@@ -57,7 +57,7 @@ export type CanvasAction =
  * not depend on the factory having asked anything, so a pane with an empty
  * queue and no commands still has somewhere for `I` to land.
  *
- * Within a row the conservative verdict comes first: "bắt sửa" before "bỏ qua",
+ * Within a row the conservative verdict comes first: "bắt sửa" before "reject qua",
  * "bỏ" before "duyệt". `j` from the row above therefore stops on the answer
  * that changes nothing, and reaching the one that accepts a defect takes one
  * more deliberate press.
@@ -75,14 +75,14 @@ export function buildActions(
       id: `waiver:${finding.fingerprint}:denied`,
       rowId: finding.fingerprint,
       verdict: 'denied',
-      label: `bắt sửa ${finding.fingerprint}`,
+      label: `fix ${finding.fingerprint}`,
     });
     actions.push({
       kind: 'waiver',
       id: `waiver:${finding.fingerprint}:granted`,
       rowId: finding.fingerprint,
       verdict: 'granted',
-      label: `bỏ qua ${finding.fingerprint}`,
+      label: `waive ${finding.fingerprint}`,
     });
   }
 
@@ -92,14 +92,14 @@ export function buildActions(
       id: `lesson:${lesson.lessonId}:reject`,
       rowId: lesson.lessonId,
       verdict: 'reject',
-      label: `bỏ ${lesson.lessonId}`,
+      label: `reject ${lesson.lessonId}`,
     });
     actions.push({
       kind: 'lesson',
       id: `lesson:${lesson.lessonId}:approve`,
       rowId: lesson.lessonId,
       verdict: 'approve',
-      label: `duyệt ${lesson.lessonId}`,
+      label: `approve ${lesson.lessonId}`,
     });
   }
 
@@ -112,7 +112,7 @@ export function buildActions(
     });
   }
 
-  actions.push({ kind: 'prompt', id: 'prompt', rowId: null, label: 'nhập prompt' });
+  actions.push({ kind: 'prompt', id: 'prompt', rowId: null, label: 'write a prompt' });
   return actions;
 }
 

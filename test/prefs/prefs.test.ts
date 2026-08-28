@@ -55,6 +55,7 @@ function model(icon: string | null = null): CanvasModel {
             status: 'done',
             runningAgents: 0,
             activity: null,
+            age: null,
             decisions: [],
           },
         ],

@@ -2,92 +2,155 @@
 @import '@xyflow/react/dist/style.css';
 
 /*
- * Vam's visual language, borrowed on purpose rather than invented.
+ * Vam's visual language, taken from the ADE session-canvas mockup
+ * (claude.ai/design · "ADE App UI Mockups" · artboards 1a dark / 1b light,
+ * read 2026-08-28). Both artboards are the same screen, so every value below
+ * is a PAIR read off the two rather than a colour anybody chose here.
  *
- * docs/design/canvas-layout.md §1.1 records that vam takes its UI from orca
- * instead of HDS. This file is where that becomes concrete, and it takes from
- * two places, both read on 2026-08-27:
+ * The names are the ones vam already used — surfaces by ELEVATION, text by
+ * WEIGHT — because those survived the reskin unchanged. What did not survive
+ * is how they were built.
  *
- *  - **orca** (`src/renderer/src/assets/main.css`) for the METRICS: its radius
- *    ramp is `--radius: 0.625rem` with sm/md/lg/xl at 0.6/0.8/1.0/1.4 of it,
- *    and its type sits on a 10 / 11 / 12 / 12.5 / 13 / 13.5 / 14 scale. Vam uses
- *    the same numbers so the two apps feel like the same size of thing.
- *  - **nodeterm** (`src/renderer/styles.css`) for the CANVAS IDIOM: it draws
- *    node cards and group frames on @xyflow/react, the same library vam uses,
- *    so its recipes transfer directly rather than by analogy.
+ * ## Why the greys stopped being one tint at three alphas
  *
- * The one idea worth stealing outright is nodeterm's text ramp. Its greys are
- * not hexes; they are one tint triple at three alphas (0.85 / 0.55 / 0.25) over
- * whatever surface they land on. That means a label reads correctly on the
- * canvas, on a panel and on a raised card without three separate greys — and it
- * is why nodeterm's light theme is one declaration rather than three hundred
- * edits.
+ * The previous scheme mixed every grey from `--color-tint` at 0.85/0.55/0.25,
+ * and its comment promised a light theme would be "one declaration rather than
+ * three hundred edits" — flip the triple, keep the alphas.
+ *
+ * That promise does not survive contact with this design, and it is worth
+ * saying why rather than quietly deleting it. Dark uses neutral greys
+ * (#1f1f1f, #262626, #6b6b6b); light uses WARM ones (#e4e4e1, #d6d6d2,
+ * #8a8a8f) — and light's own text greys are cool (#52525b, #18181b) while its
+ * borders are warm. No single tint at any alpha produces both halves. A design
+ * that deliberately warms its light borders is making a choice an alpha ramp
+ * cannot encode, so the greys are spelled as pairs. The saving was real; it
+ * was just buying the wrong thing.
+ *
+ * ## How the swap works
+ *
+ * `@theme inline` makes Tailwind emit `var(--color-x)` into every utility
+ * instead of inlining the hex at build time. That is the whole mechanism: the
+ * values live on `:root` (dark, so a document with no class still renders) and
+ * `html.light` replaces them. One class on <html> moves the entire app.
  */
-@theme {
-  /* The tint every overlay and every grey is mixed from. Dark is the only theme
-     today; a light one flips this triple, not the rules below it. */
-  --color-tint: 255 255 255;
+@theme inline {
+  /* Surfaces, by elevation. Note `panel` and `canvas` collapse to the same
+     white in light — the mockup separates cards from the ground with a border
+     there, not with a fill, and forcing a tint would be inventing a step the
+     design does not have. */
+  --color-canvas: var(--vam-canvas);
+  --color-sunken: var(--vam-sunken);
+  --color-panel: var(--vam-panel);
+  --color-raised: var(--vam-raised);
+  --color-header: var(--vam-header);
+  --color-dots: var(--vam-dots);
 
-  /* Surfaces named by ELEVATION, not by where they happen to be used first —
-     nodeterm's naming, adopted because "panel-2" style names stop meaning
-     anything the second time a surface moves. */
-  --color-canvas: #16171a;
-  --color-sunken: #101113;
-  --color-panel: #1d1f23;
-  --color-raised: #24272c;
-  --color-header: #2a2e34;
+  --color-line: var(--vam-line);
+  --color-line-strong: var(--vam-line-strong);
+  --color-line-loud: var(--vam-line-loud);
 
-  /* All five routed through the one triple above, which is the whole point of
-     having it: a light theme flips `--color-tint` and every alpha the design
-     chose survives untouched. Spelling the greys as hexes here would make that
-     token decorative. */
-  --color-line: rgb(var(--color-tint) / 0.1);
-  --color-line-strong: rgb(var(--color-tint) / 0.22);
+  --color-ink: var(--vam-ink);
+  --color-ink-dim: var(--vam-ink-dim);
+  --color-ink-faint: var(--vam-ink-faint);
+  --color-ink-ghost: var(--vam-ink-ghost);
 
-  --color-ink: rgb(var(--color-tint) / 0.85);
-  --color-ink-dim: rgb(var(--color-tint) / 0.55);
-  --color-ink-faint: rgb(var(--color-tint) / 0.3);
+  /* Status. The reskin SWAPPED two of these and the swap is meaningful:
+     `running` was blue and is now green, because the mockup spends its blue on
+     links and merged PRs. Amber is reserved for the one state that costs you
+     something to ignore — a session waiting on your answer. */
+  --color-running: var(--vam-running);
+  --color-waiting: var(--vam-waiting);
+  --color-done: var(--vam-done);
+  --color-failed: var(--vam-failed);
 
-  /* Status: running, waiting on you, done, failed. Nothing else gets a colour —
-     a canvas where everything is coloured tells you nothing at a glance. Hues
-     follow orca/nodeterm's macOS-derived set rather than a fourth palette. */
-  --color-running: #0a84ff;
-  --color-waiting: #ff9f0a;
-  --color-done: #32d74b;
-  --color-failed: #ff453a;
+  /* Tints: the same three hues at fill strength, for a chip's ground or a
+     card's border. Read off the mockup rather than derived, because its light
+     tints are hand-warmed too. */
+  --color-waiting-tint: var(--vam-waiting-tint);
+  --color-waiting-wash: var(--vam-waiting-wash);
+  --color-done-tint: var(--vam-done-tint);
 
-  /* `in` and `out` get their own two hues, deliberately outside the status set.
-     They answer a different question — *whose words are these*, mine or the
-     session's — and reusing a status colour for it would make the same green
-     mean "finished" in one column and "this is the answer" in the next. Violet
-     reads as the operator throughout; cyan as the session. */
-  /* `in` is the louder of the two, and cyan is the brighter hue on this ground.
-     What you asked for is the half you scan a row of cards FOR — the session's
-     answer is what the detail panel is open on anyway. */
-  --color-in: #5ec8d8;
-  --color-out: #8a7ae0;
-
-  /* orca's ramp, same arithmetic. */
   --radius-base: 0.625rem;
   --radius-sm: calc(var(--radius-base) * 0.6);
   --radius-md: calc(var(--radius-base) * 0.8);
   --radius-lg: var(--radius-base);
   --radius-xl: calc(var(--radius-base) * 1.4);
 
-  /* Chrome is sans, values are mono.
-     Both reference apps do this: orca's UI is Geist and only its terminal is
-     mono, nodeterm's node headers inherit the app sans while the terminal
-     inside them does not. Vam keeps mono for what is *data* — a session id, an
-     `in:`/`out:` value, a command — because those get compared column by column
-     and copied verbatim. Labels and counts are chrome and read better in sans.
-     Geist is not bundled; the stack falls through to the system UI face, which
-     is what orca renders as anyway on a machine without it. */
+  /* Chrome is sans, values are mono — the mockup holds this line strictly, and
+     it is the reason a step card reads as data rather than prose. Geist is the
+     design's face; it is not bundled, so the stack falls through to the system
+     UI face. */
   --font-sans: Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-  /* nodeterm's node shadow, which is what makes a card sit *above* the canvas
-     rather than being a rectangle drawn on it. */
-  --shadow-node: 0 8px 28px rgb(0 0 0 / 0.4);
+  --shadow-node: var(--vam-shadow-node);
+}
+
+/* Dark — artboard 1a, and the default, so a document that never gets a class
+   still renders the theme vam was designed in. */
+:root {
+  --vam-canvas: #0a0a0a;
+  --vam-sunken: #0f0f0f;
+  --vam-panel: #141414;
+  --vam-raised: #1a1a1a;
+  --vam-header: #111111;
+  --vam-dots: #1c1c1c;
+
+  --vam-line: #1f1f1f;
+  --vam-line-strong: #262626;
+  --vam-line-loud: #2e2e2e;
+
+  --vam-ink: #ededed;
+  --vam-ink-dim: #a1a1a1;
+  --vam-ink-faint: #6b6b6b;
+  --vam-ink-ghost: #3f3f3f;
+
+  --vam-running: #4ade80;
+  --vam-waiting: #f59e0b;
+  --vam-done: #60a5fa;
+  --vam-failed: #f87171;
+
+  --vam-waiting-tint: #3f2f12;
+  --vam-waiting-wash: #161208;
+  --vam-done-tint: #24354d;
+
+  --vam-shadow-node: 0 8px 28px rgb(0 0 0 / 0.4);
+
+  color-scheme: dark;
+}
+
+/* Light — artboard 1b. Same screen, same states, none of the same greys. */
+html.light {
+  --vam-canvas: #ffffff;
+  --vam-sunken: #fafaf9;
+  --vam-panel: #ffffff;
+  --vam-raised: #f0f0ee;
+  --vam-header: #f4f4f2;
+  --vam-dots: #dedcd7;
+
+  --vam-line: #e4e4e1;
+  --vam-line-strong: #d6d6d2;
+  --vam-line-loud: #c4c4bf;
+
+  --vam-ink: #18181b;
+  --vam-ink-dim: #52525b;
+  --vam-ink-faint: #8a8a8f;
+  --vam-ink-ghost: #a8a8a3;
+
+  --vam-running: #15803d;
+  --vam-waiting: #b45309;
+  --vam-done: #1d4ed8;
+  --vam-failed: #b91c1c;
+
+  --vam-waiting-tint: #f6dcae;
+  --vam-waiting-wash: #fdf6e8;
+  --vam-done-tint: #c0d3f4;
+
+  /* A card sits above white by a hairline and a whisper, not by the 40% black
+     that reads as a hole in a light document. */
+  --vam-shadow-node: 0 8px 28px rgb(0 0 0 / 0.06);
+
+  color-scheme: light;
 }
 
 html,

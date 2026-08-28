@@ -7,7 +7,7 @@
  * chunk arrives the first time somebody presses `s`.
  *
  * The split is at THIS boundary, not at `IconPicker`, on purpose: the picker's
- * own shell — its title, its "bỏ icon" button, its Escape handling — stays
+ * own shell — its title, its "clear icon" button, its Escape handling — stays
  * synchronous, so pressing `s` puts a real panel on screen immediately rather
  * than nothing at all while a chunk is in flight.
  */
@@ -32,7 +32,7 @@ export default function EmojiGrid({ onPick }: EmojiGridProps) {
       width={340}
       height={380}
       previewConfig={{ showPreview: false }}
-      searchPlaceholder="tìm icon…"
+      searchPlaceholder="find an icon…"
     />
   );
 }

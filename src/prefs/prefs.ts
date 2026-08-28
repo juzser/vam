@@ -47,14 +47,28 @@ export type StorageLike = {
 export type Pin = { readonly x: number; readonly y: number; readonly at: string };
 export type IconChoice = { readonly icon: string; readonly at: string };
 
+/**
+ * Which of the mockup's two artboards you are looking at.
+ *
+ * Stored, not sniffed. `prefers-color-scheme` answers a question about the
+ * operating system; this one is about a single dashboard you may well want dark
+ * while everything around it is light. The toggle in the sidebar is the whole
+ * interface, so the stored value is the only input.
+ */
+export type Theme = 'dark' | 'light';
+
+/** Dark is the default: it is the theme vam was designed in (artboard 1a). */
+export const DEFAULT_THEME: Theme = 'dark';
+
 export type Prefs = {
   /** Node id → where you put it. Only nodes you actually moved appear here. */
   readonly pinned: Readonly<Record<string, Pin>>;
   /** Session id → the emoji you gave it. */
   readonly icons: Readonly<Record<string, IconChoice>>;
+  readonly theme: Theme;
 };
 
-export const EMPTY_PREFS: Prefs = { pinned: {}, icons: {} };
+export const EMPTY_PREFS: Prefs = { pinned: {}, icons: {}, theme: DEFAULT_THEME };
 
 /**
  * The real `localStorage`, or null if this browser will not give us one.
@@ -100,7 +114,36 @@ export function readPrefs(storage: StorageLike | null, now: Date = new Date()): 
   return {
     pinned: fresh(readMap(record.pinned, readPin), cutoff),
     icons: fresh(readMap(record.icons, readIcon), cutoff),
+    // Not pruned by the TTL the other two get. A pin ages because the session
+    // it points at stops existing; a theme is about the person, and one who
+    // opens vam twice a year still wants the theme they chose.
+    theme: readTheme((parsed as { theme?: unknown }).theme),
   };
+}
+
+function readTheme(raw: unknown): Theme {
+  return raw === 'light' || raw === 'dark' ? raw : DEFAULT_THEME;
+}
+
+/** Flip it. Written by the sidebar's one toggle. */
+export function setTheme(prefs: Prefs, theme: Theme): Prefs {
+  return { ...prefs, theme };
+}
+
+/**
+ * Put the theme on the document.
+ *
+ * `html.light` is the switch (styles.css), and dark is what `:root` already
+ * says — so this REMOVES a class rather than adding a second one. A document
+ * that somehow gets neither still renders dark, which is the safe direction to
+ * fail: an unstyled light theme on a dark palette is unreadable, the reverse is
+ * merely dim.
+ */
+export function applyTheme(
+  theme: Theme,
+  root: Element | null = globalThis.document?.documentElement ?? null,
+): void {
+  root?.classList.toggle('light', theme === 'light');
 }
 
 export function writePrefs(storage: StorageLike | null, prefs: Prefs): void {

@@ -2,22 +2,29 @@
  * The right panel: the focused step, in full, and the place you answer it.
  *
  * This is the half of the split the canvas exists to make possible. Once the
- * full text lives here, a canvas card can be a strict two-line summary without
- * losing anything — and a decision made from a truncated line is the failure
- * mode this panel removes. So `in` and `out` are shown whole, wrapped, scrollable
- * and selectable, in contrast with the rest of the app.
+ * full text lives here, a canvas card can be a strict summary without losing
+ * anything — and a decision made from a truncated line is the failure mode this
+ * panel removes. So `IN` and `OUT` are shown whole, wrapped, scrollable and
+ * selectable, in contrast with the rest of the app.
  *
  * `user-select` is turned back ON here, and only here. Everywhere else it is off
  * because a stray drag selecting half the canvas is noise; here the text is the
  * point and copying part of an output is a reasonable thing to want.
  *
- * The action strip at the bottom is a prompt box, plus whatever bash commands
- * the session handed back for you to run by hand. There is no option chooser and
+ * The composer at the bottom is a prompt box, plus whatever bash commands the
+ * session handed back for you to run by hand. There is no option chooser and
  * there should not be one: a session decides for itself and stops only when it
  * wants something a person has to supply, and that something is words, not a
- * pick from a menu somebody had to invent. Nothing here sends —
- * §6 keeps epic 1 read-only, and the caller says so out loud rather than letting
- * a quiet no-op be mistaken for a delivered answer.
+ * pick from a menu somebody had to invent. Nothing here sends — the prompt is
+ * RECORDED, and the caller says so out loud rather than letting a quiet no-op
+ * be mistaken for a delivered answer.
+ *
+ * ## The mockup's four tabs
+ *
+ * ADE puts Response / PRs / Terminal / Agents across the top. Only Response has
+ * anything behind it: black-smith has no terminal to attach to, no PR index per
+ * session, and its agent roster is a factory-wide count rather than a per-
+ * session list. The other three are drawn, disabled, and say why — see the todo.
  */
 
 import { useEffect, useRef } from 'react';
@@ -52,25 +59,72 @@ export type DetailPanelProps = {
   readonly review?: ReviewQueueProps;
 };
 
-export function DetailPanel({
-  entry,
-  decision,
-  draft,
-  onDraftChange,
-  onSubmit,
-  onPickCommand,
-  onCopyCommand,
-  composing,
-  onCompose,
-  onStopComposing,
-  active,
-  actionIndex,
-  review,
-}: DetailPanelProps) {
+/** A section rule: `IN ────────── you · 12m`. The mockup's own divider. */
+function Rule({ label, meta }: { readonly label: string; readonly meta: string }) {
+  return (
+    <div className="flex items-center gap-[7px]">
+      <span className="font-mono text-[9.5px] tracking-[0.12em] text-ink-faint">{label}</span>
+      <span className="h-px flex-1 bg-line" />
+      <span className="font-mono text-[9.5px] text-ink-faint">{meta}</span>
+    </div>
+  );
+}
+
+/**
+ * The step ribbon: one tick per turn, the focused one taller.
+ *
+ * Colour carries the same meaning it does everywhere else — green answered,
+ * amber the one that stopped, grey not yet. It is the only place in vam that
+ * shows the WHOLE chain at once; the canvas draws three.
+ */
+function StepRibbon({
+  decisions,
+  focusedId,
+}: {
+  readonly decisions: readonly Decision[];
+  readonly focusedId: string | null;
+}) {
+  // Oldest first, so the ribbon runs the way the canvas and the eye do.
+  const ordered = [...decisions].reverse();
+  return (
+    <div className="flex h-3.5 flex-1 items-center gap-0.5">
+      {ordered.map((d) => {
+        const here = d.id === focusedId;
+        return (
+          <span
+            key={d.id}
+            className={[
+              'flex-1 rounded-sm',
+              here ? 'h-2.5 bg-waiting' : 'h-[3px]',
+              here ? '' : d.output === null ? 'bg-ink-ghost' : 'bg-running',
+            ].join(' ')}
+          />
+        );
+      })}
+      {ordered.length === 0 && <span className="h-[3px] flex-1 rounded-sm bg-line" />}
+    </div>
+  );
+}
+
+export function DetailPanel(props: DetailPanelProps) {
+  const {
+    entry,
+    decision,
+    draft,
+    onDraftChange,
+    onSubmit,
+    onPickCommand,
+    onCopyCommand,
+    composing,
+    onCompose,
+    onStopComposing,
+    active,
+    actionIndex,
+    review,
+  } = props;
+
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Imperative rather than `autoFocus`: focus is taken because `i` was pressed,
-  // not because a component happened to mount.
   useEffect(() => {
     if (composing) {
       inputRef.current?.focus();
@@ -82,211 +136,281 @@ export function DetailPanel({
   // blocked, and banner-ing it would train you to ignore the banner.
   const needsYou = entry?.session.status === 'waiting';
   const commands = decision?.commands ?? [];
+  const total = entry?.session.decisions.length ?? 0;
+  const index = decision === null ? 0 : total - (entry?.session.decisions.indexOf(decision) ?? 0);
 
   return (
     <aside
       data-action-pane={active ? 'active' : 'idle'}
       className={[
-        'flex h-full w-[380px] shrink-0 flex-col border-l bg-sunken',
+        'flex h-full w-[408px] shrink-0 flex-col border-l bg-sunken',
         // The pane says out loud when it holds the keyboard. Without it, `I` and
         // `H` become a mode you have to remember being in, which is the failure
         // every modal interface is judged on.
-        active ? 'border-running border-l-2' : 'border-line',
+        active ? 'border-l-2 border-waiting' : 'border-line',
       ].join(' ')}
     >
-      <header className="flex items-center gap-2 border-line border-b px-3 py-2">
-        {active && (
-          <span className="rounded-[var(--radius-sm)] bg-running px-1 font-mono font-semibold text-[9px] text-canvas">
-            ACTION
-          </span>
-        )}
-        {entry === null ? (
-          <span className="text-[11px] text-ink-faint">chưa chọn session</span>
-        ) : (
-          <>
-            <span className="truncate font-mono font-semibold text-[12px] text-ink">
-              {entry.session.title}
-            </span>
-            <span className="truncate text-[11px] text-ink-faint">{entry.project.name}</span>
-            {decision !== null && (
-              <span data-detail-step className="ml-auto shrink-0 text-[11px] text-ink-dim">
-                {decision.label}
+      <div className="flex flex-col gap-2.5 border-line border-b px-3.5 pt-3">
+        <div className="flex items-start gap-2">
+          <span
+            className={[
+              'mt-1.5 h-1.5 w-1.5 flex-none rounded-full',
+              needsYou ? 'vam-breathe bg-waiting' : 'bg-running',
+            ].join(' ')}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium text-[14px] text-ink leading-[1.35]">
+              {entry === null ? 'No session selected' : entry.session.title}
+            </div>
+            <div className="mt-1 flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
+              <span className="truncate text-ink-dim">{entry?.project.name ?? '—'}</span>
+              <span>·</span>
+              <span className="truncate">{entry?.session.epic ?? '—'}</span>
+              <span>·</span>
+              <span className="flex-none">
+                {entry === null || entry.session.runningAgents === 0
+                  ? 'no agent'
+                  : `${entry.session.runningAgents} agents`}
               </span>
-            )}
-          </>
-        )}
-      </header>
+            </div>
+          </div>
+          {active && (
+            <span className="flex-none rounded-[6px] bg-waiting px-1.5 py-1 font-mono font-semibold text-[9px] text-canvas">
+              ACTION
+            </span>
+          )}
+          {/* Which step the panel is expanding. The mockup puts it at the far
+              right of the title row, where the eye lands last — it names the
+              thing you are reading, not the thing you are choosing. */}
+          {decision !== null && (
+            <span data-detail-step className="flex-none font-mono text-[10px] text-ink-dim">
+              {decision.label}
+            </span>
+          )}
+          <span className="flex-none rounded-[6px] border border-line-strong px-1.5 py-1 font-mono text-[9.5px] text-ink-dim">
+            f jump
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="flex-none font-mono text-[9.5px] text-ink-faint">
+            STEP {index}/{total}
+          </span>
+          <StepRibbon decisions={entry?.session.decisions ?? []} focusedId={decision?.id ?? null} />
+          <span className="flex-none font-mono text-[9.5px] text-ink-faint">
+            {entry?.session.age ?? '—'}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <span className="border-ink border-b-[1.5px] pb-2 text-[12px] text-ink">Response</span>
+          {(['PRs', 'Terminal', 'Agents'] as const).map((tab) => (
+            <span
+              key={tab}
+              data-placeholder={`tab-${tab.toLowerCase()}`}
+              title="black-smith has no data behind this tab — see the todo"
+              className="pb-2 text-[12px] text-ink-ghost"
+            >
+              {tab}
+            </span>
+          ))}
+        </div>
+      </div>
 
       {/* The waiting banner. Loud on purpose: this panel is where the answer
-          gets given, so the request has to be unmissable at the top of it. */}
+          gets given, so the request has to be unmissable at the top of it. The
+          mockup carries the same signal in its amber approval box; vam keeps a
+          banner too, because a session can be waiting with nothing in the
+          review queue and the box would then not be drawn at all. */}
       {needsYou && (
-        <div className="vam-breathe flex items-center gap-2 border-waiting/40 border-b bg-waiting/10 px-3 py-1.5">
+        <div className="vam-breathe flex items-center gap-2 border-waiting-tint border-b bg-waiting-wash px-3.5 py-2">
           <span className="text-[12px] text-waiting">⏸</span>
-          <span className="font-semibold text-[11.5px] text-waiting">
-            session đã dừng, đang chờ bạn
+          <span className="font-medium text-[11.5px] text-waiting">
+            session stopped, waiting on you
           </span>
         </div>
       )}
 
-      <div className="min-h-0 flex-1 select-text overflow-y-auto px-3 py-2">
+      <div className="flex min-h-0 flex-1 select-text flex-col gap-3.5 overflow-y-auto px-3.5 py-3">
         {decision === null ? (
-          <p className="text-[11px] text-ink-faint">session này chưa có step nào.</p>
+          <p className="text-[11px] text-ink-faint">This session has no steps yet.</p>
         ) : (
           <>
-            <Block label="in" tone="text-in" body={decision.input} />
-            <Block
-              label="out"
-              tone="text-out"
-              body={decision.output}
-              placeholder="— session đang chạy, chưa trả lời xong —"
-            />
+            <section data-detail-block="in" className="flex flex-col gap-1.5">
+              <Rule label="IN" meta={`you · ${entry?.session.age ?? '—'}`} />
+              <div className="rounded-[9px] border border-line bg-panel px-3 py-2.5">
+                <p className="whitespace-pre-wrap break-words text-[12px] text-ink-dim leading-[1.55]">
+                  {decision.input}
+                </p>
+              </div>
+            </section>
+
+            {/* The mockup lists the actions inside one step. black-smith's unit
+                is the turn, so this lists the session's turns — the same shape
+                answering the same question, off data that exists. */}
+            <section className="flex flex-col gap-1.5">
+              <Rule label="PROGRESS" meta={`${total} turns`} />
+              <ul className="flex flex-col gap-1.5 pl-0.5 font-mono text-[10px] text-ink-faint">
+                {[...(entry?.session.decisions ?? [])].reverse().map((d) => (
+                  <li key={d.id} className="flex items-center gap-2">
+                    <span className={d.output === null ? 'text-waiting' : 'text-ink-ghost'}>
+                      {d.output === null ? '◌' : '✓'}
+                    </span>
+                    <span className={`truncate ${d.id === decision.id ? 'text-ink-dim' : ''}`}>
+                      {d.label}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section data-detail-block="out" className="flex min-h-0 flex-col gap-1.5">
+              <Rule label="OUT" meta={entry?.session.activity ?? '—'} />
+              {decision.output === null ? (
+                <p className="text-[11.5px] text-ink-faint">
+                  — the session is still running, no answer yet —
+                </p>
+              ) : (
+                <p className="whitespace-pre-wrap break-words text-[12px] text-ink-dim leading-[1.6]">
+                  {decision.output}
+                </p>
+              )}
+
+              {commands.length > 0 && (
+                <div className="mt-1 flex flex-col gap-2">
+                  <div className="text-[10.5px] text-ink-faint">
+                    the agent proposed these — vam does not run them
+                  </div>
+                  {commands.map((command, i) => (
+                    <div
+                      key={command.id}
+                      className={[
+                        'rounded-[9px] border bg-canvas px-3 py-2.5',
+                        active && actionIndex === i ? 'border-waiting' : 'border-line',
+                      ].join(' ')}
+                    >
+                      <div className="flex items-center gap-2 pb-1.5">
+                        <span className="font-mono text-[10px] text-ink-ghost">{i + 1}</span>
+                        <span className="truncate text-[11px] text-ink">{command.label}</span>
+                        <button
+                          type="button"
+                          onClick={() => onCopyCommand(command.id)}
+                          className="ml-auto rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-[10px] text-ink-faint hover:bg-raised hover:text-ink"
+                        >
+                          yy
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onPickCommand(command.id)}
+                          className="rounded-[var(--radius-sm)] border border-line-strong px-1.5 py-0.5 text-[10px] text-ink-dim hover:text-ink"
+                        >
+                          run
+                        </button>
+                      </div>
+                      {/* Wrapped, not scrolled. A command you cannot see the end
+                          of is one you cannot check before running. */}
+                      <pre className="select-text whitespace-pre-wrap break-all font-mono text-[10.5px] text-ink-dim leading-[1.6]">
+                        {command.command}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           </>
         )}
       </div>
 
-      {/* Above the commands, below the text: this is the thing the factory is
-          actually asking, and it should be the last thing you read before you
-          answer it. */}
-      {review !== undefined && <ReviewQueue {...review} />}
+      <div className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3">
+        {/* Above the composer, below the text: this is the thing the factory is
+            actually asking, and it should be the last thing you read before you
+            answer it. */}
+        {review !== undefined && <ReviewQueue {...review} />}
 
-      {commands.length > 0 && (
-        <div className="border-line border-t px-3 py-2">
-          <div className="pb-1.5 text-[10.5px] text-ink-faint">
-            agent đề xuất chạy tay — vam không tự chạy
-          </div>
-          <ul className="flex flex-col gap-1.5">
-            {commands.map((command, index) => (
-              <li
-                key={command.id}
-                className={[
-                  'rounded-[var(--radius-sm)] border bg-panel',
-                  active && actionIndex === index ? 'border-running' : 'border-line',
-                ].join(' ')}
-              >
-                <div className="flex items-center gap-2 px-2 pt-1.5">
-                  <span className="font-mono text-[10px] text-waiting">{index + 1}</span>
-                  <span className="truncate text-[11px] text-ink">{command.label}</span>
-                  <button
-                    type="button"
-                    onClick={() => onCopyCommand(command.id)}
-                    className="ml-auto rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-[10px] text-ink-faint hover:bg-raised hover:text-ink"
-                  >
-                    yy
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onPickCommand(command.id)}
-                    className="rounded-[var(--radius-sm)] border border-line px-1.5 py-0.5 text-[10px] text-ink-dim hover:border-line-strong hover:text-ink"
-                  >
-                    chạy
-                  </button>
-                </div>
-                {/* Wrapped, not scrolled. A command you cannot see the end of
-                    is one you cannot check before running, and a horizontal
-                    scrollbar in a dark panel is a bright bar across the thing
-                    you are trying to read. `break-all` because the interesting
-                    part of a long flag is usually its tail. */}
-                <pre className="select-text whitespace-pre-wrap break-all px-2 pt-1 pb-1.5 font-mono text-[10.5px] text-ink-dim leading-relaxed">
-                  {command.command}
-                </pre>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <footer className="border-line border-t bg-panel px-3 py-2">
-        {/*
-          Three things competing for one line, and only one of them may be
-          wrong: where your words are about to go. So the label is shrink-0
-          (squeezed, it wrapped mid-word into "gửi"/"tới"), the target truncates
-          rather than wrapping, and the hints are kept short enough that the
-          target keeps its width — the action hint names only the two keys whose
-          meaning is specific to this pane, since `j`/`k`/`h` mean the same here
-          as everywhere else and the status bar already carries them.
-        */}
-        <div className="flex items-center gap-2 pb-1">
-          <span className="shrink-0 text-[10.5px] text-ink-faint">gửi tới</span>
-          <span
-            data-prompt-target
-            className="min-w-0 truncate font-mono font-semibold text-[11px] text-running"
-          >
-            {entry === null
-              ? '— chưa chọn session —'
-              : `${entry.project.name}/${entry.session.title}`}
-          </span>
-          <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-faint">
-            {composing
-              ? 'Enter gửi · Esc thoát'
-              : active
-                ? 'i lý do · Enter làm'
-                : 'i gõ · I vào pane'}
-          </span>
-        </div>
         <div
           className={[
-            'flex items-center gap-2 rounded-[var(--radius-sm)]',
-            active && actionIndex === commands.length ? 'ring-1 ring-running' : '',
+            'flex flex-col gap-2.5 rounded-[10px] border bg-panel px-3 py-2.5',
+            active && actionIndex === commands.length ? 'border-waiting' : 'border-line-loud',
           ].join(' ')}
         >
-          <span className="font-mono text-[12px] text-ink-faint">❯</span>
-          <input
-            ref={inputRef}
-            value={draft}
-            readOnly={!composing}
-            onFocus={onCompose}
-            onChange={(event) => onDraftChange(event.target.value)}
-            onKeyDown={(event) => {
-              // The window listener ignores keys typed in an input, so this box
-              // binds the two it needs itself.
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                onSubmit();
-              } else if (event.key === 'Escape') {
-                event.preventDefault();
-                onStopComposing();
+          <div className="flex items-center gap-2">
+            <span className="flex-none font-mono text-[12px] text-ink-faint">❯</span>
+            <input
+              ref={inputRef}
+              value={draft}
+              readOnly={!composing}
+              onFocus={onCompose}
+              onChange={(event) => onDraftChange(event.target.value)}
+              onKeyDown={(event) => {
+                // The window listener ignores keys typed in an input, so this
+                // box binds the two it needs itself.
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  onSubmit();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  onStopComposing();
+                }
+              }}
+              placeholder={
+                entry === null
+                  ? 'Pick a session first'
+                  : 'Write a prompt — it is recorded, not sent'
               }
-            }}
-            placeholder={entry === null ? 'chọn một session trước' : 'nhập prompt…'}
-            className="flex-1 bg-transparent font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint"
-            aria-label="prompt gửi tới session"
-          />
-        </div>
-      </footer>
-    </aside>
-  );
-}
+              className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ink outline-none placeholder:text-ink-faint"
+              aria-label="prompt to session"
+            />
+          </div>
 
-function Block({
-  label,
-  tone,
-  body,
-  placeholder,
-}: {
-  readonly label: string;
-  readonly tone: string;
-  readonly body: string | null;
-  readonly placeholder?: string;
-}) {
-  return (
-    // Named so a test can assert on the full text HERE. The canvas card shows a
-    // clamped copy of the same string, and a query that cannot tell them apart
-    // would pass while the panel that exists to show it whole was empty.
-    <section data-detail-block={label} className="pb-6">
-      <div className={`pb-1 font-mono font-semibold text-[10.5px] uppercase ${tone}`}>{label}</div>
-      {body === null ? (
-        <p className="text-[11.5px] text-ink-faint">{placeholder}</p>
-      ) : (
-        // `whitespace-pre-wrap`: an agent's answer arrives with its own line
-        // breaks, and collapsing them turns a list of findings into a paragraph.
-        <p
-          className={`whitespace-pre-wrap break-words font-mono text-[11.5px] leading-relaxed ${
-            label === 'in' ? 'text-ink' : 'text-ink-dim'
-          }`}
-        >
-          {body}
-        </p>
-      )}
-    </section>
+          <div className="flex items-center gap-2">
+            {/* Attachments and a model picker are ADE's; black-smith's prompt
+                route takes a session id and a string. */}
+            <span
+              data-placeholder="attach"
+              title="black-smith's prompt route takes text only — see the todo"
+              className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong text-ink-ghost"
+            >
+              +
+            </span>
+            <span
+              data-placeholder="model-picker"
+              title="the model is chosen by the factory, not by vam — see the todo"
+              className="flex h-6 items-center gap-1.5 rounded-[6px] border border-line-strong px-2 font-mono text-[10px] text-ink-ghost"
+            >
+              factory picks
+            </span>
+            <span className="font-mono text-[9.5px] text-ink-faint">
+              {composing
+                ? 'Enter records · Esc leaves'
+                : active
+                  ? 'i reason · Enter act'
+                  : 'i type · I pane'}
+            </span>
+            <span className="flex-1" />
+            <span
+              data-prompt-target
+              className="min-w-0 truncate font-mono text-[10px] text-waiting"
+            >
+              {entry === null ? '— no session —' : `${entry.project.name}/${entry.session.title}`}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-[7px]">
+          {['/diff', '/tests', '/handoff'].map((slash) => (
+            <span
+              key={slash}
+              data-placeholder={`slash-${slash.slice(1)}`}
+              title="slash commands need a command route in black-smith — see the todo"
+              className="rounded-[6px] border border-line-strong bg-raised px-2 py-1 font-mono text-[10px] text-ink-ghost"
+            >
+              {slash}
+            </span>
+          ))}
+          <span className="flex-1" />
+          <span className="font-mono text-[9.5px] text-ink-faint">? shortcuts</span>
+        </div>
+      </div>
+    </aside>
   );
 }

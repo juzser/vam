@@ -41,7 +41,7 @@ export function runningAgentTotal(model: CanvasModel): number {
   return total;
 }
 
-/** The `⏸ N chờ bạn` in the status bar (§3). */
+/** The `N need you` in the status bar (§3). */
 export function waitingCount(model: CanvasModel): number {
   return allSessions(model).filter(({ session }) => session.status === 'waiting').length;
 }

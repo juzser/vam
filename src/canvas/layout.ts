@@ -42,8 +42,8 @@ import {
  * in full is read in the detail panel, which is why this can be a fixed size at
  * all.
  */
-export const INFO_SIZE = { width: 190, height: 114 } as const;
-export const STEP_SIZE = { width: 224, height: 114 } as const;
+export const INFO_SIZE = { width: 220, height: 174 } as const;
+export const STEP_SIZE = { width: 250, height: 90 } as const;
 
 /** Wider than the others: the gap is where the "N steps before this" mark sits. */
 const ELIDED_GAP = 76;

@@ -52,7 +52,7 @@ function DemoCanvas() {
         // Refused here rather than at the server: in demo mode there is no
         // session to refuse it, and "unknown session" is a confusing way to
         // learn the rows were never real.
-        note: 'dữ liệu mẫu — mọi thao tác ghi đều bị chặn',
+        note: 'demo data — every write is refused',
       }}
     />
   );

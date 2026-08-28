@@ -49,7 +49,7 @@ export function IconPicker({ title, onPick, onClose }: IconPickerProps) {
     <div className="absolute inset-0 z-30 flex items-start justify-center pt-[12vh]">
       <button
         type="button"
-        aria-label="đóng bảng icon"
+        aria-label="close the icon panel"
         onClick={onClose}
         className="absolute inset-0 cursor-default bg-canvas/70"
       />
@@ -66,7 +66,7 @@ export function IconPicker({ title, onPick, onClose }: IconPickerProps) {
             onClick={() => onPick('')}
             className="ml-auto rounded-[var(--radius-sm)] border border-line px-1.5 py-0.5 text-[10.5px] text-ink-dim hover:border-line-strong hover:text-ink"
           >
-            bỏ icon
+            clear icon
           </button>
         </div>
         <Suspense

@@ -191,10 +191,13 @@ function statusOf(api: ApiRunningSession, decisions: readonly Decision[]): Sessi
  * of a dozen is "is this fresh", never "at what o'clock" — and an ISO stamp
  * makes them subtract in their head to find out.
  */
-function activityOf(api: ApiRunningSession, now: Date): string | null {
-  return api.lastEventType === null
-    ? null
-    : `${api.lastEventType} · ${relativeTime(api.lastEventAt, now)}`;
+function activityOf(api: ApiRunningSession): string | null {
+  return api.lastEventType;
+}
+
+/** How long since it last did anything, or `null` if the stamp is unusable. */
+function ageOf(api: ApiRunningSession, now: Date): string | null {
+  return api.lastEventAt === null ? null : relativeTime(api.lastEventAt, now);
 }
 
 /**
@@ -234,7 +237,8 @@ function toSession(
     epic: epicOf(decisions),
     status: statusOf(api, decisions),
     runningAgents: api.liveAgentCount,
-    activity: activityOf(api, now),
+    activity: activityOf(api),
+    age: ageOf(api, now),
     decisions,
   };
 }

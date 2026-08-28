@@ -22,6 +22,7 @@ function session(id: string, over: Partial<Session> = {}): Session {
     status: 'running',
     runningAgents: 0,
     activity: null,
+    age: null,
     decisions: [],
     ...over,
   };

@@ -135,7 +135,7 @@ describe('useCanvas', () => {
       }),
     );
     await act(async () => {});
-    expect(seen.current?.error).toContain('không kết nối được');
+    expect(seen.current?.error).toContain('cannot reach black-smith');
   });
 
   it('keeps polling on its own', async () => {

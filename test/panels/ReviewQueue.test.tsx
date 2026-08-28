@@ -101,7 +101,7 @@ describe('when there is nothing to answer', () => {
     // An empty list reads as "nothing to answer", which is the opposite of what
     // a failed read means.
     mount({ error: 'HTTP 500' });
-    expect(screen.getByText(/không đọc được hàng chờ duyệt/)).toBeTruthy();
+    expect(screen.getByText(/không đọc được hàng chờ approve/)).toBeTruthy();
     expect(document.querySelector('[data-review-queue]')).toBeNull();
   });
 });
@@ -122,10 +122,10 @@ describe('a waiver', () => {
     // waiver with no reason reads as an accident a month later.
     const answers = mount({ waivers: [finding()] });
     const row = document.querySelector('[data-waiver="fp-1"]') as HTMLElement;
-    expect(button(row, 'bỏ qua').disabled).toBe(true);
-    expect(button(row, 'bắt sửa').disabled).toBe(true);
+    expect(button(row, 'waive').disabled).toBe(true);
+    expect(button(row, 'fix').disabled).toBe(true);
     act(() => {
-      button(row, 'bỏ qua').click();
+      button(row, 'waive').click();
     });
     expect(answers).toEqual([]);
   });
@@ -135,7 +135,7 @@ describe('a waiver', () => {
     const row = document.querySelector('[data-waiver="fp-1"]') as HTMLElement;
     typeInto(row.querySelector('input') as HTMLInputElement, 'chỉ là comment');
     act(() => {
-      button(row, 'bỏ qua').click();
+      button(row, 'waive').click();
     });
     expect(answers).toEqual([{ id: 'fp-1', verdict: 'granted', note: 'chỉ là comment' }]);
   });
@@ -145,7 +145,7 @@ describe('a waiver', () => {
     const row = document.querySelector('[data-waiver="fp-9"]') as HTMLElement;
     typeInto(row.querySelector('input') as HTMLInputElement, 'ok');
     act(() => {
-      button(row, 'bắt sửa').click();
+      button(row, 'fix').click();
     });
     expect(answers[0]).toMatchObject({ id: 'fp-9', verdict: 'denied' });
   });
@@ -155,7 +155,7 @@ describe('a waiver', () => {
     const row = document.querySelector('[data-waiver="fp-1"]') as HTMLElement;
     typeInto(row.querySelector('input') as HTMLInputElement, 'ok');
     act(() => {
-      button(row, 'bỏ qua').click();
+      button(row, 'waive').click();
     });
     expect(answers).toEqual([]);
   });
@@ -176,7 +176,7 @@ describe('a lesson candidate', () => {
     const answers = mount({ lessons: [lesson()] });
     const row = document.querySelector('[data-lesson="l-1"]') as HTMLElement;
     act(() => {
-      button(row, 'duyệt').click();
+      button(row, 'approve').click();
     });
     expect(answers).toEqual([{ id: 'l-1', verdict: 'approve', note: '' }]);
   });
@@ -186,7 +186,7 @@ describe('a lesson candidate', () => {
     const row = document.querySelector('[data-lesson="l-1"]') as HTMLElement;
     typeInto(row.querySelector('input') as HTMLInputElement, 'trùng bài cũ');
     act(() => {
-      button(row, 'bỏ').click();
+      button(row, 'reject').click();
     });
     expect(answers).toEqual([{ id: 'l-1', verdict: 'reject', note: 'trùng bài cũ' }]);
   });
@@ -194,7 +194,7 @@ describe('a lesson candidate', () => {
   it('counts both queues in the heading', () => {
     mount({ waivers: [finding()], lessons: [lesson()] });
     const header = document.querySelector('[data-review-queue]') as HTMLElement;
-    expect(header.textContent).toContain('chờ bạn duyệt');
+    expect(header.textContent).toContain('waiting for your review');
     expect(header.textContent).toContain('2');
   });
 });
@@ -205,8 +205,8 @@ describe('what the keyboard sees', () => {
     // will happen — that is why every button is its own stop.
     mount({ waivers: [finding()], selectedActionId: 'waiver:fp-1:granted' });
     const row = document.querySelector('[data-waiver="fp-1"]') as HTMLElement;
-    const grant = [...row.querySelectorAll('button')].find((b) => b.textContent === 'bỏ qua');
-    const deny = [...row.querySelectorAll('button')].find((b) => b.textContent === 'bắt sửa');
+    const grant = [...row.querySelectorAll('button')].find((b) => b.textContent === 'waive');
+    const deny = [...row.querySelectorAll('button')].find((b) => b.textContent === 'fix');
     expect(grant?.className).toContain('ring-running');
     expect(deny?.className).not.toContain('ring-running');
   });
@@ -219,13 +219,13 @@ describe('what the keyboard sees', () => {
 
   it('takes the caret when `i` asks for that row', () => {
     mount({ waivers: [finding()], focusNoteFor: 'fp-1' });
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('lý do cho fp-1');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('reason for fp-1');
   });
 
   it('leaves the caret alone when `i` asked for a different row', () => {
     // A queue that grabbed focus on every render would fight the person typing.
     mount({ waivers: [finding()], focusNoteFor: 'fp-other' });
-    expect(document.activeElement?.getAttribute('aria-label')).not.toBe('lý do cho fp-1');
+    expect(document.activeElement?.getAttribute('aria-label')).not.toBe('reason for fp-1');
   });
 });
 
@@ -236,7 +236,7 @@ describe('getting back out of a note box', () => {
     // a box the caret cannot leave. It could not, until it could.
     let done = 0;
     mount({ waivers: [finding()], focusNoteFor: 'fp-1', onNoteDone: () => (done += 1) });
-    const input = document.querySelector('input[aria-label="lý do cho fp-1"]') as HTMLInputElement;
+    const input = document.querySelector('input[aria-label="reason for fp-1"]') as HTMLInputElement;
     expect(document.activeElement).toBe(input);
     act(() => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -255,7 +255,7 @@ describe('getting back out of a note box', () => {
       focusNoteFor: 'fp-1',
       onNoteDone: () => (done += 1),
     });
-    const input = document.querySelector('input[aria-label="lý do cho fp-1"]') as HTMLInputElement;
+    const input = document.querySelector('input[aria-label="reason for fp-1"]') as HTMLInputElement;
     act(() => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });

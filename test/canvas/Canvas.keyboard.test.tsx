@@ -34,6 +34,7 @@ function session(id: string, over: Partial<Session> = {}): Session {
     status: 'done',
     runningAgents: 0,
     activity: null,
+    age: null,
     decisions: [],
     ...over,
   };
@@ -99,11 +100,11 @@ const headings = () =>
 const rowText = (id: string) =>
   document.querySelector(`[data-session-row="${id}"]`)?.textContent ?? '';
 const promptInput = () =>
-  document.querySelector<HTMLInputElement>('input[aria-label="prompt gửi tới session"]');
+  document.querySelector<HTMLInputElement>('input[aria-label="prompt to session"]');
 const filterInput = () =>
-  document.querySelector<HTMLInputElement>('input[aria-label="lọc session"]');
+  document.querySelector<HTMLInputElement>('input[aria-label="filter sessions"]');
 const renameInput = () =>
-  document.querySelector<HTMLInputElement>('input[aria-label="đổi tên session"]');
+  document.querySelector<HTMLInputElement>('input[aria-label="rename session"]');
 /** Whether `I` has handed the keyboard to the right pane. */
 const iconPicker = () => document.querySelector('[data-icon-picker]');
 /** The status bar's own text. The header badge carries the same words in demo
@@ -206,7 +207,7 @@ describe('walking sessions with j and k', () => {
     render(<Canvas model={MODEL} />);
     press('k');
     expect(focused()).toBe('alpha/a1');
-    expect(screen.getByText(/không có node nào/)).toBeTruthy();
+    expect(screen.getByText(/nothing lies/)).toBeTruthy();
   });
 });
 
@@ -244,7 +245,7 @@ describe('walking a session’s chain with h and l', () => {
     press('l');
     press('l');
     expect(focused()).toBe('beta/b1');
-    expect(screen.getByText(/không có node nào/)).toBeTruthy();
+    expect(screen.getByText(/nothing lies/)).toBeTruthy();
   });
 });
 
@@ -268,7 +269,7 @@ describe('jumps', () => {
     press('g');
     press('t'); // would wrap
     expect(focused()).toBe('beta/b1');
-    expect(screen.getByText('session cuối rồi')).toBeTruthy();
+    expect(screen.getByText('last session already')).toBeTruthy();
   });
 
   it('gT stops at the first', () => {
@@ -276,7 +277,7 @@ describe('jumps', () => {
     press('g');
     press('T');
     expect(focused()).toBe('alpha/a1');
-    expect(screen.getByText('session đầu rồi')).toBeTruthy();
+    expect(screen.getByText('first session already')).toBeTruthy();
   });
 
   it('an abandoned chord moves nothing', () => {
@@ -343,7 +344,7 @@ describe('the detail panel', () => {
   it('says it will not run a command itself', () => {
     render(<Canvas model={MODEL} />);
     press('G');
-    expect(screen.getByText(/vam không tự chạy/)).toBeTruthy();
+    expect(screen.getByText(/vam does not run them/)).toBeTruthy();
   });
 
   it('yy reports what it copied', () => {
@@ -351,14 +352,14 @@ describe('the detail panel', () => {
     press('G');
     press('y');
     press('y');
-    expect(screen.getByText(/đã chép 1 command/)).toBeTruthy();
+    expect(screen.getByText(/copied 1 command/)).toBeTruthy();
   });
 
   it('yy on a step with nothing to run says so rather than copying silence', () => {
     render(<Canvas model={MODEL} />);
     press('y');
     press('y');
-    expect(screen.getByText(/không có command nào/)).toBeTruthy();
+    expect(screen.getByText(/no command to copy/)).toBeTruthy();
   });
 });
 
@@ -379,7 +380,7 @@ describe('the prompt box', () => {
     const input = promptInput() as HTMLInputElement;
     typeInto(input, 'chạy lại đi');
     keyOn(input, 'Enter');
-    expect(statusBar()).toContain('chỉ để xem');
+    expect(statusBar()).toContain('read-only');
   });
 
   it('Escape leaves it and drops the draft', () => {
@@ -419,7 +420,7 @@ describe('filtering the sidebar with /', () => {
     press('/');
     typeInto(filterInput() as HTMLInputElement, 'zzz');
     expect(rows().map((el) => el.getAttribute('data-session-row'))).toEqual([]);
-    expect(screen.getByText('không khớp')).toBeTruthy();
+    expect(screen.getByText('No match')).toBeTruthy();
   });
 
   it('j walks only what survived the filter', () => {
@@ -432,7 +433,7 @@ describe('filtering the sidebar with /', () => {
     expect(focused()).toBe('alpha/a2');
     press('j');
     expect(focused()).toBe('alpha/a2');
-    expect(screen.getByText(/không có node nào/)).toBeTruthy();
+    expect(screen.getByText(/nothing lies/)).toBeTruthy();
   });
 
   it('n keeps walking the matches after Enter closed the box', () => {
@@ -461,7 +462,7 @@ describe('filtering the sidebar with /', () => {
     render(<Canvas model={MODEL} />);
     press('n');
     expect(focused()).toBe('alpha/a1');
-    expect(screen.getByText('chưa tìm gì')).toBeTruthy();
+    expect(screen.getByText('nothing searched yet')).toBeTruthy();
   });
 });
 
@@ -469,12 +470,12 @@ describe('the command palette', () => {
   it('Ctrl-K and Cmd-K both open it', () => {
     const { unmount } = render(<Canvas model={MODEL} />);
     press('k', { ctrlKey: true });
-    expect(screen.getByPlaceholderText('đi tới session…')).toBeTruthy();
+    expect(screen.getByPlaceholderText('go to session…')).toBeTruthy();
     unmount();
 
     render(<Canvas model={MODEL} />);
     press('k', { metaKey: true });
-    expect(screen.getByPlaceholderText('đi tới session…')).toBeTruthy();
+    expect(screen.getByPlaceholderText('go to session…')).toBeTruthy();
   });
 
   it('plain k still moves instead of opening the palette', () => {
@@ -482,14 +483,14 @@ describe('the command palette', () => {
     press('j');
     press('k');
     expect(focused()).toBe('alpha/a1');
-    expect(screen.queryByPlaceholderText('đi tới session…')).toBeNull();
+    expect(screen.queryByPlaceholderText('go to session…')).toBeNull();
   });
 
   it('Escape closes it from inside, where the window listener cannot hear', () => {
     render(<Canvas model={MODEL} />);
     press('k', { ctrlKey: true });
-    keyOn(screen.getByPlaceholderText('đi tới session…'), 'Escape');
-    expect(screen.queryByPlaceholderText('đi tới session…')).toBeNull();
+    keyOn(screen.getByPlaceholderText('go to session…'), 'Escape');
+    expect(screen.queryByPlaceholderText('go to session…')).toBeNull();
   });
 });
 
@@ -540,7 +541,7 @@ describe('the sidebar', () => {
     // coming; naming the command tells you what to go and do.
     render(<Canvas model={MODEL} />);
     act(() => {
-      screen.getByLabelText('session mới').click();
+      screen.getByLabelText('new session').click();
     });
     expect(screen.getByText(/smith event append session-start/)).toBeTruthy();
   });
@@ -550,7 +551,7 @@ describe('the sidebar', () => {
     act(() => {
       screen.getByLabelText('settings').click();
     });
-    expect(screen.getByText('settings chưa dựng')).toBeTruthy();
+    expect(screen.getByText('settings not built yet')).toBeTruthy();
   });
 });
 
@@ -567,7 +568,7 @@ describe('renaming, icons and closing', () => {
     press('r');
     typeInto(renameInput() as HTMLInputElement, 'tên mới');
     keyOn(renameInput() as HTMLInputElement, 'Enter');
-    expect(screen.getByText(/không đổi tên session được/)).toBeTruthy();
+    expect(screen.getByText(/cannot rename a session/)).toBeTruthy();
     expect(renameInput()).toBeNull();
   });
 
@@ -612,7 +613,7 @@ describe('renaming, icons and closing', () => {
 
   it('clearing the icon says where it was kept, and forgets it', () => {
     // The write half. Picking an emoji goes through the third-party grid, which
-    // loads in its own lazy chunk and is not this test's to drive; "bỏ icon" is
+    // loads in its own lazy chunk and is not this test's to drive; "clear icon" is
     // our own button and exercises the same path out.
     localStorage.setItem(
       'vam.prefs.v1',
@@ -621,12 +622,12 @@ describe('renaming, icons and closing', () => {
     render(<Canvas model={MODEL} />);
     press('s');
     act(() => {
-      screen.getByText('bỏ icon').click();
+      screen.getByText('clear icon').click();
     });
-    // It says "trên máy này", not "chưa lưu": black-smith having no icon route
+    // It says "on this machine", not "chưa lưu": black-smith having no icon route
     // was never the point — §3 says this is per-user state that must NOT reach
     // the event log.
-    expect(screen.getByText(/trên máy này/)).toBeTruthy();
+    expect(screen.getByText(/on this machine/)).toBeTruthy();
     expect(iconPicker()).toBeNull();
     expect(rowText('a1')).not.toContain('🛠');
     expect(JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}').icons).toEqual({});
@@ -649,7 +650,7 @@ describe('renaming, icons and closing', () => {
     render(<Canvas model={MODEL} />);
     press('g');
     press('r');
-    expect(screen.getByText(/bỏ ghim 2 node/)).toBeTruthy();
+    expect(screen.getByText(/unpinned 2 node/)).toBeTruthy();
     const stored = JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}');
     expect(stored.pinned).toEqual({});
     // Icons are a different preference and gr is about the layout. Clearing
@@ -661,7 +662,7 @@ describe('renaming, icons and closing', () => {
     render(<Canvas model={MODEL} />);
     press('g');
     press('r');
-    expect(screen.getByText(/không có node nào bị ghim/)).toBeTruthy();
+    expect(screen.getByText(/nothing is pinned/)).toBeTruthy();
   });
 
   it('x names the session it did not close', () => {
@@ -669,16 +670,16 @@ describe('renaming, icons and closing', () => {
     // close" must never look alike in a list you are about to act on.
     render(<Canvas model={MODEL} />);
     press('x');
-    expect(screen.getByText(/"a1" vẫn còn/)).toBeTruthy();
+    expect(screen.getByText(/"a1" is still here/)).toBeTruthy();
     expect(rows()).toHaveLength(3);
   });
 
   it('every row carries a close button of its own', () => {
     render(<Canvas model={MODEL} />);
     act(() => {
-      screen.getByLabelText('đóng b1').click();
+      screen.getByLabelText('close b1').click();
     });
-    expect(screen.getByText(/"b1" vẫn còn/)).toBeTruthy();
+    expect(screen.getByText(/"b1" is still here/)).toBeTruthy();
   });
 });
 
@@ -716,7 +717,7 @@ describe('handing the keyboard to the right pane', () => {
     press('G');
     press('I');
     press('Enter');
-    expect(screen.getByText(/đã chép "sign"/)).toBeTruthy();
+    expect(screen.getByText(/copied "sign"/)).toBeTruthy();
   });
 
   it('h leaves the pane the same way H does', () => {
@@ -730,7 +731,7 @@ describe('handing the keyboard to the right pane', () => {
     render(<Canvas model={EMPTY} />);
     press('I');
     expect(actionPane()).toBe('idle');
-    expect(screen.getByText('chọn một session trước đã')).toBeTruthy();
+    expect(screen.getByText('pick a session first')).toBeTruthy();
   });
 });
 
@@ -759,7 +760,7 @@ describe('waiting on you', () => {
 
   it('says so in the detail panel, where the answer gets given', () => {
     render(<Canvas model={WAITING} />);
-    expect(screen.getByText('session đã dừng, đang chờ bạn')).toBeTruthy();
+    expect(screen.getByText('session stopped, waiting on you')).toBeTruthy();
   });
 
   it('groups it apart in the palette', () => {
@@ -771,12 +772,12 @@ describe('waiting on you', () => {
     const headings = [...document.querySelectorAll('[cmdk-group-heading]')].map(
       (el) => el.textContent,
     );
-    expect(headings).toContain('chờ bạn');
+    expect(headings).toContain('needs you');
   });
 
   it('counts it in the status bar', () => {
     render(<Canvas model={WAITING} />);
-    expect(screen.getByText(/1 chờ bạn/)).toBeTruthy();
+    expect(screen.getByText(/1 need you/)).toBeTruthy();
   });
 });
 
@@ -824,8 +825,8 @@ describe('writing a prompt to a live black-smith', () => {
     // coming to give.
     const { source } = liveSource(async () => ({ eventId: 'e1' }));
     await submit(source, 'xin chào');
-    expect(statusBar()).toContain('đã ghi');
-    expect(statusBar()).toContain('không gửi tới agent');
+    expect(statusBar()).toContain('recorded');
+    expect(statusBar()).toContain('not sent to the agent');
   });
 
   it('clears the box and asks for a refresh once the write lands', async () => {
@@ -866,12 +867,14 @@ describe('writing a prompt to a live black-smith', () => {
           kind: 'live',
           client: {} as unknown as SmithClient,
           status: 'error',
-          error: 'không kết nối được black-smith ở http://127.0.0.1:4680',
+          error: 'cannot reach black-smith at http://127.0.0.1:4680',
           onWrote: () => {},
         }}
       />,
     );
-    expect(document.querySelector('[data-source]')?.textContent).toContain('không kết nối được');
+    expect(document.querySelector('[data-source]')?.textContent).toContain(
+      'cannot reach black-smith',
+    );
   });
 });
 
@@ -921,13 +924,13 @@ describe('answering the review queue from the keyboard', () => {
   }
 
   const noteBox = () =>
-    document.querySelector<HTMLInputElement>('input[aria-label="lý do cho fp-1"]');
+    document.querySelector<HTMLInputElement>('input[aria-label="reason for fp-1"]');
 
   it('puts every verdict button on the j/k path, conservative one first', async () => {
     const { source } = liveWithQueue();
     await mounted(source);
     press('I');
-    // First stop is the row's "bắt sửa" — nothing is excused by landing there.
+    // First stop is the row's "fix" — nothing is excused by landing there.
     expect(document.querySelector('[data-waiver="fp-1"]')?.innerHTML).toContain('ring-running');
   });
 
@@ -937,12 +940,12 @@ describe('answering the review queue from the keyboard', () => {
     const { source, applied } = liveWithQueue();
     await mounted(source);
     press('I');
-    press('j'); // onto "bỏ qua"
+    press('j'); // onto "waive"
     await act(async () => {
       press('Enter');
     });
     expect(applied).toEqual([]);
-    expect(statusBar()).toContain('waiver cần lý do');
+    expect(statusBar()).toContain('a waiver needs a reason');
   });
 
   it('i opens the row’s reason box rather than the prompt', async () => {
@@ -963,7 +966,7 @@ describe('answering the review queue from the keyboard', () => {
     press('i');
     typeInto(noteBox() as HTMLInputElement, 'chỉ là comment lệch tên');
     keyOn(noteBox() as HTMLInputElement, 'Escape');
-    press('j'); // onto "bỏ qua"
+    press('j'); // onto "waive"
     await act(async () => {
       press('Enter');
     });
@@ -976,7 +979,7 @@ describe('answering the review queue from the keyboard', () => {
     const { source } = liveWithQueue();
     await mounted(source);
     press('I');
-    press('j'); // bỏ qua
+    press('j'); // waive
     press('j'); // the command on beta/b1? no — a1 has none, so this is the prompt
     await act(async () => {
       press('Enter');
@@ -987,7 +990,7 @@ describe('answering the review queue from the keyboard', () => {
   it('puts the cursor back at the top after an answer lands', async () => {
     // The answered row vanishes. Leaving the index where it was drops the
     // cursor onto whatever slid up into that slot — which after clearing a
-    // waiver was the next row's "duyệt". A cursor landing on a consequential
+    // waiver was the next row's "approve". A cursor landing on a consequential
     // button nobody aimed at is the one way this pane could do real damage.
     const { source, applied } = liveWithQueue();
     await mounted(source);
@@ -995,7 +998,7 @@ describe('answering the review queue from the keyboard', () => {
     press('i');
     typeInto(noteBox() as HTMLInputElement, 'ok');
     keyOn(noteBox() as HTMLInputElement, 'Escape');
-    press('j'); // onto "bỏ qua", index 1
+    press('j'); // onto "waive", index 1
     await act(async () => {
       press('Enter');
     });

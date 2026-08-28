@@ -53,7 +53,7 @@ export class SmithApiError extends Error {
 /** Thrown when the server is simply not there — a different problem from a refusal. */
 export class SmithUnreachableError extends Error {
   constructor(baseUrl: string, cause: unknown) {
-    super(`không kết nối được black-smith ở ${baseUrl}`);
+    super(`cannot reach black-smith at ${baseUrl}`);
     this.name = 'SmithUnreachableError';
     this.cause = cause;
   }
@@ -95,7 +95,7 @@ export class SmithClient {
       response = await this.doFetch(`${this.baseUrl}${path}`, init);
     } catch (cause) {
       // A transport failure is not a refusal. Keeping them apart is what lets
-      // the UI say "black-smith chưa chạy" instead of blaming your input.
+      // the UI say "black-smith is not running" instead of blaming your input.
       throw new SmithUnreachableError(this.baseUrl, cause);
     }
 

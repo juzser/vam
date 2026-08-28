@@ -50,7 +50,8 @@ export const DEMO_MODEL: CanvasModel = {
           epic: 'ui-server-sse',
           status: 'waiting',
           runningAgents: 3,
-          activity: 'coder · round 2 · sonnet · 4m',
+          activity: 'coder · round 2 · sonnet',
+          age: '4m',
           // Newest first — the model's order, not the reading order. The canvas
           // reverses it so the newest lands at the bottom of the node.
           decisions: [
@@ -81,7 +82,7 @@ export const DEMO_MODEL: CanvasModel = {
             {
               id: 'd-task4',
               label: 'task-4',
-              input: 'Chạy task-4 theo plan-v2, TDD trước, đừng bỏ qua nhánh queue rỗng.',
+              input: 'Chạy task-4 theo plan-v2, TDD trước, đừng waive nhánh queue rỗng.',
               output:
                 'Xong vòng 1: 340 dòng diff, 6 file, suite xanh. Reviewer trả về 2 finding (1×S2, 1×S3).',
               commands: [],
@@ -128,7 +129,8 @@ export const DEMO_MODEL: CanvasModel = {
           epic: 'cross-provider',
           status: 'running',
           runningAgents: 2,
-          activity: 'quorum · codex + deepseek · vòng 3',
+          activity: 'quorum · codex + deepseek · round 3',
+          age: '26m',
           decisions: [
             {
               id: 'd-active',
@@ -155,7 +157,8 @@ export const DEMO_MODEL: CanvasModel = {
           epic: 'd257-verdict',
           status: 'done',
           runningAgents: 0,
-          activity: 'merged · 2h trước',
+          activity: 'merged',
+          age: '2h',
           decisions: [
             {
               id: 'd-merge',
@@ -181,6 +184,7 @@ export const DEMO_MODEL: CanvasModel = {
           status: 'waiting',
           runningAgents: 1,
           activity: null,
+          age: '8m',
           decisions: [
             {
               id: 'd-icons',

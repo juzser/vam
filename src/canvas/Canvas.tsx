@@ -26,6 +26,7 @@ import {
   Background,
   type Edge,
   MarkerType,
+  MiniMap,
   type Node,
   ReactFlow,
   ReactFlowProvider,
@@ -35,7 +36,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SmithApiError } from '../adapter/client.js';
 import { useReviewQueue } from '../adapter/useReviewQueue.js';
-import type { CanvasModel, Decision } from '../domain/model.js';
+import type { CanvasModel, Decision, SessionStatus } from '../domain/model.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
@@ -45,11 +46,13 @@ import { IconPicker } from '../panels/IconPicker.js';
 import { SessionList } from '../panels/SessionList.js';
 import {
   applyIcons,
+  applyTheme,
   browserStorage,
   type Prefs,
   pinDragged,
   readPrefs,
   setIcon,
+  setTheme,
   unpinAll,
   writePrefs,
 } from '../prefs/prefs.js';
@@ -105,6 +108,14 @@ function CanvasInner({
    * sidebar nor the canvas node has to know that an icon comes from somewhere
    * different than the rest of a session.
    */
+  // The class on <html> is what styles.css switches on, and prefs is the only
+  // source for it — so this effect, not the toggle's click handler, is what
+  // moves the document. A handler that also wrote the class would be a second
+  // writer, and the two disagree the first time prefs is restored from storage.
+  useEffect(() => {
+    applyTheme(prefs.theme);
+  }, [prefs.theme]);
+
   const model = useMemo(() => applyIcons(factoryModel, prefs.icons), [factoryModel, prefs.icons]);
 
   const layout = useMemo(() => layoutCanvas(model), [model]);
@@ -129,11 +140,20 @@ function CanvasInner({
   const [renameDraft, setRenameDraft] = useState('');
   const [pickingIconFor, setPickingIconFor] = useState<string | null>(null);
   const [filtering, setFiltering] = useState(false);
+  /**
+   * The mockup's pill row: All / Running / Needs you / Done.
+   *
+   * A SECOND narrowing, stacked on `/` rather than replacing it, because the
+   * two answer different questions — "the one called permalink" and "the ones
+   * that stopped". Both narrow where you navigate; neither hides anything the
+   * canvas draws.
+   */
+  const [statusFilter, setStatusFilter] = useState<'all' | SessionStatus>('all');
   /** True while a write is in flight — Enter must not fire twice. */
   const [writing, setWriting] = useState(false);
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
-  const { getNodes } = useReactFlow();
+  const { getNodes, zoomIn, zoomOut, fitView, getZoom } = useReactFlow();
 
   /** Which session the focused node belongs to — the id all three panes share. */
   const focusedSpec = useMemo(
@@ -196,11 +216,27 @@ function CanvasInner({
    * that hides things is not one. The filter narrows where you navigate, not
    * what exists.
    */
-  const entries = useMemo(
-    () =>
-      query.trim() === '' ? allEntries : allEntries.filter((e) => matches.includes(e.session.id)),
-    [allEntries, matches, query],
-  );
+  const entries = useMemo(() => {
+    const byText =
+      query.trim() === '' ? allEntries : allEntries.filter((e) => matches.includes(e.session.id));
+    return statusFilter === 'all'
+      ? byText
+      : byText.filter((e) => e.session.status === statusFilter);
+  }, [allEntries, matches, query, statusFilter]);
+
+  /** The pill counts are off the UNFILTERED list — a count that moved when you
+      clicked it would be a count of your own click. */
+  const tally = useMemo(() => {
+    const of = (status: SessionStatus) =>
+      allEntries.filter((e) => e.session.status === status).length;
+    return {
+      all: allEntries.length,
+      running: of('running'),
+      waiting: of('waiting'),
+      done: of('done'),
+      failed: of('failed'),
+    };
+  }, [allEntries]);
 
   /**
    * What `hjkl`, `f` and `gg` may land on. The canvas still DRAWS everything —
@@ -383,7 +419,7 @@ function CanvasInner({
       }
       // Vam copies. Vam does not run — §4: the nod is still yours.
       void navigator.clipboard?.writeText(command.command);
-      setStatus(`đã chép: ${command.label}`);
+      setStatus(`copied: ${command.label}`);
     },
     [focusedDecision],
   );
@@ -417,7 +453,7 @@ function CanvasInner({
       await source.client.recordPrompt(entry.session.id, draft);
       setDraft('');
       setComposing(false);
-      setStatus(`đã ghi vào log của ${entry.session.title} — ghi lại, không gửi tới agent`);
+      setStatus(`recorded in the log of ${entry.session.title} — recorded, not sent to the agent`);
       source.onWrote();
     } catch (cause) {
       setStatus(
@@ -484,14 +520,14 @@ function CanvasInner({
     (fingerprint: string, decision: 'granted' | 'denied') => {
       const session = focusedEntry?.session.id;
       if (source.kind !== 'live' || session === undefined) {
-        setStatus(source.kind === 'demo' ? source.note : 'chưa chọn session');
+        setStatus(source.kind === 'demo' ? source.note : 'no session picked');
         return;
       }
       const note = (notes[fingerprint] ?? '').trim();
       if (note === '') {
         // waivers.ts refuses this anyway. Saying so here means the refusal
         // arrives before a round trip, and names the missing thing.
-        setStatus('waiver cần lý do — bấm i để nhập');
+        setStatus('a waiver needs a reason — press i to write one');
         return;
       }
       void answer(
@@ -501,8 +537,8 @@ function CanvasInner({
             { fingerprint, decision, operatorNote: note },
           ]),
         decision === 'granted'
-          ? `đã bỏ qua ${fingerprint} — lý do đã vào log`
-          : `đã bắt sửa ${fingerprint}`,
+          ? `waived ${fingerprint} — the reason is in the log`
+          : `sent back for a fix: ${fingerprint}`,
       );
     },
     [source, focusedEntry, notes, answer],
@@ -518,7 +554,7 @@ function CanvasInner({
       void answer(
         lessonId,
         () => source.client.transitionLesson(lessonId, to, note === '' ? {} : { note }),
-        to === 'approve' ? `đã duyệt ${lessonId}` : `đã bỏ ${lessonId}`,
+        to === 'approve' ? `approved ${lessonId}` : `rejected ${lessonId}`,
       );
     },
     [source, notes, answer],
@@ -527,11 +563,11 @@ function CanvasInner({
   const copyAllCommands = useCallback(() => {
     const commands = focusedDecision?.commands ?? [];
     if (commands.length === 0) {
-      setStatus('không có command nào để chép');
+      setStatus('no command to copy');
       return;
     }
     void navigator.clipboard?.writeText(commands.map((c) => c.command).join('\n'));
-    setStatus(`đã chép ${commands.length} command`);
+    setStatus(`copied ${commands.length} commands`);
   }, [focusedDecision]);
 
   const stepSession = useCallback(
@@ -541,7 +577,7 @@ function CanvasInner({
       // you are. Wrapping to the far end tells you nothing.
       const nextIndex = index + delta;
       if (nextIndex < 0 || nextIndex >= entries.length) {
-        setStatus(delta > 0 ? 'session cuối rồi' : 'session đầu rồi');
+        setStatus(delta > 0 ? 'last session already' : 'first session already');
         return;
       }
       const target = entries[nextIndex];
@@ -613,7 +649,7 @@ function CanvasInner({
           if (focusedId === null || !nodeIds.includes(focusedId)) {
             const first = nodeIds[0] ?? null;
             if (first === null) {
-              setStatus('không có session nào khớp');
+              setStatus('no session matches');
               return;
             }
             setFocusedId(first);
@@ -623,7 +659,7 @@ function CanvasInner({
           const live = toNavNodes(getNodes() as unknown as FlowNodeLike[], nodeIds);
           const landed = nextNode(live, focusedId, action.direction);
           if (landed === null) {
-            setStatus(`không có node nào ở phía ${action.direction}`);
+            setStatus(`nothing lies ${action.direction}`);
           } else {
             setFocusedId(landed);
           }
@@ -656,7 +692,7 @@ function CanvasInner({
         case 'searchNext':
         case 'searchPrev': {
           if (matches.length === 0) {
-            setStatus(query.trim() === '' ? 'chưa tìm gì' : 'không khớp');
+            setStatus(query.trim() === '' ? 'nothing searched yet' : 'No match');
             return;
           }
           const current = focusedEntry?.session.id ?? null;
@@ -672,7 +708,7 @@ function CanvasInner({
           return;
         case 'focusAction':
           if (focusedEntry === null) {
-            setStatus('chọn một session trước đã');
+            setStatus('pick a session first');
             return;
           }
           setPane('action');
@@ -684,7 +720,7 @@ function CanvasInner({
           return;
         case 'rename':
           if (focusedEntry === null) {
-            setStatus('chọn một session trước đã');
+            setStatus('pick a session first');
             return;
           }
           setRenameDraft(focusedEntry.session.title);
@@ -692,7 +728,7 @@ function CanvasInner({
           return;
         case 'icon':
           if (focusedEntry === null) {
-            setStatus('chọn một session trước đã');
+            setStatus('pick a session first');
             return;
           }
           setPickingIconFor((current) =>
@@ -701,35 +737,35 @@ function CanvasInner({
           return;
         case 'close':
           if (focusedEntry === null) {
-            setStatus('chọn một session trước đã');
+            setStatus('pick a session first');
             return;
           }
           setStatus(
-            `black-smith không có lệnh đóng session — "${focusedEntry.session.title}" vẫn còn`,
+            `black-smith has no close-session command — "${focusedEntry.session.title}" is still here`,
           );
           return;
         case 'newSession':
           // A session is created by a person running `smith event append`
           // session-start, or by opening one. There is no route, and inventing
           // one would let vam mint sessions nobody is driving.
-          setStatus('tạo session phải làm từ CLI — smith event append session-start');
+          setStatus('sessions are created from the CLI — smith event append session-start');
           return;
         case 'settings':
-          setStatus('settings chưa dựng');
+          setStatus('settings not built yet');
           return;
         case 'resetLayout': {
           const count = Object.keys(prefs.pinned).length;
           if (count === 0) {
-            setStatus('không có node nào bị ghim — canvas đang tự xếp');
+            setStatus('nothing is pinned — the canvas is laying itself out');
             return;
           }
           savePrefs(unpinAll(prefs));
-          setStatus(`bỏ ghim ${count} node — canvas tự xếp lại`);
+          setStatus(`unpinned ${count} nodes — the canvas lays out again`);
           return;
         }
         case 'prompt': {
           if (focusedEntry === null) {
-            setStatus('chọn một session trước đã');
+            setStatus('pick a session first');
             return;
           }
           // `i` means "type something into the thing I am pointing at". In the
@@ -747,7 +783,7 @@ function CanvasInner({
         }
         case 'open': {
           if (pane !== 'action') {
-            setStatus('detail đầy đủ đã ở panel bên phải');
+            setStatus('the full detail is already in the right panel');
             return;
           }
           const chosen = actions[clampIndex(actionIndex, actions.length)];
@@ -767,7 +803,7 @@ function CanvasInner({
                 return;
               }
               void navigator.clipboard?.writeText(command.command);
-              setStatus(`vam không tự chạy — đã chép "${command.label}", chạy tay`);
+              setStatus(`vam does not run them — copied "${command.label}", run it yourself`);
               return;
             }
             case 'prompt':
@@ -830,32 +866,24 @@ function CanvasInner({
     savePrefs,
   ]);
 
+  const zoomPct = Math.round(getZoom() * 100);
+  const pinned = Object.keys(prefs.pinned).length;
+
   return (
     <div className="relative flex h-full flex-col">
-      <header className="flex items-center gap-3 border-line border-b bg-panel px-3 py-2">
-        <span className="font-mono font-semibold text-[13px] text-ink tracking-wide">VAM</span>
-        {/* Where the rows came from, said out loud. The one thing a dashboard
-            must never do is look the same whether or not it is connected. */}
-        <span data-source className="truncate text-[11px]">
-          {source.kind === 'demo' ? (
-            <span className="text-waiting">● {source.note}</span>
-          ) : source.status === 'error' ? (
-            <span className="text-failed">● {source.error}</span>
-          ) : source.status === 'loading' ? (
-            <span className="text-ink-faint">○ đang kết nối black-smith…</span>
-          ) : (
-            <span className="text-done">● black-smith</span>
-          )}
-        </span>
-        <span className="ml-auto text-[11px] text-running">
-          ◐ {entries.reduce((sum, e) => sum + e.session.runningAgents, 0)} agents
-        </span>
-      </header>
-
       <div className="flex min-h-0 flex-1">
         <SessionList
           entries={entries}
           focusedSessionId={focusedEntry?.session.id ?? null}
+          workspace="black-smith"
+          theme={prefs.theme}
+          onToggleTheme={() =>
+            savePrefs(setTheme(prefs, prefs.theme === 'dark' ? 'light' : 'dark'))
+          }
+          onOpenFilter={() => {
+            searchOrigin.current = focusedId;
+            setFiltering(true);
+          }}
           filter={query}
           filtering={filtering}
           onFilterChange={(next) => {
@@ -880,7 +908,7 @@ function CanvasInner({
           onRenameCommit={() => {
             // A session's id IS its name in black-smith, and ids are what the
             // whole event log chains on. Renaming one is not a UI feature.
-            setStatus(`black-smith không đổi tên session được — "${renameDraft}" chưa lưu`);
+            setStatus(`black-smith cannot rename a session — "${renameDraft}" was not saved`);
             setRenamingId(null);
           }}
           onRenameCancel={() => setRenamingId(null)}
@@ -889,52 +917,188 @@ function CanvasInner({
             setPane('list');
           }}
           onClose={(sessionId) =>
-            setStatus(`black-smith không có lệnh đóng session — "${sessionId}" vẫn còn`)
+            setStatus(`black-smith has no close-session command — "${sessionId}" is still here`)
           }
-          onAdd={() => setStatus('tạo session phải làm từ CLI — smith event append session-start')}
-          onSettings={() => setStatus('settings chưa dựng')}
+          onAdd={() =>
+            setStatus('sessions are created from the CLI — smith event append session-start')
+          }
+          onSettings={() => setStatus('settings not built yet')}
         />
 
-        <div className="relative min-w-0 flex-1">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onNodeDragStart={(_event, node) => dragging.current.add(node.id)}
-            onNodeDragStop={(_event, node, moved) => {
-              // ReactFlow reports a multi-select drag in `moved` and a single
-              // one in `node`; past that, the decision belongs to pinDragged.
-              const dragged = moved.length > 0 ? moved : [node];
-              for (const one of dragged) {
-                dragging.current.delete(one.id);
-              }
-              const next = pinDragged(prefs, dragged, (id) => layoutPositions.get(id), new Date());
-              if (next !== prefs) {
-                savePrefs(next);
-              }
-            }}
-            // A drag has to be a drag. Below this a click on a card would pin it
-            // where auto-layout had already put it, quietly opting that one card
-            // out of ever sorting again — the least visible way to break §3's
-            // ranking.
-            nodeDragThreshold={4}
-            nodeTypes={NODE_TYPES}
-            fitView
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background color="#21262d" gap={16} />
-          </ReactFlow>
+        <div className="relative flex min-w-0 flex-1 flex-col bg-canvas">
+          <div className="flex h-12 flex-none items-center gap-[9px] border-line border-b px-3.5">
+            <span className="font-medium text-[13px] text-ink">Canvas</span>
+            <span className="mx-1 h-3.5 w-px bg-line-strong" />
 
-          {paletteOpen && (
-            <CommandPalette
-              entries={entries}
-              onPick={(sessionId) => {
-                focusSession(sessionId);
-                setPaletteOpen(false);
+            {/* Where the rows came from, said out loud. The one thing a
+                dashboard must never do is look the same whether or not it is
+                connected — so this sits before the filters, not in a corner. */}
+            <span data-source className="truncate font-mono text-[10px]">
+              {source.kind === 'demo' ? (
+                <span className="text-waiting">● {source.note}</span>
+              ) : source.status === 'error' ? (
+                <span className="text-failed">● {source.error}</span>
+              ) : source.status === 'loading' ? (
+                <span className="text-ink-faint">○ connecting to black-smith…</span>
+              ) : (
+                <span className="text-done">● black-smith</span>
+              )}
+            </span>
+
+            <span className="mx-1 h-3.5 w-px bg-line-strong" />
+            <div className="flex items-center gap-1.5">
+              {(
+                [
+                  ['all', 'All', tally.all],
+                  ['running', 'Running', tally.running],
+                  ['waiting', 'Needs you', tally.waiting],
+                  ['done', 'Done', tally.done],
+                ] as const
+              ).map(([key, label, count]) => {
+                const on = statusFilter === key;
+                const loud = key === 'waiting' && count > 0;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    data-status-pill={key}
+                    aria-pressed={on}
+                    onClick={() => setStatusFilter(key)}
+                    className={[
+                      'rounded-full border px-2.5 py-1 font-mono text-[10px]',
+                      on
+                        ? 'border-line-loud bg-raised text-ink'
+                        : loud
+                          ? 'border-waiting-tint text-waiting'
+                          : 'border-line text-ink-dim hover:border-line-strong',
+                    ].join(' ')}
+                  >
+                    {label} {count}
+                  </button>
+                );
+              })}
+            </div>
+
+            <span className="flex-1" />
+
+            {/* Auto-layout is not a switch of its own: it is the ABSENCE of
+                pins. Saying so here, where the mockup puts a toggle, keeps one
+                fact in one place — `gr` is still the way to turn it back on. */}
+            <span
+              data-auto-layout
+              className="flex h-[26px] items-center gap-1.5 rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim"
+            >
+              auto-layout
+              {pinned === 0 ? (
+                <span className="text-running">on</span>
+              ) : (
+                <span className="text-waiting">{pinned} pinned</span>
+              )}
+            </span>
+
+            <div className="flex h-[26px] items-center overflow-hidden rounded-[7px] border border-line text-ink-dim">
+              <button
+                type="button"
+                aria-label="zoom out"
+                onClick={() => zoomOut()}
+                className="flex h-full w-[26px] items-center justify-center hover:text-ink"
+              >
+                −
+              </button>
+              <span className="flex h-full items-center border-line border-r border-l px-1.5 font-mono text-[10px] text-ink">
+                {zoomPct}%
+              </span>
+              <button
+                type="button"
+                aria-label="zoom in"
+                onClick={() => zoomIn()}
+                className="flex h-full w-[26px] items-center justify-center hover:text-ink"
+              >
+                +
+              </button>
+            </div>
+
+            <button
+              type="button"
+              aria-label="fit view"
+              onClick={() => fitView()}
+              className="flex h-[26px] items-center gap-1.5 rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim hover:text-ink"
+            >
+              ⛶ <span>f</span>
+            </button>
+
+            {/* The bell counts what is actually owed: sessions that stopped for
+                you, plus rows in the review queue. */}
+            <span
+              data-bell
+              className="relative flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border border-line text-ink-dim"
+            >
+              ⌁
+              {tally.waiting + review.waivers.length > 0 && (
+                <span className="-top-1.5 -right-1.5 absolute flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-waiting px-1 font-mono text-[8.5px] text-canvas">
+                  {tally.waiting + review.waivers.length}
+                </span>
+              )}
+            </span>
+          </div>
+
+          <div className="relative min-h-0 flex-1">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onNodeDragStart={(_event, node) => dragging.current.add(node.id)}
+              onNodeDragStop={(_event, node, moved) => {
+                // ReactFlow reports a multi-select drag in `moved` and a single
+                // one in `node`; past that, the decision belongs to pinDragged.
+                const dragged = moved.length > 0 ? moved : [node];
+                for (const one of dragged) {
+                  dragging.current.delete(one.id);
+                }
+                const next = pinDragged(
+                  prefs,
+                  dragged,
+                  (id) => layoutPositions.get(id),
+                  new Date(),
+                );
+                if (next !== prefs) {
+                  savePrefs(next);
+                }
               }}
-              onClose={() => setPaletteOpen(false)}
-            />
-          )}
+              // A drag has to be a drag. Below this a click on a card would pin it
+              // where auto-layout had already put it, quietly opting that one card
+              // out of ever sorting again — the least visible way to break §3's
+              // ranking.
+              nodeDragThreshold={4}
+              nodeTypes={NODE_TYPES}
+              fitView
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background color="var(--color-dots)" gap={24} size={1} />
+              <MiniMap
+                pannable
+                zoomable
+                ariaLabel="canvas minimap"
+                maskColor="rgb(0 0 0 / 0.5)"
+                style={{ width: 168, height: 96 }}
+                className="!bottom-3 !right-3 !m-0 !rounded-[8px] !border !border-line !bg-sunken"
+                nodeColor={(node) =>
+                  node.type === 'info' ? 'var(--color-ink-dim)' : 'var(--color-line-loud)'
+                }
+              />
+            </ReactFlow>
+
+            {paletteOpen && (
+              <CommandPalette
+                entries={entries}
+                onPick={(sessionId) => {
+                  focusSession(sessionId);
+                  setPaletteOpen(false);
+                }}
+                onClose={() => setPaletteOpen(false)}
+              />
+            )}
+          </div>
         </div>
 
         <DetailPanel
@@ -947,8 +1111,8 @@ function CanvasInner({
             const command = focusedDecision?.commands.find((c) => c.id === commandId);
             setStatus(
               command === undefined
-                ? 'không có command đó'
-                : `vam không tự chạy — đã chép "${command.label}", chạy tay`,
+                ? 'no such command'
+                : `vam does not run them — copied "${command.label}", run it yourself`,
             );
             copyCommand(commandId);
           }}
@@ -990,8 +1154,8 @@ function CanvasInner({
             savePrefs(setIcon(prefs, pickingIconFor, icon, new Date()));
             setStatus(
               icon === ''
-                ? 'đã bỏ icon — lưu trên máy này, không vào event log'
-                : `${icon} — lưu trên máy này, không vào event log`,
+                ? 'icon cleared — kept on this machine, never in the event log'
+                : `${icon} — kept on this machine, never in the event log`,
             );
             setPickingIconFor(null);
           }}
@@ -1004,9 +1168,13 @@ function CanvasInner({
           reading the sidebar's. */}
       <footer
         data-status-bar
-        className="flex items-center gap-4 border-line border-t bg-panel px-3 py-1.5 text-[11px] text-ink-dim"
+        className="flex h-8 flex-none items-center gap-3 border-line border-t bg-sunken px-3 font-mono text-[10px] text-ink-faint"
       >
-        <span data-mode className="font-mono font-semibold text-ink">
+        {/* The mode indicator is not in the mockup, and it stays: ADE is a
+            mouse-and-keyboard app, vam is a modal one, and a modal app that
+            does not say which mode it is in is the single worst thing a modal
+            app can be. */}
+        <span data-mode className="font-semibold text-ink">
           {jumping
             ? 'JUMP'
             : filtering
@@ -1017,16 +1185,36 @@ function CanvasInner({
                   ? 'ACTION'
                   : 'NORMAL'}
         </span>
-        <span data-focus className="font-mono">
+        <span data-focus className="truncate">
           {focusedEntry === null
             ? '—'
             : `${focusedEntry.project.name}/${focusedEntry.session.title}`}
         </span>
-        <span className="text-waiting">
-          ⏸ {entries.filter((e) => e.session.status === 'waiting').length} chờ bạn
+
+        <span className="h-3 w-px bg-line" />
+        <span>
+          <span className="text-ink-dim">{tally.all}</span> sessions
         </span>
-        {status !== null && <span className="text-ink-faint">{status}</span>}
-        <span className="ml-auto font-mono text-ink-faint">hjkl f / gt i yy ^K</span>
+        {tally.running > 0 && <span className="text-running">{tally.running} running</span>}
+        {tally.waiting > 0 && <span className="text-waiting">{tally.waiting} need you</span>}
+        {tally.done > 0 && <span className="text-done">{tally.done} done</span>}
+        {tally.failed > 0 && <span className="text-failed">{tally.failed} failed</span>}
+        <span className="h-3 w-px bg-line" />
+        <span>{model.projects.length} projects</span>
+
+        {status !== null && <span className="truncate text-ink-dim">{status}</span>}
+
+        <span className="flex-1" />
+        {/* The mockup spends its right end on a token and spend budget for the
+            day. `/api/overview` carries both (`tokensByEpic`, `budgetUsedPct`)
+            and vam's adapter does not read them yet — so the slot is here,
+            saying what it is waiting for rather than showing a number nobody
+            measured. See the todo. */}
+        <span data-budget className="text-ink-ghost">
+          today — · — / — cap
+        </span>
+        <span className="h-3 w-px bg-line" />
+        <span>hjkl f / gt i yy ^K</span>
       </footer>
     </div>
   );

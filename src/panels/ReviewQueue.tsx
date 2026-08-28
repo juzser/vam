@@ -81,7 +81,7 @@ export function ReviewQueue(props: ReviewQueueProps) {
     // the opposite of what it means.
     return (
       <div className="border-line border-t px-3 py-2">
-        <div className="text-[10.5px] text-failed">không đọc được hàng chờ duyệt — {error}</div>
+        <div className="text-[10.5px] text-failed">không đọc được hàng chờ approve — {error}</div>
       </div>
     );
   }
@@ -95,7 +95,7 @@ export function ReviewQueue(props: ReviewQueueProps) {
       <div className="flex items-center gap-2 pb-1.5">
         <span className="vam-breathe text-[11px] text-waiting">⏸</span>
         <span className="font-semibold text-[10.5px] text-waiting uppercase tracking-wide">
-          chờ bạn duyệt
+          waiting for your review
         </span>
         <span className="text-[10px] text-ink-faint">{waivers.length + lessons.length}</span>
       </div>
@@ -182,8 +182,8 @@ function WaiverRow({
           value={note}
           onChange={(event) => onNoteChange(finding.fingerprint, event.target.value)}
           onKeyDown={(event) => leaveOnKey(event, noteRef, onNoteDone)}
-          placeholder="lý do (bắt buộc)…"
-          aria-label={`lý do cho ${finding.fingerprint}`}
+          placeholder="reason (required)…"
+          aria-label={`reason for ${finding.fingerprint}`}
           className="min-w-0 flex-1 rounded-[var(--radius-sm)] bg-sunken px-1.5 py-0.5 font-mono text-[10.5px] text-ink outline-none placeholder:text-ink-faint"
         />
         <button
@@ -194,7 +194,7 @@ function WaiverRow({
             selected('denied') ? 'border-running ring-1 ring-running' : 'border-line'
           }`}
         >
-          bắt sửa
+          fix
         </button>
         <button
           type="button"
@@ -204,7 +204,7 @@ function WaiverRow({
             selected('granted') ? 'ring-1 ring-running' : ''
           }`}
         >
-          bỏ qua
+          waive
         </button>
       </div>
     </li>
@@ -226,7 +226,7 @@ function HiddenRow({ count }: { readonly count: number }) {
       className="rounded-[var(--radius-sm)] border border-waiting/40 border-dashed px-2 py-1.5"
     >
       <p className="text-[11px] text-waiting leading-relaxed">
-        còn {count} finding chờ duyệt mà vam không đọc được
+        còn {count} finding chờ approve mà vam không đọc được
       </p>
       <p className="pt-1 text-[10.5px] text-ink-faint leading-relaxed">
         vam tìm finding qua task board của session này; finding gắn vào task do session khác tạo thì
@@ -279,8 +279,8 @@ function LessonRow({
           value={note}
           onChange={(event) => onNoteChange(lesson.lessonId, event.target.value)}
           onKeyDown={(event) => leaveOnKey(event, noteRef, onNoteDone)}
-          placeholder="ghi chú (tuỳ chọn)…"
-          aria-label={`ghi chú cho ${lesson.lessonId}`}
+          placeholder="note (optional)…"
+          aria-label={`note for ${lesson.lessonId}`}
           className="min-w-0 flex-1 rounded-[var(--radius-sm)] bg-sunken px-1.5 py-0.5 font-mono text-[10.5px] text-ink outline-none placeholder:text-ink-faint"
         />
         <button
@@ -291,7 +291,7 @@ function LessonRow({
             selected('reject') ? 'border-running ring-1 ring-running' : 'border-line'
           }`}
         >
-          bỏ
+          reject
         </button>
         <button
           type="button"
@@ -301,7 +301,7 @@ function LessonRow({
             selected('approve') ? 'ring-1 ring-running' : ''
           }`}
         >
-          duyệt
+          approve
         </button>
       </div>
     </li>

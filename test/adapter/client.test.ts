@@ -76,7 +76,7 @@ describe('writes', () => {
   it('sends waiver decisions as a batch under its envelope', async () => {
     const { fetch, calls } = stub({ body: { applied: 2 } });
     await client(fetch).applyWaivers({ sessionId: 's1' }, [
-      { fingerprint: 'fp-1', decision: 'granted', operatorNote: 'nit, bỏ qua' },
+      { fingerprint: 'fp-1', decision: 'granted', operatorNote: 'nit, waive' },
       { fingerprint: 'fp-2', decision: 'denied', operatorNote: 'sửa đi' },
     ]);
     const body = JSON.parse(String(calls[0]?.init?.body));

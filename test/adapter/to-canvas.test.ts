@@ -214,7 +214,7 @@ describe('toCanvasModel', () => {
     expect(model.projects[0]?.sessions[0]?.status).toBe('done');
   });
 
-  it('dates the activity line relatively, not as an ISO stamp', () => {
+  it('splits what it last did from how long ago', () => {
     // In a column of a dozen rows the question is "is this fresh", never "at
     // what o'clock" — and an ISO stamp makes you subtract in your head.
     const now = new Date('2026-08-27T12:00:00Z');
@@ -223,7 +223,11 @@ describe('toCanvasModel', () => {
       new Map(),
       now,
     );
-    expect(model.projects[0]?.sessions[0]?.activity).toContain('15 phút trước');
+    // The two are separate fields now: the activity line says WHAT it last
+    // did, `age` says how long ago. The mockup puts them at opposite ends of
+    // the same row, and one pre-joined string cannot be put in two places.
+    expect(model.projects[0]?.sessions[0]?.activity).toBe('task-result-recorded');
+    expect(model.projects[0]?.sessions[0]?.age).toBe('15m');
   });
 
   it('labels a session with the epic its newest turn is in', () => {

@@ -35,7 +35,7 @@ export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
       */}
       <button
         type="button"
-        aria-label="đóng palette"
+        aria-label="close palette"
         className="absolute inset-0 cursor-default bg-canvas/70"
         onMouseDown={onClose}
       />
@@ -55,21 +55,21 @@ export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
       >
         <Command.Input
           autoFocus
-          placeholder="đi tới session…"
+          placeholder="go to session…"
           className="w-full border-line border-b bg-transparent px-3 py-2 text-ink outline-none placeholder:text-ink-faint"
         />
         <Command.List className="max-h-72 overflow-y-auto p-1">
-          <Command.Empty className="px-3 py-4 text-ink-faint">không khớp gì</Command.Empty>
+          <Command.Empty className="px-3 py-4 text-ink-faint">No match gì</Command.Empty>
 
           {waiting.length > 0 && (
-            <Command.Group heading="chờ bạn" className="px-1 text-ink-faint text-xs">
+            <Command.Group heading="needs you" className="px-1 text-ink-faint text-xs">
               {waiting.map((entry) => (
                 <PaletteRow key={entry.session.id} entry={entry} onPick={onPick} />
               ))}
             </Command.Group>
           )}
 
-          <Command.Group heading="tất cả session" className="px-1 text-ink-faint text-xs">
+          <Command.Group heading="all sessions" className="px-1 text-ink-faint text-xs">
             {rest.map((entry) => (
               <PaletteRow key={entry.session.id} entry={entry} onPick={onPick} />
             ))}

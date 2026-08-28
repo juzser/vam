@@ -124,6 +124,16 @@ export type Session = {
    * render as "no line", never as an empty spinner pretending to be live.
    */
   readonly activity: string | null;
+  /**
+   * How long ago the session last did anything, already in the compact form the
+   * sidebar right-aligns (`2m`, `6h`, `3d`).
+   *
+   * Split out of `activity`, which used to carry both. The ADE mockup puts the
+   * two at opposite ends of the same row — what it did on the left, how long
+   * ago on the right — and a single pre-joined string cannot be put in two
+   * places. `null` where the source cannot say.
+   */
+  readonly age: string | null;
   /** Newest first. The canvas shows the first three; §3. */
   readonly decisions: readonly Decision[];
 };
