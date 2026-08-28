@@ -68,7 +68,9 @@ describe('openChangeStream', () => {
       fake.emit('change', 'not-json');
       fake.emit('change', '{"sessions":"s1"}');
       fake.emit('change', '[1,2]');
-      fake.emit('change', '{"sessions":[1]}');
+      fake.emit('change', 'null');
+      fake.emit('change', '{"sessions":[1],"at":"2026-08-01T00:00:00Z"}');
+      fake.emit('change', '{"sessions":["s1"]}');
       fake.emit('change', '{"sessions":["s1"],"at":"2026-08-01T00:00:00Z"}');
     }).not.toThrow();
     expect(onChange).toHaveBeenCalledTimes(1);
