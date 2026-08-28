@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CELL,
+  cellOrigin,
   fanPaths,
   GRID,
   INFO_OFFSET,
@@ -10,7 +11,6 @@ import {
   STEP_PITCH,
   STEP_SIZE,
   STEP_SLOTS,
-  cellOrigin,
   stepSlotOffset,
 } from '../../src/canvas/grid.js';
 
