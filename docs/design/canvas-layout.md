@@ -39,15 +39,29 @@ nhất — xem §4.1.
 
 ### 1.2 Stack chốt
 
-Lấy theo orca, đã đọc từ `package.json` của orca ngày 2026-08-27:
+> **Sửa 2026-08-28.** Mục này từng là DANH SÁCH DỰ ĐỊNH chép từ `package.json`
+> của orca ngày 2026-08-27, nhưng viết như thể đã cài. Bốn món chưa bao giờ
+> được cài — `shadcn`, `radix-ui`, `class-variance-authority`, `sonner` — và
+> một món có thật thì không được nhắc. Một phiên khác đã đọc mục này, tin nó,
+> và suýt ghi "React + ReactFlow + shadcn/radix" thành justification chính thức
+> của vam trong registry của black-smith. Dưới đây là thứ `package.json` thực
+> sự khai, đối chiếu ngày 2026-08-28.
 
-- **React 19 + Vite** · **Tailwind CSS v4** · **shadcn + radix-ui** ·
-  `clsx` + `tailwind-merge` + `class-variance-authority`
+Đang cài thật:
+
+- **React 19 + Vite** · **Tailwind CSS v4** — không có HDS, token riêng
+  (`src/styles.css`, đọc từ mockup ADE; xem `docs/ade-redesign.md`)
+- **`@xyflow/react`** cho canvas — phần duy nhất không có trong orca
 - **`cmdk`** cho command palette (`Ctrl-K` ở §4) — orca dùng đúng thư viện này
   ở `QuickOpen.tsx` và `WorktreeJumpPalette.tsx`
-- **`zustand`** cho state · **`lucide-react`** cho icon · **`sonner`** cho toast
-- **ReactFlow** cho canvas — phần duy nhất không có trong orca
+- **`zustand`** cho state · **`lucide-react`** cho icon
+- **`clsx`** + **`tailwind-merge`** cho class
+- **`emoji-picker-react`** cho bảng icon (§4, lazy chunk 307kB)
 - **Vitest** cho unit test (giữ nguyên, trùng chuẩn)
+
+Lấy theo orca nhưng **không** lấy: `shadcn`, `radix-ui`,
+`class-variance-authority`, `sonner`. vam chưa cần lớp component dựng sẵn nào —
+mọi thành phần đều viết tay trên token của chính nó.
 
 ## 2. Mô hình chung cho hai nguồn
 
