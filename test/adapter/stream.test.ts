@@ -84,6 +84,9 @@ describe('openChangeStream', () => {
       onHello,
       onChange: vi.fn(),
     });
+    fake.emit('hello', 'null');
+    fake.emit('hello', '{"floorMs":10000}');
+    fake.emit('hello', '{"heartbeatMs":15000}');
     fake.emit('hello', '{"heartbeatMs":15000,"floorMs":10000}');
     expect(onHello).toHaveBeenCalledTimes(1);
     expect(onHello).toHaveBeenCalledWith({ heartbeatMs: 15000, floorMs: 10000 });
