@@ -230,8 +230,9 @@ bới ra. `yy` chép field đó. Vam **không tự chạy** — bước gật v�
 > `vam-sse-canvas` (chi tiết đo được ở §6.1 dưới đây). Epic B (worker
 > heartbeat) chưa đổi — giữ nguyên cho phần đó.
 
-Hai việc nằm ở black-smith, **không phải** ở vam, và vam epic 1 nên đợi chúng
-thay vì dựng lớp polling rồi vứt đi:
+Một việc còn lại (epic B) nằm ở black-smith, **không phải** ở vam, và vam
+epic 1 nên đợi nó thay vì dựng lớp polling rồi vứt đi — epic A đã đổ về, xem
+sửa ở trên:
 
 - **epic A — SSE cho `ui/server`**: **đã đổ về** (2026-08-28). `GET
   /api/stream` gửi frame `hello`/`change`; vam đọc qua `src/adapter/stream.ts`
@@ -244,9 +245,9 @@ thay vì dựng lớp polling rồi vứt đi:
   của black-smith, có spec-review đàng hoàng.
 
 ```
-black-smith epic A (SSE)        ─┐
-black-smith epic B (heartbeat)  ─┤→ vam epic 1: canvas đọc-only, một nguồn
-                                 ┘
+black-smith epic A (SSE, đã đổ về)  ─┐
+black-smith epic B (heartbeat)      ─┤→ vam epic 1: canvas đọc-only, một nguồn
+                                     ┘
 ```
 
 ## 6. Phạm vi
