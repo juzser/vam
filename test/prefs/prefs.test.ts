@@ -13,9 +13,9 @@ import {
   applyIcons,
   EMPTY_PREFS,
   readPrefs,
+  type StorageLike,
   setIcon,
   setTheme,
-  type StorageLike,
   writePrefs,
 } from '../../src/prefs/prefs.js';
 
