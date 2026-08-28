@@ -297,4 +297,30 @@ describe('useCanvas', () => {
     });
     expect(calls).toBe(2);
   });
+
+  it('a slow load never overwrites a faster one started after it', async () => {
+    const resolvers: Array<(o: ApiOverview) => void> = [];
+    const seen = mount(fakeClient({ overview: () => new Promise((r) => resolvers.push(r)) }));
+    await act(async () => {
+      seen.current?.refresh();
+    });
+    resolvers[1]?.(overviewWith(['fast']));
+    await act(async () => {});
+    resolvers[0]?.(overviewWith(['slow']));
+    await act(async () => {});
+    expect(seen.current?.model.projects[0]?.sessions[0]?.id).toBe('fast');
+  });
+
+  it('a slow error never downgrades status set by a faster success', async () => {
+    const c: Array<{ a: (o: ApiOverview) => void; b: (e: unknown) => void }> = [];
+    const seen = mount(fakeClient({ overview: () => new Promise((a, b) => c.push({ a, b })) }));
+    await act(async () => {
+      seen.current?.refresh();
+    });
+    c[1]?.a(overviewWith(['fast']));
+    await act(async () => {});
+    c[0]?.b(new Error('late'));
+    await act(async () => {});
+    expect(seen.current?.status).toBe('live');
+  });
 });
