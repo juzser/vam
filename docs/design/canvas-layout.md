@@ -224,10 +224,19 @@ bới ra. `yy` chép field đó. Vam **không tự chạy** — bước gật v�
 
 ## 5. Phụ thuộc ngược lên black-smith
 
+> **Sửa 2026-08-28.** Epic A dưới đây từng được liệt kê là phụ thuộc **đang
+> chờ** ("vam epic 1 nên đợi chúng thay vì dựng lớp polling rồi vứt đi") — lúc
+> viết mục này còn đúng, giờ thì sai cho epic A: nó đã đổ về qua epic
+> `vam-sse-canvas` (chi tiết đo được ở §6.1 dưới đây). Epic B (worker
+> heartbeat) chưa đổi — giữ nguyên cho phần đó.
+
 Hai việc nằm ở black-smith, **không phải** ở vam, và vam epic 1 nên đợi chúng
 thay vì dựng lớp polling rồi vứt đi:
 
-- **epic A — SSE cho `ui/server`**: hiện `app.ts` chỉ có request-response.
+- **epic A — SSE cho `ui/server`**: **đã đổ về** (2026-08-28). `GET
+  /api/stream` gửi frame `hello`/`change`; vam đọc qua `src/adapter/stream.ts`
+  (framework-free, tách khỏi React để test được sớm — epic.md §5.2) và nối
+  vào canvas qua `src/adapter/useCanvas.ts`. Poll 4 giây đã bị bỏ.
 - **epic B — worker heartbeat**: black-smith cố tình cấm worker trả prose
   (`{status, severity_counts, artifact_path}`) để khỏi ngập context orchestrator.
   Nên hôm nay *không có* text "agent đang làm gì". Heartbeat là một sự kiện mới
@@ -255,8 +264,38 @@ thể làm hỏng gì, và layout được nhìn tận mắt trước khi gắn 
 
 Đọc **không** đợi SSE. `GET /api/overview` đã trả `runningSessions[]` từ trước,
 nên adapter dựng được hàng thật ngay; §5 epic A chỉ đổi cách dữ liệu *tới*
-(poll → push), không phải việc có dữ liệu hay không. Hôm nay là poll 4s
-(`useCanvas`), và khi SSE về thì đúng một file đổi.
+(poll → push), không phải việc có dữ liệu hay không.
+
+> **Sửa 2026-08-28.** Câu tiếp theo ở đây từng viết "Hôm nay là poll 4s
+> (`useCanvas`), và khi SSE về thì đúng một file đổi" — đúng lúc viết
+> (2026-08-27), sai bây giờ. SSE đã về (epic `vam-sse-canvas`, task-1 +
+> task-2) và poll 4 giây đã bị bỏ. **Hai** file đổi, không phải một:
+> `src/adapter/stream.ts` (file mới — đọc frame `hello`/`change`, không phụ
+> thuộc React) và `src/adapter/useCanvas.ts` (nối stream đó vào vòng đời
+> React: gọi `load()` khi mount, khi có `hello`, và khi có `change` hợp lệ).
+> Lý do tách làm hai, epic.md §5.2: frame reader không phụ thuộc React nên
+> test được ngay và lên trước một wave, thay vì gộp chung một file phải chờ
+> `useCanvas.ts` đổi mới test được.
+
+**Ba việc đo được ở tầng trình duyệt** (measured, epic.md §3.3):
+
+1. Server không gửi field `retry:`; cơ chế reconnect mặc định của trình
+   duyệt tự lo, đo được **hằng số 3.00s**, không backoff (khoảng cách đo
+   3010 / 3004 / 3004 ms).
+2. Server chết giữa chừng lộ ra ở tầng `EventSource` là `error` rồi `open`,
+   `readyState` 0 (CONNECTING), **không bao giờ** 2 (CLOSED) — trình duyệt
+   tự hồi phục, không cần code phía client.
+3. `heartbeatMs` và `floorMs` — nằm trong frame `hello` — **không quan sát
+   được** từ trình duyệt: keep-alive là một SSE comment, và `EventSource`
+   không lộ comment ra JS ở bất kỳ hình thức nào. Hơn nữa `floorMs` (10000)
+   **nhỏ hơn** `heartbeatMs` (15000), nên hai số không thể ghép thành một
+   ngưỡng có nghĩa. **Cấm: không được dựng liveness timeout, watchdog hay
+   staleness check dựa trên bất kỳ số nào trong hai số này** (finding
+   `f-ui-server-sse/task-3-sse-handler-2fcd3eca`).
+
+`AC-G1` — kiểm tra đầu-cuối qua server thật — vẫn đang **gated**: chờ `GET
+/api/stream` lên `main` của black-smith. Ba số đo ở trên do phiên vam đo trên
+nhánh, chưa đo lại trên `main`.
 
 Ghi thì **bắt buộc** phải có đọc trước: `resolveContext` đòi `sessionId` thật và
 tự nối `causalParent` từ event cuối của log đó. Không có session thật thì mọi
