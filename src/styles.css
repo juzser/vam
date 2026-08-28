@@ -1,0 +1,316 @@
+@import 'tailwindcss';
+@import '@xyflow/react/dist/style.css';
+
+/*
+ * Vam's visual language, borrowed on purpose rather than invented.
+ *
+ * docs/design/canvas-layout.md §1.1 records that vam takes its UI from orca
+ * instead of HDS. This file is where that becomes concrete, and it takes from
+ * two places, both read on 2026-08-27:
+ *
+ *  - **orca** (`src/renderer/src/assets/main.css`) for the METRICS: its radius
+ *    ramp is `--radius: 0.625rem` with sm/md/lg/xl at 0.6/0.8/1.0/1.4 of it,
+ *    and its type sits on a 10 / 11 / 12 / 12.5 / 13 / 13.5 / 14 scale. Vam uses
+ *    the same numbers so the two apps feel like the same size of thing.
+ *  - **nodeterm** (`src/renderer/styles.css`) for the CANVAS IDIOM: it draws
+ *    node cards and group frames on @xyflow/react, the same library vam uses,
+ *    so its recipes transfer directly rather than by analogy.
+ *
+ * The one idea worth stealing outright is nodeterm's text ramp. Its greys are
+ * not hexes; they are one tint triple at three alphas (0.85 / 0.55 / 0.25) over
+ * whatever surface they land on. That means a label reads correctly on the
+ * canvas, on a panel and on a raised card without three separate greys — and it
+ * is why nodeterm's light theme is one declaration rather than three hundred
+ * edits.
+ */
+@theme {
+  /* The tint every overlay and every grey is mixed from. Dark is the only theme
+     today; a light one flips this triple, not the rules below it. */
+  --color-tint: 255 255 255;
+
+  /* Surfaces named by ELEVATION, not by where they happen to be used first —
+     nodeterm's naming, adopted because "panel-2" style names stop meaning
+     anything the second time a surface moves. */
+  --color-canvas: #16171a;
+  --color-sunken: #101113;
+  --color-panel: #1d1f23;
+  --color-raised: #24272c;
+  --color-header: #2a2e34;
+
+  /* All five routed through the one triple above, which is the whole point of
+     having it: a light theme flips `--color-tint` and every alpha the design
+     chose survives untouched. Spelling the greys as hexes here would make that
+     token decorative. */
+  --color-line: rgb(var(--color-tint) / 0.1);
+  --color-line-strong: rgb(var(--color-tint) / 0.22);
+
+  --color-ink: rgb(var(--color-tint) / 0.85);
+  --color-ink-dim: rgb(var(--color-tint) / 0.55);
+  --color-ink-faint: rgb(var(--color-tint) / 0.3);
+
+  /* Status: running, waiting on you, done, failed. Nothing else gets a colour —
+     a canvas where everything is coloured tells you nothing at a glance. Hues
+     follow orca/nodeterm's macOS-derived set rather than a fourth palette. */
+  --color-running: #0a84ff;
+  --color-waiting: #ff9f0a;
+  --color-done: #32d74b;
+  --color-failed: #ff453a;
+
+  /* `in` and `out` get their own two hues, deliberately outside the status set.
+     They answer a different question — *whose words are these*, mine or the
+     session's — and reusing a status colour for it would make the same green
+     mean "finished" in one column and "this is the answer" in the next. Violet
+     reads as the operator throughout; cyan as the session. */
+  /* `in` is the louder of the two, and cyan is the brighter hue on this ground.
+     What you asked for is the half you scan a row of cards FOR — the session's
+     answer is what the detail panel is open on anyway. */
+  --color-in: #5ec8d8;
+  --color-out: #8a7ae0;
+
+  /* orca's ramp, same arithmetic. */
+  --radius-base: 0.625rem;
+  --radius-sm: calc(var(--radius-base) * 0.6);
+  --radius-md: calc(var(--radius-base) * 0.8);
+  --radius-lg: var(--radius-base);
+  --radius-xl: calc(var(--radius-base) * 1.4);
+
+  /* Chrome is sans, values are mono.
+     Both reference apps do this: orca's UI is Geist and only its terminal is
+     mono, nodeterm's node headers inherit the app sans while the terminal
+     inside them does not. Vam keeps mono for what is *data* — a session id, an
+     `in:`/`out:` value, a command — because those get compared column by column
+     and copied verbatim. Labels and counts are chrome and read better in sans.
+     Geist is not bundled; the stack falls through to the system UI face, which
+     is what orca renders as anyway on a machine without it. */
+  --font-sans: Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* nodeterm's node shadow, which is what makes a card sit *above* the canvas
+     rather than being a rectangle drawn on it. */
+  --shadow-node: 0 8px 28px rgb(0 0 0 / 0.4);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  /* 12px is orca's workhorse size; 13px is reserved for titles. */
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
+  /* This is a keyboard tool. A stray double-click that selects half the canvas
+     is pure noise; text meant to be copied is copied with `yy`. */
+  user-select: none;
+}
+
+/* At most two lines — `max-height`, not `height`.
+   The layout still RESERVES two lines per value when sizing the node, so a node
+   is never too short. But the box itself takes only the lines it needs, which is
+   the difference between the slack collecting harmlessly at the bottom of the
+   card and it opening a hole in the middle of a decision, between a one-line
+   `in` and the `out` under it. The first build used a fixed height and the holes
+   read as broken spacing. */
+/*
+ * Exactly two lines, and the height says so.
+ *
+ * Space this apart with MARGIN, never padding: preflight puts everything in
+ * `border-box`, so a `padding-top` here comes out of the 32px and the second
+ * line gets sliced through the middle of its glyphs — which looks like a
+ * rendering fault rather than a truncation, and truncation you cannot recognise
+ * is the one thing a two-line clamp must not produce.
+ */
+.vam-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  max-height: 32px;
+  line-height: 16px;
+}
+
+/*
+ * "This session is working" — three animations, all cheap, all opt-out.
+ *
+ * nodeterm's note on its own working glow is the reason they are shaped this
+ * way: it animates OPACITY on a pseudo-element and never `box-shadow`, because
+ * animating a shadow repaints the whole glowing node every frame and that adds
+ * up once several are running at once. Vam has the same problem — a canvas is
+ * exactly where several nodes are working at the same time.
+ *
+ * `prefers-reduced-motion` stops all three. A moving dashboard is a liability
+ * for anyone it makes ill, and the colour already carries the state.
+ */
+@keyframes vam-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes vam-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* A travelling highlight along the node's 3px status edge: the one signal you
+   can read from across the room without reading anything. */
+@keyframes vam-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.vam-spin {
+  display: inline-block;
+  animation: vam-spin 1.1s linear infinite;
+}
+
+.vam-breathe {
+  animation: vam-breathe 1.8s ease-in-out infinite;
+}
+
+.vam-running-edge {
+  position: absolute;
+  top: -3px;
+  left: -1px;
+  right: -1px;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-running) 35%,
+    color-mix(in srgb, var(--color-running) 35%, white) 50%,
+    var(--color-running) 65%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: vam-sweep 2.2s linear infinite;
+  pointer-events: none;
+}
+
+/*
+ * "This session is waiting on YOU."
+ *
+ * Given its own treatment rather than another status colour because it is the
+ * only state on this canvas that is *about the reader*. Everything else is a
+ * report; this is a request, and a request that reads like a report is one that
+ * sits unanswered. So it gets a halo that grows outward — motion pointing away
+ * from the card, which the eye catches even in a column it is not reading.
+ */
+@keyframes vam-call {
+  0% {
+    box-shadow: 0 0 0 0 rgb(255 159 10 / 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgb(255 159 10 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(255 159 10 / 0);
+  }
+}
+
+.vam-call {
+  animation: vam-call 2s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vam-spin,
+  .vam-breathe,
+  .vam-running-edge,
+  .vam-call {
+    animation: none;
+  }
+  /* The halo carried the signal; with motion off, a static ring has to. */
+  .vam-call {
+    box-shadow: 0 0 0 2px rgb(255 159 10 / 0.55);
+  }
+}
+
+/* The group frame's floating label, straddling the top border — nodeterm's
+   `.group-node__label`. It is a pill on the border rather than a header row
+   inside the box because a header row costs a node's worth of vertical space in
+   every group, and the name is chrome, not content. */
+.vam-group-label {
+  position: absolute;
+  top: 0;
+  left: 14px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 90%;
+  padding: 2px 9px;
+  /* The canvas, not a panel: the frame has no fill any more, so the pill's job
+     is to interrupt the dashes cleanly rather than to sit on a surface. */
+  background: var(--color-canvas);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+/*
+ * ReactFlow ships a default fill and border for a node type literally named
+ * `group` (`.react-flow__node-group`), and ours is called that. The frame is a
+ * line drawn AROUND the rows, not a surface behind them — the inherited fill is
+ * what made the cards look sunken into a panel. The inner div draws the dashes.
+ */
+.react-flow__node-group {
+  background-color: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+/*
+ * The emoji picker, wearing vam's palette.
+ *
+ * Exactly the seam orca uses — its bundle carries
+ * `.repo-icon-emoji-picker .EmojiPickerReact { --epr-bg-color: var(--card); … }`
+ * — mapped to vam's tokens instead of shadcn's. Without it the picker arrives in
+ * the library's own dark grey, which is a different dark grey, and a panel that
+ * is nearly the right colour reads worse than one that is obviously foreign.
+ */
+[data-icon-picker] .EmojiPickerReact {
+  --epr-bg-color: var(--color-panel);
+  --epr-category-label-bg-color: var(--color-panel);
+  --epr-text-color: var(--color-ink);
+  --epr-search-input-bg-color: var(--color-sunken);
+  --epr-search-input-bg-color-active: var(--color-sunken);
+  --epr-search-input-text-color: var(--color-ink);
+  --epr-search-input-placeholder-color: var(--color-ink-faint);
+  --epr-search-border-color: var(--color-line);
+  --epr-search-border-color-active: var(--color-running);
+  --epr-hover-bg-color: var(--color-raised);
+  --epr-focus-bg-color: var(--color-raised);
+  --epr-highlight-color: var(--color-running);
+  --epr-picker-border-color: transparent;
+  --epr-category-icon-active-color: var(--color-running);
+  --epr-search-input-border-radius: var(--radius-sm);
+  border: none;
+}
+
+/* The library's scrollbar is a white bar down a dark panel — the brightest thing
+   on screen, beside the thing you are trying to read. */
+[data-icon-picker] .EmojiPickerReact .epr-body::-webkit-scrollbar {
+  width: 8px;
+}
+[data-icon-picker] .EmojiPickerReact .epr-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-icon-picker] .EmojiPickerReact .epr-body::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 999px;
+}

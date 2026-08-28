@@ -1,0 +1,47 @@
+{
+  "name": "vam",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "VAM — VIM Agent Management. Keyboard-first canvas over black-smith and orca.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.11.5",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "emoji-picker-react": "^4.19.1",
+    "lucide-react": "^1.34.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwind-merge": "^3.6.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.6",
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.6",
+    "@types/node": "26.1.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.0",
+    "@vitest/coverage-v8": "4.1.10",
+    "happy-dom": "^20.11.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "4.1.10"
+  }
+}
