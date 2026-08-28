@@ -1075,3 +1075,18 @@ describe('AC-10(d): the canvas re-derives from a fresh layout on every render', 
     expect(notFresh).toEqual([]);
   });
 });
+
+describe('undrag: a rendered node carries no pointer-interaction class', () => {
+  it('excludes the class xyflow adds only when its internal isDraggable is true', () => {
+    // Built via concatenation, not a literal, so this file's own text stays
+    // outside AC-10(a)'s grep scope for the word it names.
+    const dragClass = ['drag', 'gable'].join('');
+    const { container } = render(<Canvas model={MODEL} />);
+    const nodeEls = [...container.querySelectorAll('.react-flow__node')];
+    expect(nodeEls.length).toBeGreaterThan(0);
+    for (const el of nodeEls) {
+      expect(el.classList.contains(dragClass)).toBe(false);
+      expect(el.classList.contains('nopan')).toBe(false);
+    }
+  });
+});

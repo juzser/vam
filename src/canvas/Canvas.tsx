@@ -992,6 +992,7 @@ function CanvasInner({
               nodes={nodes}
               edges={edges}
               onNodesChange={onNodesChange}
+              nodesDraggable={false}
               nodeTypes={NODE_TYPES}
               fitView
               proOptions={{ hideAttribution: true }}
