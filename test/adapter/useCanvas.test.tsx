@@ -257,6 +257,15 @@ describe('useCanvas', () => {
     expect(seen.current?.model.projects.some((p) => p.sessions.some((s) => s.id === 's2'))).toBe(
       true,
     );
+
+    ids = ['s1', 's2', 's3']; // a later hello — the browser's own reconnect — must still recover
+    await act(async () => {
+      seen.instances[0]?.emit('hello', HELLO);
+    });
+    expect(calls).toBe(4);
+    expect(seen.current?.model.projects.some((p) => p.sessions.some((s) => s.id === 's3'))).toBe(
+      true,
+    );
   });
 
   it('unmount closes the stream exactly once, and nothing fetches afterwards', async () => {
