@@ -182,7 +182,7 @@ describe('useCanvas', () => {
       fakeClient({
         overview: async () => {
           calls += 1;
-          return overviewWith(['s1']);
+          return overviewWith(calls === 1 ? ['s1'] : ['s1', 's2']);
         },
       }),
     );
@@ -196,7 +196,7 @@ describe('useCanvas', () => {
       seen.instances[0]?.emit('change', change(['s1']));
     });
     expect(calls).toBe(2); // exactly one refetch, from the one well-formed frame
-    expect(seen.current?.model.projects).toHaveLength(1);
+    expect(seen.current?.model.projects[0]?.sessions).toHaveLength(2); // the refetch's answer, not the first
   });
 
   it('every hello triggers exactly one load, and nothing is built on heartbeatMs/floorMs', async () => {
@@ -223,7 +223,7 @@ describe('useCanvas', () => {
     expect(seen.instances[0]?.closeCalls).toBe(0);
   });
 
-  it('a stream error is not an outage, and a change missed while disconnected reappears on reconnect', async () => {
+  it('a stream error is not an outage, and a later well-formed change still refetches — nothing was torn down', async () => {
     let ids: readonly string[] = ['s1'];
     let calls = 0;
     const seen = mount(
@@ -251,7 +251,7 @@ describe('useCanvas', () => {
     ids = ['s1', 's2']; // the frame naming this is gone for good — §3.2
 
     await act(async () => {
-      seen.instances[0]?.emit('hello', HELLO); // the browser's own reconnect
+      seen.instances[0]?.emit('change', change(ids)); // the change listener, not hello, must survive the error
     });
     expect(calls).toBe(3);
     expect(seen.current?.model.projects.some((p) => p.sessions.some((s) => s.id === 's2'))).toBe(
