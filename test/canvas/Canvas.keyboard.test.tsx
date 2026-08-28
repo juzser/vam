@@ -604,7 +604,7 @@ describe('renaming, icons and closing', () => {
     // the row without the sidebar knowing an icon is a local preference.
     localStorage.setItem(
       'vam.prefs.v1',
-      JSON.stringify({ pinned: {}, icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
+      JSON.stringify({ icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
     );
     render(<Canvas model={MODEL} />);
     expect(rowText('a1')).toContain('🛠');
@@ -617,7 +617,7 @@ describe('renaming, icons and closing', () => {
     // our own button and exercises the same path out.
     localStorage.setItem(
       'vam.prefs.v1',
-      JSON.stringify({ pinned: {}, icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
+      JSON.stringify({ icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
     );
     render(<Canvas model={MODEL} />);
     press('s');
@@ -633,36 +633,20 @@ describe('renaming, icons and closing', () => {
     expect(JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}').icons).toEqual({});
   });
 
-  it('gr forgets every pin and says how many', () => {
-    // A pin survives reloads and has no other way out. Without this, one bad
-    // drag puts a card somewhere wrong forever, with nothing on screen saying
-    // why it will not sort with the others.
+  it('gr does nothing — the chord grammar drops an unrecognised second key silently', () => {
+    // `g` alone opens a chord; an unbound follower must abandon it without
+    // touching storage or announcing anything on the status bar.
     localStorage.setItem(
       'vam.prefs.v1',
-      JSON.stringify({
-        pinned: {
-          'info:a1': { x: 400, y: 400, at: new Date().toISOString() },
-          'info:b1': { x: 500, y: 90, at: new Date().toISOString() },
-        },
-        icons: { a1: { icon: '🛠', at: new Date().toISOString() } },
-      }),
+      JSON.stringify({ icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
     );
     render(<Canvas model={MODEL} />);
+    const before = statusBar();
     press('g');
     press('r');
-    expect(screen.getByText(/unpinned 2 node/)).toBeTruthy();
+    expect(statusBar()).toBe(before);
     const stored = JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}');
-    expect(stored.pinned).toEqual({});
-    // Icons are a different preference and gr is about the layout. Clearing
-    // both would make one key mean two things.
     expect(Object.keys(stored.icons)).toEqual(['a1']);
-  });
-
-  it('gr with nothing pinned says so rather than reporting a change', () => {
-    render(<Canvas model={MODEL} />);
-    press('g');
-    press('r');
-    expect(screen.getByText(/nothing is pinned/)).toBeTruthy();
   });
 
   it('x names the session it did not close', () => {
