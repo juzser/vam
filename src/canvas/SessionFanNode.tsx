@@ -103,7 +103,10 @@ export function SessionFanNode({ data }: SessionFanNodeProps) {
           alignItems: 'center',
           justifyContent: 'center',
           background: 'var(--color-canvas)',
-          color: 'var(--color-waiting)',
+          // Neutral, not status: the mockup's twelve `N steps` pills use only
+          // two greys, never a status tint — `--color-ink-faint` is the same
+          // token pair (#6b6b6b dark, #8a8a8f light) as those greys.
+          color: 'var(--color-ink-faint)',
           font: 'inherit',
         }}
       >

@@ -80,6 +80,19 @@ describe('SessionFanNode', () => {
     expect(pill.style.height).toBe('20px');
   });
 
+  it('gives the pill a neutral colour, never a status colour, regardless of sessionStatus', () => {
+    // The mockup has twelve `N steps` pills across two greys, never a status
+    // tint: the pill must stay fixed at var(--color-ink-faint) even though
+    // sessionStatus varies. This fails against `var(--color-waiting)`
+    // (wrong: prints 'var(--color-waiting)' for a running session, never
+    // 'var(--color-ink-faint)') and against `STATUS_COLOR[data.sessionStatus]`
+    // (wrong: prints 'var(--color-running)', which varies per status instead
+    // of staying fixed).
+    render(<SessionFanNode id="fan-6" data={fanData({ sessionStatus: 'running' })} />);
+    const pill = screen.getByText('3 steps').closest('[data-fan-pill]') as HTMLElement;
+    expect(pill.style.color).toBe('var(--color-ink-faint)');
+  });
+
   it('still draws three branches, one spine and one pill for a session with one visible decision', () => {
     const { container } = render(
       <SessionFanNode
