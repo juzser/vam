@@ -16,10 +16,11 @@ function fakeEventSource() {
       list.push(handler);
       listeners.set(type, list);
     },
-    close() {
-      closeSpy();
-      listeners.clear();
-    },
+    // A real EventSource stops dispatching once closed, but it does not
+    // discard the caller's registrations — so this fixture keeps the
+    // listener map intact. If the module ever stopped guarding delivery
+    // itself, a post-close emit() here would still reach it.
+    close: closeSpy,
     emit(type: string, data?: string) {
       for (const handler of listeners.get(type) ?? []) {
         handler({ data });
@@ -66,6 +67,8 @@ describe('openChangeStream', () => {
     expect(() => {
       fake.emit('change', 'not-json');
       fake.emit('change', '{"sessions":"s1"}');
+      fake.emit('change', '[1,2]');
+      fake.emit('change', '{"sessions":[1]}');
       fake.emit('change', '{"sessions":["s1"],"at":"2026-08-01T00:00:00Z"}');
     }).not.toThrow();
     expect(onChange).toHaveBeenCalledTimes(1);

@@ -1,10 +1,16 @@
 /**
  * A framework-free reader for black-smith's `GET /api/stream`. It parses the
  * two named SSE frames the server sends (`hello`, `change`) and hands the
- * caller parsed objects. No React, no timer, no clock: the server's
- * heartbeat and floor are declared on `HelloFrame` because the wire contract
- * requires them, but nothing here acts on either number — see
- * `docs/design` / epic.md section 5.2 and 3.3 for why.
+ * caller parsed objects. No React, no timer, no clock.
+ *
+ * `HelloFrame` declares `heartbeatMs`/`floorMs` because the wire contract
+ * requires it, but nothing here builds a watchdog on either number: a
+ * keep-alive is an SSE comment, and `EventSource` never surfaces a comment to
+ * JS in any form; the browser reconnects on its own at a measured constant
+ * 3.00s; and `floorMs` (10000) is *less* than `heartbeatMs` (15000), so the
+ * two cannot compose into a sound bound anyway. See black-smith's
+ * factory/specs/active/vam-sse-canvas/epic.md sections 3.3 and 5.2 for the
+ * full measurement this rests on.
  */
 
 export type HelloFrame = {
@@ -54,7 +60,10 @@ export function openChangeStream(options: ChangeStreamOptions): { close(): void 
   const createEventSource = options.createEventSource ?? ((source) => new EventSource(source));
   const source = createEventSource(url);
 
+  let closed = false;
+
   source.addEventListener('hello', (event) => {
+    if (closed) return;
     const parsed = parse((event as MessageEvent<string>).data);
     if (isHelloFrame(parsed)) {
       options.onHello?.(parsed);
@@ -62,6 +71,7 @@ export function openChangeStream(options: ChangeStreamOptions): { close(): void 
   });
 
   source.addEventListener('change', (event) => {
+    if (closed) return;
     const parsed = parse((event as MessageEvent<string>).data);
     if (isChangeFrame(parsed)) {
       options.onChange({ sessions: parsed.sessions, at: parsed.at });
@@ -72,7 +82,6 @@ export function openChangeStream(options: ChangeStreamOptions): { close(): void 
   // own at a measured constant, so this module neither closes nor reopens.
   source.addEventListener('error', () => {});
 
-  let closed = false;
   return {
     close() {
       if (closed) return;
