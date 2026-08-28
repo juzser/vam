@@ -1004,3 +1004,74 @@ describe('answering the review queue from the keyboard', () => {
     expect(actionPane()).toBe('idle');
   });
 });
+
+/**
+ * AC-10(d) — the only criterion in this task that grades behaviour rather than
+ * the absence of a string.
+ *
+ * `useNodesState` takes `initialNodes` as INITIAL state and never re-reads it,
+ * so the merge effect at Canvas.tsx that re-runs `setNodes(initialNodes)` on
+ * every render is the only thing keeping the drawn canvas in step with the
+ * model. It survived this task's removal of drag and pinning, stripped to a
+ * plain re-derivation — this guards that it keeps working, not that a pin
+ * effect was removed (that is criteria 1 and 2's job).
+ *
+ * `@xyflow/react` 12.11.5 draws each node as `.react-flow__node[data-id=...]`
+ * (verified against node_modules: the library's own `updateNode` lookup uses
+ * that selector), not `data-testid="rf__node-<id>"`.
+ */
+function drawnPositions(container: Element): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const el of [...container.querySelectorAll('.react-flow__node')]) {
+    const id = el.getAttribute('data-id');
+    if (id) map.set(id, (el as HTMLElement).style.transform);
+  }
+  return map;
+}
+
+describe('AC-10(d): the canvas re-derives from a fresh layout on every render', () => {
+  it('moves the nodes a status change re-ranks, matching a fresh mount, and stales none', () => {
+    const { container: firstContainer, rerender } = render(<Canvas model={MODEL} />);
+    const first = drawnPositions(firstContainer);
+
+    // MODEL's own comment says every session is `done` precisely so nothing
+    // reorders — this fixture needs its own second one. `waiting` is a real
+    // member of SessionStatus (src/domain/model.ts) and STATUS_RANK
+    // (src/canvas/layout.ts) ranks it ahead of `done`, so a2 swaps ahead of a1
+    // inside project p1.
+    const REORDERED: CanvasModel = {
+      ...MODEL,
+      projects: MODEL.projects.map((project) =>
+        project.id === 'p1'
+          ? {
+              ...project,
+              sessions: project.sessions.map((s) =>
+                s.id === 'a2' ? { ...s, status: 'waiting' as const } : s,
+              ),
+            }
+          : project,
+      ),
+    };
+
+    rerender(<Canvas model={REORDERED} />);
+    const second = drawnPositions(firstContainer);
+
+    cleanup();
+
+    const { container: freshContainer } = render(<Canvas model={REORDERED} />);
+    const fresh = drawnPositions(freshContainer);
+
+    const moved = [...fresh].filter(([id, t]) => first.get(id) !== t).map(([id]) => `moves:${id}`);
+    expect(moved.length).toBeGreaterThanOrEqual(1);
+
+    const stale = [...second]
+      .filter(([id, t]) => t === first.get(id) && fresh.get(id) !== t)
+      .map(([id]) => `stale:${id}`);
+    expect(stale).toEqual([]);
+
+    const notFresh = [...second]
+      .filter(([id, t]) => fresh.get(id) !== t)
+      .map(([id]) => `not-fresh:${id}`);
+    expect(notFresh).toEqual([]);
+  });
+});
