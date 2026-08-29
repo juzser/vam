@@ -66,31 +66,45 @@ describe('SessionFanNode', () => {
   });
 
   it('renders the N-steps pill once, reporting totalSteps rather than the branch count', () => {
-    render(<SessionFanNode id="fan-3" data={fanData({ totalSteps: 7 })} />);
-    const pills = screen.getAllByText('7 steps');
+    const { container } = render(<SessionFanNode id="fan-3" data={fanData({ totalSteps: 7 })} />);
+    const pills = container.querySelectorAll('[data-fan-pill]');
     expect(pills.length).toBe(1);
+    expect(pills[0]?.textContent).toBe('7 steps');
   });
 
   it("positions the pill's box at svg-local left:16px top:135px 58x20", () => {
-    render(<SessionFanNode id="fan-4" data={fanData({ totalSteps: 5 })} />);
-    const pill = screen.getByText('5 steps').closest('[data-fan-pill]') as HTMLElement;
+    const { container } = render(<SessionFanNode id="fan-4" data={fanData({ totalSteps: 5 })} />);
+    const pill = container.querySelector('[data-fan-pill]') as HTMLElement;
     expect(pill.style.left).toBe('16px');
     expect(pill.style.top).toBe('135px');
     expect(pill.style.width).toBe('58px');
     expect(pill.style.height).toBe('20px');
   });
 
-  it('gives the pill a neutral colour, never a status colour, regardless of sessionStatus', () => {
-    // The mockup has twelve `N steps` pills across two greys, never a status
-    // tint: the pill must stay fixed at var(--color-ink-faint) even though
-    // sessionStatus varies. This fails against `var(--color-waiting)`
-    // (wrong: prints 'var(--color-waiting)' for a running session, never
-    // 'var(--color-ink-faint)') and against `STATUS_COLOR[data.sessionStatus]`
-    // (wrong: prints 'var(--color-running)', which varies per status instead
-    // of staying fixed).
-    render(<SessionFanNode id="fan-6" data={fanData({ sessionStatus: 'running' })} />);
-    const pill = screen.getByText('3 steps').closest('[data-fan-pill]') as HTMLElement;
-    expect(pill.style.color).toBe('var(--color-ink-faint)');
+  it('gives the pill two tones: the number carries the status colour, the word `steps` stays fixed', () => {
+    // The mockup's pill is two-tone (visual-hds finding f-...-659560fc): the
+    // number takes the session's status colour, `steps` stays neutral. This
+    // discriminates three ways: a waiting session's number is
+    // var(--color-waiting); a non-waiting (running) session's number is NOT
+    // var(--color-waiting) (it is var(--color-running) instead); the word
+    // `steps` is var(--color-ink-faint) in both. A one-tone pill (both spans
+    // sharing var(--color-ink-faint)) fails the first two assertions.
+    const { container, rerender } = render(
+      <SessionFanNode id="fan-6" data={fanData({ sessionStatus: 'waiting' })} />,
+    );
+    let pill = container.querySelector('[data-fan-pill]') as HTMLElement;
+    let numberSpan = pill.querySelector('span:first-child') as HTMLElement;
+    let wordSpan = pill.querySelector('span:last-child') as HTMLElement;
+    expect(numberSpan.style.color).toBe('var(--color-waiting)');
+    expect(wordSpan.style.color).toBe('var(--color-ink-faint)');
+
+    rerender(<SessionFanNode id="fan-6" data={fanData({ sessionStatus: 'running' })} />);
+    pill = container.querySelector('[data-fan-pill]') as HTMLElement;
+    numberSpan = pill.querySelector('span:first-child') as HTMLElement;
+    wordSpan = pill.querySelector('span:last-child') as HTMLElement;
+    expect(numberSpan.style.color).not.toBe('var(--color-waiting)');
+    expect(numberSpan.style.color).toBe('var(--color-running)');
+    expect(wordSpan.style.color).toBe('var(--color-ink-faint)');
   });
 
   it('still draws three branches, one spine and one pill for a session with one visible decision', () => {
@@ -106,7 +120,9 @@ describe('SessionFanNode', () => {
     );
     const paths = container.querySelectorAll('svg path');
     expect(paths.length).toBe(5);
-    expect(screen.getAllByText('1 steps').length).toBe(1);
+    const pills = container.querySelectorAll('[data-fan-pill]');
+    expect(pills.length).toBe(1);
+    expect(pills[0]?.textContent).toBe('1 steps');
   });
 });
 
