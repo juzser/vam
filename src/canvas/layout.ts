@@ -1,46 +1,27 @@
 /**
  * Where the canvas nodes go before anybody drags them.
  *
- * The canvas is an **overview**, not the place work happens: one row per
- * session, and each row a chain
- *
- *     [ session ] ⟿ [ step ] → [ step ] → [ step ]
- *
- * The first link is drawn differently on purpose — it stands for however many
- * steps came before the three shown, and it is the only edge that means "there
- * is history here you are not looking at". The last three are the newest three,
- * oldest to newest left to right, so the newest step is the one nearest the
- * detail panel that expands it.
+ * The canvas is an **overview**, not the place work happens: a 2-column grid
+ * of cells (`vam-canvas-topology` task-1's `grid.ts`), each cell holding one
+ * session card and, to its right, up to three step slots stacked vertically —
+ * oldest at the top, newest at the bottom, nearest the detail panel that
+ * expands it.
  *
  * No project frame any more (`vam-canvas-topology` task-4): `orderedForCanvas`
- * stacks rows flat, urgency-first, project-blind, and every position is
+ * orders cells flat, urgency-first, project-blind, and every position is
  * absolute — no node names a parent.
  *
  * Pure and position-only. It does not know about ReactFlow, so it can be tested
- * without one, and the canvas component adapts it.
+ * without one, and the canvas component adapts it. All geometry — cell origin,
+ * card offsets, card sizes — comes from `grid.ts`; this module places, it does
+ * not measure.
  */
 
 import type { CanvasModel, Decision, Project, Session } from '../domain/model.js';
 import { allSessions, type SessionEntry, visibleDecisions } from '../domain/selectors.js';
+import { cellOrigin, INFO_OFFSET, INFO_SIZE, STEP_SIZE, stepSlotOffset } from './grid.js';
 
-/**
- * Sizes, against the type scale in `styles.css` — which is orca's (§1.1), so a
- * vam node is the same size of thing as an orca card.
- *
- * Info and step share a height so the chain reads as one band rather than a
- * skyline. The step card is a strict summary now: anything that needs reading
- * in full is read in the detail panel, which is why this can be a fixed size at
- * all.
- */
-export const INFO_SIZE = { width: 220, height: 174 } as const;
-export const STEP_SIZE = { width: 250, height: 90 } as const;
-
-/** Wider than the others: the gap is where the "N steps before this" mark sits. */
-const ELIDED_GAP = 76;
-const STEP_GAP = 26;
-const ROW_GAP = 30;
-/** Left margin of every row, now that there is no frame to inset from. */
-const ROW_MARGIN = 30;
+export { INFO_SIZE, STEP_SIZE };
 
 export type Position = { readonly x: number; readonly y: number };
 export type Size = { readonly width: number; readonly height: number };
@@ -52,6 +33,8 @@ export type InfoNodeSpec = {
   /** Absolute — no node names a parent any more. */
   readonly position: Position;
   readonly size: Size;
+  /** Status-derived; see `STATUS_OPACITY`. */
+  readonly opacity: number;
 };
 
 export type StepNodeSpec = {
@@ -59,10 +42,12 @@ export type StepNodeSpec = {
   readonly id: string;
   readonly entry: SessionEntry;
   readonly decision: Decision;
-  /** 1-based, left to right — 3 is the newest. */
+  /** 1-based, top to bottom — 3 is the newest. */
   readonly ordinal: number;
   readonly position: Position;
   readonly size: Size;
+  /** Status-derived; see `STATUS_OPACITY`. */
+  readonly opacity: number;
 };
 
 export type CanvasNodeSpec = InfoNodeSpec | StepNodeSpec;
@@ -100,6 +85,22 @@ const STATUS_RANK: Readonly<Record<Session['status'], number>> = {
   running: 1,
   done: 2,
   failed: 2,
+};
+
+/**
+ * Per-cell opacity, derived from status alone (operator answer
+ * factory-vam-2#37 q4). There is deliberately no `focused` entry: focus is
+ * not in `CanvasModel`, so `layoutCanvas` cannot compute it; the cursor
+ * override belongs to Canvas.tsx.
+ */
+const STATUS_OPACITY: Readonly<Record<Session['status'], number>> = {
+  // waiting/running/done are measured off the mockup (epic.md §3.4).
+  waiting: 0.72,
+  running: 0.6,
+  done: 0.45,
+  // failed has no mockup cell — it shows QUEUED, which vam's model does not
+  // have — so this value is inferred to match `done`, not measured.
+  failed: 0.45,
 };
 
 /** A project's rank is its most urgent session's. An empty project ranks last. */
@@ -158,7 +159,7 @@ export function orderedSessions(model: CanvasModel): SessionEntry[] {
 
 /**
  * Every session, FLAT and urgency-first, project-blind — the order the canvas
- * stacks rows in. Not `orderedSessions`: that stays project-major for the
+ * places cells in. Not `orderedSessions`: that stays project-major for the
  * sidebar and is untouched. Sorts a fresh copy, never in place; stable.
  */
 export function orderedForCanvas(model: CanvasModel): SessionEntry[] {
@@ -181,53 +182,55 @@ export function layoutCanvas(model: CanvasModel): CanvasLayout {
   const nodes: CanvasNodeSpec[] = [];
   const edges: CanvasEdgeSpec[] = [];
 
-  let y = 0;
-  for (const entry of orderedForCanvas(model)) {
+  // Emitted cell by cell in `orderedForCanvas` order, so reading order matches
+  // visual order for a screen reader or a Tab traversal.
+  orderedForCanvas(model).forEach((entry, index) => {
     const { session } = entry;
     const steps = visibleDecisions(session);
+    const origin = cellOrigin(index);
+    const opacity = STATUS_OPACITY[session.status];
 
     const info: InfoNodeSpec = {
       kind: 'info',
       id: infoNodeId(session.id),
       entry,
-      position: { x: ROW_MARGIN, y },
+      position: { x: origin.x + INFO_OFFSET.x, y: origin.y + INFO_OFFSET.y },
       size: INFO_SIZE,
+      opacity,
     };
     nodes.push(info);
 
-    let x = ROW_MARGIN + INFO_SIZE.width + ELIDED_GAP;
     let previousId = info.id;
+    const skipped = session.decisions.length - steps.length;
 
-    steps.forEach((decision, index) => {
+    steps.forEach((decision, slot) => {
       const id = stepNodeId(session.id, decision.id);
+      const offset = stepSlotOffset(slot);
       nodes.push({
         kind: 'step',
         id,
         entry,
         decision,
-        ordinal: index + 1,
-        position: { x, y },
+        ordinal: slot + 1,
+        position: { x: origin.x + offset.x, y: origin.y + offset.y },
         size: STEP_SIZE,
+        opacity,
       });
 
-      const skipped = session.decisions.length - steps.length;
       edges.push({
         id: `${previousId}->${id}`,
         source: previousId,
         target: id,
-        elided: index === 0,
+        elided: slot === 0,
         // Only the first edge can carry a count, and only when something was
         // actually dropped. Labelling it `+0` would be a mark that means
         // "nothing", which is worse than no mark.
-        label: index === 0 && skipped > 0 ? `+${skipped}` : null,
+        label: slot === 0 && skipped > 0 ? `+${skipped}` : null,
       });
 
       previousId = id;
-      x += STEP_SIZE.width + STEP_GAP;
     });
-
-    y += INFO_SIZE.height + ROW_GAP;
-  }
+  });
 
   return { nodes, edges };
 }
