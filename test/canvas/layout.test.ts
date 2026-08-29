@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { cellOrigin, INFO_OFFSET, stepSlotOffset } from '../../src/canvas/grid.js';
+import { CELL, cellOrigin, FAN, INFO_OFFSET, stepSlotOffset } from '../../src/canvas/grid.js';
 import {
+  fanNodeId,
   INFO_SIZE,
   infoNodeId,
   layoutCanvas,
   orderedForCanvas,
   orderedSessions,
+  slotNodeId,
   STEP_SIZE,
   stepNodeId,
 } from '../../src/canvas/layout.js';
@@ -194,44 +196,67 @@ describe('layoutCanvas', () => {
     expect(urgent?.position.x).toBeLessThan(idle?.position.x ?? 0);
   });
 
-  it('chains the nodes of a row with edges', () => {
-    const { edges } = layoutCanvas(three);
-    const row = edges.filter((e) => e.source.includes('s1') || e.target.includes('s1'));
-    expect(row.map((e) => [e.source, e.target])).toEqual([
-      [infoNodeId('s1'), stepNodeId('s1', 'd1')],
-      [stepNodeId('s1', 'd1'), stepNodeId('s1', 'd2')],
-      [stepNodeId('s1', 'd2'), stepNodeId('s1', 'd3')],
-    ]);
+  it('emits one fan per session, sized 110x290 at cell offset (220, 0)', () => {
+    const { fans } = layoutCanvas(three);
+    const fan = fans.find((f) => f.id === fanNodeId('s1'));
+    const origin = cellOrigin(0);
+    expect(fan?.position).toEqual({ x: origin.x + FAN.x, y: origin.y });
+    expect(fan?.size).toEqual({ width: FAN.width, height: CELL.height });
   });
 
-  it('marks only the first edge as the elided one', () => {
-    const { edges } = layoutCanvas(three);
-    const row = edges.filter((e) => e.source.includes('s1') || e.target.includes('s1'));
-    expect(row.map((e) => e.elided)).toEqual([true, false, false]);
-  });
-
-  it('counts the steps it did not draw', () => {
+  it('carries totalSteps as the full decision count, not the number drawn', () => {
     const many = model(
       session('s', { decisions: Array.from({ length: 9 }, (_, i) => decision(`d${i}`)) }),
     );
-    expect(layoutCanvas(many).edges[0]?.label).toBe('+6');
+    const { fans } = layoutCanvas(many);
+    expect(fans.find((f) => f.id === fanNodeId('s'))?.totalSteps).toBe(9);
   });
 
-  it('does not label the break when nothing was skipped', () => {
-    // `+0` would be a mark that means "nothing", which is worse than no mark.
-    const exact = model(session('s', { decisions: [decision('a'), decision('b'), decision('c')] }));
-    expect(layoutCanvas(exact).edges[0]?.label).toBeNull();
+  it('marks a branch empty where no step fills the position', () => {
+    const one = model(session('s', { decisions: [decision('only')] }));
+    const { fans } = layoutCanvas(one);
+    const fan = fans.find((f) => f.id === fanNodeId('s'));
+    expect(fan?.branchStatuses).toEqual(['done', 'empty', 'empty']);
+  });
+
+  it('emits exactly three slots per session regardless of decision count', () => {
+    const one = model(session('s', { decisions: [decision('only')] }));
+    const { nodes, fans, slots } = layoutCanvas(one);
+    const ownSlots = [0, 1, 2].map((position) =>
+      slots.find((s) => s.id === slotNodeId('s', position)),
+    );
+    expect(ownSlots.every((s) => s !== undefined)).toBe(true);
+    expect(slots).toHaveLength(3);
+    expect(ownSlots.filter((s) => s?.placeholder)).toHaveLength(2);
+    expect(fans).toHaveLength(1);
+    expect(nodes).toHaveLength(2);
+  });
+
+  it('sizes every placeholder slot 250x90, at the step slot offsets', () => {
+    const empty = model(session('s'));
+    const { slots } = layoutCanvas(empty);
+    expect(slots.map((s) => s.position)).toEqual([
+      { x: cellOrigin(0).x + stepSlotOffset(0).x, y: cellOrigin(0).y + stepSlotOffset(0).y },
+      { x: cellOrigin(0).x + stepSlotOffset(1).x, y: cellOrigin(0).y + stepSlotOffset(1).y },
+      { x: cellOrigin(0).x + stepSlotOffset(2).x, y: cellOrigin(0).y + stepSlotOffset(2).y },
+    ]);
+    for (const slot of slots) {
+      expect(slot.size).toEqual({ width: 250, height: 90 });
+      expect(slot.placeholder).toBe(true);
+    }
   });
 
   it('draws a session that has not decided anything as an info node alone', () => {
     const quiet = model(session('quiet'));
-    const { nodes, edges } = layoutCanvas(quiet);
+    const { nodes, fans, slots } = layoutCanvas(quiet);
     expect(nodes).toHaveLength(1);
-    expect(edges).toEqual([]);
+    expect(fans).toHaveLength(1);
+    expect(slots).toHaveLength(3);
+    expect(slots.every((s) => s.placeholder)).toBe(true);
   });
 
   it('lays out an empty canvas without inventing anything', () => {
-    expect(layoutCanvas({ projects: [] })).toEqual({ nodes: [], edges: [] });
+    expect(layoutCanvas({ projects: [] })).toEqual({ nodes: [], fans: [], slots: [] });
   });
 
   it('gives every node an absolute position with no parent', () => {

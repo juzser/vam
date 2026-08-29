@@ -25,7 +25,6 @@
 import {
   Background,
   type Edge,
-  MarkerType,
   MiniMap,
   type Node,
   ReactFlow,
@@ -58,11 +57,18 @@ import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
 import { infoNodeId, layoutCanvas, orderedSessions } from './layout.js';
 import { type FlowNodeLike, toNavNodes } from './nav-nodes.js';
+import { SessionFanNode } from './SessionFanNode.js';
 import { SessionInfoNode } from './SessionInfoNode.js';
 import { StepNode } from './StepNode.js';
+import { StepSlotNode } from './StepSlotNode.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from './source.js';
 
-const NODE_TYPES = { info: SessionInfoNode, step: StepNode };
+const NODE_TYPES = { info: SessionInfoNode, step: StepNode, fan: SessionFanNode, slot: StepSlotNode };
+
+/** ReactFlow requires an edges array; there is no custom edge type any more —
+ *  the fan is a scenery node (epic.md §5.2). A module-level constant keeps
+ *  this a stable reference across renders. */
+const NO_EDGES: Edge[] = [];
 
 /** Home-row first: the labels you can hit without looking. */
 const JUMP_KEYS = 'asdfghjkl;qwertyuiop';
@@ -255,6 +261,39 @@ function CanvasInner({
 
   const initialNodes = useMemo<Node[]>(
     () => [
+      // Scenery first, so ReactFlow paints it behind the navigable nodes
+      // (epic.md §5.2). Never a `j`/`k` destination: `draggable`, `selectable`
+      // and `focusable` are each written explicitly — omitting any one hands
+      // the decision to @xyflow/react's board-level default, which is `true`
+      // for all three.
+      ...layout.fans.map((spec) => ({
+        id: spec.id,
+        type: 'fan',
+        position: spec.position,
+        width: spec.size.width,
+        height: spec.size.height,
+        style: { width: spec.size.width, height: spec.size.height },
+        draggable: false,
+        selectable: false,
+        focusable: false,
+        data: {
+          sessionStatus: spec.sessionStatus,
+          branchStatuses: spec.branchStatuses,
+          totalSteps: spec.totalSteps,
+        },
+      })),
+      ...layout.slots.map((spec) => ({
+        id: spec.id,
+        type: 'slot',
+        position: spec.position,
+        width: spec.size.width,
+        height: spec.size.height,
+        style: { width: spec.size.width, height: spec.size.height },
+        draggable: false,
+        selectable: false,
+        focusable: false,
+        data: {},
+      })),
       ...layout.nodes.map((spec) => ({
         id: spec.id,
         type: spec.kind,
@@ -271,29 +310,6 @@ function CanvasInner({
             : { entry: spec.entry, decision: spec.decision, focused: false, jumpLabel: null },
       })),
     ],
-    [layout],
-  );
-
-  const edges = useMemo<Edge[]>(
-    () =>
-      layout.edges.map((spec) => ({
-        id: spec.id,
-        source: spec.source,
-        target: spec.target,
-        type: 'smoothstep',
-        // The elided link is drawn as a break, not a step: dashed, labelled with
-        // what it swallowed. An ordinary link between two shown steps is solid,
-        // because nothing is missing between them.
-        animated: false,
-        style: spec.elided
-          ? { stroke: 'var(--color-line-strong)', strokeDasharray: '3 4' }
-          : { stroke: 'var(--color-line-strong)' },
-        label: spec.label ?? undefined,
-        labelStyle: { fill: 'var(--color-ink-faint)', fontSize: 10 },
-        labelBgStyle: { fill: 'var(--color-canvas)' },
-        labelBgPadding: [4, 2] as [number, number],
-        markerEnd: { type: MarkerType.ArrowClosed, width: 10, height: 10, color: '#4b535d' },
-      })),
     [layout],
   );
 
