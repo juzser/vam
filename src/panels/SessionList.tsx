@@ -20,21 +20,22 @@
 
 import { useEffect, useRef } from 'react';
 import type { SessionStatus } from '../domain/model.js';
-import { decisionAwaitingYou, type SessionEntry } from '../domain/selectors.js';
+import type { SessionEntry } from '../domain/selectors.js';
 import type { Theme } from '../prefs/prefs.js';
-
-const STATUS_INK: Readonly<Record<SessionStatus, string>> = {
-  running: 'text-running',
-  waiting: 'text-waiting',
-  done: 'text-done',
-  failed: 'text-failed',
-};
 
 const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   running: 'bg-running',
   waiting: 'bg-waiting',
   done: 'bg-done',
   failed: 'bg-failed',
+};
+
+/** The verb pill's border and icon/text colour — its status channel. */
+const STATUS_PILL: Readonly<Record<SessionStatus, string>> = {
+  running: 'border-running text-running',
+  waiting: 'border-waiting text-waiting',
+  done: 'border-done text-done',
+  failed: 'border-failed text-failed',
 };
 
 export type SessionListProps = {
@@ -62,27 +63,6 @@ export type SessionListProps = {
   readonly onToggleTheme: () => void;
 };
 
-/**
- * The coloured half of a row's second line.
- *
- * The mockup writes a phrase per state — "Needs approval", "Editing 2 files",
- * "PR #482 open". Those come from a system that knows what its agent is doing;
- * black-smith reports the type of the last event it wrote and nothing more. So
- * a waiting session names the turn it is blocked on (which IS known and IS the
- * useful thing), and everything else says its status plainly rather than
- * inventing a verb.
- */
-function statusPhrase(entry: SessionEntry): string {
-  const { session } = entry;
-  if (session.status === 'waiting') {
-    return decisionAwaitingYou(session)?.label ?? 'Needs you';
-  }
-  if (session.status === 'running') {
-    return session.activity ?? 'Running';
-  }
-  return session.status === 'done' ? 'Done' : 'Failed';
-}
-
 function progressOf(entry: SessionEntry): number {
   const { session } = entry;
   if (session.status === 'done') {
@@ -92,6 +72,24 @@ function progressOf(entry: SessionEntry): number {
     return 0;
   }
   return session.decisions.filter((d) => d.output !== null).length / session.decisions.length;
+}
+
+function BranchIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <circle cx="4" cy="3.5" r="1.7" />
+      <circle cx="4" cy="12.5" r="1.7" />
+      <circle cx="12" cy="6.5" r="1.7" />
+    </svg>
+  );
+}
+
+function VerbIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8 2l5 12H3z" />
+    </svg>
+  );
 }
 
 function PlusIcon({ size = 15 }: { readonly size?: number }) {
@@ -323,13 +321,34 @@ export function SessionList(props: SessionListProps) {
                     </span>
 
                     <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
-                      <span className={`truncate ${STATUS_INK[session.status]}`}>
-                        {statusPhrase(entry)}
+                      <span className="flex min-w-0 flex-none items-center gap-1">
+                        <BranchIcon />
+                        <span
+                          data-placeholder="worktree"
+                          title="black-smith reports no worktree per session"
+                          className="truncate"
+                        >
+                          —
+                        </span>
                       </span>
-                      <span>·</span>
-                      <span className="flex-none">{session.decisions.length} steps</span>
                       <span className="flex-1" />
-                      <span className="flex-none">{session.age ?? '—'}</span>
+                      <span
+                        data-placeholder="step-verb"
+                        title={`black-smith reports no event kind on a timeline entry to derive a step verb from — this card's status is ${session.status}`}
+                        className={[
+                          'flex flex-none items-center gap-1 rounded-[999px] border pt-px pr-1.5 pb-px pl-1',
+                          STATUS_PILL[session.status],
+                        ].join(' ')}
+                      >
+                        <VerbIcon />—
+                      </span>
+                      <span
+                        data-placeholder="step-duration"
+                        title="black-smith times a session rather than a step"
+                        className="flex-none"
+                      >
+                        —
+                      </span>
                     </span>
 
                     <span className="block h-0.5 overflow-hidden rounded-sm bg-line">
