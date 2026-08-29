@@ -58,12 +58,11 @@ import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
 import { infoNodeId, layoutCanvas, orderedSessions } from './layout.js';
 import { type FlowNodeLike, toNavNodes } from './nav-nodes.js';
-import { ProjectGroupNode } from './ProjectGroupNode.js';
 import { SessionInfoNode } from './SessionInfoNode.js';
 import { StepNode } from './StepNode.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from './source.js';
 
-const NODE_TYPES = { group: ProjectGroupNode, info: SessionInfoNode, step: StepNode };
+const NODE_TYPES = { info: SessionInfoNode, step: StepNode };
 
 /** Home-row first: the labels you can hit without looking. */
 const JUMP_KEYS = 'asdfghjkl;qwertyuiop';
@@ -256,26 +255,9 @@ function CanvasInner({
 
   const initialNodes = useMemo<Node[]>(
     () => [
-      // Frames first: ReactFlow paints in array order, so a group listed after
-      // its children would cover them.
-      ...layout.groups.map((spec) => ({
-        id: spec.id,
-        type: 'group',
-        position: spec.position,
-        width: spec.size.width,
-        height: spec.size.height,
-        style: { width: spec.size.width, height: spec.size.height },
-        data: {
-          project: spec.project,
-          waiting: spec.project.sessions.filter((s) => s.status === 'waiting').length,
-        },
-        selectable: false,
-      })),
       ...layout.nodes.map((spec) => ({
         id: spec.id,
         type: spec.kind,
-        parentId: spec.parentId,
-        extent: 'parent' as const,
         position: spec.position,
         // `width`/`height` as well as `style`: we know these sizes, and stating
         // them means the very first keypress navigates correctly instead of
@@ -352,20 +334,14 @@ function CanvasInner({
   // dragged keeps where the person put it.
   useEffect(() => {
     setNodes((current) =>
-      current.map((node) =>
-        // Frames are neither focusable nor jump targets, so they are left
-        // alone rather than handed two fields they would have to ignore.
-        node.type === 'group'
-          ? node
-          : {
-              ...node,
-              data: {
-                ...node.data,
-                focused: node.id === focusedId,
-                jumpLabel: labels.get(node.id) ?? null,
-              },
-            },
-      ),
+      current.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          focused: node.id === focusedId,
+          jumpLabel: labels.get(node.id) ?? null,
+        },
+      })),
     );
   }, [focusedId, labels, setNodes]);
 
