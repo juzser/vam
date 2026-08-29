@@ -17,7 +17,10 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:5273',
   },
   webServer: {
-    command: 'node_modules/.bin/vite --port 5273',
+    // webServer.cwd defaults to this config file's own directory (e2e/), but
+    // vite lives in the repo root's node_modules (the shared vam tree) —
+    // e2e/node_modules holds only the Playwright harness. Reach up one level.
+    command: '../node_modules/.bin/vite --port 5273',
     url: 'http://127.0.0.1:5273',
     reuseExistingServer: false,
   },
