@@ -20,31 +20,63 @@ session that changed while the server was down.
 ## What this cannot show
 
 `kill()` closes the TCP socket cleanly — the EASY case for a proxy to
-propagate. It says nothing about a half-open connection on a machine
-where the proxy behaves differently, nor about `vite preview` (a second,
-separate proxy block in `vite.config.ts`), nor about a production host with
-no proxy at all.
+propagate. It says nothing about a half-open connection on a machine where the
+proxy behaves differently, nor about a production host with no proxy at all.
+
+It also only ever drives the **dev** server. `vite.config.ts` declares its
+`/api` proxy once, as a single `proxy` object that both `server.proxy` and
+`preview.proxy` reference, so `vite preview` shares the same `configure` hook
+and therefore the same fix — but no run here has exercised preview, so
+"shares the fixed code path" is the claim, not "tested". A future edit that
+split that shared object into two literals could drop the hook from one of
+them and nothing in this repo would catch it: `e2e/` is excluded from every
+gate, and this spec only ever loads the dev server.
+
+It also does not show recovery from a **long** outage. See the note below: on
+this machine the browser retried once, roughly 3s after the drop, and a run
+where the server was never restarted ended with `readyState` 2 (CLOSED) and no
+further attempt. The green run's server is back within that window.
 
 ## What it actually found (2026-08-29, see `acg1-transcript.json`)
 
-**Update:** the silent-stall finding below was fixed separately (vam
-`followup-52085d00`), by a `configure` hook on the shared proxy object in
-`vite.config.ts` that ends the client response when the upstream `proxyRes`
-closes or errors. With that fix in place, the spec now passes on repeated
-runs: `open`, `hello`, `change` (naming the session), then `error` all arrive
-within their windows, and `acg1-transcript.json` is written by the harness
-itself rather than assembled by hand. **This spec's pass therefore depends on
-that `configure` hook staying in `vite.config.ts`** — if it is ever reverted,
-this spec is expected to start failing at step (c) again for the reason
-recorded below.
+**The whole path, including the reconnect half, now passes.** The committed
+transcript is the one the harness wrote, after step (d), and holds seven
+tuples in order: `open`, `hello`, `change` (naming session A), `error`
+(`readyState` 0), then a post-restart `open`, `hello` and a `change` carrying
+session B — the session appended while the server was down. No tuple has
+`readyState` 2.
 
-Original finding, kept for context: steps (a) and (b) passed on every run,
-but step (c) did not — after the server was killed, no `error` event reached
-the browser's `EventSource` within the spec's 10-second window, on two
-separate runs. A manual probe (`curl -N` through the same vite proxy, same
-kill) showed why: the client connection was never closed at all, on either
-side. That was the silent-stall case this file used to only warn about — the
-vite dev proxy was not propagating the upstream's TCP close to the client.
+The post-restart `open` and `hello` are matched only against tuples recorded
+**after** a watermark taken the moment the `error` arrived
+(`waitForTuple(..., fromIndex)`), because `window.__sseEvents` accumulates for
+the life of the page: an unwindowed search is satisfied by the `open`/`hello`
+from page load and measures nothing. That windowing was verified by
+falsification — with the restart removed, the spec fails at
+`fromIndex 4` after 30s, having recorded a second `error` with `readyState` 2;
+the same code searching from index 0 passes that scenario instantly.
+
+So what the reconnect half now demonstrates, concretely: the browser's own
+`EventSource` — through vam's dev proxy, with no reload and no app code
+touched — reopened after the drop, received a fresh `hello`, and the canvas
+refetched, showing a session that only ever existed in the log while the
+socket was down. That is AC-10 measured against a real server rather than a
+mock.
+
+**Observed, not asserted, and worth knowing:** the reconnect happened ~3s
+after the drop, not at the 10000ms the `hello` frame advertises as `floorMs`,
+and in the no-restart falsification run the client gave up after that single
+retry (`readyState` 2). Whether an outage longer than one retry interval
+recovers at all is untested and is not something this spec currently claims.
+
+**This spec's pass depends on the `configure` hook in `vite.config.ts`**
+(vam `followup-52085d00`), which ends the client response when the upstream
+`proxyRes` closes or errors. Original finding, kept for context: before that
+fix, steps (a) and (b) passed but step (c) did not — after the server was
+killed, no `error` reached the browser within 10s, on two separate runs, and a
+manual `curl -N` probe through the same proxy showed the client connection was
+never closed on either side. That was the silent-stall case this file used to
+only warn about. If the hook is reverted, this spec is expected to fail at
+step (c) again for that reason.
 
 ## The cost this adds
 
@@ -70,13 +102,18 @@ npx @playwright/test@1.62.1 install --with-deps chromium   # first time only
 
 ## Run
 
-```bash
-# 1. Start black-smith against a THROWAWAY state dir — never the real state/.
-STATE_DIR=$(mktemp -d)
-node /path/to/black-smith/factory/orchestrator/dist/cli.js ui serve \
-  --port 4680 --state-dir "$STATE_DIR" --db "$STATE_DIR/e2e.db" &
+**Nothing may already be listening on `SMITH_E2E_PORT`.** The spec starts,
+kills and restarts black-smith itself; a server you started by hand survives
+the spec's `kill()`, so the drop never reaches the browser and the run fails
+at step (c) for a reason that has nothing to do with vam. Check with
+`lsof -ti tcp:4680` first.
 
-# 2. Point the spec at that same server and state dir.
+```bash
+# 1. A THROWAWAY state dir — never black-smith's real state/, since a live
+#    orchestrator session writes there and this test kills a server mid-run.
+STATE_DIR=$(mktemp -d)
+
+# 2. Point the spec at it. The spec spawns black-smith on this port itself.
 export SMITH_CLI_ENTRY=/path/to/black-smith/factory/orchestrator/dist/cli.js
 export SMITH_E2E_STATE_DIR="$STATE_DIR"
 export SMITH_E2E_PORT=4680
@@ -84,6 +121,11 @@ export SMITH_E2E_PORT=4680
 # 3. Run it (this also starts and stops vam's own vite dev server for you).
 npm run test:e2e
 ```
+
+`npm run test:e2e` shells out to `npx`. With an npm 6 `npx` on `PATH` the
+runner and the spec's `import '@playwright/test'` can resolve to two different
+installs and Playwright aborts with "did not expect test() to be called here";
+run under Node 22+ with its own npm (`nvm use 22`).
 
 The test itself drives step (b) — a real server-side write, not a poke at
 vam — via:
