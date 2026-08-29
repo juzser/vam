@@ -95,13 +95,6 @@ export type KeyAction =
   | { readonly kind: 'newSession' }
   /** `,` — settings, the convention most editors already use. */
   | { readonly kind: 'settings' }
-  /**
-   * `gr` — forget every dragged position and let auto-layout have the canvas.
-   *
-   * Under `g` because it is a whole-canvas move, not something done to the
-   * focused session; `r` alone already renames one.
-   */
-  | { readonly kind: 'resetLayout' }
   | { readonly kind: 'cancel' };
 
 export type ChordStep = {
@@ -152,7 +145,6 @@ const AFTER_G: Readonly<Record<string, KeyAction>> = {
   g: { kind: 'first' },
   t: { kind: 'project', delta: 1 },
   T: { kind: 'project', delta: -1 },
-  r: { kind: 'resetLayout' },
 };
 
 const AFTER_Y: Readonly<Record<string, KeyAction>> = {

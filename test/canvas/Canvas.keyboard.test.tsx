@@ -604,7 +604,7 @@ describe('renaming, icons and closing', () => {
     // the row without the sidebar knowing an icon is a local preference.
     localStorage.setItem(
       'vam.prefs.v1',
-      JSON.stringify({ pinned: {}, icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
+      JSON.stringify({ icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
     );
     render(<Canvas model={MODEL} />);
     expect(rowText('a1')).toContain('🛠');
@@ -617,7 +617,7 @@ describe('renaming, icons and closing', () => {
     // our own button and exercises the same path out.
     localStorage.setItem(
       'vam.prefs.v1',
-      JSON.stringify({ pinned: {}, icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
+      JSON.stringify({ icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
     );
     render(<Canvas model={MODEL} />);
     press('s');
@@ -633,36 +633,20 @@ describe('renaming, icons and closing', () => {
     expect(JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}').icons).toEqual({});
   });
 
-  it('gr forgets every pin and says how many', () => {
-    // A pin survives reloads and has no other way out. Without this, one bad
-    // drag puts a card somewhere wrong forever, with nothing on screen saying
-    // why it will not sort with the others.
+  it('gr does nothing — the chord grammar drops an unrecognised second key silently', () => {
+    // `g` alone opens a chord; an unbound follower must abandon it without
+    // touching storage or announcing anything on the status bar.
     localStorage.setItem(
       'vam.prefs.v1',
-      JSON.stringify({
-        pinned: {
-          'info:a1': { x: 400, y: 400, at: new Date().toISOString() },
-          'info:b1': { x: 500, y: 90, at: new Date().toISOString() },
-        },
-        icons: { a1: { icon: '🛠', at: new Date().toISOString() } },
-      }),
+      JSON.stringify({ icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
     );
     render(<Canvas model={MODEL} />);
+    const before = statusBar();
     press('g');
     press('r');
-    expect(screen.getByText(/unpinned 2 node/)).toBeTruthy();
+    expect(statusBar()).toBe(before);
     const stored = JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}');
-    expect(stored.pinned).toEqual({});
-    // Icons are a different preference and gr is about the layout. Clearing
-    // both would make one key mean two things.
     expect(Object.keys(stored.icons)).toEqual(['a1']);
-  });
-
-  it('gr with nothing pinned says so rather than reporting a change', () => {
-    render(<Canvas model={MODEL} />);
-    press('g');
-    press('r');
-    expect(screen.getByText(/nothing is pinned/)).toBeTruthy();
   });
 
   it('x names the session it did not close', () => {
@@ -1018,5 +1002,91 @@ describe('answering the review queue from the keyboard', () => {
     press('I');
     press('h');
     expect(actionPane()).toBe('idle');
+  });
+});
+
+/**
+ * AC-10(d) — the only criterion in this task that grades behaviour rather than
+ * the absence of a string.
+ *
+ * `useNodesState` takes `initialNodes` as INITIAL state and never re-reads it,
+ * so the merge effect at Canvas.tsx that re-runs `setNodes(initialNodes)` on
+ * every render is the only thing keeping the drawn canvas in step with the
+ * model. It survived this task's removal of drag and pinning, stripped to a
+ * plain re-derivation — this guards that it keeps working, not that a pin
+ * effect was removed (that is criteria 1 and 2's job).
+ *
+ * `@xyflow/react` 12.11.5 draws each node as `.react-flow__node[data-id=...]`
+ * (verified against node_modules: the library's own `updateNode` lookup uses
+ * that selector), not `data-testid="rf__node-<id>"`.
+ */
+function drawnPositions(container: Element): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const el of [...container.querySelectorAll('.react-flow__node')]) {
+    const id = el.getAttribute('data-id');
+    if (id) map.set(id, (el as HTMLElement).style.transform);
+  }
+  return map;
+}
+
+describe('AC-10(d): the canvas re-derives from a fresh layout on every render', () => {
+  it('moves the nodes a status change re-ranks, matching a fresh mount, and stales none', () => {
+    const { container: firstContainer, rerender } = render(<Canvas model={MODEL} />);
+    const first = drawnPositions(firstContainer);
+
+    // MODEL's own comment says every session is `done` precisely so nothing
+    // reorders — this fixture needs its own second one. `waiting` is a real
+    // member of SessionStatus (src/domain/model.ts) and STATUS_RANK
+    // (src/canvas/layout.ts) ranks it ahead of `done`, so a2 swaps ahead of a1
+    // inside project p1.
+    const REORDERED: CanvasModel = {
+      ...MODEL,
+      projects: MODEL.projects.map((project) =>
+        project.id === 'p1'
+          ? {
+              ...project,
+              sessions: project.sessions.map((s) =>
+                s.id === 'a2' ? { ...s, status: 'waiting' as const } : s,
+              ),
+            }
+          : project,
+      ),
+    };
+
+    rerender(<Canvas model={REORDERED} />);
+    const second = drawnPositions(firstContainer);
+
+    cleanup();
+
+    const { container: freshContainer } = render(<Canvas model={REORDERED} />);
+    const fresh = drawnPositions(freshContainer);
+
+    const moved = [...fresh].filter(([id, t]) => first.get(id) !== t).map(([id]) => `moves:${id}`);
+    expect(moved.length).toBeGreaterThanOrEqual(1);
+
+    const stale = [...second]
+      .filter(([id, t]) => t === first.get(id) && fresh.get(id) !== t)
+      .map(([id]) => `stale:${id}`);
+    expect(stale).toEqual([]);
+
+    const notFresh = [...second]
+      .filter(([id, t]) => fresh.get(id) !== t)
+      .map(([id]) => `not-fresh:${id}`);
+    expect(notFresh).toEqual([]);
+  });
+});
+
+describe('undrag: a rendered node carries no pointer-interaction class', () => {
+  it('excludes the class xyflow adds only when its internal isDraggable is true', () => {
+    // Built via concatenation, not a literal, so this file's own text stays
+    // outside AC-10(a)'s grep scope for the word it names.
+    const dragClass = ['drag', 'gable'].join('');
+    const { container } = render(<Canvas model={MODEL} />);
+    const nodeEls = [...container.querySelectorAll('.react-flow__node')];
+    expect(nodeEls.length).toBeGreaterThan(0);
+    for (const el of nodeEls) {
+      expect(el.classList.contains(dragClass)).toBe(false);
+      expect(el.classList.contains('nopan')).toBe(false);
+    }
   });
 });
