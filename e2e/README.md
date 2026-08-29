@@ -27,17 +27,24 @@ no proxy at all.
 
 ## What it actually found (2026-08-29, see `acg1-transcript.json`)
 
-Steps (a) and (b) passed on every run: `open`, then `hello`, then `change`
-(naming the session) all arrived within their windows. Step (c) did not: after
-the server was killed, no `error` event reached the browser's `EventSource`
-within the spec's 10-second window — on two separate runs. A manual probe
-(`curl -N` through the same vite proxy, same kill) shows why: the client
-connection is never closed at all, on either side. **This is the silent-stall
-case this file used to only warn about** — the vite dev proxy is not
-propagating the upstream's TCP close to the client. See
-`acg1-transcript.json` for both runs' event tuples. Do not tune the test to
-force it green; a transcript that honestly records the drop did not reach the
-browser is the valuable result here.
+**Update:** the silent-stall finding below was fixed separately (vam
+`followup-52085d00`), by a `configure` hook on the shared proxy object in
+`vite.config.ts` that ends the client response when the upstream `proxyRes`
+closes or errors. With that fix in place, the spec now passes on repeated
+runs: `open`, `hello`, `change` (naming the session), then `error` all arrive
+within their windows, and `acg1-transcript.json` is written by the harness
+itself rather than assembled by hand. **This spec's pass therefore depends on
+that `configure` hook staying in `vite.config.ts`** — if it is ever reverted,
+this spec is expected to start failing at step (c) again for the reason
+recorded below.
+
+Original finding, kept for context: steps (a) and (b) passed on every run,
+but step (c) did not — after the server was killed, no `error` event reached
+the browser's `EventSource` within the spec's 10-second window, on two
+separate runs. A manual probe (`curl -N` through the same vite proxy, same
+kill) showed why: the client connection was never closed at all, on either
+side. That was the silent-stall case this file used to only warn about — the
+vite dev proxy was not propagating the upstream's TCP close to the client.
 
 ## The cost this adds
 

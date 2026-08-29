@@ -35,9 +35,11 @@ import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:c
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 
 const require = createRequire(import.meta.url);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 type SseTuple = {
   readonly event: 'open' | 'error' | 'hello' | 'change';

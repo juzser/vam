@@ -1,40 +1,41 @@
 {
   "runnerCommand": "npx @playwright/test@1.62.1 test --config=e2e/playwright.config.ts",
   "playwrightVersion": "1.62.1",
-  "vamSha": "57eb4c4aa1c1d3053a12f68ba592487d09f91883",
+  "vamSha": "a229d25664c11bd19f133f5f396af3419c722a4f",
   "blackSmithSha": "68d4dcfbfb9925090b3f14fad39ecee4fdacb153",
-  "capturedAt": "2026-08-29T10:34:15.000Z",
-  "result": "FAILED — the test threw before it could write its own transcript, so this file was assembled by hand from the two runs' captured output and Playwright's own error text.",
-  "finding": "Steps (a) and (b) pass: open, then hello, then change (naming the session) all arrive within their windows. Step (c) does NOT: after `server.kill('SIGKILL')`, no `error` event was observed by the browser's EventSource within the spec's 10000ms window, on either run. A manual reproduction (curl -N through the same vite proxy, same kill) shows why — the client's connection to the proxy never closes at all; curl still holds it open past the kill with zero further bytes. This is the silent-stall case the spec's own header names: the vite proxy is not propagating the black-smith process's TCP close to the client. The load-bearing tuple (error after kill, open/hello after restart) was NOT produced. This is a real finding about the proxy, not a flaky test — it reproduced identically across two separate runs (see `runs` below) and via a proxy-level `curl` probe outside Playwright entirely.",
-  "runs": [
+  "capturedAt": "2026-08-29T11:42:13.119Z",
+  "sessionA": "e2e-acg1-1788003728393-a",
+  "sessionB": "e2e-acg1-1788003728393-b",
+  "tuples": [
     {
-      "run": 1,
-      "stateDirNote": "throwaway temp dir, discarded after the run",
-      "sessionAPrefix": "e2e-acg1-1787999618999",
-      "eventOrder": ["open", "hello", "change"],
-      "tuples": [
-        { "event": "open", "readyState": 1, "tMs": 175 },
-        { "event": "hello", "readyState": 1, "tMs": 175, "detail": { "heartbeatMs": 15000, "floorMs": 10000 } },
-        { "event": "change", "readyState": 1, "tMs": 693, "detail": { "sessions": ["e2e-acg1-1787999618999-a"], "at": "2026-08-29T10:33:40.556Z" } }
-      ],
-      "outcome": "timed out after 10000ms waiting for `error` following server.kill('SIGKILL'); test failed at step (c)"
+      "event": "open",
+      "readyState": 1,
+      "tMs": 138
     },
     {
-      "run": 2,
-      "stateDirNote": "throwaway temp dir, discarded after the run",
-      "sessionAPrefix": "e2e-acg1-1787999653429",
-      "eventOrder": ["open", "hello", "change"],
-      "tuples": [
-        { "event": "open", "readyState": 1, "tMs": 151 },
-        { "event": "hello", "readyState": 1, "tMs": 151, "detail": { "heartbeatMs": 15000, "floorMs": 10000 } },
-        { "event": "change", "readyState": 1, "tMs": 668, "detail": { "sessions": ["e2e-acg1-1787999653429-a"], "at": "2026-08-29T10:34:14.908Z" } }
-      ],
-      "outcome": "timed out after 10000ms waiting for `error` following server.kill('SIGKILL'); test failed at step (c)"
+      "event": "hello",
+      "readyState": 1,
+      "tMs": 138,
+      "detail": {
+        "heartbeatMs": 15000,
+        "floorMs": 10000
+      }
+    },
+    {
+      "event": "change",
+      "readyState": 1,
+      "tMs": 643,
+      "detail": {
+        "sessions": [
+          "e2e-acg1-1788003728393-a"
+        ],
+        "at": "2026-08-29T11:42:09.824Z"
+      }
+    },
+    {
+      "event": "error",
+      "readyState": 0,
+      "tMs": 700
     }
-  ],
-  "reproducibility": "Both runs recorded the identical event ordering (open, hello, change, then timeout at step c) and identical readyState (1, OPEN, throughout — never advancing to 2/CLOSED, since the client never learned the connection died).",
-  "manualProbe": {
-    "description": "curl -N through vam's own vite proxy (http://127.0.0.1:5273/api/stream), black-smith killed with SIGKILL 3s in, curl left running with --max-time 20",
-    "observation": "curl received `hello` and `change` frames, then zero further bytes and no connection close for the remainder of the 20s window — the proxy held the client socket open past the upstream's death."
-  }
+  ]
 }
