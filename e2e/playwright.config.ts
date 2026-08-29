@@ -7,7 +7,16 @@
  * itself part of what this criterion exists to exercise. See
  * `e2e/sse-drop.spec.ts`'s header for what this harness can and cannot show.
  */
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { defineConfig } from '@playwright/test';
+
+// webServer.cwd (and, absent an explicit `cwd`, the spawned process's own
+// cwd) defaults to this config file's own directory (e2e/) — but vite's
+// project root (index.html) and its `node_modules/.bin/vite` binary are
+// both at the repo root (the shared vam tree). e2e/node_modules holds only
+// the Playwright harness.
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export default defineConfig({
   testDir: '.',
@@ -17,10 +26,8 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:5273',
   },
   webServer: {
-    // webServer.cwd defaults to this config file's own directory (e2e/), but
-    // vite lives in the repo root's node_modules (the shared vam tree) —
-    // e2e/node_modules holds only the Playwright harness. Reach up one level.
-    command: '../node_modules/.bin/vite --port 5273',
+    command: 'node_modules/.bin/vite --port 5273',
+    cwd: repoRoot,
     url: 'http://127.0.0.1:5273',
     reuseExistingServer: false,
   },
