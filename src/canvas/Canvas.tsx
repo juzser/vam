@@ -63,11 +63,25 @@ import { StepNode } from './StepNode.js';
 import { StepSlotNode } from './StepSlotNode.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from './source.js';
 
+/**
+ * A `StepSlotSpec` is emitted for all three of a session's slot positions
+ * (layout.ts), including the one a real step already occupies — the fan's
+ * scenery ids must be stable regardless of decision count (AC-9's `scenery`
+ * set is read straight off `layout.slots`, unfiltered). Only the EMPTY
+ * positions get the dashed "no step yet" card; an occupied position renders
+ * nothing here, so it does not draw a second "no step yet" behind the real
+ * step card it sits under.
+ */
+function OccupiedSlot() {
+  return null;
+}
+
 const NODE_TYPES = {
   info: SessionInfoNode,
   step: StepNode,
   fan: SessionFanNode,
   slot: StepSlotNode,
+  'slot-filled': OccupiedSlot,
 };
 
 /** ReactFlow requires an edges array; there is no custom edge type any more —
@@ -289,7 +303,7 @@ function CanvasInner({
       })),
       ...layout.slots.map((spec) => ({
         id: spec.id,
-        type: 'slot',
+        type: spec.placeholder ? 'slot' : 'slot-filled',
         position: spec.position,
         width: spec.size.width,
         height: spec.size.height,

@@ -1172,3 +1172,89 @@ describe('the focused cell renders at full opacity, and the override moves with 
     expect(cellOpacity('s2')).toBe('1');
   });
 });
+
+/**
+ * C4 — the join, end to end: model -> layoutCanvas -> NODE_TYPES -> rendered
+ * DOM. Everything below this point is unit-tested elsewhere in isolation
+ * (SessionFanNode/StepSlotNode with fabricated props in task-2's
+ * test/canvas/fan-and-slot.test.tsx; layoutCanvas's own shape in
+ * test/canvas/layout.test.ts) — this is the one file, and the one test, that
+ * proves those pieces are actually WIRED to each other through `<Canvas>`.
+ *
+ * C4's literal fixture ("7 decisions of which 1 is visible") cannot be built:
+ * `VISIBLE_DECISION_COUNT` (src/domain/selectors.ts, a keep-out this task may
+ * not edit) is a fixed 3, and `visibleDecisions` never filters by content —
+ * `slice(0, 3)` always returns exactly `min(3, decisions.length)` items. So a
+ * 7-decision session always draws 3 real step cards, never 1, and totalSteps
+ * only reads 7 when decisions.length is actually 7. The two halves of C4's
+ * own fixture are mutually exclusive under the code this task is allowed to
+ * touch; see this task's open_questions for the reasoning. What follows
+ * proves both of C4's underlying claims with fixtures that are each
+ * internally consistent, rather than silently dropping either one:
+ *
+ *  (a) the 1-real/2-dashed placeholder shape, wired end to end (a 1-decision
+ *      session — the same shape as this task's own layout.test.ts case), and
+ *  (b) totalSteps reporting the full decision count rather than the number
+ *      drawn (a 7-decision session, where 3 of the 7 are actually drawn).
+ */
+describe('the fan and its slots, rendered end to end through <Canvas>', () => {
+  function fanSvg(container: Element): SVGSVGElement | null {
+    return container.querySelector('svg[viewBox="0 0 110 290"]');
+  }
+
+  function realStepCardCount(container: Element): number {
+    return container.querySelectorAll('.react-flow__node[data-id^="step:"]').length;
+  }
+
+  it('(a) a one-decision session draws the fan, one real card and two dashed slots', () => {
+    const ONE_DECISION: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'black-smith',
+          sessions: [session('lone', { status: 'waiting', decisions: [decision('only')] })],
+        },
+      ],
+    };
+    const { container } = render(<Canvas model={ONE_DECISION} />);
+
+    const svgs = container.querySelectorAll('svg[viewBox="0 0 110 290"]');
+    expect(svgs.length).toBe(1);
+    expect(fanSvg(container)?.querySelectorAll('path').length).toBe(5);
+
+    const pills = container.querySelectorAll('[data-fan-pill]');
+    expect(pills.length).toBe(1);
+    expect(pills[0]?.textContent).toBe('1 steps');
+
+    expect(realStepCardCount(container)).toBe(1);
+    expect(screen.getAllByText('no step yet')).toHaveLength(2);
+  });
+
+  it('(b) a seven-decision session reports totalSteps 7 while drawing only the 3 visible', () => {
+    const SEVEN_DECISIONS: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'black-smith',
+          sessions: [
+            session('busy', {
+              status: 'waiting',
+              decisions: Array.from({ length: 7 }, (_, i) => decision(`d${i}`)),
+            }),
+          ],
+        },
+      ],
+    };
+    const { container } = render(<Canvas model={SEVEN_DECISIONS} />);
+
+    expect(fanSvg(container)?.querySelectorAll('path').length).toBe(5);
+
+    const pill = container.querySelector('[data-fan-pill]');
+    expect(pill?.textContent).toBe('7 steps'); // decisions.length, not the 3 drawn
+
+    expect(realStepCardCount(container)).toBe(3); // VISIBLE_DECISION_COUNT caps the draw
+    expect(screen.queryByText('no step yet')).toBeNull(); // no slot left empty
+  });
+});
