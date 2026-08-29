@@ -58,17 +58,9 @@ DRAWN and says it has nothing — `—`, or a `data-placeholder` element with a
 
 ## Not started
 
-1. **Canvas topology.** The mockup lays sessions out in a 2-column grid of
-   580×290 cells: the session card at the left of its cell, its steps stacked
-   VERTICALLY to the right, joined by an SVG fan with a `47 steps` pill on it —
-   and **no project frames on the canvas at all**, projects live only in the
-   sidebar. vam still draws project group frames with steps chained
-   horizontally. This is the largest remaining visual difference and it is a
-   rewrite of `layout.ts`, its 273-line test, `nav-nodes.ts` and the spatial
-   navigation tests. Deliberately left whole rather than half-done.
-2. **`ReviewQueue` restyle.** It works and sits where the mockup's amber
+1. **`ReviewQueue` restyle.** It works and sits where the mockup's amber
    `APPROVAL REQUIRED` box sits, but it still wears the old visual language.
-3. **Demo fixture prose** (`src/fixtures/demo.ts`) is still Vietnamese. It is
+2. **Demo fixture prose** (`src/fixtures/demo.ts`) is still Vietnamese. It is
    sample CONTENT rather than chrome, so it did not block the language switch,
    but it reads oddly under an English UI.
 
