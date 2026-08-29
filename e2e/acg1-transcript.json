@@ -1,21 +1,21 @@
 {
   "runnerCommand": "npx @playwright/test@1.62.1 test --config=e2e/playwright.config.ts",
   "playwrightVersion": "1.62.1",
-  "vamSha": "a229d25664c11bd19f133f5f396af3419c722a4f",
+  "vamSha": "f44a3f52606692fd3adac2a0e28b489e3c767814",
   "blackSmithSha": "68d4dcfbfb9925090b3f14fad39ecee4fdacb153",
-  "capturedAt": "2026-08-29T11:42:13.119Z",
-  "sessionA": "e2e-acg1-1788003728393-a",
-  "sessionB": "e2e-acg1-1788003728393-b",
+  "capturedAt": "2026-08-29T11:57:39.060Z",
+  "sessionA": "e2e-acg1-1788004654428-a",
+  "sessionB": "e2e-acg1-1788004654428-b",
   "tuples": [
     {
       "event": "open",
       "readyState": 1,
-      "tMs": 138
+      "tMs": 139
     },
     {
       "event": "hello",
       "readyState": 1,
-      "tMs": 138,
+      "tMs": 139,
       "detail": {
         "heartbeatMs": 15000,
         "floorMs": 10000
@@ -24,18 +24,44 @@
     {
       "event": "change",
       "readyState": 1,
-      "tMs": 643,
+      "tMs": 642,
       "detail": {
         "sessions": [
-          "e2e-acg1-1788003728393-a"
+          "e2e-acg1-1788004654428-a"
         ],
-        "at": "2026-08-29T11:42:09.824Z"
+        "at": "2026-08-29T11:57:35.880Z"
       }
     },
     {
       "event": "error",
       "readyState": 0,
-      "tMs": 700
+      "tMs": 701
+    },
+    {
+      "event": "open",
+      "readyState": 1,
+      "tMs": 3719
+    },
+    {
+      "event": "hello",
+      "readyState": 1,
+      "tMs": 3719,
+      "detail": {
+        "heartbeatMs": 15000,
+        "floorMs": 10000
+      }
+    },
+    {
+      "event": "change",
+      "readyState": 1,
+      "tMs": 3741,
+      "detail": {
+        "sessions": [
+          "e2e-acg1-1788004654428-a",
+          "e2e-acg1-1788004654428-b"
+        ],
+        "at": "2026-08-29T11:57:38.972Z"
+      }
     }
   ]
 }

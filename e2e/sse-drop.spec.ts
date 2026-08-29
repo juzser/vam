@@ -119,8 +119,9 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
   test.skip(!cliEntry, `${CLI_ENTRY_VAR} is not set — see e2e/README.md`);
   test.skip(!stateDirRoot, `${STATE_DIR_VAR} is not set — see e2e/README.md`);
   test.skip(!portRaw, `${PORT_VAR} is not set — see e2e/README.md`);
-  // The reconnect half waits out the server's own 10s retry floor twice over
-  // in the worst case; 60s left no margin for the restart.
+  // Two 15s health waits plus a 30s + 10s reconnect window exceed 60s in the
+  // worst case, so the old 60s cap could have expired on a slow-but-correct
+  // run. Observed on this machine the whole test takes ~5s.
   test.setTimeout(120_000);
 
   const cli = cliEntry as string;
