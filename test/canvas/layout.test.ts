@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  groupNodeId,
   INFO_SIZE,
   infoNodeId,
   layoutCanvas,
+  orderedForCanvas,
   orderedSessions,
   stepNodeId,
 } from '../../src/canvas/layout.js';
@@ -31,6 +31,15 @@ function session(id: string, over: Partial<Session> = {}): Session {
 function model(...sessions: Session[]): CanvasModel {
   return {
     projects: [{ id: 'p1', name: 'repo', source: 'black-smith', sessions }],
+  };
+}
+
+function twoProjects(bStatus: Session['status']): CanvasModel {
+  return {
+    projects: [
+      { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a')] },
+      { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b', { status: bStatus })] },
+    ],
   };
 }
 
@@ -96,6 +105,12 @@ describe('orderedSessions', () => {
   });
 });
 
+describe('orderedForCanvas', () => {
+  it('ignores projects: a waiting session in project B beats a done session in project A', () => {
+    expect(orderedForCanvas(twoProjects('waiting')).map((e) => e.session.id)).toEqual(['b', 'a']);
+  });
+});
+
 describe('layoutCanvas', () => {
   const three = model(
     session('s1', { decisions: [decision('d3'), decision('d2'), decision('d1')] }),
@@ -125,7 +140,7 @@ describe('layoutCanvas', () => {
     expect(ys.size).toBe(1);
   });
 
-  it('stacks sessions down the canvas in the sidebar’s order', () => {
+  it('stacks sessions down the canvas in flat urgency order', () => {
     const { nodes } = layoutCanvas(three);
     const first = nodes.find((n) => n.id === infoNodeId('s1'));
     const second = nodes.find((n) => n.id === infoNodeId('s2'));
@@ -182,80 +197,22 @@ describe('layoutCanvas', () => {
   });
 
   it('lays out an empty canvas without inventing anything', () => {
-    expect(layoutCanvas({ projects: [] })).toEqual({ groups: [], nodes: [], edges: [] });
+    expect(layoutCanvas({ projects: [] })).toEqual({ nodes: [], edges: [] });
   });
 
-  it('wraps each project in its own frame', () => {
-    const two: CanvasModel = {
-      projects: [
-        { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a')] },
-        { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b')] },
-      ],
-    };
-    const { groups } = layoutCanvas(two);
-    expect(groups.map((g) => g.project.name)).toEqual(['alpha', 'beta']);
-  });
-
-  it('parents every node to its project’s frame', () => {
+  it('gives every node an absolute position with no parent', () => {
     const { nodes } = layoutCanvas(three);
-    expect(new Set(nodes.map((n) => n.parentId))).toEqual(new Set([groupNodeId('p1')]));
-  });
-
-  it('keeps frames out of the navigable set — they are scenery', () => {
-    // A focusable frame would put a stop on every journey down the canvas.
-    const { groups, nodes } = layoutCanvas(three);
-    const navigable = new Set(nodes.map((n) => n.id));
-    for (const group of groups) {
-      expect(navigable.has(group.id)).toBe(false);
-    }
-  });
-
-  it('makes a frame tall enough to hold every row it wraps', () => {
-    const { groups, nodes } = layoutCanvas(three);
-    const frame = groups[0];
     for (const node of nodes) {
-      expect(node.position.y + node.size.height).toBeLessThanOrEqual(frame?.size.height ?? 0);
-      expect(node.position.x + node.size.width).toBeLessThanOrEqual(frame?.size.width ?? 0);
+      expect('parentId' in node).toBe(false);
     }
   });
 
-  it('gives every frame the same width, so the boxes line up down the canvas', () => {
-    const uneven: CanvasModel = {
-      projects: [
-        {
-          id: 'p1',
-          name: 'alpha',
-          source: 'black-smith',
-          sessions: [session('a', { decisions: [decision('x'), decision('y'), decision('z')] })],
-        },
-        { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b')] },
-      ],
-    };
-    const { groups } = layoutCanvas(uneven);
-    expect(groups[0]?.size.width).toBe(groups[1]?.size.width);
-  });
-
-  it('stacks frames without overlapping', () => {
-    const two: CanvasModel = {
-      projects: [
-        { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a')] },
-        { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b')] },
-      ],
-    };
-    const { groups } = layoutCanvas(two);
-    expect(groups[1]?.position.y).toBeGreaterThanOrEqual(
-      (groups[0]?.position.y ?? 0) + (groups[0]?.size.height ?? 0),
-    );
-  });
-
-  it('still draws a frame for a project with no sessions', () => {
-    const empty: CanvasModel = {
-      projects: [{ id: 'p1', name: 'alpha', source: 'orca', sessions: [] }],
-    };
-    const { groups, nodes } = layoutCanvas(empty);
-    expect(groups).toHaveLength(1);
-    expect(groups[0]?.size.height).toBeGreaterThan(0);
-    expect(nodes).toEqual([]);
+  it('stacks sessions flat, ignoring project boundaries', () => {
+    // Frame gone: waiting-in-p2 floats above done-in-p1, which a frame blocked.
+    const { nodes } = layoutCanvas(twoProjects('waiting'));
+    const a = nodes.find((n) => n.id === infoNodeId('a'));
+    const b = nodes.find((n) => n.id === infoNodeId('b'));
+    expect(b?.position.y).toBeLessThan(a?.position.y ?? 0);
   });
 
   it('never lets two rows overlap', () => {

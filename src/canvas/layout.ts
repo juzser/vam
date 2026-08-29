@@ -1,8 +1,8 @@
 /**
  * Where the canvas nodes go before anybody drags them.
  *
- * The canvas is now an **overview**, not the place work happens: one row per
- * session, rows in the same order the sidebar lists them, and each row a chain
+ * The canvas is an **overview**, not the place work happens: one row per
+ * session, and each row a chain
  *
  *     [ session ] ⟿ [ step ] → [ step ] → [ step ]
  *
@@ -12,26 +12,16 @@
  * oldest to newest left to right, so the newest step is the one nearest the
  * detail panel that expands it.
  *
- * Rows are wrapped by a dashed project frame, and the sidebar draws the same
- * grouping as headings. The cost is paid here: a frame can only wrap members
- * that are **contiguous**, so the flat "everything waiting floats to the very
- * top" order is no longer available. `orderedProjects` buys the important half
- * of it back by ranking each project by its most urgent session.
- *
- * The frames are `groups`, kept out of `nodes`, because they are scenery rather
- * than destinations — see `CanvasLayout`.
+ * No project frame any more (`vam-canvas-topology` task-4): `orderedForCanvas`
+ * stacks rows flat, urgency-first, project-blind, and every position is
+ * absolute — no node names a parent.
  *
  * Pure and position-only. It does not know about ReactFlow, so it can be tested
  * without one, and the canvas component adapts it.
  */
 
 import type { CanvasModel, Decision, Project, Session } from '../domain/model.js';
-import {
-  allSessions,
-  type SessionEntry,
-  VISIBLE_DECISION_COUNT,
-  visibleDecisions,
-} from '../domain/selectors.js';
+import { allSessions, type SessionEntry, visibleDecisions } from '../domain/selectors.js';
 
 /**
  * Sizes, against the type scale in `styles.css` — which is orca's (§1.1), so a
@@ -49,19 +39,8 @@ export const STEP_SIZE = { width: 250, height: 90 } as const;
 const ELIDED_GAP = 76;
 const STEP_GAP = 26;
 const ROW_GAP = 30;
-
-/**
- * The project frame's inset. Generous, because the frame is now nothing but a
- * dashed line: without a fill, the only thing saying "these rows are inside
- * something" is the distance between the line and the first card. Still smaller
- * at the top than the sides would suggest — the project's name is a pill
- * straddling the top border rather than a header row, so only its lower half
- * intrudes.
- */
-const GROUP_PADDING = { x: 30, top: 34, bottom: 30 } as const;
-const GROUP_GAP = 56;
-/** A project with no sessions is still a visible box, not a hairline. */
-const EMPTY_GROUP_BODY = 44;
+/** Left margin of every row, now that there is no frame to inset from. */
+const ROW_MARGIN = 30;
 
 export type Position = { readonly x: number; readonly y: number };
 export type Size = { readonly width: number; readonly height: number };
@@ -70,9 +49,7 @@ export type InfoNodeSpec = {
   readonly kind: 'info';
   readonly id: string;
   readonly entry: SessionEntry;
-  /** The project frame this row sits inside — ReactFlow's `parentId`. */
-  readonly parentId: string;
-  /** Relative to that frame, which is what ReactFlow wants for a child node. */
+  /** Absolute — no node names a parent any more. */
   readonly position: Position;
   readonly size: Size;
 };
@@ -84,7 +61,6 @@ export type StepNodeSpec = {
   readonly decision: Decision;
   /** 1-based, left to right — 3 is the newest. */
   readonly ordinal: number;
-  readonly parentId: string;
   readonly position: Position;
   readonly size: Size;
 };
@@ -104,22 +80,8 @@ export type CanvasEdgeSpec = {
   readonly label: string | null;
 };
 
-export type GroupNodeSpec = {
-  readonly id: string;
-  readonly project: Project;
-  readonly position: Position;
-  readonly size: Size;
-};
-
 export type CanvasLayout = {
-  /**
-   * The project frames. Kept apart from `nodes` on purpose: these are scenery,
-   * not destinations. `hjkl` navigates `nodes`, and a frame that could be
-   * focused would put a stop on every journey down the canvas that nobody asked
-   * for. Rendered behind their children, which are parented to them.
-   */
-  readonly groups: readonly GroupNodeSpec[];
-  /** The navigable nodes. Positions are RELATIVE to their group. */
+  /** The navigable nodes. Positions are absolute. */
   readonly nodes: readonly CanvasNodeSpec[];
   readonly edges: readonly CanvasEdgeSpec[];
 };
@@ -194,9 +156,15 @@ export function orderedSessions(model: CanvasModel): SessionEntry[] {
   return ordered;
 }
 
-/** The node id for a project's frame. Ids are derived, never stored. */
-export function groupNodeId(projectId: string): string {
-  return `group:${projectId}`;
+/**
+ * Every session, FLAT and urgency-first, project-blind — the order the canvas
+ * stacks rows in. Not `orderedSessions`: that stays project-major for the
+ * sidebar and is untouched. Sorts a fresh copy, never in place; stable.
+ */
+export function orderedForCanvas(model: CanvasModel): SessionEntry[] {
+  return [...allSessions(model)].sort(
+    (a, b) => STATUS_RANK[a.session.status] - STATUS_RANK[b.session.status],
+  );
 }
 
 /** The node id for a session's info card. */
@@ -210,92 +178,56 @@ export function stepNodeId(sessionId: string, decisionId: string): string {
 }
 
 export function layoutCanvas(model: CanvasModel): CanvasLayout {
-  const groups: GroupNodeSpec[] = [];
   const nodes: CanvasNodeSpec[] = [];
   const edges: CanvasEdgeSpec[] = [];
 
-  const byId = new Map(allSessions(model).map((entry) => [entry.session.id, entry]));
+  let y = 0;
+  for (const entry of orderedForCanvas(model)) {
+    const { session } = entry;
+    const steps = visibleDecisions(session);
 
-  // The widest a row can get: the frame is that wide for every project, so the
-  // boxes line up down the canvas instead of stepping in and out with whatever
-  // happens to be the longest chain inside each one.
-  const rowWidth =
-    INFO_SIZE.width + ELIDED_GAP + VISIBLE_DECISION_COUNT * STEP_SIZE.width + 2 * STEP_GAP;
+    const info: InfoNodeSpec = {
+      kind: 'info',
+      id: infoNodeId(session.id),
+      entry,
+      position: { x: ROW_MARGIN, y },
+      size: INFO_SIZE,
+    };
+    nodes.push(info);
 
-  let groupY = 0;
-  for (const project of orderedProjects(model)) {
-    const sessions = orderedInProject(project);
-    const body =
-      sessions.length === 0
-        ? EMPTY_GROUP_BODY
-        : sessions.length * INFO_SIZE.height + (sessions.length - 1) * ROW_GAP;
+    let x = ROW_MARGIN + INFO_SIZE.width + ELIDED_GAP;
+    let previousId = info.id;
 
-    const groupId = groupNodeId(project.id);
-    groups.push({
-      id: groupId,
-      project,
-      position: { x: 0, y: groupY },
-      size: {
-        width: rowWidth + GROUP_PADDING.x * 2,
-        height: GROUP_PADDING.top + body + GROUP_PADDING.bottom,
-      },
-    });
-
-    let y = GROUP_PADDING.top;
-    for (const session of sessions) {
-      const entry = byId.get(session.id);
-      if (entry === undefined) {
-        continue;
-      }
-      const steps = visibleDecisions(session);
-
-      const info: InfoNodeSpec = {
-        kind: 'info',
-        id: infoNodeId(session.id),
+    steps.forEach((decision, index) => {
+      const id = stepNodeId(session.id, decision.id);
+      nodes.push({
+        kind: 'step',
+        id,
         entry,
-        parentId: groupId,
-        position: { x: GROUP_PADDING.x, y },
-        size: INFO_SIZE,
-      };
-      nodes.push(info);
-
-      let x = GROUP_PADDING.x + INFO_SIZE.width + ELIDED_GAP;
-      let previousId = info.id;
-
-      steps.forEach((decision, index) => {
-        const id = stepNodeId(session.id, decision.id);
-        nodes.push({
-          kind: 'step',
-          id,
-          entry,
-          decision,
-          ordinal: index + 1,
-          parentId: groupId,
-          position: { x, y },
-          size: STEP_SIZE,
-        });
-
-        const skipped = session.decisions.length - steps.length;
-        edges.push({
-          id: `${previousId}->${id}`,
-          source: previousId,
-          target: id,
-          elided: index === 0,
-          // Only the first edge can carry a count, and only when something was
-          // actually dropped. Labelling it `+0` would be a mark that means
-          // "nothing", which is worse than no mark.
-          label: index === 0 && skipped > 0 ? `+${skipped}` : null,
-        });
-
-        previousId = id;
-        x += STEP_SIZE.width + STEP_GAP;
+        decision,
+        ordinal: index + 1,
+        position: { x, y },
+        size: STEP_SIZE,
       });
 
-      y += INFO_SIZE.height + ROW_GAP;
-    }
+      const skipped = session.decisions.length - steps.length;
+      edges.push({
+        id: `${previousId}->${id}`,
+        source: previousId,
+        target: id,
+        elided: index === 0,
+        // Only the first edge can carry a count, and only when something was
+        // actually dropped. Labelling it `+0` would be a mark that means
+        // "nothing", which is worse than no mark.
+        label: index === 0 && skipped > 0 ? `+${skipped}` : null,
+      });
 
-    groupY += GROUP_PADDING.top + body + GROUP_PADDING.bottom + GROUP_GAP;
+      previousId = id;
+      x += STEP_SIZE.width + STEP_GAP;
+    });
+
+    y += INFO_SIZE.height + ROW_GAP;
   }
 
-  return { groups, nodes, edges };
+  return { nodes, edges };
 }
