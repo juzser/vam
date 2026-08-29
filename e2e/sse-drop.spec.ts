@@ -91,18 +91,25 @@ function startServer(cli: string, stateDir: string, dbPath: string, port: number
   });
 }
 
+// `fromIndex` is the whole point of this helper: `__sseEvents` accumulates for
+// the life of the page, so a post-reconnect wait that searches the whole array
+// is satisfied by the `open`/`hello` recorded at page load and measures
+// nothing. Callers past the drop pass a watermark taken before it.
 async function waitForTuple(
   page: import('@playwright/test').Page,
   predicate: (t: SseTuple) => boolean,
   timeoutMs: number,
+  fromIndex = 0,
 ): Promise<SseTuple> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const events = (await page.evaluate(() => (window as unknown as { __sseEvents: SseTuple[] }).__sseEvents)) ?? [];
-    const found = events.find(predicate);
+    const found = events.slice(fromIndex).find(predicate);
     if (found) return found;
     if (Date.now() > deadline) {
-      throw new Error(`timed out after ${timeoutMs}ms waiting for a matching SSE tuple; recorded so far: ${JSON.stringify(events)}`);
+      throw new Error(
+        `timed out after ${timeoutMs}ms waiting for a matching SSE tuple at or after index ${fromIndex}; recorded so far: ${JSON.stringify(events)}`,
+      );
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -112,7 +119,9 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
   test.skip(!cliEntry, `${CLI_ENTRY_VAR} is not set — see e2e/README.md`);
   test.skip(!stateDirRoot, `${STATE_DIR_VAR} is not set — see e2e/README.md`);
   test.skip(!portRaw, `${PORT_VAR} is not set — see e2e/README.md`);
-  test.setTimeout(60_000);
+  // The reconnect half waits out the server's own 10s retry floor twice over
+  // in the worst case; 60s left no margin for the restart.
+  test.setTimeout(120_000);
 
   const cli = cliEntry as string;
   const stateDir = stateDirRoot as string;
@@ -205,6 +214,10 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
   server.kill('SIGKILL');
   await waitForTuple(page, (t) => t.event === 'error', 10_000);
 
+  // Everything already recorded is pre-drop evidence. The post-restart waits
+  // below may only be satisfied by tuples recorded after this line.
+  const watermark = await page.evaluate(() => (window as unknown as { __sseEvents: SseTuple[] }).__sseEvents.length);
+
   appendEvent(id, cli, stateDir, {
     session_id: sessionB,
     actor: 'e2e-tester',
@@ -217,11 +230,11 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
   server = startServer(cli, stateDir, dbPath, port);
   await waitForHealth(`http://127.0.0.1:${port}/api/health`, 15_000);
 
-  await waitForTuple(page, (t) => t.event === 'open', 15_000);
-  await waitForTuple(page, (t) => t.event === 'hello', 5_000);
-
-  const allTuples = (await page.evaluate(() => (window as unknown as { __sseEvents: SseTuple[] }).__sseEvents)) as SseTuple[];
-  expect(allTuples.some((t) => t.readyState === 2)).toBe(false);
+  // The browser's reconnect delay is governed by the server's own `retry`
+  // directive (the `hello` frame reports `floorMs: 10000`), so these windows
+  // must clear that floor with room for the restart itself.
+  await waitForTuple(page, (t) => t.event === 'open', 30_000, watermark);
+  await waitForTuple(page, (t) => t.event === 'hello', 10_000, watermark);
 
   // (d) the session that changed while the server was down is now visible,
   // with no reload — AC-10 measured against a real server. Session identity
@@ -229,6 +242,12 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
   // counts: a sibling epic is free to redraw the canvas around this session
   // list without invalidating this assertion.
   await expect(page.locator(`[data-session-row="${sessionB}"]`)).toBeVisible({ timeout: 10_000 });
+
+  // Sampled only now, after the recovery assertion: a transcript captured
+  // before step (d) is a snapshot of the pre-reconnect state and is silent
+  // about the very property AC-G1 exists to record.
+  const allTuples = (await page.evaluate(() => (window as unknown as { __sseEvents: SseTuple[] }).__sseEvents)) as SseTuple[];
+  expect(allTuples.some((t) => t.readyState === 2)).toBe(false);
 
   server.kill('SIGKILL');
 
