@@ -306,40 +306,6 @@ body {
   }
 }
 
-/* The group frame's floating label, straddling the top border — nodeterm's
-   `.group-node__label`. It is a pill on the border rather than a header row
-   inside the box because a header row costs a node's worth of vertical space in
-   every group, and the name is chrome, not content. */
-.vam-group-label {
-  position: absolute;
-  top: 0;
-  left: 14px;
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  max-width: 90%;
-  padding: 2px 9px;
-  /* The canvas, not a panel: the frame has no fill any more, so the pill's job
-     is to interrupt the dashes cleanly rather than to sit on a surface. */
-  background: var(--color-canvas);
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-/*
- * ReactFlow ships a default fill and border for a node type literally named
- * `group` (`.react-flow__node-group`), and ours is called that. The frame is a
- * line drawn AROUND the rows, not a surface behind them — the inherited fill is
- * what made the cards look sunken into a panel. The inner div draws the dashes.
- */
-.react-flow__node-group {
-  background-color: transparent;
-  border: none;
-  border-radius: 0;
-}
-
 /*
  * The emoji picker, wearing vam's palette.
  *
