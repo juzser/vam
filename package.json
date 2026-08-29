@@ -15,7 +15,8 @@
     "typecheck:test": "tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "lint": "biome check ."
+    "lint": "biome check .",
+    "test:e2e": "npx @playwright/test@1.62.1 test --config=e2e/playwright.config.ts"
   },
   "dependencies": {
     "@xyflow/react": "^12.11.5",
