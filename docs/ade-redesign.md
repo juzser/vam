@@ -72,6 +72,25 @@ DRAWN and says it has nothing — `—`, or a `data-placeholder` element with a
    sample CONTENT rather than chrome, so it did not block the language switch,
    but it reads oddly under an English UI.
 
+## Corrections to this document's own predictions
+
+- **`nav-nodes.ts` and `spatial-nav.ts` needed no rewrite.** This document
+  predicted the topology rewrite would touch `src/canvas/nav-nodes.ts` and
+  `src/keyboard/spatial-nav.ts`. It did not: the spatial navigation rule
+  walks node geometry, not a project hierarchy, so it was layout-independent
+  by construction and the new grid dropped straight in.
+- **`src/domain/model.ts` needed no new field.** The topology is computed
+  entirely from existing session and decision data; nothing in the domain
+  model changed to support it.
+- **The step count is a pill, not the drawn count.** `visibleDecisions` caps
+  what a session's cell draws at `VISIBLE_DECISION_COUNT` (3): a session with
+  three or more decisions always draws exactly three step cards and zero
+  placeholders. Only a session with **fewer** than three decisions draws
+  dashed "no step yet" placeholders, to fill out to three slots. The fan's
+  `N steps` pill reports `session.decisions.length` — the session's real
+  total — which is a different number from the drawn count as soon as a
+  session passes three decisions.
+
 ## Known bug, unrelated to this work
 
 `i` then `Escape` leaves focus inside the prompt input while the mode returns to
