@@ -20,6 +20,11 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 
 export default defineConfig({
   testDir: '.',
+  // Playwright's outputDir default resolves against process.cwd(), not this
+  // config's own directory — with webServer's cwd now pointed at repoRoot,
+  // that would otherwise litter the repo root. Keep artifacts inside e2e/,
+  // where .gitignore already ignores them.
+  outputDir: path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'test-results'),
   workers: 1,
   retries: 0,
   use: {
