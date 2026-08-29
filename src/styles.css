@@ -48,6 +48,7 @@
   --color-line: var(--vam-line);
   --color-line-strong: var(--vam-line-strong);
   --color-line-loud: var(--vam-line-loud);
+  --color-line-loudest: var(--vam-line-loudest);
 
   --color-ink: var(--vam-ink);
   --color-ink-dim: var(--vam-ink-dim);
@@ -99,6 +100,7 @@
   --vam-line: #1f1f1f;
   --vam-line-strong: #262626;
   --vam-line-loud: #2e2e2e;
+  --vam-line-loudest: #4a4a4a;
 
   --vam-ink: #ededed;
   --vam-ink-dim: #a1a1a1;
@@ -131,6 +133,7 @@ html.light {
   --vam-line: #e4e4e1;
   --vam-line-strong: #d6d6d2;
   --vam-line-loud: #c4c4bf;
+  --vam-line-loudest: #8f8f8a;
 
   --vam-ink: #18181b;
   --vam-ink-dim: #52525b;

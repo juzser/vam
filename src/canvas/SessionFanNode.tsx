@@ -33,17 +33,36 @@ export type SessionFanNodeData = {
   readonly totalSteps: number;
 };
 
-const STATUS_COLOR: Readonly<Record<SessionFanStatus, string>> = {
+/**
+ * Trunk/spine/branch colour, per the operator's canvas colour rule (epic.md
+ * §13.4): colour is reserved for what needs a person. `waiting` and `failed`
+ * carry their status colour because both need a person; `running` and `done`
+ * carry neutral line tones — `running` the new `--color-line-loudest`,
+ * `done` the existing `--color-line-loud` (accepted with its measured
+ * five-unit light drift rather than minting a second near-identical neutral).
+ */
+const TRUNK_COLOR: Readonly<Record<SessionFanStatus, string>> = {
   waiting: 'var(--color-waiting)',
-  running: 'var(--color-running)',
-  done: 'var(--color-done)',
+  running: 'var(--color-line-loudest)',
+  done: 'var(--color-line-loud)',
+  failed: 'var(--color-failed)',
+};
+
+/**
+ * Pill number colour. Same rule as the trunk: `waiting`/`failed` carry their
+ * status colour, `running`/`done` fall to the neutral `--color-ink-dim`.
+ */
+const NUMBER_COLOR: Readonly<Record<SessionFanStatus, string>> = {
+  waiting: 'var(--color-waiting)',
+  running: 'var(--color-ink-dim)',
+  done: 'var(--color-ink-dim)',
   failed: 'var(--color-failed)',
 };
 
 const EMPTY_BRANCH_COLOR = 'var(--color-line-strong)';
 
 function branchColor(status: SessionFanBranchStatus): string {
-  return status === 'empty' ? EMPTY_BRANCH_COLOR : STATUS_COLOR[status];
+  return status === 'empty' ? EMPTY_BRANCH_COLOR : TRUNK_COLOR[status];
 }
 
 export type SessionFanNodeProps = {
@@ -58,7 +77,8 @@ export type SessionFanNodeProps = {
  * fields this node has no use for and never reads.
  */
 export function SessionFanNode({ data }: SessionFanNodeProps) {
-  const trunkColor = STATUS_COLOR[data.sessionStatus];
+  const trunkColor = TRUNK_COLOR[data.sessionStatus];
+  const numberColor = NUMBER_COLOR[data.sessionStatus];
 
   return (
     <div style={{ position: 'relative', width: '110px', height: '290px' }}>
@@ -107,9 +127,11 @@ export function SessionFanNode({ data }: SessionFanNodeProps) {
         }}
       >
         {/* Two-tone per the mockup: the number carries the session's status
-            colour, the word `steps` stays the fixed neutral it is in all
-            twelve mockup pills. */}
-        <span style={{ color: trunkColor }}>{data.totalSteps}</span>
+            colour (per the canvas colour rule, not necessarily the trunk's —
+            `running`/`done` dim to --color-ink-dim on the number while the
+            trunk reads a line tone), the word `steps` stays the fixed
+            neutral it is in all twelve mockup pills. */}
+        <span style={{ color: numberColor }}>{data.totalSteps}</span>
         <span style={{ color: 'var(--color-ink-faint)' }}> steps</span>
       </div>
     </div>
