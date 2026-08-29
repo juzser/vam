@@ -40,6 +40,14 @@ DRAWN and says it has nothing — `—`, or a `data-placeholder` element with a
 - **Minimap** — 168×96 plate, bottom right.
 - **UI language** — English throughout, per the operator's decision. 286 tests
   re-pointed and green.
+- **Canvas grid layout** (`src/canvas/layout.ts`, `src/canvas/grid.ts`) — a flat,
+  project-blind 2-column grid of 580×290 cells (`orderedForCanvas`, urgency
+  first). Each cell holds the session card at the left, vertically centred,
+  and up to three step cards stacked vertically to its right. An SVG fan
+  (trunk, spine, branches) connects the session card to its step slots and
+  carries an `N steps` pill. Project frames are gone from the canvas —
+  projects live only in the sidebar — and every node position is absolute;
+  nothing names a parent.
 
 ## Placeholders — drawn, inert, and why
 
@@ -58,19 +66,30 @@ DRAWN and says it has nothing — `—`, or a `data-placeholder` element with a
 
 ## Not started
 
-1. **Canvas topology.** The mockup lays sessions out in a 2-column grid of
-   580×290 cells: the session card at the left of its cell, its steps stacked
-   VERTICALLY to the right, joined by an SVG fan with a `47 steps` pill on it —
-   and **no project frames on the canvas at all**, projects live only in the
-   sidebar. vam still draws project group frames with steps chained
-   horizontally. This is the largest remaining visual difference and it is a
-   rewrite of `layout.ts`, its 273-line test, `nav-nodes.ts` and the spatial
-   navigation tests. Deliberately left whole rather than half-done.
-2. **`ReviewQueue` restyle.** It works and sits where the mockup's amber
+1. **`ReviewQueue` restyle.** It works and sits where the mockup's amber
    `APPROVAL REQUIRED` box sits, but it still wears the old visual language.
-3. **Demo fixture prose** (`src/fixtures/demo.ts`) is still Vietnamese. It is
+2. **Demo fixture prose** (`src/fixtures/demo.ts`) is still Vietnamese. It is
    sample CONTENT rather than chrome, so it did not block the language switch,
    but it reads oddly under an English UI.
+
+## Corrections to this document's own predictions
+
+- **`nav-nodes.ts` and `spatial-nav.ts` needed no rewrite.** This document
+  predicted the topology rewrite would touch `src/canvas/nav-nodes.ts` and
+  `src/keyboard/spatial-nav.ts`. It did not: the spatial navigation rule
+  walks node geometry, not a project hierarchy, so it was layout-independent
+  by construction and the new grid dropped straight in.
+- **`src/domain/model.ts` needed no new field.** The topology is computed
+  entirely from existing session and decision data; nothing in the domain
+  model changed to support it.
+- **The step count is a pill, not the drawn count.** `visibleDecisions` caps
+  what a session's cell draws at `VISIBLE_DECISION_COUNT` (3): a session with
+  three or more decisions always draws exactly three step cards and zero
+  placeholders. Only a session with **fewer** than three decisions draws
+  dashed "no step yet" placeholders, to fill out to three slots. The fan's
+  `N steps` pill reports `session.decisions.length` — the session's real
+  total — which is a different number from the drawn count as soon as a
+  session passes three decisions.
 
 ## Known bug, unrelated to this work
 
