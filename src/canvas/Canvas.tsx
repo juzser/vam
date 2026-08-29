@@ -25,7 +25,6 @@
 import {
   Background,
   type Edge,
-  MarkerType,
   MiniMap,
   type Node,
   ReactFlow,
@@ -58,11 +57,37 @@ import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
 import { infoNodeId, layoutCanvas, orderedSessions } from './layout.js';
 import { type FlowNodeLike, toNavNodes } from './nav-nodes.js';
+import { SessionFanNode } from './SessionFanNode.js';
 import { SessionInfoNode } from './SessionInfoNode.js';
 import { StepNode } from './StepNode.js';
+import { StepSlotNode } from './StepSlotNode.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from './source.js';
 
-const NODE_TYPES = { info: SessionInfoNode, step: StepNode };
+/**
+ * A `StepSlotSpec` is emitted for all three of a session's slot positions
+ * (layout.ts), including the one a real step already occupies — the fan's
+ * scenery ids must be stable regardless of decision count (AC-9's `scenery`
+ * set is read straight off `layout.slots`, unfiltered). Only the EMPTY
+ * positions get the dashed "no step yet" card; an occupied position renders
+ * nothing here, so it does not draw a second "no step yet" behind the real
+ * step card it sits under.
+ */
+function OccupiedSlot() {
+  return null;
+}
+
+const NODE_TYPES = {
+  info: SessionInfoNode,
+  step: StepNode,
+  fan: SessionFanNode,
+  slot: StepSlotNode,
+  'slot-filled': OccupiedSlot,
+};
+
+/** ReactFlow requires an edges array; there is no custom edge type any more —
+ *  the fan is a scenery node (epic.md §5.2). A module-level constant keeps
+ *  this a stable reference across renders. */
+const NO_EDGES: Edge[] = [];
 
 /** Home-row first: the labels you can hit without looking. */
 const JUMP_KEYS = 'asdfghjkl;qwertyuiop';
@@ -255,6 +280,39 @@ function CanvasInner({
 
   const initialNodes = useMemo<Node[]>(
     () => [
+      // Scenery first, painted behind the navigable nodes (epic.md §5.2).
+      // Never a `j`/`k` destination: draggable/selectable/focusable are each
+      // explicit — omitted, they'd default true (@xyflow/react board level).
+      ...layout.fans.map((spec) => ({
+        id: spec.id,
+        type: 'fan',
+        position: spec.position,
+        width: spec.size.width,
+        height: spec.size.height,
+        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
+        draggable: false,
+        selectable: false,
+        focusable: false,
+        data: {
+          sessionId: spec.sessionId,
+          baseOpacity: spec.opacity,
+          sessionStatus: spec.sessionStatus,
+          branchStatuses: spec.branchStatuses,
+          totalSteps: spec.totalSteps,
+        },
+      })),
+      ...layout.slots.map((spec) => ({
+        id: spec.id,
+        type: spec.placeholder ? 'slot' : 'slot-filled',
+        position: spec.position,
+        width: spec.size.width,
+        height: spec.size.height,
+        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
+        draggable: false,
+        selectable: false,
+        focusable: false,
+        data: { sessionId: spec.sessionId, baseOpacity: spec.opacity },
+      })),
       ...layout.nodes.map((spec) => ({
         id: spec.id,
         type: spec.kind,
@@ -264,36 +322,18 @@ function CanvasInner({
         // falling back to a zero rectangle before ReactFlow has measured.
         width: spec.size.width,
         height: spec.size.height,
-        style: { width: spec.size.width, height: spec.size.height },
-        data:
-          spec.kind === 'info'
-            ? { entry: spec.entry, focused: false, jumpLabel: null }
-            : { entry: spec.entry, decision: spec.decision, focused: false, jumpLabel: null },
+        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
+        data: {
+          ...(spec.kind === 'info'
+            ? { entry: spec.entry }
+            : { entry: spec.entry, decision: spec.decision }),
+          focused: false,
+          jumpLabel: null,
+          sessionId: spec.entry.session.id,
+          baseOpacity: spec.opacity,
+        },
       })),
     ],
-    [layout],
-  );
-
-  const edges = useMemo<Edge[]>(
-    () =>
-      layout.edges.map((spec) => ({
-        id: spec.id,
-        source: spec.source,
-        target: spec.target,
-        type: 'smoothstep',
-        // The elided link is drawn as a break, not a step: dashed, labelled with
-        // what it swallowed. An ordinary link between two shown steps is solid,
-        // because nothing is missing between them.
-        animated: false,
-        style: spec.elided
-          ? { stroke: 'var(--color-line-strong)', strokeDasharray: '3 4' }
-          : { stroke: 'var(--color-line-strong)' },
-        label: spec.label ?? undefined,
-        labelStyle: { fill: 'var(--color-ink-faint)', fontSize: 10 },
-        labelBgStyle: { fill: 'var(--color-canvas)' },
-        labelBgPadding: [4, 2] as [number, number],
-        markerEnd: { type: MarkerType.ArrowClosed, width: 10, height: 10, color: '#4b535d' },
-      })),
     [layout],
   );
 
@@ -329,21 +369,32 @@ function CanvasInner({
     }
   }, [nodeIds, focusedId]);
 
-  // Focus and jump labels are presentation, not layout: they are written onto
-  // the existing nodes rather than rebuilding them, so a node that has been
-  // dragged keeps where the person put it.
+  // Focus, jump labels and the focused-cell opacity override are all
+  // presentation, written onto the existing nodes rather than rebuilding
+  // them: `layoutCanvas` is a pure function of the model and cannot see
+  // focus, so it can only ever emit the status opacity read from
+  // `data.baseOpacity` (stamped once in `initialNodes`).
   useEffect(() => {
+    const focusedSessionId = focusedEntry?.session.id ?? null;
     setNodes((current) =>
-      current.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          focused: node.id === focusedId,
-          jumpLabel: labels.get(node.id) ?? null,
-        },
-      })),
+      current.map((node) => {
+        const data = node.data as { sessionId?: string; baseOpacity?: number };
+        const opacity =
+          data.sessionId !== undefined && data.sessionId === focusedSessionId
+            ? 1
+            : (data.baseOpacity ?? 1);
+        return {
+          ...node,
+          style: { ...node.style, opacity },
+          data: {
+            ...node.data,
+            focused: node.id === focusedId,
+            jumpLabel: labels.get(node.id) ?? null,
+          },
+        };
+      }),
     );
-  }, [focusedId, labels, setNodes]);
+  }, [focusedId, focusedEntry, labels, setNodes]);
 
   /** Move focus to a session by id — what the sidebar and the palette do. */
   const focusSession = useCallback((sessionId: string) => {
@@ -966,7 +1017,7 @@ function CanvasInner({
           <div className="relative min-h-0 flex-1">
             <ReactFlow
               nodes={nodes}
-              edges={edges}
+              edges={NO_EDGES}
               onNodesChange={onNodesChange}
               nodesDraggable={false}
               nodeTypes={NODE_TYPES}

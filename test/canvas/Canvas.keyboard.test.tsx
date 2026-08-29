@@ -18,6 +18,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { SmithApiError, type SmithClient } from '../../src/adapter/client.js';
 import { Canvas } from '../../src/canvas/Canvas.js';
+import { layoutCanvas } from '../../src/canvas/layout.js';
 import type { CanvasSource } from '../../src/canvas/source.js';
 import type { CanvasModel, Decision, Session } from '../../src/domain/model.js';
 
@@ -1108,5 +1109,152 @@ describe('undrag: a rendered node carries no pointer-interaction class', () => {
       expect(el.classList.contains(dragClass)).toBe(false);
       expect(el.classList.contains('nopan')).toBe(false);
     }
+  });
+});
+
+// AC-9: reads the DRAWN state — the one thing a grep over vam's own source
+// cannot see when a prop was simply omitted and a library default won.
+describe('scenery nodes: no tab stop, no drag, no select', () => {
+  it('every fan and every slot renders tabindex=none role=none draggable=false selectable=false', () => {
+    const layout = layoutCanvas(MODEL);
+    const scenery = new Set([...layout.fans, ...layout.slots].map((s) => s.id));
+    expect(scenery.size).toBeGreaterThanOrEqual(4);
+
+    const { container } = render(<Canvas model={MODEL} />);
+    const report = [...container.querySelectorAll('.react-flow__node')]
+      .filter((el) => scenery.has(el.getAttribute('data-id') ?? ''))
+      .map((el) => {
+        const id = el.getAttribute('data-id');
+        const tabindex = el.getAttribute('tabindex') ?? 'none';
+        const role = el.getAttribute('role') ?? 'none';
+        const draggable = el.classList.contains('draggable');
+        const selectable = el.classList.contains('selectable');
+        return `${id} tabindex=${tabindex} role=${role} draggable=${draggable} selectable=${selectable}`;
+      });
+
+    expect(report.length).toBe(scenery.size);
+    expect(report.sort()).toEqual(
+      [...scenery]
+        .sort()
+        .map((id) => `${id} tabindex=none role=none draggable=false selectable=false`),
+    );
+  });
+});
+
+// AC-8: the focused-cell opacity override, applied in Canvas.tsx's focus
+// effect — never by re-running layoutCanvas, which cannot see focus.
+describe('the focused cell renders at full opacity, and the override moves with the cursor', () => {
+  const THREE: CanvasModel = {
+    projects: [
+      {
+        id: 'p1',
+        name: 'alpha',
+        source: 'black-smith',
+        sessions: [
+          session('s1', { status: 'waiting' }),
+          session('s2', { status: 'done' }),
+          session('s3', { status: 'running' }),
+        ],
+      },
+    ],
+  };
+  const cellOpacity = (sessionId: string) =>
+    (document.querySelector(`.react-flow__node[data-id^="info:${sessionId}"]`) as HTMLElement)
+      ?.style.opacity;
+
+  it('overrides the focused cell to 1 and clears the one it left', () => {
+    render(<Canvas model={THREE} />);
+    expect(cellOpacity('s1')).toBe('1'); // waiting sorts first, so s1 starts focused
+    expect(cellOpacity('s2')).toBe('0.45');
+
+    press('j'); // s1 -> s2 (grid column 0, row 1)
+    expect(cellOpacity('s1')).toBe('0.72');
+    expect(cellOpacity('s2')).toBe('1');
+  });
+});
+
+/**
+ * C4 — the join, end to end: model -> layoutCanvas -> NODE_TYPES -> rendered
+ * DOM. Everything below this point is unit-tested elsewhere in isolation
+ * (SessionFanNode/StepSlotNode with fabricated props in task-2's
+ * test/canvas/fan-and-slot.test.tsx; layoutCanvas's own shape in
+ * test/canvas/layout.test.ts) — this is the one file, and the one test, that
+ * proves those pieces are actually WIRED to each other through `<Canvas>`.
+ *
+ * C4's literal fixture ("7 decisions of which 1 is visible") cannot be built:
+ * `VISIBLE_DECISION_COUNT` (src/domain/selectors.ts, a keep-out this task may
+ * not edit) is a fixed 3, and `visibleDecisions` never filters by content —
+ * `slice(0, 3)` always returns exactly `min(3, decisions.length)` items. So a
+ * 7-decision session always draws 3 real step cards, never 1, and totalSteps
+ * only reads 7 when decisions.length is actually 7. The two halves of C4's
+ * own fixture are mutually exclusive under the code this task is allowed to
+ * touch; see this task's open_questions for the reasoning. What follows
+ * proves both of C4's underlying claims with fixtures that are each
+ * internally consistent, rather than silently dropping either one:
+ *
+ *  (a) the 1-real/2-dashed placeholder shape, wired end to end (a 1-decision
+ *      session — the same shape as this task's own layout.test.ts case), and
+ *  (b) totalSteps reporting the full decision count rather than the number
+ *      drawn (a 7-decision session, where 3 of the 7 are actually drawn).
+ */
+describe('the fan and its slots, rendered end to end through <Canvas>', () => {
+  function fanSvg(container: Element): SVGSVGElement | null {
+    return container.querySelector('svg[viewBox="0 0 110 290"]');
+  }
+
+  function realStepCardCount(container: Element): number {
+    return container.querySelectorAll('.react-flow__node[data-id^="step:"]').length;
+  }
+
+  it('(a) a one-decision session draws the fan, one real card and two dashed slots', () => {
+    const ONE_DECISION: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'black-smith',
+          sessions: [session('lone', { status: 'waiting', decisions: [decision('only')] })],
+        },
+      ],
+    };
+    const { container } = render(<Canvas model={ONE_DECISION} />);
+
+    const svgs = container.querySelectorAll('svg[viewBox="0 0 110 290"]');
+    expect(svgs.length).toBe(1);
+    expect(fanSvg(container)?.querySelectorAll('path').length).toBe(5);
+
+    const pills = container.querySelectorAll('[data-fan-pill]');
+    expect(pills.length).toBe(1);
+    expect(pills[0]?.textContent).toBe('1 steps');
+
+    expect(realStepCardCount(container)).toBe(1);
+    expect(screen.getAllByText('no step yet')).toHaveLength(2);
+  });
+
+  it('(b) a seven-decision session reports totalSteps 7 while drawing only the 3 visible', () => {
+    const SEVEN_DECISIONS: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'black-smith',
+          sessions: [
+            session('busy', {
+              status: 'waiting',
+              decisions: Array.from({ length: 7 }, (_, i) => decision(`d${i}`)),
+            }),
+          ],
+        },
+      ],
+    };
+    const { container } = render(<Canvas model={SEVEN_DECISIONS} />);
+
+    expect(fanSvg(container)?.querySelectorAll('path').length).toBe(5);
+
+    const pill = container.querySelector('[data-fan-pill]');
+    expect(pill?.textContent).toBe('7 steps'); // decisions.length, not the 3 drawn
+
+    expect(realStepCardCount(container)).toBe(3); // VISIBLE_DECISION_COUNT caps the draw
+    expect(screen.queryByText('no step yet')).toBeNull(); // no slot left empty
   });
 });

@@ -19,7 +19,16 @@
 
 import type { CanvasModel, Decision, Project, Session } from '../domain/model.js';
 import { allSessions, type SessionEntry, visibleDecisions } from '../domain/selectors.js';
-import { cellOrigin, INFO_OFFSET, INFO_SIZE, STEP_SIZE, stepSlotOffset } from './grid.js';
+import {
+  CELL,
+  cellOrigin,
+  FAN,
+  INFO_OFFSET,
+  INFO_SIZE,
+  STEP_SIZE,
+  STEP_SLOTS,
+  stepSlotOffset,
+} from './grid.js';
 
 export { INFO_SIZE, STEP_SIZE };
 
@@ -52,23 +61,47 @@ export type StepNodeSpec = {
 
 export type CanvasNodeSpec = InfoNodeSpec | StepNodeSpec;
 
-export type CanvasEdgeSpec = {
+/** The four statuses a colour exists for on the canvas — matches SessionFanNode. */
+export type FanBranchStatus = Session['status'] | 'empty';
+
+/** Scenery: the connector to a session's three step slots (epic.md §5.2). Not
+ *  navigable — kept out of `nodes` so Canvas.tsx's nodeIds memo never turns
+ *  it into a `j`/`k` destination. `sessionId` lets the focus effect find its
+ *  cell without parsing `id`. */
+export type FanSpec = {
+  readonly kind: 'fan';
   readonly id: string;
-  readonly source: string;
-  readonly target: string;
-  /**
-   * True for the link out of the session node: it stands in for the steps that
-   * are not drawn, and is styled as a break rather than a step.
-   */
-  readonly elided: boolean;
-  /** `+N` when steps were skipped, else null. */
-  readonly label: string | null;
+  readonly sessionId: string;
+  readonly sessionStatus: Session['status'];
+  /** One per slot position, top to bottom. `'empty'` where no step is drawn. */
+  readonly branchStatuses: readonly [FanBranchStatus, FanBranchStatus, FanBranchStatus];
+  /** `session.decisions.length` — NOT the number of branches drawn. */
+  readonly totalSteps: number;
+  readonly position: Position;
+  readonly size: Size;
+  readonly opacity: number;
+};
+
+/** Scenery: one of a session's three step positions. `placeholder` is true
+ *  where no decision fills it — the dashed "no step yet" card. Not
+ *  navigable, for the same reason `FanSpec` is not. */
+export type StepSlotSpec = {
+  readonly kind: 'slot';
+  readonly id: string;
+  readonly sessionId: string;
+  readonly placeholder: boolean;
+  readonly position: Position;
+  readonly size: Size;
+  readonly opacity: number;
 };
 
 export type CanvasLayout = {
   /** The navigable nodes. Positions are absolute. */
   readonly nodes: readonly CanvasNodeSpec[];
-  readonly edges: readonly CanvasEdgeSpec[];
+  /** Fans (one per session) and slots (exactly `STEP_SLOTS` per session).
+   *  Neither is navigable. */
+  readonly fans: readonly FanSpec[];
+  readonly slots: readonly StepSlotSpec[];
 };
 
 /**
@@ -178,9 +211,18 @@ export function stepNodeId(sessionId: string, decisionId: string): string {
   return `step:${sessionId}:${decisionId}`;
 }
 
+/** Scenery ids: a session's fan, and one of its three slot positions (0-based). */
+export function fanNodeId(sessionId: string): string {
+  return `fan:${sessionId}`;
+}
+export function slotNodeId(sessionId: string, position: number): string {
+  return `slot:${sessionId}:${position}`;
+}
+
 export function layoutCanvas(model: CanvasModel): CanvasLayout {
   const nodes: CanvasNodeSpec[] = [];
-  const edges: CanvasEdgeSpec[] = [];
+  const fans: FanSpec[] = [];
+  const slots: StepSlotSpec[] = [];
 
   // Emitted cell by cell in `orderedForCanvas` order, so reading order matches
   // visual order for a screen reader or a Tab traversal.
@@ -200,15 +242,11 @@ export function layoutCanvas(model: CanvasModel): CanvasLayout {
     };
     nodes.push(info);
 
-    let previousId = info.id;
-    const skipped = session.decisions.length - steps.length;
-
     steps.forEach((decision, slot) => {
-      const id = stepNodeId(session.id, decision.id);
       const offset = stepSlotOffset(slot);
       nodes.push({
         kind: 'step',
-        id,
+        id: stepNodeId(session.id, decision.id),
         entry,
         decision,
         ordinal: slot + 1,
@@ -216,21 +254,37 @@ export function layoutCanvas(model: CanvasModel): CanvasLayout {
         size: STEP_SIZE,
         opacity,
       });
-
-      edges.push({
-        id: `${previousId}->${id}`,
-        source: previousId,
-        target: id,
-        elided: slot === 0,
-        // Only the first edge can carry a count, and only when something was
-        // actually dropped. Labelling it `+0` would be a mark that means
-        // "nothing", which is worse than no mark.
-        label: slot === 0 && skipped > 0 ? `+${skipped}` : null,
-      });
-
-      previousId = id;
     });
+
+    const branchStatuses = Array.from({ length: STEP_SLOTS }, (_, slot) =>
+      slot < steps.length ? session.status : 'empty',
+    ) as [FanBranchStatus, FanBranchStatus, FanBranchStatus];
+
+    fans.push({
+      kind: 'fan',
+      id: fanNodeId(session.id),
+      sessionId: session.id,
+      sessionStatus: session.status,
+      branchStatuses,
+      totalSteps: session.decisions.length,
+      position: { x: origin.x + FAN.x, y: origin.y },
+      size: { width: FAN.width, height: CELL.height },
+      opacity,
+    });
+
+    for (let slot = 0; slot < STEP_SLOTS; slot += 1) {
+      const offset = stepSlotOffset(slot);
+      slots.push({
+        kind: 'slot',
+        id: slotNodeId(session.id, slot),
+        sessionId: session.id,
+        placeholder: slot >= steps.length,
+        position: { x: origin.x + offset.x, y: origin.y + offset.y },
+        size: STEP_SIZE,
+        opacity,
+      });
+    }
   });
 
-  return { nodes, edges };
+  return { nodes, fans, slots };
 }
