@@ -40,6 +40,14 @@ DRAWN and says it has nothing — `—`, or a `data-placeholder` element with a
 - **Minimap** — 168×96 plate, bottom right.
 - **UI language** — English throughout, per the operator's decision. 286 tests
   re-pointed and green.
+- **Canvas topology** (`src/canvas/layout.ts`, `src/canvas/grid.ts`) — a flat,
+  project-blind 2-column grid of 580×290 cells (`orderedForCanvas`, urgency
+  first). Each cell holds the session card at the left, vertically centred,
+  and up to three step cards stacked vertically to its right. An SVG fan
+  (trunk, spine, branches) connects the session card to its step slots and
+  carries an `N steps` pill. Project frames are gone from the canvas —
+  projects live only in the sidebar — and every node position is absolute;
+  nothing names a parent.
 
 ## Placeholders — drawn, inert, and why
 
