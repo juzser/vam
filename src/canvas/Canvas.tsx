@@ -272,11 +272,13 @@ function CanvasInner({
         position: spec.position,
         width: spec.size.width,
         height: spec.size.height,
-        style: { width: spec.size.width, height: spec.size.height },
+        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
         draggable: false,
         selectable: false,
         focusable: false,
         data: {
+          sessionId: spec.sessionId,
+          baseOpacity: spec.opacity,
           sessionStatus: spec.sessionStatus,
           branchStatuses: spec.branchStatuses,
           totalSteps: spec.totalSteps,
@@ -288,11 +290,11 @@ function CanvasInner({
         position: spec.position,
         width: spec.size.width,
         height: spec.size.height,
-        style: { width: spec.size.width, height: spec.size.height },
+        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
         draggable: false,
         selectable: false,
         focusable: false,
-        data: {},
+        data: { sessionId: spec.sessionId, baseOpacity: spec.opacity },
       })),
       ...layout.nodes.map((spec) => ({
         id: spec.id,
@@ -303,11 +305,24 @@ function CanvasInner({
         // falling back to a zero rectangle before ReactFlow has measured.
         width: spec.size.width,
         height: spec.size.height,
-        style: { width: spec.size.width, height: spec.size.height },
+        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
         data:
           spec.kind === 'info'
-            ? { entry: spec.entry, focused: false, jumpLabel: null }
-            : { entry: spec.entry, decision: spec.decision, focused: false, jumpLabel: null },
+            ? {
+                entry: spec.entry,
+                focused: false,
+                jumpLabel: null,
+                sessionId: spec.entry.session.id,
+                baseOpacity: spec.opacity,
+              }
+            : {
+                entry: spec.entry,
+                decision: spec.decision,
+                focused: false,
+                jumpLabel: null,
+                sessionId: spec.entry.session.id,
+                baseOpacity: spec.opacity,
+              },
       })),
     ],
     [layout],
@@ -348,18 +363,35 @@ function CanvasInner({
   // Focus and jump labels are presentation, not layout: they are written onto
   // the existing nodes rather than rebuilding them, so a node that has been
   // dragged keeps where the person put it.
+  //
+  // The focused-cell opacity override lives here too, for the same reason:
+  // `layoutCanvas` is a pure function of the model and has no idea where the
+  // cursor is, so it can only ever emit the status opacity. Every node reads
+  // `data.sessionId`/`data.baseOpacity` — stamped once in `initialNodes` — so
+  // this effect never has to re-derive them from the layout, and a cell that
+  // loses focus falls back to its own status opacity rather than staying at
+  // 1.0.
   useEffect(() => {
+    const focusedSessionId = focusedEntry?.session.id ?? null;
     setNodes((current) =>
-      current.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          focused: node.id === focusedId,
-          jumpLabel: labels.get(node.id) ?? null,
-        },
-      })),
+      current.map((node) => {
+        const data = node.data as { sessionId?: string; baseOpacity?: number };
+        const opacity =
+          data.sessionId !== undefined && data.sessionId === focusedSessionId
+            ? 1
+            : (data.baseOpacity ?? 1);
+        return {
+          ...node,
+          style: { ...node.style, opacity },
+          data: {
+            ...node.data,
+            focused: node.id === focusedId,
+            jumpLabel: labels.get(node.id) ?? null,
+          },
+        };
+      }),
     );
-  }, [focusedId, labels, setNodes]);
+  }, [focusedId, focusedEntry, labels, setNodes]);
 
   /** Move focus to a session by id — what the sidebar and the palette do. */
   const focusSession = useCallback((sessionId: string) => {
@@ -982,7 +1014,7 @@ function CanvasInner({
           <div className="relative min-h-0 flex-1">
             <ReactFlow
               nodes={nodes}
-              edges={edges}
+              edges={NO_EDGES}
               onNodesChange={onNodesChange}
               nodesDraggable={false}
               nodeTypes={NODE_TYPES}
