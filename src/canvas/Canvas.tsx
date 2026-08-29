@@ -63,7 +63,12 @@ import { StepNode } from './StepNode.js';
 import { StepSlotNode } from './StepSlotNode.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from './source.js';
 
-const NODE_TYPES = { info: SessionInfoNode, step: StepNode, fan: SessionFanNode, slot: StepSlotNode };
+const NODE_TYPES = {
+  info: SessionInfoNode,
+  step: StepNode,
+  fan: SessionFanNode,
+  slot: StepSlotNode,
+};
 
 /** ReactFlow requires an edges array; there is no custom edge type any more —
  *  the fan is a scenery node (epic.md §5.2). A module-level constant keeps

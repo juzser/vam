@@ -7,8 +7,8 @@ import {
   layoutCanvas,
   orderedForCanvas,
   orderedSessions,
-  slotNodeId,
   STEP_SIZE,
+  slotNodeId,
   stepNodeId,
 } from '../../src/canvas/layout.js';
 import { toNavNodes } from '../../src/canvas/nav-nodes.js';

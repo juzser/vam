@@ -18,6 +18,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { SmithApiError, type SmithClient } from '../../src/adapter/client.js';
 import { Canvas } from '../../src/canvas/Canvas.js';
+import { layoutCanvas } from '../../src/canvas/layout.js';
 import type { CanvasSource } from '../../src/canvas/source.js';
 import type { CanvasModel, Decision, Session } from '../../src/domain/model.js';
 
@@ -1108,5 +1109,80 @@ describe('undrag: a rendered node carries no pointer-interaction class', () => {
       expect(el.classList.contains(dragClass)).toBe(false);
       expect(el.classList.contains('nopan')).toBe(false);
     }
+  });
+});
+
+/**
+ * AC-9 — the generalised undrag/unfocusable/unselectable check for scenery.
+ *
+ * `layout.fans`/`layout.slots` ids are DERIVED here, never hard-coded as
+ * `fan:`/`slot:`, so this criterion cannot drift from what `layout.ts`
+ * actually emits. See docs/design for the mechanism boundary: this reads the
+ * DRAWN, resolved state — the one thing a grep over vam's own source cannot
+ * see when a prop was simply omitted and a library default silently won.
+ */
+describe('scenery nodes: no tab stop, no drag, no select', () => {
+  it('every fan and every slot renders tabindex=none role=none draggable=false selectable=false', () => {
+    const layout = layoutCanvas(MODEL);
+    const scenery = new Set([...layout.fans, ...layout.slots].map((s) => s.id));
+    expect(scenery.size).toBeGreaterThanOrEqual(4);
+
+    const { container } = render(<Canvas model={MODEL} />);
+    const report = [...container.querySelectorAll('.react-flow__node')]
+      .filter((el) => scenery.has(el.getAttribute('data-id') ?? ''))
+      .map((el) => {
+        const id = el.getAttribute('data-id');
+        const tabindex = el.getAttribute('tabindex') ?? 'none';
+        const role = el.getAttribute('role') ?? 'none';
+        const draggable = el.classList.contains('draggable');
+        const selectable = el.classList.contains('selectable');
+        return `${id} tabindex=${tabindex} role=${role} draggable=${draggable} selectable=${selectable}`;
+      });
+
+    expect(report.length).toBe(scenery.size);
+    expect(report.sort()).toEqual(
+      [...scenery]
+        .sort()
+        .map((id) => `${id} tabindex=none role=none draggable=false selectable=false`),
+    );
+  });
+});
+
+/**
+ * AC-8 — the focused-cell opacity override, applied in Canvas.tsx's existing
+ * focus effect rather than by re-running `layoutCanvas` (which cannot see
+ * focus at all: it is a pure function of the model).
+ */
+describe('the focused cell renders at full opacity, and the override moves with the cursor', () => {
+  const THREE: CanvasModel = {
+    projects: [
+      {
+        id: 'p1',
+        name: 'alpha',
+        source: 'black-smith',
+        sessions: [
+          session('s1', { status: 'waiting' }),
+          session('s2', { status: 'done' }),
+          session('s3', { status: 'running' }),
+        ],
+      },
+    ],
+  };
+
+  function cellOpacity(sessionId: string): string[] {
+    return [...document.querySelectorAll(`.react-flow__node[data-id^="info:${sessionId}"]`)].map(
+      (el) => (el as HTMLElement).style.opacity,
+    );
+  }
+
+  it('overrides the focused cell to 1 and clears the one it left', () => {
+    render(<Canvas model={THREE} />);
+    // s1 (waiting) is first in urgency order, so it starts focused.
+    expect(cellOpacity('s1')).toEqual(['1']);
+    expect(cellOpacity('s2')).toEqual(['0.45']);
+
+    press('j'); // s1 -> s2 (grid column 0, row 1)
+    expect(cellOpacity('s1')).toEqual(['0.72']);
+    expect(cellOpacity('s2')).toEqual(['1']);
   });
 });
