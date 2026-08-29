@@ -34,6 +34,15 @@ function model(...sessions: Session[]): CanvasModel {
   };
 }
 
+function twoProjects(bStatus: Session['status']): CanvasModel {
+  return {
+    projects: [
+      { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a')] },
+      { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b', { status: bStatus })] },
+    ],
+  };
+}
+
 describe('orderedSessions', () => {
   it('puts what is waiting on you first, then what is running, then the rest', () => {
     const ordered = orderedSessions(
@@ -98,13 +107,7 @@ describe('orderedSessions', () => {
 
 describe('orderedForCanvas', () => {
   it('ignores projects: a waiting session in project B beats a done session in project A', () => {
-    const two: CanvasModel = {
-      projects: [
-        { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a1')] },
-        { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b1', { status: 'waiting' })] },
-      ],
-    };
-    expect(orderedForCanvas(two).map((e) => e.session.id)).toEqual(['b1', 'a1']);
+    expect(orderedForCanvas(twoProjects('waiting')).map((e) => e.session.id)).toEqual(['b', 'a']);
   });
 });
 
@@ -205,15 +208,8 @@ describe('layoutCanvas', () => {
   });
 
   it('stacks sessions flat, ignoring project boundaries', () => {
-    // Frame gone: a waiting session in project 2 floats above a done one in
-    // project 1 — the property a frame would have blocked.
-    const two: CanvasModel = {
-      projects: [
-        { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a')] },
-        { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b', { status: 'waiting' })] },
-      ],
-    };
-    const { nodes } = layoutCanvas(two);
+    // Frame gone: waiting-in-p2 floats above done-in-p1, which a frame blocked.
+    const { nodes } = layoutCanvas(twoProjects('waiting'));
     const a = nodes.find((n) => n.id === infoNodeId('a'));
     const b = nodes.find((n) => n.id === infoNodeId('b'));
     expect(b?.position.y).toBeLessThan(a?.position.y ?? 0);

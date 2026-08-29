@@ -12,9 +12,9 @@
  * oldest to newest left to right, so the newest step is the one nearest the
  * detail panel that expands it.
  *
- * There is no project frame any more (`vam-canvas-topology` task-4).
- * `orderedForCanvas` stacks rows flat, urgency-first, project-blind. Every
- * position is absolute — no node names a parent.
+ * No project frame any more (`vam-canvas-topology` task-4): `orderedForCanvas`
+ * stacks rows flat, urgency-first, project-blind, and every position is
+ * absolute — no node names a parent.
  *
  * Pure and position-only. It does not know about ReactFlow, so it can be tested
  * without one, and the canvas component adapts it.
