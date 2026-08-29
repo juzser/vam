@@ -266,11 +266,9 @@ function CanvasInner({
 
   const initialNodes = useMemo<Node[]>(
     () => [
-      // Scenery first, so ReactFlow paints it behind the navigable nodes
-      // (epic.md §5.2). Never a `j`/`k` destination: `draggable`, `selectable`
-      // and `focusable` are each written explicitly — omitting any one hands
-      // the decision to @xyflow/react's board-level default, which is `true`
-      // for all three.
+      // Scenery first, painted behind the navigable nodes (epic.md §5.2).
+      // Never a `j`/`k` destination: draggable/selectable/focusable are each
+      // explicit — omitted, they'd default true (@xyflow/react board level).
       ...layout.fans.map((spec) => ({
         id: spec.id,
         type: 'fan',
@@ -311,23 +309,15 @@ function CanvasInner({
         width: spec.size.width,
         height: spec.size.height,
         style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
-        data:
-          spec.kind === 'info'
-            ? {
-                entry: spec.entry,
-                focused: false,
-                jumpLabel: null,
-                sessionId: spec.entry.session.id,
-                baseOpacity: spec.opacity,
-              }
-            : {
-                entry: spec.entry,
-                decision: spec.decision,
-                focused: false,
-                jumpLabel: null,
-                sessionId: spec.entry.session.id,
-                baseOpacity: spec.opacity,
-              },
+        data: {
+          ...(spec.kind === 'info'
+            ? { entry: spec.entry }
+            : { entry: spec.entry, decision: spec.decision }),
+          focused: false,
+          jumpLabel: null,
+          sessionId: spec.entry.session.id,
+          baseOpacity: spec.opacity,
+        },
       })),
     ],
     [layout],
@@ -365,17 +355,11 @@ function CanvasInner({
     }
   }, [nodeIds, focusedId]);
 
-  // Focus and jump labels are presentation, not layout: they are written onto
-  // the existing nodes rather than rebuilding them, so a node that has been
-  // dragged keeps where the person put it.
-  //
-  // The focused-cell opacity override lives here too, for the same reason:
-  // `layoutCanvas` is a pure function of the model and has no idea where the
-  // cursor is, so it can only ever emit the status opacity. Every node reads
-  // `data.sessionId`/`data.baseOpacity` — stamped once in `initialNodes` — so
-  // this effect never has to re-derive them from the layout, and a cell that
-  // loses focus falls back to its own status opacity rather than staying at
-  // 1.0.
+  // Focus, jump labels and the focused-cell opacity override are all
+  // presentation, written onto the existing nodes rather than rebuilding
+  // them: `layoutCanvas` is a pure function of the model and cannot see
+  // focus, so it can only ever emit the status opacity read from
+  // `data.baseOpacity` (stamped once in `initialNodes`).
   useEffect(() => {
     const focusedSessionId = focusedEntry?.session.id ?? null;
     setNodes((current) =>

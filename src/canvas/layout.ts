@@ -64,18 +64,13 @@ export type CanvasNodeSpec = InfoNodeSpec | StepNodeSpec;
 /** The four statuses a colour exists for on the canvas — matches SessionFanNode. */
 export type FanBranchStatus = Session['status'] | 'empty';
 
-/**
- * Scenery: the connector between a session card and its three step slots
- * (epic.md §5.2). Not navigable — kept out of `nodes` so Canvas.tsx's
- * nodeIds memo, which filters `nodes` alone, never turns it into a `j`/`k`
- * destination.
- */
+/** Scenery: the connector to a session's three step slots (epic.md §5.2). Not
+ *  navigable — kept out of `nodes` so Canvas.tsx's nodeIds memo never turns
+ *  it into a `j`/`k` destination. `sessionId` lets the focus effect find its
+ *  cell without parsing `id`. */
 export type FanSpec = {
   readonly kind: 'fan';
   readonly id: string;
-  /** Which session's cell this fan belongs to — Canvas.tsx's focus effect
-   *  needs it to apply the focused-cell opacity override without parsing
-   *  `id`. */
   readonly sessionId: string;
   readonly sessionStatus: Session['status'];
   /** One per slot position, top to bottom. `'empty'` where no step is drawn. */
@@ -84,33 +79,28 @@ export type FanSpec = {
   readonly totalSteps: number;
   readonly position: Position;
   readonly size: Size;
-  /** Status-derived; see `STATUS_OPACITY`. Same value as the cell's info node. */
   readonly opacity: number;
 };
 
-/**
- * Scenery: one of a session's three step positions. `placeholder` is true
- * where no decision fills the position — that is the dashed "no step yet"
- * card. Not navigable, for the same reason `FanSpec` is not.
- */
+/** Scenery: one of a session's three step positions. `placeholder` is true
+ *  where no decision fills it — the dashed "no step yet" card. Not
+ *  navigable, for the same reason `FanSpec` is not. */
 export type StepSlotSpec = {
   readonly kind: 'slot';
   readonly id: string;
-  /** Same reason `FanSpec.sessionId` exists. */
   readonly sessionId: string;
   readonly placeholder: boolean;
   readonly position: Position;
   readonly size: Size;
-  /** Status-derived; see `STATUS_OPACITY`. Same value as the cell's info node. */
   readonly opacity: number;
 };
 
 export type CanvasLayout = {
   /** The navigable nodes. Positions are absolute. */
   readonly nodes: readonly CanvasNodeSpec[];
-  /** Scenery — one per session. Not navigable. */
+  /** Fans (one per session) and slots (exactly `STEP_SLOTS` per session).
+   *  Neither is navigable. */
   readonly fans: readonly FanSpec[];
-  /** Scenery — exactly `STEP_SLOTS` per session. Not navigable. */
   readonly slots: readonly StepSlotSpec[];
 };
 
@@ -221,12 +211,10 @@ export function stepNodeId(sessionId: string, decisionId: string): string {
   return `step:${sessionId}:${decisionId}`;
 }
 
-/** The scenery id for a session's fan. */
+/** Scenery ids: a session's fan, and one of its three slot positions (0-based). */
 export function fanNodeId(sessionId: string): string {
   return `fan:${sessionId}`;
 }
-
-/** The scenery id for one of a session's three step slot positions (0-based). */
 export function slotNodeId(sessionId: string, position: number): string {
   return `slot:${sessionId}:${position}`;
 }

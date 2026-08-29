@@ -1112,15 +1112,8 @@ describe('undrag: a rendered node carries no pointer-interaction class', () => {
   });
 });
 
-/**
- * AC-9 — the generalised undrag/unfocusable/unselectable check for scenery.
- *
- * `layout.fans`/`layout.slots` ids are DERIVED here, never hard-coded as
- * `fan:`/`slot:`, so this criterion cannot drift from what `layout.ts`
- * actually emits. See docs/design for the mechanism boundary: this reads the
- * DRAWN, resolved state — the one thing a grep over vam's own source cannot
- * see when a prop was simply omitted and a library default silently won.
- */
+// AC-9: reads the DRAWN state — the one thing a grep over vam's own source
+// cannot see when a prop was simply omitted and a library default won.
 describe('scenery nodes: no tab stop, no drag, no select', () => {
   it('every fan and every slot renders tabindex=none role=none draggable=false selectable=false', () => {
     const layout = layoutCanvas(MODEL);
@@ -1148,11 +1141,8 @@ describe('scenery nodes: no tab stop, no drag, no select', () => {
   });
 });
 
-/**
- * AC-8 — the focused-cell opacity override, applied in Canvas.tsx's existing
- * focus effect rather than by re-running `layoutCanvas` (which cannot see
- * focus at all: it is a pure function of the model).
- */
+// AC-8: the focused-cell opacity override, applied in Canvas.tsx's focus
+// effect — never by re-running layoutCanvas, which cannot see focus.
 describe('the focused cell renders at full opacity, and the override moves with the cursor', () => {
   const THREE: CanvasModel = {
     projects: [
@@ -1168,21 +1158,17 @@ describe('the focused cell renders at full opacity, and the override moves with 
       },
     ],
   };
-
-  function cellOpacity(sessionId: string): string[] {
-    return [...document.querySelectorAll(`.react-flow__node[data-id^="info:${sessionId}"]`)].map(
-      (el) => (el as HTMLElement).style.opacity,
-    );
-  }
+  const cellOpacity = (sessionId: string) =>
+    (document.querySelector(`.react-flow__node[data-id^="info:${sessionId}"]`) as HTMLElement)
+      ?.style.opacity;
 
   it('overrides the focused cell to 1 and clears the one it left', () => {
     render(<Canvas model={THREE} />);
-    // s1 (waiting) is first in urgency order, so it starts focused.
-    expect(cellOpacity('s1')).toEqual(['1']);
-    expect(cellOpacity('s2')).toEqual(['0.45']);
+    expect(cellOpacity('s1')).toBe('1'); // waiting sorts first, so s1 starts focused
+    expect(cellOpacity('s2')).toBe('0.45');
 
     press('j'); // s1 -> s2 (grid column 0, row 1)
-    expect(cellOpacity('s1')).toEqual(['0.72']);
-    expect(cellOpacity('s2')).toEqual(['1']);
+    expect(cellOpacity('s1')).toBe('0.72');
+    expect(cellOpacity('s2')).toBe('1');
   });
 });
