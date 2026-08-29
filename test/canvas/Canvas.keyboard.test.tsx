@@ -345,8 +345,8 @@ describe('the detail panel', () => {
     // right words to the wrong agent, and here the wrong agent is another repo's.
     render(<Canvas model={MODEL} />);
     expect(promptTarget()).toBe('alpha/a1');
-    press('j');
-    expect(promptTarget()).toBe('alpha/a2');
+    press('j'); // b1 sits directly below a1 in the grid
+    expect(promptTarget()).toBe('beta/b1');
   });
 
   it('lists the bash commands the agent proposed, with their text', () => {
@@ -445,10 +445,12 @@ describe('filtering the sidebar with /', () => {
     keyOn(filterInput() as HTMLInputElement, 'Enter');
     expect(mode()).toBe('NORMAL');
     press('j');
-    expect(focused()).toBe('alpha/a2');
-    press('j');
-    expect(focused()).toBe('alpha/a2');
+    // b1 — the only cell directly below a1 in the grid — is filtered out, and
+    // there is nothing else left in a1's column to walk to.
+    expect(focused()).toBe('alpha/a1');
     expect(screen.getByText(/nothing lies/)).toBeTruthy();
+    press('j');
+    expect(focused()).toBe('alpha/a1');
   });
 
   it('n keeps walking the matches after Enter closed the box', () => {
@@ -464,7 +466,8 @@ describe('filtering the sidebar with /', () => {
 
   it('Escape drops the filter and puts focus back where it started', () => {
     render(<Canvas model={MODEL} />);
-    press('j'); // alpha/a2
+    press('l');
+    press('l'); // alpha/a2 — a1's short chain runs `l` straight into it
     press('/');
     typeInto(filterInput() as HTMLInputElement, 'beta');
     expect(focused()).toBe('beta/b1');
@@ -548,7 +551,9 @@ describe('the sidebar', () => {
       (rows()[2] as HTMLElement).click();
     });
     press('k');
-    expect(focused()).toBe('alpha/a2');
+    // b1 sits directly below a1 in the grid; a2 is in the other column and
+    // does not share b1's band, so `k` from b1 lands on a1.
+    expect(focused()).toBe('alpha/a1');
   });
 
   it('offers adding a session, and names the CLI that actually creates one', () => {
@@ -573,9 +578,9 @@ describe('the sidebar', () => {
 describe('renaming, icons and closing', () => {
   it('r opens rename on the focused row, seeded with its current name', () => {
     render(<Canvas model={MODEL} />);
-    press('j');
+    press('j'); // b1 sits directly below a1 in the grid
     press('r');
-    expect(renameInput()?.value).toBe('a2');
+    expect(renameInput()?.value).toBe('b1');
   });
 
   it('rename does not claim to have saved — a session id is what the log chains on', () => {
@@ -609,9 +614,9 @@ describe('renaming, icons and closing', () => {
 
   it('names the session it is picking for', () => {
     render(<Canvas model={MODEL} />);
-    press('j');
+    press('j'); // b1 sits directly below a1 in the grid
     press('s');
-    expect(iconPicker()?.textContent).toContain('a2');
+    expect(iconPicker()?.textContent).toContain('b1');
   });
 
   it('shows an icon you chose on a previous visit', () => {
