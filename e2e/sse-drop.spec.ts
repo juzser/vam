@@ -7,16 +7,29 @@
  * (`vite.config.ts`, target `VAM_SMITH_URL` or its own default,
  * `changeOrigin: false`), a black-smith process that is killed surfaces at
  * the browser as an `error` event, and once the process is back the browser's
- * own reconnect surfaces `open` then `hello` — with no `readyState` ever
- * observed as 2 (CLOSED) — and the canvas then shows, with no reload, the
- * session that changed while the server was down.
+ * own reconnect surfaces `open` then `hello`. On the path this spec drives —
+ * kill, then restart inside the browser's single retry — no tuple carries
+ * `readyState` 2 (CLOSED), and the canvas then shows, with no reload, the
+ * session that changed while the server was down. That is scoped to this
+ * path, not general: with the server NOT restarted, the browser gives up —
+ * one retry at ~3.7s, an `error` with `readyState` 2, and no further
+ * attempt — because vite answers a dead upstream with `GET /api/stream` ->
+ * `HTTP/1.1 502 Bad Gateway`, `Content-Type: text/plain`, and the HTML
+ * specification makes a non-200/non-`text/event-stream` response fatal for
+ * `EventSource`. This epic's own negative control records exactly that:
+ * `state/artifacts/vam-sse-canvas/task-4-acg1-e2e/falsification-no-restart.txt`.
  *
  * WHAT THIS CANNOT SHOW: `kill()` closes the TCP socket cleanly, which is the
  * EASY case for a proxy to propagate. It says nothing about a half-open
  * connection — the silent stall epic.md section 3.4 records, where a proxy
  * failed to forward an upstream close and the browser never saw an `error`
- * at all. It also says nothing about `vite preview` (a second, separate
- * proxy block in the same config) or about a production host with no proxy.
+ * at all. It also says nothing about a production host with no proxy.
+ * `vite.config.ts:22` declares one `const proxy` object referenced by BOTH
+ * `server.proxy` and `preview.proxy`, so `vite preview` shares the same
+ * `configure` hook and the same fix — but no run here has exercised preview,
+ * only that the code path is shared; a future edit that splits that shared
+ * object into two literals would drop the hook from one of them with
+ * nothing in this repo to catch it.
  *
  * THE COST THIS ADDS: a pinned Playwright harness fetched at run time and a
  * headless Chromium download (near-zero on a machine with
@@ -231,9 +244,13 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
   server = startServer(cli, stateDir, dbPath, port);
   await waitForHealth(`http://127.0.0.1:${port}/api/health`, 15_000);
 
-  // The browser's reconnect delay is governed by the server's own `retry`
-  // directive (the `hello` frame reports `floorMs: 10000`), so these windows
-  // must clear that floor with room for the restart itself.
+  // The server sends no `retry:` field (epic.md section 3.2); the browser's
+  // own default reconnect governs, measured at a constant 3.00s with no
+  // backoff. These windows are not sized for that reconnect — they are sized
+  // for the SERVER RESTART: `startServer` plus `waitForHealth` above already
+  // spent up to 15s, and `waitForTuple` here budgets the same 15s twice more
+  // (30_000 covers `open` after `waitForHealth`'s own retries; 10_000 covers
+  // `hello` right behind it) so a slow-but-correct restart still passes.
   await waitForTuple(page, (t) => t.event === 'open', 30_000, watermark);
   await waitForTuple(page, (t) => t.event === 'hello', 10_000, watermark);
 
@@ -242,13 +259,20 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
   // (`data-session-row`, `src/panels/SessionList.tsx`), never layout or node
   // counts: a sibling epic is free to redraw the canvas around this session
   // list without invalidating this assertion.
-  await expect(page.locator(`[data-session-row="${sessionB}"]`)).toBeVisible({ timeout: 10_000 });
+  const sessionBRowSelector = `[data-session-row="${sessionB}"]`;
+  await expect(page.locator(sessionBRowSelector)).toBeVisible({ timeout: 10_000 });
 
   // Sampled only now, after the recovery assertion: a transcript captured
   // before step (d) is a snapshot of the pre-reconnect state and is silent
   // about the very property AC-G1 exists to record.
   const allTuples = (await page.evaluate(() => (window as unknown as { __sseEvents: SseTuple[] }).__sseEvents)) as SseTuple[];
   expect(allTuples.some((t) => t.readyState === 2)).toBe(false);
+
+  // Same locator, same passing assertion, recorded rather than discarded:
+  // the transcript's own (d), so a second operator can adjudicate AC-G1 from
+  // the committed file instead of a run nobody can re-read.
+  const canvasTMs = await page.evaluate(() => Date.now() - (window as unknown as { __t0: number }).__t0);
+  const canvas = { selector: sessionBRowSelector, visible: true, tMs: canvasTMs };
 
   server.kill('SIGKILL');
 
@@ -269,6 +293,7 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
         sessionA,
         sessionB,
         tuples: allTuples,
+        canvas,
       },
       null,
       2,
