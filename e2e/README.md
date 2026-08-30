@@ -126,9 +126,32 @@ export SMITH_CLI_ENTRY=/path/to/black-smith/factory/orchestrator/dist/cli.js
 export SMITH_E2E_STATE_DIR="$STATE_DIR"
 export SMITH_E2E_PORT=4680
 
-# 3. Run it (this also starts and stops vam's own vite dev server for you).
-npm run test:e2e
+# 3. Playwright is NOT a vam dependency and vam's node_modules is a symlink to
+#    one tree shared by every worktree on this machine, so install it LOCALLY,
+#    beside the spec. Copy it from an existing npx cache if you have one;
+#    never install into the shared tree, which would break every other vam
+#    checkout.
+#    IMPORTANT on a fresh clone: e2e/node_modules is kept out of git by
+#    .git/info/exclude, which is LOCAL TO THIS MACHINE and is not cloned. On
+#    any other checkout you must exclude it yourself, or the transcript's
+#    --untracked-files=all dirty stamp will fire on it and mark vamSha
+#    `-dirty` for a directory that is not source. That is a false positive,
+#    never a false clean, so it cannot make a transcript overclaim -- but it
+#    will make an honest run look unreproducible, so exclude it.
+#    cp -R "$(npm root -g)/../_npx/*/node_modules" e2e/node_modules   # or npm i --prefix e2e @playwright/test@1.62.1
+
+# 4. Run it (this also starts and stops vam's own vite dev server for you).
+e2e/node_modules/.bin/playwright test --config=e2e/playwright.config.ts
 ```
+
+**Use that command, not `npm run test:e2e`.** The `test:e2e` script shells out
+to `npx`, and in this layout npx's own install and the config's bare
+`import '@playwright/test'` resolve to two different places, so the run dies
+before it starts with `ERR_MODULE_NOT_FOUND: Cannot find package
+'@playwright/test'`. The committed transcript's `runnerCommand` field records
+the local-binary form for the same reason: a transcript that names a command
+which cannot reproduce it is exactly the defect this epic spent a plan version
+correcting on the `vamSha` field.
 
 `npm run test:e2e` shells out to `npx`. With an npm 6 `npx` on `PATH` the
 runner and the spec's `import '@playwright/test'` can resolve to two different

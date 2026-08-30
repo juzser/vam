@@ -1,21 +1,21 @@
 {
-  "runnerCommand": "npx @playwright/test@1.62.1 test --config=e2e/playwright.config.ts",
+  "runnerCommand": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.config.ts",
   "playwrightVersion": "1.62.1",
-  "vamSha": "c59a0e472f1609fa41fce73c437996bb311335b8",
+  "vamSha": "a9d8eb1ebf6bc5d7ad9486941b4b9d03ad31f1c7",
   "blackSmithSha": "a59826953dd5aee3b30fe5d3e4a1597aeb0f965c-dirty",
-  "capturedAt": "2026-08-30T11:22:13.825Z",
-  "sessionA": "e2e-acg1-1788088929152-a",
-  "sessionB": "e2e-acg1-1788088929152-b",
+  "capturedAt": "2026-08-30T11:27:45.937Z",
+  "sessionA": "e2e-acg1-1788089261195-a",
+  "sessionB": "e2e-acg1-1788089261195-b",
   "tuples": [
     {
       "event": "open",
       "readyState": 1,
-      "tMs": 162
+      "tMs": 167
     },
     {
       "event": "hello",
       "readyState": 1,
-      "tMs": 162,
+      "tMs": 168,
       "detail": {
         "heartbeatMs": 15000,
         "floorMs": 10000
@@ -24,28 +24,28 @@
     {
       "event": "change",
       "readyState": 1,
-      "tMs": 663,
+      "tMs": 683,
       "detail": {
         "sessions": [
-          "e2e-acg1-1788088929152-a"
+          "e2e-acg1-1788089261195-a"
         ],
-        "at": "2026-08-30T11:22:10.611Z"
+        "at": "2026-08-30T11:27:42.737Z"
       }
     },
     {
       "event": "error",
       "readyState": 0,
-      "tMs": 726
+      "tMs": 746
     },
     {
       "event": "open",
       "readyState": 1,
-      "tMs": 3733
+      "tMs": 3753
     },
     {
       "event": "hello",
       "readyState": 1,
-      "tMs": 3733,
+      "tMs": 3753,
       "detail": {
         "heartbeatMs": 15000,
         "floorMs": 10000
@@ -54,19 +54,19 @@
     {
       "event": "change",
       "readyState": 1,
-      "tMs": 3748,
+      "tMs": 3769,
       "detail": {
         "sessions": [
-          "e2e-acg1-1788088929152-a",
-          "e2e-acg1-1788088929152-b"
+          "e2e-acg1-1788089261195-a",
+          "e2e-acg1-1788089261195-b"
         ],
-        "at": "2026-08-30T11:22:13.691Z"
+        "at": "2026-08-30T11:27:45.818Z"
       }
     }
   ],
   "canvas": {
-    "selector": "[data-session-row=\"e2e-acg1-1788088929152-b\"]",
+    "selector": "[data-session-row=\"e2e-acg1-1788089261195-b\"]",
     "visible": true,
-    "tMs": 3839
+    "tMs": 3845
   }
 }

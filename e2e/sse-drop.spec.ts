@@ -308,7 +308,15 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
     path.join(__dirname, 'acg1-transcript.json'),
     `${JSON.stringify(
       {
-        runnerCommand: 'npx @playwright/test@1.62.1 test --config=e2e/playwright.config.ts',
+        // The invocation that actually produces this file. NOT `npx` and NOT
+        // `npm run test:e2e`: @playwright/test is not a vam dependency, and in
+        // this factory's layout vam's node_modules is a symlink to one tree
+        // shared by every worktree, so npx's install and this config's bare
+        // `import '@playwright/test'` resolve to two different places and the
+        // run dies with ERR_MODULE_NOT_FOUND. A transcript naming a command
+        // that cannot reproduce it is the same defect as a sha that cannot --
+        // see e2e/README.md, "Reproducing this transcript".
+        runnerCommand: 'e2e/node_modules/.bin/playwright test --config=e2e/playwright.config.ts',
         playwrightVersion,
         vamSha,
         blackSmithSha,
