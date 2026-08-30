@@ -29,6 +29,16 @@
  *
  * Every machine-specific path is an environment variable; unset, this test
  * skips rather than false-passing.
+ *
+ * NEGATIVE CONTROL (epic AC-3): this spec was falsified against `onHello:
+ * () => void loadRef.current(),` deleted from `src/adapter/useCanvas.ts`.
+ * With that line gone the run fails exactly here:
+ * `Locator: locator('[data-session-row="...-b"]')` / `Expected: visible` /
+ * `Timeout: 10000ms`. Restoring the line and re-running the same command
+ * passes. Both runners' verbatim output, in the black-smith repo:
+ * `state/artifacts/vam-acg1-discriminating-ac10/task-2-falsification/falsification-onhello-removed.txt`
+ * and
+ * `state/artifacts/vam-acg1-discriminating-ac10/task-2-falsification/confirmation-onhello-restored.txt`.
  */
 
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';

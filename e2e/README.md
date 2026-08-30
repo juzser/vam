@@ -275,6 +275,15 @@ e2e/node_modules/.bin/playwright test --config=e2e/playwright.reconnect.config.t
 recorded frames and `helloCount`. `runnerCommand` names this section's
 config, not AC-G1's.
 
+## Negative control
+
+This spec's discriminating power (epic AC-3) was proved by running it once
+with `onHello` deleted (red) and once restored (green); both runners'
+verbatim output is committed in the black-smith repo at
+`state/artifacts/vam-acg1-discriminating-ac10/task-2-falsification/falsification-onhello-removed.txt`
+and `.../confirmation-onhello-restored.txt`, not in this repo (raw output
+carries absolute machine paths).
+
 ## Cleanup
 
 Same discipline as AC-G1: the spec kills its own vite and black-smith
