@@ -15,8 +15,12 @@
  * EASY case for a proxy to propagate. It says nothing about a half-open
  * connection — the silent stall epic.md section 3.4 records, where a proxy
  * failed to forward an upstream close and the browser never saw an `error`
- * at all. It also says nothing about `vite preview` (a second, separate
- * proxy block in the same config) or about a production host with no proxy.
+ * at all. Nor has any run here exercised `vite preview` -- but not because it
+ * is a separate proxy: `vite.config.ts` declares `const proxy` ONCE (`:22`)
+ * and both `server.proxy` (`:55`) and `preview.proxy` (`:62`) reference that
+ * same object, so preview shares the `configure` hook and therefore the same
+ * fix. "Shares the fixed code path" is the claim; "tested" is not. It also
+ * says nothing about a production host with no proxy.
  *
  * THE COST THIS ADDS: a pinned Playwright harness fetched at run time and a
  * headless Chromium download (near-zero on a machine with
@@ -231,9 +235,25 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
   server = startServer(cli, stateDir, dbPath, port);
   await waitForHealth(`http://127.0.0.1:${port}/api/health`, 15_000);
 
-  // The browser's reconnect delay is governed by the server's own `retry`
-  // directive (the `hello` frame reports `floorMs: 10000`), so these windows
-  // must clear that floor with room for the restart itself.
+  // The server sends NO `retry:` field (epic.md 3.2), so the browser's own
+  // default reconnect governs, measured at a 3.00s constant with no backoff
+  // (gaps of 3010 / 3004 / 3004 ms). Do NOT size these windows off `floorMs`
+  // from the `hello` frame: 3.3 fact 3 records that floorMs is not observable
+  // from a browser at all, and that floorMs (10000) is LESS than heartbeatMs
+  // (15000), so the two cannot compose into a sound bound -- reasoning from it
+  // is the exact composition AC-4 exists to forbid. 30s is ~10x the measured
+  // delay, which leaves room for the restart itself.
+  //
+  // PRECONDITION, and how to classify a RED run here. Recovery through the dev
+  // proxy holds only while the server is back before the browser's FIRST retry
+  // (~3s). A dead upstream behind a live vite proxy answers 502 text/plain,
+  // which the HTML spec makes a FATAL EventSource error: readyState 2 (CLOSED)
+  // and no further attempt, ever. So if `waitForHealth` above took long enough
+  // that the retry landed on the 502, this wait dies at the 30s timeout and the
+  // last tuple reads readyState 2. That is a SLOW MACHINE, not a product
+  // defect, and it is NOT the finding-and-a-new-plan-version case AC-G1's R-2
+  // clause describes. Re-run it. A red run with a readyState-0 error tuple and
+  // no post-restart `open` is the real defect.
   await waitForTuple(page, (t) => t.event === 'open', 30_000, watermark);
   await waitForTuple(page, (t) => t.event === 'hello', 10_000, watermark);
 
