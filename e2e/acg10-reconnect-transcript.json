@@ -1,0 +1,83 @@
+{
+  "runnerCommand": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.reconnect.config.ts",
+  "playwrightVersion": "1.62.1",
+  "vamSha": "bf09239c71deb7bcc66af9ce20deeed593005ecb-dirty",
+  "blackSmithSha": "c4e89f6c523bebd5553a92299fc298f4a6d4a535-dirty",
+  "capturedAt": "2026-08-30T16:17:11.458Z",
+  "sessionA": "e2e-acg10-reconnect-1788106626800-a",
+  "sessionB": "e2e-acg10-reconnect-1788106626800-b",
+  "tuples": [
+    {
+      "event": "open",
+      "readyState": 1,
+      "tMs": 76
+    },
+    {
+      "event": "hello",
+      "readyState": 1,
+      "tMs": 76,
+      "detail": {
+        "heartbeatMs": 15000,
+        "floorMs": 10000
+      }
+    },
+    {
+      "event": "error",
+      "readyState": 0,
+      "tMs": 179
+    },
+    {
+      "event": "open",
+      "readyState": 1,
+      "tMs": 3197
+    },
+    {
+      "event": "hello",
+      "readyState": 1,
+      "tMs": 3197,
+      "detail": {
+        "heartbeatMs": 15000,
+        "floorMs": 10000
+      }
+    }
+  ],
+  "canvas": {
+    "selector": "[data-session-row=\"e2e-acg10-reconnect-1788106626800-b\"]",
+    "visible": true,
+    "tMs": 3233
+  },
+  "streamA": {
+    "helloCount": 1,
+    "frames": [
+      {
+        "event": "hello",
+        "tMs": 781,
+        "detail": {
+          "heartbeatMs": 15000,
+          "floorMs": 10000
+        }
+      },
+      {
+        "event": "change",
+        "tMs": 788,
+        "detail": {
+          "sessions": [
+            "e2e-acg10-reconnect-1788106626800-a"
+          ],
+          "at": "2026-08-30T16:17:07.587Z"
+        }
+      },
+      {
+        "event": "change",
+        "tMs": 1965,
+        "detail": {
+          "sessions": [
+            "e2e-acg10-reconnect-1788106626800-b"
+          ],
+          "at": "2026-08-30T16:17:08.764Z"
+        }
+      }
+    ],
+    "watermarkIndex": 2
+  }
+}
