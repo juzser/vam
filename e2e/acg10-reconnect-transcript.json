@@ -1,21 +1,21 @@
 {
   "runnerCommand": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.reconnect.config.ts",
   "playwrightVersion": "1.62.1",
-  "vamSha": "bf09239c71deb7bcc66af9ce20deeed593005ecb-dirty",
+  "vamSha": "d9fe84dc8153a1e4d76abdb5a0da288db80076ac-dirty",
   "blackSmithSha": "c4e89f6c523bebd5553a92299fc298f4a6d4a535-dirty",
-  "capturedAt": "2026-08-30T16:17:11.458Z",
-  "sessionA": "e2e-acg10-reconnect-1788106626800-a",
-  "sessionB": "e2e-acg10-reconnect-1788106626800-b",
+  "capturedAt": "2026-08-30T16:43:55.396Z",
+  "sessionA": "e2e-acg10-reconnect-1788108230647-a",
+  "sessionB": "e2e-acg10-reconnect-1788108230647-b",
   "tuples": [
     {
       "event": "open",
       "readyState": 1,
-      "tMs": 76
+      "tMs": 77
     },
     {
       "event": "hello",
       "readyState": 1,
-      "tMs": 76,
+      "tMs": 77,
       "detail": {
         "heartbeatMs": 15000,
         "floorMs": 10000
@@ -29,12 +29,12 @@
     {
       "event": "open",
       "readyState": 1,
-      "tMs": 3197
+      "tMs": 3192
     },
     {
       "event": "hello",
       "readyState": 1,
-      "tMs": 3197,
+      "tMs": 3192,
       "detail": {
         "heartbeatMs": 15000,
         "floorMs": 10000
@@ -42,16 +42,16 @@
     }
   ],
   "canvas": {
-    "selector": "[data-session-row=\"e2e-acg10-reconnect-1788106626800-b\"]",
+    "selector": "[data-session-row=\"e2e-acg10-reconnect-1788108230647-b\"]",
     "visible": true,
-    "tMs": 3233
+    "tMs": 3307
   },
   "streamA": {
     "helloCount": 1,
     "frames": [
       {
         "event": "hello",
-        "tMs": 781,
+        "tMs": 788,
         "detail": {
           "heartbeatMs": 15000,
           "floorMs": 10000
@@ -59,22 +59,22 @@
       },
       {
         "event": "change",
-        "tMs": 788,
+        "tMs": 795,
         "detail": {
           "sessions": [
-            "e2e-acg10-reconnect-1788106626800-a"
+            "e2e-acg10-reconnect-1788108230647-a"
           ],
-          "at": "2026-08-30T16:17:07.587Z"
+          "at": "2026-08-30T16:43:51.442Z"
         }
       },
       {
         "event": "change",
-        "tMs": 1965,
+        "tMs": 2000,
         "detail": {
           "sessions": [
-            "e2e-acg10-reconnect-1788106626800-b"
+            "e2e-acg10-reconnect-1788108230647-b"
           ],
-          "at": "2026-08-30T16:17:08.764Z"
+          "at": "2026-08-30T16:43:52.647Z"
         }
       }
     ],

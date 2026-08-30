@@ -168,10 +168,18 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
   });
 
   const blackSmith = startServer(cli, stateDir, dbPath, port);
-  await waitForHealth(`http://127.0.0.1:${port}/api/health`, 15_000);
+  // `vite` is declared here, before the protected region opens, so the
+  // `finally` below can reach it even when the throw that triggers teardown
+  // happens before `startVite` ever runs (in which case it stays undefined
+  // and the guarded kill below is a no-op).
+  let vite: ChildProcessWithoutNullStreams | undefined;
 
   // Stream A: a real second SSE client of /api/stream, `fetch`-based (no
   // new dependency, no auto-retry — see the stream-A rationale below).
+  // Declared here, outside the `try`, because `finally` needs to reach
+  // them for cleanup regardless of where inside the protected region a
+  // throw happens; none of these declarations themselves spawn a process
+  // or can throw synchronously.
   const streamAController = new AbortController();
   const streamAFrames: StreamAFrame[] = [];
   const streamAState = { tornDown: false, endedUnexpectedly: false, erroredUnexpectedly: false, reopened: false };
@@ -230,14 +238,6 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
     }
   }
 
-  // WHY STREAM A EXISTS: subscribing keeps black-smith's
-  // `changeFeed.ts:143-169` watcher and floor timer armed — `listeners.size`
-  // gates both, arming at 1 and disarming at 0. Without stream A holding
-  // `listeners.size >= 1` through the outage, session B would never be
-  // projected while vite is down, and the test would collapse back into the
-  // confound this epic removes.
-  const streamAReading = readStreamA();
-
   async function waitForStreamAFrame(predicate: (f: StreamAFrame) => boolean, timeoutMs: number): Promise<StreamAFrame> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
@@ -252,58 +252,72 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
     }
   }
 
-  // Proof black-smith accepted stream A and armed the watcher.
-  await waitForStreamAFrame((f) => f.event === 'hello', 5_000);
-
-  buildOnce(repoRoot);
-  let vite = startVite(repoRoot, VITE_PORT);
-  await waitForHealth(`http://127.0.0.1:${VITE_PORT}/`, 15_000);
-
-  await page.addInitScript(() => {
-    const w = window as unknown as { __t0: number; __sseEvents: SseTuple[] };
-    w.__t0 = Date.now();
-    w.__sseEvents = [];
-    const Native = window.EventSource;
-    // biome-ignore-file: this init script runs in the page, not through vam's lint config.
-    window.EventSource = new Proxy(Native, {
-      construct(target, args: ConstructorParameters<typeof EventSource>) {
-        const es = new target(...args);
-        const record = (name: SseTuple['event']) => (ev: Event) => {
-          let detail: unknown;
-          const data = (ev as MessageEvent<string>).data;
-          if (typeof data === 'string') {
-            try {
-              detail = JSON.parse(data);
-            } catch {
-              detail = undefined;
-            }
-          }
-          w.__sseEvents.push({
-            event: name,
-            readyState: es.readyState,
-            tMs: Date.now() - w.__t0,
-            ...(detail !== undefined ? { detail } : {}),
-          });
-        };
-        es.addEventListener('open', record('open'));
-        es.addEventListener('error', record('error'));
-        es.addEventListener('hello', record('hello'));
-        es.addEventListener('change', record('change'));
-        return es;
-      },
-    });
-  });
-
-  await page.goto('/');
-  await waitForTuple(page, (t) => t.event === 'open', 5_000);
-  await waitForTuple(page, (t) => t.event === 'hello', 5_000);
-
-  // AC-2's window starts here, before vite dies (same discipline as
-  // e2e/sse-drop.spec.ts's own watermark).
-  const watermark = await page.evaluate(() => (window as unknown as { __sseEvents: SseTuple[] }).__sseEvents.length);
-  const streamAWatermark = streamAFrames.length;
+  // `streamAReading` is likewise declared outside `try` (assigned inside)
+  // so `finally` can always await it, even if it was never started.
+  let streamAReading: Promise<void> | undefined;
 
   try {
+    await waitForHealth(`http://127.0.0.1:${port}/api/health`, 15_000);
+
+    // WHY STREAM A EXISTS: subscribing keeps black-smith's
+    // `changeFeed.ts:143-169` watcher and floor timer armed — `listeners.size`
+    // gates both, arming at 1 and disarming at 0. Without stream A holding
+    // `listeners.size >= 1` through the outage, session B would never be
+    // projected while vite is down, and the test would collapse back into the
+    // confound this epic removes.
+    streamAReading = readStreamA();
+
+    // Proof black-smith accepted stream A and armed the watcher.
+    await waitForStreamAFrame((f) => f.event === 'hello', 5_000);
+
+    buildOnce(repoRoot);
+    vite = startVite(repoRoot, VITE_PORT);
+    await waitForHealth(`http://127.0.0.1:${VITE_PORT}/`, 15_000);
+
+    await page.addInitScript(() => {
+      const w = window as unknown as { __t0: number; __sseEvents: SseTuple[] };
+      w.__t0 = Date.now();
+      w.__sseEvents = [];
+      const Native = window.EventSource;
+      // biome-ignore-file: this init script runs in the page, not through vam's lint config.
+      window.EventSource = new Proxy(Native, {
+        construct(target, args: ConstructorParameters<typeof EventSource>) {
+          const es = new target(...args);
+          const record = (name: SseTuple['event']) => (ev: Event) => {
+            let detail: unknown;
+            const data = (ev as MessageEvent<string>).data;
+            if (typeof data === 'string') {
+              try {
+                detail = JSON.parse(data);
+              } catch {
+                detail = undefined;
+              }
+            }
+            w.__sseEvents.push({
+              event: name,
+              readyState: es.readyState,
+              tMs: Date.now() - w.__t0,
+              ...(detail !== undefined ? { detail } : {}),
+            });
+          };
+          es.addEventListener('open', record('open'));
+          es.addEventListener('error', record('error'));
+          es.addEventListener('hello', record('hello'));
+          es.addEventListener('change', record('change'));
+          return es;
+        },
+      });
+    });
+
+    await page.goto('/');
+    await waitForTuple(page, (t) => t.event === 'open', 5_000);
+    await waitForTuple(page, (t) => t.event === 'hello', 5_000);
+
+    // AC-2's window starts here, before vite dies (same discipline as
+    // e2e/sse-drop.spec.ts's own watermark).
+    const watermark = await page.evaluate(() => (window as unknown as { __sseEvents: SseTuple[] }).__sseEvents.length);
+    const streamAWatermark = streamAFrames.length;
+
     // (2) Drop the TRANSPORT, not black-smith. SIGKILL, not the default
     // signal: `vite preview`'s graceful shutdown waits for the page's
     // long-lived SSE connection to drain, which it never does, so a plain
@@ -346,14 +360,28 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
     const health = await fetch(`http://127.0.0.1:${port}/api/health`);
     expect(health.ok).toBe(true);
 
-    // AC-2: no `change` naming session B may appear on the page, watermark
-    // to now, snapshotted immediately before the canvas assertion fires.
+    // AC-2, broadened beyond its literal wording ("no `change` tuple naming
+    // session B"): `src/adapter/useCanvas.ts` refetches on ANY well-formed
+    // `change`, whatever session it names — its own comment says `sessions`
+    // is never read on change, since an ended session must still refetch
+    // (§5.4). So a `change` naming only session A in the reconnect window
+    // would pass a check narrowed to session B while still masking `onHello`
+    // (the exact failure mode that made the earlier AC-G1 test
+    // non-discriminating). A check that exceeds its literal criterion still
+    // satisfies it — do not narrow this back to session B only.
+    //
+    // Anchored at the post-reconnect `hello`, not the pre-kill watermark: a
+    // legitimate `change` naming session A can land between the watermark
+    // and the kill on a slower machine, and anchoring at the watermark would
+    // make this flaky.
     const tuplesSoFar = (await page.evaluate(() => (window as unknown as { __sseEvents: SseTuple[] }).__sseEvents)) as SseTuple[];
-    const maskingChange = tuplesSoFar
-      .slice(watermark)
-      .find((t) => t.event === 'change' && Array.isArray((t.detail as { sessions?: unknown })?.sessions) && (t.detail as { sessions: string[] }).sessions.includes(sessionB));
-    expect(maskingChange, `a change frame naming session B masked onHello: ${JSON.stringify(maskingChange)}`).toBeUndefined();
-    void postReconnectHello;
+    // `postReconnectHello` crossed the page.evaluate wire once already (in
+    // `waitForTuple`), so it is not reference-equal to its counterpart in
+    // this fresh snapshot — match on `tMs`, which `__sseEvents` stamps once
+    // per recorded event and never mutates.
+    const helloIndex = tuplesSoFar.findIndex((t) => t.event === 'hello' && t.tMs === postReconnectHello.tMs);
+    const maskingChange = tuplesSoFar.slice(helloIndex + 1).find((t) => t.event === 'change');
+    expect(maskingChange, `a change frame arrived after the post-reconnect hello: ${JSON.stringify(maskingChange)}`).toBeUndefined();
 
     // (5) Session identity only, never layout or node counts (AC-G1's own
     // discipline).
@@ -413,8 +441,13 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
     // the mid-run end-of-body / re-open failure AC-1 forbids.
     streamAState.tornDown = true;
     streamAController.abort();
-    await streamAReading.catch(() => {});
-    vite.kill('SIGKILL');
+    // Guarded: a throw before `readStreamA` ran (e.g. the black-smith
+    // health check itself failing) leaves `streamAReading` undefined.
+    await streamAReading?.catch(() => {});
+    // Guarded: a throw before `startVite` ran (e.g. a dead black-smith
+    // health check, or `buildOnce` failing) leaves `vite` undefined — there
+    // is nothing to kill.
+    vite?.kill('SIGKILL');
     blackSmith.kill('SIGKILL');
   }
 });
