@@ -283,9 +283,31 @@ nên adapter dựng được hàng thật ngay; §5 epic A chỉ đổi cách d�
 1. Server không gửi field `retry:`; cơ chế reconnect mặc định của trình
    duyệt tự lo, đo được **hằng số 3.00s**, không backoff (khoảng cách đo
    3010 / 3004 / 3004 ms).
-2. Server chết giữa chừng lộ ra ở tầng `EventSource` là `error` rồi `open`,
-   `readyState` 0 (CONNECTING), **không bao giờ** 2 (CLOSED) — trình duyệt
-   tự hồi phục, không cần code phía client.
+2. **Sửa 2026-08-30.** Ý này từng viết "Server chết giữa chừng lộ ra ở tầng
+   `EventSource` là `error` rồi `open`, `readyState` 0 (CONNECTING), **không
+   bao giờ** 2 (CLOSED) — trình duyệt tự hồi phục, không cần code phía
+   client" — đúng lúc chỉ đo một đường, sai khi phát biểu như một quy luật
+   chung. Đo lại đủ ba trường hợp:
+   - **Kết nối thẳng tới black-smith, không qua proxy nào (đây là
+     PRODUCTION, không bị ảnh hưởng):** server chết là một lỗi TCP, và HTML
+     spec KHÔNG coi lỗi TCP là fatal; `EventSource` tự retry vô hạn, đo
+     được hằng số 3.00s, không backoff.
+   - **Qua vite dev proxy của vam, server sống lại trước lần retry đầu
+     (~3s):** hồi phục thật — transcript đã commit của epic này chứng
+     kiến điều đó (`open` rồi `hello` cùng lúc, `change` ngay sau).
+   - **Qua vite dev proxy, server vẫn chết ở đúng lần retry đó:** vite trả
+     lời `GET /api/stream` bằng `HTTP/1.1 502 Bad Gateway`,
+     `Content-Type: text/plain`. HTML spec coi một response không phải 200
+     `text/event-stream` là fatal, nên `readyState` chuyển sang 2 (CLOSED)
+     và không còn lần thử nào nữa. **`readyState` 2 CÓ xảy ra được** — đo
+     bằng negative control đã commit của chính epic này
+     (`state/artifacts/vam-sse-canvas/task-4-acg1-e2e/falsification-no-restart.txt`,
+     `{"event":"error","readyState":0,"tMs":696}` rồi
+     `{"event":"error","readyState":2,"tMs":3704}`).
+
+   Nguồn của lần "cho luôn" (give up) là vite dev proxy đứng giữa browser và
+   server, không phải client của vam: `src/adapter/stream.ts` đúng như đã
+   viết, epic này không raise finding nào lên file đó.
 3. `heartbeatMs` và `floorMs` — nằm trong frame `hello` — **không quan sát
    được** từ trình duyệt: keep-alive là một SSE comment, và `EventSource`
    không lộ comment ra JS ở bất kỳ hình thức nào. Hơn nữa `floorMs` (10000)
@@ -297,6 +319,18 @@ nên adapter dựng được hàng thật ngay; §5 epic A chỉ đổi cách d�
 `AC-G1` — kiểm tra đầu-cuối qua server thật — vẫn đang **gated**: chờ `GET
 /api/stream` lên `main` của black-smith. Ba số đo ở trên do phiên vam đo trên
 nhánh, chưa đo lại trên `main`.
+
+> **Sửa 2026-08-30.** Đoạn ngay trên đúng lúc viết, sai từ lúc
+> `161ffc7 feat(ui-server): GET /api/stream` lên `main` của black-smith.
+> `AC-G1` **nay đã discharged, không còn gated**: nó đã chạy thật, đầu-cuối,
+> qua đúng vite dev proxy của vam, và transcript đã commit của epic này —
+> `e2e/acg1-transcript.json` — là bằng chứng: `open`/`hello`, một `change`,
+> rồi `error` khi server bị giết, rồi `open`/`hello` lại và `change` sau khi
+> server sống lại, cộng một lần đọc canvas cuối cùng. Ba số đo ở §3.3 vì thế
+> không còn là "đo trên nhánh, chưa đo lại": chúng đo qua đường thật.
+> Nguồn: `f-vam-sse-canvas/integration-fc8c5787` (S2-major) và
+> `f-vam-sse-canvas/integration-595388f1`. Bản đầy đủ: black-smith
+> `factory/specs/active/vam-sse-canvas/epic.md`, AC-G1.
 
 Ghi thì **bắt buộc** phải có đọc trước: `resolveContext` đòi `sessionId` thật và
 tự nối `causalParent` từ event cuối của log đó. Không có session thật thì mọi

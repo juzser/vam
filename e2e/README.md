@@ -12,10 +12,18 @@ SSE wire contract (`src/adapter/stream.ts`), or the vite proxy
 On this machine, through vam's OWN `vite` dev proxy (never black-smith's port
 directly — cross-origin `EventSource` from vam's origin to black-smith's port
 delivers zero events), a black-smith process that is killed should surface at
-the browser as an `error` event, and once the process is back, the browser's
-own reconnect should surface `open` then `hello` — with `readyState` never
-observed as 2 (CLOSED) — and the canvas should then show, with no reload, the
-session that changed while the server was down.
+the browser as an `error` event, and — **if the process is back before the
+browser's single retry, roughly 3s after the drop** — the browser's own
+reconnect should surface `open` then `hello` with `readyState` never observed
+as 2 (CLOSED), and the canvas should then show, with no reload, the session
+that changed while the server was down.
+
+If the server is still down at that retry, this is not what happens: vite
+answers a dead upstream with `HTTP/1.1 502 Bad Gateway`,
+`Content-Type: text/plain`, which the HTML specification makes a fatal
+`EventSource` error, so `readyState` becomes 2 (CLOSED) and no further
+attempt is made. See "What this cannot show" below for what that means for
+outages longer than one retry.
 
 ## What this cannot show
 
