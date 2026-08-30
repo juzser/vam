@@ -288,7 +288,14 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
   // from "this cannot be reproduced from a sha at all".
   const shaOf = (cwd: string): string => {
     const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd }).toString().trim();
-    const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd })
+    // `--untracked-files=all` explicitly, and NOT the default or `=no`: a
+    // `status.showUntrackedFiles = no` anywhere in git's config chain makes an
+    // untracked-only tree read back as clean, which is exactly the tree
+    // someone forgot to commit. black-smith's own integration check settled
+    // this (D-178) and this stamp had it wrong in the other direction for one
+    // commit. Ignored paths are still ignored, so `e2e/node_modules` — the
+    // local Playwright install this harness runs from — does not trip it.
+    const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd })
       .toString()
       .trim();
     return dirty === '' ? head : `${head}-dirty`;
