@@ -320,6 +320,18 @@ nên adapter dựng được hàng thật ngay; §5 epic A chỉ đổi cách d�
 /api/stream` lên `main` của black-smith. Ba số đo ở trên do phiên vam đo trên
 nhánh, chưa đo lại trên `main`.
 
+> **Sửa 2026-08-30.** Đoạn ngay trên đúng lúc viết, sai từ lúc
+> `161ffc7 feat(ui-server): GET /api/stream` lên `main` của black-smith.
+> `AC-G1` **nay đã discharged, không còn gated**: nó đã chạy thật, đầu-cuối,
+> qua đúng vite dev proxy của vam, và transcript đã commit của epic này —
+> `e2e/acg1-transcript.json` — là bằng chứng: `open`/`hello`, một `change`,
+> rồi `error` khi server bị giết, rồi `open`/`hello` lại và `change` sau khi
+> server sống lại, cộng một lần đọc canvas cuối cùng. Ba số đo ở §3.3 vì thế
+> không còn là "đo trên nhánh, chưa đo lại": chúng đo qua đường thật.
+> Nguồn: `f-vam-sse-canvas/integration-fc8c5787` (S2-major) và
+> `f-vam-sse-canvas/integration-595388f1`. Bản đầy đủ: black-smith
+> `factory/specs/active/vam-sse-canvas/epic.md`, AC-G1.
+
 Ghi thì **bắt buộc** phải có đọc trước: `resolveContext` đòi `sessionId` thật và
 tự nối `causalParent` từ event cuối của log đó. Không có session thật thì mọi
 POST đều 400.
