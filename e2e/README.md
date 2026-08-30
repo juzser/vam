@@ -131,13 +131,14 @@ export SMITH_E2E_PORT=4680
 #    beside the spec. Copy it from an existing npx cache if you have one;
 #    never install into the shared tree, which would break every other vam
 #    checkout.
-#    IMPORTANT on a fresh clone: e2e/node_modules is kept out of git by
-#    .git/info/exclude, which is LOCAL TO THIS MACHINE and is not cloned. On
-#    any other checkout you must exclude it yourself, or the transcript's
-#    --untracked-files=all dirty stamp will fire on it and mark vamSha
-#    `-dirty` for a directory that is not source. That is a false positive,
-#    never a false clean, so it cannot make a transcript overclaim -- but it
-#    will make an honest run look unreproducible, so exclude it.
+#    e2e/node_modules needs no ignore rule of its own: the committed
+#    .gitignore's first line, `node_modules/`, already covers it at any
+#    depth, so the --untracked-files=all dirty stamp does not fire on it and
+#    a fresh clone needs nothing extra. (Check it with
+#    `git check-ignore -v e2e/node_modules`, and note the trailing slash
+#    matters: `node_modules/` matches DIRECTORIES, so the rule only resolves
+#    once the directory actually exists -- run the check after copying it in,
+#    not before, or you will be told a different rule matched.)
 #    cp -R "$(npm root -g)/../_npx/*/node_modules" e2e/node_modules   # or npm i --prefix e2e @playwright/test@1.62.1
 
 # 4. Run it (this also starts and stops vam's own vite dev server for you).
