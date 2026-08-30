@@ -114,6 +114,17 @@ const RULES: {
 
 describe('epic.md section 13: standing constraints, made permanent and checkable', () => {
   it.each(RULES)('$name', ({ files, rule, check }) => {
+    // A rule whose selector matches nothing scans nothing and reports no
+    // violations, so it passes -- silently, forever, and most likely right
+    // after someone renames or moves the files it was watching. That is the
+    // exact failure this file was written to end (finding b80ce28a: a
+    // case-sensitive grep that printed 0 and read clean), so it must not be
+    // reachable from inside the instrument itself. If this fires, fix the
+    // selector; deleting the rule is how the check dies quietly.
+    expect(
+      files.length,
+      `${rule}\nThis rule matched NO files, so it checked nothing and would have passed vacuously.`,
+    ).toBeGreaterThan(0);
     const violations: string[] = [];
     for (const f of files) {
       readFileSync(join(SRC_DIR, f), 'utf8')
