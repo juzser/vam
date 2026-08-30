@@ -298,51 +298,6 @@ nên adapter dựng được hàng thật ngay; §5 epic A chỉ đổi cách d�
 /api/stream` lên `main` của black-smith. Ba số đo ở trên do phiên vam đo trên
 nhánh, chưa đo lại trên `main`.
 
-> **Đính chính 2026-08-29 — đọc kèm việc đo số 2 ở trên. Câu gốc giữ nguyên,
-> vì đó là văn bản đã được chấm; đây là đính chính chứ không phải bản viết lại.**
->
-> Việc đo số 2 nói **không điều kiện** rằng trình duyệt tự hồi phục và
-> `readyState` **không bao giờ** là 2. Câu đó chỉ đúng với đúng cái đã đo lúc
-> viết: một kết nối **trực tiếp** tới `127.0.0.1:4680`. Nó chưa từng được đo qua
-> proxy của vite — đường thật và duy nhất của vam khi dev. `AC-G1` (đoạn ngay
-> trên) **nay đã discharged, không còn gated**: `GET /api/stream` đã lên `main`
-> của black-smith và bài đo đã chạy lại qua đường thật. Kết quả có ba phần, phải
-> đọc cả ba cùng nhau:
->
-> 1. **Qua proxy, lúc đầu cú rớt không lộ ra gì cả.** Proxy dev của vite không
->    chuyển tiếp TCP close của upstream, nên không `error` nào tới được trình
->    duyệt: `curl -N` qua proxy sống sót 16s sau khi upstream bị `SIGKILL`
->    (exit 28, timeout của chính curl), trong khi cùng cú kill đó trên kết nối
->    trực tiếp kết thúc sau ~6s (exit 18, peer closed). Đã sửa trong
->    `followup-52085d00`, bằng một hook `configure` trên object `proxy` **dùng
->    chung** ở `vite.config.ts`.
-> 2. **Có bản sửa đó rồi thì hồi phục qua proxy là thật.**
->    `e2e/acg1-transcript.json` — do chính harness ghi — có bảy tuple: `open`/1,
->    `hello`/1, `change`/1, `error`/**0**, rồi `open`/1 và `hello`/1 sau khi
->    server sống lại ~3011ms, rồi một `change` mang session đã đổi trong lúc
->    socket đang chết. Không tuple nào có `readyState` 2.
-> 3. **Nhưng "không bao giờ 2 (CLOSED)" vẫn là chữ sai cho đường dev.** Nếu
->    server chết mà **không** sống lại, trình duyệt thử lại đúng MỘT lần ở ~3.7s,
->    ghi `error` với `readyState` **2**, rồi thôi hẳn. Nguyên nhân là đo được chứ
->    không phải suy ra: vite còn sống mà không có black-smith phía sau thì
->    `curl -i http://127.0.0.1:5273/api/stream` trả về **`HTTP/1.1 502 Bad
->    Gateway`** với **`Content-Type: text/plain`**. Theo đặc tả HTML, một response
->    không phải 200 `text/event-stream` **bắt buộc** phải *fail the connection* —
->    CLOSED, và **không** hẹn kết nối lại. Trình duyệt làm đúng; code client của
->    vam không dính gì ở đây.
->
-> **Production không ảnh hưởng.** Không có proxy đứng trước thì một server chết
-> là lỗi kết nối TCP chứ không phải một HTTP error response, và cái đó đặc tả nói
-> rõ là **không** fatal — trình duyệt thử lại mãi với backoff. Cú bỏ cuộc ở trên
-> là sản phẩm của proxy dev, không phải của đường đã ship. Tóm lại: **qua proxy
-> dev, "tự hồi phục" chỉ đúng chừng nào server quay lại trước lần thử lại đầu
-> tiên (~3s).**
->
-> Nguồn: `f-vam-sse-canvas/integration-180e7b11` (đã sửa ở epic.md §3.3) và
-> `f-vam-sse-canvas/integration-fc8c5787` (S2-major — đính chính đó đã không với
-> tới file này, đây là chỗ nó với tới). Bản đầy đủ: black-smith
-> `factory/specs/active/vam-sse-canvas/epic.md` §3.3.
-
 Ghi thì **bắt buộc** phải có đọc trước: `resolveContext` đòi `sessionId` thật và
 tự nối `causalParent` từ event cuối của log đó. Không có session thật thì mọi
 POST đều 400.
