@@ -31,14 +31,19 @@ outages longer than one retry.
 propagate. It says nothing about a half-open connection on a machine where the
 proxy behaves differently, nor about a production host with no proxy at all.
 
-It also only ever drives the **dev** server. `vite.config.ts` declares its
-`/api` proxy once, as a single `proxy` object that both `server.proxy` and
-`preview.proxy` reference, so `vite preview` shares the same `configure` hook
-and therefore the same fix — but no run here has exercised preview, so
-"shares the fixed code path" is the claim, not "tested". A future edit that
-split that shared object into two literals could drop the hook from one of
-them and nothing in this repo would catch it: `e2e/` is excluded from every
-gate, and this spec only ever loads the dev server.
+This spec itself only ever drives the **dev** server. `vite.config.ts`
+declares its `/api` proxy once, as a single `proxy` object that both
+`server.proxy` and `preview.proxy` reference, so `vite preview` shares the
+same `configure` hook and therefore the same fix — and that path is no
+longer merely claimed shared, it is now exercised: `e2e/sse-drop-reconnect.pw.ts`,
+below, serves through `vite preview` on this same proxy and its committed
+transcript records the page's `EventSource` seeing `error` at `readyState` 0
+after vite is killed, propagated through the preview proxy exactly as this
+spec's own drop propagates through the dev one. A future edit that split
+that shared `proxy` object into two literals could still drop the hook from
+one of them with nothing in this repo to catch it: `e2e/` is excluded from
+every gate, and neither spec's own run would notice a regression in the
+other's path.
 
 It also does not show recovery from a **long** outage. See the note below: on
 this machine the browser retried once, roughly 3s after the drop, and a run
@@ -178,3 +183,110 @@ and on failure paths. Remove the throwaway `$STATE_DIR` yourself once done —
 it is never touched automatically. `e2e/test-results/` and
 `e2e/playwright-report/` (Playwright's own run artifacts) are gitignored;
 delete them freely.
+
+---
+
+# AC-10 (client) — reconnect after a transport flap, black-smith alive
+
+`e2e/sse-drop-reconnect.pw.ts`, its own config
+(`e2e/playwright.reconnect.config.ts`). Added by
+`factory/specs/active/vam-acg1-discriminating-ac10/epic.md`. **Neither this
+test nor AC-G1 above subsumes the other** (epic.md section 4):
+
+- **AC-G1** restarts black-smith. A fresh process's cold fingerprint cache
+  manufactures a masking `change` on reconnect regardless of whether the
+  client refetches on `hello`, so AC-G1 passes even with `onHello` deleted
+  from `src/adapter/useCanvas.ts` (finding
+  `f-vam-sse-canvas/integration-424bca70`). It measures AC-10's SERVER half
+  — recovery across a real restart.
+- **This test** keeps black-smith running and drops the TRANSPORT (vite)
+  instead, against an already-warm fingerprint cache (measured against a
+  real server before this epic was signed —
+  `factory/specs/active/vam-acg1-discriminating-ac10/design-validation.txt`
+  in the black-smith repo; a precondition, not this test's own result), so no
+  masking `change` forms. The canvas can then only show the session written
+  during the outage through `onHello`'s own refetch — deleting that line is
+  expected to fail this test.
+
+## What this does not measure (epic.md section 8)
+
+It does **not** restart black-smith and does **not** cover AC-10's server
+half at all — that is AC-G1's job. It does not test black-smith's cold-cache
+rescan (real and correct, but the confound this test keeps off its path).
+It does not prove `onHello` is *correct*, only that it is *necessary*.
+
+## Production build, not the dev server — a real difference from AC-G1
+
+This spec runs `vite build` once, then serves through `vite preview`
+(port 5274), not `vite` dev. `vite`'s own HMR client reconnects its
+websocket independently of the app's `EventSource` and, on that reconnect,
+forces a full `location.reload()` — which would discard this harness's
+page-side instrumentation exactly when the test needs the canvas to persist
+without reloading. `vite preview` has no dev client and no such reload.
+`vite.config.ts`'s `preview` block already proxies `/api` through the same
+`proxy` object `server` uses, on this same port — this test is the first run
+to exercise that path. The build runs inside the spec itself (into the
+gitignored `dist/`); no separate build step is required by hand.
+
+## How "black-smith never died" is proved
+
+A single `GET /api/health` 200, taken immediately before the final canvas
+assertion, proves liveness **at that one instant and nothing more** — a
+died-and-restarted process answers 200 just as happily, with a cold cache
+that would silently void the run. The structural proof for the WHOLE run is
+**stream A**: a second, genuinely real SSE client the harness opens directly
+against black-smith's `/api/stream` (bypassing vite), via `fetch` with a
+hand-rolled frame parser — no `EventSource` global, no auto-retry. Its own
+job, beyond instrumenting the run, is to hold `listeners.size >= 1` so
+`changeFeed.ts:143-169`'s watcher stays armed through the outage. Two checks,
+both required: **exactly one `hello`** across the whole run (a restarted
+black-smith cannot deliver the same connection twice), and stream A's **body
+never ends, errors, or is re-opened** before the final assertion (the reader
+does not auto-retry, so a death surfaces here, not as a second `hello`).
+
+## Environment variables
+
+Same three as AC-G1's harness above. `SMITH_E2E_PORT` must still match
+`vite.config.ts`'s `VAM_SMITH_URL` default (`4680`) unless `VAM_SMITH_URL` is
+also set — both the dev-server and preview-server proxies share the same
+target resolution. The spec `test.skip`s, never false-passes, when any of
+the three is unset.
+
+## Run
+
+**Nothing may already be listening on `SMITH_E2E_PORT` or on `5274`** (this
+test's own preview port, distinct from AC-G1's 5273).
+
+```bash
+STATE_DIR=$(mktemp -d)
+export SMITH_CLI_ENTRY=/path/to/black-smith/factory/orchestrator/dist/cli.js
+export SMITH_E2E_STATE_DIR="$STATE_DIR"
+export SMITH_E2E_PORT=4680
+
+e2e/node_modules/.bin/playwright test --config=e2e/playwright.reconnect.config.ts
+```
+
+## Reproducing the committed transcript
+
+`e2e/acg10-reconnect-transcript.json` carries the same stamp fields as
+`e2e/acg1-transcript.json` (`runnerCommand`, `playwrightVersion`, `vamSha`,
+`blackSmithSha` with the same `-dirty` suffix rule, `capturedAt`, `sessionA`,
+`sessionB`, `tuples`, `canvas`), plus a `streamA` object with its own
+recorded frames and `helloCount`. `runnerCommand` names this section's
+config, not AC-G1's.
+
+## Cleanup
+
+Same discipline as AC-G1: the spec kills its own vite and black-smith
+children with `SIGKILL` in a `finally` on every path, including failure.
+SIGKILL, not the default signal, because `vite preview`'s graceful shutdown
+waits for the page's long-lived SSE connection to drain, which it never
+does. Remove the throwaway `$STATE_DIR` yourself; `dist/`,
+`e2e/test-results/` and `e2e/playwright-report/` are gitignored.
+
+## Exposure shared with AC-G1
+
+`vitest.config.ts`, `tsconfig*.json` and `biome.json` all exclude `e2e/` (see
+above) — nothing in vam's own gates will tell a future change that this spec
+rotted either. Re-run it by hand alongside AC-G1 after any change to the SSE
+wire contract, the vite proxy, or `src/adapter/**`.
