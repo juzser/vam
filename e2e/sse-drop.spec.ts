@@ -277,9 +277,25 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
   server.kill('SIGKILL');
 
   const { version: playwrightVersion } = require('@playwright/test/package.json') as { version: string };
-  const vamSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: path.resolve(__dirname, '..') }).toString().trim();
+  // A bare `rev-parse HEAD` describes the COMMIT, not the tree that ran, and
+  // the harness is routinely run against uncommitted edits to this very file.
+  // A transcript stamped with a clean sha it was not produced at is an
+  // artifact whose provenance claims more than its evidence supports — the
+  // exact defect class this epic exists to catch, and one it committed once:
+  // the first canvas-bearing transcript named `ad4e5e1`, a commit at which the
+  // canvas-capture code below did not yet exist. Stamp the dirtiness instead
+  // of hiding it, so a reader can always tell "check this sha out and re-run"
+  // from "this cannot be reproduced from a sha at all".
+  const shaOf = (cwd: string): string => {
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd }).toString().trim();
+    const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd })
+      .toString()
+      .trim();
+    return dirty === '' ? head : `${head}-dirty`;
+  };
+  const vamSha = shaOf(path.resolve(__dirname, '..'));
   const blackSmithRoot = path.resolve(path.dirname(cli), '..', '..', '..');
-  const blackSmithSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: blackSmithRoot }).toString().trim();
+  const blackSmithSha = shaOf(blackSmithRoot);
 
   writeFileSync(
     path.join(__dirname, 'acg1-transcript.json'),
