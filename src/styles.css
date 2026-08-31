@@ -48,6 +48,7 @@
   --color-line: var(--vam-line);
   --color-line-strong: var(--vam-line-strong);
   --color-line-loud: var(--vam-line-loud);
+  --color-line-loudest: var(--vam-line-loudest);
 
   --color-ink: var(--vam-ink);
   --color-ink-dim: var(--vam-ink-dim);
@@ -99,6 +100,7 @@
   --vam-line: #1f1f1f;
   --vam-line-strong: #262626;
   --vam-line-loud: #2e2e2e;
+  --vam-line-loudest: #4a4a4a;
 
   --vam-ink: #ededed;
   --vam-ink-dim: #a1a1a1;
@@ -131,6 +133,7 @@ html.light {
   --vam-line: #e4e4e1;
   --vam-line-strong: #d6d6d2;
   --vam-line-loud: #c4c4bf;
+  --vam-line-loudest: #8f8f8a;
 
   --vam-ink: #18181b;
   --vam-ink-dim: #52525b;
@@ -301,40 +304,6 @@ body {
   .vam-call {
     box-shadow: 0 0 0 2px rgb(255 159 10 / 0.55);
   }
-}
-
-/* The group frame's floating label, straddling the top border — nodeterm's
-   `.group-node__label`. It is a pill on the border rather than a header row
-   inside the box because a header row costs a node's worth of vertical space in
-   every group, and the name is chrome, not content. */
-.vam-group-label {
-  position: absolute;
-  top: 0;
-  left: 14px;
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  max-width: 90%;
-  padding: 2px 9px;
-  /* The canvas, not a panel: the frame has no fill any more, so the pill's job
-     is to interrupt the dashes cleanly rather than to sit on a surface. */
-  background: var(--color-canvas);
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-/*
- * ReactFlow ships a default fill and border for a node type literally named
- * `group` (`.react-flow__node-group`), and ours is called that. The frame is a
- * line drawn AROUND the rows, not a surface behind them — the inherited fill is
- * what made the cards look sunken into a panel. The inner div draws the dashes.
- */
-.react-flow__node-group {
-  background-color: transparent;
-  border: none;
-  border-radius: 0;
 }
 
 /*

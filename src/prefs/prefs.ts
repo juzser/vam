@@ -44,7 +44,6 @@ export type StorageLike = {
   setItem(key: string, value: string): void;
 };
 
-export type Pin = { readonly x: number; readonly y: number; readonly at: string };
 export type IconChoice = { readonly icon: string; readonly at: string };
 
 /**
@@ -61,14 +60,12 @@ export type Theme = 'dark' | 'light';
 export const DEFAULT_THEME: Theme = 'dark';
 
 export type Prefs = {
-  /** Node id → where you put it. Only nodes you actually moved appear here. */
-  readonly pinned: Readonly<Record<string, Pin>>;
   /** Session id → the emoji you gave it. */
   readonly icons: Readonly<Record<string, IconChoice>>;
   readonly theme: Theme;
 };
 
-export const EMPTY_PREFS: Prefs = { pinned: {}, icons: {}, theme: DEFAULT_THEME };
+export const EMPTY_PREFS: Prefs = { icons: {}, theme: DEFAULT_THEME };
 
 /**
  * The real `localStorage`, or null if this browser will not give us one.
@@ -109,14 +106,12 @@ export function readPrefs(storage: StorageLike | null, now: Date = new Date()): 
   if (typeof parsed !== 'object' || parsed === null) {
     return EMPTY_PREFS;
   }
-  const record = parsed as { pinned?: unknown; icons?: unknown };
+  const record = parsed as { icons?: unknown };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   return {
-    pinned: fresh(readMap(record.pinned, readPin), cutoff),
     icons: fresh(readMap(record.icons, readIcon), cutoff),
-    // Not pruned by the TTL the other two get. A pin ages because the session
-    // it points at stops existing; a theme is about the person, and one who
-    // opens vam twice a year still wants the theme they chose.
+    // Not pruned by the TTL icons get. A theme is about the person, and one
+    // who opens vam twice a year still wants the theme they chose.
     theme: readTheme((parsed as { theme?: unknown }).theme),
   };
 }
@@ -156,69 +151,6 @@ export function writePrefs(storage: StorageLike | null, prefs: Prefs): void {
     // Quota, or a browser that hands out a Storage and then refuses to use it.
     // The in-memory prefs still work for this session; only the memory is lost.
   }
-}
-
-/** Remember where a node was put. */
-export function pin(prefs: Prefs, nodeId: string, at: { x: number; y: number }, now: Date): Prefs {
-  return {
-    ...prefs,
-    pinned: { ...prefs.pinned, [nodeId]: { x: at.x, y: at.y, at: now.toISOString() } },
-  };
-}
-
-/**
- * Did this node actually move, or did ReactFlow just call a click a drag?
- *
- * The drag threshold catches most of it; this catches the rest — a drag that
- * ends where it started should leave no pin, because a pin is the thing that
- * opts a node out of ever being re-ranked again.
- *
- * A node with no home — one the layout no longer draws — counts as moved: it
- * has nothing to sort back into, so keeping where the person put it is the only
- * answer available.
- */
-export function movedFromHome(
-  at: { x: number; y: number },
-  home: { x: number; y: number } | undefined,
-): boolean {
-  return home === undefined || Math.abs(at.x - home.x) > 1 || Math.abs(at.y - home.y) > 1;
-}
-
-/**
- * What a finished drag changes, decided here rather than in the event handler.
- *
- * The handler that calls this is two lines of unwrapping ReactFlow's arguments;
- * everything that could be wrong — which nodes count as moved, what a pin
- * holds, whether anything changed at all — is in this function, where a test
- * can reach it without a pointer.
- *
- * Returns the SAME object when nothing moved, so the caller can skip the write
- * with an identity check and a drag that goes nowhere touches no storage.
- */
-export function pinDragged(
-  prefs: Prefs,
-  dragged: readonly { id: string; position: { x: number; y: number } }[],
-  homeOf: (id: string) => { x: number; y: number } | undefined,
-  now: Date,
-): Prefs {
-  let next = prefs;
-  for (const node of dragged) {
-    if (movedFromHome(node.position, homeOf(node.id))) {
-      next = pin(next, node.id, node.position, now);
-    }
-  }
-  return next;
-}
-
-/**
- * Forget every position, so auto-layout has the canvas back.
- *
- * A pin that survives reloads and has no way out is a trap: one bad drag and
- * that card is wrong forever, with nothing on screen explaining why it will not
- * sort with the others. `gr` is that way out.
- */
-export function unpinAll(prefs: Prefs): Prefs {
-  return { ...prefs, pinned: {} };
 }
 
 /** An empty icon clears the choice rather than storing "". */
@@ -267,19 +199,6 @@ function readMap<T>(value: unknown, read: (entry: unknown) => T | null): Record<
     }
   }
   return out;
-}
-
-function readPin(entry: unknown): Pin | null {
-  if (typeof entry !== 'object' || entry === null) {
-    return null;
-  }
-  const { x, y, at } = entry as { x?: unknown; y?: unknown; at?: unknown };
-  // Number.isFinite, not typeof: a stored NaN or Infinity round-trips through
-  // JSON as null or throws off the layout, and a node placed at NaN vanishes.
-  if (!Number.isFinite(x) || !Number.isFinite(y) || typeof at !== 'string') {
-    return null;
-  }
-  return { x: x as number, y: y as number, at };
 }
 
 function readIcon(entry: unknown): IconChoice | null {

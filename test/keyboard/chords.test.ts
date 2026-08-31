@@ -65,6 +65,12 @@ describe('resolveChord — two-key chords', () => {
   });
 });
 
+describe('resolveChord — gr, removed', () => {
+  it('gr resolves to no action at all — the removed binding must not resolve to something unhandled', () => {
+    expect(type(['g', 'r']).actions).toEqual([]);
+  });
+});
+
 describe('resolveChord — abandoning a chord', () => {
   it('drops an unfinished chord rather than acting on its second key', () => {
     // `gj` is not a binding. It must do nothing at all — silently falling

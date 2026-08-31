@@ -25,7 +25,6 @@
 import {
   Background,
   type Edge,
-  MarkerType,
   MiniMap,
   type Node,
   ReactFlow,
@@ -49,23 +48,46 @@ import {
   applyTheme,
   browserStorage,
   type Prefs,
-  pinDragged,
   readPrefs,
   setIcon,
   setTheme,
-  unpinAll,
   writePrefs,
 } from '../prefs/prefs.js';
 import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
 import { infoNodeId, layoutCanvas, orderedSessions } from './layout.js';
 import { type FlowNodeLike, toNavNodes } from './nav-nodes.js';
-import { ProjectGroupNode } from './ProjectGroupNode.js';
+import { SessionFanNode } from './SessionFanNode.js';
 import { SessionInfoNode } from './SessionInfoNode.js';
 import { StepNode } from './StepNode.js';
+import { StepSlotNode } from './StepSlotNode.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from './source.js';
 
-const NODE_TYPES = { group: ProjectGroupNode, info: SessionInfoNode, step: StepNode };
+/**
+ * A `StepSlotSpec` is emitted for all three of a session's slot positions
+ * (layout.ts), including the one a real step already occupies — the fan's
+ * scenery ids must be stable regardless of decision count (AC-9's `scenery`
+ * set is read straight off `layout.slots`, unfiltered). Only the EMPTY
+ * positions get the dashed "no step yet" card; an occupied position renders
+ * nothing here, so it does not draw a second "no step yet" behind the real
+ * step card it sits under.
+ */
+function OccupiedSlot() {
+  return null;
+}
+
+const NODE_TYPES = {
+  info: SessionInfoNode,
+  step: StepNode,
+  fan: SessionFanNode,
+  slot: StepSlotNode,
+  'slot-filled': OccupiedSlot,
+};
+
+/** ReactFlow requires an edges array; there is no custom edge type any more —
+ *  the fan is a scenery node (epic.md §5.2). A module-level constant keeps
+ *  this a stable reference across renders. */
+const NO_EDGES: Edge[] = [];
 
 /** Home-row first: the labels you can hit without looking. */
 const JUMP_KEYS = 'asdfghjkl;qwertyuiop';
@@ -258,84 +280,64 @@ function CanvasInner({
 
   const initialNodes = useMemo<Node[]>(
     () => [
-      // Frames first: ReactFlow paints in array order, so a group listed after
-      // its children would cover them.
-      ...layout.groups.map((spec) => ({
+      // Scenery first, painted behind the navigable nodes (epic.md §5.2).
+      // Never a `j`/`k` destination: draggable/selectable/focusable are each
+      // explicit — omitted, they'd default true (@xyflow/react board level).
+      ...layout.fans.map((spec) => ({
         id: spec.id,
-        type: 'group',
+        type: 'fan',
         position: spec.position,
         width: spec.size.width,
         height: spec.size.height,
-        style: { width: spec.size.width, height: spec.size.height },
-        data: {
-          project: spec.project,
-          waiting: spec.project.sessions.filter((s) => s.status === 'waiting').length,
-        },
-        draggable: true,
+        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
+        draggable: false,
         selectable: false,
+        focusable: false,
+        data: {
+          sessionId: spec.sessionId,
+          baseOpacity: spec.opacity,
+          sessionStatus: spec.sessionStatus,
+          branchStatuses: spec.branchStatuses,
+          totalSteps: spec.totalSteps,
+        },
+      })),
+      ...layout.slots.map((spec) => ({
+        id: spec.id,
+        type: spec.placeholder ? 'slot' : 'slot-filled',
+        position: spec.position,
+        width: spec.size.width,
+        height: spec.size.height,
+        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
+        draggable: false,
+        selectable: false,
+        focusable: false,
+        data: { sessionId: spec.sessionId, baseOpacity: spec.opacity },
       })),
       ...layout.nodes.map((spec) => ({
         id: spec.id,
         type: spec.kind,
-        parentId: spec.parentId,
-        extent: 'parent' as const,
         position: spec.position,
         // `width`/`height` as well as `style`: we know these sizes, and stating
         // them means the very first keypress navigates correctly instead of
         // falling back to a zero rectangle before ReactFlow has measured.
         width: spec.size.width,
         height: spec.size.height,
-        style: { width: spec.size.width, height: spec.size.height },
-        data:
-          spec.kind === 'info'
-            ? { entry: spec.entry, focused: false, jumpLabel: null }
-            : { entry: spec.entry, decision: spec.decision, focused: false, jumpLabel: null },
-        draggable: true,
+        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
+        data: {
+          ...(spec.kind === 'info'
+            ? { entry: spec.entry }
+            : { entry: spec.entry, decision: spec.decision }),
+          focused: false,
+          jumpLabel: null,
+          sessionId: spec.entry.session.id,
+          baseOpacity: spec.opacity,
+        },
       })),
     ],
     [layout],
   );
 
-  const edges = useMemo<Edge[]>(
-    () =>
-      layout.edges.map((spec) => ({
-        id: spec.id,
-        source: spec.source,
-        target: spec.target,
-        type: 'smoothstep',
-        // The elided link is drawn as a break, not a step: dashed, labelled with
-        // what it swallowed. An ordinary link between two shown steps is solid,
-        // because nothing is missing between them.
-        animated: false,
-        style: spec.elided
-          ? { stroke: 'var(--color-line-strong)', strokeDasharray: '3 4' }
-          : { stroke: 'var(--color-line-strong)' },
-        label: spec.label ?? undefined,
-        labelStyle: { fill: 'var(--color-ink-faint)', fontSize: 10 },
-        labelBgStyle: { fill: 'var(--color-canvas)' },
-        labelBgPadding: [4, 2] as [number, number],
-        markerEnd: { type: MarkerType.ArrowClosed, width: 10, height: 10, color: '#4b535d' },
-      })),
-    [layout],
-  );
-
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-
-  /**
-   * Node ids under the hand right now.
-   *
-   * A poll answering mid-drag would otherwise re-place the node from the fresh
-   * layout and yank it out from under the cursor. A ref rather than state: the
-   * merge effect must see it immediately, and re-rendering on mousedown would
-   * be a re-render per drag start for nothing.
-   */
-  const dragging = useRef(new Set<string>());
-
-  /** Where auto-layout would put each node, to tell a real move from a twitch. */
-  const layoutPositions = useMemo(
-    () => new Map(initialNodes.map((node) => [node.id, node.position])),
-    [initialNodes],
-  );
 
   /**
    * Keep the drawn nodes in step with the model.
@@ -344,29 +346,12 @@ function CanvasInner({
    * again. Against a fixture that is invisible — the model never changes — but
    * against a live factory the first render happens before the first fetch
    * answers, so the canvas latched onto an empty layout and stayed empty
-   * forever while the sidebar filled in beside it.
-   *
-   * What survives a refresh is exactly what you PINNED by dragging it. This
-   * used to keep every node's current position instead, which sounds like the
-   * same thing and is not: it froze the auto-layout at whatever it was on the
-   * first render, so a session that started waiting for you while you watched
-   * never rose to the top of its frame. §3's ranking — đang-chờ-bạn, then
-   * đang-chạy, then newest — only means something if it can still happen after
-   * the page is open, which is the only time anybody is looking.
+   * forever while the sidebar filled in beside it. Positions are a pure
+   * function of the model, so every render simply re-applies the layout.
    */
   useEffect(() => {
-    setNodes((current) => {
-      const held = new Map(current.map((node) => [node.id, node.position]));
-      return initialNodes.map((spec) => {
-        const stored = prefs.pinned[spec.id];
-        if (stored !== undefined) {
-          return { ...spec, position: { x: stored.x, y: stored.y } };
-        }
-        const held_ = dragging.current.has(spec.id) ? held.get(spec.id) : undefined;
-        return held_ === undefined ? spec : { ...spec, position: held_ };
-      });
-    });
-  }, [initialNodes, prefs.pinned, setNodes]);
+    setNodes(initialNodes);
+  }, [initialNodes, setNodes]);
 
   /**
    * Land focus on something real once there is something real.
@@ -384,27 +369,32 @@ function CanvasInner({
     }
   }, [nodeIds, focusedId]);
 
-  // Focus and jump labels are presentation, not layout: they are written onto
-  // the existing nodes rather than rebuilding them, so a node that has been
-  // dragged keeps where the person put it.
+  // Focus, jump labels and the focused-cell opacity override are all
+  // presentation, written onto the existing nodes rather than rebuilding
+  // them: `layoutCanvas` is a pure function of the model and cannot see
+  // focus, so it can only ever emit the status opacity read from
+  // `data.baseOpacity` (stamped once in `initialNodes`).
   useEffect(() => {
+    const focusedSessionId = focusedEntry?.session.id ?? null;
     setNodes((current) =>
-      current.map((node) =>
-        // Frames are neither focusable nor jump targets, so they are left
-        // alone rather than handed two fields they would have to ignore.
-        node.type === 'group'
-          ? node
-          : {
-              ...node,
-              data: {
-                ...node.data,
-                focused: node.id === focusedId,
-                jumpLabel: labels.get(node.id) ?? null,
-              },
-            },
-      ),
+      current.map((node) => {
+        const data = node.data as { sessionId?: string; baseOpacity?: number };
+        const opacity =
+          data.sessionId !== undefined && data.sessionId === focusedSessionId
+            ? 1
+            : (data.baseOpacity ?? 1);
+        return {
+          ...node,
+          style: { ...node.style, opacity },
+          data: {
+            ...node.data,
+            focused: node.id === focusedId,
+            jumpLabel: labels.get(node.id) ?? null,
+          },
+        };
+      }),
     );
-  }, [focusedId, labels, setNodes]);
+  }, [focusedId, focusedEntry, labels, setNodes]);
 
   /** Move focus to a session by id — what the sidebar and the palette do. */
   const focusSession = useCallback((sessionId: string) => {
@@ -753,16 +743,6 @@ function CanvasInner({
         case 'settings':
           setStatus('settings not built yet');
           return;
-        case 'resetLayout': {
-          const count = Object.keys(prefs.pinned).length;
-          if (count === 0) {
-            setStatus('nothing is pinned — the canvas is laying itself out');
-            return;
-          }
-          savePrefs(unpinAll(prefs));
-          setStatus(`unpinned ${count} nodes — the canvas lays out again`);
-          return;
-        }
         case 'prompt': {
           if (focusedEntry === null) {
             setStatus('pick a session first');
@@ -862,12 +842,9 @@ function CanvasInner({
     actions,
     answerWaiver,
     answerLesson,
-    prefs,
-    savePrefs,
   ]);
 
   const zoomPct = Math.round(getZoom() * 100);
-  const pinned = Object.keys(prefs.pinned).length;
 
   return (
     <div className="relative flex h-full flex-col">
@@ -981,19 +958,14 @@ function CanvasInner({
 
             <span className="flex-1" />
 
-            {/* Auto-layout is not a switch of its own: it is the ABSENCE of
-                pins. Saying so here, where the mockup puts a toggle, keeps one
-                fact in one place — `gr` is still the way to turn it back on. */}
+            {/* Positions are a pure function of the model, always — there is
+                no drag to opt a node out of it, so this has nothing to
+                report but "on". */}
             <span
               data-auto-layout
               className="flex h-[26px] items-center gap-1.5 rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim"
             >
-              auto-layout
-              {pinned === 0 ? (
-                <span className="text-running">on</span>
-              ) : (
-                <span className="text-waiting">{pinned} pinned</span>
-              )}
+              auto-layout <span className="text-running">on</span>
             </span>
 
             <div className="flex h-[26px] items-center overflow-hidden rounded-[7px] border border-line text-ink-dim">
@@ -1045,31 +1017,9 @@ function CanvasInner({
           <div className="relative min-h-0 flex-1">
             <ReactFlow
               nodes={nodes}
-              edges={edges}
+              edges={NO_EDGES}
               onNodesChange={onNodesChange}
-              onNodeDragStart={(_event, node) => dragging.current.add(node.id)}
-              onNodeDragStop={(_event, node, moved) => {
-                // ReactFlow reports a multi-select drag in `moved` and a single
-                // one in `node`; past that, the decision belongs to pinDragged.
-                const dragged = moved.length > 0 ? moved : [node];
-                for (const one of dragged) {
-                  dragging.current.delete(one.id);
-                }
-                const next = pinDragged(
-                  prefs,
-                  dragged,
-                  (id) => layoutPositions.get(id),
-                  new Date(),
-                );
-                if (next !== prefs) {
-                  savePrefs(next);
-                }
-              }}
-              // A drag has to be a drag. Below this a click on a card would pin it
-              // where auto-layout had already put it, quietly opting that one card
-              // out of ever sorting again — the least visible way to break §3's
-              // ranking.
-              nodeDragThreshold={4}
+              nodesDraggable={false}
               nodeTypes={NODE_TYPES}
               fitView
               proOptions={{ hideAttribution: true }}

@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
+import { CELL, cellOrigin, FAN, INFO_OFFSET, stepSlotOffset } from '../../src/canvas/grid.js';
 import {
-  groupNodeId,
+  fanNodeId,
   INFO_SIZE,
   infoNodeId,
   layoutCanvas,
+  orderedForCanvas,
   orderedSessions,
+  STEP_SIZE,
+  slotNodeId,
   stepNodeId,
 } from '../../src/canvas/layout.js';
+import { toNavNodes } from '../../src/canvas/nav-nodes.js';
 import type { CanvasModel, Decision, Session } from '../../src/domain/model.js';
+import { nextNode } from '../../src/keyboard/spatial-nav.js';
 
 function decision(id: string): Decision {
   return { id, label: `step-${id}`, input: `in-${id}`, output: `out-${id}`, commands: [] };
@@ -31,6 +37,15 @@ function session(id: string, over: Partial<Session> = {}): Session {
 function model(...sessions: Session[]): CanvasModel {
   return {
     projects: [{ id: 'p1', name: 'repo', source: 'black-smith', sessions }],
+  };
+}
+
+function twoProjects(bStatus: Session['status']): CanvasModel {
+  return {
+    projects: [
+      { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a')] },
+      { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b', { status: bStatus })] },
+    ],
   };
 }
 
@@ -96,6 +111,12 @@ describe('orderedSessions', () => {
   });
 });
 
+describe('orderedForCanvas', () => {
+  it('ignores projects: a waiting session in project B beats a done session in project A', () => {
+    expect(orderedForCanvas(twoProjects('waiting')).map((e) => e.session.id)).toEqual(['b', 'a']);
+  });
+});
+
 describe('layoutCanvas', () => {
   const three = model(
     session('s1', { decisions: [decision('d3'), decision('d2'), decision('d1')] }),
@@ -111,159 +132,218 @@ describe('layoutCanvas', () => {
     expect(nodes.filter((n) => n.kind === 'step')).toHaveLength(4);
   });
 
-  it('runs the steps oldest to newest, left to right', () => {
+  it('runs the steps oldest to newest, top to bottom', () => {
     const { nodes } = layoutCanvas(three);
     const steps = nodes.filter((n) => n.kind === 'step').filter((n) => n.id.includes('s1'));
     expect(steps.map((n) => (n.kind === 'step' ? n.decision.id : ''))).toEqual(['d1', 'd2', 'd3']);
-    expect(steps[0]?.position.x).toBeLessThan(steps[2]?.position.x ?? 0);
+    expect(steps[0]?.position.y).toBeLessThan(steps[2]?.position.y ?? 0);
   });
 
-  it('keeps every node of a session on one row', () => {
+  it('places info nodes at the mockup grid origin, one cell per session', () => {
+    const five = model(session('a'), session('b'), session('c'), session('d'), session('e'));
+    const { nodes } = layoutCanvas(five);
+    const infos = ['a', 'b', 'c', 'd', 'e'].map((id) => nodes.find((n) => n.id === infoNodeId(id)));
+    infos.forEach((info, i) => {
+      expect(info?.position).toEqual({
+        x: 16 + (i % 2) * 652,
+        y: 16 + Math.floor(i / 2) * 354 + 58,
+      });
+      expect(info?.size).toEqual({ width: 220, height: 174 });
+    });
+  });
+
+  it('stacks a session’s steps in one column, 100px apart, sized 250x90', () => {
+    const one = model(
+      session('s1', { decisions: [decision('d3'), decision('d2'), decision('d1')] }),
+    );
+    const { nodes } = layoutCanvas(one);
+    const cellX = cellOrigin(0).x;
+    const steps = nodes.filter((n) => n.kind === 'step');
+    expect(steps.map((n) => n.position.x)).toEqual([cellX + 330, cellX + 330, cellX + 330]);
+    expect(steps[1]?.position.y).toBe((steps[0]?.position.y ?? 0) + 100);
+    expect(steps[2]?.position.y).toBe((steps[0]?.position.y ?? 0) + 200);
+    for (const step of steps) {
+      expect(step.size).toEqual({ width: 250, height: 90 });
+    }
+  });
+
+  it('imports geometry from grid.ts instead of declaring its own', () => {
+    expect(INFO_SIZE).toEqual({ width: 220, height: 174 });
+    expect(STEP_SIZE).toEqual({ width: 250, height: 90 });
+    const origin = cellOrigin(1);
+    const offset = stepSlotOffset(1);
+    expect(origin).toEqual({ x: 668, y: 16 });
+    expect(offset).toEqual({ x: 330, y: 100 });
+  });
+
+  it('places the info node at cellOrigin + INFO_OFFSET', () => {
     const { nodes } = layoutCanvas(three);
-    const row = nodes.filter((n) => n.id.includes('s1'));
-    const ys = new Set(row.map((n) => n.position.y));
-    expect(ys.size).toBe(1);
+    const info = nodes.find((n) => n.id === infoNodeId('s2'));
+    const origin = cellOrigin(1);
+    expect(info?.position).toEqual({ x: origin.x + INFO_OFFSET.x, y: origin.y + INFO_OFFSET.y });
   });
 
-  it('stacks sessions down the canvas in the sidebar’s order', () => {
-    const { nodes } = layoutCanvas(three);
-    const first = nodes.find((n) => n.id === infoNodeId('s1'));
-    const second = nodes.find((n) => n.id === infoNodeId('s2'));
-    expect(second?.position.y).toBeGreaterThan(first?.position.y ?? 0);
+  it('places sessions into cells in flat urgency order', () => {
+    const mixed = model(
+      session('idle', { status: 'done' }),
+      session('urgent', { status: 'waiting' }),
+    );
+    const { nodes } = layoutCanvas(mixed);
+    const urgent = nodes.find((n) => n.id === infoNodeId('urgent'));
+    const idle = nodes.find((n) => n.id === infoNodeId('idle'));
+    // Waiting outranks done, so `urgent` takes cell 0 (leftmost) and `idle`
+    // cell 1, even though `idle` was declared first.
+    expect(urgent?.position.x).toBeLessThan(idle?.position.x ?? 0);
   });
 
-  it('leaves a wider gap before the first step than between the steps', () => {
-    // That gap is where the "there is history you are not seeing" mark goes, so
-    // it has to be visibly different from an ordinary link.
-    const { nodes } = layoutCanvas(three);
-    const steps = nodes
-      .filter((n) => n.kind === 'step' && n.id.includes('s1'))
-      .sort((a, b) => a.position.x - b.position.x);
-    const firstGap = (steps[0]?.position.x ?? 0) - INFO_SIZE.width;
-    const nextGap =
-      (steps[1]?.position.x ?? 0) - ((steps[0]?.position.x ?? 0) + (steps[0]?.size.width ?? 0));
-    expect(firstGap).toBeGreaterThan(nextGap);
+  it('emits one fan per session, sized 110x290 at cell offset (220, 0)', () => {
+    const { fans } = layoutCanvas(three);
+    const fan = fans.find((f) => f.id === fanNodeId('s1'));
+    const origin = cellOrigin(0);
+    expect(fan?.position).toEqual({ x: origin.x + FAN.x, y: origin.y });
+    expect(fan?.size).toEqual({ width: FAN.width, height: CELL.height });
   });
 
-  it('chains the nodes of a row with edges', () => {
-    const { edges } = layoutCanvas(three);
-    const row = edges.filter((e) => e.source.includes('s1') || e.target.includes('s1'));
-    expect(row.map((e) => [e.source, e.target])).toEqual([
-      [infoNodeId('s1'), stepNodeId('s1', 'd1')],
-      [stepNodeId('s1', 'd1'), stepNodeId('s1', 'd2')],
-      [stepNodeId('s1', 'd2'), stepNodeId('s1', 'd3')],
-    ]);
-  });
-
-  it('marks only the first edge as the elided one', () => {
-    const { edges } = layoutCanvas(three);
-    const row = edges.filter((e) => e.source.includes('s1') || e.target.includes('s1'));
-    expect(row.map((e) => e.elided)).toEqual([true, false, false]);
-  });
-
-  it('counts the steps it did not draw', () => {
+  it('carries totalSteps as the full decision count, not the number drawn', () => {
     const many = model(
       session('s', { decisions: Array.from({ length: 9 }, (_, i) => decision(`d${i}`)) }),
     );
-    expect(layoutCanvas(many).edges[0]?.label).toBe('+6');
+    const { fans } = layoutCanvas(many);
+    expect(fans.find((f) => f.id === fanNodeId('s'))?.totalSteps).toBe(9);
   });
 
-  it('does not label the break when nothing was skipped', () => {
-    // `+0` would be a mark that means "nothing", which is worse than no mark.
-    const exact = model(session('s', { decisions: [decision('a'), decision('b'), decision('c')] }));
-    expect(layoutCanvas(exact).edges[0]?.label).toBeNull();
+  it('marks a branch empty where no step fills the position', () => {
+    const one = model(session('s', { decisions: [decision('only')] }));
+    const { fans } = layoutCanvas(one);
+    const fan = fans.find((f) => f.id === fanNodeId('s'));
+    expect(fan?.branchStatuses).toEqual(['done', 'empty', 'empty']);
+  });
+
+  it('emits exactly three slots per session regardless of decision count', () => {
+    const one = model(session('s', { decisions: [decision('only')] }));
+    const { nodes, fans, slots } = layoutCanvas(one);
+    const ownSlots = [0, 1, 2].map((position) =>
+      slots.find((s) => s.id === slotNodeId('s', position)),
+    );
+    expect(ownSlots.every((s) => s !== undefined)).toBe(true);
+    expect(slots).toHaveLength(3);
+    expect(ownSlots.filter((s) => s?.placeholder)).toHaveLength(2);
+    expect(fans).toHaveLength(1);
+    expect(nodes).toHaveLength(2);
+  });
+
+  it('sizes every placeholder slot 250x90, at the step slot offsets', () => {
+    const empty = model(session('s'));
+    const { slots } = layoutCanvas(empty);
+    expect(slots.map((s) => s.position)).toEqual([
+      { x: cellOrigin(0).x + stepSlotOffset(0).x, y: cellOrigin(0).y + stepSlotOffset(0).y },
+      { x: cellOrigin(0).x + stepSlotOffset(1).x, y: cellOrigin(0).y + stepSlotOffset(1).y },
+      { x: cellOrigin(0).x + stepSlotOffset(2).x, y: cellOrigin(0).y + stepSlotOffset(2).y },
+    ]);
+    for (const slot of slots) {
+      expect(slot.size).toEqual({ width: 250, height: 90 });
+      expect(slot.placeholder).toBe(true);
+    }
   });
 
   it('draws a session that has not decided anything as an info node alone', () => {
     const quiet = model(session('quiet'));
-    const { nodes, edges } = layoutCanvas(quiet);
+    const { nodes, fans, slots } = layoutCanvas(quiet);
     expect(nodes).toHaveLength(1);
-    expect(edges).toEqual([]);
+    expect(fans).toHaveLength(1);
+    expect(slots).toHaveLength(3);
+    expect(slots.every((s) => s.placeholder)).toBe(true);
   });
 
   it('lays out an empty canvas without inventing anything', () => {
-    expect(layoutCanvas({ projects: [] })).toEqual({ groups: [], nodes: [], edges: [] });
+    expect(layoutCanvas({ projects: [] })).toEqual({ nodes: [], fans: [], slots: [] });
   });
 
-  it('wraps each project in its own frame', () => {
-    const two: CanvasModel = {
-      projects: [
-        { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a')] },
-        { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b')] },
-      ],
-    };
-    const { groups } = layoutCanvas(two);
-    expect(groups.map((g) => g.project.name)).toEqual(['alpha', 'beta']);
-  });
-
-  it('parents every node to its project’s frame', () => {
+  it('gives every node an absolute position with no parent', () => {
     const { nodes } = layoutCanvas(three);
-    expect(new Set(nodes.map((n) => n.parentId))).toEqual(new Set([groupNodeId('p1')]));
-  });
-
-  it('keeps frames out of the navigable set — they are scenery', () => {
-    // A focusable frame would put a stop on every journey down the canvas.
-    const { groups, nodes } = layoutCanvas(three);
-    const navigable = new Set(nodes.map((n) => n.id));
-    for (const group of groups) {
-      expect(navigable.has(group.id)).toBe(false);
-    }
-  });
-
-  it('makes a frame tall enough to hold every row it wraps', () => {
-    const { groups, nodes } = layoutCanvas(three);
-    const frame = groups[0];
     for (const node of nodes) {
-      expect(node.position.y + node.size.height).toBeLessThanOrEqual(frame?.size.height ?? 0);
-      expect(node.position.x + node.size.width).toBeLessThanOrEqual(frame?.size.width ?? 0);
+      expect('parentId' in node).toBe(false);
     }
   });
 
-  it('gives every frame the same width, so the boxes line up down the canvas', () => {
-    const uneven: CanvasModel = {
-      projects: [
-        {
-          id: 'p1',
-          name: 'alpha',
-          source: 'black-smith',
-          sessions: [session('a', { decisions: [decision('x'), decision('y'), decision('z')] })],
-        },
-        { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b')] },
-      ],
-    };
-    const { groups } = layoutCanvas(uneven);
-    expect(groups[0]?.size.width).toBe(groups[1]?.size.width);
+  it('stacks sessions flat, ignoring project boundaries', () => {
+    // Frame gone: waiting-in-p2 takes the earlier cell than done-in-p1, which a
+    // frame blocked.
+    const { nodes } = layoutCanvas(twoProjects('waiting'));
+    const a = nodes.find((n) => n.id === infoNodeId('a'));
+    const b = nodes.find((n) => n.id === infoNodeId('b'));
+    expect(b?.position.x).toBeLessThan(a?.position.x ?? 0);
   });
 
-  it('stacks frames without overlapping', () => {
-    const two: CanvasModel = {
-      projects: [
-        { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a')] },
-        { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b')] },
-      ],
-    };
-    const { groups } = layoutCanvas(two);
-    expect(groups[1]?.position.y).toBeGreaterThanOrEqual(
-      (groups[0]?.position.y ?? 0) + (groups[0]?.size.height ?? 0),
+  it('never lets two grid rows overlap', () => {
+    const three_in_a_row = model(session('s1'), session('s2'), session('s3'));
+    const { nodes } = layoutCanvas(three_in_a_row);
+    const row0 = nodes.find((n) => n.id === infoNodeId('s1'));
+    const row1 = nodes.find((n) => n.id === infoNodeId('s3'));
+    expect(row1?.position.y).toBeGreaterThanOrEqual(
+      (row0?.position.y ?? 0) + (row0?.size.height ?? 0),
     );
   });
 
-  it('still draws a frame for a project with no sessions', () => {
-    const empty: CanvasModel = {
-      projects: [{ id: 'p1', name: 'alpha', source: 'orca', sessions: [] }],
-    };
-    const { groups, nodes } = layoutCanvas(empty);
-    expect(groups).toHaveLength(1);
-    expect(groups[0]?.size.height).toBeGreaterThan(0);
-    expect(nodes).toEqual([]);
+  it('emits a status-derived opacity for each cell, inferred for failed', () => {
+    const statuses = model(
+      session('w', { status: 'waiting' }),
+      session('r', { status: 'running' }),
+      session('d', { status: 'done' }),
+      session('f', { status: 'failed' }),
+    );
+    const { nodes } = layoutCanvas(statuses);
+    const opacityOf = (id: string) => nodes.find((n) => n.id === infoNodeId(id))?.opacity;
+    expect(opacityOf('w')).toBe(0.72);
+    expect(opacityOf('r')).toBe(0.6);
+    expect(opacityOf('d')).toBe(0.45);
+    expect(opacityOf('f')).toBe(0.45);
   });
 
-  it('never lets two rows overlap', () => {
+  it('does not emit a focused opacity: focus is not in the model', () => {
     const { nodes } = layoutCanvas(three);
-    const first = nodes.find((n) => n.id === infoNodeId('s1'));
-    const second = nodes.find((n) => n.id === infoNodeId('s2'));
-    expect(second?.position.y).toBeGreaterThanOrEqual(
-      (first?.position.y ?? 0) + (first?.size.height ?? 0),
+    for (const node of nodes) {
+      expect('focused' in node).toBe(false);
+    }
+  });
+});
+
+describe('layoutCanvas keyboard grammar (docs/design/canvas-layout.md §4)', () => {
+  // Model order is newest-first (`visibleDecisions` reverses it for display), so
+  // this produces d3, d2, d1 — reversed to d1, d2, d3 oldest-first on the canvas.
+  function stepsOf(count: number, prefix: string): Decision[] {
+    return Array.from({ length: count }, (_, i) => decision(`${prefix}${count - i}`));
+  }
+
+  it('reaches the middle step slot from each column, and the cell below from the info node', () => {
+    const four = model(
+      session('s0', { decisions: stepsOf(3, 's0d') }),
+      session('s1', { decisions: stepsOf(3, 's1d') }),
+      session('s2', { decisions: stepsOf(3, 's2d') }),
+      session('s3', { decisions: stepsOf(3, 's3d') }),
     );
+    const { nodes } = layoutCanvas(four);
+    const navigableIds = nodes.map((n) => n.id);
+    const flowNodes = nodes.map((n) => ({
+      id: n.id,
+      position: n.position,
+      width: n.size.width,
+      height: n.size.height,
+    }));
+    const navNodes = toNavNodes(flowNodes, navigableIds);
+
+    for (const sessionId of ['s0', 's1']) {
+      const infoId = infoNodeId(sessionId);
+      const middleId = stepNodeId(sessionId, `${sessionId}d2`);
+      const topId = stepNodeId(sessionId, `${sessionId}d1`);
+      const bottomId = stepNodeId(sessionId, `${sessionId}d3`);
+
+      expect(nextNode(navNodes, infoId, 'right')).toBe(middleId);
+      expect(nextNode(navNodes, middleId, 'up')).toBe(topId);
+      expect(nextNode(navNodes, middleId, 'down')).toBe(bottomId);
+      expect(nextNode(navNodes, middleId, 'left')).toBe(infoId);
+    }
+
+    expect(nextNode(navNodes, infoNodeId('s0'), 'down')).toBe(infoNodeId('s2'));
   });
 });
