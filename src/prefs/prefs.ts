@@ -1,12 +1,13 @@
 /**
  * The two things that are yours rather than the factory's.
  *
- * §3 already decided this and the code had not caught up: "kéo được và nhớ vị
- * trí. Vị trí lưu theo từng người dùng, **không đi vào event log**." Where you
- * dragged a card and which emoji you put on a session are facts about how you
- * like to look at the work — they are not facts about the work, so they must
- * not become events. black-smith is right to have no route for them, and vam
- * was wrong to answer "black-smith không lưu icon" as though that settled it.
+ * §3 already decided this and the code had not caught up: "draggable and
+ * remembers position. Position is saved per user, **and does not go into
+ * the event log**." Where you dragged a card and which emoji you put on a
+ * session are facts about how you like to look at the work — they are not
+ * facts about the work, so they must not become events. black-smith is right
+ * to have no route for them, and vam was wrong to answer "black-smith
+ * doesn't store icons" as though that settled it.
  * Nobody asked black-smith. This is the browser's job.
  *
  * So: `localStorage`, per browser, per person. It never leaves the machine and

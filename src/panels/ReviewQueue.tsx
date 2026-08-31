@@ -81,7 +81,7 @@ export function ReviewQueue(props: ReviewQueueProps) {
     // the opposite of what it means.
     return (
       <div className="border-line border-t px-3 py-2">
-        <div className="text-[10.5px] text-failed">không đọc được hàng chờ approve — {error}</div>
+        <div className="text-[10.5px] text-failed">could not read the approval queue — {error}</div>
       </div>
     );
   }
@@ -226,11 +226,11 @@ function HiddenRow({ count }: { readonly count: number }) {
       className="rounded-[var(--radius-sm)] border border-waiting/40 border-dashed px-2 py-1.5"
     >
       <p className="text-[11px] text-waiting leading-relaxed">
-        còn {count} finding chờ approve mà vam không đọc được
+        {count} more finding(s) awaiting approval that vam cannot read
       </p>
       <p className="pt-1 text-[10.5px] text-ink-faint leading-relaxed">
-        vam tìm finding qua task board của session này; finding gắn vào task do session khác tạo thì
-        không có đường tới. Xem bằng{' '}
+        vam finds findings through this session's task board; a finding attached to a task created
+        by another session has no path here. See it with{' '}
         <span className="select-text font-mono text-ink-dim">smith stats overview</span>.
       </p>
     </li>

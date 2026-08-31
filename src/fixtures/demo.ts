@@ -59,13 +59,13 @@ export const DEMO_MODEL: CanvasModel = {
               id: 'd-r5',
               label: 'R-5',
               input:
-                'Cross-origin EventSource có thật sự tới được server 127.0.0.1 không? Đo đi, đừng đoán.',
+                "Does cross-origin EventSource actually reach the 127.0.0.1 server? Measure it, don't guess.",
               output:
-                'Tới được — Origin có, handler chạy, subscribe + heartbeat khởi động. Nhưng Chrome cắt ở ~5.0s (5004/5008/5010ms), còn same-origin thì không giới hạn. Sửa câu chữ R-5 hay thêm CORS?',
+                "It reaches — Origin header present, handler runs, subscribe + heartbeat start. But Chrome cuts it at ~5.0s (5004/5008/5010ms), while same-origin has no limit. Fix R-5's wording, or add CORS?",
               commands: [
                 {
                   id: 'c-raise',
-                  label: 'raise finding sửa câu chữ R-5',
+                  label: 'raise finding to fix R-5 wording',
                   command:
                     'smith findings raise --evidence state/results/f-ui-server-sse.json --found-by reviewer --session factory-sse-1',
                 },
@@ -74,17 +74,17 @@ export const DEMO_MODEL: CanvasModel = {
             {
               id: 'd-signoff',
               label: 'sign-off',
-              input: 'Ký plan-v2 chưa? Còn finding nào chưa đóng thì đừng ký.',
+              input: "Have we signed off plan-v2 yet? Don't sign if any finding is still open.",
               output:
-                'Chưa ký. Còn 1×S2 mở ở task-4 (race in queue) — verifier đã confirm, coder đang sửa vòng 2.',
+                'Not yet. One S2 still open on task-4 (race in queue) — verifier confirmed it, coder is fixing round 2.',
               commands: [],
             },
             {
               id: 'd-task4',
               label: 'task-4',
-              input: 'Chạy task-4 theo plan-v2, TDD trước, đừng waive nhánh queue rỗng.',
+              input: "Run task-4 per plan-v2, TDD first, don't waive the empty-queue branch.",
               output:
-                'Xong vòng 1: 340 dòng diff, 6 file, suite xanh. Reviewer trả về 2 finding (1×S2, 1×S3).',
+                'Round 1 done: 340-line diff, 6 files, suite green. Reviewer came back with 2 findings (1×S2, 1×S3).',
               commands: [],
             },
             // Everything below here is older than the three the canvas draws. It
@@ -94,30 +94,31 @@ export const DEMO_MODEL: CanvasModel = {
             {
               id: 'd-plan',
               label: 'plan',
-              input: 'Lên plan cho epic ui-server-sse, chia wave theo claim graph.',
+              input: 'Draft a plan for epic ui-server-sse, split waves by claim graph.',
               output:
-                'plan-v2: 5 task, 41 AC, 3 wave. task-2 giữ claims của task-1 qua claim-order.',
+                "plan-v2: 5 tasks, 41 ACs, 3 waves. task-2 holds task-1's claims via claim-order.",
               commands: [],
             },
             {
               id: 'd-scope',
               label: 'scope',
-              input: 'Epic này chỉ đọc thôi, chưa ghi gì. Ghi rõ vào spec giúp tôi.',
-              output: 'Đã ghi §6: epic 1 read-only, luồng ghi để epic 2.',
+              input:
+                'This epic is read-only for now, no writes yet. Put that explicitly in the spec.',
+              output: 'Written into §6: epic 1 is read-only, the write path is epic 2.',
               commands: [],
             },
             {
               id: 'd-start',
               label: 'start',
-              input: 'Mở session cho epic ui-server-sse.',
+              input: 'Open a session for epic ui-server-sse.',
               output: 'session-start factory-sse-1, plan_version 1.',
               commands: [],
             },
             {
               id: 'd-hello',
               label: 'hello',
-              input: 'Trạng thái factory đang thế nào?',
-              output: '2 epic mở, 1 merge queue trống, không có gate nào đang chờ.',
+              input: "What's the factory's status right now?",
+              output: '2 epics open, 1 merge queue empty, no gate pending.',
               commands: [],
             },
           ],
@@ -135,7 +136,7 @@ export const DEMO_MODEL: CanvasModel = {
             {
               id: 'd-active',
               label: 'active mode',
-              input: 'Sửa lại deepseek và active mode cho cả deepseek và codex.',
+              input: 'Fix deepseek, and active mode for both deepseek and codex.',
               // Still writing. `running`, not `waiting`: it wants nothing yet.
               output: null,
               commands: [],
@@ -143,9 +144,9 @@ export const DEMO_MODEL: CanvasModel = {
             {
               id: 'd-shadow',
               label: 'shadow',
-              input: 'Hai provider đang shadow phải không? Đọc crosscheck.yml xem.',
+              input: 'Both providers are in shadow mode, right? Check crosscheck.yml.',
               output:
-                'Đúng, cả hai đều mode: shadow. Header file còn ghi sai là đã promote — tôi sửa lại luôn.',
+                'Correct, both are mode: shadow. The file header still said promoted — I fixed that too.',
               commands: [],
             },
           ],
@@ -163,8 +164,8 @@ export const DEMO_MODEL: CanvasModel = {
             {
               id: 'd-merge',
               label: 'merge',
-              input: 'Rebase rồi merge, đừng squash — tôi muốn giữ từng commit của task-4.',
-              output: 'Rebase sạch, không conflict. Đã merge vào main, 7 commit giữ nguyên.',
+              input: "Rebase then merge, don't squash — I want to keep every commit from task-4.",
+              output: 'Clean rebase, no conflicts. Merged into main, all 7 commits kept.',
               commands: [],
             },
           ],
@@ -189,30 +190,30 @@ export const DEMO_MODEL: CanvasModel = {
             {
               id: 'd-icons',
               label: 'icon',
-              input: 'Rename và chọn được icon cho session giống orca.',
+              input: 'Rename sessions and pick an icon for them, like orca does.',
               output:
-                'Orca dùng emoji-picker-react (class .repo-icon-emoji-picker), không phải danh sách cố định. Đã đổi bảng chọn sang picker có search. Bấm s trên một hàng để thử.',
+                'Orca uses emoji-picker-react (class .repo-icon-emoji-picker), not a fixed list. Switched the picker to one with search. Press s on a row to try it.',
               commands: [],
             },
             {
               id: 'd-group',
               label: 'group',
               input:
-                'Ở sidebar bên trái có thể group session theo project. Trong canvas có wrapper dashed line quanh các session thuộc project, label project.',
+                "The left sidebar can group sessions by project. On the canvas, wrap a dashed-line border around each project's sessions, labeled with the project name.",
               output:
-                'Xong. Heading là <div> thường nên j không bao giờ dừng ở đó; khung chỉ bọc được các hàng liền nhau, nên project được xếp theo session gấp nhất của nó.',
+                'Done. The heading is a plain <div> so j never stops there; the border can only wrap contiguous rows, so a project sorts by its most urgent session.',
               commands: [],
             },
             {
               id: 'd-stack',
               label: 'stack',
-              input: 'Dùng React và ReactFlow, nhưng không dùng HDS, tham khảo từ chính orca.',
+              input: 'Use React and ReactFlow, but not HDS — reference orca itself.',
               output:
-                'Đã ghi §1.1 lệch chuẩn: Vue→React, vue-flow→ReactFlow, HDS→Tailwind. Mất 57 file .vue và token HDS; vam là repo đầu tiên ra khỏi chuẩn.',
+                'Written into §1.1 as a stack deviation: Vue→React, vue-flow→ReactFlow, HDS→Tailwind. Loses 57 .vue files and the HDS tokens; vam is the first repo off the standard.',
               commands: [
                 {
                   id: 'c-check',
-                  label: 'chạy lại gate UI',
+                  label: 'rerun the UI gate',
                   command: 'pnpm -s lint && pnpm -s typecheck && pnpm -s test && pnpm -s build',
                 },
               ],

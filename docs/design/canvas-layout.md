@@ -1,84 +1,89 @@
 # VAM — canvas layout & interaction spec
 
-VAM = **VIM Agent Management**. Bản này chốt từ phiên phỏng vấn 2026-08-27.
-Ràng buộc số một: **điều khiển bằng bàn phím, hạn chế chuột tối đa.**
+VAM = **VIM Agent Management**. This version was locked down from the
+2026-08-27 interview session.
+Constraint number one: **keyboard-driven control, mouse kept to a minimum.**
 
-## 1. Vam đứng ở đâu
+## 1. Where vam sits
 
-App riêng, **không fork orca**. Orca (MIT, 19.146 file, `packages: []` — không
-phải monorepo module hoá) đã có sẵn client thứ hai là `mobile/` nói chuyện với
-backend qua RPC; vam là client thứ ba theo đúng đường đó.
+A separate app, **not a fork of orca**. Orca (MIT, 19,146 files, `packages: []`
+— not a modularized monorepo) already has a second client, `mobile/`, that
+talks to the backend over RPC; vam is a third client on that same path.
 
 ```
 vam (web · Vite + React + ReactFlow)
- ├─ adapter black-smith → http://127.0.0.1:4680/api/*   (đã tồn tại, cả đọc lẫn ghi)
+ ├─ adapter black-smith → http://127.0.0.1:4680/api/*   (already exists, both read and write)
  └─ adapter orca        → http://127.0.0.1:6768 RPC     (orchestration.* · terminal.*)
 ```
 
-Web trước, Electron sau ⇒ **lớp truy cập dữ liệu phải tách khỏi component ngay
-từ commit đầu**, nếu không việc bọc Electron sẽ phải viết lại UI.
+Web first, Electron later ⇒ **the data-access layer must be separated from
+components from the very first commit**, or wrapping it in Electron later will
+mean rewriting the UI.
 
-### 1.1 Lệch chuẩn stack — ghi lại có lý do (bắt buộc)
+### 1.1 Stack deviation — recorded with justification (required)
 
-`docs/standards/stack.md` của black-smith bắt buộc **Vue 3 + Vite**,
-**`@vue-flow/core`** và **HDS**, và cho phép lệch *chỉ khi có justification viết
-ra*. Vam lệch ở hai điểm. Operator quyết ngày 2026-08-27:
+black-smith's `docs/standards/stack.md` mandates **Vue 3 + Vite**,
+**`@vue-flow/core`**, and **HDS**, and allows deviation *only with a written
+justification*. Vam deviates on two points. Operator decision, 2026-08-27:
 
-| điểm | chuẩn | vam | lý do |
+| point | standard | vam | reason |
 |---|---|---|---|
-| framework | Vue 3 | **React 19** | UI của vam tham chiếu trực tiếp từ orca, mà orca là app React. Cùng framework thì pattern chuyển thẳng sang; khác framework thì mọi thứ tham chiếu đều phải dịch lại bằng tay. |
-| canvas | `@vue-flow/core` | **ReactFlow** | Hệ quả của dòng trên. Cùng một paradigm hiển thị, chỉ khác cổng. Orca **không** dùng thư viện canvas nào — phần này vam tự mang, nên không có gì để kế thừa từ orca ở đây. |
-| styling | HDS + Tailwind v4 | **Tailwind v4 + shadcn/radix, không HDS** | Cùng lý do: lấy thẳng từ orca. |
+| framework | Vue 3 | **React 19** | vam's UI references orca directly, and orca is a React app. Same framework means patterns carry straight over; a different framework means everything referenced has to be translated by hand. |
+| canvas | `@vue-flow/core` | **ReactFlow** | A consequence of the row above. Same rendering paradigm, just a different port. Orca **does not** use any canvas library — vam brings this part on its own, so there is nothing to inherit from orca here. |
+| styling | HDS + Tailwind v4 | **Tailwind v4 + shadcn/radix, no HDS** | Same reason: taken straight from orca. |
 
-Cái mất, nói rõ để sau này không ai tưởng là bỏ sót: HDS token và 57 file `.vue`
-của `black-smith/ui/src` **không** dùng lại được, kể cả CSS đã viết sẵn cho
-class `.vue-flow__`. Vam là repo đầu tiên trong hệ lệch khỏi chuẩn stack.
+What is lost, stated plainly so nobody later mistakes it for an oversight: the
+HDS tokens and the 57 `.vue` files in `black-smith/ui/src` **cannot** be
+reused, including the CSS already written for the `.vue-flow__` class. Vam is
+the first repo in the family to deviate from the standard stack.
 
-Cái được: orca (MIT) cho vam một tham chiếu chạy thật cho đúng những phần khó
-nhất — xem §4.1.
+What is gained: orca (MIT) gives vam a real, running reference for exactly the
+hardest parts — see §4.1.
 
-### 1.2 Stack chốt
+### 1.2 Stack, as locked
 
-> **Sửa 2026-08-28.** Mục này từng là DANH SÁCH DỰ ĐỊNH chép từ `package.json`
-> của orca ngày 2026-08-27, nhưng viết như thể đã cài. Bốn món chưa bao giờ
-> được cài — `shadcn`, `radix-ui`, `class-variance-authority`, `sonner` — và
-> một món có thật thì không được nhắc. Một phiên khác đã đọc mục này, tin nó,
-> và suýt ghi "React + ReactFlow + shadcn/radix" thành justification chính thức
-> của vam trong registry của black-smith. Dưới đây là thứ `package.json` thực
-> sự khai, đối chiếu ngày 2026-08-28.
+> **Fixed 2026-08-28.** This section used to be an INTENDED LIST copied from
+> orca's `package.json` on 2026-08-27, but written as though it had already
+> been installed. Four items were never installed — `shadcn`, `radix-ui`,
+> `class-variance-authority`, `sonner` — and one real item went unmentioned. A
+> different session read this section, trusted it, and nearly wrote "React +
+> ReactFlow + shadcn/radix" into black-smith's registry as vam's official
+> justification. Below is what `package.json` actually declares, checked
+> against it on 2026-08-28.
 
-Đang cài thật:
+Actually installed:
 
-- **React 19 + Vite** · **Tailwind CSS v4** — không có HDS, token riêng
-  (`src/styles.css`, đọc từ mockup ADE; xem `docs/ade-redesign.md`)
-- **`@xyflow/react`** cho canvas — phần duy nhất không có trong orca
-- **`cmdk`** cho command palette (`Ctrl-K` ở §4) — orca dùng đúng thư viện này
-  ở `QuickOpen.tsx` và `WorktreeJumpPalette.tsx`
-- **`zustand`** cho state · **`lucide-react`** cho icon
-- **`clsx`** + **`tailwind-merge`** cho class
-- **`emoji-picker-react`** cho bảng icon (§4, lazy chunk 307kB)
-- **Vitest** cho unit test (giữ nguyên, trùng chuẩn)
+- **React 19 + Vite** · **Tailwind CSS v4** — no HDS, its own tokens
+  (`src/styles.css`, read from the ADE mockup; see `docs/ade-redesign.md`)
+- **`@xyflow/react`** for the canvas — the only part with no counterpart in orca
+- **`cmdk`** for the command palette (`Ctrl-K` in §4) — orca uses this exact
+  library in `QuickOpen.tsx` and `WorktreeJumpPalette.tsx`
+- **`zustand`** for state · **`lucide-react`** for icons
+- **`clsx`** + **`tailwind-merge`** for classes
+- **`emoji-picker-react`** for the icon grid (§4, lazy chunk 307kB)
+- **Vitest** for unit tests (kept as is, matches the standard)
 
-Lấy theo orca nhưng **không** lấy: `shadcn`, `radix-ui`,
-`class-variance-authority`, `sonner`. vam chưa cần lớp component dựng sẵn nào —
-mọi thành phần đều viết tay trên token của chính nó.
+Taken from orca's lead but **not** taken: `shadcn`, `radix-ui`,
+`class-variance-authority`, `sonner`. vam does not yet need any pre-built
+component layer — every component is hand-written on its own tokens.
 
-## 2. Mô hình chung cho hai nguồn
+## 2. A shared model for two sources
 
-Không phải bịa ra — cả hai bên đều đã có "quyết định chờ người" là first-class:
+Not invented — both sides already treat "a decision waiting on a person" as
+first-class:
 
-| khái niệm chung | orca | black-smith |
+| shared concept | orca | black-smith |
 |---|---|---|
 | project | `worktree-catalog`, `repo`, `folder-workspace` | `tasks` + worktree |
 | session | `orchestration.runList` / `runShow` | `sessions`, `epics` |
-| agent đang chạy (`●`) | `orchestration.workerList`, `agent-status-*` | `agents`, `dispatches` |
+| running agent (`●`) | `orchestration.workerList`, `agent-status-*` | `agents`, `dispatches` |
 | **decision** | `orchestration.gateList` / `gateResolve` | `waivers`, `gate-outcome`, plan sign-off |
 
 ## 3. Layout
 
-Canvas ReactFlow. **Group lồng**: project là parent node, session là child.
-**Không có mũi tên** giữa các session — canvas là bảng điều khiển, không phải sơ đồ.
-Quy mô thiết kế: **3–5 repo × 1–3 session**.
+ReactFlow canvas. **Nested groups**: project is the parent node, session is
+the child. **No arrows** between sessions — the canvas is a control panel, not
+a diagram. Design scale: **3–5 repos × 1–3 sessions**.
 
 ```
 ┌─ VAM ─────────────────────────────────────────────────────── ⣾ 4 agents ─┐
@@ -88,129 +93,144 @@ Quy mô thiết kế: **3–5 repo × 1–3 session**.
 │  ║ │ ⣾ coder · round 2 · sonnet · 4m │     ║  ║ │ ⣾ planner · 1m   │  ║   │
 │  ║ ├─────────────────────────────────┤     ║  ║ ├──────────────────┤  ║   │
 │  ║ │ ▸ reviewer                      │     ║  ║ │ ▸ plan draft     │  ║   │
-│  ║ │   in : diff 340 dòng, 6 file    │     ║  ║ │   in : goal      │  ║   │
-│  ║ │   out: 2 findings (1×S2)        │     ║  ║ │   out: 7 task    │  ║   │
+│  ║ │   in : diff 340 lines, 6 files  │     ║  ║ │   in : goal      │  ║   │
+│  ║ │   out: 2 findings (1×S2)        │     ║  ║ │   out: 7 tasks   │  ║   │
 │  ║ │ ▸ verifier                      │     ║  ║ │ ▸ spec-review    │  ║   │
 │  ║ │   in : S2 "race in queue"       │     ║  ║ │   in : plan-v1   │  ║   │
 │  ║ │   out: confirmed                │     ║  ║ │   out: 2×S2      │  ║   │
 │  ║ │ ▸ gate                     ⏸    │     ║  ║ │ ▸ sign-off  ⏸    │  ║   │
-│  ║ │   in : 1 S2 chưa fix            │     ║  ║ │   in : plan-v2   │  ║   │
-│  ║ │   out: — chờ bạn duyệt —        │     ║  ║ │   out: — chờ —   │  ║   │
+│  ║ │   in : 1 S2 not fixed           │     ║  ║ │   in : plan-v2   │  ║   │
+│  ║ │   out: — waiting on you —       │     ║  ║ │   out: — waiting —│  ║   │
 │  ║ └─────────────────────────────────┘     ║  ║ └──────────────────┘  ║   │
 │  ║ ┌─ D-263 ─────────────────── ●0 ─┐      ║  ╚═══════════════════════╝   │
-│  ║ │ ✓ merged · 2h trước             │      ║                              │
+│  ║ │ ✓ merged · 2h ago               │      ║                              │
 │  ║ └─────────────────────────────────┘      ║                              │
 │  ╚═════════════════════════════════════════╝                              │
 ├───────────────────────────────────────────────────────────────────────────┤
-│ NORMAL   black-smith/D-257   ⏸ 2 chờ bạn      hjkl f / gt  yy  ^K         │
+│ NORMAL   black-smith/D-257   ⏸ 2 waiting on you   hjkl f / gt  yy  ^K     │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Node session
+### Session node
 
-- **Header**: id · epic · `●N` agent đang chạy.
-- **Dòng activity** (1 dòng, truncate, có spinner khi live). Nguồn: worker
-  heartbeat của black-smith (xem §5).
-- **Đúng 3 decision gần nhất**, mỗi cái 2 dòng `in:` / `out:` tách riêng.
-  Step = **điểm quyết định**, không phải mỗi lượt agent, không phải mỗi pha.
-- Toàn bộ diễn tiến chi tiết của agent **không hiện ra ngoài** — Enter mới xem.
+- **Header**: id · epic · `●N` agents running.
+- **Activity line** (1 line, truncated, spinner when live). Source:
+  black-smith's worker heartbeat (see §5).
+- **Exactly the 3 most recent decisions**, each with its own `in:` / `out:`
+  pair of lines. A step = **a decision point**, not every agent turn, not
+  every phase.
+- The agent's full, detailed progress **does not surface** — only `Enter`
+  shows it.
 
-### Sắp xếp
+### Ordering
 
-Auto-layout mặc định (ưu tiên: đang-chờ-bạn → đang-chạy → mới nhất), **kéo được
-và nhớ vị trí**. Vị trí lưu theo từng người dùng, không đi vào event log.
+Default auto-layout (priority: waiting-on-you → running → newest),
+**draggable and remembers position**. Position is saved per user, and does
+not go into the event log.
 
-**Ghim là thứ bạn kéo, không phải mọi node.** Chỉ node bạn thật sự kéo mới được
-ghi vào `localStorage` (`src/prefs/prefs.ts`); mọi node còn lại nhận vị trí mới
-từ auto-layout ở mỗi lần model đổi. Hai thứ này nghe giống nhau nhưng không
-phải: bản đầu giữ vị trí *hiện tại* của mọi node, nên auto-layout bị đóng băng ở
-lần render đầu tiên — một session chuyển sang chờ-bạn trong lúc bạn đang nhìn
-thì không bao giờ nổi lên đầu khung. Thứ tự ở §3 chỉ có nghĩa nếu nó còn xảy ra
-được sau khi trang đã mở, mà đó là lúc duy nhất có người đang xem.
+**A pin is what you dragged, not every node.** Only a node you actually
+dragged gets written to `localStorage` (`src/prefs/prefs.ts`); every other
+node keeps receiving a fresh position from auto-layout on every model change.
+The two sound alike but are not: the former keeps every node's *current*
+position, which would freeze auto-layout at the first render — a session that
+flips to waiting-on-you while you are looking would never rise to the top of
+the frame. The ordering in §3 only means anything if it can still happen
+after the page is already open, which is the only time anyone is watching.
 
-Kèm theo là đường ra: `gr` bỏ hết ghim. Một cái ghim sống qua reload mà không có
-cách gỡ là một cái bẫy — kéo nhầm một lần là thẻ đó sai vĩnh viễn, và trên màn
-hình không có gì giải thích vì sao nó không xếp cùng những thẻ khác.
+Which comes with an exit: `gr` clears every pin. A pin that survives a reload
+with no way to undo it is a trap — one wrong drag and that card is wrong
+forever, with nothing on screen explaining why it will not sort with the
+rest.
 
-**Icon cũng ở đây, cùng lý do.** black-smith không có route lưu icon, và đó
-không phải là câu trả lời — không ai hỏi black-smith. Icon là chuyện bạn thích
-nhìn việc thế nào, không phải chuyện của việc; nó thuộc về trình duyệt, và §3
-đã nói sẵn: lưu theo từng người dùng, **không đi vào event log**.
+**The icon lives here too, for the same reason.** black-smith has no route to
+store an icon, and that is not the answer — nobody asked black-smith. An icon
+is about how you like to look at the work, not a fact about the work; it
+belongs to the browser, and §3 already said it: saved per user, **and does
+not go into the event log**.
 
-## 4. Bàn phím
+## 4. Keyboard
 
-Không modal thật. Một nhúm chord kiểu vim + command palette.
+No real modes. A handful of vim-style chords plus a command palette.
 
-| phím | việc |
+| key | action |
 |---|---|
-| `h j k l` | đi giữa các node — **tính hình học tại thời điểm bấm**, nên kéo thả không phá |
-| `f` | hiện nhãn nhảy trên mọi node, gõ nhãn là tới |
-| `/` `n` `N` | tìm theo tên session/task |
-| `gt` `gT` | sang project kế / trước |
-| `gg` `G` | node đầu / cuối |
-| `Enter` | mở detail (toàn bộ quá trình agent) |
-| `yy` | **chép command cần chạy tay vào clipboard** |
+| `h j k l` | move between nodes — **computed geometrically at press time**, so drag-and-drop doesn't break it |
+| `f` | shows a jump label on every node, type the label to land there |
+| `/` `n` `N` | search by session/task name |
+| `gt` `gT` | move to next / previous project |
+| `gg` `G` | first / last node |
+| `Enter` | opens detail (the agent's full process) |
+| `yy` | **copies the command you need to run by hand to the clipboard** |
 | `Ctrl-K` | command palette |
-| `Esc` | đóng lớp trên cùng |
-| `I` | vào **action pane** (hàng chờ duyệt + prompt) |
-| `i` | mở ô nhập của thứ con trỏ đang đứng — lý do waiver, ghi chú lesson, hoặc prompt |
-| `H` | rời action pane, về danh sách session |
-| `gr` | bỏ mọi vị trí đã ghim, trả canvas về auto-layout |
+| `Esc` | closes the topmost layer |
+| `I` | enters the **action pane** (approval queue + prompt) |
+| `i` | opens the input for whatever the cursor is on — a waiver's reason, a lesson's note, or the prompt |
+| `H` | leaves the action pane, back to the session list |
+| `gr` | clears every pinned position, returns the canvas to auto-layout |
 
-`hjkl` phải tính theo toạ độ thực tại thời điểm bấm, **không** theo chỉ số cố
-định — đó là điều kiện để kéo-thả và điều hướng bằng phím sống chung được.
+`hjkl` must be computed from real coordinates at press time, **not** from a
+fixed index — that is the condition that lets drag-and-drop and keyboard
+navigation coexist.
 
-### 4.1 Orca cho lớp bàn phím những gì (đọc ngày 2026-08-27)
+### 4.1 What orca gives the keyboard layer (read on 2026-08-27)
 
-**Orca không có vim mode** — tìm cả cây `src/renderer` không ra file nào. Nên
-lớp chord vim của vam là phần mới, không có gì để chép. Cái orca cho là *khung
-đỡ* quanh nó, ở `src/shared/keybindings.ts` (2.432 dòng) và
+**Orca has no vim mode** — searching all of `src/renderer` turns up no such
+file. So vam's vim-chord layer is new; there is nothing to copy from there.
+What orca does give is the *scaffolding* around it, in
+`src/shared/keybindings.ts` (2,432 lines) and
 `app-shell/use-global-keybindings.ts`:
 
-| orca có sẵn | vam cần nó để làm gì |
+| what orca already has | what vam needs it for |
 |---|---|
-| `KeybindingDefinition` registry — action id ↔ binding | Một chỗ duy nhất khai báo phím, thay vì rải `onKeyDown` khắp component |
-| `KeybindingOverrides` + validate + diagnostics | Người dùng đổi phím được mà không sửa code |
-| `findKeybindingConflicts` | `gt` và `g` không thể cùng tồn tại nếu không ai phát hiện xung đột |
-| `isDoubleTapBinding` | Đúng cơ chế `gg` / `yy` cần |
-| `keybindingIsActiveInContext` — `app` / `terminal` / `browser` | Gate theo lớp: đang mở detail thì `j` không được chạy về canvas |
-| `TerminalShortcutPolicy` = `orca-first` \| `terminal-first` | Bài toán phân xử "ai được nhận phím" khi có terminal — vam sẽ gặp y hệt ở lớp detail |
+| `KeybindingDefinition` registry — action id ↔ binding | A single place to declare keys, instead of scattering `onKeyDown` across components |
+| `KeybindingOverrides` + validate + diagnostics | Users can rebind keys without touching code |
+| `findKeybindingConflicts` | `gt` and `g` cannot coexist unless something detects the conflict |
+| `isDoubleTapBinding` | Exactly the mechanism `gg` / `yy` need |
+| `keybindingIsActiveInContext` — `app` / `terminal` / `browser` | Gates by layer: with detail open, `j` must not fall through to the canvas |
+| `TerminalShortcutPolicy` = `orca-first` \| `terminal-first` | The "who gets the keystroke" arbitration problem when a terminal is present — vam will hit the exact same thing in the detail layer |
 
-Hai thứ vam **không** lấy từ orca vì orca không có: bộ chord vim, và điều hướng
-`hjkl` theo hình học. Cả hai là logic thuần, không phụ thuộc nguồn dữ liệu, nên
-dựng và test được ngay — trước cả hai epic black-smith ở §5.
+Two things vam **does not** take from orca because orca does not have them:
+the vim chord set, and geometry-based `hjkl` navigation. Both are pure logic,
+not dependent on any data source, so they can be built and tested right
+away — ahead of both black-smith epics in §5.
 
-### 4.2 Action pane: mỗi nút một điểm dừng
+### 4.2 Action pane: one stop per button
 
-Hàng chờ duyệt là chỗ vam ghi lên record vĩnh viễn — waiver nhận một defect,
-lesson được duyệt sẽ chèn vào mọi dispatch sau đó. Nên `j`/`k` dừng ở **từng
-nút**, không phải từng hàng, và **nút bảo thủ đứng trước**: `bắt sửa` trước `bỏ
-qua`, `bỏ` trước `duyệt`. Vòng ring quanh cái bạn sắp bấm *chính là* câu trả lời
-cho "bấm xong thì gì xảy ra" — không cần biết phím nào là verdict "chính".
+The approval queue is where vam writes to the permanent record — a waiver
+accepts a defect, an approved lesson gets spliced into every future dispatch.
+So `j`/`k` stops at **each button**, not each row, and **the conservative
+button comes first**: `fix` before `waive`, `reject` before `approve`. The
+ring around whatever you are about to press *is* the answer to "what happens
+if I press this" — no need to know which key is the "main" verdict.
 
-Hai lựa chọn bị loại: (a) một điểm dừng mỗi hàng + `y`/`n` cho hai verdict — cả
-hai chữ đã có nghĩa trong grammar (`yy` chép, `n` đi tiếp match), và nghĩa theo
-mode là đúng thứ §4 nói vam không có; (b) một điểm dừng mỗi hàng + `Enter` là
-verdict chính — đòi người đọc biết verdict nào "chính" cho một quyết định nhận
-defect vào record, mà không có gì trên màn hình nói được điều đó.
+Two options were rejected: (a) one stop per row with `y`/`n` for the two
+verdicts — both letters already mean something in the grammar (`yy` copies,
+`n` advances a match), and meaning-by-mode is exactly what §4 says vam does
+not have; (b) one stop per row with `Enter` as the main verdict — that
+requires the reader to know which verdict is "main" for a decision that
+admits a defect into the record, and nothing on screen says which one that
+is.
 
-Ba chi tiết còn lại đều là chống-lỡ-tay:
+The remaining three details are all guards against a slip of the hand:
 
-- `Enter` **trong ô lý do** chỉ kết thúc gõ, không bắn verdict. Con trỏ vẫn đứng
-  ở nút `j` vừa tới; bắn từ trong ô text nghĩa là grant một waiver bằng đúng
-  phím cuối cùng của việc viết lời biện hộ cho nó.
-- `Escape` trong ô lý do trả bàn phím lại pane. Listener cửa sổ bỏ qua phím gõ
-  trong `INPUT` — đó là thứ giữ grammar không bắn giữa chừng — nên ô nào không
-  tự bind thì con trỏ mắc kẹt trong đó.
-- Trả lời xong thì con trỏ **về đầu danh sách**. Hàng vừa trả lời biến mất; giữ
-  nguyên chỉ số là thả con trỏ xuống thứ vừa trượt lên chỗ đó — sau khi bỏ qua
-  một waiver thì đó là nút `duyệt` của hàng kế.
+- `Enter` **inside the reason box** only ends typing, it never fires a
+  verdict. The cursor stays on whichever button `j` last reached; firing from
+  inside the text box would mean granting a waiver with the very last
+  keystroke of writing its excuse.
+- `Escape` inside the reason box hands the keyboard back to the pane. The
+  window listener ignores keys typed inside an `INPUT` — that is what keeps
+  the grammar from firing mid-typing — so any box that does not bind its own
+  handler leaves the caret stuck inside it.
+- Once answered, the cursor **goes back to the top of the list**. The row
+  just answered disappears; keeping the same index would drop the cursor onto
+  whatever just slid up into that slot — after waiving a finding, that would
+  be the `approve` button of the next row.
 
-### `yy` — bỏ hẳn thao tác copy bằng chuột
+### `yy` — doing away with mouse-copy entirely
 
-Black-smith **cố tình** trả command dạng dữ liệu có cấu trúc thay vì tự chạy
-(guardrails: chỉ operator mới tạo remote / push / gửi ra ngoài). Ví dụ thật từ
-`smith new vam`:
+black-smith **deliberately** returns commands as structured data instead of
+running them itself (guardrails: only the operator creates a remote, pushes,
+or sends anything out). A real example from `smith new vam`:
 
 ```json
 "commands": {
@@ -219,142 +239,158 @@ Black-smith **cố tình** trả command dạng dữ liệu có cấu trúc thay
 }
 ```
 
-Nên command chờ-bạn-chạy là **một field**, không phải text lẫn trong prose phải
-bới ra. `yy` chép field đó. Vam **không tự chạy** — bước gật vẫn là của bạn.
+So the command waiting for you to run is **a field**, not text buried in
+prose that has to be dug out. `yy` copies that field. Vam **never runs it
+itself** — the nod of approval is still yours.
 
-## 5. Phụ thuộc ngược lên black-smith
+## 5. Reverse dependency on black-smith
 
-> **Sửa 2026-08-28.** Epic A dưới đây từng được liệt kê là phụ thuộc **đang
-> chờ** ("vam epic 1 nên đợi chúng thay vì dựng lớp polling rồi vứt đi") — lúc
-> viết mục này còn đúng, giờ thì sai cho epic A: nó đã đổ về qua epic
-> `vam-sse-canvas` (chi tiết đo được ở §6.1 dưới đây). Epic B (worker
-> heartbeat) chưa đổi — giữ nguyên cho phần đó.
+> **Fixed 2026-08-28.** Epic A below used to be listed as a **pending**
+> dependency ("vam epic 1 should wait on them rather than build a polling
+> layer just to throw it away") — true when this section was written, now
+> false for epic A: it has landed via epic `vam-sse-canvas` (measured detail
+> in §6.1 below). Epic B (worker heartbeat) has not changed — unchanged for
+> that part.
 
-Một việc còn lại (epic B) nằm ở black-smith, **không phải** ở vam, và vam
-epic 1 nên đợi nó thay vì dựng lớp polling rồi vứt đi — epic A đã đổ về, xem
-sửa ở trên:
+One remaining piece of work (epic B) sits in black-smith, **not** in vam, and
+vam epic 1 should wait on it rather than build a polling layer just to throw
+it away — epic A has already landed, see the fix above:
 
-- **epic A — SSE cho `ui/server`**: **đã đổ về** (2026-08-28). `GET
-  /api/stream` gửi frame `hello`/`change`; vam đọc qua `src/adapter/stream.ts`
-  (framework-free, tách khỏi React để test được sớm — epic.md §5.2) và nối
-  vào canvas qua `src/adapter/useCanvas.ts`. Poll 4 giây đã bị bỏ.
-- **epic B — worker heartbeat**: black-smith cố tình cấm worker trả prose
-  (`{status, severity_counts, artifact_path}`) để khỏi ngập context orchestrator.
-  Nên hôm nay *không có* text "agent đang làm gì". Heartbeat là một sự kiện mới
-  mang một dòng mô tả ngắn — đụng vào return discipline, nên phải là epic riêng
-  của black-smith, có spec-review đàng hoàng.
+- **epic A — SSE for `ui/server`**: **landed** (2026-08-28). `GET
+  /api/stream` sends `hello`/`change` frames; vam reads them through
+  `src/adapter/stream.ts` (framework-free, separated from React so it can be
+  tested early — epic.md §5.2) and wires it into the canvas through
+  `src/adapter/useCanvas.ts`. The 4-second poll has been dropped.
+- **epic B — worker heartbeat**: black-smith deliberately forbids workers
+  from returning prose (`{status, severity_counts, artifact_path}`) to keep
+  the orchestrator's context from flooding. So today there is *no* "what the
+  agent is doing" text. A heartbeat is a new event carrying one short
+  description line — it touches return discipline, so it has to be its own
+  black-smith epic, with a proper spec review.
 
 ```
-black-smith epic A (SSE, đã đổ về)  ─┐
-black-smith epic B (heartbeat)      ─┤→ vam epic 1: canvas đọc-only, một nguồn
+black-smith epic A (SSE, landed)    ─┐
+black-smith epic B (heartbeat)      ─┤→ vam epic 1: canvas read-only, one source
                                      ┘
 ```
 
-## 6. Phạm vi
+## 6. Scope
 
-Đích cuối là **điều khiển đầy đủ** (duyệt gate, tạo/dừng session, spawn agent,
-gửi prompt). Nhưng ghi vào hai hệ thống có mô hình nhất quán khác nhau —
-black-smith bắt mọi lệnh ghi mang envelope `--session/--plan-version/--causal-parent`
-và từ chối nếu thiếu; orca `gateResolve` là RPC nội bộ không cam kết ổn định.
-Ghi sai vào event log là làm hỏng trí nhớ của factory, không phải lỗi UI.
+The end goal is **full control** (approve gates, create/stop sessions, spawn
+agents, send prompts). But writing into two systems with different
+consistency models — black-smith requires every write to carry the
+`--session/--plan-version/--causal-parent` envelope and refuses it if
+missing; orca's `gateResolve` is an internal RPC with no stability guarantee.
+A bad write into the event log corrupts the factory's memory, it is not a UI
+bug.
 
-**Epic 1 dừng ở: canvas đọc-only, một nguồn black-smith.** Chưa ghi gì nên chưa
-thể làm hỏng gì, và layout được nhìn tận mắt trước khi gắn vào luồng ghi.
+**Epic 1 stops at: canvas read-only, one black-smith source.** Nothing is
+written yet, so nothing can be corrupted yet, and the layout gets looked at
+with real eyes before it is wired to the write path.
 
-### 6.1 Epic 2 — luồng ghi đã nối (2026-08-27)
+### 6.1 Epic 2 — write path wired up (2026-08-27)
 
-Đọc **không** đợi SSE. `GET /api/overview` đã trả `runningSessions[]` từ trước,
-nên adapter dựng được hàng thật ngay; §5 epic A chỉ đổi cách dữ liệu *tới*
-(poll → push), không phải việc có dữ liệu hay không.
+Reads **do not** wait on SSE. `GET /api/overview` was already returning
+`runningSessions[]` before this, so the adapter can build real rows right
+away; §5 epic A only changes how the data *arrives* (poll → push), not
+whether there is data at all.
 
-> **Sửa 2026-08-28.** Câu tiếp theo ở đây từng viết "Hôm nay là poll 4s
-> (`useCanvas`), và khi SSE về thì đúng một file đổi" — đúng lúc viết
-> (2026-08-27), sai bây giờ. SSE đã về (epic `vam-sse-canvas`, task-1 +
-> task-2) và poll 4 giây đã bị bỏ. **Hai** file đổi, không phải một:
-> `src/adapter/stream.ts` (file mới — đọc frame `hello`/`change`, không phụ
-> thuộc React) và `src/adapter/useCanvas.ts` (nối stream đó vào vòng đời
-> React: gọi `load()` khi mount, khi có `hello`, và khi có `change` hợp lệ).
-> Lý do tách làm hai, epic.md §5.2: frame reader không phụ thuộc React nên
-> test được ngay và lên trước một wave, thay vì gộp chung một file phải chờ
-> `useCanvas.ts` đổi mới test được.
+> **Fixed 2026-08-28.** The next sentence here used to say "Today it's a 4s
+> poll (`useCanvas`), and when SSE lands exactly one file changes" — true
+> when written (2026-08-27), false now. SSE has landed (epic
+> `vam-sse-canvas`, task-1 + task-2) and the 4-second poll has been dropped.
+> **Two** files changed, not one: `src/adapter/stream.ts` (a new file —
+> reads `hello`/`change` frames, no React dependency) and
+> `src/adapter/useCanvas.ts` (wires that stream into the React lifecycle:
+> calls `load()` on mount, on `hello`, and on a valid `change`). Reason for
+> splitting into two, epic.md §5.2: the frame reader has no React dependency
+> so it can be tested right away and land a wave ahead, instead of bundling
+> it into one file that has to wait on `useCanvas.ts` changing before it is
+> testable.
 
-**Ba việc đo được ở tầng trình duyệt** (measured, epic.md §3.3):
+**Three things measured at the browser layer** (measured, epic.md §3.3):
 
-1. Server không gửi field `retry:`; cơ chế reconnect mặc định của trình
-   duyệt tự lo, đo được **hằng số 3.00s**, không backoff (khoảng cách đo
-   3010 / 3004 / 3004 ms).
-2. **Sửa 2026-08-30.** Ý này từng viết "Server chết giữa chừng lộ ra ở tầng
-   `EventSource` là `error` rồi `open`, `readyState` 0 (CONNECTING), **không
-   bao giờ** 2 (CLOSED) — trình duyệt tự hồi phục, không cần code phía
-   client" — đúng lúc chỉ đo một đường, sai khi phát biểu như một quy luật
-   chung. Đo lại đủ ba trường hợp:
-   - **Kết nối thẳng tới black-smith, không qua proxy nào (đây là
-     PRODUCTION, không bị ảnh hưởng):** server chết là một lỗi TCP, và HTML
-     spec KHÔNG coi lỗi TCP là fatal; `EventSource` tự retry vô hạn, đo
-     được hằng số 3.00s, không backoff.
-   - **Qua vite dev proxy của vam, server sống lại trước lần retry đầu
-     (~3s):** hồi phục thật — transcript đã commit của epic này chứng
-     kiến điều đó (`open` rồi `hello` cùng lúc, `change` ngay sau).
-   - **Qua vite dev proxy, server vẫn chết ở đúng lần retry đó:** vite trả
-     lời `GET /api/stream` bằng `HTTP/1.1 502 Bad Gateway`,
-     `Content-Type: text/plain`. HTML spec coi một response không phải 200
-     `text/event-stream` là fatal, nên `readyState` chuyển sang 2 (CLOSED)
-     và không còn lần thử nào nữa. **`readyState` 2 CÓ xảy ra được** — đo
-     bằng negative control đã commit của chính epic này
+1. The server does not send a `retry:` field; the browser's default
+   reconnect mechanism handles it on its own, measured at a **constant
+   3.00s**, no backoff (measured intervals 3010 / 3004 / 3004 ms).
+2. **Fixed 2026-08-30.** This point used to say "A server dying mid-stream
+   surfaces at the `EventSource` layer as `error` then `open`, `readyState`
+   0 (CONNECTING), **never** 2 (CLOSED) — the browser recovers on its own,
+   no client-side code needed" — true when only one path had been measured,
+   false when stated as a general rule. Measured all three cases:
+   - **Connected straight to black-smith, no proxy in between (this is
+     PRODUCTION, unaffected):** the server dying is a TCP error, and the
+     HTML spec does NOT treat a TCP error as fatal; `EventSource` retries
+     indefinitely on its own, measured at a constant 3.00s, no backoff.
+   - **Through vam's vite dev proxy, server comes back before the first
+     retry (~3s):** a real recovery — this epic's committed transcript
+     witnesses it (`open` then `hello` at the same moment, `change` right
+     after).
+   - **Through the vite dev proxy, the server is still dead at that exact
+     retry:** vite answers `GET /api/stream` with `HTTP/1.1 502 Bad
+     Gateway`, `Content-Type: text/plain`. The HTML spec treats a non-200,
+     non-`text/event-stream` response as fatal, so `readyState` moves to 2
+     (CLOSED) and no further retry happens. **`readyState` 2 CAN happen** —
+     measured by this epic's own committed negative control
      (`state/artifacts/vam-sse-canvas/task-4-acg1-e2e/falsification-no-restart.txt`,
-     `{"event":"error","readyState":0,"tMs":696}` rồi
+     `{"event":"error","readyState":0,"tMs":696}` then
      `{"event":"error","readyState":2,"tMs":3704}`).
 
-   Nguồn của lần "cho luôn" (give up) là vite dev proxy đứng giữa browser và
-   server, không phải client của vam: `src/adapter/stream.ts` đúng như đã
-   viết, epic này không raise finding nào lên file đó.
-3. `heartbeatMs` và `floorMs` — nằm trong frame `hello` — **không quan sát
-   được** từ trình duyệt: keep-alive là một SSE comment, và `EventSource`
-   không lộ comment ra JS ở bất kỳ hình thức nào. Hơn nữa `floorMs` (10000)
-   **nhỏ hơn** `heartbeatMs` (15000), nên hai số không thể ghép thành một
-   ngưỡng có nghĩa. **Cấm: không được dựng liveness timeout, watchdog hay
-   staleness check dựa trên bất kỳ số nào trong hai số này** (finding
-   `f-ui-server-sse/task-3-sse-handler-2fcd3eca`).
+   The source of that "give up" is the vite dev proxy sitting between the
+   browser and the server, not vam's client: `src/adapter/stream.ts` is
+   correct as written, and this epic raised no finding against that file.
+3. `heartbeatMs` and `floorMs` — carried in the `hello` frame — are **not
+   observable** from the browser: keep-alive is an SSE comment, and
+   `EventSource` never exposes comments to JS in any form. What's more,
+   `floorMs` (10000) is **smaller** than `heartbeatMs` (15000), so the two
+   numbers cannot be combined into a meaningful threshold. **Forbidden: do
+   not build a liveness timeout, watchdog, or staleness check on either of
+   these two numbers** (finding `f-ui-server-sse/task-3-sse-handler-2fcd3eca`).
 
-`AC-G1` — kiểm tra đầu-cuối qua server thật — vẫn đang **gated**: chờ `GET
-/api/stream` lên `main` của black-smith. Ba số đo ở trên do phiên vam đo trên
-nhánh, chưa đo lại trên `main`.
+`AC-G1` — end-to-end verification through a real server — is still
+**gated**: waiting on `GET /api/stream` landing on black-smith's `main`. The
+three measurements above were taken by a vam session on a branch, not yet
+re-measured on `main`.
 
-> **Sửa 2026-08-30.** Đoạn ngay trên đúng lúc viết, sai từ lúc
-> `161ffc7 feat(ui-server): GET /api/stream` lên `main` của black-smith.
-> `AC-G1` **nay đã discharged, không còn gated**: nó đã chạy thật, đầu-cuối,
-> qua đúng vite dev proxy của vam, và transcript đã commit của epic này —
-> `e2e/acg1-transcript.json` — là bằng chứng: `open`/`hello`, một `change`,
-> rồi `error` khi server bị giết, rồi `open`/`hello` lại và `change` sau khi
-> server sống lại, cộng một lần đọc canvas cuối cùng. Ba số đo ở §3.3 vì thế
-> không còn là "đo trên nhánh, chưa đo lại": chúng đo qua đường thật.
-> Nguồn: `f-vam-sse-canvas/integration-fc8c5787` (S2-major) và
-> `f-vam-sse-canvas/integration-595388f1`. Bản đầy đủ: black-smith
+> **Fixed 2026-08-30.** The paragraph directly above was true when written,
+> false as of `161ffc7 feat(ui-server): GET /api/stream` landing on
+> black-smith's `main`. `AC-G1` is **now discharged, no longer gated**: it
+> ran for real, end-to-end, through vam's actual vite dev proxy, and this
+> epic's committed transcript — `e2e/acg1-transcript.json` — is the
+> evidence: `open`/`hello`, one `change`, then `error` when the server was
+> killed, then `open`/`hello` again and a `change` once the server came
+> back, plus one final canvas read. The three measurements in §3.3 are
+> therefore no longer "measured on a branch, not yet re-measured": they were
+> measured through the real path. Source:
+> `f-vam-sse-canvas/integration-fc8c5787` (S2-major) and
+> `f-vam-sse-canvas/integration-595388f1`. Full record: black-smith
 > `factory/specs/active/vam-sse-canvas/epic.md`, AC-G1.
 
-Ghi thì **bắt buộc** phải có đọc trước: `resolveContext` đòi `sessionId` thật và
-tự nối `causalParent` từ event cuối của log đó. Không có session thật thì mọi
-POST đều 400.
+A write **requires** a read before it: `resolveContext` demands a real
+`sessionId` and chains `causalParent` from that log's last event on its own.
+Without a real session, every POST comes back 400.
 
-Ba việc ghi được nối, và chỉ ba:
+Three writes are wired up, and only three:
 
-| việc | đường | ghi chú |
+| action | route | note |
 |---|---|---|
-| prompt | `POST /api/prompt` (mới) | **ghi lại, không gửi** — xem dưới |
-| waiver S3/S4 | `POST /api/waivers/apply-batch` | theo fingerprint, bắt buộc có lý do |
-| lesson candidate | `POST /api/lessons/:id/approve\|reject` | không bao giờ tự đặt `acceptDuplicate` |
+| prompt | `POST /api/prompt` (new) | **recorded, not sent** — see below |
+| waiver S3/S4 | `POST /api/waivers/apply-batch` | by fingerprint, a reason is required |
+| lesson candidate | `POST /api/lessons/:id/approve\|reject` | never sets `acceptDuplicate` on its own |
 
-**Prompt ghi lại chứ không gửi đi.** black-smith không có kênh nào vào một
-session Claude Code đang chạy. Cái nó có là `user_prompt` — lưu nguyên văn để
-`dispatch_decision` sau đó móc `parent_prompt_id` vào, và timeline đọc ra "việc
-này xảy ra vì một người yêu cầu". UI phải nói đúng chữ đó; một ô prompt trông
-như đã gửi sẽ để người dùng ngồi đợi câu trả lời không ai định đưa.
+**A prompt is recorded, not sent.** black-smith has no channel into a
+running Claude Code session. What it has is `user_prompt` — saved verbatim so
+that a later `dispatch_decision` can hook `parent_prompt_id` into it, and the
+timeline reads out as "this happened because a person asked for it". The UI
+has to say exactly that; a prompt box that looks like it sent something would
+leave the user sitting there waiting for an answer nobody intends to give.
 
-**Những thứ vẫn không nối, vì factory không có:** tạo session (làm từ CLI:
-`smith event append session-start`), đổi tên session (id là thứ cả event log
-móc vào), đóng session, lưu icon. Những chỗ này báo đúng lý do chứ không nói
-"chưa nối".
+**What is still not wired up, because the factory has nothing for it:**
+creating a session (done from the CLI: `smith event append session-start`),
+renaming a session (the id is what the whole event log hooks onto), closing
+a session, saving an icon. These spots report the actual reason rather than
+saying "not wired up yet".
 
-**CORS:** không mở. vam proxy `/api/*` qua origin của chính nó
-(`vite.config.ts`); mở CORS trên một server nhận lệnh ghi là nới rộng thứ mà
-mọi trang trong trình duyệt với tới được.
+**CORS:** not opened. vam proxies `/api/*` through its own origin
+(`vite.config.ts`); opening CORS on a server that accepts writes would widen
+what any page in the browser could reach.

@@ -35,7 +35,7 @@ function lesson(over: Partial<ApiLesson> = {}): ApiLesson {
     lessonType: 'rule',
     lessonScope: 'stack-wide',
     lessonStatus: 'candidate',
-    statement: 'Đọc lại claim trước khi ghi ra ngoài nó.',
+    statement: 'Re-read the claim before writing outside it.',
     ...over,
   };
 }
@@ -101,7 +101,7 @@ describe('when there is nothing to answer', () => {
     // An empty list reads as "nothing to answer", which is the opposite of what
     // a failed read means.
     mount({ error: 'HTTP 500' });
-    expect(screen.getByText(/không đọc được hàng chờ approve/)).toBeTruthy();
+    expect(screen.getByText(/could not read the approval queue/)).toBeTruthy();
     expect(document.querySelector('[data-review-queue]')).toBeNull();
   });
 });
@@ -133,11 +133,11 @@ describe('a waiver', () => {
   it('carries the reason through with the verdict', () => {
     const answers = mount({ waivers: [finding()] });
     const row = document.querySelector('[data-waiver="fp-1"]') as HTMLElement;
-    typeInto(row.querySelector('input') as HTMLInputElement, 'chỉ là comment');
+    typeInto(row.querySelector('input') as HTMLInputElement, 'just a comment');
     act(() => {
       button(row, 'waive').click();
     });
-    expect(answers).toEqual([{ id: 'fp-1', verdict: 'granted', note: 'chỉ là comment' }]);
+    expect(answers).toEqual([{ id: 'fp-1', verdict: 'granted', note: 'just a comment' }]);
   });
 
   it('sends the fingerprint, which is what the factory answers in', () => {
@@ -167,7 +167,7 @@ describe('a lesson candidate', () => {
     const row = document.querySelector('[data-lesson="l-1"]') as HTMLElement;
     expect(row.textContent).toContain('rule');
     expect(row.textContent).toContain('stack-wide');
-    expect(row.textContent).toContain('Đọc lại claim');
+    expect(row.textContent).toContain('Re-read the claim');
   });
 
   it('takes an answer without requiring a note', () => {
@@ -184,11 +184,11 @@ describe('a lesson candidate', () => {
   it('routes a rejection separately', () => {
     const answers = mount({ lessons: [lesson()] });
     const row = document.querySelector('[data-lesson="l-1"]') as HTMLElement;
-    typeInto(row.querySelector('input') as HTMLInputElement, 'trùng bài cũ');
+    typeInto(row.querySelector('input') as HTMLInputElement, 'duplicate of an old one');
     act(() => {
       button(row, 'reject').click();
     });
-    expect(answers).toEqual([{ id: 'l-1', verdict: 'reject', note: 'trùng bài cũ' }]);
+    expect(answers).toEqual([{ id: 'l-1', verdict: 'reject', note: 'duplicate of an old one' }]);
   });
 
   it('counts both queues in the heading', () => {

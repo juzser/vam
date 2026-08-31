@@ -46,18 +46,18 @@ describe('toDecisions', () => {
     const decisions = toDecisions([
       entry('e1', 'user_prompt', {
         ts: '2026-08-01T00:00:01Z',
-        payload: { prompt: 'chạy task-4' },
+        payload: { prompt: 'run task-4' },
       }),
     ]);
     expect(decisions).toHaveLength(1);
-    expect(decisions[0]?.input).toBe('chạy task-4');
+    expect(decisions[0]?.input).toBe('run task-4');
   });
 
   it('leaves output null while only dispatches have followed', () => {
     // A dispatch is the session going off to work. It is not an answer, and
     // calling it one would mark every in-flight turn as finished.
     const decisions = toDecisions([
-      entry('e1', 'user_prompt', { ts: '2026-08-01T00:00:01Z', payload: { prompt: 'chạy đi' } }),
+      entry('e1', 'user_prompt', { ts: '2026-08-01T00:00:01Z', payload: { prompt: 'go run it' } }),
       entry('e2', 'dispatch_decision', { ts: '2026-08-01T00:00:02Z' }),
     ]);
     expect(decisions[0]?.output).toBeNull();
@@ -65,7 +65,7 @@ describe('toDecisions', () => {
 
   it('answers with the outcomes that followed, not with the working', () => {
     const decisions = toDecisions([
-      entry('e1', 'user_prompt', { ts: '2026-08-01T00:00:01Z', payload: { prompt: 'chạy đi' } }),
+      entry('e1', 'user_prompt', { ts: '2026-08-01T00:00:01Z', payload: { prompt: 'go run it' } }),
       entry('e2', 'dispatch_decision', { ts: '2026-08-01T00:00:02Z' }),
       entry('e3', 'task-result-recorded', {
         ts: '2026-08-01T00:00:03Z',
@@ -81,35 +81,35 @@ describe('toDecisions', () => {
 
   it('closes a turn when the next prompt arrives', () => {
     const decisions = toDecisions([
-      entry('e1', 'user_prompt', { ts: '2026-08-01T00:00:01Z', payload: { prompt: 'một' } }),
+      entry('e1', 'user_prompt', { ts: '2026-08-01T00:00:01Z', payload: { prompt: 'one' } }),
       entry('e2', 'task-result-recorded', { ts: '2026-08-01T00:00:02Z', payload: {} }),
-      entry('e3', 'user_prompt', { ts: '2026-08-01T00:00:03Z', payload: { prompt: 'hai' } }),
+      entry('e3', 'user_prompt', { ts: '2026-08-01T00:00:03Z', payload: { prompt: 'two' } }),
     ]);
-    expect(decisions.map((d) => d.input)).toEqual(['hai', 'một']);
+    expect(decisions.map((d) => d.input)).toEqual(['two', 'one']);
     expect(decisions[1]?.output).not.toBeNull();
     expect(decisions[0]?.output).toBeNull();
   });
 
   it('returns newest first, the order the model stores', () => {
     const decisions = toDecisions([
-      entry('e1', 'user_prompt', { ts: '2026-08-01T00:00:01Z', payload: { prompt: 'cũ' } }),
-      entry('e2', 'user_prompt', { ts: '2026-08-01T00:00:02Z', payload: { prompt: 'mới' } }),
+      entry('e1', 'user_prompt', { ts: '2026-08-01T00:00:01Z', payload: { prompt: 'old' } }),
+      entry('e2', 'user_prompt', { ts: '2026-08-01T00:00:02Z', payload: { prompt: 'new' } }),
     ]);
-    expect(decisions.map((d) => d.input)).toEqual(['mới', 'cũ']);
+    expect(decisions.map((d) => d.input)).toEqual(['new', 'old']);
   });
 
   it('sorts by timestamp rather than trusting the order it was handed', () => {
     const decisions = toDecisions([
-      entry('e2', 'user_prompt', { ts: '2026-08-01T00:00:02Z', payload: { prompt: 'mới' } }),
-      entry('e1', 'user_prompt', { ts: '2026-08-01T00:00:01Z', payload: { prompt: 'cũ' } }),
+      entry('e2', 'user_prompt', { ts: '2026-08-01T00:00:02Z', payload: { prompt: 'new' } }),
+      entry('e1', 'user_prompt', { ts: '2026-08-01T00:00:01Z', payload: { prompt: 'old' } }),
     ]);
-    expect(decisions.map((d) => d.input)).toEqual(['mới', 'cũ']);
+    expect(decisions.map((d) => d.input)).toEqual(['new', 'old']);
   });
 
   it('ignores events before your first word — they answer no question of yours', () => {
     const decisions = toDecisions([
       entry('e1', 'session-start', { ts: '2026-08-01T00:00:01Z' }),
-      entry('e2', 'user_prompt', { ts: '2026-08-01T00:00:02Z', payload: { prompt: 'xin chào' } }),
+      entry('e2', 'user_prompt', { ts: '2026-08-01T00:00:02Z', payload: { prompt: 'hello' } }),
     ]);
     expect(decisions).toHaveLength(1);
   });
@@ -125,10 +125,10 @@ describe('toDecisions', () => {
       entry('e1', 'operator-note', {
         ts: '2026-08-01T00:00:01Z',
         actor: 'operator',
-        payload: { note: 'đừng waive cái S2' },
+        payload: { note: "don't waive the S2" },
       }),
     ]);
-    expect(decisions[0]?.input).toBe('đừng waive cái S2');
+    expect(decisions[0]?.input).toBe("don't waive the S2");
   });
 });
 
@@ -185,7 +185,7 @@ describe('toCanvasModel', () => {
         [
           'a',
           [
-            entry('e1', 'user_prompt', { payload: { prompt: 'chạy đi' } }),
+            entry('e1', 'user_prompt', { payload: { prompt: 'go run it' } }),
           ] as readonly ApiTimelineEntry[],
         ],
       ]),
@@ -200,7 +200,7 @@ describe('toCanvasModel', () => {
         [
           'a',
           [
-            entry('e1', 'user_prompt', { ts: '2026-08-01T00:00:01Z', payload: { prompt: 'hỏi' } }),
+            entry('e1', 'user_prompt', { ts: '2026-08-01T00:00:01Z', payload: { prompt: 'ask' } }),
             entry('e2', 'task-result-recorded', { ts: '2026-08-01T00:00:02Z' }),
           ] as readonly ApiTimelineEntry[],
         ],
@@ -242,7 +242,7 @@ describe('toCanvasModel', () => {
             entry('e1', 'user_prompt', {
               ts: '2026-08-01T00:00:01Z',
               taskId: 'ui-server-sse/task-4',
-              payload: { prompt: 'chạy' },
+              payload: { prompt: 'run' },
             }),
           ] as readonly ApiTimelineEntry[],
         ],
@@ -278,12 +278,12 @@ describe('toCanvasModel', () => {
         [
           'a',
           [
-            entry('e1', 'user_prompt', { payload: { prompt: 'chào' } }),
+            entry('e1', 'user_prompt', { payload: { prompt: 'hi' } }),
           ] as readonly ApiTimelineEntry[],
         ],
       ]),
     );
-    expect(model.projects[0]?.sessions[0]?.decisions[0]?.input).toBe('chào');
+    expect(model.projects[0]?.sessions[0]?.decisions[0]?.input).toBe('hi');
   });
 
   it('gives a session no icon, because nothing in the factory stores one', () => {

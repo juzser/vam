@@ -72,7 +72,7 @@ export function IconPicker({ title, onPick, onClose }: IconPickerProps) {
         <Suspense
           fallback={
             <div className="flex h-[380px] w-[340px] items-center justify-center text-[11px] text-ink-faint">
-              đang tải bảng icon…
+              loading icon grid…
             </div>
           }
         >
