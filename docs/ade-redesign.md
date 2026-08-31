@@ -68,11 +68,14 @@ DRAWN and says it has nothing — `—`, or a `data-placeholder` element with a
 
 1. **`ReviewQueue` restyle.** It works and sits where the mockup's amber
    `APPROVAL REQUIRED` box sits, but it still wears the old visual language.
-2. **Demo fixture prose** (`src/fixtures/demo.ts`) is still Vietnamese. It is
-   sample CONTENT rather than chrome, so it did not block the language switch,
-   but it reads oddly under an English UI.
 
 ## Corrections to this document's own predictions
+
+- **The demo fixture is no longer Vietnamese.** This document listed it under
+  "Not started"; it was translated along with the last user-visible strings
+  when the repo's language switch was completed, so that item is gone rather
+  than merely stale. The fixture is what every README screenshot shows, which
+  is what finally forced it.
 
 - **`nav-nodes.ts` and `spatial-nav.ts` needed no rewrite.** This document
   predicted the topology rewrite would touch `src/canvas/nav-nodes.ts` and

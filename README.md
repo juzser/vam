@@ -1,8 +1,8 @@
 # vam — VIM Agent Management
 
-A keyboard-first canvas over black-smith: one screen that lays out every running agent session as a node, colours it by
-whether it needs you, and lets you navigate and act on it with vim-style keys
-instead of a mouse.
+A keyboard-first canvas over black-smith: one screen that lays out every
+running agent session as a node, colours it by whether it needs you, and lets
+you navigate and act on it with vim-style keys instead of a mouse.
 
 ![vam canvas, dark theme](docs/images/canvas-dark.png)
 
@@ -136,9 +136,10 @@ on your prompt any faster than the agent already checks its log.
 
 ## Orca
 
-The package description mentions orca as a design reference, and `src/keyboard/chords.ts` and `src/domain/model.ts`
-borrow vocabulary from it (its keybinding conventions, its treatment of a
-"decision waiting for a person" as first-class). There is no working orca
+The package description mentions orca as a design reference, and
+`src/keyboard/chords.ts` and `src/domain/model.ts` borrow vocabulary from it
+(its keybinding conventions, its treatment of a "decision waiting for a
+person" as first-class). There is no working orca
 integration in this codebase today: `SourceId` in `src/domain/model.ts`
 already has an `'orca'` case, but the adapter that would populate it
 (`src/adapter/to-canvas.ts`) only ever sets `source: 'black-smith'` — the
@@ -148,15 +149,15 @@ adapter exists, vam talks to black-smith only.
 ## Development
 
 ```bash
-pnpm run dev            # start the dev server on :5273
+pnpm run dev             # start the dev server on :5273
 pnpm run build           # production build
 pnpm run preview         # serve the production build on :5274
 pnpm run typecheck       # tsc --noEmit
 pnpm run typecheck:test  # typecheck the test sources
-pnpm run lint             # biome check .
-pnpm run test              # vitest run
+pnpm run lint            # biome check .
+pnpm run test            # vitest run
 pnpm run test:coverage   # vitest run --coverage
-pnpm run test:e2e          # Playwright, from e2e/
+pnpm run test:e2e        # Playwright, from e2e/
 ```
 
 Tests use Vitest; run a single file directly with
