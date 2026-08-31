@@ -4,7 +4,7 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "description": "VAM — VIM Agent Management. Keyboard-first canvas over black-smith and orca.",
+  "description": "VAM — VIM Agent Management. A keyboard-first ADE for managing agent sessions from any CLI.",
   "engines": {
     "node": ">=22"
   },
