@@ -23,6 +23,23 @@ const proxy = {
   '/api': {
     target: SMITH_URL,
     changeOrigin: false,
+    // node-http-proxy pipes the upstream response into the client response,
+    // but a pipe only reacts to a graceful `end` — an upstream that dies
+    // (SIGKILL, ECONNRESET) leaves the client response open indefinitely,
+    // so the browser's EventSource never sees `error` and never reconnects.
+    // Watch the upstream response ourselves and close the client side the
+    // moment it goes away, however it goes away.
+    configure: (proxyServer: import('http-proxy').Server) => {
+      proxyServer.on('proxyRes', (proxyRes, _req, res) => {
+        const closeClient = () => {
+          if (!res.writableEnded) {
+            res.end();
+          }
+        };
+        proxyRes.on('close', closeClient);
+        proxyRes.on('error', closeClient);
+      });
+    },
   },
 };
 
