@@ -394,7 +394,7 @@ describe('the prompt box', () => {
     render(<Canvas model={MODEL} />);
     press('i');
     const input = promptInput() as HTMLInputElement;
-    typeInto(input, 'chạy lại đi');
+    typeInto(input, 'run it again');
     keyOn(input, 'Enter');
     expect(statusBar()).toContain('read-only');
   });
@@ -402,7 +402,7 @@ describe('the prompt box', () => {
   it('Escape leaves it and drops the draft', () => {
     render(<Canvas model={MODEL} />);
     press('i');
-    typeInto(promptInput() as HTMLInputElement, 'nửa chừng');
+    typeInto(promptInput() as HTMLInputElement, 'halfway typed');
     keyOn(promptInput() as HTMLInputElement, 'Escape');
     expect(mode()).toBe('NORMAL');
     expect(promptInput()?.value).toBe('');
@@ -558,8 +558,8 @@ describe('the sidebar', () => {
   });
 
   it('offers adding a session, and names the CLI that actually creates one', () => {
-    // black-smith has no route for this. Saying "chưa nối" would suggest one is
-    // coming; naming the command tells you what to go and do.
+    // black-smith has no route for this. Saying "not wired yet" would suggest
+    // one is coming; naming the command tells you what to go and do.
     render(<Canvas model={MODEL} />);
     act(() => {
       screen.getByLabelText('new session').click();
@@ -587,7 +587,7 @@ describe('renaming, icons and closing', () => {
   it('rename does not claim to have saved — a session id is what the log chains on', () => {
     render(<Canvas model={MODEL} />);
     press('r');
-    typeInto(renameInput() as HTMLInputElement, 'tên mới');
+    typeInto(renameInput() as HTMLInputElement, 'new name');
     keyOn(renameInput() as HTMLInputElement, 'Enter');
     expect(screen.getByText(/cannot rename a session/)).toBeTruthy();
     expect(renameInput()).toBeNull();
@@ -596,7 +596,7 @@ describe('renaming, icons and closing', () => {
   it('Escape abandons the rename without touching the row', () => {
     render(<Canvas model={MODEL} />);
     press('r');
-    typeInto(renameInput() as HTMLInputElement, 'nửa chừng');
+    typeInto(renameInput() as HTMLInputElement, 'halfway typed');
     keyOn(renameInput() as HTMLInputElement, 'Escape');
     expect(renameInput()).toBeNull();
     expect(rowText('a1')).toContain('a1');
@@ -645,7 +645,7 @@ describe('renaming, icons and closing', () => {
     act(() => {
       screen.getByText('clear icon').click();
     });
-    // It says "on this machine", not "chưa lưu": black-smith having no icon route
+    // It says "on this machine", not "not saved": black-smith having no icon route
     // was never the point — §3 says this is per-user state that must NOT reach
     // the event log.
     expect(screen.getByText(/on this machine/)).toBeTruthy();
@@ -771,9 +771,9 @@ describe('waiting on you', () => {
   it('groups it apart in the palette', () => {
     render(<Canvas model={WAITING} />);
     press('k', { ctrlKey: true });
-    // Scoped to the palette's own group headings: "chờ bạn" also appears in the
-    // sidebar row and the status-bar count, and a bare text query would pass on
-    // either of those while the grouping was missing.
+    // Scoped to the palette's own group headings: "needs you" also appears in
+    // the sidebar row and the status-bar count, and a bare text query would
+    // pass on either of those while the grouping was missing.
     const headings = [...document.querySelectorAll('[cmdk-group-heading]')].map(
       (el) => el.textContent,
     );
@@ -820,8 +820,8 @@ describe('writing a prompt to a live black-smith', () => {
       calls.push({ sessionId, prompt });
       return { eventId: 'e1' };
     });
-    await submit(source, 'chạy lại task-4');
-    expect(calls).toEqual([{ sessionId: 'a1', prompt: 'chạy lại task-4' }]);
+    await submit(source, 'run task-4 again');
+    expect(calls).toEqual([{ sessionId: 'a1', prompt: 'run task-4 again' }]);
   });
 
   it('says it RECORDED, never that it sent', async () => {
@@ -829,14 +829,14 @@ describe('writing a prompt to a live black-smith', () => {
     // claiming to have sent would leave you waiting for an answer nobody is
     // coming to give.
     const { source } = liveSource(async () => ({ eventId: 'e1' }));
-    await submit(source, 'xin chào');
+    await submit(source, 'hello');
     expect(statusBar()).toContain('recorded');
     expect(statusBar()).toContain('not sent to the agent');
   });
 
   it('clears the box and asks for a refresh once the write lands', async () => {
     const { source, wrote } = liveSource(async () => ({ eventId: 'e1' }));
-    await submit(source, 'xin chào');
+    await submit(source, 'hello');
     expect(promptInput()?.value).toBe('');
     expect(wrote.count).toBe(1);
   });
@@ -845,13 +845,13 @@ describe('writing a prompt to a live black-smith', () => {
     const { source, wrote } = liveSource(async () => {
       throw new SmithApiError('events.unknown-causal-session', 'No log for session "a1".', 409);
     });
-    await submit(source, 'xin chào');
+    await submit(source, 'hello');
     expect(statusBar()).toContain('events.unknown-causal-session');
     expect(statusBar()).toContain('No log for session');
     // Nothing was written, so nothing is refreshed and the draft is kept — you
     // should not have to retype what the server just rejected.
     expect(wrote.count).toBe(0);
-    expect(promptInput()?.value).toBe('xin chào');
+    expect(promptInput()?.value).toBe('hello');
   });
 
   it('does not write an empty prompt', async () => {
@@ -969,14 +969,14 @@ describe('answering the review queue from the keyboard', () => {
     await mounted(source);
     press('I');
     press('i');
-    typeInto(noteBox() as HTMLInputElement, 'chỉ là comment lệch tên');
+    typeInto(noteBox() as HTMLInputElement, 'just a naming nit');
     keyOn(noteBox() as HTMLInputElement, 'Escape');
     press('j'); // onto "waive"
     await act(async () => {
       press('Enter');
     });
     expect(applied).toEqual([
-      { fingerprint: 'fp-1', decision: 'granted', operatorNote: 'chỉ là comment lệch tên' },
+      { fingerprint: 'fp-1', decision: 'granted', operatorNote: 'just a naming nit' },
     ]);
   });
 

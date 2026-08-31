@@ -59,7 +59,7 @@ export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
           className="w-full border-line border-b bg-transparent px-3 py-2 text-ink outline-none placeholder:text-ink-faint"
         />
         <Command.List className="max-h-72 overflow-y-auto p-1">
-          <Command.Empty className="px-3 py-4 text-ink-faint">No match gì</Command.Empty>
+          <Command.Empty className="px-3 py-4 text-ink-faint">No match</Command.Empty>
 
           {waiting.length > 0 && (
             <Command.Group heading="needs you" className="px-1 text-ink-faint text-xs">

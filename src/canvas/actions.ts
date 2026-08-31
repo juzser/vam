@@ -57,8 +57,8 @@ export type CanvasAction =
  * not depend on the factory having asked anything, so a pane with an empty
  * queue and no commands still has somewhere for `I` to land.
  *
- * Within a row the conservative verdict comes first: "bắt sửa" before "reject qua",
- * "bỏ" before "duyệt". `j` from the row above therefore stops on the answer
+ * Within a row the conservative verdict comes first: "fix" before "waive",
+ * "reject" before "approve". `j` from the row above therefore stops on the answer
  * that changes nothing, and reaching the one that accepts a defect takes one
  * more deliberate press.
  */

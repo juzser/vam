@@ -112,7 +112,7 @@ describe('useCanvas', () => {
             taskId: null,
             planVersion: 1,
             causalParent: null,
-            payload: { prompt: 'chào' },
+            payload: { prompt: 'hi' },
             project: 'p',
             actor: 'user',
           },
@@ -121,7 +121,7 @@ describe('useCanvas', () => {
     );
     await act(async () => {});
     expect(seen.current?.status).toBe('live');
-    expect(seen.current?.model.projects[0]?.sessions[0]?.decisions[0]?.input).toBe('chào');
+    expect(seen.current?.model.projects[0]?.sessions[0]?.decisions[0]?.input).toBe('hi');
   });
 
   it('asks for one timeline per session', async () => {

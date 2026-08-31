@@ -418,13 +418,13 @@ function CanvasInner({
    * Write what you typed into the focused session's log.
    *
    * The wording of every outcome here is load-bearing. black-smith RECORDS a
-   * prompt; it has no channel into a running agent session, so "đã ghi" is the
-   * truth and "đã gửi" would not be. A prompt box that claimed to send would
+   * prompt; it has no channel into a running agent session, so "recorded" is
+   * the truth and "sent" would not be. A prompt box that claimed to send would
    * have you waiting for an answer nobody is coming to give.
    *
    * A refusal is reported in the factory's own words. `events.unknown-causal-session`
    * and `write.bad-request` each name a different mistake, and collapsing them
-   * into "lỗi" throws away the one thing black-smith just told us.
+   * into "error" throws away the one thing black-smith just told us.
    */
   const sendPrompt = useCallback(async () => {
     const entry = focusedEntry;
@@ -480,7 +480,7 @@ function CanvasInner({
         setStatus(done);
         // Back to the top of the list. The answered row vanishes, and leaving
         // the cursor at the same index drops it onto whatever slid up into that
-        // slot — which after clearing a waiver was the NEXT row's "duyệt". A
+        // slot — which after clearing a waiver was the NEXT row's "approve". A
         // cursor that lands on a consequential button you did not aim at is the
         // one way this pane could do real damage.
         setActionIndex(0);

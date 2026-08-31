@@ -51,11 +51,11 @@ describe('reads', () => {
 describe('writes', () => {
   it('posts the prompt with its session', async () => {
     const { fetch, calls } = stub({ body: { eventId: 'e1' } });
-    await client(fetch).recordPrompt('factory-sse-1', 'chạy lại task-4');
+    await client(fetch).recordPrompt('factory-sse-1', 'run task-4 again');
     const body = JSON.parse(String(calls[0]?.init?.body));
     expect(calls[0]?.init?.method).toBe('POST');
     expect(body.sessionId).toBe('factory-sse-1');
-    expect(body.prompt).toBe('chạy lại task-4');
+    expect(body.prompt).toBe('run task-4 again');
   });
 
   it('never sends a causal parent of its own', async () => {
@@ -63,13 +63,13 @@ describe('writes', () => {
     // Enter, and a write chained onto a stale parent is the corruption §6
     // warns about. The server resolves it from the session's own last event.
     const { fetch, calls } = stub({ body: {} });
-    await client(fetch).recordPrompt('s1', 'xin chào');
+    await client(fetch).recordPrompt('s1', 'hello');
     expect(JSON.parse(String(calls[0]?.init?.body))).not.toHaveProperty('causalParent');
   });
 
   it('stamps an actor so the log records a person did this', async () => {
     const { fetch, calls } = stub({ body: {} });
-    await client(fetch).recordPrompt('s1', 'xin chào');
+    await client(fetch).recordPrompt('s1', 'hello');
     expect(JSON.parse(String(calls[0]?.init?.body)).actor).toBe('operator');
   });
 
@@ -77,7 +77,7 @@ describe('writes', () => {
     const { fetch, calls } = stub({ body: { applied: 2 } });
     await client(fetch).applyWaivers({ sessionId: 's1' }, [
       { fingerprint: 'fp-1', decision: 'granted', operatorNote: 'nit, waive' },
-      { fingerprint: 'fp-2', decision: 'denied', operatorNote: 'sửa đi' },
+      { fingerprint: 'fp-2', decision: 'denied', operatorNote: 'fix it' },
     ]);
     const body = JSON.parse(String(calls[0]?.init?.body));
     expect(calls[0]?.url).toContain('/api/waivers/apply-batch');
@@ -127,7 +127,7 @@ describe('when the factory refuses', () => {
   });
 
   it('tells a dead server apart from a rejected write', async () => {
-    // Different problems, different sentences: one is "black-smith chưa chạy",
+    // Different problems, different sentences: one is "black-smith isn't running",
     // the other is "what you sent was wrong".
     const { fetch } = stub({ throws: new TypeError('fetch failed') });
     await expect(client(fetch).overview()).rejects.toBeInstanceOf(SmithUnreachableError);
