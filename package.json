@@ -2,6 +2,7 @@
   "name": "vam",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "VAM — VIM Agent Management. Keyboard-first canvas over black-smith and orca.",
   "engines": {

@@ -134,17 +134,23 @@ agent session, so `/api/prompt` records what you typed into the event log for
 the agent to pick up on its own next step. vam cannot make an idle agent act
 on your prompt any faster than the agent already checks its log.
 
-## Orca
+## Relationship to orca
 
-The package description mentions orca as a design reference, and
-`src/keyboard/chords.ts` and `src/domain/model.ts` borrow vocabulary from it
-(its keybinding conventions, its treatment of a "decision waiting for a
-person" as first-class). There is no working orca
-integration in this codebase today: `SourceId` in `src/domain/model.ts`
-already has an `'orca'` case, but the adapter that would populate it
-(`src/adapter/to-canvas.ts`) only ever sets `source: 'black-smith'` — the
-comment there says plainly that "orca is a second adapter's job." Until that
-adapter exists, vam talks to black-smith only.
+vam builds on orca's core rather than reimplementing it. The parts orca has
+already solved — connecting to the CLI, session handling, provider login,
+remote control — are taken from there, which keeps this repo focused on the
+canvas and the keyboard layer sitting on top of them. The intent is for vam to
+become independent of orca over time; for now, orca's core is the foundation.
+
+What is *wired today* is narrower than that intent, and worth stating plainly
+so the code doesn't surprise you. The vocabulary is already borrowed:
+`src/keyboard/chords.ts` takes orca's keybinding conventions, and the model
+treats "a decision waiting for a person" as first-class the way orca does.
+`SourceId` in `src/domain/model.ts` already has an `'orca'` case. But the
+adapter that would populate it (`src/adapter/to-canvas.ts`) only ever sets
+`source: 'black-smith'` — its comment says "orca is a second adapter's job",
+and that adapter is not written yet. Every session in the screenshots above
+came out of black-smith.
 
 ## Development
 
@@ -165,6 +171,10 @@ Tests use Vitest; run a single file directly with
 
 ## Project status
 
-Early: `package.json` is still at `0.0.0` and marked `private`. There is
-currently no `LICENSE` file in this repository, so treat the code as
-all-rights-reserved until one is added.
+Early: `package.json` is still at `0.0.0`. It is marked `private` so it can't
+be published to npm by accident — vam is an application, not a library — which
+is separate from the licence.
+
+## Licence
+
+[MIT](LICENSE).
