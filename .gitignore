@@ -5,3 +5,8 @@ coverage/
 .DS_Store
 e2e/test-results/
 e2e/playwright-report/
+
+# The ADE mockup the canvas is built from. Local only: juzser/vam is public
+# and this is a design file from a private workspace. Operator decision
+# 2026-08-28 — every session that needs it reads it off this machine.
+docs/design/mockup/
