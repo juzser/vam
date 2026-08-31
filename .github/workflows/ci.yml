@@ -1,0 +1,64 @@
+# vam CI — the gates that can actually run here.
+#
+# WHAT IS DELIBERATELY ABSENT, and why, so nobody reads a green tick as more
+# than it is: neither e2e spec runs in CI. `e2e/sse-drop.spec.ts` (AC-G1) and
+# `e2e/sse-drop-reconnect.pw.ts` (AC-10) each need a live black-smith — they
+# spawn it via SMITH_CLI_ENTRY, which points into a SIBLING REPOSITORY that is
+# private and not checked out here. They also need a Playwright browser, and
+# `e2e/` has no package.json anywhere in the repo, so its dependency set is not
+# reproducible from a clean clone at all. Three independent blockers, none of
+# them fixable by adding a step to this file. Until they are, the e2e suite is
+# run by hand, per e2e/README.md, and a green run of THIS workflow says nothing
+# about SSE recovery.
+#
+# `e2e/` is also excluded from vitest.config.ts, tsconfig*.json and biome.json,
+# so the jobs below do not typecheck or lint those files either.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # package.json engines: node >=22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Each step runs even if an earlier one failed: one push should report
+      # every broken gate, not just the first. A single red step still fails
+      # the job.
+      - name: lint
+        run: pnpm run lint
+
+      - name: typecheck (src)
+        if: '!cancelled()'
+        run: pnpm run typecheck
+
+      - name: typecheck (tests)
+        if: '!cancelled()'
+        run: pnpm run typecheck:test
+
+      - name: unit tests
+        if: '!cancelled()'
+        run: pnpm test
+
+      - name: build
+        if: '!cancelled()'
+        run: pnpm run build
