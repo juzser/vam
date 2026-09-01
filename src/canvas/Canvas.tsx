@@ -27,6 +27,7 @@ import {
   type Edge,
   MiniMap,
   type Node,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   useNodesState,
@@ -922,40 +923,6 @@ function CanvasInner({
               )}
             </span>
 
-            <span className="mx-1 h-3.5 w-px bg-line-strong" />
-            <div className="flex items-center gap-1.5">
-              {(
-                [
-                  ['all', 'All', tally.all],
-                  ['running', 'Running', tally.running],
-                  ['waiting', 'Needs you', tally.waiting],
-                  ['done', 'Done', tally.done],
-                ] as const
-              ).map(([key, label, count]) => {
-                const on = statusFilter === key;
-                const loud = key === 'waiting' && count > 0;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    data-status-pill={key}
-                    aria-pressed={on}
-                    onClick={() => setStatusFilter(key)}
-                    className={[
-                      'rounded-full border px-2.5 py-1 font-mono text-[10px]',
-                      on
-                        ? 'border-line-loud bg-raised text-ink'
-                        : loud
-                          ? 'border-waiting-tint text-waiting'
-                          : 'border-line text-ink-dim hover:border-line-strong',
-                    ].join(' ')}
-                  >
-                    {label} {count}
-                  </button>
-                );
-              })}
-            </div>
-
             <span className="flex-1" />
 
             {/* Positions are a pure function of the model, always — there is
@@ -1025,6 +992,46 @@ function CanvasInner({
               proOptions={{ hideAttribution: true }}
             >
               <Background color="var(--color-dots)" gap={24} size={1} />
+              {/* `Panel` renders outside ReactFlow's pan/zoom transform (the
+                  same mechanism `MiniMap` below relies on), so these pills
+                  stay fixed at the canvas's top-left corner: panning or
+                  zooming the canvas never moves them — "không liên quan đến
+                  drag canvas". They still drive `statusFilter`, which
+                  narrows `entries` (used by both the sidebar and this
+                  panel's counts) but deliberately never the canvas itself;
+                  see the note above `entries`. */}
+              <Panel position="top-left" className="!m-3 flex items-center gap-1.5">
+                {(
+                  [
+                    ['all', 'All', tally.all],
+                    ['running', 'Running', tally.running],
+                    ['waiting', 'Needs you', tally.waiting],
+                    ['done', 'Done', tally.done],
+                  ] as const
+                ).map(([key, label, count]) => {
+                  const on = statusFilter === key;
+                  const loud = key === 'waiting' && count > 0;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      data-status-pill={key}
+                      aria-pressed={on}
+                      onClick={() => setStatusFilter(key)}
+                      className={[
+                        'rounded-full border bg-canvas px-2.5 py-1 font-mono text-[10px]',
+                        on
+                          ? 'border-line-loud bg-raised text-ink'
+                          : loud
+                            ? 'border-waiting-tint text-waiting'
+                            : 'border-line text-ink-dim hover:border-line-strong',
+                      ].join(' ')}
+                    >
+                      {label} {count}
+                    </button>
+                  );
+                })}
+              </Panel>
               <MiniMap
                 pannable
                 zoomable
