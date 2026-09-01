@@ -59,6 +59,56 @@ export type DetailPanelProps = {
   readonly review?: ReviewQueueProps;
 };
 
+/**
+ * The tab bar's four entries. Presentation only — the labels, order and which
+ * tabs actually hold content are unchanged; this restyles a segmented control,
+ * it does not decide information architecture.
+ */
+const TABS = ['Response', 'PRs', 'Terminal', 'Agents'] as const;
+
+/**
+ * The mockup's segmented control: one filled pill on a sunken well, not
+ * underlined labels. `Response` is the only tab with real content — see the
+ * module doc — so it is also the only one that is ever "current" here.
+ *
+ * The Agents badge has a real source (`runningAgents`) and is omitted at
+ * zero. PRs has none in black-smith's domain model, so it ships with no
+ * badge rather than a fabricated or hardcoded count.
+ */
+function TabBar({ runningAgents }: { readonly runningAgents: number }) {
+  return (
+    <div className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px]">
+      {TABS.map((tab) => {
+        const current = tab === 'Response';
+        const badge = tab === 'Agents' && runningAgents > 0 ? runningAgents : null;
+        return (
+          <span
+            key={tab}
+            data-placeholder={current ? undefined : `tab-${tab.toLowerCase()}`}
+            title={current ? undefined : 'black-smith has no data behind this tab — see the todo'}
+            className={[
+              'flex h-[26px] flex-1 items-center justify-center gap-[5px] rounded-[7px] text-[12px]',
+              current ? 'bg-line-strong font-medium text-ink' : 'text-ink-dim',
+            ].join(' ')}
+          >
+            {tab}
+            {badge !== null && (
+              <span
+                className={[
+                  'font-mono text-[9.5px]',
+                  current ? 'text-ink-dim' : 'text-ink-faint',
+                ].join(' ')}
+              >
+                {badge}
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 /** A section rule: `IN ────────── you · 12m`. The mockup's own divider. */
 function Rule({ label, meta }: { readonly label: string; readonly meta: string }) {
   return (
@@ -202,19 +252,7 @@ export function DetailPanel(props: DetailPanelProps) {
           </span>
         </div>
 
-        <div className="flex items-center gap-4">
-          <span className="border-ink border-b-[1.5px] pb-2 text-[12px] text-ink">Response</span>
-          {(['PRs', 'Terminal', 'Agents'] as const).map((tab) => (
-            <span
-              key={tab}
-              data-placeholder={`tab-${tab.toLowerCase()}`}
-              title="black-smith has no data behind this tab — see the todo"
-              className="pb-2 text-[12px] text-ink-ghost"
-            >
-              {tab}
-            </span>
-          ))}
-        </div>
+        <TabBar runningAgents={entry?.session.runningAgents ?? 0} />
       </div>
 
       {/* The waiting banner. Loud on purpose: this panel is where the answer

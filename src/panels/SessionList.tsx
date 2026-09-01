@@ -18,6 +18,7 @@
  * it the way it floats the command palette; the row only draws what came back.
  */
 
+import { GitBranch, Plus, Search, Settings, Sun } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import type { SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
@@ -74,37 +75,16 @@ function progressOf(entry: SessionEntry): number {
   return session.decisions.filter((d) => d.output !== null).length / session.decisions.length;
 }
 
-function BranchIcon() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <circle cx="4" cy="3.5" r="1.7" />
-      <circle cx="4" cy="12.5" r="1.7" />
-      <circle cx="12" cy="6.5" r="1.7" />
-    </svg>
-  );
-}
-
+/**
+ * The step-verb pill's icon. Decorative filler for a placeholder pill that
+ * already says out loud it has no data (`step-verb`, dash label) — no lucide
+ * glyph carries "generic unlabelled step", so substituting one would dress a
+ * known-empty slot in false precision. Kept bespoke.
+ */
 function VerbIcon() {
   return (
     <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M8 2l5 12H3z" />
-    </svg>
-  );
-}
-
-function PlusIcon({ size = 15 }: { readonly size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      aria-hidden="true"
-    >
-      <path d="M8 3.5v9M3.5 8h9" />
     </svg>
   );
 }
@@ -167,7 +147,7 @@ export function SessionList(props: SessionListProps) {
           aria-label="new session"
           className="flex h-[34px] items-center justify-center gap-[7px] rounded-[9px] border border-line-loud bg-raised font-medium text-[12.5px] text-ink hover:border-ink-faint"
         >
-          <PlusIcon />
+          <Plus size={15} strokeWidth={1.7} />
           New session
           <span className="ml-0.5 font-mono text-[10px] text-ink-faint">o</span>
         </button>
@@ -201,19 +181,7 @@ export function SessionList(props: SessionListProps) {
             aria-label="search sessions"
             className="flex h-[30px] items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5 text-ink-faint hover:border-line-strong"
           >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              <circle cx="7" cy="7" r="4.2" />
-              <path d="M10.2 10.2L13.5 13.5" />
-            </svg>
+            <Search size={14} strokeWidth={1.6} />
             <span className="flex-1 text-left text-[12px]">Search sessions</span>
             <span className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-[9.5px]">
               /
@@ -254,7 +222,7 @@ export function SessionList(props: SessionListProps) {
                     aria-hidden="true"
                     className="flex h-[19px] w-[19px] items-center justify-center rounded-[5px] border border-line-strong text-ink-ghost"
                   >
-                    <PlusIcon size={13} />
+                    <Plus size={13} strokeWidth={1.7} />
                   </span>
                 </div>
               )}
@@ -322,7 +290,7 @@ export function SessionList(props: SessionListProps) {
 
                     <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
                       <span className="flex min-w-0 flex-none items-center gap-1">
-                        <BranchIcon />
+                        <GitBranch size={10} strokeWidth={1.6} />
                         <span
                           data-placeholder="worktree"
                           title="black-smith reports no worktree per session"
@@ -396,9 +364,9 @@ export function SessionList(props: SessionListProps) {
           type="button"
           onClick={onSettings}
           aria-label="settings"
-          className="text-[12px] text-ink-faint hover:text-ink"
+          className="flex items-center text-ink-faint hover:text-ink"
         >
-          ⚙
+          <Settings size={14} strokeWidth={1.5} />
         </button>
         <button
           type="button"
@@ -406,19 +374,7 @@ export function SessionList(props: SessionListProps) {
           aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
           className="flex items-center text-ink-faint hover:text-ink"
         >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            aria-hidden="true"
-          >
-            <circle cx="8" cy="8" r="2.2" />
-            <path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1" />
-          </svg>
+          <Sun size={14} strokeWidth={1.5} />
         </button>
       </footer>
     </aside>
