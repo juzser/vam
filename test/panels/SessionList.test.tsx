@@ -70,6 +70,8 @@ function mount(entries: readonly SessionEntry[]) {
     onSettings: noop,
     theme: 'dark',
     onToggleTheme: noop,
+    width: 264,
+    resizeHandle: null,
   };
   return render(<SessionList {...props} />);
 }
