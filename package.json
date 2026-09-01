@@ -17,7 +17,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "lint": "biome check .",
-    "test:e2e": "npx @playwright/test@1.62.1 test --config=e2e/playwright.config.ts"
+    "test:e2e": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.config.ts",
+    "test:e2e:reconnect": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.reconnect.config.ts"
   },
   "dependencies": {
     "@xyflow/react": "^12.11.5",

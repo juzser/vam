@@ -193,11 +193,29 @@ pnpm run typecheck:test  # typecheck the test sources
 pnpm run lint            # biome check .
 pnpm run test            # vitest run
 pnpm run test:coverage   # vitest run --coverage
-pnpm run test:e2e        # Playwright, from e2e/
 ```
 
 Tests use Vitest; run a single file directly with
 `node_modules/.bin/vitest run <path>` if you don't want the whole suite.
+
+### End-to-end tests
+
+The Playwright suites in `e2e/` need a one-time manual setup and are **not**
+covered by `pnpm install`: there is deliberately no `e2e/package.json`, so a
+fresh clone has no `e2e/node_modules` and the scripts below will not run until
+you create one. `e2e/README.md` has the steps and explains why the layout is
+this way.
+
+Once the harness exists:
+
+```bash
+pnpm run test:e2e            # the canvas suite
+pnpm run test:e2e:reconnect  # the SSE drop/reconnect suite
+```
+
+Neither runs in CI, for the same reason — plus one suite needs a sibling
+repository that is not public. `.github/workflows/ci.yml` says so in its header
+rather than leaving the gap unexplained.
 
 ## Project status
 
