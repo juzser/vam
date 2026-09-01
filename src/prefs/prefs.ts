@@ -22,6 +22,7 @@
  */
 
 import type { CanvasModel } from '../domain/model.js';
+import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
 
 const KEY = 'vam.prefs.v1';
 
@@ -64,9 +65,17 @@ export type Prefs = {
   /** Session id → the emoji you gave it. */
   readonly icons: Readonly<Record<string, IconChoice>>;
   readonly theme: Theme;
+  /**
+   * The two dragged pane widths, always present — there are exactly two
+   * panes and both are known at compile time, so this is not a keyed map.
+   * Not pruned by the TTL `icons` gets: a pane width is a fact about the
+   * person, not about a session that stopped existing, the same argument
+   * that already exempts `theme` (epic.md §4.1).
+   */
+  readonly panes: { readonly sidebar: number; readonly detail: number };
 };
 
-export const EMPTY_PREFS: Prefs = { icons: {}, theme: DEFAULT_THEME };
+export const EMPTY_PREFS: Prefs = { icons: {}, theme: DEFAULT_THEME, panes: DEFAULT_PANES };
 
 /**
  * The real `localStorage`, or null if this browser will not give us one.
@@ -107,18 +116,39 @@ export function readPrefs(storage: StorageLike | null, now: Date = new Date()): 
   if (typeof parsed !== 'object' || parsed === null) {
     return EMPTY_PREFS;
   }
-  const record = parsed as { icons?: unknown };
+  const record = parsed as { icons?: unknown; panes?: unknown };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   return {
     icons: fresh(readMap(record.icons, readIcon), cutoff),
     // Not pruned by the TTL icons get. A theme is about the person, and one
     // who opens vam twice a year still wants the theme they chose.
     theme: readTheme((parsed as { theme?: unknown }).theme),
+    // Same argument as theme: not pruned, and defensive against an absent
+    // field (today's shipped payloads have none), a non-object, or garbage
+    // numbers left by devtools or an older vam.
+    panes: readPanes(record.panes),
   };
 }
 
 function readTheme(raw: unknown): Theme {
   return raw === 'light' || raw === 'dark' ? raw : DEFAULT_THEME;
+}
+
+function readPanes(raw: unknown): Prefs['panes'] {
+  if (typeof raw !== 'object' || raw === null) {
+    return DEFAULT_PANES;
+  }
+  const { sidebar, detail } = raw as { sidebar?: unknown; detail?: unknown };
+  return {
+    sidebar: readPaneWidth('sidebar', sidebar),
+    detail: readPaneWidth('detail', detail),
+  };
+}
+
+/** `clampPaneWidth` is already total, so a non-number falls through to `NaN`
+ * and lands on the pane's default, exactly like any other malformed field. */
+function readPaneWidth(pane: Pane, raw: unknown): number {
+  return clampPaneWidth(pane, typeof raw === 'number' ? raw : Number.NaN);
 }
 
 /** Flip it. Written by the sidebar's one toggle. */
@@ -140,6 +170,16 @@ export function applyTheme(
   root: Element | null = globalThis.document?.documentElement ?? null,
 ): void {
   root?.classList.toggle('light', theme === 'light');
+}
+
+/**
+ * Store what you dragged, clamped. Called on drag end and on the resize
+ * chord — never on a mere render, which is what keeps clamping off the
+ * write path (epic.md §4.2 point 2, AC-2(c)): a viewport change calls
+ * `renderedWidth` to decide what to draw, never this.
+ */
+export function setPaneWidth(prefs: Prefs, pane: Pane, width: number): Prefs {
+  return { ...prefs, panes: { ...prefs.panes, [pane]: clampPaneWidth(pane, width) } };
 }
 
 export function writePrefs(storage: StorageLike | null, prefs: Prefs): void {
