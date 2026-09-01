@@ -72,14 +72,14 @@ export function PaneResizer(props: PaneResizerProps) {
     [pane, otherRendered, viewportWidth],
   );
 
-  function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+  function onPointerDown(event: React.PointerEvent<HTMLHRElement>) {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { startX: event.clientX, startWidth: width };
     setDragging(true);
   }
 
-  function onPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+  function onPointerMove(event: React.PointerEvent<HTMLHRElement>) {
     const drag = dragRef.current;
     if (drag === null) {
       return;
@@ -87,7 +87,7 @@ export function PaneResizer(props: PaneResizerProps) {
     onChange(pane, proposedWidth(event.clientX, drag.startX, drag.startWidth));
   }
 
-  function onPointerUp(event: React.PointerEvent<HTMLDivElement>) {
+  function onPointerUp(event: React.PointerEvent<HTMLHRElement>) {
     const drag = dragRef.current;
     if (drag === null) {
       return;
@@ -100,8 +100,11 @@ export function PaneResizer(props: PaneResizerProps) {
   }
 
   return (
-    <div
-      role="separator"
+    // A native <hr> already carries the `separator` role, which is what
+    // biome's a11y/useSemanticElements rule asks for in place of a bare
+    // `role="separator"` div — Tailwind's preflight zeroes its default
+    // margin/border, so nothing here overrides that visually.
+    <hr
       aria-orientation="vertical"
       aria-label={ariaLabel}
       aria-valuenow={Math.round(width)}

@@ -43,7 +43,9 @@ import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../key
 import { nextNode } from '../keyboard/spatial-nav.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
 import { IconPicker } from '../panels/IconPicker.js';
+import { PaneResizer } from '../panels/PaneResizer.js';
 import { SessionList } from '../panels/SessionList.js';
+import { renderedWidth } from '../prefs/panes.js';
 import {
   applyIcons,
   applyTheme,
@@ -51,6 +53,7 @@ import {
   type Prefs,
   readPrefs,
   setIcon,
+  setPaneWidth,
   setTheme,
   writePrefs,
 } from '../prefs/prefs.js';
@@ -124,6 +127,44 @@ function CanvasInner({
       writePrefs(storage, next);
     },
     [storage],
+  );
+
+  /**
+   * The two pane widths, live. `viewportWidth` re-renders the clamp on every
+   * resize but never writes (epic.md §4.2 point 2). `liveWidths` holds a
+   * pane's in-progress drag value so the other pane's rendered width can
+   * react to it without touching storage; it is cleared and `savePrefs` is
+   * called only at drag end, never mid-drag (AC-2(c)).
+   */
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    function onResize() {
+      setViewportWidth(window.innerWidth);
+    }
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const [liveWidths, setLiveWidths] = useState<{
+    sidebar: number | null;
+    detail: number | null;
+  }>({ sidebar: null, detail: null });
+
+  const storedSidebar = liveWidths.sidebar ?? prefs.panes.sidebar;
+  const storedDetail = liveWidths.detail ?? prefs.panes.detail;
+  const sidebarWidth = renderedWidth('sidebar', storedSidebar, storedDetail, viewportWidth);
+  const detailWidth = renderedWidth('detail', storedDetail, storedSidebar, viewportWidth);
+
+  const onPaneChange = useCallback((pane: 'sidebar' | 'detail', width: number) => {
+    setLiveWidths((prev) => ({ ...prev, [pane]: width }));
+  }, []);
+
+  const onPaneCommit = useCallback(
+    (pane: 'sidebar' | 'detail', width: number) => {
+      setLiveWidths((prev) => ({ ...prev, [pane]: null }));
+      savePrefs(setPaneWidth(prefs, pane, width));
+    },
+    [prefs, savePrefs],
   );
 
   /**
@@ -901,6 +942,18 @@ function CanvasInner({
             setStatus('sessions are created from the CLI — smith event append session-start')
           }
           onSettings={() => setStatus('settings not built yet')}
+          width={sidebarWidth}
+          resizeHandle={
+            <PaneResizer
+              pane="sidebar"
+              ariaLabel="resize sessions panel"
+              width={sidebarWidth}
+              otherRendered={detailWidth}
+              viewportWidth={viewportWidth}
+              onChange={onPaneChange}
+              onCommit={onPaneCommit}
+            />
+          }
         />
 
         <div className="relative flex min-w-0 flex-1 flex-col bg-canvas">
@@ -1099,6 +1152,18 @@ function CanvasInner({
             setComposing(false);
             setDraft('');
           }}
+          width={detailWidth}
+          resizeHandle={
+            <PaneResizer
+              pane="detail"
+              ariaLabel="resize detail panel"
+              width={detailWidth}
+              otherRendered={sidebarWidth}
+              viewportWidth={viewportWidth}
+              onChange={onPaneChange}
+              onCommit={onPaneCommit}
+            />
+          }
         />
       </div>
 

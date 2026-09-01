@@ -13,9 +13,17 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
-import { renderedWidth } from '../../src/prefs/panes.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DetailPanel, type DetailPanelProps } from '../../src/panels/DetailPanel.js';
 import { PaneResizer } from '../../src/panels/PaneResizer.js';
+import { DETAIL_MIN, renderedWidth, SIDEBAR_MAX } from '../../src/prefs/panes.js';
+import {
+  EMPTY_PREFS,
+  readPrefs,
+  type StorageLike,
+  setPaneWidth,
+  writePrefs,
+} from '../../src/prefs/prefs.js';
 
 afterEach(() => {
   cleanup();
@@ -145,10 +153,7 @@ describe('PaneResizer', () => {
 
 describe('PaneResizer source hygiene (AC-4)', () => {
   const NO_LITERAL_COLOUR = /#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(|oklch\(/;
-  const source = readFileSync(
-    path.resolve(process.cwd(), 'src/panels/PaneResizer.tsx'),
-    'utf8',
-  );
+  const source = readFileSync(path.resolve(process.cwd(), 'src/panels/PaneResizer.tsx'), 'utf8');
 
   it('contains the literal tokens `line-loudest` and `col-resize`', () => {
     expect(source).toMatch(/line-loudest/);
@@ -161,5 +166,132 @@ describe('PaneResizer source hygiene (AC-4)', () => {
 
   it('non-vacuity: the same regex DOES match a fixture containing a literal hex', () => {
     expect(NO_LITERAL_COLOUR.test('background: #4a4a4a;')).toBe(true);
+  });
+});
+
+describe('Canvas wiring (AC-2 integration — the real prefs.ts/panes.ts functions Canvas.tsx composes)', () => {
+  function makeStorage(): { storage: StorageLike; setItemSpy: ReturnType<typeof vi.fn> } {
+    const data = new Map<string, string>();
+    const setItemSpy = vi.fn((key: string, value: string) => {
+      data.set(key, value);
+    });
+    const storage: StorageLike = {
+      getItem: (key) => data.get(key) ?? null,
+      setItem: setItemSpy,
+    };
+    return { storage, setItemSpy };
+  }
+
+  it('an out-of-range stored width renders at MAX/MIN through renderedWidth, and reading it writes nothing', () => {
+    const { storage, setItemSpy } = makeStorage();
+    let prefs = { ...EMPTY_PREFS, panes: { sidebar: 1e9, detail: 0 } };
+    writePrefs(storage, prefs);
+    setItemSpy.mockClear();
+
+    prefs = readPrefs(storage);
+    expect(setItemSpy).not.toHaveBeenCalled();
+
+    const sidebarRendered = renderedWidth('sidebar', prefs.panes.sidebar, prefs.panes.detail, 1400);
+    const detailRendered = renderedWidth('detail', prefs.panes.detail, prefs.panes.sidebar, 1400);
+    expect(sidebarRendered).toBe(SIDEBAR_MAX);
+    expect(detailRendered).toBe(DETAIL_MIN);
+    expect(setItemSpy).not.toHaveBeenCalled();
+  });
+
+  it('a simulated viewport change (wide -> 700 -> wide) writes nothing, byte-identical storage; one real drag-end write is exactly one call', () => {
+    const { storage, setItemSpy } = makeStorage();
+    let prefs = EMPTY_PREFS;
+    writePrefs(storage, prefs);
+    setItemSpy.mockClear();
+    const before = storage.getItem('vam.prefs.v1');
+
+    // Simulate re-render at a narrow, then wide, viewport: only renderedWidth
+    // runs, never setPaneWidth/writePrefs.
+    renderedWidth('sidebar', prefs.panes.sidebar, prefs.panes.detail, 700);
+    renderedWidth('detail', prefs.panes.detail, prefs.panes.sidebar, 700);
+    renderedWidth('sidebar', prefs.panes.sidebar, prefs.panes.detail, 1400);
+    renderedWidth('detail', prefs.panes.detail, prefs.panes.sidebar, 1400);
+    expect(setItemSpy).not.toHaveBeenCalled();
+    expect(storage.getItem('vam.prefs.v1')).toBe(before);
+
+    // A real drag end: exactly one write.
+    prefs = setPaneWidth(prefs, 'sidebar', 300);
+    writePrefs(storage, prefs);
+    expect(setItemSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DetailPanel active-pane signal survives with the handle mounted (AC-6 precondition)', () => {
+  function detailPanelProps(active: boolean): DetailPanelProps {
+    return {
+      entry: null,
+      decision: null,
+      draft: '',
+      onDraftChange: noop,
+      onSubmit: noop,
+      onPickCommand: noop,
+      onCopyCommand: noop,
+      composing: false,
+      onCompose: noop,
+      onStopComposing: noop,
+      active,
+      actionIndex: 0,
+      width: 408,
+      resizeHandle: (
+        <PaneResizer
+          pane="detail"
+          ariaLabel="resize detail panel"
+          width={408}
+          otherRendered={264}
+          viewportWidth={1400}
+          onChange={noop}
+          onCommit={noop}
+        />
+      ),
+    };
+  }
+
+  it('carries border-l-2 and border-waiting when active, with the handle present', () => {
+    const { container } = render(<DetailPanel {...detailPanelProps(true)} />);
+    const aside = container.querySelector('[data-action-pane="active"]');
+    expect(aside).not.toBeNull();
+    expect(aside?.className).toMatch(/border-l-2/);
+    expect(aside?.className).toMatch(/border-waiting/);
+    expect(container.querySelector('[data-pane-resize-handle="detail"]')).not.toBeNull();
+  });
+
+  it('does not carry the active signal when idle', () => {
+    const { container } = render(<DetailPanel {...detailPanelProps(false)} />);
+    const aside = container.querySelector('[data-action-pane="idle"]');
+    expect(aside?.className).not.toMatch(/border-l-2/);
+  });
+});
+
+describe('PaneResizer defensive guards (branch coverage)', () => {
+  it('a pointermove or pointerup with no prior pointerdown is a no-op', () => {
+    const changes: number[] = [];
+    const commits: number[] = [];
+
+    render(
+      <PaneResizer
+        pane="sidebar"
+        ariaLabel="resize sessions panel"
+        width={264}
+        otherRendered={408}
+        viewportWidth={1400}
+        onChange={(_, w) => changes.push(w)}
+        onCommit={(_, w) => commits.push(w)}
+      />,
+    );
+
+    const handle = screen.getByRole('separator', { name: 'resize sessions panel' });
+    Object.assign(handle, { setPointerCapture: noop, releasePointerCapture: noop });
+
+    // No pointerdown preceded these — the drag ref is still null.
+    fireEvent.pointerMove(handle, { clientX: 300, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientX: 300, pointerId: 1 });
+
+    expect(changes).toEqual([]);
+    expect(commits).toEqual([]);
   });
 });

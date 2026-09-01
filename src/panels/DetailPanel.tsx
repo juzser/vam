@@ -27,7 +27,7 @@
  * session list. The other three are drawn, disabled, and say why — see the todo.
  */
 
-import { useEffect, useRef } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 import type { Decision } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { ReviewQueue, type ReviewQueueProps } from './ReviewQueue.js';
@@ -57,6 +57,10 @@ export type DetailPanelProps = {
    * source — a queue you cannot answer should not be drawn.
    */
   readonly review?: ReviewQueueProps;
+  /** The current rendered width (task-1's `renderedWidth`), applied inline. */
+  readonly width: number;
+  /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
+  readonly resizeHandle: ReactNode;
 };
 
 /**
@@ -171,6 +175,8 @@ export function DetailPanel(props: DetailPanelProps) {
     active,
     actionIndex,
     review,
+    width,
+    resizeHandle,
   } = props;
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -192,14 +198,16 @@ export function DetailPanel(props: DetailPanelProps) {
   return (
     <aside
       data-action-pane={active ? 'active' : 'idle'}
+      style={{ width }}
       className={[
-        'flex h-full w-[408px] shrink-0 flex-col border-l bg-sunken',
+        'relative flex h-full shrink-0 flex-col border-l bg-sunken',
         // The pane says out loud when it holds the keyboard. Without it, `I` and
         // `H` become a mode you have to remember being in, which is the failure
         // every modal interface is judged on.
         active ? 'border-l-2 border-waiting' : 'border-line',
       ].join(' ')}
     >
+      {resizeHandle}
       <div className="flex flex-col gap-2.5 border-line border-b px-3.5 pt-3">
         <div className="flex items-start gap-2">
           <span

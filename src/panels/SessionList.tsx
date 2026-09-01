@@ -19,7 +19,7 @@
  */
 
 import { GitBranch, Plus, Search, Settings, Sun } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 import type { SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { Theme } from '../prefs/prefs.js';
@@ -62,6 +62,10 @@ export type SessionListProps = {
   readonly onSettings: () => void;
   readonly theme: Theme;
   readonly onToggleTheme: () => void;
+  /** The current rendered width (task-1's `renderedWidth`), applied inline. */
+  readonly width: number;
+  /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
+  readonly resizeHandle: ReactNode;
 };
 
 function progressOf(entry: SessionEntry): number {
@@ -111,6 +115,8 @@ export function SessionList(props: SessionListProps) {
     onSettings,
     theme,
     onToggleTheme,
+    width,
+    resizeHandle,
   } = props;
 
   const filterRef = useRef<HTMLInputElement>(null);
@@ -131,7 +137,11 @@ export function SessionList(props: SessionListProps) {
   }, [renamingId]);
 
   return (
-    <aside className="flex h-full w-[264px] shrink-0 flex-col border-line border-r bg-sunken">
+    <aside
+      className="relative flex h-full shrink-0 flex-col border-line border-r bg-sunken"
+      style={{ width }}
+    >
+      {resizeHandle}
       <div className="flex flex-col gap-2.5 border-line border-b p-3">
         <div className="flex items-center gap-2">
           <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[6px] bg-line-strong font-mono text-[11px] text-ink">
