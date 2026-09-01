@@ -10,6 +10,8 @@
  * Click-through and the computed cursor are task-4's, in a real browser.
  */
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { renderedWidth } from '../../src/prefs/panes.js';
@@ -138,5 +140,26 @@ describe('PaneResizer', () => {
     expect(countAfter).toBe(countBefore);
     expect(container.querySelector('[data-pane-resize-overlay]')).toBeNull();
     expect(container.querySelector('[style*="position: fixed"]')).toBeNull();
+  });
+});
+
+describe('PaneResizer source hygiene (AC-4)', () => {
+  const NO_LITERAL_COLOUR = /#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(|oklch\(/;
+  const source = readFileSync(
+    path.resolve(process.cwd(), 'src/panels/PaneResizer.tsx'),
+    'utf8',
+  );
+
+  it('contains the literal tokens `line-loudest` and `col-resize`', () => {
+    expect(source).toMatch(/line-loudest/);
+    expect(source).toMatch(/col-resize/);
+  });
+
+  it('contains no literal colour', () => {
+    expect(NO_LITERAL_COLOUR.test(source)).toBe(false);
+  });
+
+  it('non-vacuity: the same regex DOES match a fixture containing a literal hex', () => {
+    expect(NO_LITERAL_COLOUR.test('background: #4a4a4a;')).toBe(true);
   });
 });
