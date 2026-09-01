@@ -45,7 +45,7 @@ import { DetailPanel } from '../panels/DetailPanel.js';
 import { IconPicker } from '../panels/IconPicker.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
 import { SessionList } from '../panels/SessionList.js';
-import { renderedWidth } from '../prefs/panes.js';
+import { DEFAULT_PANES, renderedWidth } from '../prefs/panes.js';
 import {
   applyIcons,
   applyTheme,
@@ -785,6 +785,17 @@ function CanvasInner({
         case 'settings':
           setStatus('settings not built yet');
           return;
+        case 'resizePane': {
+          // Which pane owns the keyboard right now decides which one moves —
+          // the same `pane` state `I`/`H` already set, nothing new (epic.md §4.5).
+          const target: 'sidebar' | 'detail' = pane === 'action' ? 'detail' : 'sidebar';
+          const step = action.delta * 24;
+          savePrefs(setPaneWidth(prefs, target, prefs.panes[target] + step));
+          return;
+        }
+        case 'resetPanes':
+          savePrefs(setPaneWidth(setPaneWidth(prefs, 'sidebar', DEFAULT_PANES.sidebar), 'detail', DEFAULT_PANES.detail));
+          return;
         case 'prompt': {
           if (focusedEntry === null) {
             setStatus('pick a session first');
@@ -884,6 +895,8 @@ function CanvasInner({
     actions,
     answerWaiver,
     answerLesson,
+    prefs,
+    savePrefs,
   ]);
 
   const zoomPct = Math.round(getZoom() * 100);
