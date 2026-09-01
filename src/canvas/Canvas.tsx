@@ -794,7 +794,13 @@ function CanvasInner({
           return;
         }
         case 'resetPanes':
-          savePrefs(setPaneWidth(setPaneWidth(prefs, 'sidebar', DEFAULT_PANES.sidebar), 'detail', DEFAULT_PANES.detail));
+          savePrefs(
+            setPaneWidth(
+              setPaneWidth(prefs, 'sidebar', DEFAULT_PANES.sidebar),
+              'detail',
+              DEFAULT_PANES.detail,
+            ),
+          );
           return;
         case 'prompt': {
           if (focusedEntry === null) {

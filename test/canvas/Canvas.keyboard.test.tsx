@@ -117,8 +117,7 @@ const actionPane = () =>
 // The sidebar renders first among the two resizable `<aside>`s; the detail
 // pane is the one that also carries `data-action-pane`.
 const sidebarAside = () => document.querySelectorAll('aside')[0] as HTMLElement | undefined;
-const detailAside = () =>
-  document.querySelector<HTMLElement>('[data-action-pane]') ?? undefined;
+const detailAside = () => document.querySelector<HTMLElement>('[data-action-pane]') ?? undefined;
 const width = (el: HTMLElement | undefined) => Number.parseFloat(el?.style.width ?? 'NaN');
 
 /**

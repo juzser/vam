@@ -187,8 +187,7 @@ export function resolveChord(state: ChordState, key: string): ChordStep {
   }
 
   if (state.pending !== null) {
-    const table =
-      state.pending === 'g' ? AFTER_G : state.pending === 'y' ? AFTER_Y : AFTER_Z;
+    const table = state.pending === 'g' ? AFTER_G : state.pending === 'y' ? AFTER_Y : AFTER_Z;
     const action = table[key];
     // A completed chord clears the memory, so `ggg` is `gg` then a fresh `g`
     // rather than two jumps to the top.
