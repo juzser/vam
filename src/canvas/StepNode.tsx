@@ -18,6 +18,7 @@
  */
 
 import { Handle, type NodeProps, Position } from '@xyflow/react';
+import { CircleHelp, File, Play } from 'lucide-react';
 import type { Decision } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 
@@ -63,56 +64,12 @@ const KIND_WORD: Readonly<Record<StepKind, string>> = {
 
 function KindIcon({ kind }: { readonly kind: StepKind }) {
   if (kind === 'ask') {
-    return (
-      <svg
-        width="12"
-        height="12"
-        viewBox="0 0 16 16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        aria-hidden="true"
-      >
-        <circle cx="8" cy="8" r="6" />
-        <path d="M6.3 6.3a1.8 1.8 0 1 1 2.4 1.7c-.5.2-.7.6-.7 1.1v.3" />
-        <path d="M8 11.8h.01" />
-      </svg>
-    );
+    return <CircleHelp size={12} strokeWidth={1.6} aria-hidden="true" />;
   }
   if (kind === 'run') {
-    return (
-      <svg
-        width="12"
-        height="12"
-        viewBox="0 0 16 16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M4.6 3.4l7.6 4.6-7.6 4.6z" />
-      </svg>
-    );
+    return <Play size={12} strokeWidth={1.6} aria-hidden="true" />;
   }
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M9.4 2H4.6a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h6.8a1 1 0 0 0 1-1V5.2z" />
-      <path d="M9.4 2v3.2h3.2" />
-    </svg>
-  );
+  return <File size={12} strokeWidth={1.6} aria-hidden="true" />;
 }
 
 export function StepNode({ data }: NodeProps & { data: StepNodeData }) {

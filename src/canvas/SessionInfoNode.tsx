@@ -16,6 +16,7 @@
  */
 
 import { Handle, type NodeProps, Position } from '@xyflow/react';
+import { GitBranch } from 'lucide-react';
 import type { Session, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 
@@ -124,21 +125,7 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
       <div className="flex flex-col gap-1 font-mono text-[10px] text-ink-faint">
         <span className="truncate text-ink-dim">{entry.project.name}</span>
         <span className="flex items-center gap-1.5">
-          <svg
-            width="11"
-            height="11"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            aria-hidden="true"
-          >
-            <circle cx="4.5" cy="3.6" r="1.6" />
-            <circle cx="4.5" cy="12.4" r="1.6" />
-            <circle cx="11.5" cy="6" r="1.6" />
-            <path d="M4.5 5.2v5.6M4.5 9.4h3.4A3.4 3.4 0 0 0 11.4 7.6" />
-          </svg>
+          <GitBranch size={11} strokeWidth={1.6} aria-hidden="true" />
           {/* black-smith does not report a worktree per session. */}
           <span data-session-worktree className="truncate text-ink-ghost">
             {session.epic ?? '—'}

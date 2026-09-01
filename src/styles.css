@@ -44,6 +44,9 @@
   --color-raised: var(--vam-raised);
   --color-header: var(--vam-header);
   --color-dots: var(--vam-dots);
+  /* A recess below `sunken`, for a control that sits inset in its own chrome
+     rather than flush with the panel floor — the segmented tab bar's ground. */
+  --color-well: var(--vam-well);
 
   --color-line: var(--vam-line);
   --color-line-strong: var(--vam-line-strong);
@@ -96,6 +99,7 @@
   --vam-raised: #1a1a1a;
   --vam-header: #111111;
   --vam-dots: #1c1c1c;
+  --vam-well: #101010;
 
   --vam-line: #1f1f1f;
   --vam-line-strong: #262626;
@@ -129,6 +133,7 @@ html.light {
   --vam-raised: #f0f0ee;
   --vam-header: #f4f4f2;
   --vam-dots: #dedcd7;
+  --vam-well: #eeece7;
 
   --vam-line: #e4e4e1;
   --vam-line-strong: #d6d6d2;
