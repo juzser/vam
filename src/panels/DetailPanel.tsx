@@ -406,18 +406,18 @@ export function DetailPanel(props: DetailPanelProps) {
             <span
               data-placeholder="attach"
               title="black-smith's prompt route takes text only — see the todo"
-              className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong text-ink-ghost"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] border border-line-strong text-ink-ghost"
             >
               +
             </span>
             <span
               data-placeholder="model-picker"
               title="the model is chosen by the factory, not by vam — see the todo"
-              className="flex h-6 items-center gap-1.5 rounded-[6px] border border-line-strong px-2 font-mono text-[10px] text-ink-ghost"
+              className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] border border-line-strong px-2 font-mono text-[10px] text-ink-ghost"
             >
               factory picks
             </span>
-            <span className="font-mono text-[9.5px] text-ink-faint">
+            <span className="shrink-0 whitespace-nowrap font-mono text-[9.5px] text-ink-faint">
               {composing
                 ? 'Enter records · Esc leaves'
                 : active
