@@ -12,6 +12,9 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
-import { createPreloadApi } from './api.js';
+import { createPreloadApi, createStreamSubscribe } from './api.js';
 
-contextBridge.exposeInMainWorld('api', createPreloadApi(ipcRenderer));
+contextBridge.exposeInMainWorld('api', {
+  ...createPreloadApi(ipcRenderer),
+  subscribe: createStreamSubscribe(ipcRenderer),
+});

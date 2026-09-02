@@ -21,6 +21,21 @@ export const CHANNELS = {
   createSession: 'vam:source:create-session',
   applyWaivers: 'vam:source:apply-waivers',
   transitionLesson: 'vam:source:transition-lesson',
+  /**
+   * The push channel: main sends on it, payload-free (AC-18), whenever the
+   * upstream change stream ticks. `webContents.send`, never `ipcMain.handle`
+   * -- there is no request/response here, only main-initiated delivery.
+   */
+  stream: 'vam:stream:change',
+  /**
+   * Preload-internal only -- never a member of `PreloadSourceApi`. Lets the
+   * preload's `subscribe()` tell main a listener now cares, so main can open
+   * its own change-stream connection lazily rather than unconditionally at
+   * startup.
+   */
+  streamSubscribe: 'vam:stream:subscribe',
+  /** Preload-internal only, the other half of `streamSubscribe`'s ref count. */
+  streamUnsubscribe: 'vam:stream:unsubscribe',
 } as const;
 
 /**

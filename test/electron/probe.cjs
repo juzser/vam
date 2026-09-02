@@ -36,6 +36,17 @@ async function main() {
   const contents = win.webContents;
   const run = (code) => contents.executeJavaScript(code, true);
 
+  // Task 5: captures the preload's own `console.error` when
+  // `ipcRenderer.invoke(CHANNELS.streamSubscribe)` rejects -- the only way a
+  // missing `registerStreamIpc` registration in main is observable from here,
+  // since the push channel itself is fire-and-forget `webContents.send`.
+  const streamSubscribeErrors = [];
+  contents.on('console-message', (_event, _level, message) => {
+    if (typeof message === 'string' && message.includes('stream subscribe failed')) {
+      streamSubscribeErrors.push(message);
+    }
+  });
+
   const prefs = contents.getLastWebPreferences() ?? {};
   const result = {
     windowCount: BrowserWindow.getAllWindows().length,
@@ -111,6 +122,23 @@ async function main() {
   await run(`window.location.href = ${JSON.stringify(OFF_ORIGIN)}; undefined`);
   await sleep(700);
   result.urlAfterNavigate = contents.getURL();
+
+  // Task 5, AC-15(e2e)/AC-17/AC-18: subscribe through the real bridge while
+  // the local SSE server (see launch.test.ts's `startChangeStreamServer`)
+  // emits a change every 300ms. `beforeUnsub` proves a push arrived and
+  // carried no argument (the callback takes none); `afterUnsub` staying equal
+  // proves the unsubscribe actually stopped delivery.
+  result.streamTicks = await run(`(async () => {
+    const ticks = [];
+    const unsub = window.api.subscribe(() => { ticks.push(Date.now()); });
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    const beforeUnsub = ticks.length;
+    unsub();
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    const afterUnsub = ticks.length;
+    return { beforeUnsub, afterUnsub };
+  })()`);
+  result.streamSubscribeErrors = streamSubscribeErrors;
 
   process.stdout.write(`VAM_SMOKE_RESULT ${JSON.stringify(result)}\n`);
   app.exit(0);
