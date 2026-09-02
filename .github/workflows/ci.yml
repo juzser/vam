@@ -28,7 +28,17 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # `fetch-depth: 0` is load-bearing, not hygiene. `test/keyboard/chords.ts`
+      # reads the PRE-CHANGE chords table straight out of history --
+      # `git show <BASE_SHA>:src/keyboard/chords.ts` -- because AC-5(a) demands
+      # the "before" state come from the file that really shipped rather than a
+      # hand-copied list that could drift. Under the default shallow clone that
+      # commit's tree is never fetched, so the read fails with "path ... does
+      # not exist in <sha>" -- which reads as a MISSING FILE and is actually a
+      # missing history.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         with:
