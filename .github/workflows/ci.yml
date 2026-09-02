@@ -61,6 +61,21 @@ jobs:
         if: '!cancelled()'
         run: pnpm run typecheck
 
+      # The root tsconfig loads the DOM lib for the WHOLE tree, so it typechecks
+      # the main process as though it were a browser. That is the exact
+      # confusion tsconfig.node.json/tsconfig.web.json exist to prevent, and
+      # this repo has already shipped a bug of that class -- `MessageEvent<T>`
+      # is generic in the DOM lib and not in Node's. Measured: a DOM-only type
+      # in src/main leaves `pnpm run typecheck` green and fails typecheck:node.
+      # Without these two steps CI is strictly weaker than the local gate.
+      - name: typecheck (main + preload, no DOM)
+        if: '!cancelled()'
+        run: pnpm run typecheck:node
+
+      - name: typecheck (renderer)
+        if: '!cancelled()'
+        run: pnpm run typecheck:web
+
       - name: typecheck (tests)
         if: '!cancelled()'
         run: pnpm run typecheck:test
@@ -72,3 +87,15 @@ jobs:
       - name: build
         if: '!cancelled()'
         run: pnpm run build
+
+      # AC-13's proof that the application actually BOOTS. This epic's opening
+      # S1 was that no criterion observed the app launching; the launch harness
+      # answers it, and until now answered it only on a developer's machine, so
+      # a non-booting build could reach main with a green tick. The harness
+      # spawns a real Electron binary and needs a display, hence xvfb; it lives
+      # in its own vitest config because an `exclude` in the default config
+      # also suppresses an explicit run, which reports "no tests" while looking
+      # like a pass.
+      - name: launch harness (Electron, needs a display)
+        if: '!cancelled()'
+        run: xvfb-run --auto-servernum pnpm run test:app
