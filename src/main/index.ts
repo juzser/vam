@@ -13,6 +13,35 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { isSameOrigin } from './origin.js';
 import { FIXTURE_SOURCE } from './sources/fixture-source.js';
+import { createNodeEventSource } from './stream/event-source.js';
+import { registerStreamIpc } from './stream/register.js';
+
+/**
+ * The fixture source, with `liveUpdates` flipped on. Main can push a change
+ * tick over `webContents.send` independently of which source answers
+ * `load()` (`registerStreamIpc`, below, does not read `MainSource` at all),
+ * so the decline that explained why the bundled sample never pushes no
+ * longer applies once something does.
+ */
+const { liveUpdates: _liveUpdatesDecline, ...declinesWithoutLiveUpdates } =
+  FIXTURE_SOURCE.descriptor.declines;
+const PUSHABLE_SOURCE = {
+  ...FIXTURE_SOURCE,
+  descriptor: {
+    ...FIXTURE_SOURCE.descriptor,
+    capabilities: { ...FIXTURE_SOURCE.descriptor.capabilities, liveUpdates: true },
+    declines: declinesWithoutLiveUpdates,
+  },
+};
+
+/**
+ * Where main's own change-stream connects, absolute (main is not served from
+ * the backend's origin the way the browser build is, so a relative URL
+ * cannot resolve). Unset in a build with no backend configured --
+ * `registerStreamIpc` is registered regardless, so `subscribe()` never hits
+ * a genuinely missing handler; with no URL it simply has nothing to open.
+ */
+const streamUrl = process.env.VAM_STREAM_URL ?? '';
 
 /** The built renderer, relative to the built main bundle in `out/main`. */
 const rendererHtml = join(__dirname, '..', 'renderer', 'index.html');
@@ -51,6 +80,14 @@ function createWindow(): void {
     window.show();
   });
 
+  // Registered here, not at `app.whenReady`, because it needs THIS window's
+  // `webContents` to push to. `subscribe()` never races it: the preload only
+  // exists once this window's page has loaded it, which is after this call.
+  registerStreamIpc(ipcMain, window.webContents, {
+    url: streamUrl,
+    createEventSource: (url) => createNodeEventSource(url) as unknown as EventSource,
+  });
+
   // Deny by default. A handler returning `{ action: 'allow' }` is the exact bug
   // a static presence scan cannot see, so the harness opens a window instead.
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -73,7 +110,7 @@ function createWindow(): void {
 void app.whenReady().then(() => {
   // Registered before the window is created, so the renderer's first call can
   // never race an unregistered channel.
-  registerSourceIpc(ipcMain, FIXTURE_SOURCE);
+  registerSourceIpc(ipcMain, PUSHABLE_SOURCE);
   createWindow();
 });
 

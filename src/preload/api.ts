@@ -7,14 +7,15 @@
  * contextual parameter types -- while failing the build on drift; per slice so
  * a drift error names the one key that drifted instead of the whole object.
  *
- * `subscribe` IS ABSENT, deliberately, and this is the one place the general
- * rule does not apply. `invoke` is one-shot request/response: it cannot call
- * `onChange` back, and it returns a `Promise` where the port demands an
- * unsubscribe function returned SYNCHRONOUSLY. Written with `invoke` it would
- * typecheck and fail at `stop()`. It needs `ipcRenderer.on` plus a
- * preload-side closure, which is a later task; until then the descriptor
- * declares `liveUpdates: false` and the renderer-side factory therefore never
- * asks for the member.
+ * `subscribe` IS BUILT SEPARATELY, by `createStreamSubscribe` below, and this
+ * is the one place the general rule does not apply. `invoke` is one-shot
+ * request/response: it cannot call `onChange` back, and it returns a
+ * `Promise` where the port demands an unsubscribe function returned
+ * SYNCHRONOUSLY. Written with `invoke` it would typecheck and fail at
+ * `stop()`. It needs `ipcRenderer.on` plus a preload-side closure -- kept out
+ * of `createPreloadApi`'s object literal so that function's signature (and
+ * every existing caller that hands it only an `invoke`-shaped object) is
+ * untouched. `src/preload/index.ts` assembles the two into one bridge.
  */
 
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
@@ -24,7 +25,13 @@ import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.j
 /** The slice of `ipcRenderer` used here, so this module is testable without electron. */
 export type InvokerLike = { invoke(channel: string, ...args: unknown[]): Promise<unknown> };
 
-/** Everything the bridge carries today. `subscribe` joins it with `ipcRenderer.on`. */
+/** The slice of `ipcRenderer` `createStreamSubscribe` needs -- listener add/remove. */
+export type ListenerLike = {
+  on(channel: string, listener: (event: unknown, ...args: unknown[]) => void): void;
+  removeListener(channel: string, listener: (event: unknown, ...args: unknown[]) => void): void;
+};
+
+/** Everything `createPreloadApi` builds. `subscribe` joins it separately, in `index.ts`. */
 export type DesktopSourceApi = Omit<PreloadSourceApi, 'subscribe'>;
 
 /**
@@ -67,4 +74,46 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
   } satisfies Pick<PreloadSourceApi, 'applyWaivers' | 'transitionLesson'>;
 
   return { ...reads, ...writes, ...governance };
+}
+
+/**
+ * Builds `subscribe`: a closure over the renderer's `onChange`, registered
+ * with `ipcRenderer.on` and removed by `ipcRenderer.removeListener` with the
+ * SAME listener reference (AC-19) -- never the renderer's own function
+ * handed straight to either call, which is not identity-stable across the
+ * context-bridge proxy and would make the unsubscribe a no-op (AC-17's
+ * mandated falsifier).
+ *
+ * The `vam:stream:subscribe` invoke tells main a listener now cares, so it
+ * can open its own change-stream connection lazily; its result and any
+ * rejection are not awaited by the caller (the port's `subscribe` returns
+ * synchronously) but a rejection is logged so the launch harness can observe
+ * it if the registration is ever missing.
+ */
+export function createStreamSubscribe(
+  ipc: InvokerLike & ListenerLike,
+): (onChange: () => void) => () => void {
+  return (onChange: () => void) => {
+    // No argument forwarded (AC-18): a tick means "something changed", and
+    // the data comes back through `load()`, never through this channel.
+    const listener = () => onChange();
+    ipc.on(CHANNELS.stream, listener);
+    ipc.invoke(CHANNELS.streamSubscribe).catch((error: unknown) => {
+      console.error('vam: stream subscribe failed:', error);
+    });
+    // Idempotent on purpose. main REFCOUNTS subscribers, so a second call
+    // would decrement for a subscriber that had already left and close the
+    // shared stream under everyone still on it -- silently, since nothing
+    // errors. React StrictMode invokes effect cleanups twice in development,
+    // so a double call is the normal case, not a defensive hypothetical.
+    let stopped = false;
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      ipc.removeListener(CHANNELS.stream, listener);
+      ipc.invoke(CHANNELS.streamUnsubscribe).catch((error: unknown) => {
+        console.error('vam: stream unsubscribe failed:', error);
+      });
+    };
+  };
 }
