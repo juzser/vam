@@ -250,9 +250,9 @@ export function DetailPanel(props: DetailPanelProps) {
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 border-line border-t pt-[9px] pb-[3px]">
           <span className="flex-none font-mono text-[9.5px] text-ink-faint">
-            STEP {index}/{total}
+            STEP {index} OF {total}
           </span>
           <StepRibbon decisions={entry?.session.decisions ?? []} focusedId={decision?.id ?? null} />
           <span className="flex-none font-mono text-[9.5px] text-ink-faint">
