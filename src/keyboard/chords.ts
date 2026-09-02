@@ -57,7 +57,7 @@ export function normalizeKey(event: KeyEventLike): string | null {
 }
 
 /** Keys that open a chord instead of doing something on their own. */
-const PREFIXES = ['g', 'y'] as const;
+const PREFIXES = ['g', 'y', 'z'] as const;
 type Prefix = (typeof PREFIXES)[number];
 
 export type ChordState = {
@@ -95,6 +95,10 @@ export type KeyAction =
   | { readonly kind: 'newSession' }
   /** `,` — settings, the convention most editors already use. */
   | { readonly kind: 'settings' }
+  /** `<` / `>` — narrow or widen the focused side pane by one step. */
+  | { readonly kind: 'resizePane'; readonly delta: -1 | 1 }
+  /** `z0` — set both side panes back to their shipped defaults. */
+  | { readonly kind: 'resetPanes' }
   | { readonly kind: 'cancel' };
 
 export type ChordStep = {
@@ -139,6 +143,12 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   N: { kind: 'searchPrev' },
   Enter: { kind: 'open' },
   'Mod-k': { kind: 'palette' },
+  // Vim's own "shift this leftwards / rightwards" — literally what moving a
+  // side pane's boundary is. A real Shift+, / Shift+. keydown normalizes to
+  // the browser-applied `<` / `>` here, distinct from the plain `,` above
+  // (proven by test, not assumed — epic.md §4.5).
+  '<': { kind: 'resizePane', delta: -1 },
+  '>': { kind: 'resizePane', delta: 1 },
 };
 
 const AFTER_G: Readonly<Record<string, KeyAction>> = {
@@ -149,6 +159,11 @@ const AFTER_G: Readonly<Record<string, KeyAction>> = {
 
 const AFTER_Y: Readonly<Record<string, KeyAction>> = {
   y: { kind: 'copy' },
+};
+
+/** `z` is vim's "adjust the view" namespace; `z0` restores both side panes. */
+const AFTER_Z: Readonly<Record<string, KeyAction>> = {
+  '0': { kind: 'resetPanes' },
 };
 
 function isPrefix(key: string): key is Prefix {
@@ -172,7 +187,7 @@ export function resolveChord(state: ChordState, key: string): ChordStep {
   }
 
   if (state.pending !== null) {
-    const table = state.pending === 'g' ? AFTER_G : AFTER_Y;
+    const table = state.pending === 'g' ? AFTER_G : state.pending === 'y' ? AFTER_Y : AFTER_Z;
     const action = table[key];
     // A completed chord clears the memory, so `ggg` is `gg` then a fresh `g`
     // rather than two jumps to the top.

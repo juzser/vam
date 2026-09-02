@@ -15,12 +15,13 @@
  */
 
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SmithApiError, type SmithClient } from '../../src/adapter/client.js';
 import { Canvas } from '../../src/canvas/Canvas.js';
 import { layoutCanvas } from '../../src/canvas/layout.js';
 import type { CanvasSource } from '../../src/canvas/source.js';
 import type { CanvasModel, Decision, Session } from '../../src/domain/model.js';
+import { DEFAULT_PANES, DETAIL_MIN, SIDEBAR_MAX, SIDEBAR_MIN } from '../../src/prefs/panes.js';
 
 function decision(id: string, over: Partial<Decision> = {}): Decision {
   return { id, label: id, input: `in-${id}`, output: `out-${id}`, commands: [], ...over };
@@ -113,6 +114,11 @@ const iconPicker = () => document.querySelector('[data-icon-picker]');
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
 const actionPane = () =>
   document.querySelector('[data-action-pane]')?.getAttribute('data-action-pane') ?? '';
+// The sidebar renders first among the two resizable `<aside>`s; the detail
+// pane is the one that also carries `data-action-pane`.
+const sidebarAside = () => document.querySelectorAll('aside')[0] as HTMLElement | undefined;
+const detailAside = () => document.querySelector<HTMLElement>('[data-action-pane]') ?? undefined;
+const width = (el: HTMLElement | undefined) => Number.parseFloat(el?.style.width ?? 'NaN');
 
 /**
  * A real keydown on the window, flushed.
@@ -1256,5 +1262,113 @@ describe('the fan and its slots, rendered end to end through <Canvas>', () => {
 
     expect(realStepCardCount(container)).toBe(3); // VISIBLE_DECISION_COUNT caps the draw
     expect(screen.queryByText('no step yet')).toBeNull(); // no slot left empty
+  });
+});
+
+describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
+  // A wide viewport, so both DEFAULT_PANES fit under dragCeiling without the
+  // narrow-viewport rule (epic.md §4.2 point 4) already clamping the render —
+  // that rule is task-1's own AC-2(b) and is not what this suite is testing.
+  const realInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+  beforeEach(() => {
+    Object.defineProperty(window, 'innerWidth', { value: 1600, configurable: true });
+  });
+  afterEach(() => {
+    if (realInnerWidth) {
+      Object.defineProperty(window, 'innerWidth', realInnerWidth);
+    }
+  });
+
+  it('< narrows the sidebar (default focus) by 24px, > widens it, and both clamp at the bounds', () => {
+    render(<Canvas model={MODEL} />);
+    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar);
+
+    press('<');
+    // Non-vacuity: the press actually changed the width.
+    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar - 24);
+
+    press('>');
+    press('>');
+    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar + 24);
+
+    // Drive it down past MIN — it must stop at MIN, not run past or go negative.
+    for (let i = 0; i < 20; i++) {
+      press('<');
+    }
+    expect(width(sidebarAside())).toBe(SIDEBAR_MIN);
+    press('<');
+    expect(width(sidebarAside())).toBe(SIDEBAR_MIN); // still at the bound, not below it
+
+    // And up past MAX — it must stop at MAX.
+    for (let i = 0; i < 40; i++) {
+      press('>');
+    }
+    expect(width(sidebarAside())).toBe(SIDEBAR_MAX);
+  });
+
+  it('routes to the detail pane once I has focused it, leaving the sidebar untouched', () => {
+    render(<Canvas model={MODEL} />);
+    press('I'); // focuses the action pane — pane === 'action'
+    expect(actionPane()).toBe('active');
+
+    press('<');
+    expect(width(detailAside())).toBe(DEFAULT_PANES.detail - 24);
+    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar); // untouched
+
+    press('>');
+    press('>');
+    expect(width(detailAside())).toBe(DEFAULT_PANES.detail + 24);
+    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar); // still untouched
+
+    // Also prove the detail pane clamps at its own MIN.
+    for (let i = 0; i < 20; i++) {
+      press('<');
+    }
+    expect(width(detailAside())).toBe(DETAIL_MIN);
+  });
+
+  it('z0 resets both panes to their defaults in one keystroke sequence', () => {
+    render(<Canvas model={MODEL} />);
+    press('<');
+    press('<');
+    press('I');
+    press('>');
+    expect(width(sidebarAside())).not.toBe(DEFAULT_PANES.sidebar);
+    expect(width(detailAside())).not.toBe(DEFAULT_PANES.detail);
+
+    press('z');
+    press('0');
+    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar);
+    expect(width(detailAside())).toBe(DEFAULT_PANES.detail);
+  });
+
+  it('writes prefs at most once per press, even one that lands exactly on a bound', () => {
+    render(<Canvas model={MODEL} />);
+    const setItem = vi.spyOn(localStorage, 'setItem');
+    setItem.mockClear();
+
+    press('<');
+    expect(setItem).toHaveBeenCalledTimes(1);
+
+    // Drive to MIN, then one more press that cannot move it further.
+    for (let i = 0; i < 20; i++) {
+      press('<');
+    }
+    setItem.mockClear();
+    press('<'); // already at MIN
+    expect(setItem.mock.calls.length).toBeLessThanOrEqual(1);
+    setItem.mockRestore();
+  });
+
+  it('does not fire while a text input holds focus — the filter box owns < > 0 as literal characters', () => {
+    render(<Canvas model={MODEL} />);
+    press('/'); // opens the filter box
+    const input = filterInput();
+    expect(input).not.toBeNull();
+
+    const before = width(sidebarAside());
+    keyOn(input as HTMLInputElement, '<');
+    keyOn(input as HTMLInputElement, '>');
+    expect(width(sidebarAside())).toBe(before);
   });
 });
