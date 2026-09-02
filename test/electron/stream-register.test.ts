@@ -6,10 +6,13 @@
  * a path, or a stack.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CHANNELS } from '../../src/main/ipc/channels.js';
-import { registerStreamIpc } from '../../src/main/stream/register.js';
+import { CLOSE_LINGER_MS, registerStreamIpc } from '../../src/main/stream/register.js';
 import { createStreamSubscribe } from '../../src/preload/api.js';
+
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
 
 function fakeIpcMain() {
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
@@ -53,6 +56,44 @@ describe('registerStreamIpc', () => {
     await ipcMain.invoke(CHANNELS.streamUnsubscribe);
     expect(close).not.toHaveBeenCalled();
     await ipcMain.invoke(CHANNELS.streamUnsubscribe);
+    // Not closed on the instant: the stream LINGERS, so a resubscribe within
+    // the window reuses it instead of rebuilding the socket.
+    expect(close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(CLOSE_LINGER_MS);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The renderer is the untrusted side and main is the privileged one, so
+   * closing the moment the count hits zero lets the renderer decide how often
+   * main makes an outbound connection. Driving subscribe/unsubscribe in a loop
+   * used to mean a connect and a destroy per cycle, at IPC speed, against
+   * whatever host the stream URL names.
+   */
+  it('opens one connection however fast subscribe/unsubscribe is driven', async () => {
+    const ipcMain = fakeIpcMain();
+    const close = vi.fn();
+    const createEventSource = vi.fn(() => ({
+      addEventListener: vi.fn(),
+      close,
+    })) as unknown as (url: string) => EventSource;
+
+    registerStreamIpc(
+      ipcMain,
+      { send: vi.fn() },
+      { url: 'http://example.invalid/stream', createEventSource },
+    );
+
+    for (let i = 0; i < 50; i += 1) {
+      await ipcMain.invoke(CHANNELS.streamSubscribe);
+      await ipcMain.invoke(CHANNELS.streamUnsubscribe);
+    }
+
+    // 50 cycles, one connection, nothing torn down yet.
+    expect(createEventSource).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(CLOSE_LINGER_MS);
     expect(close).toHaveBeenCalledTimes(1);
   });
 
@@ -153,7 +194,7 @@ describe('a subscriber that unsubscribes twice', () => {
 
     stopA();
     stopA();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.advanceTimersByTimeAsync(CLOSE_LINGER_MS * 2);
 
     expect(close, 'the stream closed while another subscriber was live').not.toHaveBeenCalled();
   });

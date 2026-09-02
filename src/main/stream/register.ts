@@ -40,6 +40,16 @@ export type RegisterStreamOptions = {
  * to main's own console -- which never reaches the renderer -- and the
  * handler still resolves, with `false`, rather than reject.
  */
+/**
+ * How long an idle stream stays open after its last subscriber leaves.
+ *
+ * Bounds connection churn: without it, a compromised renderer driving
+ * subscribe/unsubscribe in a loop makes the privileged main process open and
+ * tear down a real connection per cycle, at IPC speed, against whatever host
+ * the stream URL names.
+ */
+export const CLOSE_LINGER_MS = 1_000;
+
 export function registerStreamIpc(
   ipcMain: IpcMainLike,
   webContents: WebContentsLike,
@@ -47,9 +57,16 @@ export function registerStreamIpc(
 ): void {
   let refCount = 0;
   let stream: { close(): void } | null = null;
+  let closeTimer: ReturnType<typeof setTimeout> | null = null;
 
   ipcMain.handle(CHANNELS.streamSubscribe, () => {
     refCount += 1;
+    // A pending close means the stream is still open and was about to be
+    // dropped; the new subscriber cancels that and reuses it.
+    if (closeTimer !== null) {
+      clearTimeout(closeTimer);
+      closeTimer = null;
+    }
     if (stream !== null) return true;
     try {
       stream = openChangeStream({
@@ -68,9 +85,25 @@ export function registerStreamIpc(
 
   ipcMain.handle(CHANNELS.streamUnsubscribe, () => {
     refCount = Math.max(0, refCount - 1);
-    if (refCount === 0 && stream !== null) {
-      stream.close();
-      stream = null;
+    if (refCount === 0 && stream !== null && closeTimer === null) {
+      // Linger rather than close at once. The renderer is the untrusted side
+      // and main is the privileged one, so closing on the instant lets the
+      // renderer set the rate at which main makes outbound connections: a
+      // subscribe/unsubscribe loop becomes a connect/destroy loop against
+      // whatever host the stream URL names, at IPC speed. The linger bounds
+      // that to one connection per window no matter how fast it is driven.
+      //
+      // It also removes a real reconnect: a component remounting (React
+      // StrictMode does exactly this) unsubscribes and resubscribes within
+      // milliseconds, and used to drop and rebuild the socket every time.
+      closeTimer = setTimeout(() => {
+        closeTimer = null;
+        if (refCount === 0 && stream !== null) {
+          stream.close();
+          stream = null;
+        }
+      }, CLOSE_LINGER_MS);
+      closeTimer.unref?.();
     }
     return true;
   });
