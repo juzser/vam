@@ -91,9 +91,10 @@ export type KeyAction =
   | { readonly kind: 'icon' }
   /** `x` — close the focused session. */
   | { readonly kind: 'close' }
-  /** `o` — start a new session, the way `o` opens a new line.
-      `Mod-t` reaches the same action too — a second binding for the same
-      intent, not a replacement for `o`. */
+  /** `o` — start a new session, the way `o` opens a new line. Bound plain
+      because vam is browser-tested for now; once it runs in an Electron
+      shell (like orca) the intended chord is `Mod-t`, which a desktop
+      window can capture and a browser tab cannot. */
   | { readonly kind: 'newSession' }
   /** `,` — settings, the convention most editors already use. */
   | { readonly kind: 'settings' }
@@ -137,7 +138,6 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   s: { kind: 'icon' },
   x: { kind: 'close' },
   o: { kind: 'newSession' },
-  'Mod-t': { kind: 'newSession' },
   ',': { kind: 'settings' },
   f: { kind: 'jump' },
   G: { kind: 'last' },

@@ -87,7 +87,7 @@ node on the canvas the way they always do.
 | `r` | Rename the focused session |
 | `s` | Pick the focused session's icon |
 | `x` | Close the focused session |
-| `o` / `Mod-t` | Start a new session |
+| `o` | Start a new session |
 | `,` | Open settings |
 | `f` | Jump (open the jump list) |
 | `G` | Jump to the last session |

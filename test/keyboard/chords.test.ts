@@ -201,8 +201,6 @@ describe('every old binding still resolves the same way (AC-5b)', () => {
     expect(type(['N']).actions).toEqual([{ kind: 'searchPrev' }]);
     expect(type(['Enter']).actions).toEqual([{ kind: 'open' }]);
     expect(type(['Mod-k']).actions).toEqual([{ kind: 'palette' }]);
-    // Mod-t: added alongside `o`, not in place of it (AC — new-session chord).
-    expect(type(['Mod-t']).actions).toEqual([{ kind: 'newSession' }]);
     // two-key chords
     expect(type(['g', 'g']).actions).toEqual([{ kind: 'first' }]);
     expect(type(['g', 't']).actions).toEqual([{ kind: 'project', delta: 1 }]);
