@@ -6,7 +6,16 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["*.ts", "src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "!dist"]
+    "includes": [
+      "*.ts",
+      "src/**/*.ts",
+      "src/**/*.tsx",
+      "test/**/*.ts",
+      "test/**/*.tsx",
+      "!dist",
+      "!dist-web",
+      "!out"
+    ]
   },
   "formatter": {
     "enabled": true,

@@ -4,22 +4,29 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "description": "VAM — VIM Agent Management. A keyboard-first ADE for managing agent sessions from any CLI.",
+  "main": "out/main/index.cjs",
+  "description": "VAM \u2014 VIM Agent Management. A keyboard-first ADE for managing agent sessions from any CLI.",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "dev:app": "electron-vite dev",
+    "build:app": "electron-vite build",
+    "build:web": "vite build --config vite.web.config.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
+    "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "lint": "biome check .",
     "test:e2e": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.config.ts",
     "test:e2e:reconnect": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.reconnect.config.ts",
-    "test:e2e:filter-panel": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.filter-panel.config.ts"
+    "test:e2e:filter-panel": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.filter-panel.config.ts",
+    "test:app": "vitest run --config vitest.app.config.ts"
   },
   "dependencies": {
     "@xyflow/react": "^12.11.5",
@@ -34,6 +41,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.6",
+    "@electron-toolkit/preload": "3.0.2",
+    "@electron-toolkit/tsconfig": "2.0.0",
+    "@electron-toolkit/utils": "4.0.0",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.6",
@@ -42,6 +52,8 @@
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.0",
     "@vitest/coverage-v8": "4.1.10",
+    "electron": "44.1.1",
+    "electron-vite": "5.0.0",
     "happy-dom": "^20.11.8",
     "tailwindcss": "^4.3.3",
     "typescript": "7.0.2",
