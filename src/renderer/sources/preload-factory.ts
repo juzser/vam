@@ -73,6 +73,26 @@ export async function createSourceFromPreload(api: PreloadSourceApi): Promise<Se
   if (capabilities.liveUpdates) {
     assignable.subscribe = (onChange) => api.subscribe(onChange);
   }
+  // `SourceWrites.recordPrompt` is REQUIRED by the port, so a write surface
+  // cannot exist without it -- which makes `renameSession` (or `closeSession`,
+  // or `createSession`) true while `recordPrompt` is false a contradiction the
+  // type system cannot state: the capability advertises an affordance that no
+  // member can reach, and `declines` is conventionally only written for FALSE
+  // capabilities, so nothing explains the gap either. Refuse it here rather
+  // than build a source that lies about itself. Fixing this properly is a
+  // port-level change (make `recordPrompt` optional, or state the invariant)
+  // and `port.ts` is deliberately untouched by this task.
+  const strandedWrites = (['renameSession', 'closeSession', 'createSession'] as const).filter(
+    (k) => capabilities[k],
+  );
+  if (!capabilities.recordPrompt && strandedWrites.length > 0) {
+    throw new Error(
+      `source "${descriptor.id}" claims ${strandedWrites.join(', ')} but not recordPrompt; ` +
+        'the port has no way to expose a write surface without recordPrompt, so the ' +
+        'capability could never be reached',
+    );
+  }
+
   if (capabilities.recordPrompt) {
     assignable.write = buildWrites(api, descriptor);
   }

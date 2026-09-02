@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { SourceCapabilities } from '../../src/renderer/sources/port.js';
+import type { SourceCapabilities, SourceDeclines } from '../../src/renderer/sources/port.js';
 import { canGovernWith, canSubscribeTo, canWriteTo } from '../../src/renderer/sources/port.js';
 import { createSourceFromPreload } from '../../src/renderer/sources/preload-factory.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../../src/shared/preload-api.js';
@@ -34,6 +34,20 @@ const ALL_CAPABILITIES: SourceCapabilities = {
   agentRoster: true,
 };
 
+/**
+ * A decline for every false capability. The port's own rule is that a refusal
+ * is written by the source that lacks the thing, so a fixture shipping twelve
+ * `false` flags with `declines: {}` teaches the next adapter that empty
+ * declines are acceptable -- while its tests stay green.
+ */
+function declinesFor(capabilities: SourceCapabilities): SourceDeclines {
+  return Object.fromEntries(
+    Object.entries(capabilities)
+      .filter(([, on]) => !on)
+      .map(([k]) => [k, `the fixture source does not implement ${k}`]),
+  );
+}
+
 function makeDescriptor(
   capabilities: SourceCapabilities,
   overrides: Partial<SourceDescriptor> = {},
@@ -42,7 +56,7 @@ function makeDescriptor(
     id: 'black-smith',
     label: 'Bridged fixture',
     capabilities,
-    declines: {},
+    declines: declinesFor(capabilities),
     viewerScope: { kind: 'connection', note: 'the connection is the identity' },
     ...overrides,
   };
@@ -126,10 +140,22 @@ describe('createSourceFromPreload', () => {
     expect('createSession' in source.write).toBe(false);
   });
 
-  it('drops the write surface entirely when only lifecycle flags are set', async () => {
-    const source = await createSourceFromPreload(
-      makeApi(makeDescriptor({ ...NO_CAPABILITIES, renameSession: true, closeSession: true })),
-    );
+  it('refuses a lifecycle capability that no member could ever reach', async () => {
+    // `SourceWrites.recordPrompt` is required by the port, so there is no way
+    // to expose `renameSession` without it. Silently dropping the write surface
+    // -- which is what this factory used to do -- leaves `capabilities
+    // .renameSession` true with nothing behind it and no decline explaining the
+    // gap: a source that lies about itself, and the lie only surfaces wherever
+    // someone reads the flag. Refuse it instead.
+    await expect(
+      createSourceFromPreload(
+        makeApi(makeDescriptor({ ...NO_CAPABILITIES, renameSession: true, closeSession: true })),
+      ),
+    ).rejects.toThrow(/claims renameSession, closeSession but not recordPrompt/);
+  });
+
+  it('drops the write surface when NO write capability is claimed at all', async () => {
+    const source = await createSourceFromPreload(makeApi(makeDescriptor(NO_CAPABILITIES)));
 
     expect('write' in source).toBe(false);
     expect(canWriteTo(source)).toBe(false);

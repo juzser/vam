@@ -16,9 +16,16 @@
  *
  * The consequence is the rule this module exists to state: **nothing in the
  * preload's shape may depend on runtime state.** Every member below is
- * present unconditionally, each one destined to be a thin
- * `ipcRenderer.invoke` forwarder, whether or not the source behind it can do
- * the thing. The temptation a future reader will feel -- "expose only the
+ * present unconditionally, whether or not the source behind it can do the
+ * thing. Most become a thin `ipcRenderer.invoke` forwarder.
+ *
+ * `subscribe` IS THE EXCEPTION, and it must not be written with `invoke`.
+ * `invoke` is one-shot request/response: it cannot call `onChange` back, and
+ * it returns a `Promise` where the port's signature
+ * `(onChange: () => void) => () => void` demands an unsubscribe function
+ * returned SYNCHRONOUSLY. Built on `invoke` it would typecheck at the bridge
+ * and fail at `stop()`. It needs `ipcRenderer.on` plus an unsubscribe closure
+ * created preload-side. The temptation a future reader will feel -- "expose only the
  * members the source supports, then the renderer can just use the api
  * directly" -- cannot be satisfied: at expose time there is no source to ask.
  *
