@@ -245,9 +245,6 @@ export function DetailPanel(props: DetailPanelProps) {
               {decision.label}
             </span>
           )}
-          <span className="flex-none rounded-[6px] border border-line-strong px-1.5 py-1 font-mono text-[9.5px] text-ink-dim">
-            f jump
-          </span>
         </div>
 
         <div className="flex items-center gap-2">
