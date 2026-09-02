@@ -11,4 +11,5 @@ e2e/playwright-report/
 # 2026-08-28 — every session that needs it reads it off this machine.
 docs/design/mockup/
 out/
+dist-app/
 dist-web/
