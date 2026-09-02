@@ -91,7 +91,10 @@ export type KeyAction =
   | { readonly kind: 'icon' }
   /** `x` — close the focused session. */
   | { readonly kind: 'close' }
-  /** `o` — start a new session, the way `o` opens a new line. */
+  /** `o` — start a new session, the way `o` opens a new line. Bound plain
+      because vam is browser-tested for now; once it runs in an Electron
+      shell (like orca) the intended chord is `Mod-t`, which a desktop
+      window can capture and a browser tab cannot. */
   | { readonly kind: 'newSession' }
   /** `,` — settings, the convention most editors already use. */
   | { readonly kind: 'settings' }

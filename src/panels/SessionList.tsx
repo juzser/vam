@@ -9,8 +9,9 @@
  * pressed N times lands N sessions further down no matter how many project
  * boundaries lie between.
  *
- * The shape is the ADE mockup's: a workspace line, one loud "New session", a
- * search box, then cards rather than list rows. A card costs vertical space and
+ * The shape is the ADE mockup's: a workspace line, a search box, then cards
+ * rather than list rows, with one loud "New session" strip at the bottom —
+ * last, after the session rows, not first. A card costs vertical space and
  * buys a second line — what the session is doing, how many steps in, how long
  * ago — which is the line you actually scan a sidebar for.
  *
@@ -150,17 +151,6 @@ export function SessionList(props: SessionListProps) {
           <span className="truncate font-medium text-[13px] text-ink">{workspace}</span>
           <span className="flex-none font-mono text-[9.5px] text-ink-faint">workspace</span>
         </div>
-
-        <button
-          type="button"
-          onClick={onAdd}
-          aria-label="new session"
-          className="flex h-[34px] items-center justify-center gap-[7px] rounded-[9px] border border-line-loud bg-raised font-medium text-[12.5px] text-ink hover:border-ink-faint"
-        >
-          <Plus size={15} strokeWidth={1.7} />
-          New session
-          <span className="ml-0.5 font-mono text-[10px] text-ink-faint">o</span>
-        </button>
 
         {filtering ? (
           <div className="flex h-[30px] items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5">
@@ -363,6 +353,24 @@ export function SessionList(props: SessionListProps) {
           </li>
         )}
       </ul>
+
+      {/* The mockup's own footer strip: workspace line, search, session rows,
+          then this — last, not first. It sits above the workspace/settings
+          footer rather than merged into it, because those two rows answer
+          different questions ("what am I in", not "what do I do next") and
+          the mockup keeps New session as its own full-width strip. */}
+      <div className="border-line border-t px-[11px] py-2.5">
+        <button
+          type="button"
+          onClick={onAdd}
+          aria-label="new session"
+          className="flex h-9 w-full items-center justify-center gap-[7px] rounded-[9px] border border-ink-ghost bg-line-strong font-medium text-[12.5px] text-ink hover:border-ink-faint"
+        >
+          <Plus size={15} strokeWidth={1.7} />
+          New session
+          <span className="ml-0.5 font-mono text-[10px] text-ink-faint">o</span>
+        </button>
+      </div>
 
       <footer className="flex items-center gap-2 border-line border-t px-3 py-2.5">
         <span className="flex h-[19px] w-[19px] flex-none items-center justify-center rounded-full bg-line-strong font-mono text-[9.5px] text-ink-dim">
