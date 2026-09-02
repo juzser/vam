@@ -16,8 +16,8 @@ import {
   SessionFanNode,
   type SessionFanNodeData,
   type SessionFanStatus,
-} from '../../src/canvas/SessionFanNode.js';
-import { StepSlotNode } from '../../src/canvas/StepSlotNode.js';
+} from '../../src/renderer/canvas/SessionFanNode.js';
+import { StepSlotNode } from '../../src/renderer/canvas/StepSlotNode.js';
 
 afterEach(cleanup);
 

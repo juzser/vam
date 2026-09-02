@@ -9,11 +9,11 @@
 
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ApiOverview, ApiTimelineEntry } from '../../src/adapter/api.js';
-import type { SmithClient } from '../../src/adapter/client.js';
-import { SmithUnreachableError } from '../../src/adapter/client.js';
-import type { CanvasFeed, UseCanvasOptions } from '../../src/adapter/useCanvas.js';
-import { useCanvas } from '../../src/adapter/useCanvas.js';
+import type { ApiOverview, ApiTimelineEntry } from '../../src/renderer/adapter/api.js';
+import type { SmithClient } from '../../src/renderer/adapter/client.js';
+import { SmithUnreachableError } from '../../src/renderer/adapter/client.js';
+import type { CanvasFeed, UseCanvasOptions } from '../../src/renderer/adapter/useCanvas.js';
+import { useCanvas } from '../../src/renderer/adapter/useCanvas.js';
 
 function overviewWith(ids: readonly string[]): ApiOverview {
   return {

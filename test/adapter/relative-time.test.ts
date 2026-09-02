@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { relativeTime } from '../../src/adapter/relative-time.js';
+import { relativeTime } from '../../src/renderer/adapter/relative-time.js';
 
 const NOW = new Date('2026-08-27T12:00:00.000Z');
 const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();

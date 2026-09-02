@@ -16,12 +16,17 @@
 
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SmithApiError, type SmithClient } from '../../src/adapter/client.js';
-import { Canvas } from '../../src/canvas/Canvas.js';
-import { layoutCanvas } from '../../src/canvas/layout.js';
-import type { CanvasSource } from '../../src/canvas/source.js';
-import type { CanvasModel, Decision, Session } from '../../src/domain/model.js';
-import { DEFAULT_PANES, DETAIL_MIN, SIDEBAR_MAX, SIDEBAR_MIN } from '../../src/prefs/panes.js';
+import { SmithApiError, type SmithClient } from '../../src/renderer/adapter/client.js';
+import { Canvas } from '../../src/renderer/canvas/Canvas.js';
+import { layoutCanvas } from '../../src/renderer/canvas/layout.js';
+import type { CanvasSource } from '../../src/renderer/canvas/source.js';
+import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
+import {
+  DEFAULT_PANES,
+  DETAIL_MIN,
+  SIDEBAR_MAX,
+  SIDEBAR_MIN,
+} from '../../src/renderer/prefs/panes.js';
 
 function decision(id: string, over: Partial<Decision> = {}): Decision {
   return { id, label: id, input: `in-${id}`, output: `out-${id}`, commands: [], ...over };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type FlowNodeLike, toNavNodes } from '../../src/canvas/nav-nodes.js';
+import { type FlowNodeLike, toNavNodes } from '../../src/renderer/canvas/nav-nodes.js';
 
 const NODES: FlowNodeLike[] = [
   { id: 'p1', position: { x: 100, y: 50 }, measured: { width: 352, height: 400 } },

@@ -44,6 +44,8 @@ const proxy = {
 };
 
 export default defineConfig({
+  root: 'src/renderer',
+  build: { outDir: '../../dist', emptyOutDir: true },
   plugins: [react(), tailwindcss()],
   server: {
     // 127.0.0.1 only, like every service this tool talks to. Vam reads a local

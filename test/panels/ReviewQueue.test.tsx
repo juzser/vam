@@ -11,8 +11,8 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ApiFinding, ApiLesson } from '../../src/adapter/api.js';
-import { ReviewQueue, type ReviewQueueProps } from '../../src/panels/ReviewQueue.js';
+import type { ApiFinding, ApiLesson } from '../../src/renderer/adapter/api.js';
+import { ReviewQueue, type ReviewQueueProps } from '../../src/renderer/panels/ReviewQueue.js';
 
 function finding(over: Partial<ApiFinding> = {}): ApiFinding {
   return {

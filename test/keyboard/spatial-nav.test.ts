@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type NavNode, nextNode } from '../../src/keyboard/spatial-nav.js';
+import { type NavNode, nextNode } from '../../src/renderer/keyboard/spatial-nav.js';
 
 /**
  * Geometry mirroring the canvas in docs/design/canvas-layout.md §3: two project

@@ -8,8 +8,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { CanvasModel } from '../../src/domain/model.js';
-import { DEFAULT_PANES, renderedWidth } from '../../src/prefs/panes.js';
+import type { CanvasModel } from '../../src/renderer/domain/model.js';
+import { DEFAULT_PANES, renderedWidth } from '../../src/renderer/prefs/panes.js';
 import {
   applyIcons,
   EMPTY_PREFS,
@@ -19,7 +19,7 @@ import {
   setPaneWidth,
   setTheme,
   writePrefs,
-} from '../../src/prefs/prefs.js';
+} from '../../src/renderer/prefs/prefs.js';
 
 const KEY = 'vam.prefs.v1';
 const NOW = new Date('2026-08-27T12:00:00.000Z');

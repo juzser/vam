@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { CanvasModel, Session } from '../../src/domain/model.js';
-import { cycleMatch, searchMatches } from '../../src/domain/search.js';
-import { allSessions } from '../../src/domain/selectors.js';
+import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import { cycleMatch, searchMatches } from '../../src/renderer/domain/search.js';
+import { allSessions } from '../../src/renderer/domain/selectors.js';
 
 function session(id: string, over: Partial<Session> = {}): Session {
   return {

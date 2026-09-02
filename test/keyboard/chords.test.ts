@@ -5,7 +5,7 @@ import {
   EMPTY_CHORD,
   normalizeKey,
   resolveChord,
-} from '../../src/keyboard/chords.js';
+} from '../../src/renderer/keyboard/chords.js';
 
 /**
  * The commit this task branched from (`origin/main`, PR #12 merged — task-1

@@ -17,7 +17,7 @@ import { extname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const SRC_DIR = fileURLToPath(new URL('../../src', import.meta.url));
+const SRC_DIR = fileURLToPath(new URL('../../src/renderer', import.meta.url));
 const SELF_PATH = fileURLToPath(import.meta.url);
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git']);
 
@@ -38,7 +38,7 @@ const cssAndTsFiles = allSrcFiles.filter(
   (f) => f !== 'styles.css' && ['.ts', '.tsx', '.css'].includes(extname(f)),
 );
 
-const at = (f: string, i: number, l: string) => `src/${f}:${i + 1}: ${l.trim()}`;
+const at = (f: string, i: number, l: string) => `src/renderer/${f}:${i + 1}: ${l.trim()}`;
 const isComment = (t: string) => t.startsWith('//') || t.startsWith('*');
 
 const DRAGGABLE_ALLOWED = /draggable:\s*false\b|nodesDraggable=\{false\}/;

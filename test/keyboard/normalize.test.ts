@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeKey } from '../../src/keyboard/chords.js';
+import { normalizeKey } from '../../src/renderer/keyboard/chords.js';
 
 describe('normalizeKey', () => {
   it('leaves a plain key alone', () => {

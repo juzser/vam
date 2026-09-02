@@ -13,8 +13,8 @@
 
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { Canvas } from '../../src/canvas/Canvas.js';
-import type { CanvasModel, Session } from '../../src/domain/model.js';
+import { Canvas } from '../../src/renderer/canvas/Canvas.js';
+import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 
 function session(id: string, status: Session['status']): Session {
   return {

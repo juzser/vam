@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ApiFinding, ApiLesson } from '../../src/adapter/api.js';
-import { lessonQueue, waiverQueue } from '../../src/adapter/review-queue.js';
+import type { ApiFinding, ApiLesson } from '../../src/renderer/adapter/api.js';
+import { lessonQueue, waiverQueue } from '../../src/renderer/adapter/review-queue.js';
 
 function finding(id: string, over: Partial<ApiFinding> = {}): ApiFinding {
   return {

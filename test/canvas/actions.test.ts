@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { ApiFinding, ApiLesson } from '../../src/adapter/api.js';
-import { buildActions, clampIndex } from '../../src/canvas/actions.js';
-import type { Command } from '../../src/domain/model.js';
+import type { ApiFinding, ApiLesson } from '../../src/renderer/adapter/api.js';
+import { buildActions, clampIndex } from '../../src/renderer/canvas/actions.js';
+import type { Command } from '../../src/renderer/domain/model.js';
 
 const finding = (fingerprint: string): ApiFinding => ({
   findingId: `f-${fingerprint}`,

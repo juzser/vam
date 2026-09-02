@@ -12,7 +12,7 @@ import {
   STEP_SIZE,
   STEP_SLOTS,
   stepSlotOffset,
-} from '../../src/canvas/grid.js';
+} from '../../src/renderer/canvas/grid.js';
 
 describe('constants', () => {
   it('matches epic.md section 3.1-3.3', () => {

@@ -16,7 +16,7 @@ import {
   renderedWidth,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
-} from '../../src/prefs/panes.js';
+} from '../../src/renderer/prefs/panes.js';
 
 const PANES: { pane: Pane; min: number; max: number; fallback: number }[] = [
   { pane: 'sidebar', min: SIDEBAR_MIN, max: SIDEBAR_MAX, fallback: DEFAULT_PANES.sidebar },

@@ -14,16 +14,16 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DetailPanel, type DetailPanelProps } from '../../src/panels/DetailPanel.js';
-import { PaneResizer } from '../../src/panels/PaneResizer.js';
-import { DETAIL_MIN, renderedWidth, SIDEBAR_MAX } from '../../src/prefs/panes.js';
+import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
+import { PaneResizer } from '../../src/renderer/panels/PaneResizer.js';
+import { DETAIL_MIN, renderedWidth, SIDEBAR_MAX } from '../../src/renderer/prefs/panes.js';
 import {
   EMPTY_PREFS,
   readPrefs,
   type StorageLike,
   setPaneWidth,
   writePrefs,
-} from '../../src/prefs/prefs.js';
+} from '../../src/renderer/prefs/prefs.js';
 
 afterEach(() => {
   cleanup();
@@ -153,7 +153,10 @@ describe('PaneResizer', () => {
 
 describe('PaneResizer source hygiene (AC-4)', () => {
   const NO_LITERAL_COLOUR = /#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(|oklch\(/;
-  const source = readFileSync(path.resolve(process.cwd(), 'src/panels/PaneResizer.tsx'), 'utf8');
+  const source = readFileSync(
+    path.resolve(process.cwd(), 'src/renderer/panels/PaneResizer.tsx'),
+    'utf8',
+  );
 
   it('contains the literal tokens `line-loudest` and `col-resize`', () => {
     expect(source).toMatch(/line-loudest/);

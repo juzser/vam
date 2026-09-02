@@ -5,8 +5,8 @@ import type {
   SourceDeclines,
   SourceError,
   ViewerScope,
-} from '../../src/sources/port.js';
-import { canGovernWith, canSubscribeTo, canWriteTo } from '../../src/sources/port.js';
+} from '../../src/renderer/sources/port.js';
+import { canGovernWith, canSubscribeTo, canWriteTo } from '../../src/renderer/sources/port.js';
 
 const NO_CAPABILITIES: SourceCapabilities = {
   liveUpdates: false,
