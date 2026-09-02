@@ -1193,7 +1193,15 @@ function CanvasInner({
             allEntries.find((e) => e.session.id === pickingIconFor)?.session.title ?? pickingIconFor
           }
           onPick={(icon) => {
-            savePrefs(setIcon(prefs, pickingIconFor, icon, new Date()));
+            // The session's own project carries which source it came from
+            // (AC-1: session ids repeat across sources) — 'black-smith' here
+            // is only the fallback for a session that vanished from the
+            // model between opening the picker and picking, never the
+            // resolved attribution for a live entry.
+            const pickedSource =
+              allEntries.find((e) => e.session.id === pickingIconFor)?.project.source ??
+              'black-smith';
+            savePrefs(setIcon(prefs, pickedSource, pickingIconFor, icon, new Date()));
             setStatus(
               icon === ''
                 ? 'icon cleared — kept on this machine, never in the event log'

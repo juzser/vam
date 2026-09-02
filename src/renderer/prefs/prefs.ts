@@ -21,7 +21,7 @@
  * worth a screen. Every path here ends in "then draw the default layout".
  */
 
-import type { CanvasModel } from '../domain/model.js';
+import type { CanvasModel, SourceId } from '../domain/model.js';
 import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
 
 const KEY = 'vam.prefs.v1';
@@ -61,9 +61,23 @@ export type Theme = 'dark' | 'light';
 /** Dark is the default: it is the theme vam was designed in (artboard 1a). */
 export const DEFAULT_THEME: Theme = 'dark';
 
+/** Session id → the emoji you gave it, for one source. */
+export type IconsBySession = Readonly<Record<string, IconChoice>>;
+
 export type Prefs = {
-  /** Session id → the emoji you gave it. */
-  readonly icons: Readonly<Record<string, IconChoice>>;
+  /**
+   * Source id → session id → the emoji you gave it.
+   *
+   * Session ids are unique only within a source (§ epic.md, AC-1): two
+   * sources can both name a session `D-257`, and without this outer key they
+   * would share one glyph. Both levels are built on `Object.create(null)`
+   * objects populated by explicit loops, never a bare `{}` mutated with
+   * `obj[key] = …` — a plain object's `__proto__` is a setter, so assigning
+   * through a hostile key like `__proto__` or `constructor` would silently
+   * miss the store's own-property count and vanish on the next
+   * `JSON.stringify` round trip (AC-2).
+   */
+  readonly icons: Readonly<Record<string, IconsBySession>>;
   readonly theme: Theme;
   /**
    * The two dragged pane widths, always present — there are exactly two
@@ -92,7 +106,11 @@ export function browserStorage(): StorageLike | null {
   }
 }
 
-export function readPrefs(storage: StorageLike | null, now: Date = new Date()): Prefs {
+export function readPrefs(
+  storage: StorageLike | null,
+  now: Date = new Date(),
+  migrateSource: SourceId = 'black-smith',
+): Prefs {
   if (storage === null) {
     return EMPTY_PREFS;
   }
@@ -119,7 +137,7 @@ export function readPrefs(storage: StorageLike | null, now: Date = new Date()): 
   const record = parsed as { icons?: unknown; panes?: unknown };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   return {
-    icons: fresh(readMap(record.icons, readIcon), cutoff),
+    icons: pruneIcons(readIcons(record.icons, migrateSource), cutoff),
     // Not pruned by the TTL icons get. A theme is about the person, and one
     // who opens vam twice a year still wants the theme they chose.
     theme: readTheme((parsed as { theme?: unknown }).theme),
@@ -194,14 +212,56 @@ export function writePrefs(storage: StorageLike | null, prefs: Prefs): void {
   }
 }
 
-/** An empty icon clears the choice rather than storing "". */
-export function setIcon(prefs: Prefs, sessionId: string, icon: string, now: Date): Prefs {
-  const icons = { ...prefs.icons };
-  if (icon === '') {
-    delete icons[sessionId];
-  } else {
-    icons[sessionId] = { icon, at: now.toISOString() };
+/**
+ * A null-prototype accumulator, safe to populate with `out[key] = value` even
+ * when `key` is `__proto__` or `constructor`: a plain `{}` inherits
+ * `Object.prototype`'s `__proto__` setter, which intercepts that assignment
+ * and never creates an own property, so the entry silently fails to
+ * enumerate and is dropped by `JSON.stringify`. An object with no prototype
+ * has no such setter to intercept the assignment.
+ */
+function emptyMap<T>(): Record<string, T> {
+  return Object.create(null) as Record<string, T>;
+}
+
+/** A copy of `map` with one entry added or replaced, still prototype-free. */
+function withEntry<T>(map: Record<string, T>, key: string, value: T): Record<string, T> {
+  const out = emptyMap<T>();
+  for (const k of Object.keys(map)) {
+    out[k] = map[k] as T;
   }
+  out[key] = value;
+  return out;
+}
+
+/** A copy of `map` with one entry removed, still prototype-free. */
+function withoutEntry<T>(map: Record<string, T>, key: string): Record<string, T> {
+  const out = emptyMap<T>();
+  for (const k of Object.keys(map)) {
+    if (k !== key) {
+      out[k] = map[k] as T;
+    }
+  }
+  return out;
+}
+
+/** An empty icon clears the choice rather than storing "". */
+export function setIcon(
+  prefs: Prefs,
+  sourceId: SourceId,
+  sessionId: string,
+  icon: string,
+  now: Date,
+): Prefs {
+  const bucket = prefs.icons[sourceId] ?? emptyMap<IconChoice>();
+  const nextBucket =
+    icon === ''
+      ? withoutEntry(bucket, sessionId)
+      : withEntry(bucket, sessionId, { icon, at: now.toISOString() });
+  const icons =
+    Object.keys(nextBucket).length > 0
+      ? withEntry(prefs.icons, sourceId, nextBucket)
+      : withoutEntry(prefs.icons, sourceId);
   return { ...prefs, icons };
 }
 
@@ -210,7 +270,9 @@ export function setIcon(prefs: Prefs, sessionId: string, icon: string, now: Date
  *
  * The sidebar and the canvas node both render `session.icon`, and neither
  * should know that an icon is a local preference rather than something the
- * factory said. Applying it here means one place knows.
+ * factory said. Applying it here means one place knows. Looked up per
+ * project's `source`, not by session id alone — two sources can name a
+ * session the same thing (AC-1).
  */
 export function applyIcons(model: CanvasModel, icons: Prefs['icons']): CanvasModel {
   if (Object.keys(icons).length === 0) {
@@ -218,25 +280,81 @@ export function applyIcons(model: CanvasModel, icons: Prefs['icons']): CanvasMod
   }
   return {
     ...model,
-    projects: model.projects.map((project) => ({
-      ...project,
-      sessions: project.sessions.map((session) => {
-        const choice = icons[session.id];
-        return choice === undefined ? session : { ...session, icon: choice.icon };
-      }),
-    })),
+    projects: model.projects.map((project) => {
+      const bucket = icons[project.source];
+      if (bucket === undefined) {
+        return project;
+      }
+      return {
+        ...project,
+        sessions: project.sessions.map((session) => {
+          const choice = bucket[session.id];
+          return choice === undefined ? session : { ...session, icon: choice.icon };
+        }),
+      };
+    }),
   };
 }
 
 function readMap<T>(value: unknown, read: (entry: unknown) => T | null): Record<string, T> {
   if (typeof value !== 'object' || value === null) {
-    return {};
+    return emptyMap<T>();
   }
-  const out: Record<string, T> = {};
+  const out = emptyMap<T>();
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
     const parsed = read(entry);
     if (parsed !== null) {
       out[key] = parsed;
+    }
+  }
+  return out;
+}
+
+/**
+ * Build the by-source icon map from whatever is under the stored `icons` key,
+ * migrating the pre-AC-1 flat shape (`{sessionId: IconChoice}`) as it goes.
+ *
+ * Handles a payload holding both shapes at once (AC-5) — the case an operator
+ * hits mid-upgrade with vam open in two tabs, one writing the old flat shape
+ * and one already writing the new nested one to the same key. Each top-level
+ * entry is inspected on its own: one that parses as an `IconChoice` is an old
+ * flat entry keyed by session id, migrated into `migrateSource`'s bucket;
+ * anything else is tried as a new-shape bucket (session id → `IconChoice`)
+ * keyed by its own source id. Both merge into the same source's bucket
+ * without colliding.
+ */
+function readIcons(raw: unknown, migrateSource: SourceId): Prefs['icons'] {
+  if (typeof raw !== 'object' || raw === null) {
+    return emptyMap<IconsBySession>();
+  }
+  let outer = emptyMap<IconsBySession>();
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const flatLeaf = readIcon(value);
+    if (flatLeaf !== null) {
+      const bucket = outer[migrateSource] ?? emptyMap<IconChoice>();
+      outer = withEntry(outer, migrateSource, withEntry(bucket, key, flatLeaf));
+      continue;
+    }
+    const nested = readMap(value, readIcon);
+    if (Object.keys(nested).length === 0) {
+      continue;
+    }
+    let bucket = outer[key] ?? emptyMap<IconChoice>();
+    for (const [sid, choice] of Object.entries(nested)) {
+      bucket = withEntry(bucket, sid, choice);
+    }
+    outer = withEntry(outer, key, bucket);
+  }
+  return outer;
+}
+
+/** `fresh` applied per source, dropping a source whose bucket becomes empty. */
+function pruneIcons(icons: Prefs['icons'], cutoff: string): Prefs['icons'] {
+  let out = emptyMap<IconsBySession>();
+  for (const [source, bucket] of Object.entries(icons)) {
+    const kept = fresh(bucket, cutoff);
+    if (Object.keys(kept).length > 0) {
+      out = withEntry(out, source, kept);
     }
   }
   return out;
@@ -262,7 +380,7 @@ function fresh<T extends { at: string }>(
   map: Record<string, T>,
   cutoff: string,
 ): Record<string, T> {
-  const out: Record<string, T> = {};
+  const out = emptyMap<T>();
   for (const [key, entry] of Object.entries(map)) {
     if (Number.isNaN(Date.parse(entry.at)) || entry.at >= cutoff) {
       out[key] = entry;
