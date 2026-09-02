@@ -292,6 +292,45 @@ describe('main validates every IPC payload (AC-16b)', () => {
       message: expect.any(String),
     });
   });
+
+  // A compromised renderer can pass a type-correct, non-empty string or array
+  // that is simply enormous. `isText`/`isTextList` must refuse it as
+  // `invalid-payload` -- the same refusal any other bad shape gets -- and
+  // must do so BEFORE anything walks the array, not merely eventually.
+  it('refuses recordPrompt when the prompt text exceeds the length bound', async () => {
+    const { ipcRenderer, rejections } = wire(FIXTURE_SOURCE);
+    const overLong = 'a'.repeat(10_001);
+
+    const result = await ipcRenderer.invoke(CHANNELS.recordPrompt, 's', overLong);
+    expect(result).toMatchObject({ ok: false, error: { code: 'invalid-payload' } });
+    expect(rejections).toEqual([]);
+  });
+
+  it('refuses applyWaivers when the waiver list exceeds the count bound', async () => {
+    const { ipcRenderer, rejections } = wire(FIXTURE_SOURCE);
+    const overCount = Array.from({ length: 1001 }, (_, i) => `f-${i}`);
+
+    const result = await ipcRenderer.invoke(CHANNELS.applyWaivers, 's', overCount);
+    expect(result).toMatchObject({ ok: false, error: { code: 'invalid-payload' } });
+    expect(rejections).toEqual([]);
+  });
+
+  it('still validates a normal-sized prompt and waiver list past the length/count check', async () => {
+    const { ipcRenderer, rejections } = wire(FIXTURE_SOURCE);
+
+    const promptResult = await ipcRenderer.invoke(CHANNELS.recordPrompt, 's', 'a normal prompt');
+    expect(promptResult).toMatchObject({
+      ok: false,
+      error: { code: expect.stringMatching(/^unsupported:/) },
+    });
+
+    const waiversResult = await ipcRenderer.invoke(CHANNELS.applyWaivers, 's', ['f1', 'f2']);
+    expect(waiversResult).toMatchObject({
+      ok: false,
+      error: { code: expect.stringMatching(/^unsupported:/) },
+    });
+    expect(rejections).toEqual([]);
+  });
 });
 
 function isRefusal(result: unknown): boolean {

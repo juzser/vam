@@ -28,8 +28,24 @@ const refused = (code: string, message: string): SourceError => ({
   message,
 });
 
-const isText = (value: unknown): boolean => typeof value === 'string' && value.length > 0;
-const isTextList = (value: unknown): boolean => Array.isArray(value) && value.every(isText);
+/**
+ * Real prompts, titles and identifiers are well under this; the bound exists
+ * only so a compromised renderer cannot park a hundred-megabyte string on
+ * main's single event loop -- the process hosting every window -- before
+ * validation has even finished looking at the payload.
+ */
+const MAX_TEXT_LENGTH = 10_000;
+/**
+ * A waiver or lesson-transition list is a handful of finding ids; 1000 is
+ * generous headroom while still keeping the array bounded BEFORE anything
+ * walks it with `every`.
+ */
+const MAX_LIST_LENGTH = 1_000;
+
+const isText = (value: unknown): boolean =>
+  typeof value === 'string' && value.length > 0 && value.length <= MAX_TEXT_LENGTH;
+const isTextList = (value: unknown): boolean =>
+  Array.isArray(value) && value.length <= MAX_LIST_LENGTH && value.every(isText);
 
 /** What each argumentful channel accepts, positionally. Arity is part of it. */
 const ARGUMENTS: Record<string, readonly ((value: unknown) => boolean)[]> = {
