@@ -29,12 +29,37 @@ const refused = (code: string, message: string): SourceError => ({
 });
 
 /**
- * Real prompts, titles and identifiers are well under this; the bound exists
- * only so a compromised renderer cannot park a hundred-megabyte string on
- * main's single event loop -- the process hosting every window -- before
- * validation has even finished looking at the payload.
+ * Session ids, titles and lesson/finding ids are short by construction --
+ * they are UI-generated labels, never user-typed prose. 10,000 is far above
+ * any of them; the bound exists only so a compromised renderer cannot park
+ * a hundred-megabyte string on main's single event loop -- the process
+ * hosting every window -- before validation has even finished looking at
+ * the payload.
  */
 const MAX_TEXT_LENGTH = 10_000;
+/**
+ * The prompt BODY (`recordPrompt`'s second argument) is a different
+ * population from an identifier: it is exactly the free text vam's prompt
+ * box exists to record, and f-vam-electron-shell/task-4-load-ipc-c7bf7335
+ * found that a shared 10,000-char bound refused legitimate input. Sized
+ * from 2,900 real, typed Claude Code prompts (sidechains, tool results and
+ * injected system-reminders excluded) as a proxy population -- vam's own
+ * prompt box has no history yet:
+ *
+ *   median    968
+ *   p90    36,424
+ *   p99    60,268
+ *   max   616,040
+ *
+ * A uniform 10,000-char bound refused 1,067 of 2,900 (36.8%) of them --
+ * the distribution is bimodal (short interactive prompts plus routinely
+ * pasted long ones), so the small median made the old bound feel safe
+ * while it was wrong. 1,000,000 clears the observed max with headroom and
+ * still refuses the half-gigabyte payload the original S3 finding was
+ * about.
+ */
+const MAX_PROMPT_LENGTH = 1_000_000;
+
 /**
  * A waiver or lesson-transition list is a handful of finding ids; 1000 is
  * generous headroom while still keeping the array bounded BEFORE anything
@@ -44,12 +69,14 @@ const MAX_LIST_LENGTH = 1_000;
 
 const isText = (value: unknown): boolean =>
   typeof value === 'string' && value.length > 0 && value.length <= MAX_TEXT_LENGTH;
+const isPromptText = (value: unknown): boolean =>
+  typeof value === 'string' && value.length > 0 && value.length <= MAX_PROMPT_LENGTH;
 const isTextList = (value: unknown): boolean =>
   Array.isArray(value) && value.length <= MAX_LIST_LENGTH && value.every(isText);
 
 /** What each argumentful channel accepts, positionally. Arity is part of it. */
 const ARGUMENTS: Record<string, readonly ((value: unknown) => boolean)[]> = {
-  [CHANNELS.recordPrompt]: [isText, isText],
+  [CHANNELS.recordPrompt]: [isText, isPromptText],
   [CHANNELS.renameSession]: [isText, isText],
   [CHANNELS.closeSession]: [isText],
   [CHANNELS.createSession]: [isText, isText],

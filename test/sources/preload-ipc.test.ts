@@ -297,12 +297,31 @@ describe('main validates every IPC payload (AC-16b)', () => {
   // that is simply enormous. `isText`/`isTextList` must refuse it as
   // `invalid-payload` -- the same refusal any other bad shape gets -- and
   // must do so BEFORE anything walks the array, not merely eventually.
-  it('refuses recordPrompt when the prompt text exceeds the length bound', async () => {
+  it('refuses recordPrompt when the prompt text exceeds the PROMPT length bound', async () => {
     const { ipcRenderer, rejections } = wire(FIXTURE_SOURCE);
-    const overLong = 'a'.repeat(10_001);
+    const overLong = 'a'.repeat(1_000_001);
 
     const result = await ipcRenderer.invoke(CHANNELS.recordPrompt, 's', overLong);
     expect(result).toMatchObject({ ok: false, error: { code: 'invalid-payload' } });
+    expect(rejections).toEqual([]);
+  });
+
+  // f-vam-electron-shell/task-4-load-ipc-c7bf7335: the identifier bound
+  // (10,000) must NOT apply to the prompt body -- a real, pasted prompt
+  // routinely exceeds it. This is the regression the finding is about:
+  // without a separate, larger bound for the prompt body, this case is
+  // wrongly refused as invalid-payload.
+  it('accepts a recordPrompt body above the identifier bound but within the prompt bound', async () => {
+    const { ipcRenderer, rejections } = wire(FIXTURE_SOURCE);
+    const longButReal = 'a'.repeat(60_268); // roughly the measured p99
+
+    const result = await ipcRenderer.invoke(CHANNELS.recordPrompt, 's', longButReal);
+    // Validation passes the length check; refusal here is for lack of the
+    // capability, not invalid-payload -- the FIXTURE_SOURCE advertises none.
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: expect.stringMatching(/^unsupported:/) },
+    });
     expect(rejections).toEqual([]);
   });
 
