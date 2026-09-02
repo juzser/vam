@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openChangeStream } from '../../src/renderer/adapter/stream.js';
+import { openChangeStream } from '../../src/shared/stream.js';
 
 /**
  * A minimal stand-in for the browser's EventSource: just enough surface for
