@@ -148,6 +148,55 @@ async function main() {
   })()`);
   result.streamSubscribeErrors = streamSubscribeErrors;
 
+  // Permission policy, behaviourally: `Notification.requestPermission()` is a
+  // real renderer call that routes through `session.setPermissionRequestHandler`
+  // for the `notifications` permission. With no handler registered, Electron's
+  // own default is to APPROVE, so this resolves 'granted' without the fix.
+  result.notificationPermission = await run('Notification.requestPermission()');
+
+  // `will-redirect`, behaviourally, on the REAL webContents and the REAL
+  // listener `app.on('web-contents-created', ...)` attached to it -- fired
+  // synthetically here because arranging a genuine same-origin-then-302
+  // network redirect against a `file://` origin is not practical, but the
+  // listener invoked is the one actually registered on this contents object.
+  let offOriginRedirectPrevented = false;
+  contents.emit('will-redirect', { preventDefault: () => { offOriginRedirectPrevented = true; } }, OFF_ORIGIN);
+  result.offOriginRedirectPrevented = offOriginRedirectPrevented;
+
+  let sameOriginRedirectPrevented = false;
+  contents.emit(
+    'will-redirect',
+    { preventDefault: () => { sameOriginRedirectPrevented = true; } },
+    contents.getURL(),
+  );
+  result.sameOriginRedirectPrevented = sameOriginRedirectPrevented;
+
+  // A SECOND window, created after startup: proves the window-open and
+  // navigation policy is bound at `app.on('web-contents-created', ...)`
+  // rather than to the first window's `webContents` alone.
+  const second = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true } });
+  await second.loadURL('about:blank');
+  const secondContents = second.webContents;
+  const runSecond = (code) => secondContents.executeJavaScript(code, true);
+
+  await runSecond(`window.open(${JSON.stringify(OFF_ORIGIN)}); undefined`);
+  await sleep(700);
+  result.secondWindowCountAfterOpen = BrowserWindow.getAllWindows().length;
+
+  const secondUrlBeforeNavigate = secondContents.getURL();
+  await runSecond(`window.location.href = ${JSON.stringify(OFF_ORIGIN)}; undefined`);
+  await sleep(700);
+  result.secondWindowNavigated = secondContents.getURL() !== secondUrlBeforeNavigate;
+
+  second.destroy();
+
+  // CSP, read off the actual delivered response, not off configuration: a
+  // self-fetch of the currently loaded document goes through the same
+  // `webRequest.onHeadersReceived` path the initial navigation did.
+  result.cspHeader = await run(
+    `fetch(location.href).then((r) => r.headers.get('content-security-policy')).catch((e) => 'fetch-error:' + e.message)`,
+  );
+
   process.stdout.write(`VAM_SMOKE_RESULT ${JSON.stringify(result)}\n`);
   app.exit(0);
 }

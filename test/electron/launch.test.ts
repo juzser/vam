@@ -41,6 +41,12 @@ interface SmokeResult {
   streamTicks: { beforeUnsub: number; afterUnsub: number };
   streamSubscribeErrors: string[];
   mainEventSource: string;
+  notificationPermission: string;
+  offOriginRedirectPrevented: boolean;
+  sameOriginRedirectPrevented: boolean;
+  secondWindowCountAfterOpen: number;
+  secondWindowNavigated: boolean;
+  cspHeader: string | null;
 }
 
 interface Launch {
@@ -311,5 +317,42 @@ describe('the Electron shell launches', () => {
   // with electron's own "No handler registered for 'vam:stream:subscribe'".
   it('never logs a stream-subscribe rejection when main is registered correctly', () => {
     expect(smoke().streamSubscribeErrors).toEqual([]);
+  });
+
+  // Followup security gap 1: with no permission handler at all, Electron's own
+  // default is to APPROVE. `Notification.requestPermission()` is a real call
+  // that routes through `session.setPermissionRequestHandler` for the
+  // `notifications` permission, so this is denied only if the handler exists
+  // and actually denies.
+  it('denies a permission request by default (no permission handler means Electron auto-approves)', () => {
+    expect(smoke().notificationPermission).toBe('denied');
+  });
+
+  // Followup security gap 3: a same-origin URL that then 302s off-origin never
+  // fires `will-navigate` -- only `will-redirect` sees it. Both directions are
+  // asserted so the handler is shown to discriminate, not to always prevent.
+  it('blocks a redirect to an off-origin URL', () => {
+    expect(smoke().offOriginRedirectPrevented).toBe(true);
+  });
+
+  it('lets a same-origin redirect through', () => {
+    expect(smoke().sameOriginRedirectPrevented).toBe(false);
+  });
+
+  // Followup security gap 2: the window-open and navigation policy must apply
+  // to a SECOND `webContents`, created after startup -- the one a per-window
+  // binding (`window.webContents.setWindowOpenHandler(...)`) cannot reach.
+  it('denies window.open on a second window created after startup', () => {
+    expect(smoke().secondWindowCountAfterOpen).toBe(2);
+  });
+
+  it('refuses off-origin navigation on a second window created after startup', () => {
+    expect(smoke().secondWindowNavigated).toBe(false);
+  });
+
+  // Followup security gap 4: the CSP must be present on the delivered
+  // response, not merely configured somewhere main never wires up.
+  it('serves the document with a Content-Security-Policy header', () => {
+    expect(smoke().cspHeader).toContain("script-src 'self'");
   });
 });
