@@ -40,6 +40,7 @@ interface SmokeResult {
     | { ok: false; message: string };
   streamTicks: { beforeUnsub: number; afterUnsub: number };
   streamSubscribeErrors: string[];
+  mainEventSource: string;
 }
 
 interface Launch {
@@ -236,6 +237,16 @@ describe('the Electron shell launches', () => {
 
   it('denies window.open, so no second window results', () => {
     expect(smoke().windowCountAfterOpen).toBe(1);
+  });
+
+  // AC-20: the EventSource question, answered by the running main process on
+  // every harness run. `src/main/stream/event-source.ts` -- a hand-written SSE
+  // client over node:http -- exists ONLY because main has no global
+  // EventSource. That justification is a measurement, so it is checked here
+  // rather than left in a comment: if it ever changes, this fails and someone
+  // reconsiders the adapter instead of maintaining it forever.
+  it('has no global EventSource in main, which is why the node adapter exists', () => {
+    expect(smoke().mainEventSource).toBe('undefined');
   });
 
   it('refuses off-origin navigation, so the URL is unchanged', () => {

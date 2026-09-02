@@ -64,6 +64,14 @@ async function main() {
     // absent. This is the field that notices.
     bridgeKeys: await run('Object.keys(window.api ?? {}).sort()'),
     bridgeLoadType: await run("typeof (window.api ?? {}).load"),
+    // AC-20, measured rather than asserted, and measured in the RIGHT
+    // process: this file runs in main, so `typeof EventSource` here is main's
+    // answer. Plain `node` is a different runtime and would be the wrong
+    // process to ask. `src/main/stream/event-source.ts` exists only because
+    // this is 'undefined'; if a future Electron ships a global EventSource,
+    // this field changes and the harness says so, rather than the adapter
+    // quietly outliving its reason.
+    mainEventSource: typeof EventSource,
   };
 
   // AC-15: the running app's `SessionSource.load()`, not an in-process handler

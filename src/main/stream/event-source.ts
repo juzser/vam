@@ -7,9 +7,13 @@
  * Nothing else -- no `readyState`, no `onmessage`, no `withCredentials`.
  *
  * It exists because Electron's main process has no global `EventSource`.
- * Measured, not assumed: `typeof EventSource` inside the real main process
- * launched by `pnpm test:app` (via `test/electron/probe.cjs`) is
- * `undefined`. Plain `node` alone would have been the wrong process to ask.
+ * That is a MEASUREMENT, and it is re-taken on every harness run rather than
+ * recorded here once: `test/electron/probe.cjs` runs in main and reports
+ * `typeof EventSource`, and `launch.test.ts` asserts it is `undefined`. Plain
+ * `node` is a different runtime and would be the wrong process to ask.
+ *
+ * So if a future Electron ships a global `EventSource`, that test fails and
+ * someone reconsiders this file, instead of it outliving its own reason.
  *
  * The browser build never imports this file; it keeps the DOM's own
  * `EventSource` through `stream.ts`'s own default.
