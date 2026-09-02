@@ -14,11 +14,22 @@
  * one you would send a real prompt to.
  */
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { DesktopSourceApi } from '../preload/api.js';
+import type { PreloadSourceApi } from '../shared/preload-api.js';
 import { SmithClient } from './adapter/client.js';
 import { useCanvas } from './adapter/useCanvas.js';
 import { Canvas } from './canvas/Canvas.js';
+import type { CanvasModel } from './domain/model.js';
 import { DEMO_MODEL } from './fixtures/demo.js';
+import { createSourceFromPreload } from './sources/preload-factory.js';
+
+declare global {
+  interface Window {
+    /** Present only in the Electron shell; the preload put it there. */
+    readonly api?: DesktopSourceApi;
+  }
+}
 
 /**
  * Empty means "my own origin", which is where the real answer lives: vite.config
@@ -40,7 +51,62 @@ function isDemo(): boolean {
 
 export function App() {
   const client = useMemo(() => new SmithClient({ baseUrl: smithUrl() }), []);
+  // The bridge exists only in the Electron shell. In a browser there is no
+  // `window.api` and nothing below it is reachable, which is why the check is
+  // for the object rather than for a build flag.
+  const api = globalThis.window?.api;
+  if (api !== undefined) {
+    return <DesktopCanvas api={api} />;
+  }
   return isDemo() ? <DemoCanvas /> : <LiveCanvas client={client} />;
+}
+
+/**
+ * The desktop canvas: rows that came from the main process, and no write route.
+ *
+ * `Canvas` is rendered without a `source`, which means `READ_ONLY_SOURCE` --
+ * the honest description of this shell. The main-side descriptor declares
+ * `liveUpdates`, `recordPrompt` and `governance` all false, so the assembled
+ * source carries no `subscribe`, no `write` and no `governance` member at all,
+ * and there is nothing here that could write even by mistake.
+ */
+function DesktopCanvas({ api }: { readonly api: DesktopSourceApi }) {
+  const [model, setModel] = useState<CanvasModel>({ projects: [] });
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    // The cast is the `subscribe` member this task does not implement: it needs
+    // `ipcRenderer.on`, not `invoke`. It is genuinely absent at runtime, and
+    // with `liveUpdates: false` the factory never reads it.
+    createSourceFromPreload(api as PreloadSourceApi)
+      .then((source) => source.load())
+      .then((projects) => {
+        if (!cancelled) setModel({ projects });
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(describeFailure(reason));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
+
+  // Empty and saying why, never a fixture standing in for a source that failed.
+  return (
+    <>
+      {error !== null && <p className="text-failed">● {error}</p>}
+      <Canvas model={model} />
+    </>
+  );
+}
+
+/** A `SourceError` reads as `code: message`; anything else falls back to its text. */
+function describeFailure(reason: unknown): string {
+  if (typeof reason === 'object' && reason !== null && 'code' in reason && 'message' in reason) {
+    return `${String(reason.code)}: ${String(reason.message)}`;
+  }
+  return reason instanceof Error ? reason.message : String(reason);
 }
 
 function DemoCanvas() {
