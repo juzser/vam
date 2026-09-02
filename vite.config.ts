@@ -45,6 +45,9 @@ const proxy = {
 
 export default defineConfig({
   root: 'src/renderer',
+  // `envDir` defaults to `root`, so without this a repo-root `.env.local`
+  // (the VITE_SMITH_URL override README documents) is silently ignored.
+  envDir: '../..',
   build: { outDir: '../../dist', emptyOutDir: true },
   plugins: [react(), tailwindcss()],
   server: {

@@ -17,7 +17,7 @@ import { extname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const SRC_DIR = fileURLToPath(new URL('../../src/renderer', import.meta.url));
+const SRC_DIR = fileURLToPath(new URL('../../src', import.meta.url));
 const SELF_PATH = fileURLToPath(import.meta.url);
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git']);
 
@@ -33,12 +33,12 @@ function listSrcFiles(dir: string): string[] {
 }
 
 const allSrcFiles = listSrcFiles(SRC_DIR);
-const nodeFiles = allSrcFiles.filter((f) => f.startsWith('canvas/') && /Node\.tsx$/.test(f));
+const nodeFiles = allSrcFiles.filter((f) => /(^|\/)canvas\//.test(f) && /Node\.tsx$/.test(f));
 const cssAndTsFiles = allSrcFiles.filter(
-  (f) => f !== 'styles.css' && ['.ts', '.tsx', '.css'].includes(extname(f)),
+  (f) => !f.endsWith('styles.css') && ['.ts', '.tsx', '.css'].includes(extname(f)),
 );
 
-const at = (f: string, i: number, l: string) => `src/renderer/${f}:${i + 1}: ${l.trim()}`;
+const at = (f: string, i: number, l: string) => `src/${f}:${i + 1}: ${l.trim()}`;
 const isComment = (t: string) => t.startsWith('//') || t.startsWith('*');
 
 const DRAGGABLE_ALLOWED = /draggable:\s*false\b|nodesDraggable=\{false\}/;
@@ -77,7 +77,7 @@ const RULES: {
     // Constrains what grid.ts READS, not who reads it; layout.ts importing FROM
     // it is fine and unaffected.
     name: '13.2(a): grid.ts has zero import or require statements — geometry stays data',
-    files: ['canvas/grid.ts'],
+    files: ['renderer/canvas/grid.ts'],
     rule: 'grid.ts must stay pure, zero dependency edges (13.2(a)):',
     check: (f, l, i) => (/^\s*import\b/.test(l) || /\brequire\(/.test(l) ? at(f, i, l) : null),
   },
