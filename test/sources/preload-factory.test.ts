@@ -1,0 +1,172 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { PreloadSourceApi, SourceDescriptor } from '../../src/shared/preload-api.js';
+import { createSourceFromPreload } from '../../src/renderer/sources/preload-factory.js';
+import { canGovernWith, canSubscribeTo, canWriteTo } from '../../src/renderer/sources/port.js';
+import type { SourceCapabilities } from '../../src/renderer/sources/port.js';
+
+const NO_CAPABILITIES: SourceCapabilities = {
+  liveUpdates: false,
+  recordPrompt: false,
+  deliverPrompt: false,
+  promptAttachments: false,
+  slashCommands: false,
+  renameSession: false,
+  closeSession: false,
+  createSession: false,
+  governance: false,
+  pullRequests: false,
+  terminal: false,
+  agentRoster: false,
+};
+
+const ALL_CAPABILITIES: SourceCapabilities = {
+  liveUpdates: true,
+  recordPrompt: true,
+  deliverPrompt: true,
+  promptAttachments: true,
+  slashCommands: true,
+  renameSession: true,
+  closeSession: true,
+  createSession: true,
+  governance: true,
+  pullRequests: true,
+  terminal: true,
+  agentRoster: true,
+};
+
+function makeDescriptor(
+  capabilities: SourceCapabilities,
+  overrides: Partial<SourceDescriptor> = {},
+): SourceDescriptor {
+  return {
+    id: 'black-smith',
+    label: 'Bridged fixture',
+    capabilities,
+    declines: {},
+    viewerScope: { kind: 'connection', note: 'the connection is the identity' },
+    ...overrides,
+  };
+}
+
+/**
+ * A stand-in for what `contextBridge.exposeInMainWorld` puts on `window`: every
+ * member present unconditionally, whatever the source turns out to be able to
+ * do. No electron is imported anywhere in this test, by design.
+ */
+function makeApi(descriptor: SourceDescriptor): PreloadSourceApi {
+  const unsubscribe = vi.fn();
+  return {
+    describe: vi.fn(async () => descriptor),
+    load: vi.fn(async () => []),
+    subscribe: vi.fn(() => unsubscribe),
+    recordPrompt: vi.fn(async () => undefined),
+    renameSession: vi.fn(async () => undefined),
+    closeSession: vi.fn(async () => undefined),
+    createSession: vi.fn(async () => undefined),
+    applyWaivers: vi.fn(async () => undefined),
+    transitionLesson: vi.fn(async () => undefined),
+  };
+}
+
+describe('createSourceFromPreload', () => {
+  it('carries the descriptor data through onto the source', async () => {
+    const descriptor = makeDescriptor(NO_CAPABILITIES, {
+      label: 'Named by the source',
+      declines: { liveUpdates: 'this backend has no event stream' },
+      viewerScope: { kind: 'unscoped', warning: 'cannot promise scoping' },
+    });
+    const source = await createSourceFromPreload(makeApi(descriptor));
+
+    expect(source.id).toBe('black-smith');
+    expect(source.label).toBe('Named by the source');
+    expect(source.capabilities).toEqual(NO_CAPABILITIES);
+    expect(source.declines).toEqual({ liveUpdates: 'this backend has no event stream' });
+    expect(source.viewerScope).toEqual({ kind: 'unscoped', warning: 'cannot promise scoping' });
+  });
+
+  it('omits every optional member when no capability is claimed', async () => {
+    const source = await createSourceFromPreload(makeApi(makeDescriptor(NO_CAPABILITIES)));
+
+    // `in`, never `=== undefined`: a stub and an explicitly-undefined property
+    // both pass `=== undefined`, and both are exactly what the port forbids.
+    expect('subscribe' in source).toBe(false);
+    expect('write' in source).toBe(false);
+    expect('governance' in source).toBe(false);
+    expect(Object.keys(source)).not.toContain('subscribe');
+    expect(Object.keys(source)).not.toContain('write');
+    expect(Object.keys(source)).not.toContain('governance');
+  });
+
+  it('assigns every optional member when every capability is claimed', async () => {
+    const source = await createSourceFromPreload(makeApi(makeDescriptor(ALL_CAPABILITIES)));
+
+    expect('subscribe' in source).toBe(true);
+    expect('write' in source).toBe(true);
+    expect('governance' in source).toBe(true);
+    expect(canSubscribeTo(source)).toBe(true);
+    expect(canWriteTo(source)).toBe(true);
+    expect(canGovernWith(source)).toBe(true);
+  });
+
+  it('omits each write lifecycle member independently of recordPrompt', async () => {
+    const source = await createSourceFromPreload(
+      makeApi(
+        makeDescriptor({
+          ...NO_CAPABILITIES,
+          recordPrompt: true,
+          renameSession: true,
+        }),
+      ),
+    );
+
+    if (!canWriteTo(source)) throw new Error('expected a writable source');
+    expect('recordPrompt' in source.write).toBe(true);
+    expect('renameSession' in source.write).toBe(true);
+    expect('closeSession' in source.write).toBe(false);
+    expect('createSession' in source.write).toBe(false);
+  });
+
+  it('drops the write surface entirely when only lifecycle flags are set', async () => {
+    const source = await createSourceFromPreload(
+      makeApi(makeDescriptor({ ...NO_CAPABILITIES, renameSession: true, closeSession: true })),
+    );
+
+    expect('write' in source).toBe(false);
+    expect(canWriteTo(source)).toBe(false);
+  });
+
+  it('forwards load, subscribe and the unsubscribe handle to the api', async () => {
+    const api = makeApi(makeDescriptor(ALL_CAPABILITIES));
+    const source = await createSourceFromPreload(api);
+
+    await source.load();
+    expect(api.load).toHaveBeenCalledTimes(1);
+
+    if (!canSubscribeTo(source)) throw new Error('expected a live source');
+    const onChange = () => undefined;
+    const stop = source.subscribe(onChange);
+    expect(api.subscribe).toHaveBeenCalledWith(onChange);
+    stop();
+  });
+
+  it('forwards every write and governance call to the api', async () => {
+    const api = makeApi(makeDescriptor(ALL_CAPABILITIES));
+    const source = await createSourceFromPreload(api);
+
+    if (!canWriteTo(source)) throw new Error('expected a writable source');
+    await source.write.recordPrompt('s1', 'hello');
+    await source.write.renameSession?.('s1', 'new title');
+    await source.write.closeSession?.('s1');
+    await source.write.createSession?.('p1', 'fresh');
+    expect(api.recordPrompt).toHaveBeenCalledWith('s1', 'hello');
+    expect(api.renameSession).toHaveBeenCalledWith('s1', 'new title');
+    expect(api.closeSession).toHaveBeenCalledWith('s1');
+    expect(api.createSession).toHaveBeenCalledWith('p1', 'fresh');
+
+    if (!canGovernWith(source)) throw new Error('expected a governing source');
+    await source.governance.applyWaivers('s1', ['f1']);
+    await source.governance.transitionLesson('s1', 'l1', 'approved');
+    expect(api.applyWaivers).toHaveBeenCalledWith('s1', ['f1']);
+    expect(api.transitionLesson).toHaveBeenCalledWith('s1', 'l1', 'approved');
+  });
+});
