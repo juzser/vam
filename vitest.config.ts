@@ -5,6 +5,14 @@ export default defineConfig({
   plugins: [react()],
   test: {
     include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
+    // `test/electron/launch.test.ts` SPAWNS A REAL ELECTRON BINARY, which needs
+    // a display. CI is `ubuntu-latest` with no xvfb, so leaving it in the
+    // default run makes `pnpm test` die there with `Missing X server or
+    // $DISPLAY` -- a headless-environment fault that reads as a broken app.
+    // It is excluded here and run by `pnpm test:app`, the same bargain `e2e/`
+    // already has. THE COST IS REAL AND IS NOT HIDDEN: AC-13's proof that the
+    // application boots does not run in CI until a display is provided there.
+    exclude: ['test/electron/launch.test.ts', '**/node_modules/**', '**/dist/**'],
     // Default to `node`. Most of vam's logic — spatial navigation, the chord
     // reducer, the adapters — is pure and has no business paying for a DOM.
     // A test that genuinely renders opts in with `// @vitest-environment

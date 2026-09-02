@@ -25,7 +25,8 @@
     "lint": "biome check .",
     "test:e2e": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.config.ts",
     "test:e2e:reconnect": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.reconnect.config.ts",
-    "test:e2e:filter-panel": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.filter-panel.config.ts"
+    "test:e2e:filter-panel": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.filter-panel.config.ts",
+    "test:app": "vitest run --config vitest.app.config.ts"
   },
   "dependencies": {
     "@xyflow/react": "^12.11.5",

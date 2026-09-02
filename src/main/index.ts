@@ -10,6 +10,7 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow } from 'electron';
+import { isSameOrigin } from './origin.js';
 
 /** The built renderer, relative to the built main bundle in `out/main`. */
 const rendererHtml = join(__dirname, '..', 'renderer', 'index.html');
@@ -24,10 +25,7 @@ const devServerUrl = process.env.ELECTRON_RENDERER_URL;
 const allowedOrigin = devServerUrl === undefined ? pathToFileURL(rendererHtml).href : devServerUrl;
 
 function isInternal(target: string): boolean {
-  if (devServerUrl === undefined) {
-    return target === allowedOrigin;
-  }
-  return target.startsWith(allowedOrigin);
+  return isSameOrigin(target, allowedOrigin, devServerUrl !== undefined);
 }
 
 function createWindow(): void {
