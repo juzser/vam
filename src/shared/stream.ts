@@ -57,6 +57,9 @@ function parse(data: string | undefined): unknown {
 
 export function openChangeStream(options: ChangeStreamOptions): { close(): void } {
   const url = options.url ?? '/api/stream';
+  // The event casts below read `data` structurally: `MessageEvent` is generic
+  // in the DOM lib and not generic in node's, and src/shared is typechecked
+  // under both (tsconfig.web.json and tsconfig.node.json).
   const createEventSource = options.createEventSource ?? ((source) => new EventSource(source));
   const source = createEventSource(url);
 
@@ -64,7 +67,7 @@ export function openChangeStream(options: ChangeStreamOptions): { close(): void 
 
   source.addEventListener('hello', (event) => {
     if (closed) return;
-    const parsed = parse((event as MessageEvent<string>).data);
+    const parsed = parse((event as { data?: string }).data);
     if (isHelloFrame(parsed)) {
       options.onHello?.(parsed);
     }
@@ -72,7 +75,7 @@ export function openChangeStream(options: ChangeStreamOptions): { close(): void 
 
   source.addEventListener('change', (event) => {
     if (closed) return;
-    const parsed = parse((event as MessageEvent<string>).data);
+    const parsed = parse((event as { data?: string }).data);
     if (isChangeFrame(parsed)) {
       options.onChange({ sessions: parsed.sessions, at: parsed.at });
     }
