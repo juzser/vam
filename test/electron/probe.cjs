@@ -55,6 +55,29 @@ async function main() {
     bridgeLoadType: await run("typeof (window.api ?? {}).load"),
   };
 
+  // AC-15: the running app's `SessionSource.load()`, not an in-process handler
+  // registry. `window.api.load()` IS what the assembled source's `load` member
+  // calls (`src/renderer/sources/preload-factory.ts`: `load: () => api.load()`
+  // -- no other logic sits between them for this member), so invoking it here,
+  // through the real `contextBridge` in the launched renderer, over the real
+  // `ipcRenderer.invoke`, is the same round trip the mounted `DesktopCanvas`
+  // makes. A rejection (no handler registered) and a resolution are both
+  // reported, never thrown out of the probe, so the harness can assert either.
+  result.sourceLoad = await run(`(async () => {
+    try {
+      const projects = await window.api.load();
+      const project = projects[0] ?? {};
+      const session = (project.sessions ?? [])[0] ?? {};
+      return {
+        ok: true,
+        projectKeys: Object.keys(project).sort(),
+        sessionKeys: Object.keys(session).sort(),
+      };
+    } catch (error) {
+      return { ok: false, message: error && error.message ? String(error.message) : String(error) };
+    }
+  })()`);
+
   // webSecurity, probed rather than read. The probe is a cross-origin DOCUMENT
   // read, not a fetch: a `fetch` from this window's `file:` origin to a
   // same-machine http server returns 200 with webSecurity ON (measured), so it

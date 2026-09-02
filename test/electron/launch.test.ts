@@ -15,6 +15,7 @@ import { createServer, type Server } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { DEMO_MODEL } from '../../src/renderer/fixtures/demo.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const bin = (name: string) => path.join(repoRoot, 'node_modules', '.bin', name);
@@ -34,6 +35,9 @@ interface SmokeResult {
   windowCountAfterOpen: number;
   urlBeforeNavigate: string;
   urlAfterNavigate: string;
+  sourceLoad:
+    | { ok: true; projectKeys: string[]; sessionKeys: string[] }
+    | { ok: false; message: string };
 }
 
 interface Launch {
@@ -197,5 +201,27 @@ describe('the Electron shell launches', () => {
 
   it('refuses off-origin navigation, so the URL is unchanged', () => {
     expect(smoke().urlAfterNavigate).toBe(smoke().urlBeforeNavigate);
+  });
+
+  // AC-15: the launched app, not the unit suite, proves `registerSourceIpc`
+  // is actually wired into main's startup. `window.api.load()` is the exact
+  // call the mounted `DesktopCanvas` makes through its assembled
+  // `SessionSource` (see `test/electron/probe.cjs`), so a rejection here means
+  // the running process has no `vam:source:load` handler -- the failure this
+  // criterion exists to catch.
+  it("resolves the renderer's assembled SessionSource.load()", () => {
+    const result = smoke().sourceLoad;
+    expect(result.ok, result.ok ? '' : `rejected: ${result.message}`).toBe(true);
+  });
+
+  it('resolves to the same Project/Session shape the browser build produces', () => {
+    const result = smoke().sourceLoad;
+    if (!result.ok) {
+      throw new Error(`sourceLoad rejected: ${result.message}`);
+    }
+    const demoProject = DEMO_MODEL.projects[0];
+    const demoSession = demoProject?.sessions[0];
+    expect(result.projectKeys).toEqual(Object.keys(demoProject ?? {}).sort());
+    expect(result.sessionKeys).toEqual(Object.keys(demoSession ?? {}).sort());
   });
 });

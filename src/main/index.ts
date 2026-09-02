@@ -9,8 +9,10 @@
 
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
+import { registerSourceIpc } from './ipc/handlers.js';
 import { isSameOrigin } from './origin.js';
+import { FIXTURE_SOURCE } from './sources/fixture-source.js';
 
 /** The built renderer, relative to the built main bundle in `out/main`. */
 const rendererHtml = join(__dirname, '..', 'renderer', 'index.html');
@@ -69,6 +71,9 @@ function createWindow(): void {
 }
 
 void app.whenReady().then(() => {
+  // Registered before the window is created, so the renderer's first call can
+  // never race an unregistered channel.
+  registerSourceIpc(ipcMain, FIXTURE_SOURCE);
   createWindow();
 });
 
