@@ -86,6 +86,25 @@ const STATEMENT_FROM =
 const STATEMENT_BARE = /\bimport\s*['"]([^'"]+)['"]/g;
 const STATEMENT_DYNAMIC = /(?:^|[^.\w])import\s*\(\s*['"]([^'"]+)['"]/g;
 const STATEMENT_REQUIRE = /\brequire\s*\(\s*['"]([^'"]+)['"]/g;
+/**
+ * A RE-EXPORT is a runtime dependency too. `export { x } from '<spec>'` and
+ * `export * from '<spec>'` both emit a real `require(...)` in the CJS output
+ * main and preload are built to -- the module is loaded exactly as an
+ * `import` would load it. Nothing above matches them: every other detector
+ * anchors on a literal `import` or `require` keyword, and a re-export has
+ * neither.
+ *
+ * This is the FOURTH form this one guard has silently missed -- after
+ * `src/`-relative paths that stopped matching when files moved, and after
+ * line-by-line scanning that a wrapped import defeated. The lesson each time
+ * was the same: the guard's falsifier suite only ever contained the forms
+ * somebody had already thought of, so the gap was invisible from inside it.
+ * `export type ... from` is erased at compile time and stays exempt, exactly
+ * as `import type` is.
+ */
+const TYPE_ONLY_EXPORT = /^export\s+type\s/;
+const STATEMENT_EXPORT_FROM =
+  /\bexport\s+(?:type\s+)?(?:(?!\bexport\b|\bimport\b|;)[^'"])*?\bfrom\s*['"]([^'"]+)['"]/g;
 const RENDERER_SPECIFIER = /(?:^|[/@])renderer\//;
 
 /**
@@ -107,6 +126,10 @@ function importSpecifiersIn(text: string): { index: number; spec: string }[] {
     specs.push({ index: m.index ?? 0, spec: m[1] as string });
   }
   for (const m of text.matchAll(STATEMENT_REQUIRE)) {
+    specs.push({ index: m.index ?? 0, spec: m[1] as string });
+  }
+  for (const m of text.matchAll(STATEMENT_EXPORT_FROM)) {
+    if (TYPE_ONLY_EXPORT.test(m[0])) continue;
     specs.push({ index: m.index ?? 0, spec: m[1] as string });
   }
   return specs;
@@ -226,11 +249,22 @@ describe('the renderer-import guard catches every form', () => {
     ['wrapped from clause', "import { createClient } from\n  '../renderer/adapter/client.js';"],
     ['wrapped dynamic import', "const mod = await import(\n  '../renderer/fixtures/demo.js'\n);"],
     ['wrapped require', "const { DEMO_MODEL } = require(\n  '../../renderer/fixtures/demo.js'\n);"],
+    // Re-exports: a runtime dependency with neither an `import` nor a
+    // `require` keyword for the other detectors to anchor on.
+    ['named re-export', "export { createClient } from '../renderer/adapter/client.js';"],
+    ['star re-export', "export * from '../renderer/adapter/client.js';"],
+    ['namespaced star re-export', "export * as client from '../renderer/adapter/client.js';"],
+    [
+      'wrapped re-export',
+      "export {\n  createSourceFromPreload,\n} from '../renderer/sources/preload-factory.js';",
+    ],
   ])('reports a %s import', (_form, line) => {
     expect(rendererRuntimeImport(line)).not.toBeNull();
   });
 
   it.each([
+    // Erased at compile time, so no runtime dependency exists to forbid.
+    ["export type { Project } from '../../renderer/domain/model.js';"],
     ["import type { Project } from '../../renderer/domain/model.js';"],
     ["import type { SessionSource } from '../renderer/sources/port.js';"],
     ["import { contextBridge, ipcRenderer } from 'electron';"],
