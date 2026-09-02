@@ -220,7 +220,7 @@ export function DetailPanel(props: DetailPanelProps) {
             <div className="truncate font-medium text-[14px] text-ink leading-[1.35]">
               {entry === null ? 'No session selected' : entry.session.title}
             </div>
-            <div className="mt-1 flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
+            <div className="mt-1 flex items-center gap-[5px] font-mono text-[10px] text-ink-faint">
               <span className="truncate text-ink-dim">{entry?.project.name ?? '—'}</span>
               <span>·</span>
               <span className="truncate">{entry?.session.epic ?? '—'}</span>
