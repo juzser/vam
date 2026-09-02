@@ -105,12 +105,24 @@ jobs:
       # different security posture than the one that ships -- a check passing
       # for a reason unrelated to what it claims, which is the failure this
       # whole epic exists to stop. Fix the permissions and keep the sandbox on.
-      - name: give Electron's SUID sandbox the ownership it requires
+      - name: fetch Electron's binary, then give its SUID sandbox the ownership it requires
         if: '!cancelled()'
         run: |
           set -euo pipefail
-          sandbox=$(find node_modules/.pnpm -path '*/electron/dist/chrome-sandbox' -print -quit)
+          # electron's postinstall does not run under this install, so `dist/`
+          # -- and the sandbox helper inside it -- does not exist until the
+          # first launch downloads it lazily. That is AFTER any chmod here,
+          # which is why fixing the permissions alone failed. Download it at a
+          # known point instead, then fix the bit.
+          node node_modules/electron/install.js
+          sandbox=$(find node_modules -path '*/electron/dist/chrome-sandbox' -print -quit)
           test -n "$sandbox"
+          # Chromium requires root ownership and mode 4755. The cheap fix is
+          # `--no-sandbox`, and it is the WRONG one: AC-14 asserts
+          # `sandbox: true`, so disabling it would leave CI validating a
+          # security posture that is not the one shipping -- a check passing
+          # for a reason unrelated to what it claims, which is the failure this
+          # epic exists to stop.
           sudo chown root:root "$sandbox"
           sudo chmod 4755 "$sandbox"
 
