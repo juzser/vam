@@ -15,6 +15,7 @@ import { createServer, type Server } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { DEMO_MODEL } from '../../src/renderer/fixtures/demo.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const bin = (name: string) => path.join(repoRoot, 'node_modules', '.bin', name);
@@ -28,10 +29,15 @@ interface SmokeResult {
   webSecurity: boolean;
   title: string;
   rootHtmlLength: number;
+  bridgeKeys: string[];
+  bridgeLoadType: string;
   crossOriginRead: string;
   windowCountAfterOpen: number;
   urlBeforeNavigate: string;
   urlAfterNavigate: string;
+  sourceLoad:
+    | { ok: true; projectKeys: string[]; sessionKeys: string[] }
+    | { ok: false; message: string };
 }
 
 interface Launch {
@@ -144,6 +150,30 @@ describe('the Electron shell launches', () => {
     expect(smoke().title).toBe('VAM');
   });
 
+  // The preload actually LOADED and exposed the bridge. Until this existed the
+  // preload path was untested: `webPreferences.preload` could name a file that
+  // does not exist and all eleven other assertions still passed.
+  it('runs the preload, which exposes the bridge', () => {
+    expect(smoke().bridgeKeys).toEqual([
+      'applyWaivers',
+      'closeSession',
+      'createSession',
+      'describe',
+      'load',
+      'recordPrompt',
+      'renameSession',
+      'transitionLesson',
+    ]);
+    expect(smoke().bridgeLoadType).toBe('function');
+  });
+
+  // `subscribe` needs `ipcRenderer.on`, not `invoke`, and is a later task. It
+  // must be ABSENT rather than present-and-broken, so the descriptor's
+  // `liveUpdates: false` and the bridge agree.
+  it('exposes no subscribe member yet', () => {
+    expect(smoke().bridgeKeys).not.toContain('subscribe');
+  });
+
   // AC-14, one assertion per clause: a single assertion covering six passes
   // while five are wrong.
   it('runs the renderer with contextIsolation', () => {
@@ -171,5 +201,27 @@ describe('the Electron shell launches', () => {
 
   it('refuses off-origin navigation, so the URL is unchanged', () => {
     expect(smoke().urlAfterNavigate).toBe(smoke().urlBeforeNavigate);
+  });
+
+  // AC-15: the launched app, not the unit suite, proves `registerSourceIpc`
+  // is actually wired into main's startup. `window.api.load()` is the exact
+  // call the mounted `DesktopCanvas` makes through its assembled
+  // `SessionSource` (see `test/electron/probe.cjs`), so a rejection here means
+  // the running process has no `vam:source:load` handler -- the failure this
+  // criterion exists to catch.
+  it("resolves the renderer's assembled SessionSource.load()", () => {
+    const result = smoke().sourceLoad;
+    expect(result.ok, result.ok ? '' : `rejected: ${result.message}`).toBe(true);
+  });
+
+  it('resolves to the same Project/Session shape the browser build produces', () => {
+    const result = smoke().sourceLoad;
+    if (!result.ok) {
+      throw new Error(`sourceLoad rejected: ${result.message}`);
+    }
+    const demoProject = DEMO_MODEL.projects[0];
+    const demoSession = demoProject?.sessions[0];
+    expect(result.projectKeys).toEqual(Object.keys(demoProject ?? {}).sort());
+    expect(result.sessionKeys).toEqual(Object.keys(demoSession ?? {}).sort());
   });
 });

@@ -1,11 +1,17 @@
 /**
- * The preload script. It exposes NOTHING yet, deliberately.
+ * The preload script: it exposes the bridge, and nothing else.
  *
  * `contextBridge.exposeInMainWorld` runs once, before anything is known about
  * the source, and what it exposes then is what the renderer sees forever
- * (`src/shared/preload-api.ts` explains why). Exposing a placeholder now would
- * fix the shape of the bridge before the shape is decided; this task only has
- * to prove the window boots with a preload attached and no capability granted.
+ * (`src/shared/preload-api.ts` explains why). So the shape below is
+ * unconditional and capability travels as data, through `describe()`.
+ *
+ * Nothing here decides anything: no channel is chosen at runtime, no argument
+ * is interpreted, and `ipcRenderer` itself never reaches the page -- only the
+ * closed set of forwarders in `./api.js` does.
  */
 
-export {};
+import { contextBridge, ipcRenderer } from 'electron';
+import { createPreloadApi } from './api.js';
+
+contextBridge.exposeInMainWorld('api', createPreloadApi(ipcRenderer));
