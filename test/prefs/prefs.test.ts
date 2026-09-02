@@ -383,6 +383,57 @@ describe('AC-5: the reader stays total', () => {
   });
 });
 
+/**
+ * The both-shapes case where the two shapes CONTEND for one key.
+ *
+ * The AC-5 test above uses distinct session ids, so the flat and nested
+ * entries never touch each other -- it looks like it covers the merge and
+ * does not. `migrateSource` is a real source id, so the migrated flat entry
+ * and a genuine nested entry can name the SAME session under the SAME source.
+ * That is what two tabs mid-upgrade produce, and an unconditional overwrite
+ * loses one of the operator's choices to `Object.entries` order.
+ */
+describe('AC-5(b): both shapes contending for the same session id', () => {
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  it('keeps the later choice when the nested entry is newer', () => {
+    const now = new Date(3_000_000);
+    const raw = JSON.stringify({
+      icons: {
+        'D-257': { icon: 'older', at: iso(1_000_000) },
+        'black-smith': { 'D-257': { icon: 'newer', at: iso(2_000_000) } },
+      },
+    });
+    const got = readPrefs({ getItem: () => raw, setItem: () => {} }, now);
+    expect(got.icons['black-smith']?.['D-257']?.icon).toBe('newer');
+  });
+
+  it('keeps the later choice when the MIGRATED flat entry is newer', () => {
+    const now = new Date(3_000_000);
+    const raw = JSON.stringify({
+      icons: {
+        'D-257': { icon: 'newer', at: iso(2_000_000) },
+        'black-smith': { 'D-257': { icon: 'older', at: iso(1_000_000) } },
+      },
+    });
+    const got = readPrefs({ getItem: () => raw, setItem: () => {} }, now);
+    // Order-independent: the flat entry is read FIRST here and must still win.
+    expect(got.icons['black-smith']?.['D-257']?.icon).toBe('newer');
+  });
+
+  it('prefers a readable date over an unreadable one', () => {
+    const now = new Date(3_000_000);
+    const raw = JSON.stringify({
+      icons: {
+        'D-257': { icon: 'unreadable', at: 'not-a-date' },
+        'black-smith': { 'D-257': { icon: 'readable', at: iso(1_000_000) } },
+      },
+    });
+    const got = readPrefs({ getItem: () => raw, setItem: () => {} }, now);
+    expect(got.icons['black-smith']?.['D-257']?.icon).toBe('readable');
+  });
+});
+
 describe('AC-6: TTL prunes per source', () => {
   it('falsifier: a stale entry under one source drops without touching a fresh one under another, same session id', () => {
     const store = fake(

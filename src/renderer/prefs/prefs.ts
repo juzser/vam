@@ -320,9 +320,36 @@ function readMap<T>(value: unknown, read: (entry: unknown) => T | null): Record<
  * entry is inspected on its own: one that parses as an `IconChoice` is an old
  * flat entry keyed by session id, migrated into `migrateSource`'s bucket;
  * anything else is tried as a new-shape bucket (session id → `IconChoice`)
- * keyed by its own source id. Both merge into the same source's bucket
- * without colliding.
+ * keyed by its own source id. Both merge into the same source's bucket.
+ *
+ * WHEN THEY CONTEND FOR THE SAME KEY, THE LATER `at` WINS. `migrateSource` is
+ * a real source id, so a migrated flat entry and a genuine nested entry can
+ * name the same session under the same source -- exactly what the two-tab
+ * upgrade produces. An unconditional overwrite would make the survivor depend
+ * on `Object.entries` order, which is to say on nothing, and would silently
+ * drop an icon that exists nowhere else. An unparseable `at` sorts oldest, so
+ * a readable choice always beats an unreadable one; if neither parses the
+ * first seen is kept, because there is nothing to prefer it by.
  */
+/** Milliseconds for ordering; an unreadable date sorts oldest and never wins. */
+function ageOf(choice: IconChoice): number {
+  const t = Date.parse(choice.at);
+  return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t;
+}
+
+/** Add `choice` at `sid` unless something strictly newer is already there. */
+function keepNewer(
+  bucket: Record<string, IconChoice>,
+  sid: string,
+  choice: IconChoice,
+): Record<string, IconChoice> {
+  const existing = bucket[sid];
+  if (existing !== undefined && ageOf(existing) >= ageOf(choice)) {
+    return bucket;
+  }
+  return withEntry(bucket, sid, choice);
+}
+
 function readIcons(raw: unknown, migrateSource: SourceId): Prefs['icons'] {
   if (typeof raw !== 'object' || raw === null) {
     return emptyMap<IconsBySession>();
@@ -332,7 +359,7 @@ function readIcons(raw: unknown, migrateSource: SourceId): Prefs['icons'] {
     const flatLeaf = readIcon(value);
     if (flatLeaf !== null) {
       const bucket = outer[migrateSource] ?? emptyMap<IconChoice>();
-      outer = withEntry(outer, migrateSource, withEntry(bucket, key, flatLeaf));
+      outer = withEntry(outer, migrateSource, keepNewer(bucket, key, flatLeaf));
       continue;
     }
     const nested = readMap(value, readIcon);
@@ -341,7 +368,7 @@ function readIcons(raw: unknown, migrateSource: SourceId): Prefs['icons'] {
     }
     let bucket = outer[key] ?? emptyMap<IconChoice>();
     for (const [sid, choice] of Object.entries(nested)) {
-      bucket = withEntry(bucket, sid, choice);
+      bucket = keepNewer(bucket, sid, choice);
     }
     outer = withEntry(outer, key, bucket);
   }
