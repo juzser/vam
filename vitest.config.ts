@@ -18,7 +18,12 @@ export default defineConfig({
       // names vanishes from the transcript exactly when it is doing best. The
       // gate reads coverage/coverage-summary.json instead (D-40/P9-25).
       reporter: ['text', 'text-summary', 'json-summary'],
-      include: ['src/**/*.ts', 'src/**/*.tsx'],
+      // `src/main` and `src/preload` stay OUT of the denominator: they are
+      // Electron process entrypoints, exercised by the launch harness rather
+      // than by unit tests. `src/shared` stays IN it — `src/shared/stream.ts`
+      // is tested by `test/adapter/stream.test.ts`, and dropping it here would
+      // quietly retire a tested module from the floor.
+      include: ['src/renderer/**/*.ts', 'src/renderer/**/*.tsx', 'src/shared/**/*.ts'],
       // The renderer mount entrypoint is the Vite entry: three lines that hand
       // <App/> to createRoot, with nothing a node-environment test could assert
       // that a browser wouldn't. Counted, it drags a freshly scaffolded UI

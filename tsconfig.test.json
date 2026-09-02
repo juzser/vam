@@ -1,7 +1,18 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "./tsconfig.web.json",
   "compilerOptions": {
+    // The test tree, and only the test tree, gets node types back:
+    // `test/canvas/topology-constraints.test.ts` reads the source tree off disk
+    // with `node:fs`, `node:path` and `node:url`, and the launch harness spawns
+    // a process. `tsconfig.web.json` itself stays node-free so that a `process`
+    // reference in the renderer is still an error there.
+    "types": ["node", "vite/client"],
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "test/**/*.ts",
+    "test/**/*.tsx"
+  ]
 }

@@ -10,3 +10,5 @@ e2e/playwright-report/
 # and this is a design file from a private workspace. Operator decision
 # 2026-08-28 — every session that needs it reads it off this machine.
 docs/design/mockup/
+out/
+dist-web/
