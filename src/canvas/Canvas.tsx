@@ -977,13 +977,13 @@ function CanvasInner({
 
         <div className="relative flex min-w-0 flex-1 flex-col bg-canvas">
           <div className="flex h-12 flex-none items-center gap-[9px] border-line border-b px-3.5">
-            <span className="font-medium text-[13px] text-ink">Canvas</span>
-            <span className="mx-1 h-3.5 w-px bg-line-strong" />
+            <span className="shrink-0 font-medium text-[13px] text-ink">Canvas</span>
+            <span className="mx-1 h-3.5 w-px shrink-0 bg-line-strong" />
 
             {/* Where the rows came from, said out loud. The one thing a
                 dashboard must never do is look the same whether or not it is
                 connected — so this sits before the filters, not in a corner. */}
-            <span data-source className="truncate font-mono text-[10px]">
+            <span data-source className="min-w-0 truncate font-mono text-[10px]">
               {source.kind === 'demo' ? (
                 <span className="text-waiting">● {source.note}</span>
               ) : source.status === 'error' ? (
@@ -1002,12 +1002,12 @@ function CanvasInner({
                 report but "on". */}
             <span
               data-auto-layout
-              className="flex h-[26px] items-center gap-1.5 rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim"
+              className="flex h-[26px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim"
             >
               auto-layout <span className="text-running">on</span>
             </span>
 
-            <div className="flex h-[26px] items-center overflow-hidden rounded-[7px] border border-line text-ink-dim">
+            <div className="flex h-[26px] shrink-0 items-center overflow-hidden rounded-[7px] border border-line text-ink-dim">
               <button
                 type="button"
                 aria-label="zoom out"
@@ -1033,7 +1033,7 @@ function CanvasInner({
               type="button"
               aria-label="fit view"
               onClick={() => fitView()}
-              className="flex h-[26px] items-center gap-1.5 rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim hover:text-ink"
+              className="flex h-[26px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim hover:text-ink"
             >
               ⛶ <span>f</span>
             </button>
@@ -1042,7 +1042,7 @@ function CanvasInner({
                 you, plus rows in the review queue. */}
             <span
               data-bell
-              className="relative flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border border-line text-ink-dim"
+              className="relative flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] border border-line text-ink-dim"
             >
               ⌁
               {tally.waiting + review.waivers.length > 0 && (
