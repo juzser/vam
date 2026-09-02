@@ -368,7 +368,7 @@ export function SessionList(props: SessionListProps) {
         >
           <Plus size={15} strokeWidth={1.7} />
           New session
-          <span className="ml-0.5 font-mono text-[10px] text-ink-faint">o</span>
+          <span className="ml-0.5 font-mono text-[10px] text-ink-faint">Mod-t</span>
         </button>
       </div>
 

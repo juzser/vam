@@ -91,7 +91,9 @@ export type KeyAction =
   | { readonly kind: 'icon' }
   /** `x` — close the focused session. */
   | { readonly kind: 'close' }
-  /** `o` — start a new session, the way `o` opens a new line. */
+  /** `o` — start a new session, the way `o` opens a new line.
+      `Mod-t` reaches the same action too — a second binding for the same
+      intent, not a replacement for `o`. */
   | { readonly kind: 'newSession' }
   /** `,` — settings, the convention most editors already use. */
   | { readonly kind: 'settings' }
@@ -135,6 +137,7 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   s: { kind: 'icon' },
   x: { kind: 'close' },
   o: { kind: 'newSession' },
+  'Mod-t': { kind: 'newSession' },
   ',': { kind: 'settings' },
   f: { kind: 'jump' },
   G: { kind: 'last' },
