@@ -33,6 +33,7 @@ import {
   useNodesState,
   useReactFlow,
 } from '@xyflow/react';
+import { Bell, Maximize } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SmithApiError } from '../adapter/client.js';
 import { useReviewQueue } from '../adapter/useReviewQueue.js';
@@ -1035,7 +1036,7 @@ function CanvasInner({
               onClick={() => fitView()}
               className="flex h-[26px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim hover:text-ink"
             >
-              ⛶ <span>f</span>
+              <Maximize size={13} strokeWidth={1.6} aria-hidden="true" />
             </button>
 
             {/* The bell counts what is actually owed: sessions that stopped for
@@ -1044,7 +1045,7 @@ function CanvasInner({
               data-bell
               className="relative flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] border border-line text-ink-dim"
             >
-              ⌁
+              <Bell size={15} strokeWidth={1.6} aria-hidden="true" />
               {tally.waiting + review.waivers.length > 0 && (
                 <span className="-top-1.5 -right-1.5 absolute flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-waiting px-1 font-mono text-[8.5px] text-canvas">
                   {tally.waiting + review.waivers.length}
