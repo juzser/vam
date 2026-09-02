@@ -28,6 +28,8 @@ interface SmokeResult {
   webSecurity: boolean;
   title: string;
   rootHtmlLength: number;
+  bridgeKeys: string[];
+  bridgeLoadType: string;
   crossOriginRead: string;
   windowCountAfterOpen: number;
   urlBeforeNavigate: string;
@@ -142,6 +144,30 @@ describe('the Electron shell launches', () => {
 
   it('reaches the known document title', () => {
     expect(smoke().title).toBe('VAM');
+  });
+
+  // The preload actually LOADED and exposed the bridge. Until this existed the
+  // preload path was untested: `webPreferences.preload` could name a file that
+  // does not exist and all eleven other assertions still passed.
+  it('runs the preload, which exposes the bridge', () => {
+    expect(smoke().bridgeKeys).toEqual([
+      'applyWaivers',
+      'closeSession',
+      'createSession',
+      'describe',
+      'load',
+      'recordPrompt',
+      'renameSession',
+      'transitionLesson',
+    ]);
+    expect(smoke().bridgeLoadType).toBe('function');
+  });
+
+  // `subscribe` needs `ipcRenderer.on`, not `invoke`, and is a later task. It
+  // must be ABSENT rather than present-and-broken, so the descriptor's
+  // `liveUpdates: false` and the bridge agree.
+  it('exposes no subscribe member yet', () => {
+    expect(smoke().bridgeKeys).not.toContain('subscribe');
   });
 
   // AC-14, one assertion per clause: a single assertion covering six passes

@@ -46,6 +46,13 @@ async function main() {
     webSecurity: prefs.webSecurity,
     title: await run('document.title'),
     rootHtmlLength: await run("(document.getElementById('root')?.innerHTML ?? '').length"),
+    // The preload, observed from the page. Nothing else in this harness can
+    // see it: with `webPreferences.preload` pointed at a file that does not
+    // exist, every other assertion here still passes -- the window opens, the
+    // renderer mounts, the security clauses hold -- and the bridge is simply
+    // absent. This is the field that notices.
+    bridgeKeys: await run('Object.keys(window.api ?? {}).sort()'),
+    bridgeLoadType: await run("typeof (window.api ?? {}).load"),
   };
 
   // webSecurity, probed rather than read. The probe is a cross-origin DOCUMENT
