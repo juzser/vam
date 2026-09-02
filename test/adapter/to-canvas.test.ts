@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { ApiOverview, ApiRunningSession, ApiTimelineEntry } from '../../src/adapter/api.js';
-import { NO_PROJECT_ID, toCanvasModel, toDecisions } from '../../src/adapter/to-canvas.js';
+import type {
+  ApiOverview,
+  ApiRunningSession,
+  ApiTimelineEntry,
+} from '../../src/renderer/adapter/api.js';
+import { NO_PROJECT_ID, toCanvasModel, toDecisions } from '../../src/renderer/adapter/to-canvas.js';
 
 function apiSession(id: string, over: Partial<ApiRunningSession> = {}): ApiRunningSession {
   return {

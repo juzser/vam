@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { SmithApiError, SmithClient, SmithUnreachableError } from '../../src/adapter/client.js';
+import {
+  SmithApiError,
+  SmithClient,
+  SmithUnreachableError,
+} from '../../src/renderer/adapter/client.js';
 
 type Call = { url: string; init: RequestInit | undefined };
 

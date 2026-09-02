@@ -15,11 +15,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { openChangeStream } from '../../shared/stream.js';
 import type { CanvasModel } from '../domain/model.js';
 import type { ApiTimelineEntry } from './api.js';
 import type { SmithClient } from './client.js';
 import { SmithUnreachableError } from './client.js';
-import { openChangeStream } from './stream.js';
 import { toCanvasModel } from './to-canvas.js';
 
 export type CanvasFeed = {

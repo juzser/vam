@@ -56,7 +56,7 @@ pnpm run dev
 # open http://127.0.0.1:5273/?demo=1
 ```
 
-Demo mode renders a fixed fixture (`src/fixtures/demo.ts`). It needs no
+Demo mode renders a fixed fixture (`src/renderer/fixtures/demo.ts`). It needs no
 running black-smith. Every write is refused before it reaches any server, and
 the canvas shows a banner saying so — this mode is for looking, not for
 recording anything.
@@ -75,7 +75,7 @@ nothing and says why — it never falls back to fake data.
 
 ## Keyboard reference
 
-Bindings are defined in `src/keyboard/chords.ts`. `hjkl` move the focused
+Bindings are defined in `src/renderer/keyboard/chords.ts`. `hjkl` move the focused
 node on the canvas the way they always do.
 
 | Key | Action |
@@ -156,28 +156,28 @@ core is the foundation.
 
 What is *wired today* is narrower than that intent, and worth stating plainly
 so the code doesn't surprise you. The vocabulary is already borrowed:
-`src/keyboard/chords.ts` takes orca's keybinding conventions, and the model
+`src/renderer/keyboard/chords.ts` takes orca's keybinding conventions, and the model
 treats "a decision waiting for a person" as first-class the way orca does.
-`SourceId` in `src/domain/model.ts` already has an `'orca'` case. But the
-adapter that would populate it (`src/adapter/to-canvas.ts`) only ever sets
+`SourceId` in `src/renderer/domain/model.ts` already has an `'orca'` case. But the
+adapter that would populate it (`src/renderer/adapter/to-canvas.ts`) only ever sets
 `source: 'black-smith'` — its comment says "orca is a second adapter's job",
 and that adapter is not written yet. Every session in the screenshots above
 came out of black-smith.
 
 ## Adding a source
 
-`src/adapter/` is the seam a new source plugs into: `to-canvas.ts` translates
+`src/renderer/adapter/` is the seam a new source plugs into: `to-canvas.ts` translates
 a CLI's own API shapes into the source-agnostic domain model in
-`src/domain/model.ts`, which is all the canvas ever renders. That seam exists
+`src/renderer/domain/model.ts`, which is all the canvas ever renders. That seam exists
 today, but it is not finished — three concrete things still couple the rest
 of the code to black-smith specifically:
 
-- `SourceId` in `src/domain/model.ts` is a closed union of exactly
+- `SourceId` in `src/renderer/domain/model.ts` is a closed union of exactly
   `'black-smith' | 'orca'`, not an open source type.
-- `src/canvas/source.ts` and `src/canvas/Canvas.tsx` import `SmithClient` /
+- `src/renderer/canvas/source.ts` and `src/renderer/canvas/Canvas.tsx` import `SmithClient` /
   `SmithApiError` concretely, so the canvas layer is still coupled to the
   black-smith client type, not just the domain model.
-- `src/adapter/to-canvas.ts` hardcodes `source: 'black-smith'` on every
+- `src/renderer/adapter/to-canvas.ts` hardcodes `source: 'black-smith'` on every
   project it builds.
 
 A second adapter needs all three loosened before it can drop in cleanly.

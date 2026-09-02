@@ -8,9 +8,9 @@
 
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Decision, Project, Session, SourceId } from '../../src/domain/model.js';
-import type { SessionEntry } from '../../src/domain/selectors.js';
-import { SessionList, type SessionListProps } from '../../src/panels/SessionList.js';
+import type { Decision, Project, Session, SourceId } from '../../src/renderer/domain/model.js';
+import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
+import { SessionList, type SessionListProps } from '../../src/renderer/panels/SessionList.js';
 
 function decision(id: string, output: string | null): Decision {
   return { id, label: `label-${id}`, input: 'input', output, commands: [] };

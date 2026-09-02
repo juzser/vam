@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { CELL, cellOrigin, FAN, INFO_OFFSET, stepSlotOffset } from '../../src/canvas/grid.js';
+import {
+  CELL,
+  cellOrigin,
+  FAN,
+  INFO_OFFSET,
+  stepSlotOffset,
+} from '../../src/renderer/canvas/grid.js';
 import {
   fanNodeId,
   INFO_SIZE,
@@ -10,10 +16,10 @@ import {
   STEP_SIZE,
   slotNodeId,
   stepNodeId,
-} from '../../src/canvas/layout.js';
-import { toNavNodes } from '../../src/canvas/nav-nodes.js';
-import type { CanvasModel, Decision, Session } from '../../src/domain/model.js';
-import { nextNode } from '../../src/keyboard/spatial-nav.js';
+} from '../../src/renderer/canvas/layout.js';
+import { toNavNodes } from '../../src/renderer/canvas/nav-nodes.js';
+import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
+import { nextNode } from '../../src/renderer/keyboard/spatial-nav.js';
 
 function decision(id: string): Decision {
   return { id, label: `step-${id}`, input: `in-${id}`, output: `out-${id}`, commands: [] };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CanvasModel, Decision, Project, Session } from '../../src/domain/model.js';
+import type { CanvasModel, Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import {
   allSessions,
   copyableCommands,
@@ -7,7 +7,7 @@ import {
   runningAgentTotal,
   visibleDecisions,
   waitingCount,
-} from '../../src/domain/selectors.js';
+} from '../../src/renderer/domain/selectors.js';
 
 function decision(id: string, output: string | null = 'done'): Decision {
   return { id, label: `step-${id}`, input: `in-${id}`, output, commands: [] };

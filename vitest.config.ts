@@ -19,12 +19,12 @@ export default defineConfig({
       // gate reads coverage/coverage-summary.json instead (D-40/P9-25).
       reporter: ['text', 'text-summary', 'json-summary'],
       include: ['src/**/*.ts', 'src/**/*.tsx'],
-      // `src/main.tsx` is the Vite mount entrypoint: three lines that hand
+      // The renderer mount entrypoint is the Vite entry: three lines that hand
       // <App/> to createRoot, with nothing a node-environment test could assert
       // that a browser wouldn't. Counted, it drags a freshly scaffolded UI
       // project below the floor on its very first run — measured, not
       // predicted. Ambient declarations have no statements to cover at all.
-      exclude: ['src/main.tsx', 'src/**/*.d.ts'],
+      exclude: ['src/renderer/index.tsx', 'src/**/*.d.ts'],
       thresholds: {
         lines: 80,
         statements: 80,

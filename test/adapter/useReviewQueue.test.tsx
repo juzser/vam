@@ -2,9 +2,9 @@
 
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ApiFinding, ApiLessons, ApiTaskDetail } from '../../src/adapter/api.js';
-import type { SmithClient } from '../../src/adapter/client.js';
-import { useReviewQueue } from '../../src/adapter/useReviewQueue.js';
+import type { ApiFinding, ApiLessons, ApiTaskDetail } from '../../src/renderer/adapter/api.js';
+import type { SmithClient } from '../../src/renderer/adapter/client.js';
+import { useReviewQueue } from '../../src/renderer/adapter/useReviewQueue.js';
 
 function finding(over: Partial<ApiFinding> = {}): ApiFinding {
   return {
