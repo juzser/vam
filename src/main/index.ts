@@ -103,10 +103,20 @@ function registerPermissionPolicy(): void {
 
 /**
  * A minimal CSP for the bundled renderer: same-origin scripts and styles
- * only. `'unsafe-inline'` on `style-src` covers Vue's runtime-injected
- * `<style>` tags for scoped component CSS -- without it the renderer mounts
- * unstyled, which the launch harness's title/root assertions would not catch
- * but a human looking at the window would. No `default-src`/`frame-src`: this
+ * only.
+ *
+ * `'unsafe-inline'` on `style-src` is there for React's `style={{...}}` props,
+ * which render as inline style ATTRIBUTES -- there are 12 of them in `src/`
+ * today. Without it those components mount unstyled, and the launch harness's
+ * title/root assertions would NOT catch that: the window opens, the renderer
+ * mounts, the text is right, and only a human looking at it sees the problem.
+ *
+ * Stated precisely because the reason is the load-bearing part. Whoever next
+ * tries to tighten this will go looking for whatever needs the allowance, and
+ * if they find nothing they will delete it. `style-src-attr 'unsafe-inline'`
+ * with a strict `style-src` is the real tightening, but it is only safe once
+ * someone has checked whether any dependency injects a `<style>` element at
+ * runtime -- verify with a CSP violation report, do not guess. No `default-src`/`frame-src`: this
  * app never frames anything, and `webSecurity` (already on) is what actually
  * governs cross-origin framing, not this policy -- restricting `frame-src`
  * here as well would only mask that boundary in the launch harness.
