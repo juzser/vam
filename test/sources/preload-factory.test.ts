@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { PreloadSourceApi, SourceDescriptor } from '../../src/shared/preload-api.js';
-import { createSourceFromPreload } from '../../src/renderer/sources/preload-factory.js';
-import { canGovernWith, canSubscribeTo, canWriteTo } from '../../src/renderer/sources/port.js';
 import type { SourceCapabilities } from '../../src/renderer/sources/port.js';
+import { canGovernWith, canSubscribeTo, canWriteTo } from '../../src/renderer/sources/port.js';
+import { createSourceFromPreload } from '../../src/renderer/sources/preload-factory.js';
+import type { PreloadSourceApi, SourceDescriptor } from '../../src/shared/preload-api.js';
 
 const NO_CAPABILITIES: SourceCapabilities = {
   liveUpdates: false,
