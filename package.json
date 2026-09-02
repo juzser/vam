@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "main": "out/main/index.cjs",
-  "description": "VAM \u2014 VIM Agent Management. A keyboard-first ADE for managing agent sessions from any CLI.",
+  "description": "VAM — VIM Agent Management. A keyboard-first ADE for managing agent sessions from any CLI.",
   "engines": {
     "node": ">=22"
   },
@@ -53,6 +53,7 @@
     "@vitejs/plugin-react": "^6.1.0",
     "@vitest/coverage-v8": "4.1.10",
     "electron": "44.1.1",
+    "electron-builder": "^26.15.3",
     "electron-vite": "5.0.0",
     "happy-dom": "^20.11.8",
     "tailwindcss": "^4.3.3",
