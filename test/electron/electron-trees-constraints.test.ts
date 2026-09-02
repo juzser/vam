@@ -61,32 +61,76 @@ const IMPORT_LINE = /^\s*import\s+(?:type\s+)?.*\bfrom\s+['"]([^'"]+)['"]/;
  * Only the `import type` PREFIX form is accepted. `import { type X } from`
  * would also be erased, and is still reported: the prefix form is the one a
  * reader can verify at a glance, and the fix is to write it.
+ *
+ * STATEMENT, not LINE: biome's own formatter wraps a named-import list once
+ * it crosses `lineWidth` (100 here), splitting `import { … } from '…'` onto
+ * three lines with neither `import` nor `from` sharing a line with the
+ * specifier. A scan that tests one line at a time never sees the full
+ * statement, so every regex below is run against the WHOLE FILE TEXT, not a
+ * per-line slice. The clause between the `import`/`require` keyword and the
+ * opening quote is matched with `[^'"]*?` -- excluding quote characters --
+ * so a lazy match can never skip past the string literal that closes one
+ * statement and accidentally splice it to the next; a JS/TS import clause
+ * never legitimately contains a quote before its specifier, so this bound
+ * is exact, not a heuristic.
+ *
+ * The clause is ALSO bounded against crossing into a second `import` (or
+ * `require`, or a `;`): without that, a doc comment mentioning "import"
+ * ahead of a real, later `import type { X } from '...'` statement lets the
+ * lazy match skip the comment's stray "import" word and the real
+ * statement's own `type` keyword, splicing them into one false violation.
  */
-const TYPE_ONLY_IMPORT = /^\s*import\s+type\s/;
-const STATIC_FROM = /^\s*import\s.*\bfrom\s*['"]([^'"]+)['"]/;
-const BARE_IMPORT = /^\s*import\s*['"]([^'"]+)['"]/;
-const DYNAMIC_IMPORT = /(?:^|[^.\w])import\s*\(\s*['"]([^'"]+)['"]/;
-const REQUIRE_CALL = /\brequire\s*\(\s*['"]([^'"]+)['"]/;
+const TYPE_ONLY_IMPORT = /^import\s+type\s/;
+const STATEMENT_FROM =
+  /\bimport\s+(?:type\s+)?(?:(?!\bimport\b|\brequire\b|;)[^'"])*?\bfrom\s*['"]([^'"]+)['"]/g;
+const STATEMENT_BARE = /\bimport\s*['"]([^'"]+)['"]/g;
+const STATEMENT_DYNAMIC = /(?:^|[^.\w])import\s*\(\s*['"]([^'"]+)['"]/g;
+const STATEMENT_REQUIRE = /\brequire\s*\(\s*['"]([^'"]+)['"]/g;
 const RENDERER_SPECIFIER = /(?:^|[/@])renderer\//;
 
-function rendererRuntimeImport(line: string): string | null {
-  const specs: string[] = [];
-  if (!TYPE_ONLY_IMPORT.test(line)) {
-    const stat = line.match(STATIC_FROM)?.[1] ?? line.match(BARE_IMPORT)?.[1];
-    if (stat !== undefined) specs.push(stat);
+/**
+ * Every import/require specifier found anywhere in `text`, with the index
+ * (into `text`) where the match starts -- used by the whole-file scan to
+ * recover a line number for reporting. `text` may be a single line (the
+ * falsifier tests below) or a whole file; the regexes above tolerate both.
+ */
+function importSpecifiersIn(text: string): { index: number; spec: string }[] {
+  const specs: { index: number; spec: string }[] = [];
+  for (const m of text.matchAll(STATEMENT_FROM)) {
+    if (TYPE_ONLY_IMPORT.test(m[0])) continue;
+    specs.push({ index: m.index ?? 0, spec: m[1] as string });
   }
-  const dynamic = line.match(DYNAMIC_IMPORT)?.[1];
-  if (dynamic !== undefined) specs.push(dynamic);
-  const required = line.match(REQUIRE_CALL)?.[1];
-  if (required !== undefined) specs.push(required);
-  return specs.find((spec) => RENDERER_SPECIFIER.test(spec)) ?? null;
+  for (const m of text.matchAll(STATEMENT_BARE)) {
+    specs.push({ index: m.index ?? 0, spec: m[1] as string });
+  }
+  for (const m of text.matchAll(STATEMENT_DYNAMIC)) {
+    specs.push({ index: m.index ?? 0, spec: m[1] as string });
+  }
+  for (const m of text.matchAll(STATEMENT_REQUIRE)) {
+    specs.push({ index: m.index ?? 0, spec: m[1] as string });
+  }
+  return specs;
+}
+
+function rendererRuntimeImport(text: string): string | null {
+  return importSpecifiersIn(text).find(({ spec }) => RENDERER_SPECIFIER.test(spec))?.spec ?? null;
+}
+
+/** Zero-based line index and line text at a character offset into `content`. */
+function lineAt(content: string, index: number): { i: number; l: string } {
+  const i = content.slice(0, index).split('\n').length - 1;
+  const l = content.split('\n')[i] as string;
+  return { i, l };
 }
 
 const RULES: {
   name: string;
   files: string[];
   rule: string;
-  check: (f: string, l: string, i: number) => string | null;
+  // Per-line rules set `check`; the renderer-import rule scans the whole
+  // file at once (a statement can span lines) and sets `checkFile` instead.
+  check?: (f: string, l: string, i: number) => string | null;
+  checkFile?: (f: string, content: string) => string[];
 }[] = [
   {
     // The literal a reviewer will find if this rule is absent is
@@ -121,24 +165,33 @@ const RULES: {
     name: 'no runtime import from src/main or src/preload into src/renderer',
     files: processFiles,
     rule: 'main and preload may import renderer TYPES only, never a runtime value:',
-    check: (f, l, i) => (rendererRuntimeImport(l) === null ? null : at(f, i, l)),
+    checkFile: (f, content) =>
+      importSpecifiersIn(content)
+        .filter(({ spec }) => RENDERER_SPECIFIER.test(spec))
+        .map(({ index }) => {
+          const { i, l } = lineAt(content, index);
+          return at(f, i, l);
+        }),
   },
 ];
 
 describe('standing constraints for the electron trees', () => {
-  it.each(RULES)('$name', ({ files, rule, check }) => {
+  it.each(RULES)('$name', ({ files, rule, check, checkFile }) => {
     expect(
       files.length,
       `${rule}\nThis rule matched NO files, so it checked nothing and would have passed vacuously.`,
     ).toBeGreaterThan(0);
     const violations: string[] = [];
     for (const f of files) {
-      readFileSync(join(SRC_DIR, f), 'utf8')
-        .split('\n')
-        .forEach((l, i) => {
-          const m = check(f, l, i);
-          if (m) violations.push(m);
-        });
+      const content = readFileSync(join(SRC_DIR, f), 'utf8');
+      if (checkFile) {
+        violations.push(...checkFile(f, content));
+        continue;
+      }
+      content.split('\n').forEach((l, i) => {
+        const m = check?.(f, l, i);
+        if (m) violations.push(m);
+      });
     }
     expect(violations, [rule, ...violations].join('\n')).toEqual([]);
   });
@@ -150,6 +203,11 @@ describe('standing constraints for the electron trees', () => {
  * Each line below is a real violation in one of the four forms, and each must
  * be reported; the accepted lines beneath them are the type-only imports main
  * and preload legitimately carry today, and must not be.
+ *
+ * The WRAPPED cases repeat all four forms split across lines -- the shape a
+ * scan that reads one line at a time cannot see. Named-import wrapping in
+ * particular is not a contrivance: biome's configured `lineWidth: 100`
+ * produces exactly this shape for any import list that runs long.
  */
 describe('the renderer-import guard catches every form', () => {
   it.each([
@@ -161,6 +219,13 @@ describe('the renderer-import guard catches every form', () => {
     ['dynamic import', "const mod = await import('../renderer/fixtures/demo.js');"],
     ['require', "const { DEMO_MODEL } = require('../../renderer/fixtures/demo.js');"],
     ['side effect', "import '../renderer/styles.css';"],
+    [
+      'wrapped named-import list',
+      "import {\n  createSourceFromPreload,\n} from '../renderer/sources/preload-factory.js';",
+    ],
+    ['wrapped from clause', "import { createClient } from\n  '../renderer/adapter/client.js';"],
+    ['wrapped dynamic import', "const mod = await import(\n  '../renderer/fixtures/demo.js'\n);"],
+    ['wrapped require', "const { DEMO_MODEL } = require(\n  '../../renderer/fixtures/demo.js'\n);"],
   ])('reports a %s import', (_form, line) => {
     expect(rendererRuntimeImport(line)).not.toBeNull();
   });
@@ -170,6 +235,7 @@ describe('the renderer-import guard catches every form', () => {
     ["import type { SessionSource } from '../renderer/sources/port.js';"],
     ["import { contextBridge, ipcRenderer } from 'electron';"],
     ["import { CHANNELS } from '../main/ipc/channels.js';"],
+    ["import type {\n  Project,\n} from '../../renderer/domain/model.js';"],
   ])('accepts %s', (line) => {
     expect(rendererRuntimeImport(line)).toBeNull();
   });
