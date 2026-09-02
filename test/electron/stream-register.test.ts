@@ -9,6 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CHANNELS } from '../../src/main/ipc/channels.js';
 import { registerStreamIpc } from '../../src/main/stream/register.js';
+import { createStreamSubscribe } from '../../src/preload/api.js';
 
 function fakeIpcMain() {
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
@@ -106,5 +107,49 @@ describe('registerStreamIpc', () => {
     expect(result).toBe(false);
     expect(JSON.stringify(result)).not.toContain(sensitivePath);
     consoleSpy.mockRestore();
+  });
+});
+
+/**
+ * The preload's unsubscribe and main's refcount, together.
+ *
+ * Neither side is wrong alone: main refcounts correctly, and the preload
+ * removes its own listener correctly. The defect lives in the seam -- a
+ * non-idempotent stop() spends a decrement that its subscriber had already
+ * spent, and closes the SHARED stream under everyone still on it. React
+ * StrictMode invokes effect cleanups twice in development, so the double call
+ * is the ordinary case rather than a defensive hypothetical, and the symptom
+ * is an app that quietly stops updating.
+ */
+describe('a subscriber that unsubscribes twice', () => {
+  it('does not close the stream for the subscribers still on it', async () => {
+    const ipcMain = fakeIpcMain();
+    const close = vi.fn();
+    registerStreamIpc(
+      ipcMain,
+      { send: vi.fn() },
+      {
+        url: 'http://example.invalid/stream',
+        createEventSource: vi.fn(() => ({ addEventListener: vi.fn(), close })) as unknown as (
+          url: string,
+        ) => EventSource,
+      },
+    );
+
+    const subscribe = createStreamSubscribe({
+      invoke: async (channel: string) => ipcMain.invoke(channel),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    });
+
+    const stopA = subscribe(() => {});
+    subscribe(() => {});
+    await Promise.resolve();
+
+    stopA();
+    stopA();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(close, 'the stream closed while another subscriber was live').not.toHaveBeenCalled();
   });
 });

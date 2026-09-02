@@ -101,7 +101,15 @@ export function createStreamSubscribe(
     ipc.invoke(CHANNELS.streamSubscribe).catch((error: unknown) => {
       console.error('vam: stream subscribe failed:', error);
     });
+    // Idempotent on purpose. main REFCOUNTS subscribers, so a second call
+    // would decrement for a subscriber that had already left and close the
+    // shared stream under everyone still on it -- silently, since nothing
+    // errors. React StrictMode invokes effect cleanups twice in development,
+    // so a double call is the normal case, not a defensive hypothetical.
+    let stopped = false;
     return () => {
+      if (stopped) return;
+      stopped = true;
       ipc.removeListener(CHANNELS.stream, listener);
       ipc.invoke(CHANNELS.streamUnsubscribe).catch((error: unknown) => {
         console.error('vam: stream unsubscribe failed:', error);

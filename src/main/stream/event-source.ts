@@ -24,6 +24,13 @@ import { request as httpsRequest } from 'node:https';
 
 type FrameListener = (event: { readonly data?: string }) => void;
 
+/**
+ * The most we will hold for a single unterminated frame. Real frames here are
+ * a session-id list; this is orders of magnitude above them and still small
+ * enough that a hostile or broken endpoint cannot exhaust main.
+ */
+const MAX_BUFFER_CHARS = 1_000_000;
+
 /** How long to wait before reconnecting after the stream ends or errors. */
 const RECONNECT_MS = 3_000;
 
@@ -37,6 +44,9 @@ export function createNodeEventSource(url: string): MinimalEventSource {
   const listeners = new Map<string, Set<FrameListener>>();
   let closed = false;
   let buffer = '';
+  // Set when a chunk ended with CR, so a LF opening the next chunk is read as
+  // the second half of one CRLF rather than a second line break.
+  let skipLeadingLf = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let currentReq: ReturnType<typeof httpRequest> | null = null;
 
@@ -48,8 +58,38 @@ export function createNodeEventSource(url: string): MinimalEventSource {
 
   // Frames are separated by a blank line; within a frame, `event:` names it
   // (default `message`) and one or more `data:` lines carry the payload.
-  const consume = (chunk: string) => {
-    buffer += chunk;
+  //
+  // The spec permits a line to end with CRLF, LF **or** a lone CR, so the wire
+  // is normalised to LF before any boundary search. Searching for '\n\n'
+  // directly is what a CRLF server defeats: its separator is '\r\n\r\n',
+  // which never matches, so every frame is dropped in silence and the buffer
+  // grows for the life of the connection. The browser's own EventSource
+  // handles all three, and this adapter is the other half of "two transports,
+  // one port" -- they have to agree on the wire, not just on the port.
+  //
+  // A CRLF pair split across two chunks would otherwise normalise to two LFs
+  // and fabricate a frame boundary. Holding the trailing CR back instead is
+  // worse: a CR-terminated final line would then wait for a chunk that may
+  // never come. So the CR is translated immediately and a LEADING LF in the
+  // next chunk is swallowed as the other half of that pair.
+  const consume = (raw: string) => {
+    let text = raw;
+    if (skipLeadingLf && text.startsWith('\n')) {
+      text = text.slice(1);
+    }
+    skipLeadingLf = text.endsWith('\r');
+    buffer += text.replace(/\r\n|\r/g, '\n');
+    // An endpoint that never sends a blank line would otherwise grow this
+    // without limit inside MAIN -- unsandboxed, hosting every window. Drop the
+    // connection instead; the reconnect path gives it a clean start.
+    if (buffer.length > MAX_BUFFER_CHARS) {
+      buffer = '';
+      dispatch('error', undefined);
+      currentReq?.destroy();
+      currentReq = null;
+      scheduleReconnect();
+      return;
+    }
     let boundary = buffer.indexOf('\n\n');
     while (boundary !== -1) {
       const raw = buffer.slice(0, boundary);
