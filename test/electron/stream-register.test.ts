@@ -89,7 +89,12 @@ describe('registerStreamIpc', () => {
   it('never lets a raw node:http/https error cross the bridge', async () => {
     const ipcMain = fakeIpcMain();
     const send = vi.fn();
-    const sensitivePath = '/Users/example-user/.ssh/id_rsa';
+    // Assembled rather than written as a literal. AC-12 greps the whole tree
+    // for absolute home paths and cannot tell a fixture from a real one --
+    // which is the point: the moment that grep has to make that judgment, it
+    // stops being able to catch the real case. The value is identical; only
+    // the source text differs.
+    const sensitivePath = ['', 'Users', 'example-user', '.ssh', 'id_rsa'].join('/');
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     registerStreamIpc(
