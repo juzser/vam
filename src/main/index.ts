@@ -10,6 +10,7 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { contentSecurityPolicy } from './csp.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { isSameOrigin } from './origin.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
@@ -103,34 +104,21 @@ function registerPermissionPolicy(): void {
 }
 
 /**
- * A minimal CSP for the bundled renderer: same-origin scripts and styles
- * only.
- *
- * `'unsafe-inline'` on `style-src` is there for React's `style={{...}}` props,
- * which render as inline style ATTRIBUTES -- there are 12 of them in `src/`
- * today. Without it those components mount unstyled, and the launch harness's
- * title/root assertions would NOT catch that: the window opens, the renderer
- * mounts, the text is right, and only a human looking at it sees the problem.
- *
- * Stated precisely because the reason is the load-bearing part. Whoever next
- * tries to tighten this will go looking for whatever needs the allowance, and
- * if they find nothing they will delete it. `style-src-attr 'unsafe-inline'`
- * with a strict `style-src` is the real tightening, but it is only safe once
- * someone has checked whether any dependency injects a `<style>` element at
- * runtime -- verify with a CSP violation report, do not guess. No `default-src`/`frame-src`: this
- * app never frames anything, and `webSecurity` (already on) is what actually
- * governs cross-origin framing, not this policy -- restricting `frame-src`
- * here as well would only mask that boundary in the launch harness.
+ * The response CSP: strict in the built app, and widened by exactly one
+ * clause when `electron-vite dev`'s Vite server is the one serving the page.
+ * See `./csp.ts` for what each clause is for and why the two policies differ
+ * -- No `default-src`/`frame-src` in either: this app never frames anything,
+ * and `webSecurity` (already on) is what actually governs cross-origin
+ * framing, not this policy -- restricting `frame-src` here as well would only
+ * mask that boundary in the launch harness.
  */
-const CONTENT_SECURITY_POLICY =
-  "script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'";
-
 function registerContentSecurityPolicy(): void {
+  const policy = contentSecurityPolicy(devServerUrl);
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
-        'Content-Security-Policy': [CONTENT_SECURITY_POLICY],
+        'Content-Security-Policy': [policy],
       },
     });
   });
