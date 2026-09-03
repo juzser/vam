@@ -1383,6 +1383,15 @@ function CanvasInner({
           onStopComposing={() => {
             setComposing(false);
             setDraft('');
+            // Escape out of the composer returns the keyboard to the SIDEBAR,
+            // which is the pane the operator asked to get back to. Without
+            // this, a prompt opened with `I` leaves `pane === 'action'`, so
+            // the blur hands the keys back to a window where `j`/`k` walk the
+            // detail pane's actions instead of the session list — the keys
+            // work, they just do the wrong thing, which is worse than being
+            // swallowed. The `i` path already sat on 'list' and was unaffected,
+            // which is why this only ever bit one of the two entry points.
+            setPane('list');
           }}
           width={detailWidth}
           resizeHandle={
