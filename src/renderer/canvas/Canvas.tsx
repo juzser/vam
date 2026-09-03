@@ -1040,7 +1040,7 @@ function CanvasInner({
                 type="button"
                 aria-label="zoom out"
                 onClick={() => zoomOut()}
-                className="flex h-full w-[26px] items-center justify-center hover:text-ink"
+                className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
               >
                 −
               </button>
@@ -1051,7 +1051,7 @@ function CanvasInner({
                 type="button"
                 aria-label="zoom in"
                 onClick={() => zoomIn()}
-                className="flex h-full w-[26px] items-center justify-center hover:text-ink"
+                className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
               >
                 +
               </button>
@@ -1061,7 +1061,7 @@ function CanvasInner({
               type="button"
               aria-label="fit view"
               onClick={() => fitView()}
-              className="flex h-[26px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim hover:text-ink"
+              className="flex h-[26px] shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim hover:text-ink"
             >
               <Maximize size={13} strokeWidth={1.6} aria-hidden="true" />
             </button>
@@ -1119,7 +1119,7 @@ function CanvasInner({
                       aria-pressed={on}
                       onClick={() => setStatusFilter(key)}
                       className={[
-                        'rounded-full border bg-canvas px-2.5 py-1 font-mono text-[10px]',
+                        'cursor-pointer rounded-full border bg-canvas px-2.5 py-1 font-mono text-[10px]',
                         on
                           ? 'border-line-loud bg-raised text-ink'
                           : loud

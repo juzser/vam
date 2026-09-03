@@ -64,7 +64,7 @@ export function IconPicker({ title, onPick, onClose }: IconPickerProps) {
           <button
             type="button"
             onClick={() => onPick('')}
-            className="ml-auto rounded-[var(--radius-sm)] border border-line px-1.5 py-0.5 text-[10.5px] text-ink-dim hover:border-line-strong hover:text-ink"
+            className="ml-auto cursor-pointer rounded-[var(--radius-sm)] border border-line px-1.5 py-0.5 text-[10.5px] text-ink-dim hover:border-line-strong hover:text-ink"
           >
             clear icon
           </button>
