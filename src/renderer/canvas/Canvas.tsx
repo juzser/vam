@@ -27,7 +27,6 @@ import {
   type Edge,
   MiniMap,
   type Node,
-  Panel,
   ReactFlow,
   ReactFlowProvider,
   useNodesState,
@@ -41,6 +40,7 @@ import { useReviewQueue } from '../adapter/useReviewQueue.js';
 import type { CanvasModel, Decision, Project, SessionStatus, SourceId } from '../domain/model.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import type { StatusFilter } from '../domain/session-filter.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
 import { nextNode } from '../keyboard/spatial-nav.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
@@ -262,14 +262,17 @@ function CanvasInner({
   );
   const [filtering, setFiltering] = useState(false);
   /**
-   * The mockup's pill row: All / Running / Needs you / Done.
+   * The pill row: All / Running / Needs you / Done — drawn by the sidebar's
+   * filter popover, which is now its only control.
    *
    * A SECOND narrowing, stacked on `/` rather than replacing it, because the
    * two answer different questions — "the one called permalink" and "the ones
    * that stopped". Both narrow where you navigate; neither hides anything the
    * canvas draws.
    */
-  const [statusFilter, setStatusFilter] = useState<'all' | SessionStatus>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  /** The sidebar's filter popover — the ONE home for narrowing (SessionList). */
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   /** True while a write is in flight — Enter must not fire twice. */
   const [writing, setWriting] = useState(false);
   const searchOrigin = useRef<string | null>(null);
@@ -893,6 +896,9 @@ function CanvasInner({
         case 'palette':
           setPaletteOpen(true);
           return;
+        case 'filterMenu':
+          setFilterMenuOpen((open) => !open);
+          return;
         case 'focusAction':
           if (focusedEntry === null) {
             setStatus('pick a session first');
@@ -1032,6 +1038,7 @@ function CanvasInner({
           // there is never a state you cannot press Esc out of.
           setJumping(false);
           setPaletteOpen(false);
+          setFilterMenuOpen(false);
           setFiltering(false);
           setComposing(false);
           setRenamingId(null);
@@ -1118,6 +1125,17 @@ function CanvasInner({
               focusSession(first);
             }
           }}
+          statusFilter={statusFilter}
+          onStatusFilter={setStatusFilter}
+          statusTally={{
+            all: tally.all,
+            running: tally.running,
+            waiting: tally.waiting,
+            done: tally.done,
+            failed: tally.failed,
+          }}
+          filterMenuOpen={filterMenuOpen}
+          onFilterMenuToggle={setFilterMenuOpen}
           onFilterCommit={() => setFiltering(false)}
           onFilterCancel={() => {
             setFiltering(false);
@@ -1264,46 +1282,6 @@ function CanvasInner({
               proOptions={{ hideAttribution: true }}
             >
               <Background color="var(--color-dots)" gap={24} size={1} />
-              {/* `Panel` renders outside ReactFlow's pan/zoom transform (the
-                  same mechanism `MiniMap` below relies on), so these pills
-                  stay fixed at the canvas's top-left corner: panning or
-                  zooming the canvas never moves them — "không liên quan đến
-                  drag canvas". They still drive `statusFilter`, which
-                  narrows `entries` (used by both the sidebar and this
-                  panel's counts) but deliberately never the canvas itself;
-                  see the note above `entries`. */}
-              <Panel position="top-left" className="!m-3 flex items-center gap-1.5">
-                {(
-                  [
-                    ['all', 'All', tally.all],
-                    ['running', 'Running', tally.running],
-                    ['waiting', 'Needs you', tally.waiting],
-                    ['done', 'Done', tally.done],
-                  ] as const
-                ).map(([key, label, count]) => {
-                  const on = statusFilter === key;
-                  const loud = key === 'waiting' && count > 0;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      data-status-pill={key}
-                      aria-pressed={on}
-                      onClick={() => setStatusFilter(key)}
-                      className={[
-                        'cursor-pointer rounded-full border bg-canvas px-2.5 py-1 font-mono text-[10px]',
-                        on
-                          ? 'border-line-loud bg-raised text-ink'
-                          : loud
-                            ? 'border-waiting-tint text-waiting'
-                            : 'border-line text-ink-dim hover:border-line-strong',
-                      ].join(' ')}
-                    >
-                      {label} {count}
-                    </button>
-                  );
-                })}
-              </Panel>
               {/* Measured off the mockup's minimap: 176x56, one chip per
                   session cell in that session's status colour, and a viewport
                   drawn as a 1px outline in the ink colour over an UNDIMMED
