@@ -307,8 +307,9 @@ describe('a canvas card is clickable, and a click focuses that session', () => {
     // card you clicked. Targeted at b1 deliberately: b1 sits directly below a1
     // in the grid, so `k` from it has a known destination. An earlier draft
     // clicked "the first unfocused card", which is a2 — in the other column
-    // with nothing above it — so `k` correctly did nothing and the test failed
-    // on its own premise rather than on the code.
+    // with nothing above it. Under list-order `j`/`k` the premise changed
+    // again: vertical now walks the SIDEBAR, so `k` from b1 lands on a2, the
+    // row above it in the list, not on a1.
     render(<Canvas model={MODEL} />);
     const b1 = document.querySelector('[data-session-card="b1"]');
     expect(b1, 'fixture has no b1 card to click').not.toBeNull();
@@ -317,7 +318,7 @@ describe('a canvas card is clickable, and a click focuses that session', () => {
     });
     expect(focused()).toBe('beta/b1');
     press('k');
-    expect(focused()).toBe('alpha/a1');
+    expect(focused()).toBe('alpha/a2');
   });
 });
 
@@ -345,14 +346,19 @@ describe('walking sessions with j and k', () => {
     expect(focused()).toBe('alpha/a1');
   });
 
-  it('j goes to the next session, across repos', () => {
-    // The grid places a1 at (col 0, row 0), a2 at (col 1, row 0) and b1 at
-    // (col 0, row 1) — b1 sits directly below a1, so a single `j` already
-    // crosses from alpha into beta, without stopping on a group header.
+  it('j walks the sidebar in order, one session at a time', () => {
+    // The sidebar lists a1, a2, b1 — project-major. `j` follows THAT, not the
+    // grid: the grid puts b1 physically below a1 (a2 is in the other column),
+    // so geometry-order used to jump straight from alpha into beta and skip a2
+    // entirely. The list is how sessions are enumerated, so it is what "next
+    // session" means. Crossing into another project happens where the list
+    // crosses, not where the columns wrap.
     render(<Canvas model={MODEL} />);
     press('j');
+    expect(focused()).toBe('alpha/a2');
+    press('j');
     expect(focused()).toBe('beta/b1');
-    press('j'); // nothing lies below the grid's last row
+    press('j'); // the ends do not wrap
     expect(focused()).toBe('beta/b1');
   });
 
@@ -508,7 +514,9 @@ describe('the detail panel', () => {
     // there. What must stay true is that SOMETHING names the session the
     // prompt will be written to, and that it follows the focus.
     expect(promptTarget()).toBe('a1');
-    press('j'); // b1 sits directly below a1 in the grid
+    press('j'); // the next row in the sidebar, still inside alpha
+    expect(promptTarget()).toBe('a2');
+    press('j'); // and on across the project boundary
     expect(promptTarget()).toBe('b1');
   });
 
@@ -611,12 +619,13 @@ describe('filtering the sidebar with /', () => {
     keyOn(filterInput() as HTMLInputElement, 'Enter');
     expect(mode()).toBe('NORMAL');
     press('j');
-    // b1 — the only cell directly below a1 in the grid — is filtered out, and
-    // there is nothing else left in a1's column to walk to.
-    expect(focused()).toBe('alpha/a1');
-    expect(screen.getByText(/nothing lies/)).toBeTruthy();
+    // a2 is the next row that survived the filter, so the walk reaches it,
+    expect(focused()).toBe('alpha/a2');
     press('j');
-    expect(focused()).toBe('alpha/a1');
+    // and stops there: `j` walks the surviving list, not the whole model, so
+    // the filtered-out b1 is not somewhere the cursor can still fall into.
+    expect(focused()).toBe('alpha/a2');
+    expect(screen.getByText(/nothing lies/)).toBeTruthy();
   });
 
   it('n keeps walking the matches after Enter closed the box', () => {
@@ -717,9 +726,10 @@ describe('the sidebar', () => {
       (rows()[2] as HTMLElement).click();
     });
     press('k');
-    // b1 sits directly below a1 in the grid; a2 is in the other column and
-    // does not share b1's band, so `k` from b1 lands on a1.
-    expect(focused()).toBe('alpha/a1');
+    // rows()[2] is b1, the last row in the sidebar; `k` walks one row back up
+    // it, to a2 — the click handed the keyboard a position in the list, not
+    // just a highlight.
+    expect(focused()).toBe('alpha/a2');
   });
 
   it('offers adding a session, and names the CLI that actually creates one', () => {
@@ -744,9 +754,9 @@ describe('the sidebar', () => {
 describe('renaming, icons and closing', () => {
   it('r opens rename on the focused row, seeded with its current name', () => {
     render(<Canvas model={MODEL} />);
-    press('j'); // b1 sits directly below a1 in the grid
+    press('j'); // a2, the next row in the sidebar
     press('r');
-    expect(renameInput()?.value).toBe('b1');
+    expect(renameInput()?.value).toBe('a2');
   });
 
   it('rename does not claim to have saved — a session id is what the log chains on', () => {
@@ -780,9 +790,9 @@ describe('renaming, icons and closing', () => {
 
   it('names the session it is picking for', () => {
     render(<Canvas model={MODEL} />);
-    press('j'); // b1 sits directly below a1 in the grid
+    press('j'); // a2, the next row in the sidebar
     press('s');
-    expect(iconPicker()?.textContent).toContain('b1');
+    expect(iconPicker()?.textContent).toContain('a2');
   });
 
   it('shows an icon you chose on a previous visit', () => {
@@ -861,7 +871,8 @@ describe('renaming, icons and closing', () => {
   it("keeps aiming at orca's b1 after the model drops it mid-pick", () => {
     BOTH_SOURCES_HOLD_B1();
     const { rerender } = render(<Canvas model={MODEL} />);
-    press('j'); // beta/b1 — the orca one
+    press('j');
+    press('j'); // beta/b1 — the orca one, two rows down the sidebar
     expect(focused()).toBe('beta/b1');
     press('s');
     // The refresh that used to lose the source.
@@ -888,6 +899,7 @@ describe('renaming, icons and closing', () => {
     };
     const { rerender } = render(<Canvas model={titled} />);
     press('j');
+    press('j'); // beta/b1
     press('s');
     act(() => rerender(<Canvas model={WITHOUT_B1} />));
     expect(iconPicker()?.textContent).toContain('beta work');
@@ -1278,10 +1290,14 @@ describe('the focused cell renders at full opacity, and the override moves with 
     render(<Canvas model={THREE} />);
     expect(cellOpacity('s1')).toBe('1'); // waiting sorts first, so s1 starts focused
     expect(cellOpacity('s2')).toBe('0.45');
+    expect(cellOpacity('s3')).toBe('0.6');
 
-    press('j'); // s1 -> s2 (grid column 0, row 1)
+    // `j` walks the sidebar's order — waiting, running, done — so it steps
+    // from s1 to s3, not to the s2 the fixture happens to list second.
+    press('j');
     expect(cellOpacity('s1')).toBe('0.72');
-    expect(cellOpacity('s2')).toBe('1');
+    expect(cellOpacity('s3')).toBe('1');
+    expect(cellOpacity('s2')).toBe('0.45');
   });
 });
 
