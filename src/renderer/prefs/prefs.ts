@@ -72,10 +72,18 @@ export type Prefs = {
    * sources can both name a session `D-257`, and without this outer key they
    * would share one glyph. Both levels are built on `Object.create(null)`
    * objects populated by explicit loops, never a bare `{}` mutated with
-   * `obj[key] = …` — a plain object's `__proto__` is a setter, so assigning
-   * through a hostile key like `__proto__` or `constructor` would silently
-   * miss the store's own-property count and vanish on the next
+   * `obj[key] = …`, because a plain object's `__proto__` is an inherited
+   * SETTER: assigning through it produces no own property at all, so the entry
+   * misses the store's own-property count and vanishes on the next
    * `JSON.stringify` round trip (AC-2).
+   *
+   * `__proto__` is the ONLY key that does this, and naming a second one here
+   * would be wrong rather than merely cautious. `constructor`, `prototype` and
+   * `toString` are inherited WRITABLE DATA properties, so assigning through
+   * them shadows the inherited value with a real own property that serialises
+   * like any other — measured, not assumed. The null-prototype accumulator is
+   * still the right shape: it removes the hazard by construction instead of
+   * relying on a list of key names staying complete.
    */
   readonly icons: Readonly<Record<string, IconsBySession>>;
   readonly theme: Theme;
