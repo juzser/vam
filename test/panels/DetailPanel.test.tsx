@@ -19,12 +19,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import {
+  ApprovalBox,
+  type ApprovalRequest,
   ATTACH_LIMIT_BYTES,
   type AttachedFile,
   attachIntoDraft,
   DetailPanel,
   type DetailPanelProps,
   detachFromDraft,
+  PLACEHOLDER_APPROVAL,
   readAttachedName,
   readModelRequest,
   readModeRequest,
@@ -717,19 +720,23 @@ describe('the option picker is the mockup layout over a declared placeholder', (
     expect(options()[2]?.textContent).toContain('↵');
   });
 
-  it('marks the cursor separately from the suggestion — two facts, two treatments', () => {
+  it('holds no cursor until focus lands, and the mouse never moves one', () => {
     draw();
     const [first, second] = options();
-    // The cursor opens on the first card, which is also the suggested one, so
-    // the two markings are proved apart by MOVING it.
+    // At rest the picker marks no cursor at all. The ring is a `focus-visible`
+    // variant, so it cannot be painted without DOM focus — and in particular
+    // the amber card does not wear it merely for being the suggested one.
+    expect(all('[data-focused]')).toHaveLength(0);
+    expect(first?.className).toContain('focus-visible:outline-2');
+    // Focusing, and clicking behind it, leave no painted cursor in the DOM:
+    // there is no mirror of DOM focus left that could drift out of step with
+    // it, and a mouse click cannot move a keyboard cursor.
     fireEvent.focus(second as Element);
-    expect(second?.getAttribute('data-focused')).toBe('true');
-    expect(first?.getAttribute('data-focused')).toBeNull();
-    // And the suggestion did not move with it.
+    act(() => (second as HTMLButtonElement).click());
+    expect(all('[data-focused]')).toHaveLength(0);
+    // The suggestion is still its own separate marking, in its own language.
     expect(first?.getAttribute('data-suggested')).toBe('true');
     expect(second?.getAttribute('data-suggested')).toBeNull();
-    // The two treatments are not the same class either: a shared one would
-    // make "the agent suggests this" and "your cursor is here" one signal.
     expect(second?.className).not.toBe(first?.className);
   });
 
@@ -758,6 +765,81 @@ describe('the option picker is the mockup layout over a declared placeholder', (
   it('appears only while the session is the one waiting on you', () => {
     draw({ entry: { project: PROJECT, session: { ...SESSION, status: 'running' } } });
     expect(box()).toBeNull();
+  });
+});
+
+describe('the picker keeps the promises it prints, and says it is a placeholder', () => {
+  const box = () => q<HTMLElement>('[data-approval]');
+  const options = () => all('[data-approval-option]');
+
+  /** A request with `n` options, to reach the counts the placeholder cannot. */
+  const many = (n: number): ApprovalRequest => ({
+    label: 'many options',
+    options: Array.from({ length: n }, (_, i) => ({
+      id: `o${i}`,
+      suggested: i === 0,
+      title: `option ${i + 1}`,
+      body: 'body',
+    })),
+  });
+
+  const drawBox = (request: ApprovalRequest, onChoose: (o: { title: string }) => void) =>
+    render(<ApprovalBox request={request} age="12m" onChoose={onChoose} onCompose={() => {}} />);
+
+  it('takes a digit from anywhere inside the picker, not only from a focused card', () => {
+    const drafts: string[] = [];
+    draw({ onDraftChange: (value) => drafts.push(value) });
+    // The hint promises `1-3 to pick` to anyone reading the pane, so the key is
+    // caught by the group rather than by whichever card happens to hold focus.
+    fireEvent.keyDown(box() as Element, { key: '2' });
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]).toBe(options()[1]?.querySelector('[data-approval-title]')?.textContent);
+    // Reachable as a target for that key without joining the Tab order.
+    expect(box()?.getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('promises only the digits that exist, and prints no badge it cannot honour', () => {
+    const picked: string[] = [];
+    drawBox(many(12), (o) => picked.push(o.title));
+    // `pickDigit` reads one key, so ten and up are unreachable: the hint stops
+    // where the keys stop instead of counting the whole list.
+    expect(box()?.textContent).toContain('1–9 to pick');
+    const badges = options().map((o) => o.querySelector('[data-approval-number]')?.textContent);
+    expect(badges.slice(0, 9)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+    // Past nine the badge says it has no key, rather than printing a number
+    // that looks like one and does nothing.
+    expect(badges.slice(9)).toEqual(['—', '—', '—']);
+    fireEvent.keyDown(box() as Element, { key: '9' });
+    expect(picked).toEqual(['option 9']);
+  });
+
+  it('names the gap where a keyboard can read it, and draws the cards as not real', () => {
+    draw();
+    // `docs/ade-redesign.md`: a placeholder is a `data-placeholder` element
+    // whose note names the gap. A `Note`, not a `title`, because this pane's
+    // explanations have to be readable without a mouse.
+    const note = q<HTMLElement>('[data-approval] [data-note]')?.getAttribute('data-note') ?? '';
+    expect(note.toLowerCase()).toContain('no source');
+    // Dashed is this app's own vocabulary for "nothing real here" — the same
+    // one the canvas uses for a step that has not happened. It survives both
+    // themes without anyone having to parse small amber capitals.
+    expect(options().every((o) => o.className.includes('border-dashed'))).toBe(true);
+  });
+
+  it('names the group, marks the suggestion, and keeps the glyph out of the name', () => {
+    draw();
+    // A <fieldset> is a group without needing `role="group"` on a div.
+    expect(box()?.tagName).toBe('FIELDSET');
+    const labelledBy = box()?.getAttribute('aria-labelledby') ?? '';
+    expect(document.getElementById(labelledBy)?.textContent).toBe(PLACEHOLDER_APPROVAL.label);
+    // The pill spells SUGGESTED out for a sighted reader; this is the same
+    // fact for a reader who gets the button's name and nothing else.
+    expect(options()[0]?.getAttribute('aria-current')).toBe('true');
+    expect(options()[1]?.getAttribute('aria-current')).toBeNull();
+    // The return arrow is a picture of a key. It must not end card 2's name.
+    expect(options()[1]?.querySelector('[data-approval-enter]')?.getAttribute('aria-hidden')).toBe(
+      'true',
+    );
   });
 });
 
@@ -793,6 +875,16 @@ describe('the surface the picker sits on is a token pair, not a dark-only hex', 
     const light = css.slice(css.indexOf('html.light {'));
     expect(dark).toContain('--vam-lifted:');
     expect(light).toContain('--vam-lifted:');
+  });
+
+  it('pins the light line-loud to the value the light artboard actually draws', () => {
+    // The border of the plain option card and of the "type your own" field.
+    // The light artboard draws no picker, so this is read off the surfaces it
+    // does draw at that weight: the composer card and the answer pills. It was
+    // a few units too dark before, which is why the value is pinned here.
+    const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
+    const light = css.slice(css.indexOf('html.light {'));
+    expect(light).toContain('--vam-line-loud: #c9c7c1;');
   });
 });
 

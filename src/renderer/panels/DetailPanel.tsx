@@ -285,7 +285,16 @@ export const PLACEHOLDER_APPROVAL: ApprovalRequest = {
 
 /**
  * The option picker: the mockup's block at `docs/design/mockup/ADE Session
- * Canvas.dc.html` lines 1515-1554 (artboard 1a, dark), value for value.
+ * Canvas.dc.html` lines 1515-1554, value for value.
+ *
+ * Those lines are in artboard **2b** ("Agent offers three options instead of an
+ * approval gate", opening at dc:812), not 1a — 1a is the approval-gate board
+ * and only starts at dc:1576, after this block ends. The difference matters
+ * beyond a citation: 1a has a light twin, 1b at dc:2336, and **2b has none**.
+ * The mockup draws this component in dark only. So every dark value below is
+ * measured and every light value it reaches through a token is DERIVED — read
+ * off the nearest surface the light artboard does draw at the same weight.
+ * `styles.css` says so at `--vam-lifted`; it is true of the whole block.
  *
  * Where each measurement came from, and the token it mapped to. The mockup's
  * own hex values are deliberately NOT repeated here: `topology-constraints`
@@ -310,15 +319,23 @@ export const PLACEHOLDER_APPROVAL: ApprovalRequest = {
  *  - footer field (dc:1552) h30, r8, 1px, 11.5px    -> `border-line-loud` / `bg-lifted`
  *  - footer hint  (dc:1553) mono 9.5px              -> `text-ink-faint`
  *
- * The plain card's surface was the one value with no token to map to, and it
- * is not close to one — it sits between `raised` and `line-strong`. It was
- * minted as `--vam-lifted`, with both theme values, rather than approximated.
+ * The plain card's surface was minted as `--vam-lifted`. What that token buys
+ * is exactly one value: the dark one, which the mockup measures directly at
+ * dc:1533 and which no existing token holds. It is NOT far from its
+ * neighbours — dark `raised` is four steps of 255 below it — and in light it
+ * is an exact duplicate of both `--vam-panel` and `--vam-canvas`, so in that
+ * theme it carries no information at all. It exists so the one measured dark
+ * value is written once, under a name, instead of being approximated by
+ * `raised` or copied as a hex.
  *
  * SUGGESTED is a fact about the agent's opinion. FOCUSED is a fact about where
- * your cursor is. They collide on the first card the moment the picker opens,
- * so they are drawn in different languages: suggested is the amber card and the
- * amber pill, focused is an achromatic ring the amber card wears too. Sharing a
- * treatment would make moving the cursor look like changing the recommendation.
+ * your cursor is, and they collide on the first card. So focus is not painted
+ * from state at all: the ring is a `focus-visible` outline, which cannot exist
+ * without the browser's own focus BY CONSTRUCTION. It therefore cannot be worn
+ * at rest by the suggested card, cannot be moved by a mouse click, and cannot
+ * drift out of step with where the keyboard actually is. Suggested stays the
+ * amber card and the amber pill; sharing a treatment would make moving the
+ * cursor look like changing the recommendation.
  *
  * ## Keyboard
  *
@@ -328,6 +345,13 @@ export const PLACEHOLDER_APPROVAL: ApprovalRequest = {
  * pick`. Digits are free in `keyboard/chords.ts`: `SINGLE` binds none of them
  * and `0` is only ever read after the `z` prefix, so nothing was taken.
  *
+ * The handler sits on the GROUP, not on each card, so the hint holds anywhere
+ * inside the picker — including the "type your own" button — rather than only
+ * once a card already has DOM focus. And because one keypress carries one
+ * digit, only nine options are reachable: the hint stops at nine and a badge
+ * past nine prints no number, so nothing on screen promises a key that does
+ * not exist. The placeholder has three; a real adapter may not.
+ *
  * The digit binding is scoped to this component rather than added to the chord
  * table because the global table's actions are dispatched from `Canvas.tsx`,
  * which this task must not edit. What the follow-up would be, exactly: add
@@ -335,7 +359,10 @@ export const PLACEHOLDER_APPROVAL: ApprovalRequest = {
  * `SINGLE`, and have `Canvas.tsx` route it to the same `onChoose` this
  * component already calls.
  */
-function ApprovalBox({
+/** The header label, so the group can point an accessible name at it. */
+const APPROVAL_LABEL_ID = 'vam-approval-label';
+
+export function ApprovalBox({
   request,
   age,
   onChoose,
@@ -347,9 +374,6 @@ function ApprovalBox({
   readonly onChoose: (option: ApprovalOption) => void;
   readonly onCompose: () => void;
 }) {
-  // Where the cursor is inside the picker. Component state, like `progressOpen`
-  // above it: nothing outside this pane has an opinion about it.
-  const [focused, setFocused] = useState(0);
   const { options } = request;
   const pickDigit = (key: string) => {
     if (!/^[1-9]$/.test(key)) return false;
@@ -362,7 +386,23 @@ function ApprovalBox({
   };
 
   return (
-    <div data-approval data-placeholder="approval-options" className="flex flex-col gap-[11px]">
+    // A <fieldset>, which IS a group, rather than a div wearing `role="group"`:
+    // one grouped question with a set of answers is what the element is for,
+    // and it carries the role without an attribute. The name comes from
+    // `aria-labelledby` rather than a <legend> because the label is the third
+    // thing in the header row, after the icon, not a heading above it.
+    // `tabIndex={-1}` so the digit handler catches from any descendant without
+    // adding a second Tab stop in front of the cards themselves.
+    <fieldset
+      data-approval
+      data-placeholder="approval-options"
+      aria-labelledby={APPROVAL_LABEL_ID}
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (pickDigit(event.key)) event.preventDefault();
+      }}
+      className="flex flex-col gap-[11px]"
+    >
       <div className="flex items-center gap-[7px]">
         <span
           role="img"
@@ -371,9 +411,19 @@ function ApprovalBox({
         >
           <CircleHelp size={12} strokeWidth={1.7} />
         </span>
-        <span className="min-w-0 truncate font-mono text-[9.5px] tracking-[0.1em] text-waiting uppercase">
-          {request.label}
-        </span>
+        {/* The gap this block stands in, named where a keyboard can read it:
+            `docs/ade-redesign.md` asks a placeholder to say what it is, and a
+            `title` says it to a mouse only. The trigger is a real <button>
+            for the same reason the MODE label below is one. */}
+        <Note text="no source vam reads returns a question with numbered options, so these three cards are a drawn layout, not a real request">
+          <button
+            type="button"
+            id={APPROVAL_LABEL_ID}
+            className="min-w-0 cursor-default truncate font-mono text-[9.5px] tracking-[0.1em] text-waiting uppercase"
+          >
+            {request.label}
+          </button>
+        </Note>
         <span className="flex-1" />
         <span className="flex-none font-mono text-[9.5px] text-ink-faint">waiting {age}</span>
       </div>
@@ -385,16 +435,15 @@ function ApprovalBox({
             type="button"
             data-approval-option={option.id}
             data-suggested={option.suggested ? 'true' : undefined}
-            data-focused={i === focused ? 'true' : undefined}
-            onFocus={() => setFocused(i)}
+            aria-current={option.suggested ? 'true' : undefined}
             onClick={() => onChoose(option)}
-            onKeyDown={(event) => {
-              if (pickDigit(event.key)) event.preventDefault();
-            }}
             className={[
-              'flex cursor-pointer items-start gap-[10px] rounded-[9px] border px-[11px] py-[10px] text-left',
+              // Dashed, the app's own vocabulary for "nothing real here" — the
+              // same one the canvas draws a step that has not happened in. It
+              // reads in both themes, which small amber capitals do not.
+              'flex cursor-pointer items-start gap-[10px] rounded-[9px] border border-dashed px-[11px] py-[10px] text-left',
               option.suggested ? 'border-waiting bg-waiting-wash' : 'border-line-loud bg-lifted',
-              i === focused ? 'outline-2 outline-line-loudest outline-offset-1' : '',
+              'focus-visible:outline-2 focus-visible:outline-line-loudest focus-visible:outline-offset-1',
             ].join(' ')}
           >
             <span
@@ -404,7 +453,10 @@ function ApprovalBox({
                 option.suggested ? 'bg-waiting-tint text-waiting' : 'bg-line-strong text-ink-dim',
               ].join(' ')}
             >
-              {i + 1}
+              {/* A tenth card has no key to print: one keypress is one digit,
+                  so a badge past nine would name a shortcut that does not
+                  exist. It says it has none instead. */}
+              {i < 9 ? i + 1 : '—'}
             </span>
             <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
               <span data-approval-title className="font-medium text-[12px] text-ink leading-[1.35]">
@@ -421,7 +473,13 @@ function ApprovalBox({
                 SUGGESTED
               </span>
             ) : (
-              <span className="flex-none font-mono text-[9.5px] text-ink-faint">↵</span>
+              <span
+                data-approval-enter
+                aria-hidden="true"
+                className="flex-none font-mono text-[9.5px] text-ink-faint"
+              >
+                ↵
+              </span>
             )}
           </button>
         ))}
@@ -441,10 +499,10 @@ function ApprovalBox({
           …or type your own instruction
         </button>
         <span className="flex-none font-mono text-[9.5px] text-ink-faint">
-          1–{options.length} to pick
+          1–{Math.min(options.length, 9)} to pick
         </span>
       </div>
-    </div>
+    </fieldset>
   );
 }
 
