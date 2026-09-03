@@ -190,7 +190,7 @@ function WaiverRow({
           type="button"
           disabled={!ready}
           onClick={() => onAnswer(finding.fingerprint, 'denied', note)}
-          className={`rounded-[var(--radius-sm)] border px-1.5 py-0.5 text-[10px] text-ink-dim enabled:hover:border-line-strong enabled:hover:text-ink disabled:opacity-40 ${
+          className={`rounded-[var(--radius-sm)] border px-1.5 py-0.5 text-[10px] text-ink-dim enabled:cursor-pointer enabled:hover:border-line-strong enabled:hover:text-ink disabled:opacity-40 ${
             selected('denied') ? 'border-running ring-1 ring-running' : 'border-line'
           }`}
         >
@@ -200,7 +200,7 @@ function WaiverRow({
           type="button"
           disabled={!ready}
           onClick={() => onAnswer(finding.fingerprint, 'granted', note)}
-          className={`rounded-[var(--radius-sm)] border border-waiting/50 px-1.5 py-0.5 text-[10px] text-waiting enabled:hover:bg-waiting/10 disabled:opacity-40 ${
+          className={`rounded-[var(--radius-sm)] border border-waiting/50 px-1.5 py-0.5 text-[10px] text-waiting enabled:cursor-pointer enabled:hover:bg-waiting/10 disabled:opacity-40 ${
             selected('granted') ? 'ring-1 ring-running' : ''
           }`}
         >
@@ -287,7 +287,7 @@ function LessonRow({
           type="button"
           disabled={busy}
           onClick={() => onAnswer(lesson.lessonId, 'reject', note)}
-          className={`rounded-[var(--radius-sm)] border px-1.5 py-0.5 text-[10px] text-ink-dim enabled:hover:border-line-strong enabled:hover:text-ink disabled:opacity-40 ${
+          className={`rounded-[var(--radius-sm)] border px-1.5 py-0.5 text-[10px] text-ink-dim enabled:cursor-pointer enabled:hover:border-line-strong enabled:hover:text-ink disabled:opacity-40 ${
             selected('reject') ? 'border-running ring-1 ring-running' : 'border-line'
           }`}
         >
@@ -297,7 +297,7 @@ function LessonRow({
           type="button"
           disabled={busy}
           onClick={() => onAnswer(lesson.lessonId, 'approve', note)}
-          className={`rounded-[var(--radius-sm)] border border-done/50 px-1.5 py-0.5 text-[10px] text-done enabled:hover:bg-done/10 disabled:opacity-40 ${
+          className={`rounded-[var(--radius-sm)] border border-done/50 px-1.5 py-0.5 text-[10px] text-done enabled:cursor-pointer enabled:hover:bg-done/10 disabled:opacity-40 ${
             selected('approve') ? 'ring-1 ring-running' : ''
           }`}
         >

@@ -274,7 +274,7 @@ export function DetailPanel(props: DetailPanelProps) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 select-text flex-col gap-3.5 overflow-y-auto px-3.5 py-3">
+      <div className="vam-fade-scroll flex min-h-0 flex-1 select-text flex-col gap-3.5 overflow-y-auto px-3.5 py-3">
         {decision === null ? (
           <p className="text-[11px] text-ink-faint">This session has no steps yet.</p>
         ) : (
@@ -338,14 +338,14 @@ export function DetailPanel(props: DetailPanelProps) {
                         <button
                           type="button"
                           onClick={() => onCopyCommand(command.id)}
-                          className="ml-auto rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-[10px] text-ink-faint hover:bg-raised hover:text-ink"
+                          className="ml-auto cursor-pointer rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-[10px] text-ink-faint hover:bg-raised hover:text-ink"
                         >
                           yy
                         </button>
                         <button
                           type="button"
                           onClick={() => onPickCommand(command.id)}
-                          className="rounded-[var(--radius-sm)] border border-line-strong px-1.5 py-0.5 text-[10px] text-ink-dim hover:text-ink"
+                          className="cursor-pointer rounded-[var(--radius-sm)] border border-line-strong px-1.5 py-0.5 text-[10px] text-ink-dim hover:text-ink"
                         >
                           run
                         </button>

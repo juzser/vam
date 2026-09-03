@@ -46,6 +46,17 @@ function entriesOf(sessions: readonly Session[]): SessionEntry[] {
   return sessions.map((session) => ({ project, session }));
 }
 
+/** Two projects, so "grouped by project" has something to be wrong about. */
+function twoProjects(): SessionEntry[] {
+  const alpha = makeProject({ id: 'p1', name: 'alpha' }, []);
+  const beta = makeProject({ id: 'p2', name: 'beta' }, []);
+  return [
+    { project: alpha, session: makeSession({ id: 'a1', title: 'alpha one' }) },
+    { project: alpha, session: makeSession({ id: 'a2', title: 'alpha two' }) },
+    { project: beta, session: makeSession({ id: 'b1', title: 'beta one' }) },
+  ];
+}
+
 function noop() {}
 
 function mount(entries: readonly SessionEntry[]) {
@@ -153,6 +164,66 @@ describe('SessionList placeholder row', () => {
     const { container: doneContainer } = mount(entriesOf([done]));
     const doneBar = doneContainer.querySelector('[data-session-row="s1"] span[style]');
     expect((doneBar as HTMLElement).style.width).toBe('100%');
+  });
+
+  /**
+   * Mockup 1a groups sessions into a CARD per project, not a flat list under a
+   * caption. The distinction is not cosmetic: a caption is something you have
+   * to read to know where a row belongs, and a card makes it structural. So
+   * the assertion is CONTAINMENT — each row inside its own project's card —
+   * rather than a class list, which a flat list could satisfy while still
+   * being flat.
+   */
+  it("nests each project's rows inside that project's own group card", () => {
+    const { container } = mount(twoProjects());
+
+    const groups = container.querySelectorAll('[data-project-group]');
+    expect(groups).toHaveLength(2);
+
+    const alpha = container.querySelector('[data-project-group="p1"]');
+    const beta = container.querySelector('[data-project-group="p2"]');
+    expect(alpha?.querySelectorAll('[data-session-row]')).toHaveLength(2);
+    expect(beta?.querySelectorAll('[data-session-row]')).toHaveLength(1);
+    // And not merely "two rows somewhere" — the RIGHT rows.
+    expect(alpha?.querySelector('[data-session-row="b1"]')).toBeNull();
+    expect(beta?.querySelector('[data-session-row="b1"]')).not.toBeNull();
+  });
+
+  it('puts every heading inside a group card, and exactly one per card', () => {
+    const { container } = mount(twoProjects());
+    const headings = [...container.querySelectorAll('[data-project-heading]')];
+    const groups = [...container.querySelectorAll('[data-project-group]')];
+
+    // Assert the corpus BEFORE looping over it. The first draft of this test
+    // only iterated the groups and counted headings, so against the old flat
+    // list it looped over zero elements and still counted two headings — it
+    // passed on exactly the code it was written to reject. A sweep has to
+    // prove it found something to sweep.
+    expect(groups.length).toBe(2);
+    expect(headings.length).toBe(2);
+
+    // The load-bearing claim: no heading is loose in the list.
+    expect(headings.every((h) => h.closest('[data-project-group]') !== null)).toBe(true);
+    for (const group of groups) {
+      expect(group.querySelectorAll('[data-project-heading]')).toHaveLength(1);
+    }
+  });
+
+  /**
+   * The mockup's title line ends at the title: status dot, icon chip, title at
+   * `flex:1`. vam had a live-agent count pinned right of it with `ml-auto`,
+   * standing in for a CC/CX badge that artboard 1a does not have either.
+   */
+  it('puts nothing after the session title', () => {
+    const { container } = mount(entriesOf([makeSession({ id: 's1', runningAgents: 2 })]));
+    const row = container.querySelector('[data-session-row="s1"]');
+    const title = screen.getByText('alpha-refactor');
+
+    // The old tag rendered `●2` for a session with agents running.
+    expect(row?.textContent).not.toContain('●');
+    // Nothing at all sits between the title and the end of its line.
+    const line = title.parentElement;
+    expect(line?.lastElementChild).toBe(title);
   });
 
   it('drops the status phrase and the N-steps count, drawing the placeholder row inside the session card', () => {

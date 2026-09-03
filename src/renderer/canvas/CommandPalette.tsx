@@ -58,7 +58,7 @@ export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
           placeholder="go to session…"
           className="w-full border-line border-b bg-transparent px-3 py-2 text-ink outline-none placeholder:text-ink-faint"
         />
-        <Command.List className="max-h-72 overflow-y-auto p-1">
+        <Command.List className="vam-fade-scroll max-h-72 overflow-y-auto p-1">
           <Command.Empty className="px-3 py-4 text-ink-faint">No match</Command.Empty>
 
           {waiting.length > 0 && (
