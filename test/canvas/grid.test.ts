@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { FOCUS_VIEWPORT_SHARE, focusPadding } from '../../src/renderer/canvas/Canvas.js';
 import {
   CELL,
   cellOrigin,
@@ -78,5 +79,36 @@ describe('fanPaths', () => {
     expect(result.spine).toBe('M265 145 V145');
     expect(result.trunk).toBe('M220 145 H265');
     expect(result.branches).toEqual(['M265 145 H330']);
+  });
+});
+
+/**
+ * The focused row's share of the canvas.
+ *
+ * The operator has set this target twice with different numbers and has said
+ * it will become a setting, so the SHARE is the value that means something and
+ * the padding is derived from it. That derivation is the thing worth pinning:
+ * a wrong inversion would be invisible on screen — the view would simply be
+ * framed a bit differently — and no other test would catch it.
+ */
+describe('focusPadding inverts ReactFlow fitView padding', () => {
+  it('round-trips every share back to itself', () => {
+    for (const share of [0.5, 0.6, 0.7, 0.8, 0.95]) {
+      const p = focusPadding(share);
+      // ReactFlow adds `p` on each side, so content occupies 1/(1 + 2p).
+      expect(1 / (1 + 2 * p), `share ${share}`).toBeCloseTo(share, 10);
+    }
+  });
+
+  it('is set to the asked-for 60 percent', () => {
+    expect(FOCUS_VIEWPORT_SHARE).toBe(0.6);
+    expect(focusPadding(FOCUS_VIEWPORT_SHARE)).toBeCloseTo(1 / 3, 10);
+  });
+
+  it('asks for more padding as the target share shrinks', () => {
+    // Monotonicity, so an inverted formula that happened to hit one value
+    // right cannot pass: a smaller share must always mean more room around it.
+    expect(focusPadding(0.5)).toBeGreaterThan(focusPadding(0.6));
+    expect(focusPadding(0.6)).toBeGreaterThan(focusPadding(0.7));
   });
 });

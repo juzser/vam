@@ -109,6 +109,28 @@ const JUMP_KEYS = 'asdfghjkl;qwertyuiop';
  */
 const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 0.8 } as const;
 
+/**
+ * How much of the canvas the focused session's row should occupy.
+ *
+ * The operator has asked for this twice with different numbers (70%, now 60%),
+ * and has said it will become a setting. So it is a named target rather than a
+ * padding value: `focusPadding` derives what ReactFlow actually wants, and a
+ * settings pane will one day write to this constant's runtime equivalent
+ * without anyone having to re-derive the formula.
+ */
+export const FOCUS_VIEWPORT_SHARE = 0.6;
+
+/**
+ * ReactFlow's `fitView` padding for a target share of the viewport.
+ *
+ * `padding` is a fraction added on each side of the fitted bounds, so the
+ * content ends up occupying `1 / (1 + 2p)`. Inverting that gives the padding
+ * for a share: p = (1/share - 1) / 2. At 0.6 that is 0.333.
+ */
+export function focusPadding(share: number): number {
+  return (1 / share - 1) / 2;
+}
+
 function jumpLabels(ids: readonly string[]): Map<string, string> {
   const labels = new Map<string, string>();
   ids.forEach((id, index) => {
@@ -443,16 +465,20 @@ function CanvasInner({
     if (focusRowNodeIds === null || focusRowNodeIds.length === 0) {
       return;
     }
-    // `padding` is a fraction added around the fitted bounds, so the row ends
-    // up occupying 1/(1 + 2p) of the viewport. The operator asked for 70%:
-    // 1/(1 + 2 * 0.21) = 0.704. Written as the derivation rather than as a
-    // tuned magic number, because the next person to change the target needs
-    // the formula, not this value.
+    // `padding` is derived, not tuned. It is a fraction added around the fitted
+    // bounds, so the row occupies 1/(1 + 2p) of the viewport — and the target
+    // is the thing worth naming, since it is what a settings pane will
+    // eventually write to. See FOCUS_VIEWPORT_SHARE above.
     //
-    // `maxZoom` is 1.6 rather than 1 for the same reason: a short row would
-    // otherwise stop scaling at 1 and sit well under 70%, which is the case
-    // the cap used to silently produce.
-    void fitView({ nodes: focusRowNodeIds, padding: 0.21, maxZoom: 1.6, duration: 220 });
+    // `maxZoom` is 1.6 rather than 1 because a short row would otherwise stop
+    // scaling at 1 and sit well under the target — the case the cap used to
+    // silently produce.
+    void fitView({
+      nodes: focusRowNodeIds,
+      padding: focusPadding(FOCUS_VIEWPORT_SHARE),
+      maxZoom: 1.6,
+      duration: 220,
+    });
   }, [focusRowNodeIds, fitView]);
 
   /**
