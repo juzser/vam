@@ -179,8 +179,11 @@ describe('the pane wears the mockup’s own background', () => {
 });
 
 describe('the composer is multiline, and honest about what its button does', () => {
+  // `composing`, because the default entry is WAITING and the option picker
+  // stands in place of the prompt box there until the box owns the keyboard.
+  // These tests are about the box itself, not about when it is drawn.
   it('is a textarea with a record button, and no i / I notes', () => {
-    draw();
+    draw({ composing: true });
     const box = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
     expect(box).not.toBeNull();
     expect(document.querySelector('input[aria-label="prompt to session"]')).toBeNull();
@@ -656,7 +659,9 @@ describe('the mode pills select, and what they select gets recorded', () => {
   });
 
   it('drops the caret that used to sit in front of the composer', () => {
-    draw({ draft: '' });
+    // `composing`: an empty draft on a waiting session draws the picker in
+    // place of the box, and the caret question is about the box.
+    draw({ draft: '', composing: true });
     const composer = q<HTMLElement>('[aria-label="prompt to session"]')?.parentElement;
     expect(composer).not.toBeNull();
     expect(composer?.textContent).not.toContain('\u276f');
@@ -889,17 +894,17 @@ describe('the composer says what the session’s source actually does', () => {
   };
 
   it('says send, not record, once the source delivers into a running agent', () => {
-    draw({ delivers: true });
+    draw({ delivers: true, composing: true });
     expect(claims()).toContain('send');
     expect(claims()).not.toContain('record');
   });
 
   it('keeps the recording wording when the source only records, and when nothing said', () => {
-    draw({ delivers: false });
+    draw({ delivers: false, composing: true });
     expect(claims()).toContain('record');
     expect(claims()).not.toContain('send');
     cleanup();
-    draw();
+    draw({ composing: true });
     expect(claims()).toContain('record');
     expect(claims()).not.toContain('send');
   });
