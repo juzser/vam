@@ -227,10 +227,19 @@ function CanvasInner({
     [factoryModel, prefs.icons, prefs.projectIcons],
   );
 
-  const layout = useMemo(() => layoutCanvas(model), [model]);
   const allEntries = useMemo(() => orderedSessions(model), [model]);
 
-  const [focusedId, setFocusedId] = useState<string | null>(layout.nodes[0]?.id ?? null);
+  /**
+   * `null` until there is a layout to point at.
+   *
+   * This used to seed itself from `layout.nodes[0]`, which was only possible
+   * while the layout came straight from the model. It is now built from the
+   * FILTERED model, and that cannot be computed above the filter state
+   * declared below. Nothing is lost: the "land focus on something real" effect
+   * already had to cover the live case, where the first model arrives after
+   * mount and the first layout is empty whatever this says.
+   */
+  const [focusedId, setFocusedId] = useState<string | null>(null);
   const [jumping, setJumping] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [query, setQuery] = useState('');
