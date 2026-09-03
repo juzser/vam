@@ -36,14 +36,6 @@ const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   failed: 'bg-failed',
 };
 
-/** The verb pill's border and icon/text colour — its status channel. */
-const STATUS_PILL: Readonly<Record<SessionStatus, string>> = {
-  running: 'border-running text-running',
-  waiting: 'border-waiting text-waiting',
-  done: 'border-done text-done',
-  failed: 'border-failed text-failed',
-};
-
 export type SessionListProps = {
   readonly entries: readonly SessionEntry[];
   readonly focusedSessionId: string | null;
@@ -102,31 +94,6 @@ export type SessionListProps = {
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
   readonly resizeHandle: ReactNode;
 };
-
-function progressOf(entry: SessionEntry): number {
-  const { session } = entry;
-  if (session.status === 'done') {
-    return 1;
-  }
-  if (session.decisions.length === 0) {
-    return 0;
-  }
-  return session.decisions.filter((d) => d.output !== null).length / session.decisions.length;
-}
-
-/**
- * The step-verb pill's icon. Decorative filler for a placeholder pill that
- * already says out loud it has no data (`step-verb`, dash label) — no lucide
- * glyph carries "generic unlabelled step", so substituting one would dress a
- * known-empty slot in false precision. Kept bespoke.
- */
-function VerbIcon() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M8 2l5 12H3z" />
-    </svg>
-  );
-}
 
 export function SessionList(props: SessionListProps) {
   const {
@@ -477,7 +444,6 @@ export function SessionList(props: SessionListProps) {
                 const { session } = entry;
                 const isFocused = session.id === focusedSessionId;
                 const needsYou = session.status === 'waiting';
-                const pct = Math.round(progressOf(entry) * 100);
 
                 return (
                   <div key={session.id}>
@@ -546,8 +512,14 @@ export function SessionList(props: SessionListProps) {
                             </span>
                           </span>
 
+                          {/* Branch on the left, time on the right, and nothing
+                              between them. The step-verb pill and the progress
+                              bar that used to sit here were removed at the
+                              operator's request: both drew a per-status colour
+                              channel over data no source supplies, so a row at
+                              rest read as a dashboard reporting nothing. */}
                           <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
-                            <span className="flex min-w-0 flex-none items-center gap-1">
+                            <span className="flex min-w-0 flex-1 items-center gap-1">
                               <GitBranch size={10} strokeWidth={1.6} />
                               <span
                                 data-placeholder="worktree"
@@ -557,31 +529,17 @@ export function SessionList(props: SessionListProps) {
                                 —
                               </span>
                             </span>
-                            <span className="flex-1" />
                             <span
-                              data-placeholder="step-verb"
-                              title={`black-smith reports no event kind on a timeline entry to derive a step verb from — this card's status is ${session.status}`}
-                              className={[
-                                'flex flex-none items-center gap-1 rounded-[999px] border pt-px pr-1.5 pb-px pl-1',
-                                STATUS_PILL[session.status],
-                              ].join(' ')}
-                            >
-                              <VerbIcon />—
-                            </span>
-                            <span
-                              data-placeholder="step-duration"
-                              title="black-smith times a session rather than a step"
+                              data-session-age
+                              title={
+                                session.age === null
+                                  ? 'this source cannot say when the session last did anything'
+                                  : `last activity ${session.age} ago`
+                              }
                               className="flex-none"
                             >
-                              —
+                              {session.age ?? '—'}
                             </span>
-                          </span>
-
-                          <span className="block h-0.5 overflow-hidden rounded-sm bg-line">
-                            <span
-                              className={`block h-full ${STATUS_DOT[session.status]}`}
-                              style={{ width: `${pct}%` }}
-                            />
                           </span>
                         </button>
 
