@@ -27,6 +27,7 @@
  * session list. The other three are drawn, disabled, and say why — see the todo.
  */
 
+import { ArrowDownLeft, ArrowUpRight, GitCommitVertical } from 'lucide-react';
 import { type ReactNode, useEffect, useRef } from 'react';
 import type { Decision } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
@@ -114,10 +115,36 @@ function TabBar({ runningAgents }: { readonly runningAgents: number }) {
 }
 
 /** A section rule: `IN ────────── you · 12m`. The mockup's own divider. */
-function Rule({ label, meta }: { readonly label: string; readonly meta: string }) {
+/**
+ * A section rule: an icon, a hairline, and the section's own metadata.
+ *
+ * The icon replaced the words IN / OUT / PROGRESS. The mockup has no such
+ * block at all — input and output are vam's own construct, because a
+ * black-smith decision has both and the ADE design never modelled one — so
+ * this follows the mockup's IDIOM rather than copying a specific glyph: it
+ * labels small repeated things with an icon, not a word, and reserves letter-
+ * spaced capitals for state (NEEDS YOU, RUNNING, DONE).
+ *
+ * Direction is the whole meaning here, so the two that carry it are arrows and
+ * they oppose: in arrives (down-left), out leaves (up-right). `aria-label`
+ * carries the word that was removed, and `role="img"` is what makes that
+ * label announced at all — a bare <span> has no implicit role and would drop
+ * it silently, which this codebase has already shipped once.
+ */
+function Rule({
+  label,
+  meta,
+  icon,
+}: {
+  readonly label: string;
+  readonly meta: string;
+  readonly icon: ReactNode;
+}) {
   return (
     <div className="flex items-center gap-[7px]">
-      <span className="font-mono text-[9.5px] tracking-[0.12em] text-ink-faint">{label}</span>
+      <span role="img" aria-label={label} className="flex flex-none text-ink-faint">
+        {icon}
+      </span>
       <span className="h-px flex-1 bg-line" />
       <span className="font-mono text-[9.5px] text-ink-faint">{meta}</span>
     </div>
@@ -280,7 +307,11 @@ export function DetailPanel(props: DetailPanelProps) {
         ) : (
           <>
             <section data-detail-block="in" className="flex flex-col gap-1.5">
-              <Rule label="IN" meta={`you · ${entry?.session.age ?? '—'}`} />
+              <Rule
+                label="in"
+                meta={`you · ${entry?.session.age ?? '—'}`}
+                icon={<ArrowDownLeft size={12} strokeWidth={1.7} />}
+              />
               <div className="rounded-[9px] border border-line bg-panel px-3 py-2.5">
                 <p className="whitespace-pre-wrap break-words text-[12px] text-ink-dim leading-[1.55]">
                   {decision.input}
@@ -292,7 +323,11 @@ export function DetailPanel(props: DetailPanelProps) {
                 is the turn, so this lists the session's turns — the same shape
                 answering the same question, off data that exists. */}
             <section className="flex flex-col gap-1.5">
-              <Rule label="PROGRESS" meta={`${total} turns`} />
+              <Rule
+                label="progress"
+                meta={`${total} turns`}
+                icon={<GitCommitVertical size={12} strokeWidth={1.7} />}
+              />
               <ul className="flex flex-col gap-1.5 pl-0.5 font-mono text-[10px] text-ink-faint">
                 {[...(entry?.session.decisions ?? [])].reverse().map((d) => (
                   <li key={d.id} className="flex items-center gap-2">
@@ -308,7 +343,11 @@ export function DetailPanel(props: DetailPanelProps) {
             </section>
 
             <section data-detail-block="out" className="flex min-h-0 flex-col gap-1.5">
-              <Rule label="OUT" meta={entry?.session.activity ?? '—'} />
+              <Rule
+                label="out"
+                meta={entry?.session.activity ?? '—'}
+                icon={<ArrowUpRight size={12} strokeWidth={1.7} />}
+              />
               {decision.output === null ? (
                 <p className="text-[11.5px] text-ink-faint">
                   — the session is still running, no answer yet —
