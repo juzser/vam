@@ -15,7 +15,7 @@
  * mouse and by key, closable with Escape, and actually narrowing the list.
  */
 
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
@@ -143,5 +143,64 @@ describe('the filter popover beside the sidebar search box', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(menu()).toBeNull();
     expect(rows()).toHaveLength(2);
+  });
+});
+
+/**
+ * Dismissing the popover by pressing outside it.
+ *
+ * `pointerdown`, not `click`: a click only lands on release, so a
+ * press-drag-release starting outside and ending inside would never dismiss,
+ * leaving the menu open under the very pointer trying to close it.
+ */
+describe('the filter popover closes on a press outside it', () => {
+  function pressOn(target: Element | Document) {
+    act(() => {
+      target.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true }));
+    });
+  }
+
+  it('closes when the press lands anywhere else on the page', () => {
+    render(<Canvas model={MODEL} />);
+    act(() => {
+      trigger()?.click();
+    });
+    expect(menu()).not.toBeNull();
+
+    pressOn(document.body);
+    expect(menu()).toBeNull();
+  });
+
+  it('stays open when the press lands inside the popover', () => {
+    // Otherwise the first click on any option would dismiss the thing being
+    // clicked, and no option could ever be chosen with a mouse.
+    render(<Canvas model={MODEL} />);
+    act(() => {
+      trigger()?.click();
+    });
+    const inside = menu()?.querySelector('button');
+    expect(inside, 'popover has no button to press').not.toBeNull();
+
+    pressOn(inside as Element);
+    expect(menu()).not.toBeNull();
+  });
+
+  it('lets the toggle button close it, rather than closing and reopening', () => {
+    // The toggle is excluded from the outside-press rule on purpose: without
+    // that, pressing it while open runs BOTH the dismissal and the button's
+    // own handler, which closes and reopens in a single press and reads as a
+    // dead button.
+    render(<Canvas model={MODEL} />);
+    act(() => {
+      trigger()?.click();
+    });
+    expect(menu()).not.toBeNull();
+
+    const control = trigger() as HTMLElement;
+    pressOn(control);
+    act(() => {
+      control.click();
+    });
+    expect(menu()).toBeNull();
   });
 });

@@ -16,6 +16,7 @@
  */
 
 import type {
+  CanvasBudget,
   CanvasModel,
   Decision,
   Project,
@@ -336,5 +337,33 @@ export function toCanvasModel(
     sessions,
   }));
 
-  return { projects };
+  return { projects, budget: toBudget(overview) };
+}
+
+/**
+ * The factory's token spend, or `null` when this payload does not carry it.
+ *
+ * `null` rather than zeros. The status bar showed a hardcoded placeholder for
+ * as long as the adapter ignored these fields, and the fix must not replace
+ * one lie with a quieter one: a payload without budget data has to be
+ * distinguishable from a factory that has spent nothing.
+ *
+ * `usedPct` is the server's own figure and is NOT recomputed from the totals.
+ * They can disagree — the server prices against per-epic caps and the sum of
+ * those caps is not the account's cap — and the server is the one that owns
+ * the definition. Measured live: 324%, i.e. it exceeds 100 routinely and
+ * nothing here may clamp it.
+ */
+function toBudget(overview: ApiOverview): CanvasBudget | null {
+  const rows = overview.tokensByEpic;
+  if (rows === undefined || overview.budgetUsedPct === undefined) {
+    return null;
+  }
+  let tokensSpent = 0;
+  let tokensBudget = 0;
+  for (const row of rows) {
+    tokensSpent += row.tokensSpent;
+    tokensBudget += row.tokensBudget;
+  }
+  return { tokensSpent, tokensBudget, usedPct: overview.budgetUsedPct };
 }

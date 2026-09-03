@@ -31,10 +31,25 @@ export type ApiRunningSession = {
   readonly projects: readonly string[];
 };
 
+/** `queries.ts` → `TokensByEpic`. One row per epic the factory has budgeted. */
+export type ApiEpicTokens = {
+  readonly epicId: string;
+  readonly tokensSpent: number;
+  readonly tokensBudget: number;
+};
+
 /** `queries.ts` → `OverviewResult`, narrowed to what the canvas needs. */
 export type ApiOverview = {
   readonly runningSessions: readonly ApiRunningSession[];
   readonly alerts: { readonly escalations: number; readonly pendingWaivers: number };
+  /**
+   * Both optional, and read defensively: the status bar showed a placeholder
+   * for these for as long as the adapter ignored them, and a source that does
+   * not carry them at all (a local transcript reader has no budget) must not
+   * be made to look like one that does.
+   */
+  readonly tokensByEpic?: readonly ApiEpicTokens[];
+  readonly budgetUsedPct?: number;
 };
 
 /** `queries.ts` → `TimelineEntry`. One row per event on a session's log. */

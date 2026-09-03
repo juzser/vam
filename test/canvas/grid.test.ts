@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { FOCUS_VIEWPORT_SHARE, focusPadding } from '../../src/renderer/canvas/Canvas.js';
+import {
+  compactTokens,
+  FOCUS_VIEWPORT_SHARE,
+  focusPadding,
+} from '../../src/renderer/canvas/Canvas.js';
 import {
   CELL,
   cellOrigin,
@@ -110,5 +114,38 @@ describe('focusPadding inverts ReactFlow fitView padding', () => {
     // right cannot pass: a smaller share must always mean more room around it.
     expect(focusPadding(0.5)).toBeGreaterThan(focusPadding(0.6));
     expect(focusPadding(0.6)).toBeGreaterThan(focusPadding(0.7));
+  });
+});
+
+/**
+ * The status bar's token cell.
+ *
+ * It rendered a hardcoded `today — · — / — cap` for as long as the adapter
+ * ignored the two fields that carry the numbers. The fix must not swap one
+ * untrue caption for a quieter one, so two things are pinned here: the
+ * formatter's output width, and the fact that a payload with no budget stays
+ * distinguishable from a factory that has spent nothing.
+ */
+describe('compactTokens keeps the status bar cell narrow', () => {
+  it('abbreviates thousands and millions', () => {
+    expect(compactTokens(578_346)).toBe('578k');
+    expect(compactTokens(4_200_000)).toBe('4.2M');
+    expect(compactTokens(999)).toBe('999');
+  });
+
+  it('switches unit exactly at the boundaries, not near them', () => {
+    expect(compactTokens(999)).toBe('999');
+    expect(compactTokens(1_000)).toBe('1k');
+    expect(compactTokens(999_999)).toBe('1000k');
+    expect(compactTokens(1_000_000)).toBe('1.0M');
+  });
+
+  it('never returns a localised suffix', () => {
+    // `Intl.NumberFormat`'s compact notation localises the suffix, which makes
+    // the cell's width depend on the viewer's locale in a bar that has one
+    // line and seven cells. This formatter is deliberately not that.
+    for (const n of [1_500, 2_400_000, 12, 0]) {
+      expect(compactTokens(n)).toMatch(/^[0-9.]+[kM]?$/);
+    }
   });
 });

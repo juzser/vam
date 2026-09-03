@@ -197,6 +197,21 @@ export type Project = {
 };
 
 /** Everything the canvas draws in one frame. */
+/**
+ * Token spend against budget, when the source has such a thing.
+ *
+ * Optional on the model on purpose: a budget is a property of the FACTORY,
+ * not of sessions. A source reading local transcripts has no budget and must
+ * be able to say so by omission rather than by inventing a zero.
+ */
+export type CanvasBudget = {
+  readonly tokensSpent: number;
+  readonly tokensBudget: number;
+  /** The factory's own figure, not recomputed here — it can exceed 100. */
+  readonly usedPct: number;
+};
+
 export type CanvasModel = {
   readonly projects: readonly Project[];
+  readonly budget?: CanvasBudget | null;
 };

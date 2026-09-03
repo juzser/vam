@@ -118,6 +118,24 @@ const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 0.8 } as const;
  * settings pane will one day write to this constant's runtime equivalent
  * without anyone having to re-derive the formula.
  */
+/**
+ * Token counts at a glance: `578k`, `4.2M`.
+ *
+ * The status bar has one line and this cell shares it with six others, so the
+ * digits have to give way before the layout does. Not `Intl.NumberFormat`'s
+ * compact notation, which localises the suffix — a status bar that says `4,2 Mn`
+ * in one locale and `4.2M` in another has a cell whose width nobody can plan.
+ */
+export function compactTokens(n: number): string {
+  if (n >= 1_000_000) {
+    return `${(n / 1_000_000).toFixed(1)}M`;
+  }
+  if (n >= 1_000) {
+    return `${Math.round(n / 1_000)}k`;
+  }
+  return String(n);
+}
+
 export const FOCUS_VIEWPORT_SHARE = 0.6;
 
 /**
@@ -1551,14 +1569,26 @@ function CanvasInner({
         {status !== null && <span className="truncate text-ink-dim">{status}</span>}
 
         <span className="flex-1" />
-        {/* The mockup spends its right end on a token and spend budget for the
-            day. `/api/overview` carries both (`tokensByEpic`, `budgetUsedPct`)
-            and vam's adapter does not read them yet — so the slot is here,
-            saying what it is waiting for rather than showing a number nobody
-            measured. See the todo. */}
-        <span data-budget className="text-ink-ghost">
-          today — · — / — cap
-        </span>
+        {/* The mockup spends its right end on token spend against budget.
+            It says `today`, and this does not: `/api/overview` carries a
+            cumulative `tokensByEpic` and no daily bucket, so a cell labelled
+            "today" would be a caption the number cannot support.
+            A source with no budget at all renders the em-dashes rather than
+            zeros — a factory that has spent nothing must stay distinguishable
+            from a source that has no such concept. */}
+        {model.budget === null || model.budget === undefined ? (
+          <span data-budget className="text-ink-ghost">
+            — / — cap
+          </span>
+        ) : (
+          <span
+            data-budget
+            className={model.budget.usedPct > 100 ? 'text-waiting' : 'text-ink-ghost'}
+          >
+            {compactTokens(model.budget.tokensSpent)} / {compactTokens(model.budget.tokensBudget)}{' '}
+            cap · {Math.round(model.budget.usedPct)}%
+          </span>
+        )}
         <span className="h-3 w-px bg-line" />
         <span>hjkl f / gt i yy ^K</span>
       </footer>
