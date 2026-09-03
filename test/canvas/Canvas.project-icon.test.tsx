@@ -120,7 +120,11 @@ describe('the project heading icon picker', () => {
     });
     expect(screen.getByText(/on this machine/)).toBeTruthy();
     expect(iconPicker()).toBeNull();
-    expect(projectIcon('p1')?.textContent).toBe('·');
+    // Cleared means the placeholder is back, not that the slot went blank —
+    // an empty `textContent` alone would pass for an icon that failed to
+    // render at all.
+    expect(projectIcon('p1')?.textContent).toBe('');
+    expect(projectIcon('p1')?.querySelector('[data-project-icon-placeholder]')).not.toBeNull();
     const stored = JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}');
     expect(stored.projectIcons).toEqual({});
   });

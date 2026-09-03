@@ -20,7 +20,7 @@
  * floats the command palette; the row only draws what came back.
  */
 
-import { Filter, GitBranch, Plus, Search, Settings, Sun } from 'lucide-react';
+import { Filter, GitBranch, Monitor, Plus, Search, Settings, Sun } from 'lucide-react';
 import { type ReactNode, useEffect, useRef } from 'react';
 import type { Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
@@ -437,7 +437,15 @@ export function SessionList(props: SessionListProps) {
                   title="change project icon"
                   className="flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-[11px] leading-none text-ink-faint hover:text-ink-dim"
                 >
-                  {group.project.icon ?? '·'}
+                  {group.project.icon ?? (
+                    /* A monitor, not a middot. The glyph has to read as "this
+                       is a machine you can name" — the middot read as a bullet
+                       and gave a clickable control no affordance at all. It is
+                       a placeholder in the literal sense: the picker replaces
+                       it with whatever emoji you choose, and choosing nothing
+                       leaves something that still looks deliberate. */
+                    <Monitor data-project-icon-placeholder size={11} strokeWidth={1.7} />
+                  )}
                 </button>
                 <span className="truncate font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
                   {group.project.name}
