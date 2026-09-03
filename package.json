@@ -29,6 +29,7 @@
     "test:app": "vitest run --config vitest.app.config.ts"
   },
   "dependencies": {
+    "@radix-ui/react-tooltip": "^1.2.16",
     "@xyflow/react": "^12.11.5",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
