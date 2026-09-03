@@ -1363,10 +1363,22 @@ function CanvasInner({
                 pannable
                 zoomable
                 ariaLabel="canvas minimap"
-                maskColor="transparent"
-                maskStrokeColor="var(--color-ink)"
-                maskStrokeWidth={1}
-                nodeStrokeWidth={0}
+                // The spotlight is a DIMMED OUTSIDE, not an outlined viewport.
+                // An outline draws a rectangle around the visible area, and
+                // when that area is wider than the content — the normal case —
+                // its top and bottom edges fall outside the map and only the
+                // two vertical edges survive, reading as two bright rules down
+                // the sides rather than as a spotlight. Masking outside instead
+                // says the same thing with no lines at all, and degrades
+                // correctly: when everything is visible, nothing is dimmed.
+                maskColor="color-mix(in srgb, var(--color-canvas) 66%, transparent)"
+                maskStrokeWidth={0}
+                // `nodeStrokeWidth` is in FLOW units and is drawn around the
+                // chip, so it is also the only lever that makes a chip bigger
+                // than the node it stands for. A session card is 220 wide, so
+                // 40 is a visible fattening without merging neighbours.
+                nodeStrokeWidth={40}
+                nodeStrokeColor={minimapChipColor}
                 nodeBorderRadius={3}
                 style={{ width: 176, height: 56 }}
                 className="!bottom-3 !right-3 !m-0 !rounded-[8px] !border !border-line !bg-sunken"
