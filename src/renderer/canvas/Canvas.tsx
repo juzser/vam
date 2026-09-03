@@ -37,7 +37,7 @@ import { Bell, Maximize } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SmithApiError } from '../adapter/client.js';
 import { useReviewQueue } from '../adapter/useReviewQueue.js';
-import type { CanvasModel, Decision, SessionStatus } from '../domain/model.js';
+import type { CanvasModel, Decision, SessionStatus, SourceId } from '../domain/model.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
@@ -107,6 +107,25 @@ function jumpLabels(ids: readonly string[]): Map<string, string> {
   });
   return labels;
 }
+
+/**
+ * What the icon picker is aiming at.
+ *
+ * The SOURCE is captured when the picker opens, not re-derived when it
+ * closes. Re-deriving it meant `allEntries.find(e => e.session.id === id)`,
+ * a lookup by session id ACROSS EVERY SOURCE — the exact ambiguity this
+ * epic re-keyed storage to remove. With two sources holding a session
+ * `D-257`, `.find` returns whichever sorts first, so the glyph could land in
+ * the wrong source's bucket and appear on the other session. The title is
+ * carried for the same reason: it was a second lookup with the same flaw,
+ * and it also cannot go stale if the entry disappears while the picker is
+ * open.
+ */
+type IconTarget = {
+  readonly source: SourceId;
+  readonly sessionId: string;
+  readonly title: string;
+};
 
 function CanvasInner({
   model: factoryModel,
@@ -203,7 +222,7 @@ function CanvasInner({
   const [actionIndex, setActionIndex] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
-  const [pickingIconFor, setPickingIconFor] = useState<string | null>(null);
+  const [pickingIconFor, setPickingIconFor] = useState<IconTarget | null>(null);
   const [filtering, setFiltering] = useState(false);
   /**
    * The mockup's pill row: All / Running / Needs you / Done.
@@ -765,7 +784,15 @@ function CanvasInner({
             return;
           }
           setPickingIconFor((current) =>
-            current === focusedEntry.session.id ? null : focusedEntry.session.id,
+            current !== null &&
+            current.sessionId === focusedEntry.session.id &&
+            current.source === focusedEntry.project.source
+              ? null
+              : {
+                  source: focusedEntry.project.source,
+                  sessionId: focusedEntry.session.id,
+                  title: focusedEntry.session.title,
+                },
           );
           return;
         case 'close':
@@ -1189,19 +1216,14 @@ function CanvasInner({
 
       {pickingIconFor !== null && (
         <IconPicker
-          title={
-            allEntries.find((e) => e.session.id === pickingIconFor)?.session.title ?? pickingIconFor
-          }
+          title={pickingIconFor.title}
           onPick={(icon) => {
-            // The session's own project carries which source it came from
-            // (AC-1: session ids repeat across sources) — 'black-smith' here
-            // is only the fallback for a session that vanished from the
-            // model between opening the picker and picking, never the
-            // resolved attribution for a live entry.
-            const pickedSource =
-              allEntries.find((e) => e.session.id === pickingIconFor)?.project.source ??
-              'black-smith';
-            savePrefs(setIcon(prefs, pickedSource, pickingIconFor, icon, new Date()));
+            // Both the source and the session come from the target captured
+            // when the picker opened, so there is nothing to look up and
+            // nothing to guess: AC-1's collision cannot reach this path.
+            savePrefs(
+              setIcon(prefs, pickingIconFor.source, pickingIconFor.sessionId, icon, new Date()),
+            );
             setStatus(
               icon === ''
                 ? 'icon cleared — kept on this machine, never in the event log'

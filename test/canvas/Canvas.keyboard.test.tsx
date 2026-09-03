@@ -665,6 +665,80 @@ describe('renaming, icons and closing', () => {
     expect(JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}').icons).toEqual({});
   });
 
+  /**
+   * The picker aims at a session in a SOURCE, and it must still know which one
+   * after the model underneath it has moved on.
+   *
+   * A model refresh between opening the picker and picking is the one input
+   * that separates carrying the target from re-deriving it. Re-deriving meant
+   * `allEntries.find(e => e.session.id === id)?.project.source ?? 'black-smith'`
+   * — and once the entry is gone that `??` fires, so a pick aimed at an ORCA
+   * session silently rewrote the black-smith bucket instead. `b1` exists under
+   * both sources here, so the wrong bucket is a real entry rather than a
+   * harmless no-op, which is what makes the two directions distinguishable at
+   * all.
+   *
+   * This is deliberately NOT written as "two sources share a session id, focus
+   * the second one". That test cannot be written today: `layout.ts` keys every
+   * canvas node on `session.id` alone (`infoNodeId(session.id)`, :237) and
+   * `focusedEntry` is `layout.nodes.find(n => n.id === focusedId)` (Canvas.tsx
+   * :243), so of two sessions sharing an id the second has no reachable node —
+   * it cannot be focused, so it cannot be picked for. That collision is one
+   * layer above the storage keys AC-1 re-keyed, and it is filed rather than
+   * quietly fixed here.
+   */
+  const BOTH_SOURCES_HOLD_B1 = () =>
+    localStorage.setItem(
+      'vam.prefs.v1',
+      JSON.stringify({
+        icons: {
+          'black-smith': { b1: { icon: '🛠', at: new Date().toISOString() } },
+          orca: { b1: { icon: '🐋', at: new Date().toISOString() } },
+        },
+      }),
+    );
+
+  /** MODEL with beta emptied — b1 gone, everything else identical. */
+  const WITHOUT_B1: CanvasModel = {
+    ...MODEL,
+    projects: MODEL.projects.map((p) => (p.source === 'orca' ? { ...p, sessions: [] } : p)),
+  };
+
+  it("keeps aiming at orca's b1 after the model drops it mid-pick", () => {
+    BOTH_SOURCES_HOLD_B1();
+    const { rerender } = render(<Canvas model={MODEL} />);
+    press('j'); // beta/b1 — the orca one
+    expect(focused()).toBe('beta/b1');
+    press('s');
+    // The refresh that used to lose the source.
+    act(() => rerender(<Canvas model={WITHOUT_B1} />));
+    expect(iconPicker()).toBeTruthy();
+    act(() => {
+      screen.getByText('clear icon').click();
+    });
+    const stored = JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}');
+    expect(stored.icons).toEqual({
+      'black-smith': { b1: { icon: '🛠', at: expect.any(String) } },
+    });
+  });
+
+  it('names the session it is picking for even after the entry is gone', () => {
+    // The title came from the same lookup and fell back to the raw session id.
+    const titled: CanvasModel = {
+      ...MODEL,
+      projects: MODEL.projects.map((p) =>
+        p.source === 'orca'
+          ? { ...p, sessions: p.sessions.map((x) => ({ ...x, title: 'beta work' })) }
+          : p,
+      ),
+    };
+    const { rerender } = render(<Canvas model={titled} />);
+    press('j');
+    press('s');
+    act(() => rerender(<Canvas model={WITHOUT_B1} />));
+    expect(iconPicker()?.textContent).toContain('beta work');
+  });
+
   it('gr does nothing — the chord grammar drops an unrecognised second key silently', () => {
     // `g` alone opens a chord; an unbound follower must abandon it without
     // touching storage or announcing anything on the status bar.
