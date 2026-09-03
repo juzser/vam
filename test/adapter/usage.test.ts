@@ -44,7 +44,12 @@ const REAL_BODY = {
       is_active: true,
     },
   ],
-  spend: { used: { amount_minor: 0, currency: 'USD', exponent: 2 }, percent: 0, severity: 'normal', enabled: false },
+  spend: {
+    used: { amount_minor: 0, currency: 'USD', exponent: 2 },
+    percent: 0,
+    severity: 'normal',
+    enabled: false,
+  },
   member_dashboard_available: false,
 };
 

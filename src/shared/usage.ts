@@ -140,7 +140,11 @@ export function describeUsage(snapshot: UsageSnapshot, now: Date): UsageDisplay 
   }
   const observedAt = new Date(snapshot.observedAt).getTime();
   if (Number.isNaN(observedAt) || now.getTime() - observedAt > STALE_AFTER_MS) {
-    return { text: '—', reason: 'last reading is stale — no fresh data received', highUsage: false };
+    return {
+      text: '—',
+      reason: 'last reading is stale — no fresh data received',
+      highUsage: false,
+    };
   }
   const { fiveHour, sevenDay } = snapshot.windows;
   return {

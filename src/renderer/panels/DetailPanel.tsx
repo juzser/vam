@@ -59,7 +59,6 @@ import { Note } from './Note.js';
 import type { ReviewQueueProps } from './ReviewQueue.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 
-
 /** The three things this pane needs to know about a file it was handed. */
 export type AttachedFile = {
   readonly name: string;
