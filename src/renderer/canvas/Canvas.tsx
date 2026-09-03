@@ -988,6 +988,11 @@ function CanvasInner({
           onAdd={() =>
             setStatus('sessions are created from the CLI — smith event append session-start')
           }
+          onAddInProject={(project) =>
+            setStatus(
+              `sessions are created from the CLI — smith event append session-start (${project.name})`,
+            )
+          }
           onSettings={() => setStatus('settings not built yet')}
           width={sidebarWidth}
           resizeHandle={

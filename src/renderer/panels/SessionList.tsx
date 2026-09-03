@@ -62,6 +62,12 @@ export type SessionListProps = {
   readonly onPick: (sessionId: string) => void;
   readonly onClose: (sessionId: string) => void;
   readonly onAdd: () => void;
+  /**
+   * The `+` in a project's heading. Separate from `onAdd` because it can say
+   * WHICH project the click was about, and the answer differs per project the
+   * moment there is a route to create a session in one.
+   */
+  readonly onAddInProject: (project: Project) => void;
   readonly onSettings: () => void;
   readonly theme: Theme;
   readonly onToggleTheme: () => void;
@@ -115,6 +121,7 @@ export function SessionList(props: SessionListProps) {
     onPick,
     onClose,
     onAdd,
+    onAddInProject,
     onSettings,
     theme,
     onToggleTheme,
@@ -224,17 +231,25 @@ export function SessionList(props: SessionListProps) {
               </span>
               <span className="font-mono text-[9.5px] text-ink-faint">{group.items.length}</span>
               <span className="flex-1" />
-              {/* black-smith makes sessions from the CLI; there is no route
-                  to open one in a named project. The affordance stays, says
-                  why, and refuses. */}
-              <span
+              {/* black-smith makes sessions from the CLI, so this cannot yet
+                  create one. It is still a BUTTON, not an inert span: the
+                  full-width "New session" control below is in exactly the same
+                  position — it cannot create a session either — and it is
+                  clickable, takes a pointer, and answers on the status bar.
+                  Two controls that do the same thing should not look like
+                  different kinds of thing. Refusing on click and saying why is
+                  honest; refusing by being unclickable and unstyled just reads
+                  as broken. */}
+              <button
+                type="button"
                 data-placeholder="new-session-in-project"
-                title="Sessions are created from the CLI — see the todo"
-                aria-hidden="true"
-                className="flex h-[19px] w-[19px] items-center justify-center rounded-[5px] border border-line-strong text-ink-ghost"
+                onClick={() => onAddInProject(group.project)}
+                title={`Sessions are created from the CLI — see the todo`}
+                aria-label={`new session in ${group.project.name}`}
+                className="flex h-[19px] w-[19px] cursor-pointer items-center justify-center rounded-[5px] border border-line-strong text-ink-ghost hover:border-ink-faint hover:text-ink-dim"
               >
                 <Plus size={13} strokeWidth={1.7} />
-              </span>
+              </button>
             </div>
 
             {group.items.map((entry) => {
