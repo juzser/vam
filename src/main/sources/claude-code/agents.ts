@@ -21,10 +21,10 @@ export type LiveAgent = {
   /**
    * The row identity, and deliberately NOT the session id.
    *
-   * Two processes can resume the SAME session: measured, on this machine,
-   * `413e764a...` was listed twice with different pids and different names
-   * (`agent-scatola-80` and `hans`). They are two things the operator is
-   * running and two things they may want to look at, so they get two rows;
+   * Two processes can resume the SAME session: measured, one session id was
+   * listed twice with two different pids and two different names. They are
+   * two things the operator is running and two things they may want to look
+   * at, so they get two rows;
    * keying by session id would have collapsed one of them silently, which is
    * the failure mode a Map makes invisible. They share one transcript, so
    * both rows show the same turns -- which is true, and is the point.
