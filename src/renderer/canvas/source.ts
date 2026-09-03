@@ -9,6 +9,7 @@
  */
 
 import type { SmithClient } from '../adapter/client.js';
+import type { SessionSource } from '../sources/port.js';
 
 export type CanvasSource =
   | {
@@ -22,6 +23,13 @@ export type CanvasSource =
       readonly status: 'loading' | 'live' | 'error';
       readonly error: string | null;
       /** Called after a successful write so the next poll is not waited for. */
+      readonly onWrote: () => void;
+    }
+  | {
+      readonly kind: 'session';
+      /** The assembled port source — capabilities and, when present, `write`. */
+      readonly source: SessionSource;
+      /** Called after a successful write so the next load is not waited for. */
       readonly onWrote: () => void;
     };
 

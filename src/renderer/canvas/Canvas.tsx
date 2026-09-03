@@ -62,6 +62,7 @@ import {
   setTheme,
   writePrefs,
 } from '../prefs/prefs.js';
+import { canWriteTo } from '../sources/port.js';
 import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
 import { infoNodeId, layoutCanvas, orderedSessions } from './layout.js';
@@ -684,16 +685,22 @@ function CanvasInner({
   );
 
   /**
-   * Write what you typed into the focused session's log.
+   * Write what you typed into the focused session's log — or, for a `'session'`
+   * source whose capabilities say so, into the running agent itself.
    *
    * The wording of every outcome here is load-bearing. black-smith RECORDS a
    * prompt; it has no channel into a running agent session, so "recorded" is
-   * the truth and "sent" would not be. A prompt box that claimed to send would
-   * have you waiting for an answer nobody is coming to give.
+   * the truth and "sent" would not be. A `'session'` source can be different:
+   * when `capabilities.deliverPrompt` is true the write really does reach a
+   * running `claude --resume`, and saying "recorded" there would be the same
+   * lie in the other direction — the operator would think nothing happened
+   * when an agent is about to answer.
    *
    * A refusal is reported in the factory's own words. `events.unknown-causal-session`
    * and `write.bad-request` each name a different mistake, and collapsing them
-   * into "error" throws away the one thing black-smith just told us.
+   * into "error" throws away the one thing black-smith just told us. A
+   * `'session'` source whose `write` is absent (`recordPrompt: false`) is
+   * refused before anything is called at all — `canWriteTo` is the only way in.
    */
   const sendPrompt = useCallback(async () => {
     const entry = focusedEntry;
@@ -709,11 +716,30 @@ function CanvasInner({
     }
     setWriting(true);
     try {
-      await source.client.recordPrompt(entry.session.id, draft);
-      setDraft('');
-      setComposing(false);
-      setStatus(`recorded in the log of ${entry.session.title} — recorded, not sent to the agent`);
-      source.onWrote();
+      if (source.kind === 'session') {
+        const sessionSource = source.source;
+        if (!canWriteTo(sessionSource)) {
+          setStatus(`${sessionSource.label} cannot be written to`);
+          return;
+        }
+        await sessionSource.write.recordPrompt(entry.session.id, draft);
+        setDraft('');
+        setComposing(false);
+        setStatus(
+          sessionSource.capabilities.deliverPrompt
+            ? `sent into the running session of ${entry.session.title} — it will answer there`
+            : `recorded in the log of ${entry.session.title} — recorded, not sent to the agent`,
+        );
+        source.onWrote();
+      } else {
+        await source.client.recordPrompt(entry.session.id, draft);
+        setDraft('');
+        setComposing(false);
+        setStatus(
+          `recorded in the log of ${entry.session.title} — recorded, not sent to the agent`,
+        );
+        source.onWrote();
+      }
     } catch (cause) {
       setStatus(
         cause instanceof SmithApiError
@@ -806,7 +832,7 @@ function CanvasInner({
   const answerLesson = useCallback(
     (lessonId: string, to: 'approve' | 'reject') => {
       if (source.kind !== 'live') {
-        setStatus(source.note);
+        setStatus(source.kind === 'demo' ? source.note : 'governance is not available here');
         return;
       }
       const note = (notes[lessonId] ?? '').trim();
@@ -1313,6 +1339,8 @@ function CanvasInner({
             <span data-source className="min-w-0 truncate font-mono text-[10px]">
               {source.kind === 'demo' ? (
                 <span className="text-waiting">● {source.note}</span>
+              ) : source.kind === 'session' ? (
+                <span className="text-done">● {source.source.label}</span>
               ) : source.status === 'error' ? (
                 <span className="text-failed">● {source.error}</span>
               ) : source.status === 'loading' ? (
@@ -1463,6 +1491,7 @@ function CanvasInner({
         <DetailPanel
           entry={focusedEntry}
           decision={focusedDecision}
+          delivers={source.kind === 'session' && source.source.capabilities.deliverPrompt}
           draft={draft}
           onDraftChange={setDraft}
           onSubmit={sendPrompt}
