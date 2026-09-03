@@ -138,8 +138,8 @@ export function SessionFanNode({ data }: SessionFanNodeProps) {
           position: 'absolute',
           left: '16px',
           top: '135px',
-          width: '58px',
-          height: '20px',
+          width: '50px',
+          height: '17px',
           borderRadius: '999px',
           // The mockup's pill is outlined, and the outline is what separates it
           // from the connector it sits on. `--color-waiting-tint` already
@@ -156,11 +156,12 @@ export function SessionFanNode({ data }: SessionFanNodeProps) {
           alignItems: 'center',
           justifyContent: 'center',
           background: 'var(--color-canvas)',
-          // The mockup's own type scale for this pill. It previously inherited
-          // the node's font, which made it far larger and heavier than the
-          // connector it labels.
+          // BELOW the mockup's own scale (58x20 at 9.5px), at the operator's
+          // request after seeing it in place: the pill labels the connector, it
+          // is not a thing to read on the way past, and at mockup size it drew
+          // more attention than the line it sits on.
           fontFamily: 'var(--font-mono)',
-          fontSize: '9.5px',
+          fontSize: '8.5px',
         }}
       >
         {/* Two-tone per the mockup: the number carries the session's status

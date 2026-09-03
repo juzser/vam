@@ -101,22 +101,29 @@ function renderInfo(over: Partial<Session>, focused: boolean) {
 }
 
 describe('the glow marks the keyboard cursor', () => {
-  it('gives the focused card the glow and a border of its own', () => {
+  it('gives the focused card the glow and nothing else', () => {
     const el = renderInfo({ status: 'running' }, true);
     expect(el.className).toContain('vam-cursor-glow');
-    expect(el.className).toContain('border-line-loudest');
+    // No louder border underneath it. The halo IS the mark; a second edge
+    // would be a second thing to read for one fact.
+    expect(el.className).not.toContain('border-line-loudest');
+    expect(el.className).toContain('border-line');
   });
 
-  it('denies the glow to a needs-you card that is not focused, leaving it amber-edged', () => {
+  it('gives an unfocused needs-you card the same grey edge as any inactive node', () => {
+    // Its amber lives in the breathing dot and the word, not in an edge. Two
+    // amber edges on one canvas — one for needs-you, one for the cursor —
+    // would make the halo ambiguous, which is the whole reason it moved.
     const el = renderInfo({ status: 'waiting' }, false);
     expect(el.className).not.toContain('vam-cursor-glow');
-    expect(el.className).toContain('border-waiting');
+    expect(el.className).not.toContain('border-waiting');
+    expect(el.className).toContain('border-line');
   });
 
-  it('keeps the amber edge on a needs-you card that IS focused, and adds the glow', () => {
+  it('marks a focused needs-you card exactly like any other focused card', () => {
     const el = renderInfo({ status: 'waiting' }, true);
     expect(el.className).toContain('vam-cursor-glow');
-    expect(el.className).toContain('border-waiting');
+    expect(el.className).not.toContain('border-waiting');
     expect(el.className).not.toContain('border-line-loudest');
   });
 
@@ -133,14 +140,27 @@ describe('the glow marks the keyboard cursor', () => {
     expect(CSS).not.toMatch(/\.vam-focus-ring\b/);
   });
 
-  it('builds the glow from an achromatic token, so the status hues keep their meaning', () => {
+  it('builds the glow from the theme-stable cursor amber, not from --color-waiting', () => {
     const glow = ruleBody(CSS, '.vam-cursor-glow');
     expect(glow).toMatch(/box-shadow:/);
-    expect(glow).toMatch(/var\(--color-ink\)/);
+    expect(glow).toMatch(/var\(--color-cursor-ring\)/);
     expect(glow).toMatch(/animation:\s*vam-cursor-glow/);
     const frames = ruleBody(CSS, '@keyframes vam-cursor-glow');
     expect(frames.match(/box-shadow:/g)?.length).toBe(2);
-    expect(frames).toMatch(/var\(--color-ink\)/);
+    expect(frames).toMatch(/var\(--color-cursor-ring\)/);
+    // NOT --color-waiting: that token darkens in the light theme, and the
+    // mockup's light artboard keeps the identical amber in its halo. Binding
+    // the glow to the status hue would quietly change it with the theme.
+    expect(frames).not.toMatch(/var\(--color-waiting\)/);
+  });
+
+  it('defines the cursor amber in both themes, with the same value', () => {
+    const dark = ruleBody(CSS, ':root');
+    const light = ruleBody(CSS, 'html.light');
+    const read = (block: string) => block.match(/--vam-cursor-ring:\s*([^;]+);/)?.[1]?.trim();
+    expect(read(dark), 'no cursor ring in the dark block').toBeDefined();
+    expect(read(light), 'no cursor ring in the light block').toBeDefined();
+    expect(read(light)).toBe(read(dark));
   });
 });
 
@@ -201,7 +221,7 @@ describe('reduced motion: every glow stops, and each leaves a static stand-in', 
     // Asserted on the media block's own text, so a fallback that drifts out of
     // the block cannot pass by living somewhere else in the file.
     const after = reduced.slice(reduced.indexOf('animation: none'));
-    expect(after).toMatch(/\.vam-cursor-glow\s*\{[^}]*box-shadow:[^}]*var\(--color-ink\)/s);
+    expect(after).toMatch(/\.vam-cursor-glow\s*\{[^}]*box-shadow:[^}]*var\(--color-cursor-ring\)/s);
   });
 
   it('leaves the running edge a full-width bar rather than a blank line', () => {
@@ -234,21 +254,25 @@ describe('StepNode wears the cursor glow and the running edge', () => {
     return nodeRoot(container, '[data-step-kind]');
   }
 
-  it('gives the focused step the cursor glow and the loudest border', () => {
+  it('gives the focused step the cursor glow and the ordinary border', () => {
     const card = renderStep({ status: 'done' }, 1, true);
     expect(card.className).toContain('vam-cursor-glow');
-    expect(card.className).toContain('border-line-loudest');
+    expect(card.className).toContain('border-line');
+    expect(card.className).not.toContain('border-line-loudest');
     // The classes deleted from styles.css must not come back by habit.
     expect(card.className).not.toContain('vam-call');
     expect(card.className).not.toContain('vam-focus-ring');
   });
 
-  it('stacks the amber edge and the ring on a focused asking step', () => {
-    // Focus and needs-you are different facts, so they must not trade places:
-    // the card says both where you are AND what it wants.
-    const card = renderStep({ status: 'waiting' }, 0, true);
-    expect(card.className).toContain('vam-cursor-glow');
-    expect(card.className).toContain('border-waiting');
+  it('gives an asking step no edge of its own, focused or not', () => {
+    // The asking step says what it wants through its kind word and its amber
+    // header, not through a border. Only the cursor gets a treatment.
+    const focusedAsk = renderStep({ status: 'waiting' }, 0, true);
+    expect(focusedAsk.className).toContain('vam-cursor-glow');
+    expect(focusedAsk.className).not.toContain('border-waiting');
+    const restingAsk = renderStep({ status: 'waiting' }, 0, false);
+    expect(restingAsk.className).not.toContain('vam-cursor-glow');
+    expect(restingAsk.className).not.toContain('border-waiting');
   });
 
   it('sweeps only the newest step of a running session', () => {

@@ -87,11 +87,11 @@ export function StepNode({ data }: NodeProps & { data: StepNodeData }) {
         // Both can be true at once, so they stack rather than trade off: a
         // focused asking card wears the amber edge AND the cursor ring.
         focused ? 'vam-cursor-glow' : '',
-        asking
-          ? 'border border-waiting'
-          : focused
-            ? 'border border-line-loudest'
-            : 'border border-line',
+        // One border for every card, whatever its status. The amber halo is
+        // the only thing that marks a card out now, and it marks exactly one:
+        // the cursor. A second coloured edge would compete with it for the
+        // same glance.
+        'border border-line',
       ].join(' ')}
     >
       {entry.session.status === 'running' && entry.session.decisions[0]?.id === decision.id && (
