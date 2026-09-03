@@ -446,9 +446,13 @@ describe('the detail panel', () => {
     // One input serving many sessions is the easiest possible way to send the
     // right words to the wrong agent, and here the wrong agent is another repo's.
     render(<Canvas model={MODEL} />);
-    expect(promptTarget()).toBe('alpha/a1');
+    // The chip that used to sit under the composer is gone at the operator's
+    // request; the pane header carries the same guarantee and this now pins it
+    // there. What must stay true is that SOMETHING names the session the
+    // prompt will be written to, and that it follows the focus.
+    expect(promptTarget()).toBe('a1');
     press('j'); // b1 sits directly below a1 in the grid
-    expect(promptTarget()).toBe('beta/b1');
+    expect(promptTarget()).toBe('b1');
   });
 
   it('lists the bash commands the agent proposed, with their text', () => {
@@ -647,7 +651,7 @@ describe('the sidebar', () => {
       (rows()[2] as HTMLElement).click();
     });
     expect(focused()).toBe('beta/b1');
-    expect(promptTarget()).toBe('beta/b1');
+    expect(promptTarget()).toBe('b1');
   });
 
   it('keeps working with the keyboard after a click', () => {

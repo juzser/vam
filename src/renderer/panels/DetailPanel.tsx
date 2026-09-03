@@ -401,7 +401,18 @@ export function DetailPanel(props: DetailPanelProps) {
             ].join(' ')}
           />
           <div className="min-w-0 flex-1">
-            <div className="truncate font-medium text-[14px] text-ink leading-[1.35]">
+            {/* `data-prompt-target` lives here now, not beside the composer.
+                The operator asked for the branch line under the input to go;
+                the guarantee it carried must not go with it. One input serving
+                many sessions is the easiest possible way to send the right
+                words to the wrong agent, so SOMETHING on screen has to say
+                which session is about to be written to — and the pane header
+                already did, two lines up from where the chip was. The tests
+                that covered the chip now assert against this. */}
+            <div
+              data-prompt-target
+              className="truncate font-medium text-[14px] text-ink leading-[1.35]"
+            >
               {entry === null ? 'No session selected' : entry.session.title}
             </div>
             <div className="mt-1 flex items-center gap-[5px] font-mono text-[10px] text-ink-faint">
@@ -688,7 +699,7 @@ export function DetailPanel(props: DetailPanelProps) {
               placeholder={
                 entry === null
                   ? 'Pick a session first'
-                  : 'Write a prompt — it is recorded, not sent'
+                  : 'Reply to agent, answer with a number, or paste a plan…'
               }
               className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-[12.5px] text-ink leading-[1.55] outline-none placeholder:text-ink-faint"
               aria-label="prompt to session"
@@ -725,12 +736,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 Esc → sidebar
               </span>
             )}
-            <span
-              data-prompt-target
-              className="min-w-0 flex-1 truncate font-mono text-[10px] text-waiting"
-            >
-              {entry === null ? '— no session —' : `${entry.project.name}/${entry.session.title}`}
-            </span>
+            <span className="min-w-0 flex-1" />
             {/* The mockup draws a send arrow here. This one says RECORD, in
                 the label and in the tooltip, because black-smith has no channel
                 into a running agent session — the click appends the prompt to
