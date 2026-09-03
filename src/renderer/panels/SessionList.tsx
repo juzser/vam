@@ -36,6 +36,24 @@ const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   failed: 'bg-failed',
 };
 
+/**
+ * A branch name split so the END survives a narrow column.
+ *
+ * CSS `truncate` clips the tail, but the tail is the name: at the 200px
+ * sidebar minimum, `smith/specs/vam-seam-plan` and
+ * `smith/specs/vam-canvas-topology` both clip to `smith/specs/vam-...` —
+ * identical, and cut exactly where they would have differed. So the leading
+ * segments become the shrinkable part and the last segment is held at its
+ * full width. A name with no slash is all tail; a trailing slash yields an
+ * empty tail, which renders as nothing rather than as a crash.
+ */
+function splitBranch(branch: string): { head: string; tail: string } {
+  const cut = branch.lastIndexOf('/');
+  return cut === -1
+    ? { head: '', tail: branch }
+    : { head: branch.slice(0, cut + 1), tail: branch.slice(cut + 1) };
+}
+
 export type SessionListProps = {
   readonly entries: readonly SessionEntry[];
   readonly focusedSessionId: string | null;
@@ -549,9 +567,20 @@ export function SessionList(props: SessionListProps) {
                                     ? 'this source cannot say which branch the session is on'
                                     : session.branch
                                 }
-                                className="truncate"
+                                className="flex min-w-0 items-center"
                               >
-                                {session.branch ?? '—'}
+                                {session.branch === null ? (
+                                  '—'
+                                ) : (
+                                  <>
+                                    <span data-branch-head className="truncate">
+                                      {splitBranch(session.branch).head}
+                                    </span>
+                                    <span data-branch-tail className="flex-none">
+                                      {splitBranch(session.branch).tail}
+                                    </span>
+                                  </>
+                                )}
                               </span>
                             </span>
                             <span
