@@ -176,6 +176,57 @@ describe('the composer says when a prompt is in flight', () => {
   });
 });
 
+/**
+ * Session-level facts must not be captioned as turn-level ones.
+ *
+ * `Decision` carries no timestamp (`model.ts`), so nothing in the model can
+ * say when a particular turn happened. The `in` rule captioned every turn
+ * with `you · <session.age>` -- the session's LAST ACTIVITY, which is usually
+ * the agent's most recent write, not when you typed that input -- and the
+ * `out` rule captioned every turn's output with `session.activity`, which is
+ * what the session is doing RIGHT NOW. Walk back to an older turn with `h`
+ * and both captions kept describing the present.
+ */
+describe('the in and out rules do not date a turn the model cannot date', () => {
+  const ruleMeta = (block: string) =>
+    q<HTMLElement>(`[data-detail-block="${block}"] [data-rule-meta]`)?.textContent ?? '';
+
+  it('the in rule names who, and claims no per-turn time', () => {
+    draw({ entry: ENTRY, decision: DECISIONS[2] as Decision });
+    expect(ruleMeta('in')).toContain('you');
+    // 12m is SESSION.age. It must not appear against a turn three back.
+    expect(ruleMeta('in')).not.toContain('12m');
+  });
+
+  it('the out rule shows current activity only on the turn being worked', () => {
+    // Newest turn of a running session: the activity genuinely belongs to it.
+    cleanup();
+    draw({
+      entry: { project: PROJECT, session: { ...SESSION, status: 'running' } },
+      decision: DECISIONS[0] as Decision,
+    });
+    expect(ruleMeta('out')).toContain('just now');
+
+    // An older turn: the same activity line would be describing the present
+    // while the operator reads the past.
+    cleanup();
+    draw({
+      entry: { project: PROJECT, session: { ...SESSION, status: 'running' } },
+      decision: DECISIONS[2] as Decision,
+    });
+    expect(ruleMeta('out')).not.toContain('just now');
+  });
+
+  it('says no session is selected rather than that the session has no steps', () => {
+    // With nothing focused the pane read "This session has no steps yet",
+    // which names a session that does not exist.
+    draw({ entry: null, decision: null });
+    const body = document.body.textContent ?? '';
+    expect(body).not.toContain('This session has no steps yet');
+    expect(body).toMatch(/no session/i);
+  });
+});
+
 function draw(over: Partial<DetailPanelProps> = {}) {
   const props: DetailPanelProps = {
     entry: ENTRY,
