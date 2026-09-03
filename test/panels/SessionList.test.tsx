@@ -78,6 +78,7 @@ function mount(entries: readonly SessionEntry[]) {
     onPick: noop,
     onClose: noop,
     onAdd: noop,
+    onAddInProject: noop,
     onSettings: noop,
     theme: 'dark',
     onToggleTheme: noop,
@@ -214,6 +215,68 @@ describe('SessionList placeholder row', () => {
    * `flex:1`. vam had a live-agent count pinned right of it with `ml-auto`,
    * standing in for a CC/CX badge that artboard 1a does not have either.
    */
+  /**
+   * The `+` in a project heading was an `aria-hidden` span: no pointer, no
+   * hover, unclickable — while the full-width "New session" button below it,
+   * which equally cannot create a session, is a real button that answers on
+   * the status bar. Two controls that refuse for the same reason should refuse
+   * the same way.
+   */
+  it('makes the per-project add a real button that names its own project', () => {
+    const { container } = mount(twoProjects());
+    const adds = container.querySelectorAll('[data-placeholder="new-session-in-project"]');
+    expect(adds).toHaveLength(2);
+    for (const add of adds) {
+      expect(add.tagName).toBe('BUTTON');
+      // Unclickable to assistive tech is what `aria-hidden` meant; it is a
+      // control now, so it must be reachable and it must say which project.
+      expect(add.getAttribute('aria-hidden')).toBeNull();
+      expect(add.className).toContain('cursor-pointer');
+      expect(add.className).toMatch(/hover:/);
+    }
+    expect(adds[0]?.getAttribute('aria-label')).toBe('new session in alpha');
+    expect(adds[1]?.getAttribute('aria-label')).toBe('new session in beta');
+  });
+
+  it('reports which project the add was for', () => {
+    const seen: string[] = [];
+    const entries = twoProjects();
+    render(
+      <SessionList
+        {...({
+          entries,
+          focusedSessionId: null,
+          workspace: 'vam',
+          filter: '',
+          filtering: false,
+          onFilterChange: noop,
+          onFilterCommit: noop,
+          onFilterCancel: noop,
+          onOpenFilter: noop,
+          renamingId: null,
+          renameDraft: '',
+          onRenameChange: noop,
+          onRenameCommit: noop,
+          onRenameCancel: noop,
+          onPick: noop,
+          onClose: noop,
+          onAdd: noop,
+          onAddInProject: (project: Project) => seen.push(project.name),
+          onSettings: noop,
+          theme: 'dark',
+          onToggleTheme: noop,
+          width: 264,
+          resizeHandle: null,
+        } satisfies SessionListProps)}
+      />,
+    );
+    const adds = document.querySelectorAll<HTMLButtonElement>(
+      '[data-placeholder="new-session-in-project"]',
+    );
+    adds[1]?.click();
+    expect(seen).toEqual(['beta']);
+  });
+
   it('puts nothing after the session title', () => {
     const { container } = mount(entriesOf([makeSession({ id: 's1', runningAgents: 2 })]));
     const row = container.querySelector('[data-session-row="s1"]');
