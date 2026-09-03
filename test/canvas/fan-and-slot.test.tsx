@@ -186,3 +186,56 @@ describe('StepSlotNode', () => {
     expect(box.hasAttribute('data-jump-label')).toBe(false);
   });
 });
+
+/**
+ * The rendering half of the same rule. `layout.ts` decides WHICH branch is the
+ * route (see layout.test.ts); this asserts the fan draws that one in colour and
+ * the others in the plain line tone, at the mockup's opacities.
+ */
+describe('SessionFanNode: the route branch is the only coloured one', () => {
+  function strokesOf(container: HTMLElement): { stroke: string; opacity: string }[] {
+    const paths = Array.from(container.querySelectorAll('svg path'));
+    expect(paths.length).toBe(5);
+    // Paths 2..4 are the branches; 0 and 1 are trunk and spine.
+    return paths.slice(2).map((p) => ({
+      stroke: p.getAttribute('stroke') ?? '',
+      opacity: p.getAttribute('opacity') ?? '',
+    }));
+  }
+
+  it('draws idle branches in the plain line tone and only the active one in status colour', () => {
+    const { container } = render(
+      <SessionFanNode
+        id="fan-route"
+        data={fanData({ sessionStatus: 'waiting', branchStatuses: ['idle', 'waiting', 'idle'] })}
+      />,
+    );
+    expect(strokesOf(container)).toEqual([
+      { stroke: 'var(--color-line-strong)', opacity: '1' },
+      { stroke: 'var(--color-waiting)', opacity: '0.7' },
+      { stroke: 'var(--color-line-strong)', opacity: '1' },
+    ]);
+  });
+
+  it('draws an idle branch identically to an empty one — neither is a route', () => {
+    const { container } = render(
+      <SessionFanNode
+        id="fan-idle-empty"
+        data={fanData({ sessionStatus: 'done', branchStatuses: ['idle', 'done', 'empty'] })}
+      />,
+    );
+    const [first, , third] = strokesOf(container);
+    expect(first).toEqual(third);
+  });
+
+  it('outlines the steps pill, which is what separates it from the line it sits on', () => {
+    const { container } = render(<SessionFanNode id="fan-pill" data={fanData()} />);
+    const pill = container.querySelector('[data-fan-pill]');
+    expect(pill).not.toBeNull();
+    const style = (pill as HTMLElement).style;
+    expect(style.borderWidth).toBe('1px');
+    expect(style.borderStyle).toBe('solid');
+    expect(style.borderColor).toBe('var(--color-waiting-tint)');
+    expect(style.borderRadius).toBe('999px');
+  });
+});

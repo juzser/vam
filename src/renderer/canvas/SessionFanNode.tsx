@@ -20,7 +20,7 @@ export type SessionFanStatus = 'waiting' | 'running' | 'done' | 'failed';
  * `'empty'` covers a slot with no step drawn in it yet: still a branch (the
  * fan always has three, §3.5), just uncoloured by any status.
  */
-export type SessionFanBranchStatus = SessionFanStatus | 'empty';
+export type SessionFanBranchStatus = SessionFanStatus | 'empty' | 'idle';
 
 export type SessionFanNodeData = {
   readonly sessionStatus: SessionFanStatus;
@@ -61,8 +61,27 @@ const NUMBER_COLOR: Readonly<Record<SessionFanStatus, string>> = {
 
 const EMPTY_BRANCH_COLOR = 'var(--color-line-strong)';
 
+/**
+ * The mockup fades the one coloured branch to 0.7 exactly as it fades the
+ * trunk, and draws the plain ones at full strength — the neutral tone is
+ * already quiet enough that fading it would erase it.
+ */
+function branchOpacity(status: SessionFanBranchStatus): string {
+  return status === 'empty' || status === 'idle' ? '1' : '0.7';
+}
+
 function branchColor(status: SessionFanBranchStatus): string {
-  return status === 'empty' ? EMPTY_BRANCH_COLOR : TRUNK_COLOR[status];
+  if (status === 'empty') {
+    return EMPTY_BRANCH_COLOR;
+  }
+  // `idle` is a real step that simply is not the one in play. The mockup draws
+  // those in a plain line tone and reserves colour for the single route to the
+  // current step, so a glance answers "where is it" and not merely "what is
+  // its status", which the card already says in words.
+  if (status === 'idle') {
+    return 'var(--color-line-strong)';
+  }
+  return TRUNK_COLOR[status];
 }
 
 export type SessionFanNodeProps = {
@@ -95,18 +114,21 @@ export function SessionFanNode({ data }: SessionFanNodeProps) {
           d="M45 45 H110"
           stroke={branchColor(data.branchStatuses[0])}
           strokeWidth="1.25"
+          opacity={branchOpacity(data.branchStatuses[0])}
           fill="none"
         />
         <path
           d="M45 145 H110"
           stroke={branchColor(data.branchStatuses[1])}
           strokeWidth="1.25"
+          opacity={branchOpacity(data.branchStatuses[1])}
           fill="none"
         />
         <path
           d="M45 245 H110"
           stroke={branchColor(data.branchStatuses[2])}
           strokeWidth="1.25"
+          opacity={branchOpacity(data.branchStatuses[2])}
           fill="none"
         />
       </svg>
@@ -119,6 +141,17 @@ export function SessionFanNode({ data }: SessionFanNodeProps) {
           width: '58px',
           height: '20px',
           borderRadius: '999px',
+          // The mockup's pill is outlined, and the outline is what separates it
+          // from the connector it sits on. `--color-waiting-tint` already
+          // resolves to exactly the value artboard 1a uses, in both themes —
+          // an existing token, not a new colour.
+          // Longhand, not the `border` shorthand: a shorthand carrying a
+          // `var()` is re-serialised wrongly by more than one DOM
+          // implementation (happy-dom spreads the token across width, style
+          // AND colour), and the three longhands survive everywhere.
+          borderWidth: '1px',
+          borderStyle: 'solid',
+          borderColor: 'var(--color-waiting-tint)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
