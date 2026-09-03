@@ -13,8 +13,15 @@
  * Everything here is data at rest. No adapter, no fetching, no React.
  */
 
-/** Which system a project came from. Adapters set it; the canvas only labels with it. */
-export type SourceId = 'black-smith' | 'orca';
+/**
+ * Which system a project or session came from. Adapters set it; the canvas only
+ * labels with it.
+ *
+ * A plain string, not a union of literals: the registry (task-3) is its only
+ * validated producer, and a source is free to name itself anything the
+ * registry accepts without this file being edited for every new one.
+ */
+export type SourceId = string;
 
 /**
  * The four states worth a colour on a canvas you read at a glance (§3). A fifth
@@ -136,12 +143,24 @@ export type Session = {
   readonly age: string | null;
   /** Newest first. The canvas shows the first three; §3. */
   readonly decisions: readonly Decision[];
+  /**
+   * Which system this session came from. Optional because merging several
+   * sources into one project group (this task's point) cannot force every
+   * existing fixture to name one at once.
+   */
+  readonly source?: SourceId;
 };
 
 export type Project = {
   readonly id: string;
   readonly name: string;
-  readonly source: SourceId;
+  /**
+   * @deprecated A project mixes sessions from several sources now (this
+   * task's point), so one id on the project no longer means anything;
+   * `Session.source` is the field that carries it. Kept optional, not
+   * removed, so fixtures across ten files stay legal — removal is task-9b's.
+   */
+  readonly source?: SourceId;
   readonly sessions: readonly Session[];
 };
 
