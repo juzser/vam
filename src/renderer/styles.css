@@ -134,12 +134,6 @@
 
   --vam-shadow-node: 0 8px 28px rgb(0 0 0 / 0.4);
 
-  /* The call halo's ring. Its own token rather than `--vam-waiting`, because
-     the mockup keeps the SAME amber on both artboards: the light board's
-     glowing card rings in the dark board's amber, while its waiting TEXT is
-     the darker one below. One value that does not swap is the measurement. */
-  --vam-call-ring: #f59e0b;
-
   color-scheme: dark;
 }
 
@@ -178,9 +172,6 @@ html.light {
   /* A card sits above white by a hairline and a whisper, not by the 40% black
      that reads as a hole in a light document. */
   --vam-shadow-node: 0 8px 28px rgb(0 0 0 / 0.06);
-
-  /* Deliberately not the light `--vam-waiting`: see the note on the dark pair. */
-  --vam-call-ring: #f59e0b;
 
   color-scheme: light;
 }
@@ -258,14 +249,19 @@ body {
   }
 }
 
-/* A travelling highlight along the node's 3px status edge: the one signal you
-   can read from across the room without reading anything. */
+/* A travelling highlight along the node's top edge: the one signal you can read
+   from across the room without reading anything.
+
+   The bar MOVES, the strip does not — `transform` on a 34%-wide child, which is
+   the mockup's own `omSweep` and also the only form that stays off the paint
+   path. The previous rule swept a `background-position` across a full-width
+   gradient, which repaints the whole strip every frame for the same picture. */
 @keyframes vam-sweep {
   from {
-    background-position: 200% 0;
+    transform: translateX(-110%);
   }
   to {
-    background-position: -200% 0;
+    transform: translateX(420%);
   }
 }
 
@@ -278,23 +274,31 @@ body {
   animation: vam-breathe 1.8s ease-in-out infinite;
 }
 
+/*
+ * Measured off the mockup's running card: a 1px strip flush with the top edge,
+ * INSIDE the card and clipped by it, carrying a 34%-wide gradient bar.
+ *
+ * The rule this replaces was written from prose and never wired to a component,
+ * so nothing caught that it was 3px tall and sat at `top: -3px` — outside the
+ * card, above its own rounded corner, where the mockup has nothing at all.
+ */
 .vam-running-edge {
   position: absolute;
-  top: -3px;
-  left: -1px;
-  right: -1px;
-  height: 3px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    var(--color-running) 35%,
-    color-mix(in srgb, var(--color-running) 35%, white) 50%,
-    var(--color-running) 65%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: vam-sweep 2.2s linear infinite;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  overflow: hidden;
   pointer-events: none;
+}
+
+.vam-running-edge::after {
+  content: '';
+  display: block;
+  width: 34%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--color-running), transparent);
+  animation: vam-sweep 2.1s linear infinite;
 }
 
 /*
@@ -333,66 +337,67 @@ body {
 }
 
 /*
- * Measured off the mockup's `omGlow`, not invented here: a 1px amber ring that
- * never leaves, and a halo that breathes from 18px to 34px behind it.
+ * The glow, and what it now means.
  *
- * The previous version was a ripple — it expanded to 7px and faded to nothing,
- * which left the card with NO edge at all for most of every cycle, in an amber
- * (255 159 10) that is not the design's. A card whose border blinks out is a
- * card the eye has to re-find twice a second.
+ * Its shape is still the mockup's `omGlow` — a 1px ring that never leaves and a
+ * halo breathing 18px -> 34px behind it. What changed is who wears it, and in
+ * what colour. The mockup keys the halo to NEEDS YOU (proved: each artboard has
+ * one FOCUSED tag but two glowing cards, and the second is needs-you and
+ * unfocused). The operator overrode that: on a keyboard tool the loudest thing
+ * on the canvas should be where the cursor is, which a static artboard has no
+ * way to say. So the halo marks FOCUS.
+ *
+ * That forces the colour off amber. This canvas spends colour on states that
+ * cost a person something, and focus is not one — it is where you already are.
+ * `--color-ink` is achromatic and the brightest token in either theme, so the
+ * cursor is unmissable without borrowing a status hue. No mockup value stands
+ * behind this choice, because the mockup keys nothing to focus.
  */
-@keyframes vam-call {
+@keyframes vam-cursor-glow {
   0%,
   100% {
     box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--vam-call-ring) 85%, transparent),
-      0 0 18px color-mix(in srgb, var(--vam-call-ring) 14%, transparent);
+      0 0 0 1px color-mix(in srgb, var(--color-ink) 60%, transparent),
+      0 0 18px color-mix(in srgb, var(--color-ink) 10%, transparent);
   }
   50% {
     box-shadow:
-      0 0 0 1px var(--vam-call-ring),
-      0 0 34px color-mix(in srgb, var(--vam-call-ring) 40%, transparent);
+      0 0 0 1px var(--color-ink),
+      0 0 34px color-mix(in srgb, var(--color-ink) 26%, transparent);
   }
 }
 
-.vam-call {
+.vam-cursor-glow {
   /* The resting frame, spelled out: a node rendered before its animation
      starts, or with animations off for any reason, still wears the ring. */
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--vam-call-ring) 85%, transparent),
-    0 0 18px color-mix(in srgb, var(--vam-call-ring) 14%, transparent);
-  animation: vam-call 2.4s ease-in-out infinite;
-}
-
-/*
- * The focused node's ring.
- *
- * A ring, not a border colour: `border-ink-dim` alongside `border-line` left
- * two border-colour utilities on one element, decided by Tailwind's emission
- * order rather than by the class list — and #a1a1a1 is a TEXT grey, a border
- * value the mockup uses nowhere. `--color-line-loudest` is the top of the
- * border ramp, and the 1px ring is the same shape the mockup gives its one
- * emphasised card.
- */
-.vam-focus-ring {
-  box-shadow: 0 0 0 1px var(--color-line-loudest);
+    0 0 0 1px color-mix(in srgb, var(--color-ink) 60%, transparent),
+    0 0 18px color-mix(in srgb, var(--color-ink) 10%, transparent);
+  animation: vam-cursor-glow 2.4s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .vam-spin,
   .vam-breathe,
-  .vam-running-edge,
+  .vam-running-edge::after,
   .vam-focus-glow,
-  .vam-call {
+  .vam-cursor-glow {
     animation: none;
   }
-  /* The halo carried the signal; with motion off, a static ring has to — and
-     the mockup already draws one, on the boards where the card does not
-     animate: a full-strength 1px ring with a 24px halo behind it. */
-  .vam-call {
+  /* The halo carried the signal; with motion off, a static ring has to — the
+     shape the mockup itself freezes to on its non-animating boards, a
+     full-strength 1px ring with a 24px halo behind it. */
+  .vam-cursor-glow {
     box-shadow:
-      0 0 0 1px var(--vam-call-ring),
-      0 0 24px color-mix(in srgb, var(--vam-call-ring) 22%, transparent);
+      0 0 0 1px var(--color-ink),
+      0 0 24px color-mix(in srgb, var(--color-ink) 18%, transparent);
+  }
+  /* A bar that has stopped travelling is a bar parked at 34% of one edge, which
+     reads as damage rather than as progress. So: the full width, dimmed, and
+     `running` still has a line of its own. */
+  .vam-running-edge::after {
+    width: 100%;
+    background: color-mix(in srgb, var(--color-running) 55%, transparent);
   }
   /* Same argument for focus: the glow WAS the indicator's whole signal, and a
      dot that stops pulsing is a dot. A static ring keeps it distinguishable
