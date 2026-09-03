@@ -227,6 +227,68 @@ describe('the in and out rules do not date a turn the model cannot date', () => 
   });
 });
 
+/**
+ * A failed session, and the reason nobody has.
+ *
+ * Measured against the real CLI: `claude agents --json --all` reports two
+ * failed background sessions on this machine, and a failed row carries only
+ * `cwd, id, kind, name, sessionId, startedAt, state` -- NO error, no message,
+ * no exit code. The job's own `~/.claude/jobs/<id>/state.json` says
+ * `state: "working"` for the same session, contradicting the CLI, so it is not
+ * a second opinion worth showing either.
+ *
+ * So the pane's job is to say the session failed and to say that nothing
+ * reports why. Inventing a reason, or presenting internal state that
+ * disagrees with the tool, would both be worse than the silence.
+ */
+describe('a failed session says so, and does not invent a reason', () => {
+  const failed = (over: Partial<Session> = {}) => ({
+    project: PROJECT,
+    session: { ...SESSION, status: 'failed' as const, ...over },
+  });
+
+  it('names the failure and names the gap where the reason would be', () => {
+    draw({ entry: failed(), decision: DECISIONS[0] as Decision });
+    const banner = q<HTMLElement>('[data-session-failed]');
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).toMatch(/failed/i);
+    // The gap, on hover, in the same shape the rest of the pane uses.
+    expect(document.querySelector('[data-note]')?.getAttribute('data-note') ?? '').toMatch(
+      /no reason/i,
+    );
+  });
+
+  it('draws nothing for any status that has not failed', () => {
+    for (const status of ['waiting', 'running', 'done'] as const) {
+      cleanup();
+      draw({
+        entry: { project: PROJECT, session: { ...SESSION, status } },
+        decision: DECISIONS[0] as Decision,
+      });
+      expect(q('[data-session-failed]'), `status ${status}`).toBeNull();
+    }
+  });
+
+  it('says a failed session recorded nothing, rather than "no steps yet"', () => {
+    // A failed BACKGROUND session has no transcript at all -- verified: the
+    // CLI lists it while `~/.claude/projects/` holds no `.jsonl` for its id.
+    // "no steps yet" promises steps that are never coming.
+    draw({ entry: failed({ decisions: [] }), decision: null });
+    const body = document.body.textContent ?? '';
+    expect(body).not.toContain('no steps yet');
+    expect(body).toMatch(/failed/i);
+  });
+
+  it('still says "no steps yet" for a live session that simply has none', () => {
+    // The two absences must not collapse into one sentence.
+    draw({
+      entry: { project: PROJECT, session: { ...SESSION, status: 'running', decisions: [] } },
+      decision: null,
+    });
+    expect(document.body.textContent ?? '').toContain('no steps yet');
+  });
+});
+
 function draw(over: Partial<DetailPanelProps> = {}) {
   const props: DetailPanelProps = {
     entry: ENTRY,
