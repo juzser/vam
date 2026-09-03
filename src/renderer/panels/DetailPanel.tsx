@@ -26,7 +26,7 @@
  * the Claude Code source a real channel into a running session, so for that
  * source a prompt is delivered and answered; black-smith still only appends to
  * a log. `delivers` carries the difference, and with nothing said the wording
- * stays at "record" — see the prop for why nothing says it yet.
+ * stays at "record".
  *
  * ## The mockup's four tabs
  *
@@ -538,15 +538,13 @@ export type DetailPanelProps = {
    * which reads as the recording wording, because understating what a button
    * does is the safe direction and overstating it is not.
    *
-   * NOTHING PASSES THIS TODAY, and the gap is real rather than an oversight:
-   * `Canvas.tsx` holds a smith-api client with a `recordPrompt` method, not a
-   * `SessionSource`, so no `capabilities` object reaches this pane at all —
-   * the only ones vam builds live in `sources/preload-factory.ts` and in the
-   * main process. The seam is here so that plumbing it is one line in
-   * `Canvas.tsx` (`delivers={source.capabilities.deliverPrompt}`) once that
-   * pane holds a source that has capabilities; guessing from
-   * `Session.source` instead would be sniffing an id for a capability, which
-   * is the thing `port.ts` exists to stop.
+   * `Canvas.tsx` passes it for a `'session'` source (the desktop shell, built
+   * from `sources/preload-factory.ts` over the Claude Code source's real
+   * `capabilities`) as `source.source.capabilities.deliverPrompt`; a `'live'`
+   * source holds a bare smith-api client with no `capabilities` object, so it
+   * always reads as the recording wording. Guessing from `Session.source`
+   * instead would be sniffing an id for a capability, which is the thing
+   * `port.ts` exists to stop.
    */
   readonly delivers?: boolean;
   /** The current rendered width (task-1's `renderedWidth`), applied inline. */

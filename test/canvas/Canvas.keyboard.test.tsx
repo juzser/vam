@@ -27,6 +27,7 @@ import {
   SIDEBAR_MAX,
   SIDEBAR_MIN,
 } from '../../src/renderer/prefs/panes.js';
+import type { SessionSource } from '../../src/renderer/sources/port.js';
 
 function decision(id: string, over: Partial<Decision> = {}): Decision {
   return { id, label: id, input: `in-${id}`, output: `out-${id}`, commands: [], ...over };
@@ -1135,6 +1136,135 @@ describe('writing a prompt to a live black-smith', () => {
     expect(document.querySelector('[data-source]')?.textContent).toContain(
       'cannot reach black-smith',
     );
+  });
+});
+
+describe('writing a prompt to a "session" source (the desktop shell)', () => {
+  /**
+   * A `SessionSource` fixture whose `write` member is present or absent
+   * exactly as the port's own invariant requires: `recordPrompt: false` means
+   * `write` is never even assigned, not assigned-and-throwing. A fake that
+   * always carried `write` would let `canWriteTo`'s absence check pass this
+   * suite by accident.
+   */
+  function fakeSessionSource(
+    over: { deliverPrompt?: boolean; recordPrompt?: boolean } = {},
+    recordPrompt: (sessionId: string, prompt: string) => Promise<void> = async () => {},
+  ): { source: CanvasSource; wrote: { count: number } } {
+    const recordPromptFlag = over.recordPrompt ?? true;
+    const wrote = { count: 0 };
+    const sessionSource = {
+      id: 'claude-code',
+      label: 'Claude Code',
+      capabilities: {
+        liveUpdates: false,
+        recordPrompt: recordPromptFlag,
+        deliverPrompt: over.deliverPrompt ?? false,
+        promptAttachments: false,
+        slashCommands: false,
+        renameSession: false,
+        closeSession: false,
+        createSession: false,
+        governance: false,
+        pullRequests: false,
+        terminal: false,
+        agentRoster: false,
+      },
+      declines: {},
+      viewerScope: { kind: 'connection', note: 'one local process' },
+      load: async () => [],
+      // Assigned member-by-member, exactly like `preload-factory.ts` does:
+      // `write` exists only when `recordPrompt` is true, never as a stub.
+      ...(recordPromptFlag ? { write: { recordPrompt } } : {}),
+    };
+    const source: CanvasSource = {
+      kind: 'session',
+      // `write` is genuinely optional on `SessionSource`, so no `any` is
+      // needed -- the cast is only for the literal's `viewerScope.kind`,
+      // which TS otherwise widens to `string`.
+      source: sessionSource as SessionSource,
+      onWrote: () => {
+        wrote.count += 1;
+      },
+    };
+    return { source, wrote };
+  }
+
+  async function submit(source: CanvasSource, text: string) {
+    render(<Canvas model={MODEL} source={source} />);
+    press('i');
+    const input = promptInput() as HTMLTextAreaElement;
+    typeInto(input, text);
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+  }
+
+  it('says SENT, not recorded, once the source delivers into the running session', async () => {
+    const calls: { sessionId: string; prompt: string }[] = [];
+    const { source } = fakeSessionSource({ deliverPrompt: true }, async (sessionId, prompt) => {
+      calls.push({ sessionId, prompt });
+    });
+    await submit(source, 'run task-4 again');
+    expect(calls).toEqual([{ sessionId: 'a1', prompt: 'run task-4 again' }]);
+    expect(statusBar()).toContain('sent into the running session');
+    expect(statusBar()).not.toContain('recorded');
+  });
+
+  it('says RECORDED when the source only records, not delivers', async () => {
+    const calls: { sessionId: string; prompt: string }[] = [];
+    const { source, wrote } = fakeSessionSource(
+      { deliverPrompt: false },
+      async (sessionId, prompt) => {
+        calls.push({ sessionId, prompt });
+      },
+    );
+    await submit(source, 'hello');
+    expect(calls).toEqual([{ sessionId: 'a1', prompt: 'hello' }]);
+    expect(statusBar()).toContain('recorded, not sent to the agent');
+    expect(statusBar()).not.toContain('sent into the running session');
+    expect(wrote.count).toBe(1);
+  });
+
+  it('refuses without calling anything when recordPrompt is false — the guard is real', async () => {
+    let called = 0;
+    const { source, wrote } = fakeSessionSource({ recordPrompt: false }, async () => {
+      called += 1;
+    });
+    await submit(source, 'hello');
+    expect(called).toBe(0);
+    expect(wrote.count).toBe(0);
+    expect(statusBar()).toContain('Claude Code');
+    expect(statusBar()).toContain('cannot be written to');
+    // Nothing was sent, so the operator's words are still on screen.
+    expect(promptInput()?.value).toBe('hello');
+  });
+
+  it('leaves the draft intact and reports the message when the write rejects', async () => {
+    const { source, wrote } = fakeSessionSource({ deliverPrompt: false }, async () => {
+      throw new Error('resume failed: no such session');
+    });
+    await submit(source, 'hello');
+    expect(statusBar()).toContain('resume failed: no such session');
+    expect(wrote.count).toBe(0);
+    expect(promptInput()?.value).toBe('hello');
+  });
+
+  it('threads `deliverPrompt` into the detail panel’s composer wording', async () => {
+    const claim = () =>
+      document.querySelector('[data-prompt-record]')?.getAttribute('aria-label')?.toLowerCase() ??
+      '';
+
+    const { source: sending } = fakeSessionSource({ deliverPrompt: true });
+    render(<Canvas model={MODEL} source={sending} />);
+    press('i');
+    expect(claim()).toContain('send');
+    cleanup();
+
+    const { source: recording } = fakeSessionSource({ deliverPrompt: false });
+    render(<Canvas model={MODEL} source={recording} />);
+    press('i');
+    expect(claim()).toContain('record');
   });
 });
 

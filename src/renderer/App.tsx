@@ -14,7 +14,7 @@
  * one you would send a real prompt to.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DesktopSourceApi } from '../preload/api.js';
 import type { PreloadSourceApi } from '../shared/preload-api.js';
 import { SmithClient } from './adapter/client.js';
@@ -22,6 +22,7 @@ import { useCanvas } from './adapter/useCanvas.js';
 import { Canvas } from './canvas/Canvas.js';
 import type { CanvasModel } from './domain/model.js';
 import { DEMO_MODEL } from './fixtures/demo.js';
+import type { SessionSource } from './sources/port.js';
 import { createSourceFromPreload } from './sources/preload-factory.js';
 
 declare global {
@@ -62,27 +63,50 @@ export function App() {
 }
 
 /**
- * The desktop canvas: rows that came from the main process, and no write route.
+ * The desktop canvas: rows AND a write route, both assembled from the main
+ * process's own descriptor.
  *
- * `Canvas` is rendered without a `source`, which means `READ_ONLY_SOURCE` --
- * the honest description of this shell. The main-side descriptor declares
- * `liveUpdates`, `recordPrompt` and `governance` all false, so the assembled
- * source carries no `subscribe`, no `write` and no `governance` member at all,
- * and there is nothing here that could write even by mistake.
+ * The Claude Code source declares `recordPrompt: true` and, when it can reach
+ * a running `claude --resume`, `deliverPrompt: true` too -- so the
+ * `SessionSource` `createSourceFromPreload` returns genuinely carries a
+ * `write` member. `Canvas` is given it as a `'session'` source rather than
+ * left on the `READ_ONLY_SOURCE` default, so this shell is exactly as
+ * writable as the descriptor it was built from -- whether a given write
+ * actually reaches anything is `canWriteTo`'s call at the point of the write,
+ * not a decision made here.
  */
 function DesktopCanvas({ api }: { readonly api: DesktopSourceApi }) {
   const [model, setModel] = useState<CanvasModel>({ projects: [] });
   const [error, setError] = useState<string | null>(null);
+  const [source, setSource] = useState<SessionSource | null>(null);
+  // Holds the current reload so `onWrote` -- fired long after the effect
+  // below has settled -- can still run under the SAME `cancelled` flag: a
+  // reload that lands after unmount must not `setState` either.
+  const reloadRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     let cancelled = false;
+
+    function load(assembled: SessionSource) {
+      assembled
+        .load()
+        .then((projects) => {
+          if (!cancelled) setModel({ projects });
+        })
+        .catch((reason: unknown) => {
+          if (!cancelled) setError(describeFailure(reason));
+        });
+    }
+
     // The cast is the `subscribe` member this task does not implement: it needs
     // `ipcRenderer.on`, not `invoke`. It is genuinely absent at runtime, and
     // with `liveUpdates: false` the factory never reads it.
     createSourceFromPreload(api as PreloadSourceApi)
-      .then((source) => source.load())
-      .then((projects) => {
-        if (!cancelled) setModel({ projects });
+      .then((assembled) => {
+        if (cancelled) return;
+        setSource(assembled);
+        reloadRef.current = () => load(assembled);
+        load(assembled);
       })
       .catch((reason: unknown) => {
         if (!cancelled) setError(describeFailure(reason));
@@ -96,7 +120,14 @@ function DesktopCanvas({ api }: { readonly api: DesktopSourceApi }) {
   return (
     <>
       {error !== null && <p className="text-failed">● {error}</p>}
-      <Canvas model={model} />
+      <Canvas
+        model={model}
+        source={
+          source === null
+            ? undefined
+            : { kind: 'session', source, onWrote: () => reloadRef.current() }
+        }
+      />
     </>
   );
 }
