@@ -32,7 +32,6 @@ function event(eventType: string, actor: string | null, i = 0): ApiTimelineEntry
     ts: `2026-09-03T00:0${i}:00.000Z`,
     eventType,
     taskId: null,
-    agentId: null,
     planVersion: 1,
     causalParent: null,
     payload: {},

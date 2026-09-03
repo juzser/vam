@@ -59,11 +59,33 @@ function twoProjects(): SessionEntry[] {
 
 function noop() {}
 
-function mount(entries: readonly SessionEntry[]) {
-  const props: SessionListProps = {
+/**
+ * Every prop `SessionList` requires, with inert defaults.
+ *
+ * Exported as ONE object on purpose. Five call sites in this file each built
+ * their own literal, so the eight props the filter popover added in #59 had to
+ * be added in five places and were added in none — and `vitest` does not
+ * typecheck, so the suite stayed green while `typecheck:test` in CI went red.
+ * A new prop now breaks exactly one place, which is the point.
+ */
+function baseProps(entries: readonly SessionEntry[]): SessionListProps {
+  return {
     entries,
     focusedSessionId: null,
     workspace: 'vam',
+    // The filter popover's props, added with it in #59. They live in the
+    // shared helper rather than at each call site so that the next prop this
+    // component grows is added in ONE place — which is what made these eight
+    // go missing for a whole PR: `vitest` does not typecheck, so nothing here
+    // went red while `typecheck:test` in CI did.
+    statusFilter: 'all',
+    onStatusFilter: noop,
+    statusTally: { all: entries.length, running: 0, waiting: 0, done: 0, failed: 0 },
+    filterMenuOpen: false,
+    onFilterMenuToggle: noop,
+    originFilters: { hideAgentStarted: false, onlyPrompted: false },
+    onOriginFilters: noop,
+    hiddenCounts: { agent: 0, unprompted: 0 },
     filter: '',
     filtering: false,
     onFilterChange: noop,
@@ -86,7 +108,10 @@ function mount(entries: readonly SessionEntry[]) {
     width: 264,
     resizeHandle: null,
   };
-  return render(<SessionList {...props} />);
+}
+
+function mount(entries: readonly SessionEntry[]) {
+  return render(<SessionList {...baseProps(entries)} />);
 }
 
 afterEach(() => {
@@ -232,9 +257,7 @@ describe('SessionList placeholder row', () => {
     render(
       <SessionList
         {...({
-          entries,
-          focusedSessionId: null,
-          workspace: 'vam',
+          ...baseProps(entries),
           filter: '',
           filtering: false,
           onFilterChange: noop,
@@ -297,9 +320,7 @@ describe('SessionList placeholder row', () => {
     render(
       <SessionList
         {...({
-          entries,
-          focusedSessionId: null,
-          workspace: 'vam',
+          ...baseProps(entries),
           filter: '',
           filtering: false,
           onFilterChange: noop,
