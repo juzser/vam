@@ -28,6 +28,7 @@ import {
   readModeRequest,
   setModelRequest,
   setModeRequest,
+  splitAnswers,
 } from '../../src/renderer/panels/DetailPanel.js';
 import {
   hasContentAbove,
@@ -329,8 +330,6 @@ describe('the out text is formatted, not a flat wall', () => {
     });
     const lines = all('[data-out-line]');
     expect(lines).toHaveLength(2);
-    // Newlines are real breaks, never collapsed whitespace.
-    expect(lines[0]?.className).toContain('whitespace-pre-wrap');
     // The machine-ish head is monospace and carries the mockup's emphasis
     // colour (#ededed dark / #18181b light = `ink`); the prose stays at the
     // measured body colour (#a1a1a1 / #52525b = `ink-dim`).
@@ -338,7 +337,7 @@ describe('the out text is formatted, not a flat wall', () => {
     expect(head?.textContent).toBe('task.completed · t-4');
     expect(head?.className).toContain('font-mono');
     expect(head?.className).toContain('text-ink');
-    expect(lines[0]?.className).toContain('text-ink-dim');
+    expect(lines[0]?.querySelector('[data-out-body] p')?.className).toContain('text-ink-dim');
     expect(lines[1]?.textContent).toContain('needs review');
   });
 
@@ -349,6 +348,109 @@ describe('the out text is formatted, not a flat wall', () => {
     const lines = all('[data-out-line]');
     expect(lines).toHaveLength(1);
     expect(lines[0]?.textContent).toBe('just words');
+    expect(lines[0]?.querySelector('[data-out-head]')).toBeNull();
+  });
+});
+
+/**
+ * The `out` region renders GitHub-flavoured markdown, per the operator.
+ *
+ * Two things are being asserted at once here and they pull in opposite
+ * directions: an agent's answer should READ like the markdown it was written
+ * as, and an agent's answer is untrusted text that must not be able to run
+ * anything or fetch anything. `react-markdown` with no `rehype-raw` is what
+ * buys both, and the tests below hold that line rather than assuming it.
+ */
+describe('the out region renders the agent’s markdown', () => {
+  const withOutput = (output: string) =>
+    draw({ decision: { id: 'd5', label: 'l', input: 'i', output, commands: [] } });
+
+  it('keeps a multi-line answer whole instead of one block per newline', () => {
+    // The adapter joins summarised answers with a newline, so a newline is
+    // AMBIGUOUS: it separates two answers, and it is also every line break
+    // inside one answer's own text. A fence or a table would be shredded by
+    // splitting on it, so a block breaks only where a new answer's head sits.
+    expect(
+      splitAnswers('task.done · t-1 · here:\n```\nrun me\n```\nnote.added · t-1 · done'),
+    ).toEqual(['task.done · t-1 · here:\n```\nrun me\n```', 'note.added · t-1 · done']);
+    // Prose that merely mentions the separator mid-sentence is not a new
+    // answer: a head is one bare token and then the separator.
+    expect(splitAnswers('one\nand two · three')).toEqual(['one\nand two · three']);
+    expect(splitAnswers('  \n\n')).toEqual([]);
+  });
+
+  it('renders headings, emphasis, lists and gfm tables', () => {
+    withOutput(
+      '## heading\n\n**bold** and ~~struck~~\n\n- one\n- two\n\n| a | b |\n| - | - |\n| 1 | 2 |',
+    );
+    const out = q<HTMLElement>('[data-detail-scroll="out"]') as HTMLElement;
+    expect(out.querySelector('h2')?.textContent).toBe('heading');
+    expect(out.querySelector('strong')?.textContent).toBe('bold');
+    // Strikethrough is gfm, not core markdown: it is the cheapest proof that
+    // `remark-gfm` is actually plugged in and not merely installed.
+    expect(out.querySelector('del')?.textContent).toBe('struck');
+    expect(out.querySelectorAll('li')).toHaveLength(2);
+    // The pane is resizable and 408px by default, so the two elements that
+    // have no width of their own scroll inside their own box rather than
+    // widening the pane.
+    const table = out.querySelector('table');
+    expect(table).not.toBeNull();
+    expect(table?.parentElement?.className).toContain('overflow-x-auto');
+  });
+
+  it('scrolls a fenced block sideways rather than widening the pane', () => {
+    withOutput('```sh\necho a-very-long-command-that-does-not-wrap\n```');
+    const pre = q<HTMLElement>('[data-detail-scroll="out"] pre');
+    expect(pre).not.toBeNull();
+    expect(pre?.className).toContain('overflow-x-auto');
+    // Wrapping a fence is worse than scrolling it: a wrapped command line
+    // reads as two commands.
+    expect(pre?.className).not.toContain('whitespace-pre-wrap');
+  });
+
+  it('renders none of the raw HTML an untrusted answer may carry', () => {
+    // This is the reason the library was chosen: it parses markdown into
+    // React elements and drops embedded HTML unless `rehype-raw` is added,
+    // which it is not and must not be. `out` is an agent's text and vam has
+    // no way to know what produced it.
+    withOutput('before <img src="x" onerror="boom"> <script>bad()</script> after');
+    const out = q<HTMLElement>('[data-detail-scroll="out"]') as HTMLElement;
+    expect(out.querySelector('img')).toBeNull();
+    expect(out.querySelector('script')).toBeNull();
+    // It is not dropped, it is defused: the tags arrive as escaped TEXT, so
+    // the markup carries `&lt;img` and no element and no attribute. This is
+    // the assertion that would fail the day someone adds `rehype-raw` — it
+    // cannot fail against a plain-text renderer, which is the point: it is a
+    // standing guard, not a claim that today's rendering changed anything.
+    expect(out.innerHTML).toContain('&lt;img');
+    expect(out.textContent).toContain('before');
+    expect(out.textContent).toContain('after');
+  });
+
+  it('shows a markdown image as its words, and never fetches it', () => {
+    // An image URL in an agent's answer is a remote fetch that would tell
+    // whoever wrote the answer that this pane opened, and when.
+    withOutput('![a chart](https://example.com/pixel.png)');
+    const out = q<HTMLElement>('[data-detail-scroll="out"]') as HTMLElement;
+    expect(out.querySelector('img')).toBeNull();
+    expect(out.textContent).toContain('a chart');
+    // And the syntax itself is consumed rather than printed: without this the
+    // assertions above pass on any renderer that shows the source text.
+    expect(out.textContent).not.toContain('![');
+  });
+
+  it('prints a link’s address instead of offering a click that goes nowhere', () => {
+    // The shell denies `window.open` and every off-origin navigation
+    // (src/main/index.ts), which is the right policy and makes an <a> here a
+    // control that silently does nothing. The address is shown instead, in a
+    // pane where text is selectable, so it can be copied and opened by hand.
+    withOutput('see [the docs](https://example.com/x) for more');
+    const out = q<HTMLElement>('[data-detail-scroll="out"]') as HTMLElement;
+    expect(out.querySelector('a')).toBeNull();
+    expect(out.textContent).toContain('the docs');
+    expect(out.textContent).toContain('https://example.com/x');
+    // Same guard: the brackets are gone, so this cannot pass on raw text.
+    expect(out.textContent).not.toContain('](');
   });
 });
 

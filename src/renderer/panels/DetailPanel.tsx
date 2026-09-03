@@ -42,6 +42,8 @@ import {
   X,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import Markdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { Decision } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { ReviewQueue, type ReviewQueueProps } from './ReviewQueue.js';
@@ -365,51 +367,175 @@ const PROGRESS_LINES = 5;
 const ANSWER_SEPARATOR = ' · ';
 
 /**
- * The answer, formatted rather than poured out flat.
+ * What the start of a summarised answer looks like: one bare token, then the
+ * separator. `summarise` builds `eventType · taskId · detail`, so the token is
+ * an event type and it never contains a space — which is what makes this
+ * distinguishable from a sentence that merely uses the separator, and from
+ * every markdown construct, none of which start with a bare word and a middot.
+ */
+const ANSWER_HEAD = /^[\w.:-]+ · /;
+
+/**
+ * The adapter's newline-joined answers, back into one string per answer.
  *
- * `toDecisions` builds each answer as `eventType · taskId · detail` and joins
- * them with newlines, so the output is a LIST that was being rendered as one
- * paragraph — every answer running into the next. Splitting on the newline is
- * therefore not a formatting flourish, it restores a structure the adapter
- * already put there.
+ * The newline it joins with is AMBIGUOUS and that is the whole problem here:
+ * it separates two answers, and it is also every line break inside a single
+ * answer's own text. The previous rendering split on it flatly, which was
+ * right while an answer was one line of prose and is wrong the moment an
+ * answer is markdown — a fenced block or a table is many lines and splitting
+ * it produces neither a fence nor a table, just its wreckage.
  *
- * The mockup's own out region is the model for how it is drawn: 12px/1.6 body
- * in `ink-dim` — whose two values ARE the ones measured off the Response
- * artboards, dark and light — 9px between blocks, with the machine-ish parts
- * lifted out in mono at 11px and the emphasised words in `ink`. That is the
- * operator asked for: the body colour already matched, what was missing was
- * the mockup's two-tone split between what a thing IS and what it SAYS.
+ * So a block breaks only where a new answer's head begins. The one input this
+ * misreads is a fenced block whose own content starts a line with a bare token
+ * and the separator; nothing in the joined form can tell that apart, and the
+ * adapter is where a real fix would live.
+ */
+export function splitAnswers(output: string): string[] {
+  const blocks: string[][] = [];
+  for (const line of output.split('\n')) {
+    const current = blocks[blocks.length - 1];
+    if (current === undefined || ANSWER_HEAD.test(line)) blocks.push([line]);
+    else current.push(line);
+  }
+  return blocks.map((lines) => lines.join('\n').trim()).filter((block) => block !== '');
+}
+
+/**
+ * How each markdown element is dressed, in vam's own tokens.
  *
- * Deliberately not a markdown renderer: black-smith does not emit markdown
- * here, and guessing at one would dress arbitrary payload text as structure.
+ * Every colour here is a token from `styles.css`, which carries a dark and a
+ * light value for each — so this follows the theme rather than pinning one
+ * half of it. The body keeps the size and colour the flat rendering already
+ * had (12px/1.6 in `ink-dim`, measured off the mockup's Response artboards);
+ * everything else is built around that so a heading or a table reads as a
+ * step up from the body rather than as a different app.
+ *
+ * Two elements get their own scroller: a fenced block and a table have no
+ * width of their own and this pane is resizable and 408px by default, so
+ * without it the widest line in an answer decides how wide the pane is.
+ *
+ * `a` and `img` are the two that do NOT render as themselves, and the reason
+ * is the same for both: `out` is an AGENT's text, which vam cannot vouch for.
+ * An image would be a remote fetch that tells whoever wrote the answer that
+ * this pane opened. A link would be a control that does nothing: the shell
+ * denies `window.open` and every off-origin navigation (see src/main), which
+ * is the correct policy. So the address is printed instead, in a region where
+ * text is selectable, and opening it is a deliberate copy-and-paste.
+ */
+const OUT_MARKDOWN: Components = {
+  p: ({ children }) => <p className="text-[12px] text-ink-dim leading-[1.6]">{children}</p>,
+  h1: ({ children }) => <h1 className="font-medium text-[13px] text-ink">{children}</h1>,
+  h2: ({ children }) => <h2 className="font-medium text-[12.5px] text-ink">{children}</h2>,
+  h3: ({ children }) => (
+    <h3 className="font-medium text-[12px] text-ink tracking-[0.01em]">{children}</h3>
+  ),
+  ul: ({ children }) => (
+    <ul className="flex list-disc flex-col gap-1 pl-4 text-[12px] text-ink-dim leading-[1.6]">
+      {children}
+    </ul>
+  ),
+  ol: ({ children }) => (
+    <ol className="flex list-decimal flex-col gap-1 pl-4 text-[12px] text-ink-dim leading-[1.6]">
+      {children}
+    </ol>
+  ),
+  li: ({ children }) => <li className="marker:text-ink-ghost">{children}</li>,
+  strong: ({ children }) => <strong className="font-medium text-ink">{children}</strong>,
+  em: ({ children }) => <em className="text-ink-dim italic">{children}</em>,
+  del: ({ children }) => <del className="text-ink-faint">{children}</del>,
+  hr: () => <hr className="border-line border-t" />,
+  blockquote: ({ children }) => (
+    <blockquote className="border-line-strong border-l-2 pl-2.5 text-[12px] text-ink-faint leading-[1.6]">
+      {children}
+    </blockquote>
+  ),
+  // Styled as an inline chip, and reset back to plain text inside a fence by
+  // the `pre` rule below — react-markdown stopped telling a component which of
+  // the two it is, and the parent knows without being told.
+  code: ({ children }) => (
+    <code className="rounded-[4px] bg-raised px-1 py-[1px] font-mono text-[11px] text-ink">
+      {children}
+    </code>
+  ),
+  pre: ({ children }) => (
+    <pre className="vam-no-scrollbar overflow-x-auto rounded-[7px] border border-line bg-canvas px-2.5 py-2 font-mono text-[11px] text-ink-dim leading-[1.55] [&_code]:bg-transparent [&_code]:px-0 [&_code]:text-ink-dim">
+      {children}
+    </pre>
+  ),
+  table: ({ children }) => (
+    <div className="vam-no-scrollbar overflow-x-auto">
+      <table className="w-max border-collapse text-[11.5px] text-ink-dim">{children}</table>
+    </div>
+  ),
+  th: ({ children }) => (
+    <th className="border border-line px-2 py-1 text-left font-medium text-ink">{children}</th>
+  ),
+  td: ({ children }) => <td className="border border-line px-2 py-1 align-top">{children}</td>,
+  a: ({ href, children }) => (
+    <span className="text-done">
+      {children}
+      {href !== undefined && (
+        <span className="font-mono text-[10.5px] text-ink-faint"> ({href})</span>
+      )}
+    </span>
+  ),
+  img: ({ alt }) => (
+    <span className="font-mono text-[10.5px] text-ink-faint">{alt === '' ? 'image' : alt}</span>
+  ),
+};
+
+/**
+ * One answer: the machine-ish head it was built with, then its own markdown.
+ *
+ * The operator asked for `out` to read the way GitHub renders markdown, and
+ * the honest place to put that is INSIDE each answer rather than over the
+ * whole region. `toDecisions` builds a LIST — one summarised answer per line,
+ * `eventType · taskId · detail` — and markdown has no notion of that list:
+ * handed the joined string it would fold every answer into one paragraph,
+ * which is exactly the flat wall the two-tone treatment was written to end.
+ * So the adapter's structure stays and is what markdown is rendered within.
+ * The head is a value the adapter computed, not text an agent wrote, so it
+ * stays mono in `ink` and is not fed to the renderer; the detail is the
+ * agent's own words and is.
+ *
+ * Nothing here enables `rehype-raw` or hands a string to `innerHTML`, and
+ * that is not an omission: react-markdown parses to React elements and drops
+ * embedded HTML by default, which is the property this library was chosen
+ * for. `out` is untrusted text.
  */
 function OutText({ output }: { readonly output: string }) {
-  const lines = output.split('\n').filter((line) => line.trim() !== '');
   return (
-    <div className="flex flex-col gap-[9px]">
-      {lines.map((line, i) => {
-        const cut = line.lastIndexOf(ANSWER_SEPARATOR);
+    <div className="flex flex-col gap-[11px]">
+      {splitAnswers(output).map((block, i) => {
+        const [first = '', ...rest] = block.split('\n');
+        const cut = first.lastIndexOf(ANSWER_SEPARATOR);
         // Only a line the adapter actually built gets the two-tone treatment;
-        // anything else is prose and is left whole.
-        const head = cut === -1 ? null : line.slice(0, cut);
-        const rest = cut === -1 ? line : line.slice(cut + ANSWER_SEPARATOR.length);
+        // anything else is an agent's prose and is left whole.
+        const head = cut === -1 ? null : first.slice(0, cut);
+        const body = [
+          cut === -1 ? first : first.slice(cut + ANSWER_SEPARATOR.length),
+          ...rest,
+        ].join('\n');
         return (
-          <p
-            // The lines have no ids of their own; their order in one answer is
+          <div
+            // The blocks have no ids of their own; their order in one answer is
             // stable and is the only thing distinguishing them.
             // biome-ignore lint/suspicious/noArrayIndexKey: no stabler id exists
             key={i}
             data-out-line
-            className="whitespace-pre-wrap break-words text-[12px] text-ink-dim leading-[1.6]"
+            className="flex min-w-0 flex-col gap-1 break-words"
           >
             {head !== null && (
               <span data-out-head className="font-mono text-[11px] text-ink">
                 {head}
               </span>
             )}
-            {head !== null && ' — '}
-            {rest}
-          </p>
+            <div data-out-body className="flex min-w-0 flex-col gap-2">
+              <Markdown remarkPlugins={[remarkGfm]} components={OUT_MARKDOWN}>
+                {body}
+              </Markdown>
+            </div>
+          </div>
         );
       })}
     </div>
