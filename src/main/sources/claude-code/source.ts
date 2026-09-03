@@ -212,12 +212,23 @@ export async function loadClaudeCodeProjects(
       branch: read.facts.branch ?? (await branchOf(agent.cwd)),
       decisions: read.facts.decisions,
       source: 'claude-code',
-      // A session the CLI lists is one a PERSON started -- agent traffic lives
-      // in `<sessionId>/subagents/` and never becomes a row here. So `human`
-      // is a fact, not a default, and the sidebar's hide-agent-made filter
-      // keeps these visible. `promptCount` stays null: a tail cannot count a
-      // whole session's turns, and a partial count would read as a true one.
-      origin: { startedBy: 'human', promptCount: null },
+      // An INTERACTIVE row is a terminal a person is sitting in front of, so
+      // `human` is a fact there. A BACKGROUND row is not: measured against
+      // the real CLI, `--all` lists background sessions living under
+      // `.claude/worktrees/`, and nothing on the row says whether a person
+      // launched it or an agent spawned it. This used to claim `human` for
+      // both. `unknown` is what vam actually knows, and `session-filter.ts`
+      // keeps unknown VISIBLE by design -- hiding what you did not check is
+      // how a filter loses work -- so the honest value costs no row on
+      // screen. Agent traffic proper (`<sessionId>/subagents/`) still never
+      // becomes a row at all.
+      //
+      // `promptCount` stays null: a tail cannot count a whole session's
+      // turns, and a partial count would read as a true one.
+      origin: {
+        startedBy: agent.kind === 'interactive' ? 'human' : 'unknown',
+        promptCount: null,
+      },
     };
     const group = grouped.get(agent.cwd) ?? { cwd: agent.cwd, sessions: [] };
     group.sessions.push(session);
