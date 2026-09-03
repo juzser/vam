@@ -22,6 +22,7 @@
  */
 
 import type { CanvasModel, SourceId } from '../domain/model.js';
+import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
 import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
 
 const KEY = 'vam.prefs.v1';
@@ -106,6 +107,12 @@ export type Prefs = {
    * before this field existed.
    */
   readonly projectIcons: Readonly<Record<string, IconsBySession>>;
+  /**
+   * The filter popover's two origin toggles. Exempt from the icon TTL for the
+   * same reason `theme` and `panes` are: it describes the person, not a
+   * session that may have stopped existing.
+   */
+  readonly filters: SessionFilters;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -113,6 +120,7 @@ export const EMPTY_PREFS: Prefs = {
   theme: DEFAULT_THEME,
   panes: DEFAULT_PANES,
   projectIcons: {},
+  filters: DEFAULT_SESSION_FILTERS,
 };
 
 /**
@@ -158,7 +166,12 @@ export function readPrefs(
   if (typeof parsed !== 'object' || parsed === null) {
     return EMPTY_PREFS;
   }
-  const record = parsed as { icons?: unknown; panes?: unknown; projectIcons?: unknown };
+  const record = parsed as {
+    icons?: unknown;
+    panes?: unknown;
+    projectIcons?: unknown;
+    filters?: unknown;
+  };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   return {
     icons: pruneIcons(readIcons(record.icons, migrateSource), cutoff),
@@ -172,7 +185,31 @@ export function readPrefs(
     // Same TTL as session icons, same reasoning: a project's glyph is not
     // worth remembering forever either.
     projectIcons: pruneIcons(readProjectIcons(record.projectIcons), cutoff),
+    // Same argument again: not pruned, and per-field defensive so one garbage
+    // toggle cannot drag the other back to its default with it.
+    filters: readFilters(record.filters),
   };
+}
+
+/** Per FIELD, not per object: a payload from an older vam has neither key,
+ * and a payload with one bad key still has one good one. */
+function readFilters(raw: unknown): SessionFilters {
+  const { hideAgentStarted, onlyPrompted } = (
+    typeof raw === 'object' && raw !== null ? raw : {}
+  ) as { hideAgentStarted?: unknown; onlyPrompted?: unknown };
+  return {
+    hideAgentStarted:
+      typeof hideAgentStarted === 'boolean'
+        ? hideAgentStarted
+        : DEFAULT_SESSION_FILTERS.hideAgentStarted,
+    onlyPrompted:
+      typeof onlyPrompted === 'boolean' ? onlyPrompted : DEFAULT_SESSION_FILTERS.onlyPrompted,
+  };
+}
+
+/** Written by the filter popover's two toggles. */
+export function setSessionFilters(prefs: Prefs, filters: SessionFilters): Prefs {
+  return { ...prefs, filters };
 }
 
 /** No legacy flat shape to migrate — unlike `readIcons`, every top-level

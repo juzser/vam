@@ -96,6 +96,10 @@ export type KeyAction =
       shell (like orca) the intended chord is `Mod-t`, which a desktop
       window can capture and a browser tab cannot. */
   | { readonly kind: 'newSession' }
+  /** `F` — open or close the sidebar's filter popover. Shift-f, because
+      plain `f` is already the jump-label move and this is its stronger,
+      "narrow the whole list" cousin. */
+  | { readonly kind: 'filterMenu' }
   /** `,` — settings, the convention most editors already use. */
   | { readonly kind: 'settings' }
   /** `<` / `>` — narrow or widen the focused side pane by one step. */
@@ -140,6 +144,7 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   o: { kind: 'newSession' },
   ',': { kind: 'settings' },
   f: { kind: 'jump' },
+  F: { kind: 'filterMenu' },
   G: { kind: 'last' },
   '/': { kind: 'search' },
   n: { kind: 'searchNext' },

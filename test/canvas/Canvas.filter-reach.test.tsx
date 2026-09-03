@@ -67,6 +67,13 @@ const drawnIds = () =>
     .filter((id) => id.startsWith('info:'))
     .map((id) => id.slice('info:'.length));
 
+/** The pills live in the sidebar's filter popover now, so every test that
+ * clicks one opens it first. */
+const openMenu = () => {
+  const button = document.querySelector<HTMLButtonElement>('[data-filter-toggle]');
+  if (button) fireEvent.click(button);
+};
+
 const pill = (key: string) =>
   document.querySelector<HTMLButtonElement>(`[data-status-pill="${key}"]`);
 
@@ -103,6 +110,7 @@ describe('a card on the canvas is a card the cursor can reach', () => {
 
   it('draws exactly the two the "Needs you" pill leaves navigable', () => {
     render(<Canvas model={MODEL} />);
+    openMenu();
     const waiting = pill('waiting');
     if (waiting) fireEvent.click(waiting);
 
@@ -114,6 +122,7 @@ describe('a card on the canvas is a card the cursor can reach', () => {
 
   it('draws them all again when the filter is dropped', () => {
     render(<Canvas model={MODEL} />);
+    openMenu();
     const waiting = pill('waiting');
     if (waiting) fireEvent.click(waiting);
     const all = pill('all');
@@ -123,6 +132,7 @@ describe('a card on the canvas is a card the cursor can reach', () => {
 
   it('leaves the pill counts on the whole workspace, not on what survived', () => {
     render(<Canvas model={MODEL} />);
+    openMenu();
     const waiting = pill('waiting');
     if (waiting) fireEvent.click(waiting);
     // A count that moved when you clicked it would be a count of your own click.

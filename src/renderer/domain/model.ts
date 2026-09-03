@@ -100,6 +100,24 @@ export type Command = {
   readonly command: string;
 };
 
+/**
+ * Two immutable facts about how a session came to exist, both read off its
+ * timeline: who opened it, and how many times a person has spoken in it.
+ *
+ * Immutable is the point — a `session-start` actor never changes and a prompt
+ * count only grows — which is why they can be derived once per model build
+ * and never reconciled.
+ *
+ * `unknown` and `null` are load-bearing, not placeholders. They mean "vam has
+ * not established this", and every filter that reads them treats them as
+ * VISIBLE. Hiding something you did not check is how work disappears.
+ */
+export type SessionOrigin = {
+  readonly startedBy: 'human' | 'agent' | 'unknown';
+  /** `null` when no timeline has arrived for this session yet. */
+  readonly promptCount: number | null;
+};
+
 export type Session = {
   readonly id: string;
   /** Short name on the node header — an epic id, a task id, a run name. */
@@ -149,6 +167,13 @@ export type Session = {
    * existing fixture to name one at once.
    */
   readonly source?: SourceId;
+  /**
+   * How this session came to exist. Optional because ten fixture files build
+   * `Session` literals by hand, and because a model assembled without a
+   * timeline genuinely has nothing to say here — absent reads exactly like
+   * `unknown`, which is the visible-by-default case.
+   */
+  readonly origin?: SessionOrigin;
 };
 
 export type Project = {

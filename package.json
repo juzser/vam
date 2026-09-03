@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "main": "out/main/index.cjs",
-  "description": "VAM — VIM Agent Management. A keyboard-first ADE for managing agent sessions from any CLI.",
+  "description": "VAM \u2014 VIM Agent Management. A keyboard-first ADE for managing agent sessions from any CLI.",
   "engines": {
     "node": ">=22"
   },
@@ -25,7 +25,6 @@
     "lint": "biome check .",
     "test:e2e": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.config.ts",
     "test:e2e:reconnect": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.reconnect.config.ts",
-    "test:e2e:filter-panel": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.filter-panel.config.ts",
     "test:app": "vitest run --config vitest.app.config.ts"
   },
   "dependencies": {

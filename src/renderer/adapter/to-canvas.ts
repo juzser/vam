@@ -20,9 +20,11 @@ import type {
   Decision,
   Project,
   Session,
+  SessionOrigin,
   SessionStatus,
   SourceId,
 } from '../domain/model.js';
+import { classifyActor } from '../domain/session-filter.js';
 import type { ApiOverview, ApiRunningSession, ApiTimelineEntry } from './api.js';
 import { relativeTime } from './relative-time.js';
 
@@ -229,6 +231,29 @@ function epicOf(decisions: readonly Decision[]): string | null {
   return null;
 }
 
+/**
+ * Who opened this session, and how often a person has spoken in it.
+ *
+ * Costs nothing extra: `useCanvas` already fetches every session's timeline on
+ * every load, so this reads a list that is in hand rather than asking for one.
+ * That is also why there is no cache — there is no second request to avoid,
+ * and a cache would only introduce a way for the answer to go stale.
+ *
+ * An EMPTY list is treated exactly like an absent one. Every real session has
+ * at least a `session-start`, so `[]` means "not fetched", not "nothing
+ * happened", and answering `unknown` keeps it on screen.
+ */
+function originOf(timeline: readonly ApiTimelineEntry[]): SessionOrigin {
+  if (timeline.length === 0) {
+    return { startedBy: 'unknown', promptCount: null };
+  }
+  const start = timeline.find((e) => e.eventType === 'session-start');
+  return {
+    startedBy: start === undefined ? 'unknown' : classifyActor(start.actor),
+    promptCount: timeline.filter((e) => e.eventType === 'user_prompt').length,
+  };
+}
+
 function toSession(
   api: ApiRunningSession,
   timeline: readonly ApiTimelineEntry[],
@@ -247,6 +272,7 @@ function toSession(
     activity: activityOf(api),
     age: ageOf(api, now),
     decisions,
+    origin: originOf(timeline),
   };
 }
 

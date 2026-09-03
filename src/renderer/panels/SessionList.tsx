@@ -20,10 +20,12 @@
  * floats the command palette; the row only draws what came back.
  */
 
-import { GitBranch, Plus, Search, Settings, Sun } from 'lucide-react';
+import { Filter, GitBranch, Plus, Search, Settings, Sun } from 'lucide-react';
 import { type ReactNode, useEffect, useRef } from 'react';
 import type { Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
+import { STATUS_FILTERS } from '../domain/session-filter.js';
 import type { Theme } from '../prefs/prefs.js';
 import { OverlayScroll } from './OverlayScroll.js';
 
@@ -54,6 +56,27 @@ export type SessionListProps = {
   readonly onFilterCancel: () => void;
   /** Mouse route to what `/` does. */
   readonly onOpenFilter: () => void;
+  /**
+   * The status narrowing, and the popover that owns it.
+   *
+   * It used to be a `<Panel>` floating over the canvas. One piece of state
+   * with two controls on two surfaces is a disagreement waiting to happen,
+   * and the canvas was the wrong surface anyway: what the narrowing produces
+   * is THIS list, so the control belongs beside it.
+   */
+  readonly statusFilter: StatusFilter;
+  readonly onStatusFilter: (value: StatusFilter) => void;
+  /** Counts over the UNFILTERED workspace — a count that moved when you
+   * clicked it would be a count of your own click. */
+  readonly statusTally: Readonly<Record<StatusFilter, number>>;
+  readonly filterMenuOpen: boolean;
+  readonly onFilterMenuToggle: (open: boolean) => void;
+  /** The two origin toggles, and what each one costs you. */
+  readonly originFilters: SessionFilters;
+  readonly onOriginFilters: (next: SessionFilters) => void;
+  /** How many sessions each rule matches, over the UNFILTERED workspace. A
+   * toggle that hid things without saying how many would be a disappearance. */
+  readonly hiddenCounts: { readonly agent: number; readonly unprompted: number };
   readonly renamingId: string | null;
   readonly renameDraft: string;
   readonly onRenameChange: (value: string) => void;
@@ -116,6 +139,14 @@ export function SessionList(props: SessionListProps) {
     onFilterCommit,
     onFilterCancel,
     onOpenFilter,
+    statusFilter,
+    onStatusFilter,
+    statusTally,
+    filterMenuOpen,
+    onFilterMenuToggle,
+    originFilters,
+    onOriginFilters,
+    hiddenCounts,
     renamingId,
     renameDraft,
     onRenameChange,
@@ -135,6 +166,29 @@ export function SessionList(props: SessionListProps) {
 
   const filterRef = useRef<HTMLInputElement>(null);
   const renameRef = useRef<HTMLInputElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuWasOpen = useRef(false);
+
+  /**
+   * Where the keyboard goes when the popover opens, and where it comes back
+   * to when it closes.
+   *
+   * Written as one effect on the OPEN flag rather than in the click handler,
+   * because there are two ways to close it — the control itself and the
+   * global Escape — and a keyboard user stranded on `document.body` by one of
+   * them would have no way back into the list. Nothing here traps Tab: the
+   * popover is a plain run of buttons, so Tab walks out of it the way it
+   * walks out of anything else.
+   */
+  useEffect(() => {
+    if (filterMenuOpen) {
+      menuRef.current?.querySelector('button')?.focus();
+    } else if (menuWasOpen.current) {
+      menuButtonRef.current?.focus();
+    }
+    menuWasOpen.current = filterMenuOpen;
+  }, [filterMenuOpen]);
 
   // Imperative focus in both cases, for the same reason: the keystroke that
   // opened the box is the request for it, so `autoFocus` would be claiming a
@@ -177,42 +231,159 @@ export function SessionList(props: SessionListProps) {
           <span className="flex-none font-mono text-[9.5px] text-ink-faint">workspace</span>
         </div>
 
-        {filtering ? (
-          <div className="flex h-[30px] items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5">
-            <span className="font-mono text-[11px] text-ink-faint">/</span>
-            <input
-              ref={filterRef}
-              value={filter}
-              onChange={(event) => onFilterChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  onFilterCommit();
-                } else if (event.key === 'Escape') {
-                  event.preventDefault();
-                  onFilterCancel();
-                }
-              }}
-              placeholder="Search sessions"
-              className="min-w-0 flex-1 bg-transparent font-mono text-[11.5px] text-ink outline-none placeholder:text-ink-faint"
-              aria-label="filter sessions"
-            />
-            <span className="font-mono text-[10px] text-ink-faint">{entries.length}</span>
+        <div className="relative flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            {filtering ? (
+              <div className="flex h-[30px] items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5">
+                <span className="font-mono text-[11px] text-ink-faint">/</span>
+                <input
+                  ref={filterRef}
+                  value={filter}
+                  onChange={(event) => onFilterChange(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      onFilterCommit();
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault();
+                      onFilterCancel();
+                    }
+                  }}
+                  placeholder="Search sessions"
+                  className="min-w-0 flex-1 bg-transparent font-mono text-[11.5px] text-ink outline-none placeholder:text-ink-faint"
+                  aria-label="filter sessions"
+                />
+                <span className="font-mono text-[10px] text-ink-faint">{entries.length}</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={onOpenFilter}
+                aria-label="search sessions"
+                className="flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5 text-ink-faint hover:border-line-strong"
+              >
+                <Search size={14} strokeWidth={1.6} />
+                <span className="flex-1 text-left text-[12px]">Search sessions</span>
+                <span className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-[9.5px]">
+                  /
+                </span>
+              </button>
+            )}
           </div>
-        ) : (
+
+          {/* The operator's ask: an icon beside the search box, toggling a
+              popover that narrows this list. Search answers "the one called
+              permalink"; this answers "the ones that stopped" — two different
+              questions, so two controls, side by side. */}
           <button
             type="button"
-            onClick={onOpenFilter}
-            aria-label="search sessions"
-            className="flex h-[30px] cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5 text-ink-faint hover:border-line-strong"
+            ref={menuButtonRef}
+            data-filter-toggle
+            aria-haspopup="dialog"
+            aria-expanded={filterMenuOpen}
+            aria-label="filter sessions"
+            onClick={() => onFilterMenuToggle(!filterMenuOpen)}
+            className={[
+              'flex h-[30px] w-[30px] flex-none cursor-pointer items-center justify-center rounded-[8px] border bg-panel',
+              filterMenuOpen || statusFilter !== 'all'
+                ? 'border-line-loud text-ink'
+                : 'border-line text-ink-faint hover:border-line-strong',
+            ].join(' ')}
           >
-            <Search size={14} strokeWidth={1.6} />
-            <span className="flex-1 text-left text-[12px]">Search sessions</span>
-            <span className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-[9.5px]">
-              /
-            </span>
+            <Filter size={14} strokeWidth={1.6} />
           </button>
-        )}
+
+          {filterMenuOpen && (
+            <div
+              ref={menuRef}
+              data-filter-menu
+              role="dialog"
+              aria-label="session filters"
+              className="absolute top-[36px] right-0 z-20 flex w-[212px] flex-col gap-2 rounded-[9px] border border-line-strong bg-panel p-2.5 shadow-lg"
+            >
+              <span className="font-mono text-[9.5px] text-ink-faint uppercase tracking-[0.12em]">
+                Status
+              </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {STATUS_FILTERS.map(([key, label]) => {
+                  const on = statusFilter === key;
+                  const count = statusTally[key];
+                  const loud = key === 'waiting' && count > 0;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      data-status-pill={key}
+                      aria-pressed={on}
+                      onClick={() => onStatusFilter(key)}
+                      className={[
+                        'cursor-pointer rounded-full border bg-canvas px-2.5 py-1 font-mono text-[10px]',
+                        on
+                          ? 'border-line-loud bg-raised text-ink'
+                          : loud
+                            ? 'border-waiting-tint text-waiting'
+                            : 'border-line text-ink-dim hover:border-line-strong',
+                      ].join(' ')}
+                    >
+                      {label} {count}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <span className="mt-0.5 font-mono text-[9.5px] text-ink-faint uppercase tracking-[0.12em]">
+                Origin
+              </span>
+              {/* Each row says what it takes away. A count is the difference
+                  between narrowing a list and losing something out of it. */}
+              {(
+                [
+                  [
+                    'agent',
+                    'Hide agent/test sessions',
+                    originFilters.hideAgentStarted,
+                    hiddenCounts.agent,
+                  ],
+                  [
+                    'prompted',
+                    'Only ones I have prompted',
+                    originFilters.onlyPrompted,
+                    hiddenCounts.unprompted,
+                  ],
+                ] as const
+              ).map(([key, label, on, hides]) => (
+                <button
+                  key={key}
+                  type="button"
+                  data-origin-toggle={key}
+                  aria-pressed={on}
+                  onClick={() =>
+                    onOriginFilters(
+                      key === 'agent'
+                        ? { ...originFilters, hideAgentStarted: !on }
+                        : { ...originFilters, onlyPrompted: !on },
+                    )
+                  }
+                  className={[
+                    'flex w-full cursor-pointer items-center gap-2 rounded-[7px] border px-2 py-1.5 text-left text-[11px]',
+                    on
+                      ? 'border-line-loud bg-raised text-ink'
+                      : 'border-line text-ink-dim hover:border-line-strong',
+                  ].join(' ')}
+                >
+                  <span
+                    className={[
+                      'h-[7px] w-[7px] flex-none rounded-full',
+                      on ? 'bg-running' : 'bg-line-strong',
+                    ].join(' ')}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{label}</span>
+                  <span className="flex-none font-mono text-[9.5px] text-ink-faint">−{hides}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <OverlayScroll className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-2.5 py-2.5">
