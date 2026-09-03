@@ -189,4 +189,32 @@ describe('describeUsage', () => {
     expect(result.text).toBe('—');
     expect(result.reason).toMatch(/stale/i);
   });
+
+  it('treats an unparseable observedAt as stale, not as fresh', () => {
+    // Found by mutation. Dropping the `Number.isNaN(observedAt)` half of the
+    // staleness test left every other test green, because `now - NaN` is NaN
+    // and `NaN > STALE_AFTER_MS` is FALSE -- so a reading whose timestamp
+    // cannot be parsed took the fresh path and rendered its percentages as
+    // current. An unknown age is the one age that must not read as recent.
+    //
+    // Not reachable from our own code today: `reader.ts` stamps `observedAt`
+    // with `new Date().toISOString()`. But it crosses IPC as a bare `string`,
+    // and the guard is right; nothing was holding it.
+    for (const observedAt of ['', 'just now', '2026-13-45T99:99:99Z']) {
+      const result = describeUsage(
+        {
+          kind: 'ok',
+          windows: {
+            fiveHour: { kind: 'known', percent: 40, resetsAt: '2026-09-03T11:15:00.000Z' },
+            sevenDay: { kind: 'known', percent: 30, resetsAt: '2026-09-08T06:00:00.000Z' },
+          },
+          observedAt,
+        },
+        now,
+      );
+      expect(result.text).toBe('—');
+      expect(result.text).not.toContain('40% used');
+      expect(result.reason).toMatch(/stale/i);
+    }
+  });
 });
