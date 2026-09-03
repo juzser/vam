@@ -104,12 +104,39 @@ describe('the minimap', () => {
     expect(coloured).toHaveLength(4);
   });
 
-  it('outlines the viewport instead of dimming everything around it', () => {
+  it('dims outside the viewport rather than outlining it', () => {
+    // The outline was replaced deliberately. ReactFlow draws it as a rectangle
+    // around the visible area; when that area is wider than the content — the
+    // normal case — its top and bottom edges fall outside the map and only the
+    // two vertical edges survive, reading as two bright rules down the sides
+    // instead of as a spotlight. A dimmed outside says the same thing with no
+    // lines, and degrades correctly: with everything visible, nothing dims.
     render(<Canvas model={MODEL} />);
     const map = document.querySelector<HTMLElement>('.react-flow__minimap');
     expect(map).toBeTruthy();
     const style = map?.getAttribute('style') ?? '';
-    expect(style).toContain('--xy-minimap-mask-background-color-props: transparent');
-    expect(style).toContain('--xy-minimap-mask-stroke-color-props: var(--color-ink)');
+    expect(style).toContain('--xy-minimap-mask-background-color-props: color-mix(');
+    expect(style).toContain('var(--color-canvas)');
+    // The stroke is what produced the two rules, so its absence is the fix and
+    // is asserted rather than left to follow from the mask.
+    expect(style).not.toContain('--xy-minimap-mask-stroke-color-props: var(--color-ink)');
+  });
+
+  it('draws chips wider than the node they stand for, so a session is visible', () => {
+    // `nodeStrokeWidth` is in FLOW units and is drawn around the chip, which
+    // makes it the only lever that renders a chip larger than its node. At a
+    // 220-wide card, 40 is a visible fattening that still leaves neighbours
+    // apart.
+    render(<Canvas model={MODEL} />);
+    const map = document.querySelector<HTMLElement>('.react-flow__minimap');
+    // ReactFlow writes these through inline style, not attributes — the same
+    // way the existing fill assertions read them.
+    const strokes = [
+      ...(map?.querySelectorAll<SVGRectElement>('.react-flow__minimap-node') ?? []),
+    ].map((n) => n.style.strokeWidth || n.getAttribute('stroke-width'));
+    expect(strokes.length, 'no minimap chips rendered — the test proves nothing').toBeGreaterThan(
+      0,
+    );
+    expect(strokes.every((w) => Number(w) >= 40)).toBe(true);
   });
 });

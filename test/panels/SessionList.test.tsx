@@ -375,3 +375,42 @@ describe('SessionList footer', () => {
     }
   });
 });
+
+/**
+ * The close button belongs to its own row.
+ *
+ * `group-hover:` matches ANY ancestor carrying `group`, and `OverlayScroll`
+ * wraps this whole list in one — so an unnamed `group` on the row meant
+ * hovering anywhere in the sidebar revealed every row's close button at once.
+ * The class was there precisely to stop that, and it was doing the opposite.
+ *
+ * happy-dom applies no stylesheet and simulates no `:hover`, so the visual
+ * effect is not testable here. What IS testable, and is exactly the defect, is
+ * the scope: the button must react to a NAMED group, and the row must declare
+ * that name. An unnamed `group-hover:` on this button is the bug itself.
+ */
+describe('the close button reveals with its own row, not with the whole list', () => {
+  it('uses a named group so a sibling row cannot reveal it', () => {
+    const { container } = mount(twoProjects());
+    const closers = [...container.querySelectorAll('[aria-label^="close "]')];
+    expect(closers.length, 'no close buttons rendered — the test proves nothing').toBeGreaterThan(
+      0,
+    );
+    for (const el of closers) {
+      const cls = el.className;
+      expect(cls, 'close button is hidden at rest').toContain('opacity-0');
+      expect(cls, 'reveal must be scoped to the row').toContain('group-hover/row:opacity-100');
+      // The unnamed form is the defect: it would also fire from OverlayScroll's
+      // wrapper, which is an ancestor of every row.
+      expect(cls).not.toMatch(/(^|\s)group-hover:opacity-100/);
+    }
+  });
+
+  it('declares that named group on the row wrapper', () => {
+    const { container } = mount(twoProjects());
+    const closer = container.querySelector('[aria-label^="close "]');
+    const row = closer?.parentElement;
+    expect(row, 'close button has no wrapper').not.toBeNull();
+    expect(row?.className).toContain('group/row');
+  });
+});

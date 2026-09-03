@@ -458,7 +458,15 @@ export function SessionList(props: SessionListProps) {
                         />
                       </div>
                     ) : (
-                      <div className="group relative">
+                      <div
+                        // A NAMED group. `group-hover:` matches ANY ancestor
+                        // carrying `group`, and OverlayScroll wraps this whole
+                        // list in one — so an unnamed group here meant hovering
+                        // anywhere in the sidebar revealed every row's close
+                        // button at once, the exact opposite of what the class
+                        // was there to do.
+                        className="group/row relative"
+                      >
                         <button
                           type="button"
                           data-session-row={session.id}
@@ -542,7 +550,7 @@ export function SessionList(props: SessionListProps) {
                           aria-label={`close ${session.title}`}
                           className={[
                             'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
-                            'opacity-0 hover:bg-panel hover:text-failed group-hover:opacity-100',
+                            'opacity-0 hover:bg-panel hover:text-failed group-hover/row:opacity-100',
                           ].join(' ')}
                         >
                           ×
