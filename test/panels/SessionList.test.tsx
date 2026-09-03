@@ -386,18 +386,38 @@ describe('SessionList placeholder row', () => {
   });
 });
 
-describe('SessionList footer', () => {
-  it('shows only the workspace avatar, not the workspace name, beside two 26x26 icon buttons', () => {
+describe('SessionList avatar bar', () => {
+  it('puts the avatar and its two icon buttons at the TOP, above the search box', () => {
+    // The bar moved out of the footer and took the place of the workspace
+    // header, which is gone entirely at the operator's request. Asserted by
+    // DOM order against the search box rather than by a class name, because
+    // "above" is the whole of what was asked for.
+    const { container } = mount(entriesOf([]));
+
+    const bar = container.querySelector('[data-avatar-bar]');
+    expect(bar).not.toBeNull();
+    // At rest the search control is a button, not an input — `/` swaps it.
+    const search = screen.getByLabelText('search sessions');
+    const position = (bar as Element).compareDocumentPosition(search);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // No footer left to hold it, and no workspace line above it.
+    expect(container.querySelector('footer')).toBeNull();
+    expect(container.textContent).not.toContain('workspace');
+  });
+
+  it('keeps the avatar and both icon buttons, at their mockup size', () => {
     mount(entriesOf([]));
 
     const settings = screen.getByLabelText('settings');
     const theme = screen.getByLabelText('switch to light theme');
-    const footer = settings.closest('footer');
-    expect(footer).not.toBeNull();
+    const bar = settings.closest('[data-avatar-bar]');
+    expect(bar).not.toBeNull();
+    expect(theme.closest('[data-avatar-bar]')).toBe(bar);
 
-    // The mockup's footer has an avatar circle and two icon buttons, but no
-    // workspace name text — that text moved out with this change.
-    expect(footer?.textContent).not.toContain('vam');
+    // The avatar survives as a glyph; the workspace NAME does not come back.
+    expect(bar?.textContent).toContain('V');
+    expect(bar?.textContent).not.toContain('vam');
 
     for (const button of [settings, theme]) {
       expect(button.className).toContain('h-[26px]');
