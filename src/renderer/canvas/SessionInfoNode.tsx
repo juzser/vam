@@ -87,7 +87,7 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
         'relative flex h-full w-full flex-col gap-2 overflow-hidden rounded-[var(--radius-lg)]',
         'bg-panel p-3 shadow-[var(--shadow-node)]',
         waiting ? 'vam-call' : 'border border-line',
-        focused && !waiting ? 'border-ink-dim' : '',
+        focused && !waiting ? 'vam-focus-ring' : '',
       ].join(' ')}
     >
       {jumpLabel !== null && (

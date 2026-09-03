@@ -126,6 +126,12 @@
 
   --vam-shadow-node: 0 8px 28px rgb(0 0 0 / 0.4);
 
+  /* The call halo's ring. Its own token rather than `--vam-waiting`, because
+     the mockup keeps the SAME amber on both artboards: the light board's
+     glowing card rings in the dark board's amber, while its waiting TEXT is
+     the darker one below. One value that does not swap is the measurement. */
+  --vam-call-ring: #f59e0b;
+
   color-scheme: dark;
 }
 
@@ -162,6 +168,9 @@ html.light {
   /* A card sits above white by a hairline and a whisper, not by the 40% black
      that reads as a hole in a light document. */
   --vam-shadow-node: 0 8px 28px rgb(0 0 0 / 0.06);
+
+  /* Deliberately not the light `--vam-waiting`: see the note on the dark pair. */
+  --vam-call-ring: #f59e0b;
 
   color-scheme: light;
 }
@@ -313,20 +322,50 @@ body {
   animation: vam-focus-glow 1.9s ease-in-out infinite;
 }
 
+/*
+ * Measured off the mockup's `omGlow`, not invented here: a 1px amber ring that
+ * never leaves, and a halo that breathes from 18px to 34px behind it.
+ *
+ * The previous version was a ripple — it expanded to 7px and faded to nothing,
+ * which left the card with NO edge at all for most of every cycle, in an amber
+ * (255 159 10) that is not the design's. A card whose border blinks out is a
+ * card the eye has to re-find twice a second.
+ */
 @keyframes vam-call {
-  0% {
-    box-shadow: 0 0 0 0 rgb(255 159 10 / 0.5);
-  }
-  70% {
-    box-shadow: 0 0 0 7px rgb(255 159 10 / 0);
-  }
+  0%,
   100% {
-    box-shadow: 0 0 0 0 rgb(255 159 10 / 0);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--vam-call-ring) 85%, transparent),
+      0 0 18px color-mix(in srgb, var(--vam-call-ring) 14%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px var(--vam-call-ring),
+      0 0 34px color-mix(in srgb, var(--vam-call-ring) 40%, transparent);
   }
 }
 
 .vam-call {
-  animation: vam-call 2s ease-out infinite;
+  /* The resting frame, spelled out: a node rendered before its animation
+     starts, or with animations off for any reason, still wears the ring. */
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--vam-call-ring) 85%, transparent),
+    0 0 18px color-mix(in srgb, var(--vam-call-ring) 14%, transparent);
+  animation: vam-call 2.4s ease-in-out infinite;
+}
+
+/*
+ * The focused node's ring.
+ *
+ * A ring, not a border colour: `border-ink-dim` alongside `border-line` left
+ * two border-colour utilities on one element, decided by Tailwind's emission
+ * order rather than by the class list — and #a1a1a1 is a TEXT grey, a border
+ * value the mockup uses nowhere. `--color-line-loudest` is the top of the
+ * border ramp, and the 1px ring is the same shape the mockup gives its one
+ * emphasised card.
+ */
+.vam-focus-ring {
+  box-shadow: 0 0 0 1px var(--color-line-loudest);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -337,9 +376,13 @@ body {
   .vam-call {
     animation: none;
   }
-  /* The halo carried the signal; with motion off, a static ring has to. */
+  /* The halo carried the signal; with motion off, a static ring has to — and
+     the mockup already draws one, on the boards where the card does not
+     animate: a full-strength 1px ring with a 24px halo behind it. */
   .vam-call {
-    box-shadow: 0 0 0 2px rgb(255 159 10 / 0.55);
+    box-shadow:
+      0 0 0 1px var(--vam-call-ring),
+      0 0 24px color-mix(in srgb, var(--vam-call-ring) 22%, transparent);
   }
   /* Same argument for focus: the glow WAS the indicator's whole signal, and a
      dot that stops pulsing is a dot. A static ring keeps it distinguishable

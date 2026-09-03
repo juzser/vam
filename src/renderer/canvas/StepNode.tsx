@@ -86,7 +86,7 @@ export function StepNode({ data }: NodeProps & { data: StepNodeData }) {
         // The asking card carries the halo instead of a border, exactly as the
         // mockup does: a border is a boundary, a halo is a call.
         asking ? 'vam-call' : 'border border-line',
-        focused && !asking ? 'border-ink-dim' : '',
+        focused && !asking ? 'vam-focus-ring' : '',
       ].join(' ')}
     >
       <Handle type="target" position={Position.Left} className="!opacity-0" />
