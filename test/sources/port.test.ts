@@ -43,9 +43,8 @@ function makeSource(
   extra: Partial<SessionSource> = {},
 ): SessionSource {
   return {
-    // `SourceId` is still the pre-task-2 literal union (`'black-smith' | 'orca'`);
-    // task-2 opens it to a plain string. Reuse an existing member here rather
-    // than widen it ourselves -- this task owns only the port.
+    // `SourceId` is now the open plain string task-2 made it. This value is
+    // just a familiar member reused here -- this task owns only the port.
     id: 'black-smith',
     label: 'Fixture A',
     capabilities,

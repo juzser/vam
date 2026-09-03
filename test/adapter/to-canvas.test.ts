@@ -271,7 +271,7 @@ describe('toCanvasModel', () => {
   });
 
   it('leaves the epic blank rather than guessing one', () => {
-    const model = toCanvasModel(overview([apiSession('a')]), new Map());
+    const model = toCanvasModel(overview([apiSession('a')]), new Map(), 'black-smith');
     expect(model.projects[0]?.sessions[0]?.epic).toBeNull();
   });
 
@@ -281,12 +281,17 @@ describe('toCanvasModel', () => {
     const model = toCanvasModel(
       overview([apiSession('a', { lastEventType: 'gate-outcome' })]),
       new Map(),
+      'black-smith',
     );
     expect(model.projects[0]?.sessions[0]?.activity).toContain('gate-outcome');
   });
 
   it('leaves the activity line null when the log cannot say', () => {
-    const model = toCanvasModel(overview([apiSession('a', { lastEventType: null })]), new Map());
+    const model = toCanvasModel(
+      overview([apiSession('a', { lastEventType: null })]),
+      new Map(),
+      'black-smith',
+    );
     expect(model.projects[0]?.sessions[0]?.activity).toBeNull();
   });
 
@@ -301,12 +306,13 @@ describe('toCanvasModel', () => {
           ] as readonly ApiTimelineEntry[],
         ],
       ]),
+      'black-smith',
     );
     expect(model.projects[0]?.sessions[0]?.decisions[0]?.input).toBe('hi');
   });
 
   it('gives a session no icon, because nothing in the factory stores one', () => {
-    const model = toCanvasModel(overview([apiSession('a')]), new Map());
+    const model = toCanvasModel(overview([apiSession('a')]), new Map(), 'black-smith');
     expect(model.projects[0]?.sessions[0]?.icon).toBeNull();
   });
 });
