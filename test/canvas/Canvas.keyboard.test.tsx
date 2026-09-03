@@ -606,6 +606,32 @@ describe('filtering the sidebar with /', () => {
     expect(drawn).toEqual(['info:b1']);
   });
 
+  it('gt and gT say no session matches on an empty list, not "last session already"', () => {
+    // `entries.findIndex` returns -1 for an empty list exactly as it does for
+    // a missing entry, so `-1 + 1` is 0, and `0 >= 0` took the off-the-end
+    // branch: `t` claimed there was a LAST session to already be at while the
+    // list held none. The `hjkl` path one branch away already says the true
+    // thing for the same state, and this is that sentence.
+    render(<Canvas model={MODEL} />);
+    press('/');
+    typeInto(filterInput() as HTMLInputElement, 'zzz');
+    keyOn(filterInput() as HTMLInputElement, 'Enter');
+    expect(rows().map((el) => el.getAttribute('data-session-row'))).toEqual([]);
+
+    // `gt`/`gT`, not bare `t` -- the chord lives in the AFTER_G table, which
+    // the status bar's own hint spells out. A bare `t` is unbound and returns
+    // before any of this, so a test pressing it would pass while proving
+    // nothing about the code it names.
+    press('g');
+    press('t');
+    expect(statusBar()).toContain('no session matches');
+    press('g');
+    press('T');
+    expect(statusBar()).toContain('no session matches');
+    press('T');
+    expect(statusBar()).toContain('no session matches');
+  });
+
   it('says so rather than showing an empty list with no reason', () => {
     render(<Canvas model={MODEL} />);
     press('/');
