@@ -1227,6 +1227,39 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
     });
   }
 
+  it('shows the composer busy while the write is still in flight, and again when it lands', async () => {
+    // The `sending` prop's WIRING, not the pane's rendering of it. The pane's
+    // own tests pass whether or not `Canvas` ever passes the flag -- which is
+    // exactly how `delivers` sat unwired behind a green suite until someone
+    // read the comment admitting it. This asserts through `<Canvas>`.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { source } = fakeSessionSource({ deliverPrompt: true }, async () => {
+      await gate;
+    });
+
+    render(<Canvas model={MODEL} source={source} />);
+    press('i');
+    const input = promptInput() as HTMLTextAreaElement;
+    typeInto(input, 'run task-4 again');
+    // Deliberately NOT awaited: the write is left in flight.
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+
+    const control = () => document.querySelector('[data-prompt-record]');
+    expect(control()?.getAttribute('aria-busy')).toBe('true');
+    expect(control()?.getAttribute('aria-label')).toMatch(/sending/i);
+
+    await act(async () => {
+      release();
+      await gate;
+    });
+    expect(control()?.getAttribute('aria-busy')).toBe('false');
+  });
+
   it('says SENT, not recorded, once the source delivers into the running session', async () => {
     const calls: { sessionId: string; prompt: string }[] = [];
     const { source } = fakeSessionSource({ deliverPrompt: true }, async (sessionId, prompt) => {

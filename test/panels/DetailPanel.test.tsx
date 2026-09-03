@@ -131,6 +131,51 @@ describe('the pane header names the session status it actually has', () => {
   });
 });
 
+/**
+ * In-flight delivery.
+ *
+ * `claude --resume` is a subprocess with a 120-SECOND timeout
+ * (`deliver.ts`'s `DELIVER_TIMEOUT_MS`). Before this the composer showed
+ * nothing while it ran: Enter appeared to do nothing for up to two minutes,
+ * and every further Enter was swallowed by `Canvas`'s `writing` guard without
+ * a word. The flag existed; it just never left `Canvas`.
+ */
+describe('the composer says when a prompt is in flight', () => {
+  const submit = () => document.querySelector('[data-prompt-record]');
+
+  it('names the in-flight state on the control, and marks it busy', () => {
+    draw({ draft: 'ship it', sending: true, delivers: true });
+    expect(submit()?.getAttribute('aria-busy')).toBe('true');
+    expect(submit()?.getAttribute('aria-label')).toMatch(/sending/i);
+    expect(submit()?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('is not busy at rest, and the control keeps its own wording', () => {
+    draw({ draft: 'ship it', sending: false, delivers: true });
+    expect(submit()?.getAttribute('aria-busy')).toBe('false');
+    expect(submit()?.getAttribute('aria-label')).toBe('send prompt');
+    expect(submit()?.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('keeps the draft on screen while it is being sent', () => {
+    // The words are mid-flight, not gone: a failure leaves them to retry, and
+    // clearing the box early would look like a send that had completed.
+    draw({ draft: 'ship it', sending: true, delivers: true });
+    expect(q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]')?.value).toBe(
+      'ship it',
+    );
+  });
+
+  it('says RECORDING, not sending, for a source that only records', () => {
+    // The delivers/records distinction has to survive into the in-flight
+    // wording too, or the one honest sentence in this pane becomes a lie for
+    // exactly as long as the write takes.
+    draw({ draft: 'ship it', sending: true, delivers: false });
+    expect(submit()?.getAttribute('aria-label')).toMatch(/recording/i);
+    expect(submit()?.getAttribute('aria-label')).not.toMatch(/sending/i);
+  });
+});
+
 function draw(over: Partial<DetailPanelProps> = {}) {
   const props: DetailPanelProps = {
     entry: ENTRY,
