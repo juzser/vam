@@ -274,7 +274,7 @@ export function DetailPanel(props: DetailPanelProps) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 select-text flex-col gap-3.5 overflow-y-auto px-3.5 py-3">
+      <div className="vam-fade-scroll flex min-h-0 flex-1 select-text flex-col gap-3.5 overflow-y-auto px-3.5 py-3">
         {decision === null ? (
           <p className="text-[11px] text-ink-faint">This session has no steps yet.</p>
         ) : (

@@ -208,6 +208,12 @@ export function SessionList(props: SessionListProps) {
         {groups.map((group) => (
           <li
             key={group.project.id}
+            // The card is what makes "grouped by project" structural rather
+            // than a caption you have to read. Named so a test can assert
+            // containment — that a row sits INSIDE its own project's card —
+            // instead of asserting on a class list, which would pass on a flat
+            // list that merely looked right.
+            data-project-group={group.project.id}
             className="flex flex-col gap-[5px] rounded-[11px] border border-line-strong bg-well px-[7px] pt-[9px] pb-2"
           >
             {/* A caption, not a stop. A plain <div>, so nothing can focus it
@@ -267,7 +273,9 @@ export function SessionList(props: SessionListProps) {
                         onClick={() => onPick(session.id)}
                         className={[
                           'relative flex w-full cursor-pointer flex-col gap-[7px] overflow-hidden rounded-[9px] px-2.5 py-2.5 text-left',
-                          isFocused ? 'border border-line-loud bg-raised' : 'border border-transparent',
+                          isFocused
+                            ? 'border border-line-loud bg-raised'
+                            : 'border border-transparent',
                         ].join(' ')}
                       >
                         {isFocused && (
