@@ -845,23 +845,32 @@ function CanvasInner({
           setRenameDraft(focusedEntry.session.title);
           setRenamingId(focusedEntry.session.id);
           return;
-        case 'icon':
+        case 'icon': {
           if (focusedEntry === null) {
             setStatus('pick a session first');
+            return;
+          }
+          // A project with no source cannot store an icon under one: guessing
+          // a fallback here would reintroduce the exact cross-source
+          // collision this epic's storage re-key removed.
+          const projectSource = focusedEntry.project.source;
+          if (projectSource === undefined) {
+            setStatus('this project has no source — icon unavailable');
             return;
           }
           setPickingIconFor((current) =>
             current !== null &&
             current.sessionId === focusedEntry.session.id &&
-            current.source === focusedEntry.project.source
+            current.source === projectSource
               ? null
               : {
-                  source: focusedEntry.project.source,
+                  source: projectSource,
                   sessionId: focusedEntry.session.id,
                   title: focusedEntry.session.title,
                 },
           );
           return;
+        }
         case 'close':
           if (focusedEntry === null) {
             setStatus('pick a session first');

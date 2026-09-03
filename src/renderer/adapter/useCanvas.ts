@@ -69,7 +69,9 @@ export function useCanvas(client: SmithClient, options?: UseCanvasOptions): Canv
       if (!alive.current || mine !== generation.current) {
         return;
       }
-      setModel(toCanvasModel(overview, timelines));
+      // This hook only ever talks to black-smith; toCanvasModel now takes the
+      // source id as a parameter instead of assuming it.
+      setModel(toCanvasModel(overview, timelines, 'black-smith'));
       setStatus('live');
       setError(null);
     } catch (cause) {

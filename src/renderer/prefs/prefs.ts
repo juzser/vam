@@ -289,6 +289,11 @@ export function applyIcons(model: CanvasModel, icons: Prefs['icons']): CanvasMod
   return {
     ...model,
     projects: model.projects.map((project) => {
+      // A project with no source has no bucket to look one up in — the same
+      // "cannot store under an unknown source" call `setIcon`'s caller makes.
+      if (project.source === undefined) {
+        return project;
+      }
       const bucket = icons[project.source];
       if (bucket === undefined) {
         return project;

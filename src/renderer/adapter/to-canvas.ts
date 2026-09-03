@@ -15,7 +15,14 @@
  *  - and when a session is asking something of YOU (`statusOf`).
  */
 
-import type { CanvasModel, Decision, Project, Session, SessionStatus } from '../domain/model.js';
+import type {
+  CanvasModel,
+  Decision,
+  Project,
+  Session,
+  SessionStatus,
+  SourceId,
+} from '../domain/model.js';
 import type { ApiOverview, ApiRunningSession, ApiTimelineEntry } from './api.js';
 import { relativeTime } from './relative-time.js';
 
@@ -250,10 +257,15 @@ function toSession(
  * pure and because they load per session, at their own pace. A session with no
  * timeline yet is not an error — it renders as a row with no steps, which is
  * also what a session that never had a turn looks like, and both are true.
+ *
+ * `source` arrives as a parameter rather than a literal here: this file
+ * translates one source's API shape, but which source that is belongs to the
+ * caller, not to this adapter.
  */
 export function toCanvasModel(
   overview: ApiOverview,
   timelines: ReadonlyMap<string, readonly ApiTimelineEntry[]>,
+  source: SourceId,
   now: Date = new Date(),
 ): CanvasModel {
   const byProject = new Map<string, Session[]>();
@@ -267,8 +279,7 @@ export function toCanvasModel(
   const projects: Project[] = [...byProject.entries()].map(([id, sessions]) => ({
     id,
     name: id,
-    // Every row here came out of black-smith. orca is a second adapter's job.
-    source: 'black-smith',
+    source,
     sessions,
   }));
 
