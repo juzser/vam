@@ -208,6 +208,7 @@ describe('the Electron shell launches', () => {
       'renameSession',
       'subscribe',
       'transitionLesson',
+      'usage',
     ]);
     expect(smoke().bridgeLoadType).toBe('function');
   });

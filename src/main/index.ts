@@ -16,6 +16,8 @@ import { isSameOrigin } from './origin.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
 import { createNodeEventSource } from './stream/event-source.js';
 import { registerStreamIpc } from './stream/register.js';
+import { registerUsageIpc } from './usage/ipc.js';
+import { readUsage } from './usage/reader.js';
 
 /**
  * What the desktop shell serves: the operator's own Claude Code sessions,
@@ -166,6 +168,11 @@ void app.whenReady().then(() => {
   // Registered before the window is created, so the renderer's first call can
   // never race an unregistered channel.
   registerSourceIpc(ipcMain, DESKTOP_SOURCE);
+  // Reads the Keychain and calls the real usage endpoint only when the
+  // renderer asks; both side effects are `reader.ts`'s own, never this
+  // module's -- main-process-only because a Keychain read is not a thing the
+  // renderer, the least trusted process here, may ever perform.
+  registerUsageIpc(ipcMain, () => readUsage());
   createWindow();
 });
 

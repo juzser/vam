@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DesktopSourceApi } from '../preload/api.js';
+import type { DesktopSourceApi, UsageApi } from '../preload/api.js';
 import type { PreloadSourceApi } from '../shared/preload-api.js';
 import { SmithClient } from './adapter/client.js';
 import { useCanvas } from './adapter/useCanvas.js';
@@ -27,8 +27,14 @@ import { createSourceFromPreload } from './sources/preload-factory.js';
 
 declare global {
   interface Window {
-    /** Present only in the Electron shell; the preload put it there. */
-    readonly api?: DesktopSourceApi;
+    /**
+     * Present only in the Electron shell; the preload put it there.
+     * `usage` is a member of the SAME bridge object -- see
+     * `src/preload/index.ts` -- kept out of `DesktopSourceApi` because it
+     * answers `usage:get`'s bare `UsageSnapshot`, not a `PreloadSourceApi`
+     * member's `IpcResult` envelope.
+     */
+    readonly api?: DesktopSourceApi & { readonly usage: UsageApi };
   }
 }
 
