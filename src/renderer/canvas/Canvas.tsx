@@ -914,6 +914,36 @@ function CanvasInner({
             setFocusedId(first);
             return;
           }
+          /**
+           * Vertical is the LIST; horizontal is the canvas.
+           *
+           * `j`/`k` walk the sidebar's own order, one session at a time, and
+           * land on that session's card. They used to walk canvas geometry,
+           * which is a different order: with two projects side by side, `j`
+           * from the first session went to the one physically below it — in
+           * the other column — rather than to the next row in the list you are
+           * reading. The sidebar is how sessions are enumerated, so it is what
+           * "next session" has to mean.
+           *
+           * `h`/`l` keep the spatial walk, which is what they are for: moving
+           * along a session's own row, card to step to step.
+           */
+          if (action.direction === 'down' || action.direction === 'up') {
+            const at = entries.findIndex((e) => e.session.id === focusedSessionId);
+            if (at === -1) {
+              setStatus('no session matches');
+              return;
+            }
+            const next = entries[at + (action.direction === 'down' ? 1 : -1)];
+            if (next === undefined) {
+              // The ends do not wrap. A cursor that reappears at the far end of
+              // a long list is a cursor you then have to go looking for.
+              setStatus(`nothing lies ${action.direction}`);
+              return;
+            }
+            focusSession(next.session.id);
+            return;
+          }
           // Live geometry, read now — not a list captured at render time.
           const live = toNavNodes(getNodes() as unknown as FlowNodeLike[], nodeIds);
           const landed = nextNode(live, focusedId, action.direction);
@@ -1133,6 +1163,7 @@ function CanvasInner({
   }, [
     focusedId,
     focusedEntry,
+    focusedSessionId,
     nodeIds,
     entries,
     getNodes,
