@@ -467,7 +467,7 @@ export function SessionList(props: SessionListProps) {
                   onClick={() => onAddInProject(group.project)}
                   title={`Sessions are created from the CLI — see the todo`}
                   aria-label={`new session in ${group.project.name}`}
-                  className="flex h-[19px] w-[19px] cursor-pointer items-center justify-center rounded-[5px] border border-line-strong text-ink-ghost hover:border-ink-faint hover:text-ink-dim"
+                  className="flex h-[19px] w-[19px] cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim"
                 >
                   <Plus size={13} strokeWidth={1.7} />
                 </button>

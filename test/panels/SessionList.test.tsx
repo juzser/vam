@@ -441,3 +441,28 @@ describe('the close button reveals with its own row, not with the whole list', (
     expect(row?.className).toContain('group/row');
   });
 });
+
+/**
+ * The per-project "new session" button is quiet at rest.
+ *
+ * It sits once per project heading, so at four projects it was four outlined
+ * boxes competing with the session names underneath them — the list read as a
+ * row of controls rather than a list of sessions. The border arrives on hover,
+ * where it is the thing you are about to press.
+ *
+ * The box keeps its size in both states: a border that appears from nothing
+ * would shift the heading by a pixel on every hover.
+ */
+describe('the new-session button is dim until hovered', () => {
+  it('has no visible border at rest and gains one on hover', () => {
+    const { container } = mount(twoProjects());
+    const buttons = [...container.querySelectorAll('[aria-label^="new session in "]')];
+    expect(buttons.length, 'no new-session buttons rendered').toBeGreaterThan(0);
+    for (const el of buttons) {
+      expect(el.className, 'transparent at rest').toContain('border-transparent');
+      expect(el.className, 'a border on hover').toContain('hover:border-line-strong');
+      // Still bordered-box sized, so hover does not move the heading.
+      expect(el.className).toMatch(/(^|\s)border(\s|$)/);
+    }
+  });
+});
