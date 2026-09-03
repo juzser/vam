@@ -61,6 +61,38 @@ running black-smith. Every write is refused before it reaches any server, and
 the canvas shows a banner saying so — this mode is for looking, not for
 recording anything.
 
+### Desktop mode — against your own Claude Code sessions
+
+```bash
+pnpm run dev:app                # hot-reloading Electron shell
+# or, for the packaged build:
+pnpm run build:app
+node_modules/.bin/electron .
+```
+
+**This is the only mode that shows your own sessions.** The two browser modes
+above read a black-smith factory; the desktop shell reads Claude Code directly —
+`claude agents --json --all` for the live session list, and each session's own
+transcript for its timeline. Open vam in a browser and you will see the
+factory's rows no matter what you are working on, which is a confusing first
+impression rather than a bug.
+
+Desktop mode is also the only one that can **deliver** a prompt. The composer
+says "send prompt" here and "record prompt" in the browser, and the difference
+is real: `claude --resume <id> -p` hands your words to the running session,
+which answers them, while black-smith's `/api/prompt` appends to a log for the
+agent to find on its own next step. The wording follows the source's declared
+capability rather than being chosen per screen, so it cannot drift out of step
+with what the button does.
+
+Two things it deliberately will not do. It never passes `--fork-session`, so a
+prompt goes to the session you aimed at or to none, never to a branched copy of
+it. And it checks the `session_id` that comes back against the one addressed,
+refusing to report delivery if they differ.
+
+The one requirement is the `claude` CLI on `PATH` — nothing here is gated on an
+operating system.
+
 ### Live mode — against a running black-smith
 
 ```bash
@@ -188,6 +220,9 @@ A second adapter needs all three loosened before it can drop in cleanly.
 pnpm run dev             # start the dev server on :5273
 pnpm run build           # production build
 pnpm run preview         # serve the production build on :5274
+pnpm run dev:app         # Electron shell with hot reload
+pnpm run build:app       # build main/preload/renderer into out/
+pnpm run test:app        # boot the packaged app and assert it opens a window
 pnpm run typecheck       # tsc --noEmit
 pnpm run typecheck:test  # typecheck the test sources
 pnpm run lint            # biome check .
