@@ -92,6 +92,7 @@ describe('parseAgentRows', () => {
         row({ kind: 'background', state: 'failed', sessionId: 'b', status: undefined }),
         row({ kind: 'background', state: 'running', sessionId: 'c', status: undefined }),
       ]),
+      NOW,
     );
     expect(rows.map((r) => r.status)).toEqual(['done', 'failed', 'running']);
   });
@@ -99,6 +100,7 @@ describe('parseAgentRows', () => {
   it('keeps two processes that resumed one session as two rows with distinct keys', () => {
     const rows = parseAgentRows(
       JSON.stringify([row({ pid: 1, name: 'first' }), row({ pid: 2, name: 'second' })]),
+      NOW,
     );
     expect(rows).toHaveLength(2);
     expect(new Set(rows.map((r) => r.key)).size).toBe(2);
@@ -108,14 +110,41 @@ describe('parseAgentRows', () => {
   it('drops rows with no session id or no working directory rather than inventing one', () => {
     const rows = parseAgentRows(
       JSON.stringify([row(), row({ sessionId: undefined }), row({ cwd: undefined })]),
+      NOW,
     );
     expect(rows).toHaveLength(1);
   });
 
+  it('keeps every interactive row, however long the process has been up', () => {
+    const rows = parseAgentRows(JSON.stringify([row({ startedAt: NOW - 400 * 86_400_000 })]), NOW);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('drops a background session that finished long ago, which is noise and not news', () => {
+    const rows = parseAgentRows(
+      JSON.stringify([
+        row({
+          kind: 'background',
+          state: 'failed',
+          sessionId: 'old',
+          startedAt: NOW - 60 * 86_400_000,
+        }),
+        row({
+          kind: 'background',
+          state: 'failed',
+          sessionId: 'recent',
+          startedAt: NOW - 86_400_000,
+        }),
+      ]),
+      NOW,
+    );
+    expect(rows.map((r) => r.sessionId)).toEqual(['recent']);
+  });
+
   it('treats unparseable or non-array output as no sessions, never as an error', () => {
-    expect(parseAgentRows('not json')).toEqual([]);
-    expect(parseAgentRows('{"error":"nope"}')).toEqual([]);
-    expect(parseAgentRows('')).toEqual([]);
+    expect(parseAgentRows('not json', NOW)).toEqual([]);
+    expect(parseAgentRows('{"error":"nope"}', NOW)).toEqual([]);
+    expect(parseAgentRows('', NOW)).toEqual([]);
   });
 });
 

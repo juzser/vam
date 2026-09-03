@@ -46,6 +46,20 @@ const CLI_TIMEOUT_MS = 5_000;
 /** Guards against a runaway list; the observed live set is single digits. */
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
+/**
+ * How far back a FINISHED background session may have started and still be
+ * worth a row. Interactive rows are never filtered by this: a live process is
+ * news however long it has been up, and on this machine the longest-running
+ * one is also the one being worked in.
+ *
+ * Background rows are different. `--all` is what makes `done` and `failed`
+ * reachable at all, and it also returns every background session ever run --
+ * measured, two `failed` rows from 61 and 57 days ago. Those are the exact
+ * "sessions I don't care about" the operator complained of, so they are cut
+ * here rather than shown for the sake of a status.
+ */
+const BACKGROUND_WINDOW_MS = 14 * 86_400_000;
+
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 
 /**
@@ -71,7 +85,7 @@ function statusOf(row: Record<string, unknown>): SessionStatus {
 }
 
 /** Rows out of the CLI's stdout. Anything unexpected yields no rows, never a throw. */
-export function parseAgentRows(stdout: string): readonly LiveAgent[] {
+export function parseAgentRows(stdout: string, nowMs: number = Date.now()): readonly LiveAgent[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
@@ -89,6 +103,15 @@ export function parseAgentRows(stdout: string): readonly LiveAgent[] {
     // Without either of these there is no transcript to find and no project
     // to file the row under. Dropping it beats inventing a home for it.
     if (sessionId === null || cwd === null) continue;
+    const startedAt = typeof row['startedAt'] === 'number' ? row['startedAt'] : null;
+    // See BACKGROUND_WINDOW_MS: stale finished background work is noise.
+    if (
+      str(row['kind']) === 'background' &&
+      startedAt !== null &&
+      nowMs - startedAt > BACKGROUND_WINDOW_MS
+    ) {
+      continue;
+    }
     const pid = typeof row['pid'] === 'number' ? row['pid'] : null;
     rows.push({
       key: `${sessionId}#${pid ?? str(row['id']) ?? rows.length}`,
@@ -96,7 +119,7 @@ export function parseAgentRows(stdout: string): readonly LiveAgent[] {
       name: str(row['name']),
       cwd,
       status: statusOf(row),
-      startedAt: typeof row['startedAt'] === 'number' ? row['startedAt'] : null,
+      startedAt,
     });
   }
   return rows;
