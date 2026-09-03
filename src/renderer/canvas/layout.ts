@@ -62,7 +62,12 @@ export type StepNodeSpec = {
 export type CanvasNodeSpec = InfoNodeSpec | StepNodeSpec;
 
 /** The four statuses a colour exists for on the canvas — matches SessionFanNode. */
-export type FanBranchStatus = Session['status'] | 'empty';
+/**
+ * `empty` = no step in that slot. `idle` = a step is there but it is not the
+ * one the session is on, so it draws as a plain line. Only the active slot
+ * carries the session's status colour.
+ */
+export type FanBranchStatus = Session['status'] | 'empty' | 'idle';
 
 /** Scenery: the connector to a session's three step slots (epic.md §5.2). Not
  *  navigable — kept out of `nodes` so Canvas.tsx's nodeIds memo never turns
@@ -75,6 +80,8 @@ export type FanSpec = {
   readonly sessionStatus: Session['status'];
   /** One per slot position, top to bottom. `'empty'` where no step is drawn. */
   readonly branchStatuses: readonly [FanBranchStatus, FanBranchStatus, FanBranchStatus];
+  /** Index of the drawn step the session is on, or null when it has none. */
+  readonly activeSlot: number | null;
   /** `session.decisions.length` — NOT the number of branches drawn. */
   readonly totalSteps: number;
   readonly position: Position;
@@ -256,8 +263,24 @@ export function layoutCanvas(model: CanvasModel): CanvasLayout {
       });
     });
 
+    /**
+     * Which drawn step the session is ON — the one the route lights up for.
+     *
+     * The mockup colours exactly one path: trunk, spine, and the single branch
+     * reaching the current step. Everything else is a neutral line. Before
+     * this every filled branch got `session.status`, so they were all the same
+     * colour and the fan said "this session is waiting" three times instead of
+     * "it is waiting HERE".
+     *
+     * `steps` is newest-last (visibleDecisions reverses), so the current one is
+     * the last unanswered step, falling back to the newest when all are
+     * answered.
+     */
+    const pending = steps.findIndex((d) => d.output === null);
+    const activeSlot = steps.length === 0 ? null : pending === -1 ? steps.length - 1 : pending;
+
     const branchStatuses = Array.from({ length: STEP_SLOTS }, (_, slot) =>
-      slot < steps.length ? session.status : 'empty',
+      slot >= steps.length ? 'empty' : slot === activeSlot ? session.status : 'idle',
     ) as [FanBranchStatus, FanBranchStatus, FanBranchStatus];
 
     fans.push({
@@ -266,6 +289,7 @@ export function layoutCanvas(model: CanvasModel): CanvasLayout {
       sessionId: session.id,
       sessionStatus: session.status,
       branchStatuses,
+      activeSlot,
       totalSteps: session.decisions.length,
       position: { x: origin.x + FAN.x, y: origin.y },
       size: { width: FAN.width, height: CELL.height },

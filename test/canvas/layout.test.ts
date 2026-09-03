@@ -353,3 +353,77 @@ describe('layoutCanvas keyboard grammar (docs/design/canvas-layout.md §4)', () 
     expect(nextNode(navNodes, infoNodeId('s0'), 'down')).toBe(infoNodeId('s2'));
   });
 });
+
+/**
+ * The route to the current step.
+ *
+ * The operator's reading of artboard 1a: *"chỉ có line nối từ root tới current
+ * node là cần tô màu"* — of the fan's three branches only the one leading to
+ * the step in play carries colour; the rest are plain line. Measured off 1a,
+ * the fan draws `M45 245 H110` in `#f59e0b` at 0.7 and its two siblings in a
+ * flat `#2e2e2e`.
+ *
+ * This is falsifiable against the code it replaced, which set every branch
+ * below `steps.length` to the session's own status and so coloured all three
+ * at once — the uniformity the operator was pointing at.
+ */
+describe('layoutCanvas: only the route to the current step is coloured', () => {
+  function pending(id: string): Decision {
+    return { id, label: `step-${id}`, input: `in-${id}`, output: null, commands: [] };
+  }
+
+  it('colours exactly the first output-less step and leaves its siblings idle', () => {
+    const built = layoutCanvas(
+      model(
+        session('s', {
+          status: 'running',
+          // `session.decisions` is newest-FIRST; `visibleDecisions` reverses
+          // it. Two queued turns behind one answered means the fan draws
+          // [answered, queued, queued] and the route is the FIRST unanswered —
+          // which is not the last drawn, so this separates the two rules.
+          decisions: [pending('d2'), pending('d1'), decision('d0')],
+        }),
+      ),
+    );
+    const fan = built.fans.find((f) => f.sessionId === 's');
+    expect(fan).toBeDefined();
+    expect(fan?.activeSlot).toBe(1);
+    expect(fan?.branchStatuses).toEqual(['idle', 'running', 'idle']);
+  });
+
+  it('falls back to the last step when every step has an output', () => {
+    const built = layoutCanvas(
+      model(session('s', { status: 'done', decisions: [decision('d0'), decision('d1')] })),
+    );
+    const fan = built.fans.find((f) => f.sessionId === 's');
+    expect(fan?.activeSlot).toBe(1);
+    // Slot 2 has no step at all, so it is `empty`, not `idle` — the fan always
+    // draws three branches (§3.5) whatever the step count.
+    expect(fan?.branchStatuses).toEqual(['idle', 'done', 'empty']);
+  });
+
+  it('never colours more than one branch, at any step count', () => {
+    for (let count = 0; count <= 5; count += 1) {
+      const built = layoutCanvas(
+        model(
+          session('s', {
+            status: 'waiting',
+            decisions: Array.from({ length: count }, (_, i) => decision(`d${i}`)),
+          }),
+        ),
+      );
+      const fan = built.fans.find((f) => f.sessionId === 's');
+      const coloured = (fan?.branchStatuses ?? []).filter((b) => b !== 'idle' && b !== 'empty');
+      // A session with no steps has no current step, so zero is correct there
+      // and one everywhere else. Never two.
+      expect(coloured.length, `${count} steps`).toBe(count === 0 ? 0 : 1);
+    }
+  });
+
+  it('has a session with no steps draw three empty branches and no colour', () => {
+    const built = layoutCanvas(model(session('s', { status: 'running', decisions: [] })));
+    const fan = built.fans.find((f) => f.sessionId === 's');
+    expect(fan?.activeSlot).toBeNull();
+    expect(fan?.branchStatuses).toEqual(['empty', 'empty', 'empty']);
+  });
+});
