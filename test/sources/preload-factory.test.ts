@@ -53,7 +53,7 @@ function makeDescriptor(
   overrides: Partial<SourceDescriptor> = {},
 ): SourceDescriptor {
   return {
-    id: 'black-smith',
+    id: 'bundled-sample',
     label: 'Bridged fixture',
     capabilities,
     declines: declinesFor(capabilities),
@@ -91,7 +91,7 @@ describe('createSourceFromPreload', () => {
     });
     const source = await createSourceFromPreload(makeApi(descriptor));
 
-    expect(source.id).toBe('black-smith');
+    expect(source.id).toBe('bundled-sample');
     expect(source.label).toBe('Named by the source');
     expect(source.capabilities).toEqual(NO_CAPABILITIES);
     expect(source.declines).toEqual({ liveUpdates: 'this backend has no event stream' });
