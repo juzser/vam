@@ -358,29 +358,20 @@ body {
 }
 
 /*
- * A scrollbar that is not there until you need it. The mockup shows no
- * visible scrollbar anywhere in the sidebar — the container overflows, it
- * just does not paint a permanent bar while at rest. The thumb is
- * transparent by default and fades to the same grey the icon picker's
- * scrollbar uses, only on hover of the scrolling element itself.
+ * No native scrollbar, and no gutter either.
+ *
+ * `::-webkit-scrollbar { width: 8px }` with a transparent thumb still RESERVES
+ * those 8px in layout, so a 264px sidebar loses them from every row whether or
+ * not the bar is painted — which is why the project cards sat with a wider gap
+ * on the right than the left. Chromium offers no overlay mode to ask for
+ * (`overflow: overlay` was removed), so the native bar is removed entirely and
+ * `OverlayScroll` draws the thumb over the content instead.
+ *
+ * Scrolling itself is untouched: this hides the indicator, not the behaviour.
  */
-.vam-fade-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
+.vam-no-scrollbar {
+  scrollbar-width: none;
 }
-.vam-fade-scroll:hover {
-  scrollbar-color: var(--color-line-strong) transparent;
-}
-.vam-fade-scroll::-webkit-scrollbar {
-  width: 8px;
-}
-.vam-fade-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-.vam-fade-scroll::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 999px;
-}
-.vam-fade-scroll:hover::-webkit-scrollbar-thumb {
-  background: var(--color-line-strong);
+.vam-no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

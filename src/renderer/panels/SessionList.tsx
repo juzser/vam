@@ -26,6 +26,7 @@ import { type ReactNode, useEffect, useRef } from 'react';
 import type { Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { Theme } from '../prefs/prefs.js';
+import { OverlayScroll } from './OverlayScroll.js';
 
 const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   running: 'bg-running',
@@ -211,27 +212,28 @@ export function SessionList(props: SessionListProps) {
         )}
       </div>
 
-      <ul className="vam-fade-scroll flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-2.5 py-2.5">
-        {groups.map((group) => (
-          <li
-            key={group.project.id}
-            // The card is what makes "grouped by project" structural rather
-            // than a caption you have to read. Named so a test can assert
-            // containment — that a row sits INSIDE its own project's card —
-            // instead of asserting on a class list, which would pass on a flat
-            // list that merely looked right.
-            data-project-group={group.project.id}
-            className="flex flex-col gap-[5px] rounded-[11px] border border-line-strong bg-well px-[7px] pt-[9px] pb-2"
-          >
-            {/* A caption, not a stop. A plain <div>, so nothing can focus it
+      <OverlayScroll className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-2.5 py-2.5">
+        <ul className="flex flex-col gap-3.5">
+          {groups.map((group) => (
+            <li
+              key={group.project.id}
+              // The card is what makes "grouped by project" structural rather
+              // than a caption you have to read. Named so a test can assert
+              // containment — that a row sits INSIDE its own project's card —
+              // instead of asserting on a class list, which would pass on a flat
+              // list that merely looked right.
+              data-project-group={group.project.id}
+              className="flex flex-col gap-[5px] rounded-[11px] border border-line-strong bg-well px-[7px] pt-[9px] pb-2"
+            >
+              {/* A caption, not a stop. A plain <div>, so nothing can focus it
                 and `j` never lands on a heading. */}
-            <div data-project-heading className="flex items-center gap-[7px] px-1 pb-0.5">
-              <span className="truncate font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
-                {group.project.name}
-              </span>
-              <span className="font-mono text-[9.5px] text-ink-faint">{group.items.length}</span>
-              <span className="flex-1" />
-              {/* black-smith makes sessions from the CLI, so this cannot yet
+              <div data-project-heading className="flex items-center gap-[7px] px-1 pb-0.5">
+                <span className="truncate font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
+                  {group.project.name}
+                </span>
+                <span className="font-mono text-[9.5px] text-ink-faint">{group.items.length}</span>
+                <span className="flex-1" />
+                {/* black-smith makes sessions from the CLI, so this cannot yet
                   create one. It is still a BUTTON, not an inert span: the
                   full-width "New session" control below is in exactly the same
                   position — it cannot create a session either — and it is
@@ -240,150 +242,151 @@ export function SessionList(props: SessionListProps) {
                   different kinds of thing. Refusing on click and saying why is
                   honest; refusing by being unclickable and unstyled just reads
                   as broken. */}
-              <button
-                type="button"
-                data-placeholder="new-session-in-project"
-                onClick={() => onAddInProject(group.project)}
-                title={`Sessions are created from the CLI — see the todo`}
-                aria-label={`new session in ${group.project.name}`}
-                className="flex h-[19px] w-[19px] cursor-pointer items-center justify-center rounded-[5px] border border-line-strong text-ink-ghost hover:border-ink-faint hover:text-ink-dim"
-              >
-                <Plus size={13} strokeWidth={1.7} />
-              </button>
-            </div>
+                <button
+                  type="button"
+                  data-placeholder="new-session-in-project"
+                  onClick={() => onAddInProject(group.project)}
+                  title={`Sessions are created from the CLI — see the todo`}
+                  aria-label={`new session in ${group.project.name}`}
+                  className="flex h-[19px] w-[19px] cursor-pointer items-center justify-center rounded-[5px] border border-line-strong text-ink-ghost hover:border-ink-faint hover:text-ink-dim"
+                >
+                  <Plus size={13} strokeWidth={1.7} />
+                </button>
+              </div>
 
-            {group.items.map((entry) => {
-              const { session } = entry;
-              const isFocused = session.id === focusedSessionId;
-              const needsYou = session.status === 'waiting';
-              const pct = Math.round(progressOf(entry) * 100);
+              {group.items.map((entry) => {
+                const { session } = entry;
+                const isFocused = session.id === focusedSessionId;
+                const needsYou = session.status === 'waiting';
+                const pct = Math.round(progressOf(entry) * 100);
 
-              return (
-                <div key={session.id}>
-                  {renamingId === session.id ? (
-                    <div className="flex items-center gap-1.5 rounded-[9px] border border-line-loud bg-raised px-2.5 py-2.5">
-                      <span className="text-[11px] text-ink-faint">{session.icon ?? '·'}</span>
-                      <input
-                        ref={renameRef}
-                        value={renameDraft}
-                        onChange={(event) => onRenameChange(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault();
-                            onRenameCommit();
-                          } else if (event.key === 'Escape') {
-                            event.preventDefault();
-                            onRenameCancel();
-                          }
-                        }}
-                        className="min-w-0 flex-1 rounded-[var(--radius-sm)] bg-panel px-1 font-mono text-[12px] text-ink outline-none ring-1 ring-waiting"
-                        aria-label="rename session"
-                      />
-                    </div>
-                  ) : (
-                    <div className="group relative">
-                      <button
-                        type="button"
-                        data-session-row={session.id}
-                        onClick={() => onPick(session.id)}
-                        className={[
-                          'relative flex w-full cursor-pointer flex-col gap-[7px] overflow-hidden rounded-[9px] px-2.5 py-2.5 text-left',
-                          isFocused
-                            ? 'border border-line-loud bg-raised'
-                            : 'border border-transparent',
-                        ].join(' ')}
-                      >
-                        {isFocused && (
-                          <span
-                            className={`absolute top-0 bottom-0 left-0 w-0.5 ${STATUS_DOT[session.status]}`}
-                          />
-                        )}
-
-                        <span className="flex items-center gap-2">
-                          <span
-                            className={[
-                              'h-[7px] w-[7px] flex-none rounded-full',
-                              STATUS_DOT[session.status],
-                              needsYou || session.status === 'running' ? 'vam-breathe' : '',
-                            ].join(' ')}
-                          />
-                          {session.icon !== null && (
-                            <span className="text-[11px] leading-none">{session.icon}</span>
-                          )}
-                          <span
-                            className={`truncate text-[13px] ${isFocused ? 'font-medium text-ink' : 'text-ink-dim'}`}
-                          >
-                            {session.title}
-                          </span>
-                        </span>
-
-                        <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
-                          <span className="flex min-w-0 flex-none items-center gap-1">
-                            <GitBranch size={10} strokeWidth={1.6} />
+                return (
+                  <div key={session.id}>
+                    {renamingId === session.id ? (
+                      <div className="flex items-center gap-1.5 rounded-[9px] border border-line-loud bg-raised px-2.5 py-2.5">
+                        <span className="text-[11px] text-ink-faint">{session.icon ?? '·'}</span>
+                        <input
+                          ref={renameRef}
+                          value={renameDraft}
+                          onChange={(event) => onRenameChange(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault();
+                              onRenameCommit();
+                            } else if (event.key === 'Escape') {
+                              event.preventDefault();
+                              onRenameCancel();
+                            }
+                          }}
+                          className="min-w-0 flex-1 rounded-[var(--radius-sm)] bg-panel px-1 font-mono text-[12px] text-ink outline-none ring-1 ring-waiting"
+                          aria-label="rename session"
+                        />
+                      </div>
+                    ) : (
+                      <div className="group relative">
+                        <button
+                          type="button"
+                          data-session-row={session.id}
+                          onClick={() => onPick(session.id)}
+                          className={[
+                            'relative flex w-full cursor-pointer flex-col gap-[7px] overflow-hidden rounded-[9px] px-2.5 py-2.5 text-left',
+                            isFocused
+                              ? 'border border-line-loud bg-raised'
+                              : 'border border-transparent',
+                          ].join(' ')}
+                        >
+                          {isFocused && (
                             <span
-                              data-placeholder="worktree"
-                              title="black-smith reports no worktree per session"
-                              className="truncate"
+                              className={`absolute top-0 bottom-0 left-0 w-0.5 ${STATUS_DOT[session.status]}`}
+                            />
+                          )}
+
+                          <span className="flex items-center gap-2">
+                            <span
+                              className={[
+                                'h-[7px] w-[7px] flex-none rounded-full',
+                                STATUS_DOT[session.status],
+                                needsYou || session.status === 'running' ? 'vam-breathe' : '',
+                              ].join(' ')}
+                            />
+                            {session.icon !== null && (
+                              <span className="text-[11px] leading-none">{session.icon}</span>
+                            )}
+                            <span
+                              className={`truncate text-[13px] ${isFocused ? 'font-medium text-ink' : 'text-ink-dim'}`}
+                            >
+                              {session.title}
+                            </span>
+                          </span>
+
+                          <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
+                            <span className="flex min-w-0 flex-none items-center gap-1">
+                              <GitBranch size={10} strokeWidth={1.6} />
+                              <span
+                                data-placeholder="worktree"
+                                title="black-smith reports no worktree per session"
+                                className="truncate"
+                              >
+                                —
+                              </span>
+                            </span>
+                            <span className="flex-1" />
+                            <span
+                              data-placeholder="step-verb"
+                              title={`black-smith reports no event kind on a timeline entry to derive a step verb from — this card's status is ${session.status}`}
+                              className={[
+                                'flex flex-none items-center gap-1 rounded-[999px] border pt-px pr-1.5 pb-px pl-1',
+                                STATUS_PILL[session.status],
+                              ].join(' ')}
+                            >
+                              <VerbIcon />—
+                            </span>
+                            <span
+                              data-placeholder="step-duration"
+                              title="black-smith times a session rather than a step"
+                              className="flex-none"
                             >
                               —
                             </span>
                           </span>
-                          <span className="flex-1" />
-                          <span
-                            data-placeholder="step-verb"
-                            title={`black-smith reports no event kind on a timeline entry to derive a step verb from — this card's status is ${session.status}`}
-                            className={[
-                              'flex flex-none items-center gap-1 rounded-[999px] border pt-px pr-1.5 pb-px pl-1',
-                              STATUS_PILL[session.status],
-                            ].join(' ')}
-                          >
-                            <VerbIcon />—
-                          </span>
-                          <span
-                            data-placeholder="step-duration"
-                            title="black-smith times a session rather than a step"
-                            className="flex-none"
-                          >
-                            —
-                          </span>
-                        </span>
 
-                        <span className="block h-0.5 overflow-hidden rounded-sm bg-line">
-                          <span
-                            className={`block h-full ${STATUS_DOT[session.status]}`}
-                            style={{ width: `${pct}%` }}
-                          />
-                        </span>
-                      </button>
+                          <span className="block h-0.5 overflow-hidden rounded-sm bg-line">
+                            <span
+                              className={`block h-full ${STATUS_DOT[session.status]}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </span>
+                        </button>
 
-                      {/* Mouse route to the same thing `x` does. Hidden until the
+                        {/* Mouse route to the same thing `x` does. Hidden until the
                           row is hovered, so a list at rest is a list of names
                           rather than a row of buttons. */}
-                      <button
-                        type="button"
-                        onClick={() => onClose(session.id)}
-                        aria-label={`close ${session.title}`}
-                        className={[
-                          'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
-                          'opacity-0 hover:bg-panel hover:text-failed group-hover:opacity-100',
-                        ].join(' ')}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </li>
-        ))}
+                        <button
+                          type="button"
+                          onClick={() => onClose(session.id)}
+                          aria-label={`close ${session.title}`}
+                          className={[
+                            'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
+                            'opacity-0 hover:bg-panel hover:text-failed group-hover:opacity-100',
+                          ].join(' ')}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </li>
+          ))}
 
-        {entries.length === 0 && (
-          <li className="px-1 py-4 text-[11px] text-ink-faint">
-            {filter.trim() === '' ? 'No sessions yet' : 'No match'}
-          </li>
-        )}
-      </ul>
+          {entries.length === 0 && (
+            <li className="px-1 py-4 text-[11px] text-ink-faint">
+              {filter.trim() === '' ? 'No sessions yet' : 'No match'}
+            </li>
+          )}
+        </ul>
+      </OverlayScroll>
 
       {/* The mockup's own footer strip: workspace line, search, session rows,
           then this — last, not first. It sits above the workspace/settings
