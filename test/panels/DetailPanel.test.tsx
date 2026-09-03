@@ -25,7 +25,9 @@ import {
   detachFromDraft,
   readAttachedName,
   readModelRequest,
+  readModeRequest,
   setModelRequest,
+  setModeRequest,
 } from '../../src/renderer/panels/DetailPanel.js';
 import {
   hasContentAbove,
@@ -517,5 +519,63 @@ describe('the out region offers the two jumps that would do something', () => {
     const nearly = { scrollTop: 590, scrollHeight: 900, clientHeight: 300 };
     expect(isAtBottom(nearly)).toBe(true);
     expect(hasContentBelow(nearly)).toBe(false);
+  });
+});
+
+/**
+ * The mode pills, and the composer's missing caret.
+ *
+ * The pills were inert `<span>`s. They are buttons now, and what they change
+ * is the prompt text — black-smith has no per-session mode to switch, so a
+ * control that only moved vam's own highlight would look like it worked and
+ * do nothing.
+ */
+describe('the mode pills select, and what they select gets recorded', () => {
+  const pill = (name: string) => q<HTMLButtonElement>(`[data-mode-pill="${name}"]`);
+
+  it('writes the chosen mode into the draft as a leading line', () => {
+    const seen: string[] = [];
+    draw({ draft: 'ship it', onDraftChange: (next) => seen.push(next) });
+    act(() => {
+      pill('plan')?.click();
+    });
+    expect(seen).toEqual(['mode: Plan\nship it']);
+  });
+
+  it('clears the line when the default mode is chosen, rather than writing "unchanged"', () => {
+    const seen: string[] = [];
+    draw({ draft: 'mode: Plan\nship it', onDraftChange: (next) => seen.push(next) });
+    act(() => {
+      pill('auto')?.click();
+    });
+    expect(seen).toEqual(['ship it']);
+  });
+
+  it('shows the selection from the draft, not from a copy of it', () => {
+    draw({ draft: 'mode: Manual\nship it' });
+    expect(pill('manual')?.getAttribute('aria-pressed')).toBe('true');
+    expect(pill('auto')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('reads Auto for a draft with no mode line at all', () => {
+    draw({ draft: 'ship it' });
+    expect(pill('auto')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('lets a model request and a mode request coexist', () => {
+    // The hazard this pins: both readers were anchored at offset 0, so
+    // whichever header was written SECOND sat on top and hid the first from
+    // its own regex. Two headers is the only input that shows it.
+    const both = setModeRequest(setModelRequest('ship it', 'opus'), 'Plan');
+    expect(readModelRequest(both)).toBe('opus');
+    expect(readModeRequest(both)).toBe('Plan');
+    expect(both).toContain('ship it');
+  });
+
+  it('drops the caret that used to sit in front of the composer', () => {
+    draw({ draft: '' });
+    const composer = q<HTMLElement>('[aria-label="prompt to session"]')?.parentElement;
+    expect(composer).not.toBeNull();
+    expect(composer?.textContent).not.toContain('\u276f');
   });
 });

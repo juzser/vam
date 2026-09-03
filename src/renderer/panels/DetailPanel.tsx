@@ -152,7 +152,14 @@ export function detachFromDraft(draft: string): string {
   return draft.replace(ATTACH_BLOCK, '');
 }
 
-const MODEL_LINE = /^model: (.*)\n?/;
+// `m`, so the line is found wherever it sits. Without it the regex is anchored
+// at offset 0 and the second header written would hide the first from its own
+// reader — a bug that only appears once two of these exist.
+const MODEL_LINE = /^model: (.*)\n?/m;
+const MODE_LINE = /^mode: (.*)\n?/m;
+
+/** What a prompt carrying no `mode:` line means. */
+const DEFAULT_MODE = 'Auto';
 
 /** The model this draft asks for, or `''` when it asks for none. */
 export function readModelRequest(draft: string): string {
@@ -172,6 +179,27 @@ export function readModelRequest(draft: string): string {
 export function setModelRequest(draft: string, model: string): string {
   const rest = draft.replace(MODEL_LINE, '');
   return model === '' ? rest : `model: ${model}\n${rest}`;
+}
+
+/** The mode this draft asks for, or `''` when it asks for none. */
+export function readModeRequest(draft: string): string {
+  return MODE_LINE.exec(draft)?.[1] ?? '';
+}
+
+/**
+ * Write the mode request onto the draft, or take it off.
+ *
+ * Exactly the reasoning behind `setModelRequest`: black-smith has no
+ * per-session mode, so a control that changed vam's own state and nothing else
+ * would look like it worked and do nothing. What vam has is the prompt it
+ * records verbatim, so the request goes there in words a person reading the
+ * log will read. Selecting the default mode clears the line rather than
+ * writing `mode: Auto` — a prompt should not carry a sentence that says
+ * "unchanged".
+ */
+export function setModeRequest(draft: string, mode: string): string {
+  const rest = draft.replace(MODE_LINE, '');
+  return mode === DEFAULT_MODE ? rest : `mode: ${mode}\n${rest}`;
 }
 
 export type DetailPanelProps = {
@@ -218,7 +246,6 @@ const TABS = ['Response', 'PRs', 'Terminal', 'Agents'] as const;
  * labelled as placeholders in the same way the tab bar's three empty tabs are.
  */
 const MODES = ['Auto', 'Manual', 'Plan'] as const;
-const CURRENT_MODE = 'Auto';
 
 /**
  * The mockup's segmented control: one filled pill on a sunken well, not
@@ -875,7 +902,6 @@ export function DetailPanel(props: DetailPanelProps) {
               everything but the tail of it. The mockup's own composer is a
               104px-tall block of 12.5px/1.55 text, not an input. */}
           <div className="flex items-start gap-2">
-            <span className="mt-px flex-none font-mono text-[12px] text-ink-faint">❯</span>
             <textarea
               ref={inputRef}
               rows={2}
@@ -1012,11 +1038,14 @@ export function DetailPanel(props: DetailPanelProps) {
         </div>
 
         {/* The mockup's mode row, in place of the slash tags that stood here.
-            Both are placeholders — black-smith has no per-session mode any more
-            than it has a command route — but the mockup's segmented well is the
-            shape this row is meant to be, so it is the shape it takes: a 2px
-            well on `raised`, 24px pills at 11.5px, the current one filled with
-            `segment-on`. Values measured off artboards 1a/1b. */}
+            The pills are real buttons and the selection is real: it is written
+            into the prompt as a leading `mode:` line, the same way the model
+            request is, because that is the only thing vam can actually make
+            happen. black-smith has no per-session mode to switch, so a control
+            that only changed vam's own state would look like it worked and do
+            nothing. Selecting Auto clears the line rather than writing
+            "unchanged". The well's geometry is the mockup's: 2px on `raised`,
+            24px pills at 11.5px, the current one filled with `segment-on`. */}
         <div data-mode-row className="flex items-center gap-2">
           {/* The note hangs off the MODE label, and the label is a <button> so
               that a keyboard can reach it. A span with a tabIndex reads as a
@@ -1030,19 +1059,27 @@ export function DetailPanel(props: DetailPanelProps) {
             </button>
           </Note>
           <div className="flex items-center gap-0.5 rounded-[8px] border border-line-strong bg-raised p-0.5">
-            {MODES.map((mode) => (
-              <span
-                key={mode}
-                data-mode-pill={mode.toLowerCase()}
-                data-placeholder={mode === CURRENT_MODE ? undefined : `mode-${mode.toLowerCase()}`}
-                className={[
-                  'flex h-6 items-center rounded-[6px] px-2.5 text-[11.5px]',
-                  mode === CURRENT_MODE ? 'bg-segment-on font-medium text-ink' : 'text-ink-dim',
-                ].join(' ')}
-              >
-                {mode}
-              </span>
-            ))}
+            {MODES.map((mode) => {
+              // Derived from the draft, never a second copy of it: a mirror
+              // in component state is a thing that can disagree with the text
+              // actually being recorded.
+              const selected = mode === (readModeRequest(draft) || DEFAULT_MODE);
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  data-mode-pill={mode.toLowerCase()}
+                  aria-pressed={selected}
+                  onClick={() => onDraftChange(setModeRequest(draft, mode))}
+                  className={[
+                    'flex h-6 cursor-pointer items-center rounded-[6px] px-2.5 text-[11.5px]',
+                    selected ? 'bg-segment-on font-medium text-ink' : 'text-ink-dim hover:text-ink',
+                  ].join(' ')}
+                >
+                  {mode}
+                </button>
+              );
+            })}
           </div>
           <span className="flex-1" />
           {/* The mockup's `Tab · cycle mode` tag, at the right-hand end of the
