@@ -665,7 +665,9 @@ function Rule({
         <span className="font-mono text-[9.5px] tracking-[0.12em] uppercase">{label}</span>
       </span>
       <span className="h-px flex-1 bg-line" />
-      <span className="font-mono text-[9.5px] text-ink-faint">{meta}</span>
+      <span data-rule-meta className="font-mono text-[9.5px] text-ink-faint">
+        {meta}
+      </span>
     </div>
   );
 }
@@ -1018,6 +1020,13 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const showPromptBox = !needsYou || composing || draft !== '';
   const commands = decision?.commands ?? [];
+  /**
+   * Whether the decision on screen is the one the session is working on.
+   * `decisions` is newest first (model.ts), so the newest is the live turn --
+   * the only one a "what it is doing now" caption can honestly describe.
+   */
+  const isNewestTurn =
+    decision !== null && entry !== null && entry.session.decisions[0]?.id === decision.id;
   const total = entry?.session.decisions.length ?? 0;
   // Oldest first: `decisions` arrives newest first. That
   // ordering is what makes "the last line" and "the newest turn" the same
@@ -1165,13 +1174,26 @@ export function DetailPanel(props: DetailPanelProps) {
       */}
       <div className="flex min-h-0 flex-1 select-text flex-col gap-2.5 px-3.5 py-3">
         {decision === null ? (
-          <p className="text-[11px] text-ink-faint">This session has no steps yet.</p>
+          <p className="text-[11px] text-ink-faint">
+            {/* Two different absences. "This session has no steps yet" named a
+                session that did not exist whenever nothing was focused. */}
+            {entry === null
+              ? 'No session selected — pick one in the sidebar.'
+              : 'This session has no steps yet.'}
+          </p>
         ) : (
           <>
             <section data-detail-block="in" className="flex flex-none flex-col gap-1.5">
               <Rule
                 label="in"
-                meta={`you · ${entry?.session.age ?? '—'}`}
+                // `you`, and no time. `Decision` carries no timestamp, so
+                // nothing here can say when this turn happened -- and
+                // `session.age` is the session's LAST ACTIVITY, usually the
+                // agent's most recent write rather than when you typed this.
+                // Walk back a turn with `h` and the old caption went on
+                // describing the present. The session's age is on its sidebar
+                // row, where it is true.
+                meta="you"
                 icon={
                   <span role="img" aria-label="you" className="flex">
                     <User size={13} strokeWidth={1.6} />
@@ -1247,7 +1269,13 @@ export function DetailPanel(props: DetailPanelProps) {
                 label="out"
                 meta={
                   <span className="flex items-center gap-1.5">
-                    {entry?.session.activity ?? '—'}
+                    {/* `session.activity` is what the session is doing RIGHT
+                        NOW, so it belongs to the turn currently being worked
+                        and to no other. On an older turn it described the
+                        present while the operator read the past. The newest
+                        decision is the one in progress (`decisions` is newest
+                        first, per model.ts). */}
+                    {isNewestTurn ? (entry?.session.activity ?? '—') : '—'}
                     {jumps.above && (
                       <button
                         type="button"
