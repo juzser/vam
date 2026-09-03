@@ -1,9 +1,14 @@
 // @vitest-environment happy-dom
 
 /**
- * Direct tests for the sidebar's session card row: the three new placeholders
- * are em-dashes that name their own gap, the old status phrase and step count
- * are gone, and the pre-existing progress bar derivation is unchanged.
+ * Direct tests for the sidebar's session card row.
+ *
+ * The row is deliberately quiet: under the title there is a branch and a time,
+ * and nothing else. The step-verb pill and the progress bar were both removed
+ * at the operator's request -- both were placeholders drawing a status channel
+ * over data no source supplies, and a row at rest should be a name, not a
+ * dashboard. What remains must still name its own gaps rather than invent
+ * values, which is what these tests hold.
  */
 
 import { cleanup, render, screen } from '@testing-library/react';
@@ -119,55 +124,55 @@ afterEach(() => {
 });
 
 describe('SessionList placeholder row', () => {
-  it('renders all three placeholders as an em-dash, never a number or a fabricated name', () => {
+  it('draws a branch and a time under the title, and nothing else', () => {
     const session = makeSession();
     const { container } = mount(entriesOf([session]));
 
     const worktree = container.querySelector('[data-placeholder="worktree"]');
-    const verb = container.querySelector('[data-placeholder="step-verb"]');
-    const duration = container.querySelector('[data-placeholder="step-duration"]');
-
     expect(worktree).not.toBeNull();
-    expect(verb).not.toBeNull();
-    expect(duration).not.toBeNull();
-
+    // Still a placeholder, still saying so: no source reports a worktree yet.
     expect(worktree?.textContent).toBe('—');
-    expect(verb?.textContent).toBe('—');
-    expect(duration?.textContent).toBe('—');
+
+    // The time is real, not a placeholder. `age` is what the source measured.
+    const age = container.querySelector('[data-session-age]');
+    expect(age?.textContent).toBe('12m');
+
+    // The two the operator asked to be rid of.
+    expect(container.querySelector('[data-placeholder="step-verb"]')).toBeNull();
+    expect(container.querySelector('[data-session-progress]')).toBeNull();
   });
 
-  it('names the gap on each placeholder and gives the verb pill a status channel', () => {
+  it('shows an em-dash for the time when the source cannot say, never a zero', () => {
+    // A source with no timestamp must stay distinguishable from one that just
+    // reported activity a moment ago; `0m` would read as the second.
+    const { container } = mount(entriesOf([makeSession({ age: null })]));
+    const age = container.querySelector('[data-session-age]');
+    expect(age?.textContent).toBe('—');
+    expect(age?.getAttribute('title')).toContain('cannot say');
+  });
+
+  it('names the gap on the branch placeholder, and draws no verb pill for any status', () => {
     const running = makeSession({ id: 's1', status: 'running' });
     const waiting = makeSession({ id: 's2', status: 'waiting' });
     const { container } = mount(entriesOf([running, waiting]));
 
     const worktree = container.querySelector('[data-placeholder="worktree"]');
-    const duration = container.querySelector('[data-placeholder="step-duration"]');
-    const verb1 = container.querySelector('[data-session-row="s1"] [data-placeholder="step-verb"]');
-    const verb2 = container.querySelector('[data-session-row="s2"] [data-placeholder="step-verb"]');
-
     expect(worktree).not.toBeNull();
-    expect(duration).not.toBeNull();
-    expect(verb1).not.toBeNull();
-    expect(verb2).not.toBeNull();
-
     expect(worktree?.getAttribute('title')).toBe('black-smith reports no worktree per session');
-    expect(duration?.getAttribute('title')).toBe('black-smith times a session rather than a step');
 
-    const title1 = verb1?.getAttribute('title') ?? '';
-    const title2 = verb2?.getAttribute('title') ?? '';
-    expect(title1.length).toBeGreaterThan(0);
-    expect(title2.length).toBeGreaterThan(0);
-    expect(title1).toMatch(/event kind/);
-    expect(title2).toMatch(/event kind/);
-    expect(title1).toMatch(/\brunning\b/);
-    expect(title2).toMatch(/\bwaiting\b/);
-    expect(title1).not.toBe(title2);
+    // The pill carried a per-status border colour, so a status-sensitive check:
+    // neither of the two statuses may bring it back.
+    expect(container.querySelectorAll('[data-placeholder="step-verb"]').length).toBe(0);
+    expect(container.querySelectorAll('[data-session-progress]').length).toBe(0);
   });
 
-  it('leaves the progress bar derivation untouched — not the visible-ratio shortcut', () => {
-    // 2 of 6 decisions have a non-null output: 2/6 (33%), never the
-    // visible-ratio shortcut 3/6 (50%), since VISIBLE_DECISION_COUNT caps at 3.
+  it('draws no progress bar for any completion ratio, including a done session', () => {
+    // This replaces a test that pinned the bar's derivation (2 of 6 outputs ->
+    // 33%, never the visible-ratio 50%). The derivation is not wrong; the bar
+    // is simply gone from this row, and a test asserting a width would now be
+    // asserting something no longer on screen. What is worth keeping is that
+    // no ratio -- not even the one that used to fill the bar completely --
+    // brings it back.
     const partial = makeSession({
       id: 's1',
       decisions: [
@@ -180,17 +185,12 @@ describe('SessionList placeholder row', () => {
       ],
     });
     const { container } = mount(entriesOf([partial]));
-    const bar = container.querySelector('[data-session-row="s1"] span[style]');
-    expect(bar).not.toBeNull();
-    const width = (bar as HTMLElement).style.width;
-    expect(width).toBe(`${Math.round((2 / 6) * 100)}%`);
-    expect(width).not.toBe('50%');
+    expect(container.querySelector('[data-session-row="s1"] span[style]')).toBeNull();
 
     cleanup();
     const done = makeSession({ id: 's1', status: 'done', decisions: [decision('a', null)] });
     const { container: doneContainer } = mount(entriesOf([done]));
-    const doneBar = doneContainer.querySelector('[data-session-row="s1"] span[style]');
-    expect((doneBar as HTMLElement).style.width).toBe('100%');
+    expect(doneContainer.querySelector('[data-session-row="s1"] span[style]')).toBeNull();
   });
 
   /**
@@ -377,7 +377,10 @@ describe('SessionList placeholder row', () => {
     const title = screen.getByText('alpha-refactor'); // (A)
     const card = title.closest('[data-session-row="s1"]');
     expect(card).not.toBeNull(); // (B)
-    expect(card?.querySelectorAll('[data-placeholder]')).toHaveLength(3); // (C)
+    // One placeholder, not the three this row used to carry: `step-verb` and
+    // `step-duration` are gone, and the time in the latter's place is a real
+    // value from the source rather than a named gap.
+    expect(card?.querySelectorAll('[data-placeholder]')).toHaveLength(1); // (C)
     expect(card?.textContent).not.toMatch(/\b\d+\s+steps\b/); // (D)
     expect(card?.textContent).not.toContain('Editing 3 files'); // (E)
   });
