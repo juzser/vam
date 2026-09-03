@@ -83,12 +83,24 @@ export function StepNode({ data }: NodeProps & { data: StepNodeData }) {
       className={[
         'relative flex h-full w-full flex-col gap-1.5 overflow-hidden rounded-[var(--radius-md)]',
         'bg-panel px-2.5 py-2 shadow-[var(--shadow-node)]',
-        // The asking card carries the halo instead of a border, exactly as the
-        // mockup does: a border is a boundary, a halo is a call.
-        asking ? 'vam-call' : 'border border-line',
-        focused && !asking ? 'vam-focus-ring' : '',
+        // The glow says WHERE YOU ARE; the border says what this step needs.
+        // Both can be true at once, so they stack rather than trade off: a
+        // focused asking card wears the amber edge AND the cursor ring.
+        focused ? 'vam-cursor-glow' : '',
+        asking
+          ? 'border border-waiting'
+          : focused
+            ? 'border border-line-loudest'
+            : 'border border-line',
       ].join(' ')}
     >
+      {entry.session.status === 'running' && entry.session.decisions[0]?.id === decision.id && (
+        /* The mockup's travelling green hairline, on the CURRENT step only —
+           `decisions[0]` is the newest, the same test `stepKind` uses. Without
+           that clause every unanswered step in a running session would sweep.
+           `aria-hidden`: it restates the kind word beside it. */
+        <span className="vam-running-edge" aria-hidden="true" />
+      )}
       <Handle type="target" position={Position.Left} className="!opacity-0" />
 
       {jumpLabel !== null && (

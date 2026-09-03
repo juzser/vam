@@ -23,6 +23,7 @@ import { cleanup, render } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SessionInfoNode } from '../../src/renderer/canvas/SessionInfoNode.js';
+import { StepNode } from '../../src/renderer/canvas/StepNode.js';
 import type { Decision, Project, Session, SourceId } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 
@@ -206,5 +207,62 @@ describe('reduced motion: every glow stops, and each leaves a static stand-in', 
   it('leaves the running edge a full-width bar rather than a blank line', () => {
     const after = reduced.slice(reduced.indexOf('animation: none'));
     expect(after).toMatch(/\.vam-running-edge::after\s*\{[^}]*width:\s*100%/s);
+  });
+});
+
+/**
+ * The step card wears the same two treatments, and it was the half left
+ * unwired: `StepNode` still named `vam-call` and `vam-focus-ring` after both
+ * were deleted from styles.css, so the asking step had no halo and the focused
+ * step no ring — dead class names rather than a crash, which is why nothing
+ * caught it.
+ */
+describe('StepNode wears the cursor glow and the running edge', () => {
+  function renderStep(over: Partial<Session>, decisionIndex: number, focused: boolean) {
+    const entry = entryOf(over);
+    const target = entry.session.decisions[decisionIndex];
+    expect(target, 'the fixture has no decision at that index').toBeDefined();
+    const { container } = render(
+      <ReactFlowProvider>
+        <StepNode
+          id="step"
+          data={{ entry, decision: target as Decision, focused, jumpLabel: null }}
+          {...({} as never)}
+        />
+      </ReactFlowProvider>,
+    );
+    return nodeRoot(container, '[data-step-kind]');
+  }
+
+  it('gives the focused step the cursor glow and the loudest border', () => {
+    const card = renderStep({ status: 'done' }, 1, true);
+    expect(card.className).toContain('vam-cursor-glow');
+    expect(card.className).toContain('border-line-loudest');
+    // The classes deleted from styles.css must not come back by habit.
+    expect(card.className).not.toContain('vam-call');
+    expect(card.className).not.toContain('vam-focus-ring');
+  });
+
+  it('stacks the amber edge and the ring on a focused asking step', () => {
+    // Focus and needs-you are different facts, so they must not trade places:
+    // the card says both where you are AND what it wants.
+    const card = renderStep({ status: 'waiting' }, 0, true);
+    expect(card.className).toContain('vam-cursor-glow');
+    expect(card.className).toContain('border-waiting');
+  });
+
+  it('sweeps only the newest step of a running session', () => {
+    const edge = (card: HTMLElement) => card.querySelectorAll('.vam-running-edge').length;
+    // decisions[0] is the newest — that one sweeps.
+    expect(edge(renderStep({ status: 'running' }, 0, false))).toBe(1);
+    // Its predecessor does not, or every step of a running session would.
+    expect(edge(renderStep({ status: 'running' }, 1, false))).toBe(0);
+    // And a session that is not running has no sweep at all.
+    expect(edge(renderStep({ status: 'waiting' }, 0, false))).toBe(0);
+  });
+
+  it('hides the sweep from screen readers — it restates the kind beside it', () => {
+    const card = renderStep({ status: 'running' }, 0, false);
+    expect(card.querySelector('.vam-running-edge')?.getAttribute('aria-hidden')).toBe('true');
   });
 });
