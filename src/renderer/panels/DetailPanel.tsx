@@ -548,6 +548,17 @@ export type DetailPanelProps = {
    * `port.ts` exists to stop.
    */
   readonly delivers?: boolean;
+  /**
+   * True while a write is in flight.
+   *
+   * `claude --resume` is a subprocess with a 120-second timeout
+   * (`deliver.ts`'s `DELIVER_TIMEOUT_MS`), so this is not a flicker: Enter can
+   * start something that runs for two minutes. `Canvas` has had the flag since
+   * the composer was written -- it guards against a double submit -- and it
+   * never reached the pane, so the operator saw nothing happen and every
+   * further Enter was swallowed without a word.
+   */
+  readonly sending?: boolean;
   /** The current rendered width (task-1's `renderedWidth`), applied inline. */
   readonly width: number;
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
@@ -877,6 +888,7 @@ export function DetailPanel(props: DetailPanelProps) {
     actionIndex,
     review,
     delivers,
+    sending = false,
     width,
     resizeHandle,
   } = props;
@@ -1023,8 +1035,21 @@ export function DetailPanel(props: DetailPanelProps) {
    * black-smith still genuinely only appends to a log, so this is per-source
    * and not a rename: one wording for both would be wrong for one of them.
    */
-  const composerClaim =
-    delivers === true
+  const composerClaim = sending
+    ? // The in-flight wording keeps the delivers/records distinction. Losing it
+      // here would make the pane's one honest sentence wrong for exactly as
+      // long as the write takes, which is the window the operator is actually
+      // watching.
+      delivers === true
+      ? {
+          label: 'sending prompt…',
+          title: 'handing the prompt to the running agent session — this can take a while',
+        }
+      : {
+          label: 'recording prompt…',
+          title: 'appending the prompt to this session\u2019s log',
+        }
+    : delivers === true
       ? {
           label: 'send prompt',
           title: 'sends the prompt into the running agent session — it is delivered, not filed',
@@ -1479,11 +1504,16 @@ export function DetailPanel(props: DetailPanelProps) {
                 type="button"
                 data-prompt-record
                 onClick={onSubmit}
+                disabled={sending}
+                aria-busy={sending}
                 aria-label={composerClaim.label}
                 title={composerClaim.title}
-                className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-[7px] bg-line-strong text-ink hover:bg-line-loud"
+                className={[
+                  'flex h-7 w-7 flex-none items-center justify-center rounded-[7px] bg-line-strong text-ink',
+                  sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
+                ].join(' ')}
               >
-                <ArrowUp size={14} strokeWidth={1.7} />
+                <ArrowUp size={14} strokeWidth={1.7} className={sending ? 'vam-breathe' : ''} />
               </button>
             </div>
           </div>

@@ -1556,6 +1556,10 @@ function CanvasInner({
           entry={focusedEntry}
           decision={focusedDecision}
           delivers={source.kind === 'session' && source.source.capabilities.deliverPrompt}
+          // The flag has guarded double-submit here since the composer was
+          // written; the pane never saw it, so a two-minute `claude --resume`
+          // looked like Enter doing nothing.
+          sending={writing}
           draft={draft}
           onDraftChange={setDraft}
           onSubmit={sendPrompt}
