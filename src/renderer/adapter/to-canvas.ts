@@ -270,6 +270,33 @@ export function toCanvasModel(
 ): CanvasModel {
   const byProject = new Map<string, Session[]>();
   for (const api of overview.runningSessions) {
+    /**
+     * KNOWN LOSS, measured and deliberately not papered over: a session that
+     * belongs to several projects is filed under its first one only.
+     *
+     * Against the live factory on 2026-09-03 — 14 running sessions — three of
+     * them (`factory-vam-2`, `factory-sse-1`, `dogfood-novel-rpg-1`) each list
+     * two projects, and in all three cases `projects[0]` is `black-smith`. So
+     * the sidebar files them under the factory and the groups an operator
+     * looks for (`vam`, `novel-rpg`) never appear at all.
+     *
+     * What it is NOT is a session that vanishes: every session still gets
+     * exactly one row on the canvas and one row in the sidebar. Fixing the
+     * grouping properly means a session appearing under EACH of its projects
+     * while staying ONE canvas row, and that is not a change to this line.
+     * `Session` has no project field; membership is expressed by which
+     * `Project.sessions` array holds it, so listing a session twice duplicates
+     * it through `allSessions`, `orderedSessions` and `layoutCanvas` — which
+     * mints two nodes with the same `info:<id>`, and duplicate node ids break
+     * both ReactFlow and the id `j`/`k` navigate by. The honest fix is a
+     * membership list on the session plus a sidebar that groups by it and a
+     * layout that stays keyed on the session; that spans the domain model,
+     * the selectors, the layout and the sidebar, and belongs in its own task.
+     *
+     * Until then this stays positional and stays documented, rather than
+     * acquiring a heuristic ("prefer the project that is not the factory")
+     * that would be a guess wearing a rule's clothes.
+     */
     const projectId = api.projects[0] ?? NO_PROJECT_ID;
     const sessions = byProject.get(projectId) ?? [];
     sessions.push(toSession(api, timelines.get(api.sessionId) ?? [], now));

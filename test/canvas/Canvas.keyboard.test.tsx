@@ -509,16 +509,19 @@ describe('filtering the sidebar with /', () => {
     expect(focused()).toBe('beta/b1');
   });
 
-  it('narrows the sidebar without hiding anything on the canvas', () => {
-    // The canvas is the overview, and an overview that hides things is not one.
-    // The filter narrows where you navigate, not what exists.
+  it('narrows the canvas with it, so nothing is drawn that cannot be reached', () => {
+    // This test used to assert the opposite — that the canvas kept drawing
+    // every session while the filter narrowed only the sidebar, "because an
+    // overview that hides things is not one". That left cards on screen with
+    // no sidebar row and no key that could reach them, which is the defect the
+    // operator reported. The set is narrowed once, and all three views use it.
     render(<Canvas model={MODEL} />);
     press('/');
     typeInto(filterInput() as HTMLInputElement, 'beta');
-    const canvasTitles = [...document.querySelectorAll('.react-flow__node')]
-      .map((el) => el.textContent ?? '')
-      .join(' ');
-    expect(canvasTitles).toContain('a1');
+    const drawn = [...document.querySelectorAll('.react-flow__node')]
+      .map((el) => el.getAttribute('data-id') ?? '')
+      .filter((id) => id.startsWith('info:'));
+    expect(drawn).toEqual(['info:b1']);
   });
 
   it('says so rather than showing an empty list with no reason', () => {
@@ -1483,6 +1486,44 @@ describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
       press('<');
     }
     expect(width(detailAside())).toBe(DETAIL_MIN);
+  });
+
+  /**
+   * Escape out of the composer must hand the keyboard back to the SIDEBAR.
+   *
+   * The operator's request was "phím tắt để đi ngược từ prompt input về
+   * sidebar". Blurring the textarea was necessary but not sufficient: the
+   * composer can be reached through `I` (focus the detail pane) then `i`,
+   * which leaves `pane === 'action'`. After the blur the keys reach the
+   * window again and route to the DETAIL pane, so `j`/`k` walk that pane's
+   * actions instead of the session list. Nothing looks broken — the keys
+   * work, they just move the wrong thing, which is harder to notice than
+   * being ignored outright.
+   *
+   * Written through the `I`-then-`i` path on purpose: entering with a bare
+   * `i` leaves `pane` on 'list' already, so that route cannot tell the fixed
+   * code from the broken code and a test written along it would pass either
+   * way.
+   *
+   * Pane routing is the observable proof. `<` narrows whichever pane owns the
+   * keyboard, so "the sidebar narrowed and the detail pane did not" says
+   * exactly "the keyboard went back to the sidebar" without reaching into
+   * component state.
+   */
+  it('Escape from a composer opened via I routes the keyboard back to the sidebar', () => {
+    render(<Canvas model={MODEL} />);
+    press('I');
+    expect(actionPane()).toBe('active');
+    press('i');
+    const box = document.querySelector('[aria-label="prompt to session"]');
+    expect(box).not.toBeNull();
+    expect(document.activeElement).toBe(box);
+
+    keyOn(box as Element, 'Escape');
+
+    press('<');
+    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar - 24);
+    expect(width(detailAside())).toBe(DEFAULT_PANES.detail);
   });
 
   it('z0 resets both panes to their defaults in one keystroke sequence', () => {

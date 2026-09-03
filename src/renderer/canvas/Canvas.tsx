@@ -227,10 +227,19 @@ function CanvasInner({
     [factoryModel, prefs.icons, prefs.projectIcons],
   );
 
-  const layout = useMemo(() => layoutCanvas(model), [model]);
   const allEntries = useMemo(() => orderedSessions(model), [model]);
 
-  const [focusedId, setFocusedId] = useState<string | null>(layout.nodes[0]?.id ?? null);
+  /**
+   * `null` until there is a layout to point at.
+   *
+   * This used to seed itself from `layout.nodes[0]`, which was only possible
+   * while the layout came straight from the model. It is now built from the
+   * FILTERED model, and that cannot be computed above the filter state
+   * declared below. Nothing is lost: the "land focus on something real" effect
+   * already had to cover the live case, where the first model arrives after
+   * mount and the first layout is empty whatever this says.
+   */
+  const [focusedId, setFocusedId] = useState<string | null>(null);
   const [jumping, setJumping] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -266,6 +275,83 @@ function CanvasInner({
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
   const { getNodes, zoomIn, zoomOut, fitView } = useReactFlow();
+
+  const matches = useMemo(() => searchMatches(allEntries, query), [allEntries, query]);
+
+  /**
+   * The one set the sidebar lists, the canvas draws and the cursor may land on.
+   * `/` narrows it in place — orca's shape — rather than opening a separate
+   * search that leaves the list untouched while you type into it, and the
+   * status pills narrow it the same way.
+   *
+   * This used to narrow the SIDEBAR alone, on the reasoning that "the canvas is
+   * the overview, and an overview that hides things is not one". That reasoning
+   * cost more than it bought. The canvas went on drawing cards the cursor could
+   * not reach and the sidebar had no row for, so `j` stepped straight over a
+   * card that was plainly on screen and there was no sidebar row to click
+   * instead — reported as "some sessions do not show on the canvas and cannot
+   * be navigated to from the sidebar". A card nothing can focus is not
+   * overview; it is scenery shaped like a session. The file's own "one focus,
+   * three views" rule only means something if the three views also agree on the
+   * SET, so a filter now narrows what is drawn as well, and `All` (or Escape
+   * out of `/`) puts every card back.
+   */
+  const entries = useMemo(() => {
+    const byText =
+      query.trim() === '' ? allEntries : allEntries.filter((e) => matches.includes(e.session.id));
+    return statusFilter === 'all'
+      ? byText
+      : byText.filter((e) => e.session.status === statusFilter);
+  }, [allEntries, matches, query, statusFilter]);
+
+  /** The pill counts are off the UNFILTERED list — a count that moved when you
+      clicked it would be a count of your own click. */
+  const tally = useMemo(() => {
+    const of = (status: SessionStatus) =>
+      allEntries.filter((e) => e.session.status === status).length;
+    return {
+      all: allEntries.length,
+      running: of('running'),
+      waiting: of('waiting'),
+      done: of('done'),
+      failed: of('failed'),
+    };
+  }, [allEntries]);
+
+  /**
+   * The model the canvas draws: `model`, minus whatever the filter excluded.
+   *
+   * Re-filters `model.projects` rather than rebuilding a model out of
+   * `entries`, so every project keeps its identity — id, name and source — and
+   * only its membership changes. A project the filter empties drops out
+   * entirely instead of drawing a heading over nothing. Unfiltered, the very
+   * same object comes back, so the layout memo below does not recompute for a
+   * filter nobody set.
+   */
+  const visibleModel = useMemo<CanvasModel>(() => {
+    const visible = new Set(entries.map((e) => e.session.id));
+    if (visible.size === allEntries.length) {
+      return model;
+    }
+    return {
+      projects: model.projects
+        .map((project) => ({
+          ...project,
+          sessions: project.sessions.filter((s) => visible.has(s.id)),
+        }))
+        .filter((project) => project.sessions.length > 0),
+    };
+  }, [model, entries, allEntries]);
+
+  const layout = useMemo(() => layoutCanvas(visibleModel), [visibleModel]);
+
+  /**
+   * What `hjkl`, `f` and `gg` may land on: every node on the canvas, no filter
+   * of its own. The set is narrowed once, at `entries` above, and the canvas is
+   * drawn from the result — so a second narrowing here is what would put the
+   * cursor and the picture back out of step.
+   */
+  const nodeIds = useMemo(() => layout.nodes.map((n) => n.id), [layout]);
 
   /** Which session the focused node belongs to — the id all three panes share. */
   const focusedSpec = useMemo(
@@ -383,52 +469,6 @@ function CanvasInner({
     () => buildActions(review.waivers, review.lessons, focusedDecision?.commands ?? []),
     [review.waivers, review.lessons, focusedDecision],
   );
-
-  const matches = useMemo(() => searchMatches(allEntries, query), [allEntries, query]);
-
-  /**
-   * What the sidebar actually lists. `/` narrows it in place — orca's shape —
-   * rather than opening a separate search that leaves the list untouched while
-   * you type into it.
-   *
-   * The canvas is deliberately NOT filtered: it is the overview, and an overview
-   * that hides things is not one. The filter narrows where you navigate, not
-   * what exists.
-   */
-  const entries = useMemo(() => {
-    const byText =
-      query.trim() === '' ? allEntries : allEntries.filter((e) => matches.includes(e.session.id));
-    return statusFilter === 'all'
-      ? byText
-      : byText.filter((e) => e.session.status === statusFilter);
-  }, [allEntries, matches, query, statusFilter]);
-
-  /** The pill counts are off the UNFILTERED list — a count that moved when you
-      clicked it would be a count of your own click. */
-  const tally = useMemo(() => {
-    const of = (status: SessionStatus) =>
-      allEntries.filter((e) => e.session.status === status).length;
-    return {
-      all: allEntries.length,
-      running: of('running'),
-      waiting: of('waiting'),
-      done: of('done'),
-      failed: of('failed'),
-    };
-  }, [allEntries]);
-
-  /**
-   * What `hjkl`, `f` and `gg` may land on. The canvas still DRAWS everything —
-   * it is the overview, and an overview that hides things is not one — but the
-   * filter narrows where you can go, which is what "narrows where you navigate,
-   * not what exists" has to mean if it means anything. Without this, `j` walks
-   * into a session the sidebar just hid and the focus ring points at a row that
-   * is no longer there.
-   */
-  const nodeIds = useMemo(() => {
-    const visible = new Set(entries.map((e) => e.session.id));
-    return layout.nodes.filter((n) => visible.has(n.entry.session.id)).map((n) => n.id);
-  }, [layout, entries]);
 
   const labels = useMemo(
     () => (jumping ? jumpLabels(nodeIds) : new Map<string, string>()),
@@ -1264,16 +1304,29 @@ function CanvasInner({
                   );
                 })}
               </Panel>
+              {/* Measured off the mockup's minimap: 176x56, one chip per
+                  session cell in that session's status colour, and a viewport
+                  drawn as a 1px outline in the ink colour over an UNDIMMED
+                  map. `maskColor` transparent is the whole point — the mockup
+                  has no dark wash, and xyflow's default one hid the part of
+                  the canvas the map exists to show you. `maskStrokeWidth` is
+                  in pixels (xyflow multiplies it by the map's own scale), so 1
+                  is the mockup's hairline. `nodeStrokeWidth` is NOT: it is in
+                  flow units, where 1px is ~26 at this scale, so the mockup's
+                  bordered chip is drawn as a filled one instead — at 8px wide
+                  the fill is what carries the colour anyway. */}
               <MiniMap
                 pannable
                 zoomable
                 ariaLabel="canvas minimap"
-                maskColor="rgb(0 0 0 / 0.5)"
-                style={{ width: 168, height: 96 }}
+                maskColor="transparent"
+                maskStrokeColor="var(--color-ink)"
+                maskStrokeWidth={1}
+                nodeStrokeWidth={0}
+                nodeBorderRadius={3}
+                style={{ width: 176, height: 56 }}
                 className="!bottom-3 !right-3 !m-0 !rounded-[8px] !border !border-line !bg-sunken"
-                nodeColor={(node) =>
-                  node.type === 'info' ? 'var(--color-ink-dim)' : 'var(--color-line-loud)'
-                }
+                nodeColor={minimapChipColor}
               />
             </ReactFlow>
 
@@ -1330,6 +1383,15 @@ function CanvasInner({
           onStopComposing={() => {
             setComposing(false);
             setDraft('');
+            // Escape out of the composer returns the keyboard to the SIDEBAR,
+            // which is the pane the operator asked to get back to. Without
+            // this, a prompt opened with `I` leaves `pane === 'action'`, so
+            // the blur hands the keys back to a window where `j`/`k` walk the
+            // detail pane's actions instead of the session list — the keys
+            // work, they just do the wrong thing, which is worse than being
+            // swallowed. The `i` path already sat on 'list' and was unaffected,
+            // which is why this only ever bit one of the two entry points.
+            setPane('list');
           }}
           width={detailWidth}
           resizeHandle={
@@ -1446,6 +1508,23 @@ function CanvasInner({
       </footer>
     </div>
   );
+}
+
+/**
+ * A minimap chip's colour: the session's status, or nothing at all.
+ *
+ * Only the info card earns a chip. Its steps, its fan and its slots all belong
+ * to the same row, and drawing four more rectangles per session turns a map you
+ * read at a glance into a texture — the mockup draws one chip per cell, and so
+ * does this. `transparent` rather than an omission because xyflow renders a
+ * rect for every node either way.
+ */
+function minimapChipColor(node: Node): string {
+  if (node.type !== 'info') {
+    return 'transparent';
+  }
+  const { entry } = node.data as { entry?: SessionEntry };
+  return entry === undefined ? 'transparent' : `var(--color-${entry.session.status})`;
 }
 
 export function Canvas({
