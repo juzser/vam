@@ -192,6 +192,24 @@ afterEach(() => {
   localStorage.clear();
 });
 
+describe('the focused node says so with an indicator, not a word', () => {
+  it('marks exactly one node focused, and moves the mark with j', () => {
+    render(<Canvas model={MODEL} />);
+    const marks = () => [...document.querySelectorAll('[data-focus-indicator]')];
+
+    expect(marks()).toHaveLength(1);
+    // The word it replaced cost a tag's width in a card that is mostly title,
+    // and stopped being legible at the 80% the canvas now opens at.
+    expect(document.body.textContent).not.toContain('FOCUSED');
+    // It is an indicator, so the word has to survive for a screen reader.
+    expect(marks()[0]?.getAttribute('aria-label')).toBe('focused');
+    expect(marks()[0]?.className).toContain('vam-focus-glow');
+
+    press('j');
+    expect(marks()).toHaveLength(1);
+  });
+});
+
 describe('walking sessions with j and k', () => {
   it('starts on the first session in the list', () => {
     render(<Canvas model={MODEL} />);

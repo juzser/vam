@@ -287,6 +287,32 @@ body {
  * sits unanswered. So it gets a halo that grows outward — motion pointing away
  * from the card, which the eye catches even in a column it is not reading.
  */
+/*
+ * The focus indicator's glow.
+ *
+ * It replaces the word FOCUSED, which cost a whole tag's worth of width in a
+ * card that is mostly title. A dot that pulses reads at a glance and at any
+ * zoom, where an 8.5px label stops being legible the moment you zoom out —
+ * and the canvas now opens at 80%.
+ *
+ * Animating `box-shadow` alone keeps this off the layout path: no reflow, and
+ * it composites with the `vam-breathe` already running on a status dot in the
+ * same row. Honoured by the reduced-motion block below, like its siblings.
+ */
+@keyframes vam-focus-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--color-line-loudest);
+  }
+  50% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
+.vam-focus-glow {
+  animation: vam-focus-glow 1.9s ease-in-out infinite;
+}
+
 @keyframes vam-call {
   0% {
     box-shadow: 0 0 0 0 rgb(255 159 10 / 0.5);
@@ -307,12 +333,19 @@ body {
   .vam-spin,
   .vam-breathe,
   .vam-running-edge,
+  .vam-focus-glow,
   .vam-call {
     animation: none;
   }
   /* The halo carried the signal; with motion off, a static ring has to. */
   .vam-call {
     box-shadow: 0 0 0 2px rgb(255 159 10 / 0.55);
+  }
+  /* Same argument for focus: the glow WAS the indicator's whole signal, and a
+     dot that stops pulsing is a dot. A static ring keeps it distinguishable
+     from the status dot beside it. */
+  .vam-focus-glow {
+    box-shadow: 0 0 0 2px var(--color-line-loudest);
   }
 }
 
