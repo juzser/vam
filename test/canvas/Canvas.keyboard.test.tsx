@@ -192,25 +192,55 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe('the detail panel labels its sections with icons, not words', () => {
-  it('names in, out and progress accessibly while rendering no such text', () => {
+describe('in and out are labelled differently in the node and in the pane', () => {
+  it('gives the right pane an icon AND the word, and its own scroll per region', () => {
     render(<Canvas model={MODEL} />);
-    press('l'); // into the chain, so a step is expanded and IN/OUT render
+    press('l'); // into the chain, so a step is expanded
 
-    // The words are gone from the rendered text...
+    // The pane has room for words and the operator asked for them back: an
+    // icon alone is ambiguous in the one place a decision gets made.
     const inBlock = document.querySelector('[data-detail-block="in"]');
     const outBlock = document.querySelector('[data-detail-block="out"]');
-    expect(inBlock).not.toBeNull();
-    expect(inBlock?.textContent).not.toContain('IN');
-    expect(outBlock?.textContent).not.toContain('OUT');
+    const progress = document.querySelector('[data-detail-block="progress"]');
+    expect(inBlock?.textContent).toContain('in');
+    expect(outBlock?.textContent).toContain('out');
+    expect(progress?.textContent).toContain('progress');
 
-    // ...and survive as accessible names. `role="img"` is what makes an
-    // aria-label announced at all: on a bare <span> it is silently ignored,
-    // which this codebase shipped once already.
-    for (const name of ['in', 'out', 'progress']) {
-      const marked = document.querySelector(`[role="img"][aria-label="${name}"]`);
-      expect(marked, `no accessible label for "${name}"`).not.toBeNull();
+    // Three regions, three scrollers. Before this the pane scrolled as one
+    // column, so reading a long answer pushed the request that prompted it off
+    // the top — the two things you compare were never on screen together.
+    for (const block of [inBlock, progress, outBlock]) {
+      expect(block?.querySelector('.vam-no-scrollbar')).not.toBeNull();
     }
+    // And `out` is the one that grows: context stays short, the answer gets
+    // the height.
+    expect(outBlock?.className).toContain('flex-1');
+    expect(inBlock?.className).toContain('flex-none');
+    expect(progress?.className).toContain('flex-none');
+  });
+
+  it('gives the step node icons only, with the word kept for screen readers', () => {
+    render(<Canvas model={MODEL} />);
+    // A step card is too narrow for a label, so there the icon stands alone —
+    // and `role="img"` is what makes its aria-label announced at all. On a
+    // bare <span> the label is silently dropped, which this codebase shipped
+    // once already.
+    // Scoped to the step card, and the card is asserted FIRST. The initial
+    // draft of this test fell back to `document.body` when the selector missed,
+    // which made it pass against the old code by finding the DETAIL PANEL's
+    // icons instead — a test that could not fail, caught by reverting both
+    // files and watching only its sibling go red.
+    const steps = [...document.querySelectorAll('[data-step-kind]')];
+    expect(steps.length, 'no step cards rendered — the test proves nothing').toBeGreaterThan(0);
+    for (const name of ['in', 'out']) {
+      const marked = steps.some(
+        (step) => step.querySelector(`[role="img"][aria-label="${name}"]`) !== null,
+      );
+      expect(marked, `no step card has an accessible "${name}"`).toBe(true);
+    }
+    // And the words themselves are gone from the card, which is the change.
+    expect(steps[0]?.textContent).not.toContain('IN');
+    expect(steps[0]?.textContent).not.toContain('OUT');
   });
 });
 
