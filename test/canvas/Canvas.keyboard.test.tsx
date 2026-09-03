@@ -192,6 +192,28 @@ afterEach(() => {
   localStorage.clear();
 });
 
+describe('the detail panel labels its sections with icons, not words', () => {
+  it('names in, out and progress accessibly while rendering no such text', () => {
+    render(<Canvas model={MODEL} />);
+    press('l'); // into the chain, so a step is expanded and IN/OUT render
+
+    // The words are gone from the rendered text...
+    const inBlock = document.querySelector('[data-detail-block="in"]');
+    const outBlock = document.querySelector('[data-detail-block="out"]');
+    expect(inBlock).not.toBeNull();
+    expect(inBlock?.textContent).not.toContain('IN');
+    expect(outBlock?.textContent).not.toContain('OUT');
+
+    // ...and survive as accessible names. `role="img"` is what makes an
+    // aria-label announced at all: on a bare <span> it is silently ignored,
+    // which this codebase shipped once already.
+    for (const name of ['in', 'out', 'progress']) {
+      const marked = document.querySelector(`[role="img"][aria-label="${name}"]`);
+      expect(marked, `no accessible label for "${name}"`).not.toBeNull();
+    }
+  });
+});
+
 describe('the focused node says so with an indicator, not a word', () => {
   it('marks exactly one node focused, and moves the mark with j', () => {
     render(<Canvas model={MODEL} />);
