@@ -29,17 +29,18 @@
 
 import {
   ArrowBigUp,
-  ArrowDownLeft,
   ArrowUp,
-  ArrowUpRight,
+  Bot,
   ChevronDown,
   ChevronRight,
   GitCommitVertical,
+  User,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import type { Decision } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { ReviewQueue, type ReviewQueueProps } from './ReviewQueue.js';
+import { isAtBottom, shouldStick } from './stick-to-bottom.js';
 
 export type DetailPanelProps = {
   readonly entry: SessionEntry | null;
@@ -170,6 +171,78 @@ function Rule({
 }
 
 /**
+ * How tall three lines of `in` are, in pixels.
+ *
+ * The operator asked for three lines of `in` and three of `progress`, with the
+ * height they give up going to `out`. A percentage of the pane would be a
+ * promise about the window instead of a promise about the text, so this is
+ * derived from the type it caps: three lines of the 12px/1.55 body, plus the
+ * box's own 10px padding top and bottom and its 1px border.
+ */
+const IN_BODY_PX = 12;
+const IN_LEADING = 1.55;
+const IN_LINES = 3;
+const IN_MAX_HEIGHT = Math.round(IN_BODY_PX * IN_LEADING * IN_LINES) + 22;
+
+/** How many turns `progress` keeps while collapsed — three truncated lines. */
+const PROGRESS_LINES = 3;
+
+/** What `to-canvas.ts` joins each summarised answer with, and splits on here. */
+const ANSWER_SEPARATOR = ' · ';
+
+/**
+ * The answer, formatted rather than poured out flat.
+ *
+ * `toDecisions` builds each answer as `eventType · taskId · detail` and joins
+ * them with newlines, so the output is a LIST that was being rendered as one
+ * paragraph — every answer running into the next. Splitting on the newline is
+ * therefore not a formatting flourish, it restores a structure the adapter
+ * already put there.
+ *
+ * The mockup's own out region is the model for how it is drawn: 12px/1.6 body
+ * in `ink-dim` — whose two values ARE the ones measured off the Response
+ * artboards, dark and light — 9px between blocks, with the machine-ish parts
+ * lifted out in mono at 11px and the emphasised words in `ink`. That is the
+ * operator asked for: the body colour already matched, what was missing was
+ * the mockup's two-tone split between what a thing IS and what it SAYS.
+ *
+ * Deliberately not a markdown renderer: black-smith does not emit markdown
+ * here, and guessing at one would dress arbitrary payload text as structure.
+ */
+function OutText({ output }: { readonly output: string }) {
+  const lines = output.split('\n').filter((line) => line.trim() !== '');
+  return (
+    <div className="flex flex-col gap-[9px]">
+      {lines.map((line, i) => {
+        const cut = line.lastIndexOf(ANSWER_SEPARATOR);
+        // Only a line the adapter actually built gets the two-tone treatment;
+        // anything else is prose and is left whole.
+        const head = cut === -1 ? null : line.slice(0, cut);
+        const rest = cut === -1 ? line : line.slice(cut + ANSWER_SEPARATOR.length);
+        return (
+          <p
+            // The lines have no ids of their own; their order in one answer is
+            // stable and is the only thing distinguishing them.
+            // biome-ignore lint/suspicious/noArrayIndexKey: no stabler id exists
+            key={i}
+            data-out-line
+            className="whitespace-pre-wrap break-words text-[12px] text-ink-dim leading-[1.6]"
+          >
+            {head !== null && (
+              <span data-out-head className="font-mono text-[11px] text-ink">
+                {head}
+              </span>
+            )}
+            {head !== null && ' — '}
+            {rest}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * The step ribbon: one tick per turn, the focused one taller.
  *
  * Colour carries the same meaning it does everywhere else — green answered,
@@ -233,12 +306,24 @@ export function DetailPanel(props: DetailPanelProps) {
    * presentation toggle in the model every other pane has to carry.
    */
   const [progressOpen, setProgressOpen] = useState(false);
+  /** Whether the step counter has been asked for the sentence it abbreviates. */
+  const [noteOpen, setNoteOpen] = useState(false);
 
   useEffect(() => {
     if (composing) {
       inputRef.current?.focus();
     }
   }, [composing]);
+
+  /**
+   * The `out` region rides its own bottom: the newest output is the thing a
+   * decision gets made from, so it is what the pane shows without a scroll.
+   * `stuck` is a ref rather than state because nothing renders from it — it is
+   * read inside the effect that fires when the content changes, and turning it
+   * into state would re-render the pane on every scroll event for no pixel.
+   */
+  const outRef = useRef<HTMLDivElement>(null);
+  const stuckRef = useRef(true);
 
   // Grow with the text instead of scrolling a one-line slot. Measured from the
   // content each time: shrinking needs the reset to `auto` first, or the box
@@ -258,6 +343,25 @@ export function DetailPanel(props: DetailPanelProps) {
   // The session has stopped and the next move is yours. Keyed off the session,
   // not off an empty `output`: a session still writing its answer is busy, not
   // blocked, and banner-ing it would train you to ignore the banner.
+  // A different session or a different step is a different document, and the
+  // previous one's scroll position would open it half-read.
+  const focusKey = `${entry?.session.id ?? ''}/${decision?.id ?? ''}`;
+  const focusRef = useRef(focusKey);
+  const output = decision?.output ?? null;
+  // `output` is a change SIGNAL, not something this effect reads: new text
+  // arriving is exactly the moment the region has to stick again, and dropping it
+  // from the list would leave the pane showing the old bottom.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: stick again on new output
+  useEffect(() => {
+    const box = outRef.current;
+    const focusChanged = focusRef.current !== focusKey;
+    focusRef.current = focusKey;
+    if (box === null) return;
+    if (!shouldStick({ stuck: stuckRef.current, focusChanged })) return;
+    box.scrollTop = box.scrollHeight;
+    stuckRef.current = true;
+  }, [focusKey, output]);
+
   const needsYou = entry?.session.status === 'waiting';
   const commands = decision?.commands ?? [];
   const total = entry?.session.decisions.length ?? 0;
@@ -265,8 +369,12 @@ export function DetailPanel(props: DetailPanelProps) {
   // that ordering is what makes "the last line" and "the newest turn" the same
   // line, so the one kept is taken off the end.
   const orderedTurns = [...(entry?.session.decisions ?? [])].reverse();
-  const visibleTurns = progressOpen ? orderedTurns : orderedTurns.slice(-1);
+  const visibleTurns = progressOpen ? orderedTurns : orderedTurns.slice(-PROGRESS_LINES);
   const index = decision === null ? 0 : total - (entry?.session.decisions.indexOf(decision) ?? 0);
+  const stepNote =
+    decision === null
+      ? `step ${index} of ${total}`
+      : `step ${index} of ${total} · ${decision.label}`;
 
   return (
     <aside
@@ -324,14 +432,36 @@ export function DetailPanel(props: DetailPanelProps) {
         </div>
 
         <div className="flex items-center gap-2 border-line border-t pt-[9px] pb-[3px]">
-          <span className="flex-none font-mono text-[9.5px] text-ink-faint">
-            STEP {index} OF {total}
-          </span>
+          {/* `x/y`, per the operator, with the sentence it replaced kept in
+              reach rather than deleted. `title` is the hover tooltip and the
+              same string is the aria-label — but a `title` does NOT appear on
+              keyboard focus in any browser, and vam is driven from a keyboard,
+              so the note is also a real <button> that prints it below the row.
+              Nothing an operator must act on lives only in here: the counter is
+              on screen and so is the step's label, at the right of the title
+              row. This is the long form of what is already visible. */}
+          <button
+            type="button"
+            data-step-counter
+            aria-expanded={noteOpen}
+            title={stepNote}
+            aria-label={stepNote}
+            onClick={() => setNoteOpen((open) => !open)}
+            className="flex-none cursor-pointer rounded-[var(--radius-sm)] font-mono text-[9.5px] text-ink-faint hover:text-ink"
+          >
+            {index}/{total}
+          </button>
           <StepRibbon decisions={entry?.session.decisions ?? []} focusedId={decision?.id ?? null} />
           <span className="flex-none font-mono text-[9.5px] text-ink-faint">
             {entry?.session.age ?? '—'}
           </span>
         </div>
+
+        {noteOpen && (
+          <div data-step-note className="-mt-1 font-mono text-[9.5px] text-ink-dim">
+            {stepNote}
+          </div>
+        )}
 
         <TabBar runningAgents={entry?.session.runningAgents ?? 0} />
       </div>
@@ -365,16 +495,21 @@ export function DetailPanel(props: DetailPanelProps) {
           <p className="text-[11px] text-ink-faint">This session has no steps yet.</p>
         ) : (
           <>
-            <section
-              data-detail-block="in"
-              className="flex max-h-[24%] min-h-[64px] flex-none flex-col gap-1.5"
-            >
+            <section data-detail-block="in" className="flex flex-none flex-col gap-1.5">
               <Rule
                 label="in"
                 meta={`you · ${entry?.session.age ?? '—'}`}
-                icon={<ArrowDownLeft size={12} strokeWidth={1.7} />}
+                icon={
+                  <span role="img" aria-label="you" className="flex">
+                    <User size={13} strokeWidth={1.6} />
+                  </span>
+                }
               />
-              <div className="vam-no-scrollbar min-h-0 flex-1 overflow-y-auto rounded-[9px] border border-line bg-panel px-3 py-2.5">
+              <div
+                data-detail-scroll="in"
+                style={{ maxHeight: IN_MAX_HEIGHT }}
+                className="vam-no-scrollbar min-h-0 overflow-y-auto rounded-[9px] border border-line bg-panel px-3 py-2.5"
+              >
                 <p className="whitespace-pre-wrap break-words text-[12px] text-ink-dim leading-[1.55]">
                   {decision.input}
                 </p>
@@ -435,20 +570,29 @@ export function DetailPanel(props: DetailPanelProps) {
               <Rule
                 label="out"
                 meta={entry?.session.activity ?? '—'}
-                icon={<ArrowUpRight size={12} strokeWidth={1.7} />}
+                icon={
+                  <span role="img" aria-label="agent" className="flex">
+                    <Bot size={14} strokeWidth={1.75} />
+                  </span>
+                }
               />
               {/* The one region that grows. Everything the operator reads to
                   decide lives in here, so it gets the height and its own
                   scroll rather than pushing `in` off the top of the pane. */}
-              <div className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+              <div
+                ref={outRef}
+                data-detail-scroll="out"
+                onScroll={(event) => {
+                  stuckRef.current = isAtBottom(event.currentTarget);
+                }}
+                className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto"
+              >
                 {decision.output === null ? (
                   <p className="text-[11.5px] text-ink-faint">
                     — the session is still running, no answer yet —
                   </p>
                 ) : (
-                  <p className="whitespace-pre-wrap break-words text-[12px] text-ink-dim leading-[1.6]">
-                    {decision.output}
-                  </p>
+                  <OutText output={decision.output} />
                 )}
 
                 {commands.length > 0 && (

@@ -22,7 +22,16 @@ function decision(id: string, output: string | null = 'answered'): Decision {
   return { id, label: `step ${id}`, input: `ask ${id}`, output, commands: [] };
 }
 
-const DECISIONS = [decision('d3', null), decision('d2'), decision('d1')];
+// Five, so "the newest three" and "all of them" are different lists: with
+// three turns a collapsed region and an expanded one look identical and the
+// test proves nothing.
+const DECISIONS = [
+  decision('d5', null),
+  decision('d4'),
+  decision('d3'),
+  decision('d2'),
+  decision('d1'),
+];
 
 const SESSION: Session = {
   id: 's1',
@@ -72,12 +81,13 @@ afterEach(cleanup);
 describe('the progress region collapses to its newest line', () => {
   it('draws one turn collapsed, every turn expanded, and says which it is', () => {
     draw();
-    // Collapsed by default: `progress` is context beside `out`, and three
-    // regions competing for the pane's height is what made it unreadable.
-    expect(turns()).toHaveLength(1);
+    // Collapsed to THREE turns, not one: the operator asked for three lines of
+    // progress, with the space that buys going to `out`. A turn is one truncated
+    // line, so three list items and three rendered lines are the same thing.
+    expect(turns()).toHaveLength(3);
     // The LAST line, which this list orders as the NEWEST turn: it runs
     // oldest-first, like the ribbon and like the canvas.
-    expect(turns()[0]?.textContent).toContain('step d3');
+    expect(turns()[2]?.textContent).toContain('step d5');
     expect(toggle()?.getAttribute('aria-expanded')).toBe('false');
 
     act(() => toggle()?.click());
@@ -85,7 +95,7 @@ describe('the progress region collapses to its newest line', () => {
     expect(toggle()?.getAttribute('aria-expanded')).toBe('true');
 
     act(() => toggle()?.click());
-    expect(turns()).toHaveLength(1);
+    expect(turns()).toHaveLength(3);
   });
 
   it('keeps the three-region structure the pane already earned', () => {
@@ -229,5 +239,102 @@ describe('there is a way out of the prompt box without a mouse', () => {
     cleanup();
     draw({ composing: false });
     expect(q<HTMLElement>('[data-prompt-escape]')).toBeNull();
+  });
+});
+
+describe('the regions are capped in lines, and `out` gets what they give up', () => {
+  it('caps `in` at three rendered lines of its own body text', () => {
+    draw();
+    const box = q<HTMLElement>('[data-detail-scroll="in"]');
+    expect(box).not.toBeNull();
+    // Three lines of 12px/1.55 plus the box's own 10px padding and 1px border.
+    // A number, not a percentage: "three lines" is a promise about the text,
+    // and a percentage of the pane is a promise about the window.
+    expect(box?.style.maxHeight).toBe('78px');
+    // Still a scroller — capped, not clipped: the rest is one drag away.
+    expect(box?.className).toContain('overflow-y-auto');
+  });
+
+  it('gives `out` the height the other two gave up', () => {
+    draw();
+    const out = q<HTMLElement>('[data-detail-block="out"]');
+    expect(out?.className).toContain('flex-1');
+    expect(q<HTMLElement>('[data-detail-scroll="out"]')).not.toBeNull();
+  });
+});
+
+describe('the out text is formatted, not a flat wall', () => {
+  it('splits the adapter’s newline-joined answers into one block each', () => {
+    // What `toDecisions` actually produces: one summarised answer per line,
+    // each `eventType · taskId · detail`.
+    draw({
+      decision: {
+        id: 'd5',
+        label: 'step d5',
+        input: 'ask',
+        output: 'task.completed · t-4 · wrote the migration\nnote.added · t-4 · needs review',
+        commands: [],
+      },
+    });
+    const lines = all('[data-out-line]');
+    expect(lines).toHaveLength(2);
+    // Newlines are real breaks, never collapsed whitespace.
+    expect(lines[0]?.className).toContain('whitespace-pre-wrap');
+    // The machine-ish head is monospace and carries the mockup's emphasis
+    // colour (#ededed dark / #18181b light = `ink`); the prose stays at the
+    // measured body colour (#a1a1a1 / #52525b = `ink-dim`).
+    const head = lines[0]?.querySelector('[data-out-head]');
+    expect(head?.textContent).toBe('task.completed · t-4');
+    expect(head?.className).toContain('font-mono');
+    expect(head?.className).toContain('text-ink');
+    expect(lines[0]?.className).toContain('text-ink-dim');
+    expect(lines[1]?.textContent).toContain('needs review');
+  });
+
+  it('leaves an output with no separator as a single readable block', () => {
+    draw({
+      decision: { id: 'd5', label: 'l', input: 'i', output: 'just words', commands: [] },
+    });
+    const lines = all('[data-out-line]');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.textContent).toBe('just words');
+  });
+});
+
+describe('the in and out rules wear the mockup’s own glyphs', () => {
+  it('is a user for in and a bot for out, announced rather than drawn only', () => {
+    draw();
+    // Measured off the Response artboards: `in` is a head-and-shoulders glyph,
+    // `out` is a bot (antenna, two eyes, a mouth) — not the arrows vam had.
+    // `role="img"` is what makes the label announced at all; on a bare <span>
+    // aria-label is dropped in silence.
+    const inIcon = q<HTMLElement>('[data-detail-block="in"] [role="img"]');
+    const outIcon = q<HTMLElement>('[data-detail-block="out"] [role="img"]');
+    expect(inIcon?.getAttribute('aria-label')).toContain('you');
+    expect(outIcon?.getAttribute('aria-label')).toContain('agent');
+  });
+});
+
+describe('the step counter is compact, and says the whole thing on demand', () => {
+  it('reads x/y and carries the full note where a keyboard can reach it', () => {
+    draw();
+    const counter = q<HTMLButtonElement>('[data-step-counter]');
+    // The focused turn is the newest, which this counter numbers last.
+    expect(counter?.textContent).toBe('5/5');
+    expect(q<HTMLElement>('[data-action-pane]')?.textContent).not.toContain('STEP 5 OF 5');
+    // The full note the compact form drops. `title` is the hover tooltip and
+    // the aria-label is what a screen reader gets — but a title never appears
+    // on keyboard focus, so the same string has to be reachable by pressing
+    // the thing, which means a real <button>.
+    const note = counter?.getAttribute('title') ?? '';
+    expect(note).toContain('step 5 of 5');
+    expect(note).toContain('step d5');
+    expect(counter?.getAttribute('aria-label')).toBe(note);
+    expect(counter?.tagName).toBe('BUTTON');
+
+    expect(q<HTMLElement>('[data-step-note]')).toBeNull();
+    act(() => counter?.click());
+    expect(q<HTMLElement>('[data-step-note]')?.textContent).toBe(note);
+    expect(counter?.getAttribute('aria-expanded')).toBe('true');
   });
 });
