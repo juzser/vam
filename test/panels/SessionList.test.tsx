@@ -242,7 +242,13 @@ describe('SessionList placeholder row', () => {
     const alphaIcon = container.querySelector('[data-project-icon="p1"]');
     const betaIcon = container.querySelector('[data-project-icon="p2"]');
     expect(alphaIcon?.textContent).toBe('📦');
-    expect(betaIcon?.textContent).toBe('·');
+    // The placeholder is a glyph, so `textContent` is empty — and an empty
+    // string would equally describe an icon slot that rendered NOTHING. Assert
+    // the glyph itself, or this passes for the bug it is meant to catch.
+    expect(betaIcon?.textContent).toBe('');
+    expect(betaIcon?.querySelector('[data-project-icon-placeholder]')).not.toBeNull();
+    // And a project that HAS an icon must not also carry the placeholder.
+    expect(alphaIcon?.querySelector('[data-project-icon-placeholder]')).toBeNull();
 
     // The icon sits before the name in the heading, not after.
     const heading = container.querySelector('[data-project-heading]');
