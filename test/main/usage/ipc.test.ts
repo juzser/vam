@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
-import { registerUsageIpc } from '../../../src/main/usage/ipc.js';
+import { MIN_READ_INTERVAL_MS, registerUsageIpc } from '../../../src/main/usage/ipc.js';
 
 function fakeIpcMain() {
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
@@ -51,5 +51,129 @@ describe('registerUsageIpc', () => {
     const result = await ipcMain.invoke(CHANNELS.usageGet);
 
     expect(result).toEqual({ kind: 'unknown', reason: 'unavailable' });
+  });
+});
+
+/**
+ * The cadence lives HERE, not in the renderer.
+ *
+ * A security audit found the handler had no floor of any kind: the renderer's
+ * five-minute poll was a convention, and `window.api.usage.get()` in a loop
+ * would have driven one `security` subprocess and one authenticated request to
+ * Anthropic per call. The renderer cannot be the thing that decides how often
+ * the operator's Keychain is read.
+ */
+describe('registerUsageIpc rate limiting', () => {
+  const ok = (at: string) => ({
+    kind: 'ok' as const,
+    windows: { fiveHour: { kind: 'unknown' as const }, sevenDay: { kind: 'unknown' as const } },
+    observedAt: at,
+  });
+
+  it('reads once for a burst of calls, serving the rest from the last reading', async () => {
+    const ipcMain = fakeIpcMain();
+    let reads = 0;
+    // The clock never moves in this test -- that IS the test: 500 calls inside
+    // the floor must produce one read.
+    const now = 1_000_000;
+    registerUsageIpc(
+      ipcMain,
+      async () => {
+        reads += 1;
+        return ok(`read-${reads}`);
+      },
+      () => now,
+    );
+
+    const results = [];
+    for (let i = 0; i < 500; i += 1) {
+      results.push(await ipcMain.invoke(CHANNELS.usageGet));
+    }
+
+    expect(reads).toBe(1);
+    expect(new Set(results.map((r) => (r as { observedAt: string }).observedAt))).toEqual(
+      new Set(['read-1']),
+    );
+  });
+
+  it('collapses calls that arrive while a read is still in flight', async () => {
+    const ipcMain = fakeIpcMain();
+    let reads = 0;
+    // Declared with a no-op default rather than `null`: TypeScript cannot see
+    // that a Promise executor runs synchronously, so the `null` form narrows
+    // to `never` at the call site and fails `typecheck:test` while vitest
+    // stays green over it.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    registerUsageIpc(ipcMain, async () => {
+      reads += 1;
+      await gate;
+      return ok('slow');
+    });
+
+    // Five callers, none awaited yet: the first starts the read, the rest must
+    // join it rather than starting their own.
+    const pending = [0, 1, 2, 3, 4].map(() => ipcMain.invoke(CHANNELS.usageGet));
+    release();
+    const results = await Promise.all(pending);
+
+    expect(reads).toBe(1);
+    expect(results.every((r) => (r as { observedAt: string }).observedAt === 'slow')).toBe(true);
+  });
+
+  it('reads again once the floor has elapsed', async () => {
+    const ipcMain = fakeIpcMain();
+    let reads = 0;
+    let now = 1_000_000;
+    registerUsageIpc(
+      ipcMain,
+      async () => {
+        reads += 1;
+        return ok(`read-${reads}`);
+      },
+      () => now,
+    );
+
+    await ipcMain.invoke(CHANNELS.usageGet);
+    now += MIN_READ_INTERVAL_MS - 1;
+    await ipcMain.invoke(CHANNELS.usageGet);
+    expect(reads).toBe(1);
+
+    now += 1;
+    const fresh = await ipcMain.invoke(CHANNELS.usageGet);
+    expect(reads).toBe(2);
+    expect((fresh as { observedAt: string }).observedAt).toBe('read-2');
+  });
+
+  it('throttles a FAILING read too, and recovers once the floor elapses', async () => {
+    // The security-relevant half. Caching only successes would leave a
+    // permanently broken Keychain spawning one subprocess per call -- a
+    // smaller version of the hole rather than a closed one -- while a floor
+    // that never expired would hide a Keychain that came back.
+    const ipcMain = fakeIpcMain();
+    let reads = 0;
+    let now = 1_000_000;
+    registerUsageIpc(
+      ipcMain,
+      async () => {
+        reads += 1;
+        throw new Error('boom');
+      },
+      () => now,
+    );
+
+    for (let i = 0; i < 100; i += 1) {
+      expect(await ipcMain.invoke(CHANNELS.usageGet)).toEqual({
+        kind: 'unknown',
+        reason: 'unavailable',
+      });
+    }
+    expect(reads).toBe(1);
+
+    now += MIN_READ_INTERVAL_MS;
+    await ipcMain.invoke(CHANNELS.usageGet);
+    expect(reads).toBe(2);
   });
 });

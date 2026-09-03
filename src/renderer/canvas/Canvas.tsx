@@ -903,6 +903,16 @@ function CanvasInner({
   const stepSession = useCallback(
     (delta: 1 | -1) => {
       const index = entries.findIndex((e) => e.session.id === focusedEntry?.session.id);
+      // -1 means the cursor is on nothing this list holds: an empty list, or a
+      // focus the filter or a refresh has just made unreachable. Left to the
+      // arithmetic below it became `-1 + 1 = 0`, which for an empty list read
+      // as "off the end" and announced a LAST session that does not exist,
+      // and for a non-empty one silently jumped to the first row with no word
+      // said. `hjkl` already answers this state honestly one branch away.
+      if (index === -1) {
+        setStatus('no session matches');
+        return;
+      }
       // Clamped, not wrapped. Stopping dead is information: it tells you where
       // you are. Wrapping to the far end tells you nothing.
       const nextIndex = index + delta;
