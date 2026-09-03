@@ -18,7 +18,7 @@
  */
 
 import { Handle, type NodeProps, Position } from '@xyflow/react';
-import { CircleHelp, File, Play } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, CircleHelp, File, Play } from 'lucide-react';
 import type { Decision } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 
@@ -127,11 +127,23 @@ export function StepNode({ data }: NodeProps & { data: StepNodeData }) {
       </div>
 
       <div className="flex gap-[7px]">
-        <span className="w-[18px] flex-none pt-px font-mono text-[8.5px] text-ink-faint">IN</span>
+        <span
+          role="img"
+          aria-label="in"
+          className="flex w-[18px] flex-none justify-center pt-px text-ink-faint"
+        >
+          <ArrowDownLeft size={11} strokeWidth={1.7} />
+        </span>
         <span className="truncate text-[10.5px] text-ink-faint">{decision.input}</span>
       </div>
       <div className="flex gap-[7px]">
-        <span className="w-[18px] flex-none pt-px font-mono text-[8.5px] text-ink-faint">OUT</span>
+        <span
+          role="img"
+          aria-label="out"
+          className="flex w-[18px] flex-none justify-center pt-px text-ink-faint"
+        >
+          <ArrowUpRight size={11} strokeWidth={1.7} />
+        </span>
         <span className={`vam-clamp-2 text-[10.5px] ${asking ? 'text-ink' : 'text-ink-dim'}`}>
           {decision.output === null ? (
             <span className="text-ink-faint">— running —</span>

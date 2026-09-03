@@ -142,8 +142,9 @@ function Rule({
 }) {
   return (
     <div className="flex items-center gap-[7px]">
-      <span role="img" aria-label={label} className="flex flex-none text-ink-faint">
+      <span className="flex flex-none items-center gap-[5px] text-ink-faint">
         {icon}
+        <span className="font-mono text-[9.5px] tracking-[0.12em] uppercase">{label}</span>
       </span>
       <span className="h-px flex-1 bg-line" />
       <span className="font-mono text-[9.5px] text-ink-faint">{meta}</span>
@@ -301,18 +302,31 @@ export function DetailPanel(props: DetailPanelProps) {
         </div>
       )}
 
-      <div className="vam-no-scrollbar flex min-h-0 flex-1 select-text flex-col gap-3.5 overflow-y-auto px-3.5 py-3">
+      {/*
+        Three regions, three scrollbars, one decision.
+        Before this the whole pane scrolled as one column, so reading a long
+        answer pushed the request that prompted it off the top — and the two
+        things you compare to decide were never on screen together. Now `in`
+        and `progress` are capped short (they are context) and `out` takes the
+        remaining height (it is the thing you read), each scrolling on its own.
+        `min-h-0` on every level is what makes a flex child actually able to
+        shrink and scroll rather than growing its parent.
+      */}
+      <div className="flex min-h-0 flex-1 select-text flex-col gap-2.5 px-3.5 py-3">
         {decision === null ? (
           <p className="text-[11px] text-ink-faint">This session has no steps yet.</p>
         ) : (
           <>
-            <section data-detail-block="in" className="flex flex-col gap-1.5">
+            <section
+              data-detail-block="in"
+              className="flex max-h-[24%] min-h-[64px] flex-none flex-col gap-1.5"
+            >
               <Rule
                 label="in"
                 meta={`you · ${entry?.session.age ?? '—'}`}
                 icon={<ArrowDownLeft size={12} strokeWidth={1.7} />}
               />
-              <div className="rounded-[9px] border border-line bg-panel px-3 py-2.5">
+              <div className="vam-no-scrollbar min-h-0 flex-1 overflow-y-auto rounded-[9px] border border-line bg-panel px-3 py-2.5">
                 <p className="whitespace-pre-wrap break-words text-[12px] text-ink-dim leading-[1.55]">
                   {decision.input}
                 </p>
@@ -322,13 +336,16 @@ export function DetailPanel(props: DetailPanelProps) {
             {/* The mockup lists the actions inside one step. black-smith's unit
                 is the turn, so this lists the session's turns — the same shape
                 answering the same question, off data that exists. */}
-            <section className="flex flex-col gap-1.5">
+            <section
+              data-detail-block="progress"
+              className="flex max-h-[22%] min-h-[56px] flex-none flex-col gap-1.5"
+            >
               <Rule
                 label="progress"
                 meta={`${total} turns`}
                 icon={<GitCommitVertical size={12} strokeWidth={1.7} />}
               />
-              <ul className="flex flex-col gap-1.5 pl-0.5 font-mono text-[10px] text-ink-faint">
+              <ul className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-0.5 font-mono text-[10px] text-ink-faint">
                 {[...(entry?.session.decisions ?? [])].reverse().map((d) => (
                   <li key={d.id} className="flex items-center gap-2">
                     <span className={d.output === null ? 'text-waiting' : 'text-ink-ghost'}>
@@ -342,62 +359,67 @@ export function DetailPanel(props: DetailPanelProps) {
               </ul>
             </section>
 
-            <section data-detail-block="out" className="flex min-h-0 flex-col gap-1.5">
+            <section data-detail-block="out" className="flex min-h-0 flex-1 flex-col gap-1.5">
               <Rule
                 label="out"
                 meta={entry?.session.activity ?? '—'}
                 icon={<ArrowUpRight size={12} strokeWidth={1.7} />}
               />
-              {decision.output === null ? (
-                <p className="text-[11.5px] text-ink-faint">
-                  — the session is still running, no answer yet —
-                </p>
-              ) : (
-                <p className="whitespace-pre-wrap break-words text-[12px] text-ink-dim leading-[1.6]">
-                  {decision.output}
-                </p>
-              )}
+              {/* The one region that grows. Everything the operator reads to
+                  decide lives in here, so it gets the height and its own
+                  scroll rather than pushing `in` off the top of the pane. */}
+              <div className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+                {decision.output === null ? (
+                  <p className="text-[11.5px] text-ink-faint">
+                    — the session is still running, no answer yet —
+                  </p>
+                ) : (
+                  <p className="whitespace-pre-wrap break-words text-[12px] text-ink-dim leading-[1.6]">
+                    {decision.output}
+                  </p>
+                )}
 
-              {commands.length > 0 && (
-                <div className="mt-1 flex flex-col gap-2">
-                  <div className="text-[10.5px] text-ink-faint">
-                    the agent proposed these — vam does not run them
-                  </div>
-                  {commands.map((command, i) => (
-                    <div
-                      key={command.id}
-                      className={[
-                        'rounded-[9px] border bg-canvas px-3 py-2.5',
-                        active && actionIndex === i ? 'border-waiting' : 'border-line',
-                      ].join(' ')}
-                    >
-                      <div className="flex items-center gap-2 pb-1.5">
-                        <span className="font-mono text-[10px] text-ink-ghost">{i + 1}</span>
-                        <span className="truncate text-[11px] text-ink">{command.label}</span>
-                        <button
-                          type="button"
-                          onClick={() => onCopyCommand(command.id)}
-                          className="ml-auto cursor-pointer rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-[10px] text-ink-faint hover:bg-raised hover:text-ink"
-                        >
-                          yy
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onPickCommand(command.id)}
-                          className="cursor-pointer rounded-[var(--radius-sm)] border border-line-strong px-1.5 py-0.5 text-[10px] text-ink-dim hover:text-ink"
-                        >
-                          run
-                        </button>
-                      </div>
-                      {/* Wrapped, not scrolled. A command you cannot see the end
-                          of is one you cannot check before running. */}
-                      <pre className="select-text whitespace-pre-wrap break-all font-mono text-[10.5px] text-ink-dim leading-[1.6]">
-                        {command.command}
-                      </pre>
+                {commands.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-2">
+                    <div className="text-[10.5px] text-ink-faint">
+                      the agent proposed these — vam does not run them
                     </div>
-                  ))}
-                </div>
-              )}
+                    {commands.map((command, i) => (
+                      <div
+                        key={command.id}
+                        className={[
+                          'rounded-[9px] border bg-canvas px-3 py-2.5',
+                          active && actionIndex === i ? 'border-waiting' : 'border-line',
+                        ].join(' ')}
+                      >
+                        <div className="flex items-center gap-2 pb-1.5">
+                          <span className="font-mono text-[10px] text-ink-ghost">{i + 1}</span>
+                          <span className="truncate text-[11px] text-ink">{command.label}</span>
+                          <button
+                            type="button"
+                            onClick={() => onCopyCommand(command.id)}
+                            className="ml-auto cursor-pointer rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-[10px] text-ink-faint hover:bg-raised hover:text-ink"
+                          >
+                            yy
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onPickCommand(command.id)}
+                            className="cursor-pointer rounded-[var(--radius-sm)] border border-line-strong px-1.5 py-0.5 text-[10px] text-ink-dim hover:text-ink"
+                          >
+                            run
+                          </button>
+                        </div>
+                        {/* Wrapped, not scrolled. A command you cannot see the end
+                          of is one you cannot check before running. */}
+                        <pre className="select-text whitespace-pre-wrap break-all font-mono text-[10.5px] text-ink-dim leading-[1.6]">
+                          {command.command}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </section>
           </>
         )}
