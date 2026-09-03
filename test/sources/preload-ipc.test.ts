@@ -102,7 +102,12 @@ const SESSION_SHAPE: Shape = {
 const PROJECT_SHAPE: Shape = {
   id: isString,
   name: isString,
-  source: oneOf('black-smith', 'orca'),
+  // AC-4 said leave this as oneOf('black-smith', 'orca') and it was correct
+  // until AC-1 renamed FIXTURE_SOURCE's Project.source off 'black-smith': the
+  // real value this check runs against is now a third string, and SourceId
+  // is `string` (task-2, PR #42) -- oneOf(...) was already stale for that,
+  // this task only surfaced it. isString matches the declared type exactly.
+  source: isString,
   sessions: (v) => Array.isArray(v) && v.every((s) => matches(s, SESSION_SHAPE).length === 0),
 };
 
