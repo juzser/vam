@@ -51,6 +51,12 @@
      matching neither — the mockup gives it its own value. */
   --color-sidebar: var(--vam-sidebar);
 
+  /* The selected pill inside a segmented control's well. Read off the mode
+     row of the mockup's right pane: dark is `line-strong`'s own value, but
+     light is a warmer step the existing ladder does not contain, so the pair
+     gets a name rather than the nearest miss. */
+  --color-segment-on: var(--vam-segment-on);
+
   --color-line: var(--vam-line);
   --color-line-strong: var(--vam-line-strong);
   --color-line-loud: var(--vam-line-loud);
@@ -105,6 +111,8 @@
   --vam-well: #101010;
   --vam-sidebar: #171717;
 
+  --vam-segment-on: #262626;
+
   --vam-line: #1f1f1f;
   --vam-line-strong: #262626;
   --vam-line-loud: #2e2e2e;
@@ -145,6 +153,8 @@ html.light {
   --vam-dots: #dedcd7;
   --vam-well: #eeece7;
   --vam-sidebar: #f0eeea;
+
+  --vam-segment-on: #e2e0da;
 
   --vam-line: #e4e4e1;
   --vam-line-strong: #d6d6d2;

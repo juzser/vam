@@ -27,8 +27,16 @@
  * session list. The other three are drawn, disabled, and say why — see the todo.
  */
 
-import { ArrowDownLeft, ArrowUpRight, GitCommitVertical } from 'lucide-react';
-import { type ReactNode, useEffect, useRef } from 'react';
+import {
+  ArrowBigUp,
+  ArrowDownLeft,
+  ArrowUp,
+  ArrowUpRight,
+  ChevronDown,
+  ChevronRight,
+  GitCommitVertical,
+} from 'lucide-react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import type { Decision } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { ReviewQueue, type ReviewQueueProps } from './ReviewQueue.js';
@@ -70,6 +78,14 @@ export type DetailPanelProps = {
  * it does not decide information architecture.
  */
 const TABS = ['Response', 'PRs', 'Terminal', 'Agents'] as const;
+
+/**
+ * The mockup's mode segments, and which one it draws as current. Presentation
+ * only: black-smith exposes no per-session mode, so these are drawn and
+ * labelled as placeholders in the same way the tab bar's three empty tabs are.
+ */
+const MODES = ['Auto', 'Manual', 'Plan'] as const;
+const CURRENT_MODE = 'Auto';
 
 /**
  * The mockup's segmented control: one filled pill on a sunken well, not
@@ -137,7 +153,8 @@ function Rule({
   icon,
 }: {
   readonly label: string;
-  readonly meta: string;
+  /** Usually a value; `progress` puts its expand control here instead. */
+  readonly meta: ReactNode;
   readonly icon: ReactNode;
 }) {
   return (
@@ -207,7 +224,15 @@ export function DetailPanel(props: DetailPanelProps) {
     resizeHandle,
   } = props;
 
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * `progress` is context, not the thing you read, so it opens showing its last
+   * line only — the newest turn — and the rest is one keystroke away.
+   * Component state rather than a prop: nothing outside this pane has an
+   * opinion about it, and routing it through the canvas would put a
+   * presentation toggle in the model every other pane has to carry.
+   */
+  const [progressOpen, setProgressOpen] = useState(false);
 
   useEffect(() => {
     if (composing) {
@@ -215,12 +240,32 @@ export function DetailPanel(props: DetailPanelProps) {
     }
   }, [composing]);
 
+  // Grow with the text instead of scrolling a one-line slot. Measured from the
+  // content each time: shrinking needs the reset to `auto` first, or the box
+  // only ever gets taller. The cap lives in the class list, not here.
+  useEffect(() => {
+    const box = inputRef.current;
+    if (box === null) return;
+    box.style.height = 'auto';
+    // An empty box returns to its `rows` height, not to one line's worth:
+    // `auto` on a textarea is the placeholder's two lines, `scrollHeight` is
+    // the content's, and with no content those are not the same number.
+    if (draft !== '') {
+      box.style.height = `${box.scrollHeight}px`;
+    }
+  }, [draft]);
+
   // The session has stopped and the next move is yours. Keyed off the session,
   // not off an empty `output`: a session still writing its answer is busy, not
   // blocked, and banner-ing it would train you to ignore the banner.
   const needsYou = entry?.session.status === 'waiting';
   const commands = decision?.commands ?? [];
   const total = entry?.session.decisions.length ?? 0;
+  // Oldest first, like the ribbon: `decisions` arrives newest first. Collapsed,
+  // that ordering is what makes "the last line" and "the newest turn" the same
+  // line, so the one kept is taken off the end.
+  const orderedTurns = [...(entry?.session.decisions ?? [])].reverse();
+  const visibleTurns = progressOpen ? orderedTurns : orderedTurns.slice(-1);
   const index = decision === null ? 0 : total - (entry?.session.decisions.indexOf(decision) ?? 0);
 
   return (
@@ -228,7 +273,10 @@ export function DetailPanel(props: DetailPanelProps) {
       data-action-pane={active ? 'active' : 'idle'}
       style={{ width }}
       className={[
-        'relative flex h-full shrink-0 flex-col border-l bg-sunken',
+        // `bg-sidebar` is the mockup's own pane fill. Measured off the
+        // `width:408px` column of artboards 1a/1b, both values are exactly what
+        // this token already holds, so no new colour was invented for it.
+        'relative flex h-full shrink-0 flex-col border-l bg-sidebar',
         // The pane says out loud when it holds the keyboard. Without it, `I` and
         // `H` become a mode you have to remember being in, which is the failure
         // every modal interface is judged on.
@@ -336,18 +384,42 @@ export function DetailPanel(props: DetailPanelProps) {
             {/* The mockup lists the actions inside one step. black-smith's unit
                 is the turn, so this lists the session's turns — the same shape
                 answering the same question, off data that exists. */}
+            {/* Collapsed to its last line. The three regions compete for one
+                pane's height, and a turn list is the least of the three to
+                read — so it keeps the newest line, states how many it is
+                hiding, and opens on a real <button>. A button, not a new key:
+                Enter and Space already activate one, it is reachable by Tab
+                from the composer, and the modal keymap loses nothing to it. */}
             <section
               data-detail-block="progress"
-              className="flex max-h-[22%] min-h-[56px] flex-none flex-col gap-1.5"
+              className={[
+                'flex flex-none flex-col gap-1.5',
+                progressOpen ? 'max-h-[22%] min-h-[56px]' : '',
+              ].join(' ')}
             >
               <Rule
                 label="progress"
-                meta={`${total} turns`}
+                meta={
+                  <button
+                    type="button"
+                    data-progress-toggle
+                    aria-expanded={progressOpen}
+                    onClick={() => setProgressOpen((open) => !open)}
+                    className="flex cursor-pointer items-center gap-1 rounded-[var(--radius-sm)] px-1 py-0.5 text-ink-faint hover:bg-raised hover:text-ink"
+                  >
+                    {total} turns
+                    {progressOpen ? (
+                      <ChevronDown size={11} strokeWidth={1.7} />
+                    ) : (
+                      <ChevronRight size={11} strokeWidth={1.7} />
+                    )}
+                  </button>
+                }
                 icon={<GitCommitVertical size={12} strokeWidth={1.7} />}
               />
               <ul className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-0.5 font-mono text-[10px] text-ink-faint">
-                {[...(entry?.session.decisions ?? [])].reverse().map((d) => (
-                  <li key={d.id} className="flex items-center gap-2">
+                {visibleTurns.map((d) => (
+                  <li key={d.id} data-progress-turn className="flex items-center gap-2">
                     <span className={d.output === null ? 'text-waiting' : 'text-ink-ghost'}>
                       {d.output === null ? '◌' : '✓'}
                     </span>
@@ -437,22 +509,35 @@ export function DetailPanel(props: DetailPanelProps) {
             active && actionIndex === commands.length ? 'border-waiting' : 'border-line-loud',
           ].join(' ')}
         >
-          <div className="flex items-center gap-2">
-            <span className="flex-none font-mono text-[12px] text-ink-faint">❯</span>
-            <input
+          {/* Multiline, because a prompt is prose and a one-line slot hides
+              everything but the tail of it. The mockup's own composer is a
+              104px-tall block of 12.5px/1.55 text, not an input. */}
+          <div className="flex items-start gap-2">
+            <span className="mt-px flex-none font-mono text-[12px] text-ink-faint">❯</span>
+            <textarea
               ref={inputRef}
+              rows={2}
               value={draft}
               readOnly={!composing}
               onFocus={onCompose}
               onChange={(event) => onDraftChange(event.target.value)}
               onKeyDown={(event) => {
-                // The window listener ignores keys typed in an input, so this
-                // box binds the two it needs itself.
-                if (event.key === 'Enter') {
+                // The window listener ignores keys typed in a textarea, so this
+                // box binds the ones it needs itself. Shift+Enter is left alone
+                // — it is the newline the box became multiline to allow.
+                if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
                   onSubmit();
                 } else if (event.key === 'Escape') {
                   event.preventDefault();
+                  // BLUR, not just `composing = false`. Clearing the flag only
+                  // makes this box read-only; while it still holds DOM focus
+                  // the window key listener returns early on every keystroke
+                  // (it ignores keys aimed at an INPUT or a TEXTAREA), so
+                  // `j`/`k` land here and vanish and the sidebar is
+                  // unreachable without a mouse. Releasing focus is what hands
+                  // the keyboard back.
+                  inputRef.current?.blur();
                   onStopComposing();
                 }
               }}
@@ -461,7 +546,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   ? 'Pick a session first'
                   : 'Write a prompt — it is recorded, not sent'
               }
-              className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ink outline-none placeholder:text-ink-faint"
+              className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-[12.5px] text-ink leading-[1.55] outline-none placeholder:text-ink-faint"
               aria-label="prompt to session"
             />
           </div>
@@ -483,36 +568,89 @@ export function DetailPanel(props: DetailPanelProps) {
             >
               factory picks
             </span>
-            <span className="shrink-0 whitespace-nowrap font-mono text-[9.5px] text-ink-faint">
-              {composing
-                ? 'Enter records · Esc leaves'
-                : active
-                  ? 'i reason · Enter act'
-                  : 'i type · I pane'}
-            </span>
-            <span className="flex-1" />
+            {/* The way OUT, shown only while you are in — the moment it is the
+                thing you need, and no width the rest of the time. It replaces
+                the `i` / `I` notes the operator asked to lose: those advertised
+                the way in, which you have already found by the time you can
+                read them. */}
+            {composing && (
+              <span
+                data-prompt-escape
+                className="flex-none whitespace-nowrap font-mono text-[9.5px] text-ink-faint"
+              >
+                Esc → sidebar
+              </span>
+            )}
             <span
               data-prompt-target
-              className="min-w-0 truncate font-mono text-[10px] text-waiting"
+              className="min-w-0 flex-1 truncate font-mono text-[10px] text-waiting"
             >
               {entry === null ? '— no session —' : `${entry.project.name}/${entry.session.title}`}
             </span>
+            {/* The mockup draws a send arrow here. This one says RECORD, in
+                the label and in the tooltip, because black-smith has no channel
+                into a running agent session — the click appends the prompt to
+                the session's log and nothing reads it back out. A button that
+                implied delivery would leave you waiting for an answer nobody is
+                coming to give. */}
+            <button
+              type="button"
+              data-prompt-record
+              onClick={onSubmit}
+              aria-label="record prompt"
+              title="appends the prompt to this session’s log — vam cannot hand it to a running agent"
+              className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-[7px] bg-line-strong text-ink hover:bg-line-loud"
+            >
+              <ArrowUp size={14} strokeWidth={1.7} />
+            </button>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-[7px]">
-          {['/diff', '/tests', '/handoff'].map((slash) => (
-            <span
-              key={slash}
-              data-placeholder={`slash-${slash.slice(1)}`}
-              title="slash commands need a command route in black-smith — see the todo"
-              className="rounded-[6px] border border-line-strong bg-raised px-2 py-1 font-mono text-[10px] text-ink-ghost"
-            >
-              {slash}
-            </span>
-          ))}
+        {/* The mockup's mode row, in place of the slash tags that stood here.
+            Both are placeholders — black-smith has no per-session mode any more
+            than it has a command route — but the mockup's segmented well is the
+            shape this row is meant to be, so it is the shape it takes: a 2px
+            well on `raised`, 24px pills at 11.5px, the current one filled with
+            `segment-on`. Values measured off artboards 1a/1b. */}
+        <div data-mode-row className="flex items-center gap-2">
+          <span className="flex-none font-mono text-[9.5px] tracking-[0.1em] text-ink-faint">
+            MODE
+          </span>
+          <div
+            title="the mode is the factory's, not vam's — see the todo"
+            className="flex items-center gap-0.5 rounded-[8px] border border-line-strong bg-raised p-0.5"
+          >
+            {MODES.map((mode) => (
+              <span
+                key={mode}
+                data-mode-pill={mode.toLowerCase()}
+                data-placeholder={mode === CURRENT_MODE ? undefined : `mode-${mode.toLowerCase()}`}
+                className={[
+                  'flex h-6 items-center rounded-[6px] px-2.5 text-[11.5px]',
+                  mode === CURRENT_MODE ? 'bg-segment-on font-medium text-ink' : 'text-ink-dim',
+                ].join(' ')}
+              >
+                {mode}
+              </span>
+            ))}
+          </div>
           <span className="flex-1" />
-          <span className="font-mono text-[9.5px] text-ink-faint">? shortcuts</span>
+          {/* The mockup's `Tab · cycle mode` tag, at the right-hand end of the
+              same row, carrying the chord the operator asked for. */}
+          <span
+            data-mode-cycle
+            className="flex flex-none items-center gap-1.5 font-mono text-[9.5px] text-ink-faint"
+          >
+            <span className="flex items-center gap-1 rounded-[4px] border border-line-strong px-1.5 py-0.5">
+              {/* `role="img"` is what makes the label announced at all: on a
+                  bare <span> aria-label is dropped in silence. */}
+              <span role="img" aria-label="shift">
+                <ArrowBigUp size={11} strokeWidth={1.7} />
+              </span>
+              Tab
+            </span>
+            cycle mode
+          </span>
         </div>
       </div>
     </aside>

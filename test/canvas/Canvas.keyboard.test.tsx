@@ -106,8 +106,10 @@ const headings = () =>
   [...document.querySelectorAll('[data-project-heading]')].map((el) => el.textContent ?? '');
 const rowText = (id: string) =>
   document.querySelector(`[data-session-row="${id}"]`)?.textContent ?? '';
+// A <textarea>, not an <input>: the composer is multiline, so a prompt is
+// prose rather than the tail of one line.
 const promptInput = () =>
-  document.querySelector<HTMLInputElement>('input[aria-label="prompt to session"]');
+  document.querySelector<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
 const filterInput = () =>
   document.querySelector<HTMLInputElement>('input[aria-label="filter sessions"]');
 const renameInput = () =>
@@ -137,10 +139,17 @@ function press(key: string, modifiers: KeyboardEventInit = {}) {
   });
 }
 
-function typeInto(input: HTMLInputElement, text: string) {
+// The native setter has to come from the element's OWN prototype: React tracks
+// the last value it wrote, and going through the wrong prototype's descriptor
+// throws rather than firing a change the component can see.
+function typeInto(input: HTMLInputElement | HTMLTextAreaElement, text: string) {
   act(() => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set as (
-      this: HTMLInputElement,
+    const proto =
+      input instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set as (
+      this: HTMLElement,
       v: string,
     ) => void;
     setter.call(input, text);
@@ -474,7 +483,7 @@ describe('the prompt box', () => {
     // real log.
     render(<Canvas model={MODEL} />);
     press('i');
-    const input = promptInput() as HTMLInputElement;
+    const input = promptInput() as HTMLTextAreaElement;
     typeInto(input, 'run it again');
     keyOn(input, 'Enter');
     expect(statusBar()).toContain('read-only');
@@ -483,8 +492,8 @@ describe('the prompt box', () => {
   it('Escape leaves it and drops the draft', () => {
     render(<Canvas model={MODEL} />);
     press('i');
-    typeInto(promptInput() as HTMLInputElement, 'halfway typed');
-    keyOn(promptInput() as HTMLInputElement, 'Escape');
+    typeInto(promptInput() as HTMLTextAreaElement, 'halfway typed');
+    keyOn(promptInput() as HTMLTextAreaElement, 'Escape');
     expect(mode()).toBe('NORMAL');
     expect(promptInput()?.value).toBe('');
   });
@@ -962,7 +971,7 @@ describe('writing a prompt to a live black-smith', () => {
   async function submit(source: CanvasSource, text: string) {
     render(<Canvas model={MODEL} source={source} />);
     press('i');
-    const input = promptInput() as HTMLInputElement;
+    const input = promptInput() as HTMLTextAreaElement;
     typeInto(input, text);
     await act(async () => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
