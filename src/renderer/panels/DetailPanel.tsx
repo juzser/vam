@@ -53,7 +53,7 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Decision } from '../domain/model.js';
+import type { Decision, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { Note } from './Note.js';
 import type { ReviewQueueProps } from './ReviewQueue.js';
@@ -327,6 +327,40 @@ export const PLACEHOLDER_APPROVAL: ApprovalRequest = {
  * component already calls.
  */
 /** The header label, so the group can point an accessible name at it. */
+/**
+ * The header dot, per status.
+ *
+ * This was `needsYou ? waiting : running`, which is two values for four
+ * states plus an empty one: a `done` session, a `failed` session and NO
+ * SESSION AT ALL were all painted as running, the last of those putting a
+ * live-looking dot beside the words "No session selected". The sidebar has
+ * carried a four-way map since it was written; this is the same map, and the
+ * same tokens, so the two panes cannot disagree about what a status looks
+ * like.
+ *
+ * `null` -- no session -- gets `bg-line-strong`: present, so the header's
+ * layout does not shift, and colourless, because there is no status to
+ * report.
+ */
+const PANE_STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
+  waiting: 'bg-waiting',
+  running: 'bg-running',
+  done: 'bg-done',
+  failed: 'bg-failed',
+};
+
+/**
+ * Which statuses breathe: the ones still in motion. `waiting` is asking for
+ * something and `running` is working; `done` and `failed` have stopped, and a
+ * pulse on a stopped session reads as activity that is not there.
+ */
+const PANE_STATUS_BREATHES: Readonly<Record<SessionStatus, boolean>> = {
+  waiting: true,
+  running: true,
+  done: false,
+  failed: false,
+};
+
 const APPROVAL_LABEL_ID = 'vam-approval-label';
 
 export function ApprovalBox({
@@ -1034,9 +1068,11 @@ export function DetailPanel(props: DetailPanelProps) {
       <div className="flex flex-col gap-2.5 border-line border-b px-3.5 pt-3">
         <div className="flex items-start gap-2">
           <span
+            data-pane-status={entry?.session.status ?? 'none'}
             className={[
               'mt-1.5 h-1.5 w-1.5 flex-none rounded-full',
-              needsYou ? 'vam-breathe bg-waiting' : 'bg-running',
+              entry === null ? 'bg-line-strong' : PANE_STATUS_DOT[entry.session.status],
+              entry !== null && PANE_STATUS_BREATHES[entry.session.status] ? 'vam-breathe' : '',
             ].join(' ')}
           />
           <div className="min-w-0 flex-1">
