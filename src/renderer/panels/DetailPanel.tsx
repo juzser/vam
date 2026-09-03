@@ -45,6 +45,7 @@ import {
   ChevronsDown,
   ChevronsUp,
   CircleHelp,
+  CircleSlash,
   GitCommitVertical,
   Paperclip,
   User,
@@ -1173,13 +1174,42 @@ export function DetailPanel(props: DetailPanelProps) {
         shrink and scroll rather than growing its parent.
       */}
       <div className="flex min-h-0 flex-1 select-text flex-col gap-2.5 px-3.5 py-3">
+        {/* A failed session says so here, not only in the dot's colour.
+            Measured against the real CLI: a failed row carries `cwd, id,
+            kind, name, sessionId, startedAt, state` and NOTHING about why --
+            no error, no message, no exit code. The job's own `state.json`
+            reports `working` for a session the CLI calls failed, so it is not
+            a second opinion worth showing. Naming the gap is the whole of
+            what can honestly be said. */}
+        {entry?.session.status === 'failed' && (
+          <p
+            data-session-failed
+            className="flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-panel px-3 py-2 text-[11px] text-failed leading-[1.45]"
+          >
+            <span role="img" aria-label="failed" className="flex">
+              <CircleSlash size={13} strokeWidth={1.6} />
+            </span>
+            <span className="min-w-0 flex-1">This session failed.</span>
+            <Note text="the source reports no reason for the failure — a failed row carries no error, message or exit code">
+              <span className="flex-none cursor-help font-mono text-[9.5px] text-ink-faint underline decoration-dotted">
+                why?
+              </span>
+            </Note>
+          </p>
+        )}
         {decision === null ? (
           <p className="text-[11px] text-ink-faint">
             {/* Two different absences. "This session has no steps yet" named a
                 session that did not exist whenever nothing was focused. */}
             {entry === null
               ? 'No session selected — pick one in the sidebar.'
-              : 'This session has no steps yet.'}
+              : entry.session.status === 'failed'
+                ? // Final, not pending. A failed background session has no
+                  // transcript at all -- the CLI lists it while
+                  // `~/.claude/projects/` holds no `.jsonl` for its id -- and
+                  // "no steps yet" promises steps that are never coming.
+                  'This session failed with nothing recorded.'
+                : 'This session has no steps yet.'}
           </p>
         ) : (
           <>
