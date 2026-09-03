@@ -79,6 +79,58 @@ const SESSION: Session = {
 const PROJECT: Project = { id: 'p1', name: 'atlas', sessions: [SESSION] };
 const ENTRY: SessionEntry = { project: PROJECT, session: SESSION };
 
+/**
+ * The header dot is the pane's only status channel, and it used to have two
+ * values for four states plus an empty one: `needsYou ? waiting : running`.
+ * So a `done` session, a `failed` session, AND no session at all were all
+ * painted as RUNNING -- the last of those putting a live-looking dot beside
+ * the words "No session selected".
+ */
+describe('the pane header names the session status it actually has', () => {
+  const dotClass = () => document.querySelector('[data-pane-status]')?.getAttribute('class') ?? '';
+
+  it('paints each of the four statuses with its own token', () => {
+    for (const [status, token] of [
+      ['waiting', 'bg-waiting'],
+      ['running', 'bg-running'],
+      ['done', 'bg-done'],
+      ['failed', 'bg-failed'],
+    ] as const) {
+      cleanup();
+      draw({ entry: { project: PROJECT, session: { ...SESSION, status } } });
+      expect(dotClass(), `status ${status}`).toContain(token);
+      // Each token appears for exactly its own status, so a map collapsing two
+      // of them together fails rather than passing on a shared colour.
+      for (const other of ['bg-waiting', 'bg-running', 'bg-done', 'bg-failed']) {
+        if (other !== token)
+          expect(dotClass(), `${status} must not be ${other}`).not.toContain(other);
+      }
+    }
+  });
+
+  it('breathes only for the status that is asking for something', () => {
+    for (const [status, breathes] of [
+      ['waiting', true],
+      ['running', true],
+      ['done', false],
+      ['failed', false],
+    ] as const) {
+      cleanup();
+      draw({ entry: { project: PROJECT, session: { ...SESSION, status } } });
+      expect(dotClass().includes('vam-breathe'), `status ${status}`).toBe(breathes);
+    }
+  });
+
+  it('shows no status colour at all when no session is selected', () => {
+    // The dot claimed a running session while the title said none was picked.
+    draw({ entry: null, decision: null });
+    for (const token of ['bg-waiting', 'bg-running', 'bg-done', 'bg-failed']) {
+      expect(dotClass()).not.toContain(token);
+    }
+    expect(dotClass()).not.toContain('vam-breathe');
+  });
+});
+
 function draw(over: Partial<DetailPanelProps> = {}) {
   const props: DetailPanelProps = {
     entry: ENTRY,
