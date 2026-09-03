@@ -1,10 +1,15 @@
 /**
  * The head of a session's chain: who this session is, and whether it needs you.
  *
- * `waiting` gets a treatment nothing else on the canvas gets — an outward halo
- * (`vam-call`) rather than one more status hue. Every other state is a report;
- * this one is a request, and a request that reads like a report is one that
- * sits unanswered.
+ * Two signals sit on the card's edge and they answer different questions. The
+ * amber border says `waiting` — every other state is a report, this one is a
+ * request, and a request that reads like a report is one that sits unanswered.
+ * The achromatic halo (`vam-cursor-glow`) says nothing about the session at
+ * all: it is where the keyboard is. They stack rather than compete, so a
+ * focused needs-you card keeps its amber edge and gains the ring.
+ *
+ * A `running` session also gets the mockup's travelling hairline along its top
+ * edge — motion for the one state that is still changing while you look at it.
  *
  * ## What is real here and what is a slot
  *
@@ -86,10 +91,22 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
       className={[
         'relative flex h-full w-full flex-col gap-2 overflow-hidden rounded-[var(--radius-lg)]',
         'bg-panel p-3 shadow-[var(--shadow-node)]',
-        waiting ? 'vam-call' : 'border border-line',
-        focused && !waiting ? 'vam-focus-ring' : '',
+        // The glow says WHERE YOU ARE; the border says what this session needs.
+        // They stack, so a focused needs-you card keeps its amber edge and
+        // gains the ring, rather than trading one signal for the other.
+        focused ? 'vam-cursor-glow' : '',
+        waiting
+          ? 'border border-waiting'
+          : focused
+            ? 'border border-line-loudest'
+            : 'border border-line',
       ].join(' ')}
     >
+      {session.status === 'running' && (
+        /* The mockup's travelling green hairline, flush with the top edge.
+           `aria-hidden`: it restates the status word two rows below. */
+        <span className="vam-running-edge" aria-hidden="true" />
+      )}
       {jumpLabel !== null && (
         <span className="-top-2 -left-2 absolute z-10 rounded-[var(--radius-sm)] bg-waiting px-1.5 font-bold font-mono text-[11px] text-canvas">
           {jumpLabel}

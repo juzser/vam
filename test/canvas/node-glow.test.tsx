@@ -23,7 +23,6 @@ import { cleanup, render } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SessionInfoNode } from '../../src/renderer/canvas/SessionInfoNode.js';
-import { StepNode } from '../../src/renderer/canvas/StepNode.js';
 import type { Decision, Project, Session, SourceId } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 
@@ -100,100 +99,112 @@ function renderInfo(over: Partial<Session>, focused: boolean) {
   return nodeRoot(container, '[data-session-card]');
 }
 
-function renderStep(status: Session['status'], focused: boolean) {
-  const entry = entryOf({ status });
-  const { container } = render(
-    <ReactFlowProvider>
-      <StepNode
-        id="step"
-        data={{
-          entry,
-          // The newest decision, so a `waiting` session makes this the ask.
-          decision: entry.session.decisions[0] as Decision,
-          focused,
-          jumpLabel: null,
-        }}
-        {...({} as never)}
-      />
-    </ReactFlowProvider>,
-  );
-  return nodeRoot(container, '[data-step-kind]');
-}
-
-describe('the amber call halo is the mockup’s, and it is built from a token', () => {
-  it('defines the ring colour as a token with a value in both themes', () => {
-    expect(ruleBody(CSS, ':root')).toMatch(/--vam-call-ring:/);
-    expect(ruleBody(CSS, 'html.light')).toMatch(/--vam-call-ring:/);
+describe('the glow marks the keyboard cursor', () => {
+  it('gives the focused card the glow and a border of its own', () => {
+    const el = renderInfo({ status: 'running' }, true);
+    expect(el.className).toContain('vam-cursor-glow');
+    expect(el.className).toContain('border-line-loudest');
   });
 
-  it('carries no ad-hoc rgb() amber outside the token definitions', () => {
-    // The halo used to be `rgb(255 159 10 / …)` — an orange nobody picked,
-    // one channel off the design's #f59e0b and invisible to the hex guard.
-    expect(CSS).not.toMatch(/rgb\(\s*255\s+159\s+10/);
+  it('denies the glow to a needs-you card that is not focused, leaving it amber-edged', () => {
+    const el = renderInfo({ status: 'waiting' }, false);
+    expect(el.className).not.toContain('vam-cursor-glow');
+    expect(el.className).toContain('border-waiting');
   });
 
-  it('leaves a visible ring at rest, not only mid-animation', () => {
-    // The mockup's card wears a 1px amber ring the whole time and breathes a
-    // halo around it. A rule that only animates leaves the card border-less
-    // between pulses, which is how it lost its edge.
-    const call = ruleBody(CSS, '.vam-call');
-    expect(call).toMatch(/box-shadow:/);
-    expect(call).toMatch(/--vam-call-ring/);
-    expect(call).toMatch(/animation:\s*vam-call/);
+  it('keeps the amber edge on a needs-you card that IS focused, and adds the glow', () => {
+    const el = renderInfo({ status: 'waiting' }, true);
+    expect(el.className).toContain('vam-cursor-glow');
+    expect(el.className).toContain('border-waiting');
+    expect(el.className).not.toContain('border-line-loudest');
   });
 
-  it('builds both keyframe stops from the same token', () => {
-    const frames = ruleBody(CSS, '@keyframes vam-call');
-    expect(frames).toMatch(/--vam-call-ring/);
+  it('leaves an ordinary card the plain line border and no glow', () => {
+    const el = renderInfo({ status: 'done' }, false);
+    expect(el.className).toContain('border-line');
+    expect(el.className).not.toContain('vam-cursor-glow');
+    expect(el.className).not.toContain('border-waiting');
+  });
+
+  it('retires the needs-you halo and its ring token, which now have no caller', () => {
+    expect(CSS).not.toMatch(/\.vam-call\b/);
+    expect(CSS).not.toMatch(/--vam-call-ring/);
+    expect(CSS).not.toMatch(/\.vam-focus-ring\b/);
+  });
+
+  it('builds the glow from an achromatic token, so the status hues keep their meaning', () => {
+    const glow = ruleBody(CSS, '.vam-cursor-glow');
+    expect(glow).toMatch(/box-shadow:/);
+    expect(glow).toMatch(/var\(--color-ink\)/);
+    expect(glow).toMatch(/animation:\s*vam-cursor-glow/);
+    const frames = ruleBody(CSS, '@keyframes vam-cursor-glow');
     expect(frames.match(/box-shadow:/g)?.length).toBe(2);
+    expect(frames).toMatch(/var\(--color-ink\)/);
   });
 });
 
-describe('reduced motion keeps a static ring, inside the media block', () => {
+describe('the running light sweep, measured off the mockup', () => {
+  it('renders exactly one edge on a running session card', () => {
+    const el = renderInfo({ status: 'running' }, false);
+    expect(el.querySelectorAll('.vam-running-edge').length).toBe(1);
+  });
+
+  it('renders none on a card that is not running', () => {
+    for (const status of ['waiting', 'done', 'failed'] as const) {
+      const el = renderInfo({ status }, false);
+      expect(el.querySelectorAll('.vam-running-edge').length, status).toBe(0);
+    }
+  });
+
+  it('hides the edge from the accessibility tree — it is a restatement of the status word', () => {
+    const el = renderInfo({ status: 'running' }, false);
+    expect(el.querySelector('.vam-running-edge')?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('is a 1px strip at the top of the card, clipping a travelling bar', () => {
+    // Mockup: `left:0;right:0;top:0;height:1px;overflow:hidden` wrapping a
+    // `width:34%` gradient bar. The old rule was 3px tall at `top:-3px`, i.e.
+    // OUTSIDE the card, sweeping a background-position instead.
+    const strip = ruleBody(CSS, '.vam-running-edge');
+    expect(strip).toMatch(/height:\s*1px/);
+    expect(strip).toMatch(/top:\s*0/);
+    expect(strip).not.toMatch(/top:\s*-/);
+    expect(strip).toMatch(/overflow:\s*hidden/);
+
+    const bar = ruleBody(CSS, '.vam-running-edge::after');
+    expect(bar).toMatch(/width:\s*34%/);
+    expect(bar).toMatch(
+      /linear-gradient\(\s*90deg,\s*transparent,\s*var\(--color-running\),\s*transparent\s*\)/s,
+    );
+    expect(bar).toMatch(/animation:\s*vam-sweep/);
+  });
+
+  it('travels by transform, from -110% to 420%', () => {
+    const frames = ruleBody(CSS, '@keyframes vam-sweep');
+    expect(frames).toMatch(/translateX\(-110%\)/);
+    expect(frames).toMatch(/translateX\(420%\)/);
+    expect(frames).not.toMatch(/background-position/);
+  });
+});
+
+describe('reduced motion: every glow stops, and each leaves a static stand-in', () => {
   const reduced = ruleBody(CSS, '@media (prefers-reduced-motion: reduce)');
 
-  it('stops the halo animation there', () => {
-    expect(reduced).toMatch(/\.vam-call/);
+  it('stops both the cursor glow and the sweep, inside that block', () => {
+    expect(reduced).toMatch(/\.vam-cursor-glow/);
+    expect(reduced).toMatch(/\.vam-running-edge::after/);
     expect(reduced).toMatch(/animation:\s*none/);
   });
 
-  it('replaces it with a static token-built ring, inside that same block', () => {
+  it('leaves the focused card a static ring, inside that same block', () => {
     // Asserted on the media block's own text, so a fallback that drifts out of
     // the block cannot pass by living somewhere else in the file.
-    const staticRing = reduced.slice(reduced.indexOf('animation: none'));
-    expect(staticRing).toMatch(/box-shadow:[^;]*--vam-call-ring/s);
-  });
-});
-
-describe('which treatment each node wears', () => {
-  it('gives a waiting session card the halo and no border', () => {
-    const el = renderInfo({ status: 'waiting' }, false);
-    expect(el.className).toContain('vam-call');
-    expect(el.className).not.toMatch(/\bborder\b/);
+    const after = reduced.slice(reduced.indexOf('animation: none'));
+    expect(after).toMatch(/\.vam-cursor-glow\s*\{[^}]*box-shadow:[^}]*var\(--color-ink\)/s);
   });
 
-  it('gives a focused, non-waiting session card the focus ring, not an ink border', () => {
-    const el = renderInfo({ status: 'running' }, true);
-    expect(el.className).toContain('vam-focus-ring');
-    expect(el.className).not.toContain('border-ink-dim');
-  });
-
-  it('leaves an unfocused, non-waiting session card the plain line border', () => {
-    const el = renderInfo({ status: 'running' }, false);
-    expect(el.className).toContain('border-line');
-    expect(el.className).not.toContain('vam-focus-ring');
-    expect(el.className).not.toContain('vam-call');
-  });
-
-  it('gives an asking step the halo and a focused step the focus ring', () => {
-    expect(renderStep('waiting', false).className).toContain('vam-call');
-    const focused = renderStep('running', true);
-    expect(focused.className).toContain('vam-focus-ring');
-    expect(focused.className).not.toContain('border-ink-dim');
-  });
-
-  it('defines the focus ring as a ring rather than a border colour', () => {
-    const ring = ruleBody(CSS, '.vam-focus-ring');
-    expect(ring).toMatch(/box-shadow:[^;]*var\(--color-line-loudest\)/);
+  it('leaves the running edge a full-width bar rather than a blank line', () => {
+    const after = reduced.slice(reduced.indexOf('animation: none'));
+    expect(after).toMatch(/\.vam-running-edge::after\s*\{[^}]*width:\s*100%/s);
   });
 });
