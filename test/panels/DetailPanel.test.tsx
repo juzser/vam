@@ -579,3 +579,37 @@ describe('the mode pills select, and what they select gets recorded', () => {
     expect(composer?.textContent).not.toContain('\u276f');
   });
 });
+
+describe('the header row drops the per-turn strip the operator did not use', () => {
+  it('keeps the counter and the age, and draws no tick per turn', () => {
+    draw();
+    const row = q<HTMLElement>('[data-step-counter]')?.parentElement;
+    expect(row).not.toBeNull();
+    // The strip drew one coloured tick per turn — five of them for this
+    // session. Nothing it said is lost: the same per-turn answered/unanswered
+    // state is in the `progress` list and on the canvas, and the counter and
+    // the step label still name the focused turn.
+    expect(row?.querySelectorAll('.bg-running, .bg-ink-ghost, .bg-waiting')).toHaveLength(0);
+    expect(q<HTMLElement>('[data-step-counter]')?.textContent).toBe('5/5');
+    expect(row?.textContent).toContain('12m');
+  });
+});
+
+describe('the empty tabs carry no tooltip, and the other notes stay', () => {
+  it('drops the tab note without touching the mode, attach or model notes', () => {
+    draw();
+    const tabs = all('[data-placeholder^="tab-"]');
+    expect(tabs).toHaveLength(3);
+    for (const tab of tabs) {
+      // No note, and therefore no reason to be a focus stop either: a button
+      // that does nothing and explains nothing is a keyboard trap with a hover
+      // state.
+      expect(tab.closest('[data-note]')).toBeNull();
+      expect(tab.closest('button')).toBeNull();
+    }
+    // The three the operator asked to KEEP.
+    expect(q<HTMLElement>('[data-attach]')?.getAttribute('data-note')).not.toBeNull();
+    expect(q<HTMLElement>('[data-model-request]')?.getAttribute('data-note')).not.toBeNull();
+    expect(q<HTMLElement>('[data-mode-row] [data-note]')).not.toBeNull();
+  });
+});

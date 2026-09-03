@@ -24,7 +24,7 @@
  * ADE puts Response / PRs / Terminal / Agents across the top. Only Response has
  * anything behind it: black-smith has no terminal to attach to, no PR index per
  * session, and its agent roster is a factory-wide count rather than a per-
- * session list. The other three are drawn, disabled, and say why — see the todo.
+ * session list. The other three are drawn as inert labels — see the todo.
  */
 
 import * as Tooltip from '@radix-ui/react-tooltip';
@@ -255,6 +255,9 @@ const MODES = ['Auto', 'Manual', 'Plan'] as const;
  * The Agents badge has a real source (`runningAgents`) and is omitted at
  * zero. PRs has none in black-smith's domain model, so it ships with no
  * badge rather than a fabricated or hardcoded count.
+ *
+ * The three empty tabs are labels, not controls: nothing behind them can be
+ * activated, so nothing here takes focus or hover.
  */
 function TabBar({ runningAgents }: { readonly runningAgents: number }) {
   return (
@@ -284,17 +287,13 @@ function TabBar({ runningAgents }: { readonly runningAgents: number }) {
             )}
           </span>
         );
-        // The three empty tabs are buttons only so that a keyboard can reach
-        // the note explaining why they are empty; they still do nothing.
-        return current ? (
-          pill
-        ) : (
-          <Note key={tab} text="black-smith has no data behind this tab — see the todo">
-            <button type="button" className="flex flex-1 cursor-default">
-              {pill}
-            </button>
-          </Note>
-        );
+        // The three empty tabs were buttons wrapping a note that said why they
+        // were empty. The operator asked for the tab notes to go, and with the
+        // note gone the button had nothing left to be: it activated nothing and
+        // existed only to be a focus stop for an explanation that no longer
+        // opens. So they are plain labels now, and `data-placeholder` still
+        // says in the markup which ones are unbacked.
+        return pill;
       })}
     </div>
   );
@@ -413,42 +412,6 @@ function OutText({ output }: { readonly output: string }) {
           </p>
         );
       })}
-    </div>
-  );
-}
-
-/**
- * The step ribbon: one tick per turn, the focused one taller.
- *
- * Colour carries the same meaning it does everywhere else — green answered,
- * amber the one that stopped, grey not yet. It is the only place in vam that
- * shows the WHOLE chain at once; the canvas draws three.
- */
-function StepRibbon({
-  decisions,
-  focusedId,
-}: {
-  readonly decisions: readonly Decision[];
-  readonly focusedId: string | null;
-}) {
-  // Oldest first, so the ribbon runs the way the canvas and the eye do.
-  const ordered = [...decisions].reverse();
-  return (
-    <div className="flex h-3.5 flex-1 items-center gap-0.5">
-      {ordered.map((d) => {
-        const here = d.id === focusedId;
-        return (
-          <span
-            key={d.id}
-            className={[
-              'flex-1 rounded-sm',
-              here ? 'h-2.5 bg-waiting' : 'h-[3px]',
-              here ? '' : d.output === null ? 'bg-ink-ghost' : 'bg-running',
-            ].join(' ')}
-          />
-        );
-      })}
-      {ordered.length === 0 && <span className="h-[3px] flex-1 rounded-sm bg-line" />}
     </div>
   );
 }
@@ -582,7 +545,7 @@ export function DetailPanel(props: DetailPanelProps) {
   const needsYou = entry?.session.status === 'waiting';
   const commands = decision?.commands ?? [];
   const total = entry?.session.decisions.length ?? 0;
-  // Oldest first, like the ribbon: `decisions` arrives newest first. That
+  // Oldest first: `decisions` arrives newest first. That
   // ordering is what makes "the last line" and "the newest turn" the same
   // line, so the ones kept are taken off the end.
   const orderedTurns = [...(entry?.session.decisions ?? [])].reverse();
@@ -680,7 +643,13 @@ export function DetailPanel(props: DetailPanelProps) {
           >
             {index}/{total}
           </button>
-          <StepRibbon decisions={entry?.session.decisions ?? []} focusedId={decision?.id ?? null} />
+          {/* The strip of one tick per turn stood here. The operator found it
+              did no work, and nothing it showed is only here: which turns are
+              answered is in the `progress` list a keystroke away and on the
+              canvas itself, and the focused turn is named twice on this header
+              already — the counter to the left, its label at the right of the
+              title row. */}
+          <span className="flex-1" />
           <span className="flex-none font-mono text-[9.5px] text-ink-faint">
             {entry?.session.age ?? '—'}
           </span>
