@@ -190,6 +190,42 @@ export function SessionList(props: SessionListProps) {
     menuWasOpen.current = filterMenuOpen;
   }, [filterMenuOpen]);
 
+  /**
+   * A press anywhere outside closes the popover.
+   *
+   * `pointerdown`, not `click`: a click only lands after the button is
+   * released, so a press-drag-release that starts outside and ends inside
+   * would never close it, and the menu would still be open under the pointer
+   * that was trying to dismiss it. Pointerdown is also what every other
+   * dismissible surface in a desktop app listens for.
+   *
+   * The toggle button is excluded explicitly. Without that, pressing it while
+   * the menu is open runs BOTH this handler and the button's own `onClick`,
+   * which closes and reopens in one press and looks like the button is dead.
+   *
+   * Listener attached only while open, so a closed sidebar costs nothing.
+   */
+  useEffect(() => {
+    if (!filterMenuOpen) {
+      return;
+    }
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target as globalThis.Node | null;
+      if (target === null) {
+        return;
+      }
+      if (menuRef.current?.contains(target) === true) {
+        return;
+      }
+      if (menuButtonRef.current?.contains(target) === true) {
+        return;
+      }
+      onFilterMenuToggle(false);
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [filterMenuOpen, onFilterMenuToggle]);
+
   // Imperative focus in both cases, for the same reason: the keystroke that
   // opened the box is the request for it, so `autoFocus` would be claiming a
   // thing that was already granted, wherever the element happened to mount.

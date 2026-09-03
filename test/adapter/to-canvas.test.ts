@@ -332,3 +332,64 @@ describe('toCanvasModel', () => {
     expect(model.projects[0]?.sessions[0]?.icon).toBeNull();
   });
 });
+
+/**
+ * The budget the status bar reads.
+ *
+ * `null` rather than zeros when the payload has none: a factory that has spent
+ * nothing must stay distinguishable from a source that has no budget concept
+ * at all — a local transcript reader will have exactly that.
+ */
+describe('toCanvasModel carries the factory budget, or says it has none', () => {
+  const base = { runningSessions: [], alerts: { escalations: 0, pendingWaivers: 0 } };
+
+  it('sums spend and cap across epics and keeps the server percentage', () => {
+    const model = toCanvasModel(
+      {
+        ...base,
+        tokensByEpic: [
+          { epicId: 'a', tokensSpent: 578_346, tokensBudget: 240_000 },
+          { epicId: 'b', tokensSpent: 21_654, tokensBudget: 60_000 },
+        ],
+        budgetUsedPct: 324.45,
+      },
+      new Map(),
+      'black-smith',
+    );
+    expect(model.budget).toEqual({
+      tokensSpent: 600_000,
+      tokensBudget: 300_000,
+      usedPct: 324.45,
+    });
+  });
+
+  it('does not recompute the percentage from the totals', () => {
+    // The server prices against per-epic caps, and the sum of those caps is
+    // not the account's cap, so the two figures legitimately disagree. The
+    // server owns the definition; recomputing here would silently replace it.
+    const model = toCanvasModel(
+      {
+        ...base,
+        tokensByEpic: [{ epicId: 'a', tokensSpent: 50, tokensBudget: 100 }],
+        budgetUsedPct: 324.45,
+      },
+      new Map(),
+      'black-smith',
+    );
+    expect(model.budget?.usedPct).toBe(324.45);
+  });
+
+  it('reports null when the payload carries no budget at all', () => {
+    const model = toCanvasModel(base, new Map(), 'black-smith');
+    expect(model.budget).toBeNull();
+  });
+
+  it('reports null when only half the pair is present', () => {
+    const half = toCanvasModel(
+      { ...base, tokensByEpic: [{ epicId: 'a', tokensSpent: 1, tokensBudget: 2 }] },
+      new Map(),
+      'black-smith',
+    );
+    expect(half.budget).toBeNull();
+  });
+});
