@@ -153,6 +153,58 @@ describe('SessionList placeholder row', () => {
     expect(branch?.getAttribute('title')).toContain('smith/specs/vam-seam-plan');
   });
 
+  it('never truncates away the end of a branch name, which is what identifies it', () => {
+    // Measured: at the 200px sidebar minimum roughly 23 characters fit, so
+    // plain `truncate` renders BOTH `smith/specs/vam-seam-plan` and
+    // `smith/specs/vam-canvas-topology` as `smith/specs/vam-...` — identical,
+    // and cut at exactly the point that would have told them apart. The
+    // leading segments are the shrinkable part; the last one is the name.
+    const { container } = mount(
+      entriesOf([
+        makeSession({ id: 's1', branch: 'smith/specs/vam-seam-plan' }),
+        makeSession({ id: 's2', branch: 'smith/specs/vam-canvas-topology' }),
+      ]),
+    );
+
+    for (const [id, head, tail] of [
+      ['s1', 'smith/specs/', 'vam-seam-plan'],
+      ['s2', 'smith/specs/', 'vam-canvas-topology'],
+    ] as const) {
+      const row = container.querySelector(`[data-session-row="${id}"]`);
+      // The head may be clipped; the tail must not be, so they are separate
+      // elements and only the head carries the truncating class.
+      expect(row?.querySelector('[data-branch-head]')?.textContent).toBe(head);
+      expect(row?.querySelector('[data-branch-tail]')?.textContent).toBe(tail);
+      expect(row?.querySelector('[data-branch-tail]')?.className).not.toContain('truncate');
+    }
+
+    // Still one readable whole for anything reading text, and still the full
+    // name on hover.
+    const branch = container.querySelector('[data-session-row="s1"] [data-session-branch]');
+    expect(branch?.textContent).toBe('smith/specs/vam-seam-plan');
+    expect(branch?.getAttribute('title')).toBe('smith/specs/vam-seam-plan');
+  });
+
+  it('handles a branch with no slash, and one that is all slash', () => {
+    const { container } = mount(
+      entriesOf([
+        makeSession({ id: 's1', branch: 'main' }),
+        makeSession({ id: 's2', branch: 'a/' }),
+      ]),
+    );
+    // No slash: nothing to shrink, the whole name is the tail.
+    expect(container.querySelector('[data-session-row="s1"] [data-branch-head]')?.textContent).toBe(
+      '',
+    );
+    expect(container.querySelector('[data-session-row="s1"] [data-branch-tail]')?.textContent).toBe(
+      'main',
+    );
+    // Trailing slash: an empty tail is still not a crash, and the text is whole.
+    expect(
+      container.querySelector('[data-session-row="s2"] [data-session-branch]')?.textContent,
+    ).toBe('a/');
+  });
+
   it('shows an em-dash for the branch when the source cannot say, and names the gap', () => {
     const { container } = mount(entriesOf([makeSession({ branch: null })]));
     const branch = container.querySelector('[data-session-branch]');
