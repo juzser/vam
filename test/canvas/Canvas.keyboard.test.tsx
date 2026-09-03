@@ -509,16 +509,19 @@ describe('filtering the sidebar with /', () => {
     expect(focused()).toBe('beta/b1');
   });
 
-  it('narrows the sidebar without hiding anything on the canvas', () => {
-    // The canvas is the overview, and an overview that hides things is not one.
-    // The filter narrows where you navigate, not what exists.
+  it('narrows the canvas with it, so nothing is drawn that cannot be reached', () => {
+    // This test used to assert the opposite — that the canvas kept drawing
+    // every session while the filter narrowed only the sidebar, "because an
+    // overview that hides things is not one". That left cards on screen with
+    // no sidebar row and no key that could reach them, which is the defect the
+    // operator reported. The set is narrowed once, and all three views use it.
     render(<Canvas model={MODEL} />);
     press('/');
     typeInto(filterInput() as HTMLInputElement, 'beta');
-    const canvasTitles = [...document.querySelectorAll('.react-flow__node')]
-      .map((el) => el.textContent ?? '')
-      .join(' ');
-    expect(canvasTitles).toContain('a1');
+    const drawn = [...document.querySelectorAll('.react-flow__node')]
+      .map((el) => el.getAttribute('data-id') ?? '')
+      .filter((id) => id.startsWith('info:'));
+    expect(drawn).toEqual(['info:b1']);
   });
 
   it('says so rather than showing an empty list with no reason', () => {

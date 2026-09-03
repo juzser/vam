@@ -276,6 +276,83 @@ function CanvasInner({
   const chord = useRef<ChordState>(EMPTY_CHORD);
   const { getNodes, zoomIn, zoomOut, fitView } = useReactFlow();
 
+  const matches = useMemo(() => searchMatches(allEntries, query), [allEntries, query]);
+
+  /**
+   * The one set the sidebar lists, the canvas draws and the cursor may land on.
+   * `/` narrows it in place — orca's shape — rather than opening a separate
+   * search that leaves the list untouched while you type into it, and the
+   * status pills narrow it the same way.
+   *
+   * This used to narrow the SIDEBAR alone, on the reasoning that "the canvas is
+   * the overview, and an overview that hides things is not one". That reasoning
+   * cost more than it bought. The canvas went on drawing cards the cursor could
+   * not reach and the sidebar had no row for, so `j` stepped straight over a
+   * card that was plainly on screen and there was no sidebar row to click
+   * instead — reported as "some sessions do not show on the canvas and cannot
+   * be navigated to from the sidebar". A card nothing can focus is not
+   * overview; it is scenery shaped like a session. The file's own "one focus,
+   * three views" rule only means something if the three views also agree on the
+   * SET, so a filter now narrows what is drawn as well, and `All` (or Escape
+   * out of `/`) puts every card back.
+   */
+  const entries = useMemo(() => {
+    const byText =
+      query.trim() === '' ? allEntries : allEntries.filter((e) => matches.includes(e.session.id));
+    return statusFilter === 'all'
+      ? byText
+      : byText.filter((e) => e.session.status === statusFilter);
+  }, [allEntries, matches, query, statusFilter]);
+
+  /** The pill counts are off the UNFILTERED list — a count that moved when you
+      clicked it would be a count of your own click. */
+  const tally = useMemo(() => {
+    const of = (status: SessionStatus) =>
+      allEntries.filter((e) => e.session.status === status).length;
+    return {
+      all: allEntries.length,
+      running: of('running'),
+      waiting: of('waiting'),
+      done: of('done'),
+      failed: of('failed'),
+    };
+  }, [allEntries]);
+
+  /**
+   * The model the canvas draws: `model`, minus whatever the filter excluded.
+   *
+   * Re-filters `model.projects` rather than rebuilding a model out of
+   * `entries`, so every project keeps its identity — id, name and source — and
+   * only its membership changes. A project the filter empties drops out
+   * entirely instead of drawing a heading over nothing. Unfiltered, the very
+   * same object comes back, so the layout memo below does not recompute for a
+   * filter nobody set.
+   */
+  const visibleModel = useMemo<CanvasModel>(() => {
+    const visible = new Set(entries.map((e) => e.session.id));
+    if (visible.size === allEntries.length) {
+      return model;
+    }
+    return {
+      projects: model.projects
+        .map((project) => ({
+          ...project,
+          sessions: project.sessions.filter((s) => visible.has(s.id)),
+        }))
+        .filter((project) => project.sessions.length > 0),
+    };
+  }, [model, entries, allEntries]);
+
+  const layout = useMemo(() => layoutCanvas(visibleModel), [visibleModel]);
+
+  /**
+   * What `hjkl`, `f` and `gg` may land on: every node on the canvas, no filter
+   * of its own. The set is narrowed once, at `entries` above, and the canvas is
+   * drawn from the result — so a second narrowing here is what would put the
+   * cursor and the picture back out of step.
+   */
+  const nodeIds = useMemo(() => layout.nodes.map((n) => n.id), [layout]);
+
   /** Which session the focused node belongs to — the id all three panes share. */
   const focusedSpec = useMemo(
     () => layout.nodes.find((n) => n.id === focusedId) ?? null,
@@ -393,51 +470,6 @@ function CanvasInner({
     [review.waivers, review.lessons, focusedDecision],
   );
 
-  const matches = useMemo(() => searchMatches(allEntries, query), [allEntries, query]);
-
-  /**
-   * What the sidebar actually lists. `/` narrows it in place — orca's shape —
-   * rather than opening a separate search that leaves the list untouched while
-   * you type into it.
-   *
-   * The canvas is deliberately NOT filtered: it is the overview, and an overview
-   * that hides things is not one. The filter narrows where you navigate, not
-   * what exists.
-   */
-  const entries = useMemo(() => {
-    const byText =
-      query.trim() === '' ? allEntries : allEntries.filter((e) => matches.includes(e.session.id));
-    return statusFilter === 'all'
-      ? byText
-      : byText.filter((e) => e.session.status === statusFilter);
-  }, [allEntries, matches, query, statusFilter]);
-
-  /** The pill counts are off the UNFILTERED list — a count that moved when you
-      clicked it would be a count of your own click. */
-  const tally = useMemo(() => {
-    const of = (status: SessionStatus) =>
-      allEntries.filter((e) => e.session.status === status).length;
-    return {
-      all: allEntries.length,
-      running: of('running'),
-      waiting: of('waiting'),
-      done: of('done'),
-      failed: of('failed'),
-    };
-  }, [allEntries]);
-
-  /**
-   * What `hjkl`, `f` and `gg` may land on. The canvas still DRAWS everything —
-   * it is the overview, and an overview that hides things is not one — but the
-   * filter narrows where you can go, which is what "narrows where you navigate,
-   * not what exists" has to mean if it means anything. Without this, `j` walks
-   * into a session the sidebar just hid and the focus ring points at a row that
-   * is no longer there.
-   */
-  const nodeIds = useMemo(() => {
-    const visible = new Set(entries.map((e) => e.session.id));
-    return layout.nodes.filter((n) => visible.has(n.entry.session.id)).map((n) => n.id);
-  }, [layout, entries]);
 
   const labels = useMemo(
     () => (jumping ? jumpLabels(nodeIds) : new Map<string, string>()),
