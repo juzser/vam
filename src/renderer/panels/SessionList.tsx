@@ -226,12 +226,33 @@ export function SessionList(props: SessionListProps) {
     >
       {resizeHandle}
       <div className="flex flex-col gap-2.5 border-line border-b p-3">
-        <div className="flex items-center gap-2">
-          <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[6px] bg-line-strong font-mono text-[11px] text-ink">
-            {workspace.slice(0, 1)}
+        {/* The avatar bar, which used to be the sidebar's footer.
+            It took the place of the workspace line -- avatar, name and the
+            word "workspace" -- which is gone at the operator's request. vam
+            has exactly one workspace, so a line naming it spent the widest
+            row in the column restating something that never varies, and the
+            avatar already carries its initial for anyone who wants it. */}
+        <div data-avatar-bar className="flex items-center gap-[7px]">
+          <span className="flex h-[24px] w-[24px] flex-none items-center justify-center rounded-full bg-line-strong font-mono text-[10px] text-ink-dim">
+            {workspace.slice(0, 1).toUpperCase()}
           </span>
-          <span className="truncate font-medium text-[13px] text-ink">{workspace}</span>
-          <span className="flex-none font-mono text-[9.5px] text-ink-faint">workspace</span>
+          <span className="flex-1" />
+          <button
+            type="button"
+            onClick={onSettings}
+            aria-label="settings"
+            className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+          >
+            <Settings size={14} strokeWidth={1.5} />
+          </button>
+          <button
+            type="button"
+            onClick={onToggleTheme}
+            aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
+            className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+          >
+            <Sun size={14} strokeWidth={1.5} />
+          </button>
         </div>
 
         <div className="relative flex items-center gap-2">
@@ -590,29 +611,6 @@ export function SessionList(props: SessionListProps) {
           <span className="ml-0.5 font-mono text-[10px] text-ink-faint">o</span>
         </button>
       </div>
-
-      <footer className="flex items-center gap-[7px] border-line border-t px-[11px] py-2.5">
-        <span className="flex h-[24px] w-[24px] flex-none items-center justify-center rounded-full bg-line-strong font-mono text-[10px] text-ink-dim">
-          {workspace.slice(0, 1).toUpperCase()}
-        </span>
-        <span className="flex-1" />
-        <button
-          type="button"
-          onClick={onSettings}
-          aria-label="settings"
-          className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
-        >
-          <Settings size={14} strokeWidth={1.5} />
-        </button>
-        <button
-          type="button"
-          onClick={onToggleTheme}
-          aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
-          className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
-        >
-          <Sun size={14} strokeWidth={1.5} />
-        </button>
-      </footer>
     </aside>
   );
 }
