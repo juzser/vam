@@ -293,7 +293,21 @@ describe('AC-2: a hostile key cannot forge, corrupt or vanish an entry', () => {
     expect(roundTripped['black-smith']['__proto__'].icon).toBe('🔥');
   });
 
-  it('an icon set on a session literally named constructor survives a JSON round trip', () => {
+  // NOT a falsifier, and labelled so nobody re-files it as one. AC-2 demands a
+  // test that fails before the change; this one cannot, in either direction,
+  // because `constructor` is not a loss hazard at all. `Object.prototype`
+  // carries it as a WRITABLE DATA property, not an accessor, so
+  // `bare['constructor'] = v` shadows it with a real own property that
+  // serialises like any other — measured: `Object.keys` gives `['constructor']`
+  // and `JSON.stringify` gives `{"constructor":{…}}`, whether the accumulator
+  // is `Object.create(null)` or a bare `{}`. Contrast the `__proto__` falsifier
+  // above, which is the only reserved key that actually vanishes.
+  //
+  // It is kept rather than deleted because the property it states is still one
+  // a future edit could break — a store that sanitised keys by name, or
+  // switched to a `Map` keyed by something clever, would fail it — and because
+  // deleting it would invite someone to re-add it as the guard it is not.
+  it('a session literally named constructor round-trips (documentation, not a guard)', () => {
     const prefs = setIcon(EMPTY_PREFS, 'black-smith', 'constructor', '🐛', NOW);
     const roundTripped = JSON.parse(JSON.stringify(prefs.icons));
     expect(roundTripped['black-smith'].constructor.icon).toBe('🐛');
