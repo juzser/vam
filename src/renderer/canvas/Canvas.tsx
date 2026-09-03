@@ -470,7 +470,6 @@ function CanvasInner({
     [review.waivers, review.lessons, focusedDecision],
   );
 
-
   const labels = useMemo(
     () => (jumping ? jumpLabels(nodeIds) : new Map<string, string>()),
     [jumping, nodeIds],
@@ -1305,16 +1304,29 @@ function CanvasInner({
                   );
                 })}
               </Panel>
+              {/* Measured off the mockup's minimap: 176x56, one chip per
+                  session cell in that session's status colour, and a viewport
+                  drawn as a 1px outline in the ink colour over an UNDIMMED
+                  map. `maskColor` transparent is the whole point — the mockup
+                  has no dark wash, and xyflow's default one hid the part of
+                  the canvas the map exists to show you. `maskStrokeWidth` is
+                  in pixels (xyflow multiplies it by the map's own scale), so 1
+                  is the mockup's hairline. `nodeStrokeWidth` is NOT: it is in
+                  flow units, where 1px is ~26 at this scale, so the mockup's
+                  bordered chip is drawn as a filled one instead — at 8px wide
+                  the fill is what carries the colour anyway. */}
               <MiniMap
                 pannable
                 zoomable
                 ariaLabel="canvas minimap"
-                maskColor="rgb(0 0 0 / 0.5)"
-                style={{ width: 168, height: 96 }}
+                maskColor="transparent"
+                maskStrokeColor="var(--color-ink)"
+                maskStrokeWidth={1}
+                nodeStrokeWidth={0}
+                nodeBorderRadius={3}
+                style={{ width: 176, height: 56 }}
                 className="!bottom-3 !right-3 !m-0 !rounded-[8px] !border !border-line !bg-sunken"
-                nodeColor={(node) =>
-                  node.type === 'info' ? 'var(--color-ink-dim)' : 'var(--color-line-loud)'
-                }
+                nodeColor={minimapChipColor}
               />
             </ReactFlow>
 
@@ -1487,6 +1499,23 @@ function CanvasInner({
       </footer>
     </div>
   );
+}
+
+/**
+ * A minimap chip's colour: the session's status, or nothing at all.
+ *
+ * Only the info card earns a chip. Its steps, its fan and its slots all belong
+ * to the same row, and drawing four more rectangles per session turns a map you
+ * read at a glance into a texture — the mockup draws one chip per cell, and so
+ * does this. `transparent` rather than an omission because xyflow renders a
+ * rect for every node either way.
+ */
+function minimapChipColor(node: Node): string {
+  if (node.type !== 'info') {
+    return 'transparent';
+  }
+  const { entry } = node.data as { entry?: SessionEntry };
+  return entry === undefined ? 'transparent' : `var(--color-${entry.session.status})`;
 }
 
 export function Canvas({
