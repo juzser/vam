@@ -50,6 +50,14 @@
   /* The sidebar column itself, between `panel` and `raised` in dark and
      matching neither — the mockup gives it its own value. */
   --color-sidebar: var(--vam-sidebar);
+  /* One step ABOVE `raised`: the fill of a card that sits inside the pane's
+     own footer chrome rather than on the pane floor — the option picker's
+     unchosen cards and its "type your own" field. Measured, not chosen, and
+     it matches no existing token: dark is a step past `raised` that the
+     ladder does not contain. In light it collapses to white, exactly as
+     `panel` and `canvas` already do, because the mockup separates a card
+     from its ground there with a border rather than a fill. */
+  --color-lifted: var(--vam-lifted);
 
   /* The selected pill inside a segmented control's well. Read off the mode
      row of the mockup's right pane: dark is `line-strong`'s own value, but
@@ -116,6 +124,8 @@
   --vam-dots: #303030;
   --vam-well: #101010;
   --vam-sidebar: #171717;
+  /* dc.html:1533 (dark artboard 1a), the unchosen option card. */
+  --vam-lifted: #1e1e1e;
 
   --vam-segment-on: #262626;
 
@@ -159,6 +169,10 @@ html.light {
   --vam-dots: #d4d2cb;
   --vam-well: #eeece7;
   --vam-sidebar: #f0eeea;
+  /* The light artboard draws no option picker at all, so this is read off the
+     nearest surface it DOES draw at the same elevation — the light composer
+     card, dc.html:3057, whose dark twin at dc.html:2299 is the same #1e1e1e. */
+  --vam-lifted: #ffffff;
 
   --vam-segment-on: #e2e0da;
 

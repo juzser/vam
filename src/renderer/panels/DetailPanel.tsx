@@ -12,12 +12,21 @@
  * point and copying part of an output is a reasonable thing to want.
  *
  * The composer at the bottom is a prompt box, plus whatever bash commands the
- * session handed back for you to run by hand. There is no option chooser and
- * there should not be one: a session decides for itself and stops only when it
- * wants something a person has to supply, and that something is words, not a
- * pick from a menu somebody had to invent. Nothing here sends — the prompt is
- * RECORDED, and the caller says so out loud rather than letting a quiet no-op
- * be mistaken for a delivered answer.
+ * session handed back for you to run by hand.
+ *
+ * This doc used to say there was no option chooser and there should not be
+ * one, on the grounds that what a stopped session wants is words rather than a
+ * pick from a menu somebody invented. The mockup has one, and the operator
+ * asked for its layout; the objection survives intact as the reason
+ * `ApprovalBox` is fed by a DECLARED PLACEHOLDER rather than by a field added
+ * to the model. Nothing here invents a question a source did not ask, and a
+ * pick writes its line into the prompt box rather than answering anything.
+ *
+ * What the composer's button claims is now the SOURCE's to say. PR #70 gave
+ * the Claude Code source a real channel into a running session, so for that
+ * source a prompt is delivered and answered; black-smith still only appends to
+ * a log. `delivers` carries the difference, and with nothing said the wording
+ * stays at "record" — see the prop for why nothing says it yet.
  *
  * ## The mockup's four tabs
  *
@@ -36,6 +45,7 @@ import {
   ChevronRight,
   ChevronsDown,
   ChevronsUp,
+  CircleHelp,
   GitCommitVertical,
   Paperclip,
   User,
@@ -204,6 +214,241 @@ export function setModeRequest(draft: string, mode: string): string {
   return mode === DEFAULT_MODE ? rest : `mode: ${mode}\n${rest}`;
 }
 
+/**
+ * One option in the picker the mockup draws above the composer.
+ *
+ * ## THIS IS A PLACEHOLDER SHAPE, NOT A DOMAIN TYPE — read this before using it
+ *
+ * Nothing in `domain/model.ts` expresses "the agent asked a question with
+ * numbered options". A `Decision` has an `input` (what the operator typed), an
+ * `output` (the session's final response) and a list of `commands` the agent
+ * handed back for a person to run — and that is the whole surface. Neither
+ * adapter produces anything else: `to-canvas.ts` builds decisions out of
+ * black-smith events, and the Claude Code source builds them out of a
+ * transcript. No source vam reads returns a numbered question.
+ *
+ * So this type describes the MOCKUP, not the data, and it deliberately lives
+ * in this file rather than in the model. Adding an `options` field to
+ * `Session` or `Decision` would be inventing a fact no adapter can supply, and
+ * every fixture would then carry a field nothing fills. When a source really
+ * does return a question with options, the honest move is to add it to the
+ * model THEN and hand it to `DetailPanel` as a prop — at which point
+ * `PLACEHOLDER_APPROVAL` below is deleted and nothing else here changes.
+ */
+export type ApprovalOption = {
+  readonly id: string;
+  /** The one line the option is chosen by; it is what a pick writes. */
+  readonly title: string;
+  readonly body: string;
+  /** The one the agent leans towards — the mockup's amber card. */
+  readonly suggested: boolean;
+};
+
+export type ApprovalRequest = {
+  /** Rendered in letter-spaced capitals, the mockup's own idiom for state. */
+  readonly label: string;
+  readonly options: readonly ApprovalOption[];
+};
+
+/**
+ * The layout's stand-in content, and it says so in every line of itself.
+ *
+ * The alternative was three plausible-looking migration choices copied out of
+ * the mockup, which would have put words on screen that read exactly like an
+ * agent's own and are not. Nothing here can be mistaken for a session's answer:
+ * the header says placeholder, the DOM node says `data-placeholder`, and each
+ * card describes the slot it occupies instead of filling it.
+ */
+export const PLACEHOLDER_APPROVAL: ApprovalRequest = {
+  label: 'option picker · placeholder layout',
+  options: [
+    {
+      id: 'suggested',
+      suggested: true,
+      title: 'The option the agent leans towards',
+      body: 'Wears the amber card. No source vam reads returns a question with numbered options today, so this text describes the slot rather than filling it.',
+    },
+    {
+      id: 'second',
+      suggested: false,
+      title: 'A second way to go',
+      body: 'A plain card. Choosing one writes its title into the prompt box below — the only thing vam can honestly do with a choice it was never handed.',
+    },
+    {
+      id: 'third',
+      suggested: false,
+      title: 'A third way to go',
+      body: "Three is the mockup's own count, and the hint under the list counts with it rather than promising a fixed three.",
+    },
+  ],
+};
+
+/**
+ * The option picker: the mockup's block at `docs/design/mockup/ADE Session
+ * Canvas.dc.html` lines 1515-1554 (artboard 1a, dark), value for value.
+ *
+ * Where each measurement came from, and the token it mapped to:
+ *  - header label (dc:1518) mono 9.5px / 0.1em / `#f59e0b` -> `text-waiting`
+ *  - header right (dc:1520) mono 9.5px / `#6b6b6b`         -> `text-ink-faint`
+ *  - header icon  (dc:1517) 18px, r5, `#3f2f12` on `#f59e0b`
+ *                                       -> `bg-waiting-tint` / `text-waiting`
+ *  - column gap   (dc:1521) 7px
+ *  - suggested card (dc:1524) r9, 1px `#f59e0b`, bg `#161208`, 10px 11px
+ *                              -> `border-waiting` / `bg-waiting-wash`
+ *  - plain card   (dc:1533) 1px `#2e2e2e`, bg `#1e1e1e`
+ *                              -> `border-line-loud` / `bg-lifted` (minted)
+ *  - badge        (dc:1525) 20x20, r6, `#3f2f12` on `#f59e0b`, mono 10.5px
+ *                              -> `bg-waiting-tint` / `text-waiting`
+ *  - plain badge  (dc:1534) `#262626` on `#a1a1a1` -> `bg-line-strong` / `text-ink-dim`
+ *  - title        (dc:1527) 12px / 500 / `#ededed` / 1.35 -> `text-ink`
+ *  - body         (dc:1528) 11px / 1.45 / `#a1a1a1` / pretty -> `text-ink-dim`
+ *  - SUGGESTED    (dc:1530) mono 9px / 0.08em / `#f59e0b`, 1px `#3f2f12`,
+ *                           r999, 2px 6px -> `text-waiting` / `border-waiting-tint`
+ *  - enter glyph  (dc:1537) mono 9.5px / `#6b6b6b` -> `text-ink-faint`
+ *  - footer field (dc:1552) h30, r8, 1px `#2e2e2e`, bg `#1e1e1e`, 11.5px,
+ *                           `#6b6b6b` -> `border-line-loud` / `bg-lifted`
+ *  - footer hint  (dc:1553) mono 9.5px / `#6b6b6b` -> `text-ink-faint`
+ *
+ * `#1e1e1e` was the only value with no token to map to, and it is not close to
+ * one: `raised` is `#1a1a1a` and `line-strong` is `#262626`. It was minted as
+ * `--vam-lifted` with both theme values rather than approximated.
+ *
+ * ## The two markings, and why they are not one
+ *
+ * SUGGESTED is a fact about the agent's opinion. FOCUSED is a fact about where
+ * your cursor is. They collide on the first card the moment the picker opens,
+ * so they are drawn in different languages: suggested is the amber card and the
+ * amber pill, focused is an achromatic ring the amber card wears too. Sharing a
+ * treatment would make moving the cursor look like changing the recommendation.
+ *
+ * ## Keyboard
+ *
+ * Every option is a real `<button>`, so Tab reaches it and Enter and Space
+ * activate it with no new binding at all. On top of that a digit typed while
+ * the picker holds focus picks that card, which is the mockup's own `1-3 to
+ * pick`. Digits are free in `keyboard/chords.ts`: `SINGLE` binds none of them
+ * and `0` is only ever read after the `z` prefix, so nothing was taken.
+ *
+ * The digit binding is scoped to this component rather than added to the chord
+ * table because the global table's actions are dispatched from `Canvas.tsx`,
+ * which this task must not edit. What the follow-up would be, exactly: add
+ * `{ kind: 'pickOption', index: number }` to `KeyAction`, map `'1'`-`'9'` in
+ * `SINGLE`, and have `Canvas.tsx` route it to the same `onChoose` this
+ * component already calls.
+ */
+function ApprovalBox({
+  request,
+  age,
+  onChoose,
+  onCompose,
+}: {
+  readonly request: ApprovalRequest;
+  /** The session's own age — the only real value in this block. */
+  readonly age: string;
+  readonly onChoose: (option: ApprovalOption) => void;
+  readonly onCompose: () => void;
+}) {
+  // Where the cursor is inside the picker. Component state, like `progressOpen`
+  // above it: nothing outside this pane has an opinion about it.
+  const [focused, setFocused] = useState(0);
+  const { options } = request;
+  const pickDigit = (key: string) => {
+    if (!/^[1-9]$/.test(key)) return false;
+    const option = options[Number(key) - 1];
+    // A digit past the end does nothing, rather than wrapping onto a card the
+    // operator was not looking at.
+    if (option === undefined) return false;
+    onChoose(option);
+    return true;
+  };
+
+  return (
+    <div data-approval data-placeholder="approval-options" className="flex flex-col gap-[11px]">
+      <div className="flex items-center gap-[7px]">
+        <span
+          role="img"
+          aria-label="the agent is asking"
+          className="flex h-[18px] w-[18px] flex-none items-center justify-center rounded-[5px] bg-waiting-tint text-waiting"
+        >
+          <CircleHelp size={12} strokeWidth={1.7} />
+        </span>
+        <span className="min-w-0 truncate font-mono text-[9.5px] tracking-[0.1em] text-waiting uppercase">
+          {request.label}
+        </span>
+        <span className="flex-1" />
+        <span className="flex-none font-mono text-[9.5px] text-ink-faint">waiting {age}</span>
+      </div>
+
+      <div className="flex flex-col gap-[7px]">
+        {options.map((option, i) => (
+          <button
+            key={option.id}
+            type="button"
+            data-approval-option={option.id}
+            data-suggested={option.suggested ? 'true' : undefined}
+            data-focused={i === focused ? 'true' : undefined}
+            onFocus={() => setFocused(i)}
+            onClick={() => onChoose(option)}
+            onKeyDown={(event) => {
+              if (pickDigit(event.key)) event.preventDefault();
+            }}
+            className={[
+              'flex cursor-pointer items-start gap-[10px] rounded-[9px] border px-[11px] py-[10px] text-left',
+              option.suggested ? 'border-waiting bg-waiting-wash' : 'border-line-loud bg-lifted',
+              i === focused ? 'outline-2 outline-line-loudest outline-offset-1' : '',
+            ].join(' ')}
+          >
+            <span
+              data-approval-number
+              className={[
+                'flex h-5 w-5 flex-none items-center justify-center rounded-[6px] font-mono text-[10.5px]',
+                option.suggested ? 'bg-waiting-tint text-waiting' : 'bg-line-strong text-ink-dim',
+              ].join(' ')}
+            >
+              {i + 1}
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
+              <span data-approval-title className="font-medium text-[12px] text-ink leading-[1.35]">
+                {option.title}
+              </span>
+              {/* `text-wrap: pretty` is the mockup's own (dc:1528): it is what
+                  keeps a two-line description off a one-word last line. */}
+              <span className="text-[11px] text-ink-dim leading-[1.45] [text-wrap:pretty]">
+                {option.body}
+              </span>
+            </span>
+            {option.suggested ? (
+              <span className="flex-none rounded-full border border-waiting-tint px-1.5 py-[2px] font-mono text-[9px] tracking-[0.08em] text-waiting">
+                SUGGESTED
+              </span>
+            ) : (
+              <span className="flex-none font-mono text-[9.5px] text-ink-faint">↵</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2">
+        {/* The mockup draws this as an inert `<span>` that looks like a field.
+            A second thing that looks like a prompt box, two lines above the
+            real one, is a trap — so it is a real button and it does the one
+            useful thing available: it hands the keyboard to the composer. */}
+        <button
+          type="button"
+          data-approval-own
+          onClick={onCompose}
+          className="flex h-[30px] min-w-0 flex-1 cursor-pointer items-center rounded-[8px] border border-line-loud bg-lifted px-[11px] text-left text-[11.5px] text-ink-faint hover:text-ink-dim"
+        >
+          …or type your own instruction
+        </button>
+        <span className="flex-none font-mono text-[9.5px] text-ink-faint">
+          1–{options.length} to pick
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export type DetailPanelProps = {
   readonly entry: SessionEntry | null;
   /** The step the canvas has focused — the newest one unless `h`/`l` moved. */
@@ -229,6 +474,24 @@ export type DetailPanelProps = {
    * source — a queue you cannot answer should not be drawn.
    */
   readonly review?: ReviewQueueProps;
+  /**
+   * Whether this session's source DELIVERS a prompt into a running agent
+   * rather than only filing it in a log — `SourceCapabilities.deliverPrompt`
+   * in `sources/port.ts`, not a source id. Omitted means "nobody has said",
+   * which reads as the recording wording, because understating what a button
+   * does is the safe direction and overstating it is not.
+   *
+   * NOTHING PASSES THIS TODAY, and the gap is real rather than an oversight:
+   * `Canvas.tsx` holds a smith-api client with a `recordPrompt` method, not a
+   * `SessionSource`, so no `capabilities` object reaches this pane at all —
+   * the only ones vam builds live in `sources/preload-factory.ts` and in the
+   * main process. The seam is here so that plumbing it is one line in
+   * `Canvas.tsx` (`delivers={source.capabilities.deliverPrompt}`) once that
+   * pane holds a source that has capabilities; guessing from
+   * `Session.source` instead would be sniffing an id for a capability, which
+   * is the thing `port.ts` exists to stop.
+   */
+  readonly delivers?: boolean;
   /** The current rendered width (task-1's `renderedWidth`), applied inline. */
   readonly width: number;
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
@@ -557,6 +820,7 @@ export function DetailPanel(props: DetailPanelProps) {
     active,
     actionIndex,
     review,
+    delivers,
     width,
     resizeHandle,
   } = props;
@@ -682,6 +946,41 @@ export function DetailPanel(props: DetailPanelProps) {
     decision === null
       ? `step ${index} of ${total}`
       : `step ${index} of ${total} · ${decision.label}`;
+
+  /**
+   * What the composer's button claims, in the words the SOURCE earns.
+   *
+   * PR #70 gave the Claude Code source a real channel into a running session,
+   * so for that source a prompt is handed over and answered — `record` now
+   * understates it, and an operator has to know when a message is going out.
+   * black-smith still genuinely only appends to a log, so this is per-source
+   * and not a rename: one wording for both would be wrong for one of them.
+   */
+  const composerClaim =
+    delivers === true
+      ? {
+          label: 'send prompt',
+          title: 'sends the prompt into the running agent session — it is delivered, not filed',
+        }
+      : {
+          label: 'record prompt',
+          title:
+            'appends the prompt to this session\u2019s log — vam cannot hand it to a running agent',
+        };
+
+  /**
+   * What picking an option can honestly do: write its line into the draft.
+   *
+   * Not a submit and not a new write path — vam has neither an options API nor
+   * a source that asked the question. The pick fills the prompt box the
+   * operator was going to type into anyway, and they still record or send it
+   * themselves. Appended rather than substituted, so a half-typed reply is
+   * never silently thrown away by a keystroke meant to add to it.
+   */
+  const chooseOption = (option: ApprovalOption) => {
+    onDraftChange(draft === '' ? option.title : `${draft}\n${option.title}`);
+    onCompose();
+  };
 
   return (
     <aside
@@ -987,6 +1286,20 @@ export function DetailPanel(props: DetailPanelProps) {
             answer it. */}
         {review !== undefined && <ReviewQueue {...review} />}
 
+        {/* The mockup puts the picker here: the last thing you read before you
+            answer, above the box you answer in. Drawn only while the session is
+            the one waiting on you, because a question nobody asked is not
+            layout worth the height. See `ApprovalBox` for what is placeholder
+            here and what is not. */}
+        {needsYou && (
+          <ApprovalBox
+            request={PLACEHOLDER_APPROVAL}
+            age={entry?.session.age ?? '—'}
+            onChoose={chooseOption}
+            onCompose={onCompose}
+          />
+        )}
+
         <div
           className={[
             'flex flex-col gap-2.5 rounded-[10px] border bg-panel px-3 py-2.5',
@@ -1123,8 +1436,8 @@ export function DetailPanel(props: DetailPanelProps) {
               type="button"
               data-prompt-record
               onClick={onSubmit}
-              aria-label="record prompt"
-              title="appends the prompt to this session’s log — vam cannot hand it to a running agent"
+              aria-label={composerClaim.label}
+              title={composerClaim.title}
               className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-[7px] bg-line-strong text-ink hover:bg-line-loud"
             >
               <ArrowUp size={14} strokeWidth={1.7} />

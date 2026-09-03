@@ -12,6 +12,8 @@
  * reader or a screen reader can find it.
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
@@ -713,5 +715,122 @@ describe('the empty tabs carry no tooltip, and the other notes stay', () => {
     expect(q<HTMLElement>('[data-attach]')?.getAttribute('data-note')).not.toBeNull();
     expect(q<HTMLElement>('[data-model-request]')?.getAttribute('data-note')).not.toBeNull();
     expect(q<HTMLElement>('[data-mode-row] [data-note]')).not.toBeNull();
+  });
+});
+
+/**
+ * The option picker the mockup draws above the composer (artboard 1a dark,
+ * `ADE Session Canvas.dc.html` lines 1515-1554).
+ *
+ * Read the component's own doc before reading these: nothing in
+ * `domain/model.ts` expresses "the agent asked a question with numbered
+ * options", so what is under test is a LAYOUT fed by a declared placeholder.
+ * The assertions are therefore about geometry, marking and keyboard reach —
+ * never about a value having come from a session.
+ */
+describe('the option picker is the mockup layout over a declared placeholder', () => {
+  const box = () => q<HTMLElement>('[data-approval]');
+  const options = () => all('[data-approval-option]');
+
+  it('draws the header, three option cards and the pick hint, marked as a placeholder', () => {
+    draw();
+    // Marked in the markup, exactly like the tab bar's unbacked tabs: a reader
+    // of the DOM can tell this holds no session data.
+    expect(box()?.getAttribute('data-placeholder')).toBe('approval-options');
+    // `waiting <age>` is the one real value in the header — the session's own.
+    expect(box()?.textContent).toContain('waiting 12m');
+
+    expect(options()).toHaveLength(3);
+    // The badges count from one, which is what the hint promises.
+    expect(options().map((o) => o.querySelector('[data-approval-number]')?.textContent)).toEqual([
+      '1',
+      '2',
+      '3',
+    ]);
+    expect(box()?.textContent).toContain('1–3 to pick');
+
+    // The suggested card carries the pill; the others carry the enter glyph.
+    expect(options()[0]?.getAttribute('data-suggested')).toBe('true');
+    expect(options()[0]?.textContent).toContain('SUGGESTED');
+    expect(options()[1]?.getAttribute('data-suggested')).toBeNull();
+    expect(options()[2]?.textContent).toContain('↵');
+  });
+
+  it('marks the cursor separately from the suggestion — two facts, two treatments', () => {
+    draw();
+    const [first, second] = options();
+    // The cursor opens on the first card, which is also the suggested one, so
+    // the two markings are proved apart by MOVING it.
+    fireEvent.focus(second as Element);
+    expect(second?.getAttribute('data-focused')).toBe('true');
+    expect(first?.getAttribute('data-focused')).toBeNull();
+    // And the suggestion did not move with it.
+    expect(first?.getAttribute('data-suggested')).toBe('true');
+    expect(second?.getAttribute('data-suggested')).toBeNull();
+    // The two treatments are not the same class either: a shared one would
+    // make "the agent suggests this" and "your cursor is here" one signal.
+    expect(second?.className).not.toBe(first?.className);
+  });
+
+  it('is reachable and activatable without a mouse, and a digit picks directly', () => {
+    const drafts: string[] = [];
+    draw({ onDraftChange: (value) => drafts.push(value) });
+    // Real buttons, so Tab reaches them and Enter/Space activate them without
+    // a single new key binding.
+    expect(options().every((o) => o.tagName === 'BUTTON')).toBe(true);
+
+    act(() => (options()[1] as HTMLButtonElement).click());
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]).toBe(options()[1]?.querySelector('[data-approval-title]')?.textContent);
+
+    // The mockup's own hint is `1-3 to pick`, so a digit typed while the
+    // picker holds the keyboard picks that card.
+    fireEvent.keyDown(options()[0] as Element, { key: '3' });
+    expect(drafts).toHaveLength(2);
+    expect(drafts[1]).toBe(options()[2]?.querySelector('[data-approval-title]')?.textContent);
+
+    // A digit past the end of the list does nothing rather than wrapping.
+    fireEvent.keyDown(options()[0] as Element, { key: '7' });
+    expect(drafts).toHaveLength(2);
+  });
+
+  it('appears only while the session is the one waiting on you', () => {
+    draw({ entry: { project: PROJECT, session: { ...SESSION, status: 'running' } } });
+    expect(box()).toBeNull();
+  });
+});
+
+describe('the composer says what the session’s source actually does', () => {
+  const claims = () => {
+    const button = q<HTMLButtonElement>('[data-prompt-record]');
+    return `${button?.getAttribute('aria-label')} ${button?.getAttribute('title')}`.toLowerCase();
+  };
+
+  it('says send, not record, once the source delivers into a running agent', () => {
+    draw({ delivers: true });
+    expect(claims()).toContain('send');
+    expect(claims()).not.toContain('record');
+  });
+
+  it('keeps the recording wording when the source only records, and when nothing said', () => {
+    draw({ delivers: false });
+    expect(claims()).toContain('record');
+    expect(claims()).not.toContain('send');
+    cleanup();
+    draw();
+    expect(claims()).toContain('record');
+    expect(claims()).not.toContain('send');
+  });
+});
+
+describe('the surface the picker sits on is a token pair, not a dark-only hex', () => {
+  it('defines --vam-lifted in both themes', () => {
+    // `import.meta.url` is not a file URL under happy-dom, so the path is
+    // resolved from the runner's own root instead.
+    const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
+    const dark = css.slice(css.indexOf(':root {'), css.indexOf('html.light {'));
+    const light = css.slice(css.indexOf('html.light {'));
+    expect(dark).toContain('--vam-lifted:');
+    expect(light).toContain('--vam-lifted:');
   });
 });
