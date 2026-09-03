@@ -34,7 +34,7 @@ import {
   useReactFlow,
   useStore,
 } from '@xyflow/react';
-import { Bell, Maximize } from 'lucide-react';
+import { Maximize } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SmithApiError } from '../adapter/client.js';
 import { useReviewQueue } from '../adapter/useReviewQueue.js';
@@ -310,7 +310,16 @@ function CanvasInner({
     if (focusRowNodeIds === null || focusRowNodeIds.length === 0) {
       return;
     }
-    void fitView({ nodes: focusRowNodeIds, padding: 0.28, maxZoom: 1, duration: 220 });
+    // `padding` is a fraction added around the fitted bounds, so the row ends
+    // up occupying 1/(1 + 2p) of the viewport. The operator asked for 70%:
+    // 1/(1 + 2 * 0.21) = 0.704. Written as the derivation rather than as a
+    // tuned magic number, because the next person to change the target needs
+    // the formula, not this value.
+    //
+    // `maxZoom` is 1.6 rather than 1 for the same reason: a short row would
+    // otherwise stop scaling at 1 and sit well under 70%, which is the case
+    // the cap used to silently produce.
+    void fitView({ nodes: focusRowNodeIds, padding: 0.21, maxZoom: 1.6, duration: 220 });
   }, [focusRowNodeIds, fitView]);
 
   /**
@@ -1159,19 +1168,6 @@ function CanvasInner({
               <Maximize size={13} strokeWidth={1.6} aria-hidden="true" />
             </button>
 
-            {/* The bell counts what is actually owed: sessions that stopped for
-                you, plus rows in the review queue. */}
-            <span
-              data-bell
-              className="relative flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] border border-line text-ink-dim"
-            >
-              <Bell size={15} strokeWidth={1.6} aria-hidden="true" />
-              {tally.waiting + review.waivers.length > 0 && (
-                <span className="-top-1.5 -right-1.5 absolute flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-waiting px-1 font-mono text-[8.5px] text-canvas">
-                  {tally.waiting + review.waivers.length}
-                </span>
-              )}
-            </span>
           </div>
 
           <div className="relative min-h-0 flex-1">
