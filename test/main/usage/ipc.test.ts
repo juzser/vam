@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
 import { MIN_READ_INTERVAL_MS, registerUsageIpc } from '../../../src/main/usage/ipc.js';
+import { createUsageApi } from '../../../src/preload/api.js';
 
 function fakeIpcMain() {
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
@@ -175,5 +176,57 @@ describe('registerUsageIpc rate limiting', () => {
     now += MIN_READ_INTERVAL_MS;
     await ipcMain.invoke(CHANNELS.usageGet);
     expect(reads).toBe(2);
+  });
+});
+
+/**
+ * The preload half, end to end over a fake channel pair.
+ *
+ * A test-quality audit found `createUsageApi` had no direct coverage: it was
+ * mocked around in the Canvas test and shallow-checked for key presence in
+ * the launch harness, so the one line that actually names the channel was
+ * asserted by nothing. A typo in `CHANNELS.usageGet` on either side would
+ * have left every other test green.
+ */
+describe('createUsageApi over a real channel pair', () => {
+  it('reaches the registered handler and returns its snapshot unchanged', async () => {
+    const ipcMain = fakeIpcMain();
+    const snapshot = {
+      kind: 'ok' as const,
+      windows: {
+        fiveHour: { kind: 'known' as const, percent: 40, resetsAt: '2026-09-03T11:40:00Z' },
+        sevenDay: { kind: 'known' as const, percent: 30, resetsAt: '2026-09-07T06:00:00Z' },
+      },
+      observedAt: '2026-09-03T10:00:00Z',
+    };
+    registerUsageIpc(ipcMain, async () => snapshot);
+
+    // The preload's own object, built over an invoker that speaks to the
+    // handler registered above -- not a stub standing in for it.
+    const usage = createUsageApi({
+      invoke: async (channel: string, ...args: unknown[]) => ipcMain.invoke(channel, ...args),
+    });
+
+    expect(typeof usage.get).toBe('function');
+    await expect(usage.get()).resolves.toEqual(snapshot);
+  });
+
+  it('asks the usage channel and no other', async () => {
+    const asked: string[] = [];
+    const usage = createUsageApi({
+      invoke: async (channel: string) => {
+        asked.push(channel);
+        return { kind: 'unknown', reason: 'unavailable' };
+      },
+    });
+
+    await usage.get();
+
+    // What this catches, stated precisely: `createUsageApi` invoking a
+    // DIFFERENT channel than the handler registers -- pointing it at
+    // `CHANNELS.load` turns both tests in this block red. What it does NOT
+    // catch is renaming `CHANNELS.usageGet` itself, since both sides read the
+    // one constant; that rename is a refactor no test here should oppose.
+    expect(asked).toEqual([CHANNELS.usageGet]);
   });
 });

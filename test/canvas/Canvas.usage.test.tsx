@@ -10,7 +10,7 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel } from '../../src/renderer/domain/model.js';
-import type { UsageSnapshot } from '../../src/shared/usage.js';
+import { POLL_INTERVAL_MS, type UsageSnapshot } from '../../src/shared/usage.js';
 
 const EMPTY: CanvasModel = { projects: [] };
 
@@ -87,6 +87,66 @@ describe('the status bar usage cell', () => {
 
     expect(usageCell()?.textContent).toBe('—');
     expect(usageCell()?.textContent).not.toContain('0%');
+  });
+
+  it('lets the newest poll win when an older one answers late', async () => {
+    // Whichever `.then` resolved last used to call `setSnapshot`
+    // unconditionally, so a slow poll could overwrite a newer, already
+    // displayed reading and regress the cell to older numbers until the next
+    // tick corrected it. Background-tab timer throttling releasing a burst of
+    // queued intervals is the ordinary way to reach that.
+    const known = (percent: number): UsageSnapshot => ({
+      kind: 'ok',
+      windows: {
+        fiveHour: {
+          kind: 'known',
+          percent,
+          resetsAt: new Date(Date.now() + 75 * 60_000).toISOString(),
+        },
+        sevenDay: { kind: 'unknown' },
+      },
+      observedAt: new Date().toISOString(),
+    });
+
+    const resolvers: ((snapshot: UsageSnapshot) => void)[] = [];
+    (window as unknown as { api: unknown }).api = {
+      usage: {
+        get: vi.fn(
+          () =>
+            new Promise<UsageSnapshot>((resolve) => {
+              resolvers.push(resolve);
+            }),
+        ),
+      },
+    };
+
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      render(<Canvas model={EMPTY} />);
+      // First poll issued, still in flight.
+      expect(resolvers).toHaveLength(1);
+
+      // The interval fires a second poll before the first has answered.
+      await act(async () => {
+        vi.advanceTimersByTime(POLL_INTERVAL_MS);
+      });
+      expect(resolvers).toHaveLength(2);
+
+      // The NEWER one answers first and is displayed...
+      await act(async () => {
+        resolvers[1]?.(known(30));
+      });
+      expect(usageCell()?.textContent).toContain('30% used');
+
+      // ...then the OLDER one answers late. It must not win.
+      await act(async () => {
+        resolvers[0]?.(known(99));
+      });
+      expect(usageCell()?.textContent).toContain('30% used');
+      expect(usageCell()?.textContent).not.toContain('99% used');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('attempts nothing in the browser build: no window.api, no fetch call, em-dash shown', async () => {
