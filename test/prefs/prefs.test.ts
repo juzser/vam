@@ -18,6 +18,7 @@ import {
   type StorageLike,
   setIcon,
   setPaneWidth,
+  setProjectIcon,
   setTheme,
   writePrefs,
 } from '../../src/renderer/prefs/prefs.js';
@@ -122,6 +123,58 @@ describe('putting icons on the model', () => {
     // whole canvas, and a new object every render would relayout every render.
     const before = model();
     expect(applyIcons(before, {})).toBe(before);
+  });
+});
+
+describe('project icons: keyed (sourceId, projectId), the same idiom as session icons', () => {
+  it('round-trips a project icon', () => {
+    const saved = setProjectIcon(EMPTY_PREFS, 'black-smith', 'p1', '📦', NOW);
+    expect(saved.projectIcons).toEqual({
+      'black-smith': { p1: { icon: '📦', at: NOW.toISOString() } },
+    });
+  });
+
+  it('clearing a project icon removes it rather than storing an empty one', () => {
+    const set = setProjectIcon(EMPTY_PREFS, 'black-smith', 'p1', '📦', NOW);
+    expect(setProjectIcon(set, 'black-smith', 'p1', '', NOW).projectIcons).toEqual({});
+  });
+
+  it('two sources sharing a project id do not share an icon', () => {
+    let prefs = setProjectIcon(EMPTY_PREFS, 'black-smith', 'p1', '📦', NOW);
+    prefs = setProjectIcon(prefs, 'orca', 'p1', '🐋', NOW);
+    expect(prefs.projectIcons['black-smith']?.p1?.icon).toBe('📦');
+    expect(prefs.projectIcons.orca?.p1?.icon).toBe('🐋');
+  });
+
+  it('applyIcons puts the stored project icon onto the model', () => {
+    const prefs = setProjectIcon(EMPTY_PREFS, 'black-smith', 'p1', '📦', NOW);
+    const out = applyIcons(model(), {}, prefs.projectIcons);
+    expect(out.projects[0]?.icon).toBe('📦');
+  });
+
+  it('leaves a project with no source alone — never guesses which bucket to read', () => {
+    const sourceless: CanvasModel = { projects: [{ id: 'p1', name: 'alpha', sessions: [] }] };
+    const prefs = setProjectIcon(EMPTY_PREFS, 'black-smith', 'p1', '📦', NOW);
+    const out = applyIcons(sourceless, {}, prefs.projectIcons);
+    expect(out.projects[0]?.icon).toBeUndefined();
+  });
+
+  it('returns the same object when there is no icon and no project icon to apply', () => {
+    const before = model();
+    expect(applyIcons(before, {}, {})).toBe(before);
+  });
+
+  it('round-trips through storage alongside session icons and theme', () => {
+    const store = fake();
+    let prefs = setProjectIcon(EMPTY_PREFS, 'black-smith', 'p1', '📦', NOW);
+    prefs = setIcon(prefs, 'black-smith', 'a1', '🛠', NOW);
+    writePrefs(store, prefs);
+    expect(readPrefs(store, NOW)).toEqual(prefs);
+  });
+
+  it('a malformed projectIcons payload is dropped rather than crashing the reader', () => {
+    const store = fake(JSON.stringify({ projectIcons: 'not an object' }));
+    expect(readPrefs(store, NOW).projectIcons).toEqual({});
   });
 });
 
@@ -466,12 +519,14 @@ describe('AC-6: TTL prunes per source', () => {
   });
 });
 
-describe('AC-7: icons is the only session-keyed field', () => {
+describe('AC-7: theme and panes are not id-keyed maps', () => {
   // Checked by: `grep -n "Record<string" src/renderer/prefs/prefs.ts` — the
-  // only two matches are `IconsBySession` (session id → IconChoice) and
-  // `Prefs['icons']` (source id → IconsBySession). `theme` is `Theme`, a
-  // string union; `panes` is `{ sidebar: number; detail: number }`, a fixed
-  // two-field object. Neither is keyed by anything session-shaped.
+  // matches are `IconsBySession` (session or project id → IconChoice),
+  // `Prefs['icons']` (source id → IconsBySession) and `Prefs['projectIcons']`
+  // (source id → IconsBySession, the same idiom one level up, added by the
+  // sidebar-flat project icon). `theme` is `Theme`, a string union; `panes`
+  // is `{ sidebar: number; detail: number }`, a fixed two-field object.
+  // Neither is keyed by anything id-shaped.
   it('theme is a plain scalar union, not a keyed map', () => {
     const saved = setTheme(EMPTY_PREFS, 'light');
     expect(typeof saved.theme).toBe('string');

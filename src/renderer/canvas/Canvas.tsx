@@ -38,7 +38,7 @@ import { Maximize } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SmithApiError } from '../adapter/client.js';
 import { useReviewQueue } from '../adapter/useReviewQueue.js';
-import type { CanvasModel, Decision, SessionStatus, SourceId } from '../domain/model.js';
+import type { CanvasModel, Decision, Project, SessionStatus, SourceId } from '../domain/model.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
@@ -56,6 +56,7 @@ import {
   readPrefs,
   setIcon,
   setPaneWidth,
+  setProjectIcon,
   setTheme,
   writePrefs,
 } from '../prefs/prefs.js';
@@ -136,6 +137,18 @@ type IconTarget = {
   readonly title: string;
 };
 
+/**
+ * What the PROJECT icon picker is aiming at — same shape and same reasoning
+ * as `IconTarget`, one level up: captured when the picker opens rather than
+ * re-derived, so a model refresh mid-pick cannot move the write to the wrong
+ * project.
+ */
+type ProjectIconTarget = {
+  readonly source: SourceId;
+  readonly projectId: string;
+  readonly name: string;
+};
+
 function CanvasInner({
   model: factoryModel,
   source,
@@ -209,7 +222,10 @@ function CanvasInner({
     applyTheme(prefs.theme);
   }, [prefs.theme]);
 
-  const model = useMemo(() => applyIcons(factoryModel, prefs.icons), [factoryModel, prefs.icons]);
+  const model = useMemo(
+    () => applyIcons(factoryModel, prefs.icons, prefs.projectIcons),
+    [factoryModel, prefs.icons, prefs.projectIcons],
+  );
 
   const layout = useMemo(() => layoutCanvas(model), [model]);
   const allEntries = useMemo(() => orderedSessions(model), [model]);
@@ -232,6 +248,9 @@ function CanvasInner({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [pickingIconFor, setPickingIconFor] = useState<IconTarget | null>(null);
+  const [pickingProjectIconFor, setPickingProjectIconFor] = useState<ProjectIconTarget | null>(
+    null,
+  );
   const [filtering, setFiltering] = useState(false);
   /**
    * The mockup's pill row: All / Running / Needs you / Done.
@@ -1090,6 +1109,23 @@ function CanvasInner({
               `sessions are created from the CLI — smith event append session-start (${project.name})`,
             )
           }
+          onPickIcon={(project: Project) => {
+            // Same refusal as the session picker (§ above): a project with no
+            // source has no bucket to store under, and guessing one would
+            // reintroduce the cross-source collision AC-1 removed.
+            if (project.source === undefined) {
+              setStatus('this project has no source — icon unavailable');
+              return;
+            }
+            const projectSource = project.source;
+            setPickingProjectIconFor((current) =>
+              current !== null &&
+              current.projectId === project.id &&
+              current.source === projectSource
+                ? null
+                : { source: projectSource, projectId: project.id, name: project.name },
+            );
+          }}
           onSettings={() => setStatus('settings not built yet')}
           width={sidebarWidth}
           resizeHandle={
@@ -1328,6 +1364,30 @@ function CanvasInner({
             setPickingIconFor(null);
           }}
           onClose={() => setPickingIconFor(null)}
+        />
+      )}
+
+      {pickingProjectIconFor !== null && (
+        <IconPicker
+          title={pickingProjectIconFor.name}
+          onPick={(icon) => {
+            savePrefs(
+              setProjectIcon(
+                prefs,
+                pickingProjectIconFor.source,
+                pickingProjectIconFor.projectId,
+                icon,
+                new Date(),
+              ),
+            );
+            setStatus(
+              icon === ''
+                ? 'icon cleared — kept on this machine, never in the event log'
+                : `${icon} — kept on this machine, never in the event log`,
+            );
+            setPickingProjectIconFor(null);
+          }}
+          onClose={() => setPickingProjectIconFor(null)}
         />
       )}
 

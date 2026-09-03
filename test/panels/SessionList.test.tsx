@@ -79,6 +79,7 @@ function mount(entries: readonly SessionEntry[]) {
     onClose: noop,
     onAdd: noop,
     onAddInProject: noop,
+    onPickIcon: noop,
     onSettings: noop,
     theme: 'dark',
     onToggleTheme: noop,
@@ -168,46 +169,98 @@ describe('SessionList placeholder row', () => {
   });
 
   /**
-   * Mockup 1a groups sessions into a CARD per project, not a flat list under a
-   * caption. The distinction is not cosmetic: a caption is something you have
-   * to read to know where a row belongs, and a card makes it structural. So
-   * the assertion is CONTAINMENT — each row inside its own project's card —
-   * rather than a class list, which a flat list could satisfy while still
-   * being flat.
+   * Mockup 1a's card is gone (operator request, sidebar-flat): the project
+   * heading is a caption, not a container. A card's guarantee was
+   * CONTAINMENT — each row physically inside its own project's box, checked
+   * via `.closest('[data-project-group]')`. There is no such box any more, so
+   * the property worth keeping is the one containment was a proxy for: each
+   * project's rows are the RIGHT rows, in the RIGHT order, directly under the
+   * RIGHT heading, with no card-shaped DOM to lean on.
    */
-  it("nests each project's rows inside that project's own group card", () => {
+  it("lists each project's own rows, in order, directly under that project's heading — no group wrapper", () => {
     const { container } = mount(twoProjects());
 
-    const groups = container.querySelectorAll('[data-project-group]');
-    expect(groups).toHaveLength(2);
+    // No card left to find: the attribute that used to mark one is gone.
+    expect(container.querySelectorAll('[data-project-group]')).toHaveLength(0);
 
-    const alpha = container.querySelector('[data-project-group="p1"]');
-    const beta = container.querySelector('[data-project-group="p2"]');
-    expect(alpha?.querySelectorAll('[data-session-row]')).toHaveLength(2);
-    expect(beta?.querySelectorAll('[data-session-row]')).toHaveLength(1);
-    // And not merely "two rows somewhere" — the RIGHT rows.
-    expect(alpha?.querySelector('[data-session-row="b1"]')).toBeNull();
-    expect(beta?.querySelector('[data-session-row="b1"]')).not.toBeNull();
+    // Document order is the whole test: walk every heading and row as they
+    // actually render, and the boundary between "alpha's rows" and "beta's
+    // rows" must fall exactly at the second heading.
+    const markers = [...container.querySelectorAll('[data-project-heading], [data-session-row]')];
+    const shape = markers.map((el) =>
+      el.hasAttribute('data-project-heading')
+        ? `heading:${el.textContent?.match(/alpha|beta/)?.[0] ?? '?'}`
+        : `row:${el.getAttribute('data-session-row')}`,
+    );
+    expect(shape).toEqual(['heading:alpha', 'row:a1', 'row:a2', 'heading:beta', 'row:b1']);
   });
 
-  it('puts every heading inside a group card, and exactly one per card', () => {
+  it('puts exactly one heading per project, and no heading doubles as a session row', () => {
     const { container } = mount(twoProjects());
     const headings = [...container.querySelectorAll('[data-project-heading]')];
-    const groups = [...container.querySelectorAll('[data-project-group]')];
-
-    // Assert the corpus BEFORE looping over it. The first draft of this test
-    // only iterated the groups and counted headings, so against the old flat
-    // list it looped over zero elements and still counted two headings — it
-    // passed on exactly the code it was written to reject. A sweep has to
-    // prove it found something to sweep.
-    expect(groups.length).toBe(2);
-    expect(headings.length).toBe(2);
-
-    // The load-bearing claim: no heading is loose in the list.
-    expect(headings.every((h) => h.closest('[data-project-group]') !== null)).toBe(true);
-    for (const group of groups) {
-      expect(group.querySelectorAll('[data-project-heading]')).toHaveLength(1);
+    expect(headings).toHaveLength(2);
+    for (const heading of headings) {
+      expect(heading.hasAttribute('data-session-row')).toBe(false);
+      expect(heading.tagName).toBe('DIV');
     }
+  });
+
+  it("renders each project's stored icon before its name in the heading, and a placeholder when there is none", () => {
+    const alpha = makeProject({ id: 'p1', name: 'alpha', icon: '📦' }, []);
+    const beta = makeProject({ id: 'p2', name: 'beta' }, []);
+    const entries = [
+      { project: alpha, session: makeSession({ id: 'a1' }) },
+      { project: beta, session: makeSession({ id: 'b1' }) },
+    ];
+    const { container } = mount(entries);
+
+    const alphaIcon = container.querySelector('[data-project-icon="p1"]');
+    const betaIcon = container.querySelector('[data-project-icon="p2"]');
+    expect(alphaIcon?.textContent).toBe('📦');
+    expect(betaIcon?.textContent).toBe('·');
+
+    // The icon sits before the name in the heading, not after.
+    const heading = container.querySelector('[data-project-heading]');
+    const icon = heading?.querySelector('[data-project-icon]');
+    const name = screen.getAllByText('alpha')[0];
+    expect(icon?.compareDocumentPosition(name as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('clicking a project icon reports which project it was for', () => {
+    const seen: string[] = [];
+    const entries = twoProjects();
+    render(
+      <SessionList
+        {...({
+          entries,
+          focusedSessionId: null,
+          workspace: 'vam',
+          filter: '',
+          filtering: false,
+          onFilterChange: noop,
+          onFilterCommit: noop,
+          onFilterCancel: noop,
+          onOpenFilter: noop,
+          renamingId: null,
+          renameDraft: '',
+          onRenameChange: noop,
+          onRenameCommit: noop,
+          onRenameCancel: noop,
+          onPick: noop,
+          onClose: noop,
+          onAdd: noop,
+          onAddInProject: noop,
+          onPickIcon: (project: Project) => seen.push(project.name),
+          onSettings: noop,
+          theme: 'dark',
+          onToggleTheme: noop,
+          width: 264,
+          resizeHandle: null,
+        } satisfies SessionListProps)}
+      />,
+    );
+    document.querySelector<HTMLButtonElement>('[data-project-icon="p2"]')?.click();
+    expect(seen).toEqual(['beta']);
   });
 
   /**
@@ -262,6 +315,7 @@ describe('SessionList placeholder row', () => {
           onClose: noop,
           onAdd: noop,
           onAddInProject: (project: Project) => seen.push(project.name),
+          onPickIcon: noop,
           onSettings: noop,
           theme: 'dark',
           onToggleTheme: noop,
