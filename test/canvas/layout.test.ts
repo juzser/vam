@@ -372,26 +372,37 @@ describe('layoutCanvas: only the route to the current step is coloured', () => {
     return { id, label: `step-${id}`, input: `in-${id}`, output: null, commands: [] };
   }
 
-  it('colours exactly the first output-less step and leaves its siblings idle', () => {
+  /**
+   * The regression the operator reported as "line nối các node bị ngược màu".
+   *
+   * This rule was first written as "the first step with no output", and this
+   * very test asserted it. It is wrong against real data: `to-canvas.ts` gives
+   * `output: null` to ANY turn with no answer, and an older unanswered
+   * dispatch is ordinary in a live log. The route then lit an early branch and
+   * left the newest one grey — the colour looked inverted, which is exactly
+   * what was seen on screen.
+   *
+   * `decisions` is newest-FIRST and `visibleDecisions` reverses it, so putting
+   * the answered turn NEWEST and the unanswered ones behind it is the input
+   * that separates the two rules: the old one says slot 0, the mockup and the
+   * operator both say slot 2.
+   */
+  it('colours the newest step even when an older one was never answered', () => {
     const built = layoutCanvas(
       model(
         session('s', {
           status: 'running',
-          // `session.decisions` is newest-FIRST; `visibleDecisions` reverses
-          // it. Two queued turns behind one answered means the fan draws
-          // [answered, queued, queued] and the route is the FIRST unanswered —
-          // which is not the last drawn, so this separates the two rules.
-          decisions: [pending('d2'), pending('d1'), decision('d0')],
+          decisions: [decision('d2'), pending('d1'), pending('d0')],
         }),
       ),
     );
     const fan = built.fans.find((f) => f.sessionId === 's');
     expect(fan).toBeDefined();
-    expect(fan?.activeSlot).toBe(1);
-    expect(fan?.branchStatuses).toEqual(['idle', 'running', 'idle']);
+    expect(fan?.activeSlot).toBe(2);
+    expect(fan?.branchStatuses).toEqual(['idle', 'idle', 'running']);
   });
 
-  it('falls back to the last step when every step has an output', () => {
+  it('colours the newest step when every step has an output', () => {
     const built = layoutCanvas(
       model(session('s', { status: 'done', decisions: [decision('d0'), decision('d1')] })),
     );

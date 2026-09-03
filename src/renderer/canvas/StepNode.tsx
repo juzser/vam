@@ -18,7 +18,7 @@
  */
 
 import { Handle, type NodeProps, Position } from '@xyflow/react';
-import { ArrowDownLeft, ArrowUpRight, CircleHelp, File, Play } from 'lucide-react';
+import { Bot, CircleHelp, File, Play, User } from 'lucide-react';
 import type { Decision } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 
@@ -129,20 +129,25 @@ export function StepNode({ data }: NodeProps & { data: StepNodeData }) {
       <div className="flex gap-[7px]">
         <span
           role="img"
-          aria-label="in"
+          aria-label="from you"
           className="flex w-[18px] flex-none justify-center pt-px text-ink-faint"
         >
-          <ArrowDownLeft size={11} strokeWidth={1.7} />
+          {/* The mockup draws these two rows with a person and a machine, not
+              with direction arrows: the question the glance has to answer is
+              WHO said it, and in/out only answers that by convention. The
+              artboard's own glyphs are a head-and-shoulders and a robot head,
+              which are lucide's `User` and `Bot`. */}
+          <User size={11} strokeWidth={1.7} />
         </span>
         <span className="truncate text-[10.5px] text-ink-faint">{decision.input}</span>
       </div>
       <div className="flex gap-[7px]">
         <span
           role="img"
-          aria-label="out"
+          aria-label="from the agent"
           className="flex w-[18px] flex-none justify-center pt-px text-ink-faint"
         >
-          <ArrowUpRight size={11} strokeWidth={1.7} />
+          <Bot size={11} strokeWidth={1.7} />
         </span>
         <span className={`vam-clamp-2 text-[10.5px] ${asking ? 'text-ink' : 'text-ink-dim'}`}>
           {decision.output === null ? (

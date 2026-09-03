@@ -272,12 +272,19 @@ export function layoutCanvas(model: CanvasModel): CanvasLayout {
      * colour and the fan said "this session is waiting" three times instead of
      * "it is waiting HERE".
      *
-     * `steps` is newest-last (visibleDecisions reverses), so the current one is
-     * the last unanswered step, falling back to the newest when all are
-     * answered.
+     * `steps` is newest-last (visibleDecisions reverses), so the current step
+     * is simply the last one drawn.
+     *
+     * This was first written as "the first step with no output, falling back
+     * to the newest" — which reads plausibly and is wrong against real data.
+     * `to-canvas.ts` gives `output: null` to any turn with no answer, and an
+     * OLDER dispatch that never got answered is common in a live log. That
+     * made the route light up an early branch and leave the newest grey: the
+     * colour appeared reversed, which is exactly what the operator reported.
+     * The mockup agrees with the simple rule — every artboard colours the
+     * bottom branch `M45 245 H110`, the last one drawn.
      */
-    const pending = steps.findIndex((d) => d.output === null);
-    const activeSlot = steps.length === 0 ? null : pending === -1 ? steps.length - 1 : pending;
+    const activeSlot = steps.length === 0 ? null : steps.length - 1;
 
     const branchStatuses = Array.from({ length: STEP_SLOTS }, (_, slot) =>
       slot >= steps.length ? 'empty' : slot === activeSlot ? session.status : 'idle',
