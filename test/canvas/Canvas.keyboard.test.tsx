@@ -1126,148 +1126,17 @@ describe('writing a prompt to a live black-smith', () => {
   });
 });
 
-describe('answering the review queue from the keyboard', () => {
-  const FINDING = {
-    findingId: 'f-1',
-    taskId: 'e2e/task-1',
-    fingerprint: 'fp-1',
-    severity: 'S3-minor',
-    findingStatus: 'raised',
-    summary: 'Comment names a variable that was renamed.',
-    foundBy: 'reviewer',
-    waiverId: null,
-  };
-
-  type Applied = { fingerprint: string; decision: string; operatorNote: string };
-
-  function liveWithQueue(): { source: CanvasSource; applied: Applied[] } {
-    const applied: Applied[] = [];
-    // An answered finding stops coming back, exactly as the factory stops
-    // returning it once it is waived. A stub that kept serving the row would
-    // make "the queue shrank under the cursor" — the case the cursor reset
-    // exists for — unreachable in every test here.
-    const client = {
-      taskIds: async () => ['e2e/task-1'],
-      taskDetail: async () => ({ findings: applied.length === 0 ? [FINDING] : [] }),
-      lessons: async () => ({ pending: [], approved: [], closed: [] }),
-      overview: async () => ({
-        runningSessions: [],
-        alerts: { escalations: 0, pendingWaivers: 0 },
-      }),
-      applyWaivers: async (_envelope: unknown, decisions: Applied[]) => {
-        applied.push(...decisions);
-        return { applied: decisions.length };
-      },
-    } as unknown as SmithClient;
-    return {
-      source: { kind: 'live', client, status: 'live', error: null, onWrote: () => {} },
-      applied,
-    };
-  }
-
-  async function mounted(source: CanvasSource) {
-    render(<Canvas model={MODEL} source={source} />);
-    // Let the queue's fetch settle before the first keypress.
-    await act(async () => {});
-  }
-
-  const noteBox = () =>
-    document.querySelector<HTMLInputElement>('input[aria-label="reason for fp-1"]');
-
-  it('puts every verdict button on the j/k path, conservative one first', async () => {
-    const { source } = liveWithQueue();
-    await mounted(source);
-    press('I');
-    // First stop is the row's "fix" — nothing is excused by landing there.
-    expect(document.querySelector('[data-waiver="fp-1"]')?.innerHTML).toContain('ring-running');
-  });
-
-  it('refuses to grant without a reason, and says which key gives one', async () => {
-    // waivers.ts would refuse this anyway. Answering before the round trip
-    // names the missing thing instead of returning a 400.
-    const { source, applied } = liveWithQueue();
-    await mounted(source);
-    press('I');
-    press('j'); // onto "waive"
-    await act(async () => {
-      press('Enter');
-    });
-    expect(applied).toEqual([]);
-    expect(statusBar()).toContain('a waiver needs a reason');
-  });
-
-  it('i opens the row’s reason box rather than the prompt', async () => {
-    // Sending it to the prompt would put a waiver's justification into a
-    // message to the session.
-    const { source } = liveWithQueue();
-    await mounted(source);
-    press('I');
-    press('i');
-    expect(document.activeElement).toBe(noteBox());
-    expect(mode()).not.toBe('PROMPT');
-  });
-
-  it('writes the verdict with the reason once one is typed', async () => {
-    const { source, applied } = liveWithQueue();
-    await mounted(source);
-    press('I');
-    press('i');
-    typeInto(noteBox() as HTMLInputElement, 'just a naming nit');
-    keyOn(noteBox() as HTMLInputElement, 'Escape');
-    press('j'); // onto "waive"
-    await act(async () => {
-      press('Enter');
-    });
-    expect(applied).toEqual([
-      { fingerprint: 'fp-1', decision: 'granted', operatorNote: 'just a naming nit' },
-    ]);
-  });
-
-  it('reaches the prompt past the queue, still last', async () => {
-    const { source } = liveWithQueue();
-    await mounted(source);
-    press('I');
-    press('j'); // waive
-    press('j'); // the command on beta/b1? no — a1 has none, so this is the prompt
-    await act(async () => {
-      press('Enter');
-    });
-    expect(mode()).toBe('PROMPT');
-  });
-
-  it('puts the cursor back at the top after an answer lands', async () => {
-    // The answered row vanishes. Leaving the index where it was drops the
-    // cursor onto whatever slid up into that slot — which after clearing a
-    // waiver was the next row's "approve". A cursor landing on a consequential
-    // button nobody aimed at is the one way this pane could do real damage.
-    const { source, applied } = liveWithQueue();
-    await mounted(source);
-    press('I');
-    press('i');
-    typeInto(noteBox() as HTMLInputElement, 'ok');
-    keyOn(noteBox() as HTMLInputElement, 'Escape');
-    press('j'); // onto "waive", index 1
-    await act(async () => {
-      press('Enter');
-    });
-    expect(applied).toHaveLength(1);
-    // Index 0 again. The queue is empty now, so index 0 is the prompt — and
-    // Enter opens it instead of firing whatever slid into the old slot.
-    await act(async () => {
-      press('Enter');
-    });
-    expect(mode()).toBe('PROMPT');
-    expect(applied).toHaveLength(1);
-  });
-
-  it('h still leaves the pane, whatever the cursor is on', async () => {
-    const { source } = liveWithQueue();
-    await mounted(source);
-    press('I');
-    press('h');
-    expect(actionPane()).toBe('idle');
-  });
-});
+/*
+ * The review-queue keyboard tests stood here.
+ *
+ * black-smith's governance queue was removed from the detail pane at the
+ * operator's request, so the `I` → `j`/`k` → Enter path they exercised no
+ * longer exists in the UI and a test for it could only assert against a
+ * component the pane does not render. `ReviewQueue` and `useReviewQueue` keep
+ * their own tests (test/panels/ReviewQueue.test.tsx,
+ * test/adapter/useReviewQueue.test.tsx), so the code itself stays covered and
+ * restoring the row restores a tested component.
+ */
 
 /**
  * AC-10(d) — the only criterion in this task that grades behaviour rather than

@@ -470,30 +470,6 @@ describe('the in and out rules wear the mockup’s own glyphs', () => {
   });
 });
 
-describe('the step counter is compact, and says the whole thing on demand', () => {
-  it('reads x/y and carries the full note where a keyboard can reach it', () => {
-    draw();
-    const counter = q<HTMLButtonElement>('[data-step-counter]');
-    // The focused turn is the newest, which this counter numbers last.
-    expect(counter?.textContent).toBe('5/5');
-    expect(q<HTMLElement>('[data-action-pane]')?.textContent).not.toContain('STEP 5 OF 5');
-    // The full note the compact form drops. `title` is the hover tooltip and
-    // the aria-label is what a screen reader gets — but a title never appears
-    // on keyboard focus, so the same string has to be reachable by pressing
-    // the thing, which means a real <button>.
-    const note = counter?.getAttribute('title') ?? '';
-    expect(note).toContain('step 5 of 5');
-    expect(note).toContain('step d5');
-    expect(counter?.getAttribute('aria-label')).toBe(note);
-    expect(counter?.tagName).toBe('BUTTON');
-
-    expect(q<HTMLElement>('[data-step-note]')).toBeNull();
-    act(() => counter?.click());
-    expect(q<HTMLElement>('[data-step-note]')?.textContent).toBe(note);
-    expect(counter?.getAttribute('aria-expanded')).toBe('true');
-  });
-});
-
 describe('the attachment button inlines a file into the text that gets recorded', () => {
   const file = (over: Partial<AttachedFile> = {}): AttachedFile => ({
     name: 'notes.md',
@@ -684,21 +660,6 @@ describe('the mode pills select, and what they select gets recorded', () => {
   });
 });
 
-describe('the header row drops the per-turn strip the operator did not use', () => {
-  it('keeps the counter and the age, and draws no tick per turn', () => {
-    draw();
-    const row = q<HTMLElement>('[data-step-counter]')?.parentElement;
-    expect(row).not.toBeNull();
-    // The strip drew one coloured tick per turn — five of them for this
-    // session. Nothing it said is lost: the same per-turn answered/unanswered
-    // state is in the `progress` list and on the canvas, and the counter and
-    // the step label still name the focused turn.
-    expect(row?.querySelectorAll('.bg-running, .bg-ink-ghost, .bg-waiting')).toHaveLength(0);
-    expect(q<HTMLElement>('[data-step-counter]')?.textContent).toBe('5/5');
-    expect(row?.textContent).toContain('12m');
-  });
-});
-
 describe('the empty tabs carry no tooltip, and the other notes stay', () => {
   it('drops the tab note without touching the mode, attach or model notes', () => {
     draw();
@@ -834,3 +795,15 @@ describe('the surface the picker sits on is a token pair, not a dark-only hex', 
     expect(light).toContain('--vam-lifted:');
   });
 });
+
+/*
+ * The `x/y` step counter and its expandable note had tests here.
+ *
+ * The whole row above the tabs — counter, note and age — was removed at the
+ * operator's request, after the per-turn tick strip that preceded it. Nothing
+ * it showed lives only there: the focused step is named at the right of the
+ * title row, the turn count is the `progress` section's own counter, and the
+ * age is on the sidebar card and the canvas. There is no element left to
+ * assert against, so the tests go with the row rather than being rewritten
+ * into assertions about its absence.
+ */

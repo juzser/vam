@@ -56,7 +56,7 @@ import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Decision } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
-import { ReviewQueue, type ReviewQueueProps } from './ReviewQueue.js';
+import type { ReviewQueueProps } from './ReviewQueue.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 
 /**
@@ -834,7 +834,6 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const [progressOpen, setProgressOpen] = useState(false);
   /** Whether the step counter has been asked for the sentence it abbreviates. */
-  const [noteOpen, setNoteOpen] = useState(false);
 
   useEffect(() => {
     if (composing) {
@@ -940,11 +939,6 @@ export function DetailPanel(props: DetailPanelProps) {
   const orderedTurns = [...(entry?.session.decisions ?? [])].reverse();
   // Nothing while closed — not a shorter list, no list at all.
   const visibleTurns = progressOpen ? orderedTurns.slice(-PROGRESS_LINES) : [];
-  const index = decision === null ? 0 : total - (entry?.session.decisions.indexOf(decision) ?? 0);
-  const stepNote =
-    decision === null
-      ? `step ${index} of ${total}`
-      : `step ${index} of ${total} · ${decision.label}`;
 
   /**
    * What the composer's button claims, in the words the SOURCE earns.
@@ -1047,43 +1041,13 @@ export function DetailPanel(props: DetailPanelProps) {
           )}
         </div>
 
-        <div className="flex items-center gap-2 border-line border-t pt-[9px] pb-[3px]">
-          {/* `x/y`, per the operator, with the sentence it replaced kept in
-              reach rather than deleted. `title` is the hover tooltip and the
-              same string is the aria-label — but a `title` does NOT appear on
-              keyboard focus in any browser, and vam is driven from a keyboard,
-              so the note is also a real <button> that prints it below the row.
-              Nothing an operator must act on lives only in here: the counter is
-              on screen and so is the step's label, at the right of the title
-              row. This is the long form of what is already visible. */}
-          <button
-            type="button"
-            data-step-counter
-            aria-expanded={noteOpen}
-            title={stepNote}
-            aria-label={stepNote}
-            onClick={() => setNoteOpen((open) => !open)}
-            className="flex-none cursor-pointer rounded-[var(--radius-sm)] font-mono text-[9.5px] text-ink-faint hover:text-ink"
-          >
-            {index}/{total}
-          </button>
-          {/* The strip of one tick per turn stood here. The operator found it
-              did no work, and nothing it showed is only here: which turns are
-              answered is in the `progress` list a keystroke away and on the
-              canvas itself, and the focused turn is named twice on this header
-              already — the counter to the left, its label at the right of the
-              title row. */}
-          <span className="flex-1" />
-          <span className="flex-none font-mono text-[9.5px] text-ink-faint">
-            {entry?.session.age ?? '—'}
-          </span>
-        </div>
-
-        {noteOpen && (
-          <div data-step-note className="-mt-1 font-mono text-[9.5px] text-ink-dim">
-            {stepNote}
-          </div>
-        )}
+        {/* The row that stood here carried the `x/y` step counter, its
+            expandable note, and the session age. The operator found it did no
+            work and asked for it to go, following the tick strip that stood
+            here before it. Nothing it showed is only here: the focused step is
+            named at the right of the title row above, how many turns exist is
+            the `progress` section's own counter, and the age is on the session
+            card in the sidebar and on the canvas. */}
 
         <TabBar runningAgents={entry?.session.runningAgents ?? 0} />
       </div>
@@ -1280,10 +1244,12 @@ export function DetailPanel(props: DetailPanelProps) {
       </div>
 
       <div className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3">
-        {/* Above the composer, below the text: this is the thing the factory is
-            actually asking, and it should be the last thing you read before you
-            answer it. */}
-        {review !== undefined && <ReviewQueue {...review} />}
+        {/* black-smith's governance queue — findings awaiting a waiver, and
+            lesson candidates — used to stand here. The operator asked for it
+            to go. `ReviewQueue` and its tests are left in the tree rather than
+            deleted: it is working code for a real black-smith surface, and no
+            other source has governance to show anyway, so restoring it is one
+            line here plus the prop. */}
 
         {/* The mockup puts the picker here: the last thing you read before you
             answer, above the box you answer in. Drawn only while the session is
