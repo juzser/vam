@@ -241,7 +241,11 @@ describe('in and out are labelled differently in the node and in the pane', () =
     // files and watching only its sibling go red.
     const steps = [...document.querySelectorAll('[data-step-kind]')];
     expect(steps.length, 'no step cards rendered — the test proves nothing').toBeGreaterThan(0);
-    for (const name of ['in', 'out']) {
+    // The labels name the SPEAKER, not the direction, because the icons do:
+    // the mockup draws a person and a robot here, and "from you"/"from the
+    // agent" is what those glyphs mean. `in`/`out` would describe an arrow
+    // that is no longer on screen.
+    for (const name of ['from you', 'from the agent']) {
       const marked = steps.some(
         (step) => step.querySelector(`[role="img"][aria-label="${name}"]`) !== null,
       );
@@ -250,6 +254,13 @@ describe('in and out are labelled differently in the node and in the pane', () =
     // And the words themselves are gone from the card, which is the change.
     expect(steps[0]?.textContent).not.toContain('IN');
     expect(steps[0]?.textContent).not.toContain('OUT');
+    // Distinct labels, not one reused: a card whose two rows announced the
+    // same thing would pass the loop above and tell a screen-reader user
+    // nothing about who spoke.
+    const labels = [...steps[0]!.querySelectorAll('[role="img"][aria-label]')].map((el) =>
+      el.getAttribute('aria-label'),
+    );
+    expect(new Set(labels).size).toBe(labels.length);
   });
 });
 

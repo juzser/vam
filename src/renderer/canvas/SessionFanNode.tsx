@@ -156,7 +156,11 @@ export function SessionFanNode({ data }: SessionFanNodeProps) {
           alignItems: 'center',
           justifyContent: 'center',
           background: 'var(--color-canvas)',
-          font: 'inherit',
+          // The mockup's own type scale for this pill. It previously inherited
+          // the node's font, which made it far larger and heavier than the
+          // connector it labels.
+          fontFamily: 'var(--font-mono)',
+          fontSize: '9.5px',
         }}
       >
         {/* Two-tone per the mockup: the number carries the session's status
@@ -164,8 +168,21 @@ export function SessionFanNode({ data }: SessionFanNodeProps) {
             `running`/`done` dim to --color-ink-dim on the number while the
             trunk reads a line tone), the word `steps` stays the fixed
             neutral it is in all twelve mockup pills. */}
-        <span style={{ color: numberColor }}>{data.totalSteps}</span>
-        <span style={{ color: 'var(--color-ink-faint)' }}> steps</span>
+        {/* Both spans live inside ONE flex item on purpose. The space between
+            them is a plain text node, and a flex container DISCARDS a
+            whitespace-only text node between two items — which is why the
+            space written here never rendered and the pill read `47steps`. The
+            mockup solves the same problem with `gap:3px`; wrapping solves it
+            without splitting `47 steps` into two unrelated strings, so the
+            pill still reads as one phrase to a screen reader and to a test. */}
+        <span>
+          <span data-fan-pill-count style={{ color: numberColor }}>
+            {data.totalSteps}
+          </span>{' '}
+          <span data-fan-pill-word style={{ color: 'var(--color-ink-faint)' }}>
+            steps
+          </span>
+        </span>
       </div>
     </div>
   );

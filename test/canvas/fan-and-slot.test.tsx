@@ -99,15 +99,15 @@ describe('SessionFanNode', () => {
       <SessionFanNode id="fan-6" data={fanData({ sessionStatus: 'waiting' })} />,
     );
     let pill = container.querySelector('[data-fan-pill]') as HTMLElement;
-    let numberSpan = pill.querySelector('span:first-child') as HTMLElement;
-    let wordSpan = pill.querySelector('span:last-child') as HTMLElement;
+    let numberSpan = pill.querySelector('[data-fan-pill-count]') as HTMLElement;
+    let wordSpan = pill.querySelector('[data-fan-pill-word]') as HTMLElement;
     expect(numberSpan.style.color).toBe('var(--color-waiting)');
     expect(wordSpan.style.color).toBe('var(--color-ink-faint)');
 
     rerender(<SessionFanNode id="fan-6" data={fanData({ sessionStatus: 'running' })} />);
     pill = container.querySelector('[data-fan-pill]') as HTMLElement;
-    numberSpan = pill.querySelector('span:first-child') as HTMLElement;
-    wordSpan = pill.querySelector('span:last-child') as HTMLElement;
+    numberSpan = pill.querySelector('[data-fan-pill-count]') as HTMLElement;
+    wordSpan = pill.querySelector('[data-fan-pill-word]') as HTMLElement;
     expect(numberSpan.style.color).not.toBe('var(--color-waiting)');
     expect(numberSpan.style.color).toBe('var(--color-ink-dim)');
     expect(wordSpan.style.color).toBe('var(--color-ink-faint)');
@@ -133,8 +133,8 @@ describe('SessionFanNode', () => {
       );
       const trunkStroke = container.querySelector('svg path')?.getAttribute('stroke') ?? null;
       const pill = container.querySelector('[data-fan-pill]') as HTMLElement;
-      const numberSpan = pill.querySelector('span:first-child') as HTMLElement;
-      const wordSpan = pill.querySelector('span:last-child') as HTMLElement;
+      const numberSpan = pill.querySelector('[data-fan-pill-count]') as HTMLElement;
+      const wordSpan = pill.querySelector('[data-fan-pill-word]') as HTMLElement;
       const line = `${status} trunk=${tokenOf(trunkStroke)} num=${tokenOf(numberSpan.style.color)} word=${tokenOf(wordSpan.style.color)}`;
       unmount();
       return line;
