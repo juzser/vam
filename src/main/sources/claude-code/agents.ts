@@ -36,6 +36,13 @@ export type LiveAgent = {
   readonly name: string | null;
   readonly cwd: string;
   readonly status: SessionStatus;
+  /**
+   * Which list the row came from. Kept because it is the ONLY thing that
+   * distinguishes a terminal a person is sitting in front of from work
+   * running unattended, and `source.ts` needs that to avoid claiming a
+   * background session was started by a human when nothing says so.
+   */
+  readonly kind: 'interactive' | 'background';
   /** Epoch ms the process started. Not last activity. */
   readonly startedAt: number | null;
 };
@@ -104,12 +111,12 @@ export function parseAgentRows(stdout: string, nowMs: number = Date.now()): read
     // to file the row under. Dropping it beats inventing a home for it.
     if (sessionId === null || cwd === null) continue;
     const startedAt = typeof row['startedAt'] === 'number' ? row['startedAt'] : null;
+    // Anything that is not explicitly background is treated as interactive:
+    // an unrecognised value should not silently become "unattended", which is
+    // the reading that costs a row its origin claim.
+    const kind = str(row['kind']) === 'background' ? 'background' : 'interactive';
     // See BACKGROUND_WINDOW_MS: stale finished background work is noise.
-    if (
-      str(row['kind']) === 'background' &&
-      startedAt !== null &&
-      nowMs - startedAt > BACKGROUND_WINDOW_MS
-    ) {
+    if (kind === 'background' && startedAt !== null && nowMs - startedAt > BACKGROUND_WINDOW_MS) {
       continue;
     }
     const pid = typeof row['pid'] === 'number' ? row['pid'] : null;
@@ -119,6 +126,7 @@ export function parseAgentRows(stdout: string, nowMs: number = Date.now()): read
       name: str(row['name']),
       cwd,
       status: statusOf(row),
+      kind,
       startedAt,
     });
   }

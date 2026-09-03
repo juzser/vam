@@ -47,6 +47,7 @@ const agent = (over: Partial<LiveAgent> = {}): LiveAgent => ({
   name: 'demo',
   cwd: '/w/alpha',
   status: 'running',
+  kind: 'interactive',
   startedAt: NOW - 60_000,
   ...over,
 });
@@ -272,6 +273,30 @@ describe('loadClaudeCodeProjects', () => {
       async () => 'from-git-head',
     );
     expect(project?.sessions[0]?.branch).toBe('from-git-head');
+  });
+
+  it('calls an interactive session human-started and a background one unknown', async () => {
+    // The source used to assert `startedBy: 'human'` for EVERY row, on the
+    // reasoning that anything the CLI lists is a session a person opened.
+    // That holds for an interactive row -- it is a terminal someone is sitting
+    // in front of. It does not hold for a BACKGROUND row: measured against
+    // the real CLI, `claude agents --json --all` lists background sessions
+    // living under `.claude/worktrees/`, and nothing on the row says whether a
+    // person launched it or an agent spawned it. `unknown` is what vam
+    // actually knows, and `session-filter.ts` keeps unknown VISIBLE by
+    // design -- "hiding what you did not check is how a filter loses work" --
+    // so this costs no row on screen and stops one false claim.
+    const [project] = await loadClaudeCodeProjects(
+      root,
+      [
+        agent({ key: 'i#1', sessionId: 'i', kind: 'interactive' }),
+        agent({ key: 'b#2', sessionId: 'b', kind: 'background' }),
+      ],
+      NOW,
+    );
+    const byId = new Map(project?.sessions.map((x) => [x.id, x.origin?.startedBy]) ?? []);
+    expect(byId.get('i#1')).toBe('human');
+    expect(byId.get('b#2')).toBe('unknown');
   });
 
   it('never renders a filesystem path into a project id or name', async () => {
