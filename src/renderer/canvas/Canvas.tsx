@@ -246,7 +246,7 @@ function CanvasInner({
   const [writing, setWriting] = useState(false);
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
-  const { getNodes, zoomIn, zoomOut, fitView, setCenter } = useReactFlow();
+  const { getNodes, zoomIn, zoomOut, fitView } = useReactFlow();
 
   /** Which session the focused node belongs to — the id all three panes share. */
   const focusedSpec = useMemo(
@@ -1167,7 +1167,6 @@ function CanvasInner({
             >
               <Maximize size={13} strokeWidth={1.6} aria-hidden="true" />
             </button>
-
           </div>
 
           <div className="relative min-h-0 flex-1">
