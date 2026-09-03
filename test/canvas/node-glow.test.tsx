@@ -78,6 +78,26 @@ function entryOf(over: Partial<Session> = {}): SessionEntry {
   return { project, session };
 }
 
+/**
+ * The rest of ReactFlow's `NodeProps`, which these components never read.
+ *
+ * Spelled out rather than cast away. `{...({} as never)}` typechecked under
+ * the app config and failed under `tsconfig.test.json`, which is stricter —
+ * and a cast would have gone on hiding whichever of these ReactFlow adds next.
+ */
+const FLOW_PROPS = {
+  selected: false,
+  dragging: false,
+  draggable: false,
+  selectable: false,
+  deletable: false,
+  type: 'info',
+  zIndex: 0,
+  isConnectable: false,
+  positionAbsoluteX: 0,
+  positionAbsoluteY: 0,
+} as const;
+
 /** The rendered node's own element — never a fallback, so a miss fails loudly. */
 function nodeRoot(container: HTMLElement, selector: string): HTMLElement {
   const el = container.querySelector<HTMLElement>(selector);
@@ -93,7 +113,7 @@ function renderInfo(over: Partial<Session>, focused: boolean) {
       <SessionInfoNode
         id="info"
         data={{ entry: entryOf(over), focused, jumpLabel: null }}
-        {...({} as never)}
+        {...FLOW_PROPS}
       />
     </ReactFlowProvider>,
   );
@@ -247,7 +267,7 @@ describe('StepNode wears the cursor glow and the running edge', () => {
         <StepNode
           id="step"
           data={{ entry, decision: target as Decision, focused, jumpLabel: null }}
-          {...({} as never)}
+          {...FLOW_PROPS}
         />
       </ReactFlowProvider>,
     );
