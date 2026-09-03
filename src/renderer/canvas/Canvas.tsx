@@ -268,20 +268,50 @@ function CanvasInner({
    * The zoom argument is deliberately omitted: `setCenter` keeps the current
    * scale, so following focus never overrides a zoom the operator chose.
    */
-  // Lifted out of the effect so the dependency array names exactly what the
-  // effect reads. Depending on `focusedSpec` itself would re-centre on every
-  // layout rebuild — the object is rebuilt each render — and fight a manual pan.
-  const focusCenterX =
-    focusedSpec === null ? null : focusedSpec.position.x + focusedSpec.size.width / 2;
-  const focusCenterY =
-    focusedSpec === null ? null : focusedSpec.position.y + focusedSpec.size.height / 2;
+  /**
+   * Which nodes make up the focused session's ROW — its info card, its steps,
+   * its fan and its slots. The slots matter: they hold the three step
+   * positions even when the session has fewer than three, so framing them is
+   * what guarantees all three slots are visible rather than however many
+   * happen to be filled.
+   */
+  const focusedSessionId = focusedSpec?.entry.session.id ?? null;
+  const focusRowNodeIds = useMemo(() => {
+    if (focusedSessionId === null) {
+      return null;
+    }
+    return [
+      ...layout.nodes.filter((n) => n.entry.session.id === focusedSessionId),
+      ...layout.fans.filter((f) => f.sessionId === focusedSessionId),
+      ...layout.slots.filter((sl) => sl.sessionId === focusedSessionId),
+    ].map((n) => ({ id: n.id }));
+  }, [layout, focusedSessionId]);
 
+  /**
+   * The viewport frames the focused row.
+   *
+   * `j`/`k` can walk to an off-screen session, and before this the canvas did
+   * not move at all — the sidebar and detail panel updated while the cards
+   * stayed put, so the one pane that shows a session's SHAPE was the one that
+   * did not follow you.
+   *
+   * `fitView` over the row's own nodes rather than `setCenter`, because the
+   * ask is a ZOOM as well as a position: all three steps legible, with the
+   * neighbouring sessions still peeking in at the edges so you keep your place
+   * in the list. `padding` is what buys that peek — it is a fraction of the
+   * fitted bounds, so it scales with the viewport instead of assuming one.
+   * `maxZoom` stops a session with a single short step from filling the screen.
+   *
+   * This deliberately overrides a zoom the operator set by hand. An earlier
+   * version preserved it (`setCenter` keeps the current scale) and the
+   * operator asked for the opposite: focusing should frame the row.
+   */
   useEffect(() => {
-    if (focusCenterX === null || focusCenterY === null) {
+    if (focusRowNodeIds === null || focusRowNodeIds.length === 0) {
       return;
     }
-    setCenter(focusCenterX, focusCenterY, { duration: 220 });
-  }, [focusCenterX, focusCenterY, setCenter]);
+    void fitView({ nodes: focusRowNodeIds, padding: 0.28, maxZoom: 1, duration: 220 });
+  }, [focusRowNodeIds, fitView]);
 
   /**
    * What the detail panel expands: the focused step if a step is focused, else

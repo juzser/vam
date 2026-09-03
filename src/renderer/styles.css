@@ -302,7 +302,7 @@ body {
 @keyframes vam-focus-glow {
   0%,
   100% {
-    box-shadow: 0 0 0 0 var(--color-line-loudest);
+    box-shadow: 0 0 0 0 var(--color-running);
   }
   50% {
     box-shadow: 0 0 0 3px transparent;
@@ -345,7 +345,7 @@ body {
      dot that stops pulsing is a dot. A static ring keeps it distinguishable
      from the status dot beside it. */
   .vam-focus-glow {
-    box-shadow: 0 0 0 2px var(--color-line-loudest);
+    box-shadow: 0 0 0 2px var(--color-running);
   }
 }
 

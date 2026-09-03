@@ -122,7 +122,7 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
             data-focus-indicator
             role="img"
             aria-label="focused"
-            className="vam-focus-glow h-[7px] w-[7px] flex-none rounded-full bg-ink-dim"
+            className="vam-focus-glow h-[7px] w-[7px] flex-none rounded-full bg-running"
           />
         )}
       </div>
