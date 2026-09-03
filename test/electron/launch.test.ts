@@ -31,6 +31,7 @@ interface SmokeResult {
   rootHtmlLength: number;
   bridgeKeys: string[];
   bridgeLoadType: string;
+  bridgeUsageGetType: string;
   crossOriginRead: string;
   windowCountAfterOpen: number;
   urlBeforeNavigate: string;
@@ -211,6 +212,10 @@ describe('the Electron shell launches', () => {
       'usage',
     ]);
     expect(smoke().bridgeLoadType).toBe('function');
+    // Not just that `usage` is among the keys above: that it carries a
+    // callable `get`. The key-presence assertion would pass over a `usage`
+    // that was an empty object, which is a bridge the status bar cannot use.
+    expect(smoke().bridgeUsageGetType).toBe('function');
   });
 
   // `subscribe` now joins the bridge over `ipcRenderer.on`, not `invoke`

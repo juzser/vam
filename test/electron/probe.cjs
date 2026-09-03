@@ -64,6 +64,11 @@ async function main() {
     // absent. This is the field that notices.
     bridgeKeys: await run('Object.keys(window.api ?? {}).sort()'),
     bridgeLoadType: await run("typeof (window.api ?? {}).load"),
+    // The same question one level down. `bridgeKeys` proves `usage` is a KEY;
+    // a key whose value is an empty object, or whose `get` never got attached,
+    // would satisfy it while the status bar could never read a number. This is
+    // the field that notices that.
+    bridgeUsageGetType: await run("typeof ((window.api ?? {}).usage ?? {}).get"),
     // AC-20, measured rather than asserted, and measured in the RIGHT
     // process: this file runs in main, so `typeof EventSource` here is main's
     // answer. Plain `node` is a different runtime and would be the wrong

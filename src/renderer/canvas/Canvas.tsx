@@ -212,13 +212,22 @@ function useUsageSnapshot(getUsage: (() => Promise<UsageSnapshot>) | undefined):
       return;
     }
     let cancelled = false;
+    // Which request's answer is still wanted. `cancelled` alone only covered
+    // unmount: two polls in flight both applied their result, so a slow one
+    // answering after a newer one overwrote a fresher reading with an older
+    // one -- reachable whenever background-tab throttling releases a burst of
+    // queued intervals. Only the most recently ISSUED request may write.
+    let issued = 0;
     const poll = () => {
+      issued += 1;
+      const seq = issued;
+      const mine = () => !cancelled && seq === issued;
       getUsage()
         .then((next) => {
-          if (!cancelled) setSnapshot(next);
+          if (mine()) setSnapshot(next);
         })
         .catch(() => {
-          if (!cancelled) setSnapshot(UNKNOWN_SNAPSHOT);
+          if (mine()) setSnapshot(UNKNOWN_SNAPSHOT);
         });
     };
     poll();
