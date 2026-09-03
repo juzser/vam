@@ -1297,6 +1297,18 @@ function CanvasInner({
               edges={NO_EDGES}
               onNodesChange={onNodesChange}
               nodesDraggable={false}
+              // A click lands the cursor on the node you clicked, exactly as
+              // `j`/`k` would have. `nodeIds` is the navigable set, so a click
+              // can only reach somewhere the keyboard could also reach — the
+              // mouse takes a shortcut through the same door, it does not open
+              // a second one. Scenery (fans, empty slots) is not in that set
+              // and is therefore inert, which is right: there is nothing to
+              // focus on a connector.
+              onNodeClick={(_event, node) => {
+                if (nodeIds.includes(node.id)) {
+                  setFocusedId(node.id);
+                }
+              }}
               nodeTypes={NODE_TYPES}
               // 80%, not `fitView`. Fitting picks whatever scale makes every
               // node visible, so the canvas opened at a different zoom for

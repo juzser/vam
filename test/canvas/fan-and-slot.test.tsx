@@ -76,11 +76,11 @@ describe('SessionFanNode', () => {
     expect(pills[0]?.textContent).toBe('7 steps');
   });
 
-  it("positions the pill's box at svg-local left:16px top:135px 44x15", () => {
+  it("centres the pill's 44x15 box on the trunk/spine junction at (45,145)", () => {
     const { container } = render(<SessionFanNode id="fan-4" data={fanData({ totalSteps: 5 })} />);
     const pill = container.querySelector('[data-fan-pill]') as HTMLElement;
-    expect(pill.style.left).toBe('16px');
-    expect(pill.style.top).toBe('135px');
+    expect(pill.style.left).toBe('23px');
+    expect(pill.style.top).toBe('137.5px');
     expect(pill.style.width).toBe('44px');
     expect(pill.style.height).toBe('15px');
   });

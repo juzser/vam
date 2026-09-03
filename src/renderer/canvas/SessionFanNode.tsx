@@ -62,6 +62,20 @@ const NUMBER_COLOR: Readonly<Record<SessionFanStatus, string>> = {
 const EMPTY_BRANCH_COLOR = 'var(--color-line-strong)';
 
 /**
+ * The pill's box, and where it sits — DERIVED, never typed in twice.
+ *
+ * The trunk is `M0 145 H45` and the spine stands at x=45, so the pill belongs
+ * centred on (45, 145): on the line, at the height it leaves the root card.
+ * At the mockup's 58x20 that happened to be `left:16 top:135`, and those two
+ * literals were kept while the box was shrunk twice — so the pill drifted up
+ * and left off the line it labels. Centring it on the junction instead means
+ * a future resize moves the box and nothing else.
+ */
+const PILL = { width: 44, height: 15 } as const;
+const TRUNK_Y = 145;
+const SPINE_X = 45;
+
+/**
  * The mockup fades the one coloured branch to 0.7 exactly as it fades the
  * trunk, and draws the plain ones at full strength — the neutral tone is
  * already quiet enough that fading it would erase it.
@@ -136,10 +150,10 @@ export function SessionFanNode({ data }: SessionFanNodeProps) {
         data-fan-pill
         style={{
           position: 'absolute',
-          left: '16px',
-          top: '135px',
-          width: '44px',
-          height: '15px',
+          left: `${SPINE_X - PILL.width / 2}px`,
+          top: `${TRUNK_Y - PILL.height / 2}px`,
+          width: `${PILL.width}px`,
+          height: `${PILL.height}px`,
           borderRadius: '999px',
           // The mockup's pill is outlined, and the outline is what separates it
           // from the connector it sits on. `--color-waiting-tint` already

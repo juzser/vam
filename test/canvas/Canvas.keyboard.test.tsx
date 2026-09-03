@@ -268,6 +268,59 @@ describe('in and out are labelled differently in the node and in the pane', () =
   });
 });
 
+/**
+ * Clicking a card moves the cursor to it.
+ *
+ * The keyboard was the only way to move focus on the canvas: `j`/`k`, jump
+ * labels, or a sidebar row. A card you can see and point at but cannot select
+ * by pointing is the kind of gap that reads as the app being broken rather
+ * than as a design.
+ */
+describe('a canvas card is clickable, and a click focuses that session', () => {
+  const cards = () => [...document.querySelectorAll('[data-session-card]')];
+
+  it('moves focus to the session whose card was clicked', () => {
+    render(<Canvas model={MODEL} />);
+    const start = focused();
+    // Pick a card that is NOT already focused, or the assertion proves nothing
+    // whether or not the click handler exists at all.
+    const target = cards().find((c) => !c.className.includes('vam-cursor-glow'));
+    expect(target, 'every card was already focused — the fixture cannot test this').toBeDefined();
+    act(() => {
+      (target as HTMLElement).click();
+    });
+    expect(focused()).not.toBe(start);
+  });
+
+  it('leaves exactly one card focused after a click, not two', () => {
+    render(<Canvas model={MODEL} />);
+    const target = cards().find((c) => !c.className.includes('vam-cursor-glow'));
+    act(() => {
+      (target as HTMLElement).click();
+    });
+    expect(document.querySelectorAll('[data-focus-indicator]')).toHaveLength(1);
+  });
+
+  it('keeps the keyboard working after a click, from the clicked card', () => {
+    // A click that set focus through a second, parallel mechanism would leave
+    // j/k navigating from wherever the KEYBOARD thought it was, not from the
+    // card you clicked. Targeted at b1 deliberately: b1 sits directly below a1
+    // in the grid, so `k` from it has a known destination. An earlier draft
+    // clicked "the first unfocused card", which is a2 — in the other column
+    // with nothing above it — so `k` correctly did nothing and the test failed
+    // on its own premise rather than on the code.
+    render(<Canvas model={MODEL} />);
+    const b1 = document.querySelector('[data-session-card="b1"]');
+    expect(b1, 'fixture has no b1 card to click').not.toBeNull();
+    act(() => {
+      (b1 as HTMLElement).click();
+    });
+    expect(focused()).toBe('beta/b1');
+    press('k');
+    expect(focused()).toBe('alpha/a1');
+  });
+});
+
 describe('the focused node says so with an indicator, not a word', () => {
   it('marks exactly one node focused, and moves the mark with j', () => {
     render(<Canvas model={MODEL} />);
