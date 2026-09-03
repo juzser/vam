@@ -157,7 +157,11 @@ describe('toCanvasModel', () => {
   it('keeps a session with no project rather than dropping it', () => {
     // A session that has not created a task yet has no project. Dropping it
     // would hide exactly the session you just opened.
-    const model = toCanvasModel(overview([apiSession('a', { projects: [] })]), new Map(), 'black-smith');
+    const model = toCanvasModel(
+      overview([apiSession('a', { projects: [] })]),
+      new Map(),
+      'black-smith',
+    );
     expect(model.projects.map((p) => p.id)).toEqual([NO_PROJECT_ID]);
     expect(model.projects[0]?.sessions).toHaveLength(1);
   });
@@ -172,12 +176,20 @@ describe('toCanvasModel', () => {
   });
 
   it('carries the live agent count through as ●N', () => {
-    const model = toCanvasModel(overview([apiSession('a', { liveAgentCount: 3 })]), new Map(), 'black-smith');
+    const model = toCanvasModel(
+      overview([apiSession('a', { liveAgentCount: 3 })]),
+      new Map(),
+      'black-smith',
+    );
     expect(model.projects[0]?.sessions[0]?.runningAgents).toBe(3);
   });
 
   it('calls a session with live agents running', () => {
-    const model = toCanvasModel(overview([apiSession('a', { liveAgentCount: 2 })]), new Map(), 'black-smith');
+    const model = toCanvasModel(
+      overview([apiSession('a', { liveAgentCount: 2 })]),
+      new Map(),
+      'black-smith',
+    );
     expect(model.projects[0]?.sessions[0]?.status).toBe('running');
   });
 
@@ -227,7 +239,11 @@ describe('toCanvasModel', () => {
   });
 
   it('calls a session nobody ever spoke to done', () => {
-    const model = toCanvasModel(overview([apiSession('a', { liveAgentCount: 0 })]), new Map(), 'black-smith');
+    const model = toCanvasModel(
+      overview([apiSession('a', { liveAgentCount: 0 })]),
+      new Map(),
+      'black-smith',
+    );
     expect(model.projects[0]?.sessions[0]?.status).toBe('done');
   });
 
