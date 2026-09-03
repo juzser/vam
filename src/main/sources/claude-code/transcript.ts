@@ -1,49 +1,29 @@
 /**
- * Turning the TAIL of one Claude Code transcript into one `Session`.
+ * Turning the TAIL of one Claude Code transcript into the few facts the canvas
+ * draws: the branch, the newest turns, the current tool call, and a fallback
+ * name.
  *
- * Pure: it is handed a string and returns data, so every rule below is
+ * Pure -- it is handed a string and returns data -- so every rule below is
  * testable against a fixture instead of against the operator's home
- * directory. The file walk, the byte budget and the clock all live in
- * `source.ts`.
+ * directory. The file walk and the byte budget live in `source.ts`.
+ *
+ * IT DERIVES NO STATUS. It used to: mtime plus the shape of the last message
+ * gave a plausible-looking `running`/`waiting`, and it was a guess. The CLI
+ * knows which processes are alive, so status comes from `agents.ts` and this
+ * module does not offer a second opinion that could disagree with it.
  *
  * WHY ONLY A TAIL. A transcript is an append-only JSONL log and the operator's
- * largest is 165 MB / 75k lines. Nothing the canvas draws needs the beginning:
- * the working directory, the branch, the title, the newest turns and the
- * current tool call are all re-stated near the end. So this function is
- * written to work on a suffix and to tolerate the consequences of one --
- * a first line cut mid-token, and a window that may open in the middle of a
- * turn whose prompt is off-screen.
+ * largest is 165 MB / 75k lines. Nothing here needs the beginning: the branch,
+ * the title, the newest turns and the current tool call are all re-stated near
+ * the end. So this function is written to work on a byte suffix and to
+ * tolerate the consequences of one -- a first line cut mid-token, and a window
+ * that may open in the middle of a turn whose prompt is off-screen.
  *
- * The type-only import of the renderer's model is deliberate and required:
- * main may name the renderer's types, never load its code.
+ * The type-only import of the renderer's model is required: main may name the
+ * renderer's types, never load its code.
  */
 
-import type { Decision, Session, SessionStatus } from '../../../renderer/domain/model.js';
-
-export type TranscriptContext = {
-  /** Used as the session id when the tail carries none. */
-  readonly fallbackId: string;
-  readonly mtimeMs: number;
-  readonly nowMs: number;
-  readonly runningAgents: number;
-};
-
-export type TranscriptSummary = {
-  /** The real working directory, which groups sessions into a project. */
-  readonly cwd: string | null;
-  readonly session: Session;
-};
-
-/**
- * How recently the file must have been written for `running` to be credible.
- *
- * A transcript records no session end -- a process killed mid-tool-call
- * leaves a file byte-identical to one whose tool is still executing -- so
- * "mid-turn" alone would report a session abandoned three weeks ago as
- * running forever. Five minutes is generous for a long build and short
- * enough that yesterday's corpse is not green.
- */
-const RUNNING_WINDOW_MS = 5 * 60_000;
+import type { Decision } from '../../../renderer/domain/model.js';
 
 /** The canvas shows three; carrying more costs parsing and buys nothing. */
 const MAX_DECISIONS = 3;
@@ -51,13 +31,30 @@ const MAX_DECISIONS = 3;
 /** One line's worth of meaning, per `Session.activity`. */
 const ACTIVITY_LIMIT = 80;
 
+export type TranscriptFacts = {
+  /** The generated session title, used only when the CLI reports no name. */
+  readonly aiTitle: string | null;
+  readonly branch: string | null;
+  /** The newest tool call, for the activity line. */
+  readonly activity: string | null;
+  /** Newest first, at most `MAX_DECISIONS`. */
+  readonly decisions: readonly Decision[];
+};
+
+export const EMPTY_FACTS: TranscriptFacts = {
+  aiTitle: null,
+  branch: null,
+  activity: null,
+  decisions: [],
+};
+
 type Line = Record<string, unknown>;
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 
 function parseLines(tail: string): Line[] {
   const out: Line[] = [];
-  // The first line of a byte-suffix is almost always a fragment. It is not
+  // The first line of a byte suffix is almost always a fragment. It is not
   // special-cased -- it simply fails to parse, like any other damaged line.
   for (const raw of tail.split('\n')) {
     if (raw.trim() === '') continue;
@@ -87,8 +84,8 @@ function messageText(line: Line): string | null {
   return text === '' ? null : text;
 }
 
-/** The newest `{type:'tool_use'}` part of an assistant message, if any. */
-function toolUse(line: Line): { name: string; description: string | null } | null {
+/** The first `{type:'tool_use'}` part of an assistant message, if any. */
+function toolUse(line: Line): string | null {
   const message = line['message'];
   if (typeof message !== 'object' || message === null) return null;
   const content = (message as Line)['content'];
@@ -100,7 +97,8 @@ function toolUse(line: Line): { name: string; description: string | null } | nul
     const input = p['input'];
     const description =
       typeof input === 'object' && input !== null ? str((input as Line)['description']) : null;
-    return { name: str(p['name']) ?? 'tool', description };
+    const name = str(p['name']) ?? 'tool';
+    return `${name}${description === null ? '' : `: ${description}`}`.slice(0, ACTIVITY_LIMIT);
   }
   return null;
 }
@@ -114,37 +112,27 @@ export function compactAge(ms: number): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
-export function summarizeTranscript(
-  tail: string,
-  ctx: TranscriptContext,
-): TranscriptSummary | null {
+export function summarizeTranscript(tail: string, decisionIdPrefix: string): TranscriptFacts {
   const lines = parseLines(tail);
-  if (lines.length === 0) return null;
 
-  let cwd: string | null = null;
   let branch: string | null = null;
-  let sessionId: string | null = null;
   let aiTitle: string | null = null;
-  let customTitle: string | null = null;
   let agentName: string | null = null;
-  let apiErrored = false;
-  let midTurn = false;
   let activity: string | null = null;
 
   // Turns, oldest first. A prompt opens one; every later assistant text
   // overwrites that turn's answer, so what survives is the LAST thing the
   // session said before the operator spoke again -- its final response for
-  // that turn, which is what `Decision.output` is defined to be.
+  // that turn, which is what `Decision.output` is defined to be. vam cannot
+  // tell an interim narration from a final answer inside a turn still in
+  // flight; it shows the newest text and lets `status` carry "still working".
   const turns: { input: string; output: string | null }[] = [];
 
   for (const line of lines) {
-    cwd = str(line['cwd']) ?? cwd;
     branch = str(line['gitBranch']) ?? branch;
-    sessionId = str(line['sessionId']) ?? sessionId;
 
     const type = line['type'];
     if (type === 'ai-title') aiTitle = str(line['aiTitle']) ?? aiTitle;
-    else if (type === 'custom-title') customTitle = str(line['customTitle']) ?? customTitle;
     else if (type === 'agent-name') agentName = str(line['agentName']) ?? agentName;
     else if (type === 'last-prompt') {
       const prompt = str(line['lastPrompt']);
@@ -153,63 +141,20 @@ export function summarizeTranscript(
         turns.push({ input: prompt, output: null });
       }
     } else if (type === 'assistant') {
-      apiErrored = line['isApiErrorMessage'] === true;
       const text = messageText(line);
-      const tool = toolUse(line);
       if (text !== null) {
         const open = turns.at(-1);
         if (open !== undefined) turns[turns.length - 1] = { ...open, output: text };
       }
-      // Whether the session owes itself the next move. A tool call is the
-      // last word only until its result arrives; a plain answer ends the turn.
-      midTurn = tool !== null;
-      activity =
-        tool === null
-          ? null
-          : `${tool.name}${tool.description === null ? '' : `: ${tool.description}`}`.slice(
-              0,
-              ACTIVITY_LIMIT,
-            );
-    } else if (type === 'user') {
-      // A tool result: the ball is back with the model, still inside the turn.
-      if (messageText(line) === null) midTurn = true;
+      activity = toolUse(line) ?? activity;
     }
   }
 
-  const fresh = ctx.nowMs - ctx.mtimeMs <= RUNNING_WINDOW_MS;
-  /**
-   * The status rule, and what it cannot see.
-   *
-   *  - `failed`   the newest assistant line is an API error. Narrow on
-   *               purpose: a failing *command* inside a session is normal
-   *               work, not a failed session.
-   *  - `running`  the transcript stops mid-turn AND was written within
-   *               `RUNNING_WINDOW_MS`.
-   *  - `waiting`  everything else. Correct by the model's own definition --
-   *               "the ball is with you" -- for a finished answer and for a
-   *               turn abandoned mid-tool-call alike: in both, only the
-   *               operator can move next.
-   *  - `done`     NEVER EMITTED. Claude Code writes no end-of-session record,
-   *               so a transcript the operator finished and one they walked
-   *               away from are byte-identical. Rather than infer closure
-   *               from staleness -- which would mark every old session done
-   *               and quietly hide real unfinished work -- this source
-   *               collapses `done` into `waiting` and says so here.
-   *
-   * Failure modes, stated rather than hidden: a session whose tool has run
-   * for longer than the window reads `waiting` while it is genuinely running;
-   * a session interrupted seconds ago reads `running` for five minutes after
-   * it died; and a model that answers and then stops without a tool call is
-   * indistinguishable from one that finished the whole task.
-   */
-  const status: SessionStatus = apiErrored ? 'failed' : midTurn && fresh ? 'running' : 'waiting';
-
-  const id = sessionId ?? ctx.fallbackId;
   const decisions: readonly Decision[] = turns
     .slice(-MAX_DECISIONS)
     .reverse()
     .map((turn, index) => ({
-      id: `${id}:${index}`,
+      id: `${decisionIdPrefix}:${index}`,
       label: agentName ?? 'claude-code',
       input: turn.input,
       output: turn.output,
@@ -219,28 +164,5 @@ export function summarizeTranscript(
       commands: [],
     }));
 
-  return {
-    cwd,
-    session: {
-      id,
-      title: customTitle ?? aiTitle ?? id,
-      icon: null,
-      // The branch is the second label: it is what actually distinguishes two
-      // sessions on the same project at a glance.
-      epic: branch,
-      status,
-      runningAgents: status === 'running' ? ctx.runningAgents : 0,
-      activity: status === 'running' ? activity : null,
-      age: compactAge(ctx.nowMs - ctx.mtimeMs),
-      decisions,
-      source: 'claude-code',
-      // A transcript at the top of a project directory is one a PERSON
-      // opened -- agent traffic lives in `<sessionId>/subagents/`, which this
-      // source never turns into a row. So `human` is a fact here, not a
-      // default, and the sidebar's hide-agent-made filter keeps these visible.
-      // `promptCount` stays null: a tail cannot count a whole session's turns,
-      // and a partial count would read as a true one.
-      origin: { startedBy: 'human', promptCount: null },
-    },
-  };
+  return { aiTitle, branch, activity, decisions };
 }

@@ -12,8 +12,15 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type LiveAgent, listLiveAgents, parseAgentRows } from '../../src/main/sources/claude-code/agents.js';
-import { CLAUDE_CODE_SOURCE, loadClaudeCodeProjects } from '../../src/main/sources/claude-code/source.js';
+import {
+  type LiveAgent,
+  listLiveAgents,
+  parseAgentRows,
+} from '../../src/main/sources/claude-code/agents.js';
+import {
+  CLAUDE_CODE_SOURCE,
+  loadClaudeCodeProjects,
+} from '../../src/main/sources/claude-code/source.js';
 import { compactAge, summarizeTranscript } from '../../src/main/sources/claude-code/transcript.js';
 
 const NOW = Date.parse('2026-09-03T09:05:00.000Z');
@@ -69,7 +76,10 @@ describe('parseAgentRows', () => {
 
   it('maps an interactive session busy/idle onto running/waiting', () => {
     const [busy, idle] = parseAgentRows(
-      JSON.stringify([row({ status: 'busy', sessionId: 'a' }), row({ status: 'idle', sessionId: 'b' })]),
+      JSON.stringify([
+        row({ status: 'busy', sessionId: 'a' }),
+        row({ status: 'idle', sessionId: 'b' }),
+      ]),
     );
     expect(busy?.status).toBe('running');
     expect(idle?.status).toBe('waiting');
@@ -153,7 +163,9 @@ describe('summarizeTranscript', () => {
   });
 
   it('offers the generated title only as a fallback name', () => {
-    expect(summarizeTranscript(jsonl(reply('hi'), { type: 'ai-title', aiTitle: 'Gen' }), 'k').aiTitle).toBe('Gen');
+    expect(
+      summarizeTranscript(jsonl(reply('hi'), { type: 'ai-title', aiTitle: 'Gen' }), 'k').aiTitle,
+    ).toBe('Gen');
     expect(summarizeTranscript(jsonl(reply('hi')), 'k').aiTitle).toBeNull();
   });
 
@@ -204,25 +216,42 @@ describe('loadClaudeCodeProjects', () => {
   });
 
   it('never renders a filesystem path into a project id or name', async () => {
-    const [project] = await loadClaudeCodeProjects(root, [agent({ cwd: '/home/someone/code/alpha' })], NOW);
+    const [project] = await loadClaudeCodeProjects(
+      root,
+      [agent({ cwd: '/home/someone/code/alpha' })],
+      NOW,
+    );
     expect(project?.name).toBe('alpha');
     expect(`${project?.id} ${project?.name}`).not.toContain('/');
   });
 
   it('prefers the name the CLI reports over the transcript-generated title', async () => {
-    writeTranscript('slug-a', 'sess-1', jsonl(reply('hi'), { type: 'ai-title', aiTitle: 'Generated' }));
+    writeTranscript(
+      'slug-a',
+      'sess-1',
+      jsonl(reply('hi'), { type: 'ai-title', aiTitle: 'Generated' }),
+    );
     const [project] = await loadClaudeCodeProjects(root, [agent({ name: 'vam' })], NOW);
     expect(project?.sessions[0]?.title).toBe('vam');
   });
 
   it('falls back to the generated title when the CLI reports no name', async () => {
-    writeTranscript('slug-a', 'sess-1', jsonl(reply('hi'), { type: 'ai-title', aiTitle: 'Generated' }));
+    writeTranscript(
+      'slug-a',
+      'sess-1',
+      jsonl(reply('hi'), { type: 'ai-title', aiTitle: 'Generated' }),
+    );
     const [project] = await loadClaudeCodeProjects(root, [agent({ name: null })], NOW);
     expect(project?.sessions[0]?.title).toBe('Generated');
   });
 
   it('carries the status the CLI gave, never one derived from the file', async () => {
-    writeTranscript('slug-a', 'sess-1', jsonl(userPrompt('go'), reply('answered')), 30 * 86_400_000);
+    writeTranscript(
+      'slug-a',
+      'sess-1',
+      jsonl(userPrompt('go'), reply('answered')),
+      30 * 86_400_000,
+    );
     const [project] = await loadClaudeCodeProjects(root, [agent({ status: 'running' })], NOW);
     expect(project?.sessions[0]?.status).toBe('running');
   });
@@ -256,7 +285,10 @@ describe('loadClaudeCodeProjects', () => {
     writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
     const subs = join(root, 'slug-a', 'sess-1', 'subagents');
     mkdirSync(subs, { recursive: true });
-    for (const [name, ageMs] of [['agent-live', 0], ['agent-old', 86_400_000]] as const) {
+    for (const [name, ageMs] of [
+      ['agent-live', 0],
+      ['agent-old', 86_400_000],
+    ] as const) {
       const f = join(subs, `${name}.jsonl`);
       writeFileSync(f, jsonl(reply('sub')));
       utimesSync(f, (NOW - ageMs) / 1000, (NOW - ageMs) / 1000);
@@ -279,7 +311,8 @@ describe('loadClaudeCodeProjects', () => {
   });
 
   it('reads only a bounded tail, so a huge transcript costs the same as a small one', async () => {
-    const filler = `${JSON.stringify({ type: 'attachment', attachment: 'x'.repeat(4096) })}\n`.repeat(4000);
+    const filler =
+      `${JSON.stringify({ type: 'attachment', attachment: 'x'.repeat(4096) })}\n`.repeat(4000);
     writeTranscript('slug-a', 'sess-1', filler + jsonl(userPrompt('do the thing'), reply('done')));
     const started = Date.now();
     const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
