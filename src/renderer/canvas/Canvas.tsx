@@ -41,6 +41,7 @@ import type { CanvasModel, Decision, Project, SessionStatus, SourceId } from '..
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { StatusFilter } from '../domain/session-filter.js';
+import { isAgentStarted, isUnprompted } from '../domain/session-filter.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
 import { nextNode } from '../keyboard/spatial-nav.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
@@ -57,6 +58,7 @@ import {
   setIcon,
   setPaneWidth,
   setProjectIcon,
+  setSessionFilters,
   setTheme,
   writePrefs,
 } from '../prefs/prefs.js';
@@ -302,10 +304,33 @@ function CanvasInner({
   const entries = useMemo(() => {
     const byText =
       query.trim() === '' ? allEntries : allEntries.filter((e) => matches.includes(e.session.id));
-    return statusFilter === 'all'
-      ? byText
-      : byText.filter((e) => e.session.status === statusFilter);
-  }, [allEntries, matches, query, statusFilter]);
+    const byStatus =
+      statusFilter === 'all' ? byText : byText.filter((e) => e.session.status === statusFilter);
+    // Both origin rules only ever exclude something vam POSITIVELY classified
+    // — see `session-filter.ts`. A session whose timeline has not arrived is
+    // `unknown` and survives both, because hiding what you did not check is
+    // how a filter loses work rather than narrowing it.
+    const byOrigin = prefs.filters.hideAgentStarted
+      ? byStatus.filter((e) => !isAgentStarted(e.session))
+      : byStatus;
+    return prefs.filters.onlyPrompted ? byOrigin.filter((e) => !isUnprompted(e.session)) : byOrigin;
+  }, [allEntries, matches, query, statusFilter, prefs.filters]);
+
+  /**
+   * What each origin rule takes away, counted over the WHOLE workspace and
+   * independently of whether its toggle is on — the popover shows it either
+   * way, so turning one on is a number you saw coming rather than a row that
+   * went missing. The two overlap freely: an agent-made session with no
+   * prompt is counted by both, because each number answers "how many does
+   * THIS rule match", not "how many would I lose next".
+   */
+  const hiddenCounts = useMemo(
+    () => ({
+      agent: allEntries.filter((e) => isAgentStarted(e.session)).length,
+      unprompted: allEntries.filter((e) => isUnprompted(e.session)).length,
+    }),
+    [allEntries],
+  );
 
   /** The pill counts are off the UNFILTERED list — a count that moved when you
       clicked it would be a count of your own click. */
@@ -1136,6 +1161,9 @@ function CanvasInner({
           }}
           filterMenuOpen={filterMenuOpen}
           onFilterMenuToggle={setFilterMenuOpen}
+          originFilters={prefs.filters}
+          onOriginFilters={(next) => savePrefs(setSessionFilters(prefs, next))}
+          hiddenCounts={hiddenCounts}
           onFilterCommit={() => setFiltering(false)}
           onFilterCancel={() => {
             setFiltering(false);

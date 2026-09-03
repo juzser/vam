@@ -24,7 +24,7 @@ import { Filter, GitBranch, Plus, Search, Settings, Sun } from 'lucide-react';
 import { type ReactNode, useEffect, useRef } from 'react';
 import type { Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
-import type { StatusFilter } from '../domain/session-filter.js';
+import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { STATUS_FILTERS } from '../domain/session-filter.js';
 import type { Theme } from '../prefs/prefs.js';
 import { OverlayScroll } from './OverlayScroll.js';
@@ -71,6 +71,12 @@ export type SessionListProps = {
   readonly statusTally: Readonly<Record<StatusFilter, number>>;
   readonly filterMenuOpen: boolean;
   readonly onFilterMenuToggle: (open: boolean) => void;
+  /** The two origin toggles, and what each one costs you. */
+  readonly originFilters: SessionFilters;
+  readonly onOriginFilters: (next: SessionFilters) => void;
+  /** How many sessions each rule matches, over the UNFILTERED workspace. A
+   * toggle that hid things without saying how many would be a disappearance. */
+  readonly hiddenCounts: { readonly agent: number; readonly unprompted: number };
   readonly renamingId: string | null;
   readonly renameDraft: string;
   readonly onRenameChange: (value: string) => void;
@@ -138,6 +144,9 @@ export function SessionList(props: SessionListProps) {
     statusTally,
     filterMenuOpen,
     onFilterMenuToggle,
+    originFilters,
+    onOriginFilters,
+    hiddenCounts,
     renamingId,
     renameDraft,
     onRenameChange,
@@ -321,6 +330,57 @@ export function SessionList(props: SessionListProps) {
                   );
                 })}
               </div>
+
+              <span className="mt-0.5 font-mono text-[9.5px] text-ink-faint uppercase tracking-[0.12em]">
+                Origin
+              </span>
+              {/* Each row says what it takes away. A count is the difference
+                  between narrowing a list and losing something out of it. */}
+              {(
+                [
+                  [
+                    'agent',
+                    'Hide agent/test sessions',
+                    originFilters.hideAgentStarted,
+                    hiddenCounts.agent,
+                  ],
+                  [
+                    'prompted',
+                    'Only ones I have prompted',
+                    originFilters.onlyPrompted,
+                    hiddenCounts.unprompted,
+                  ],
+                ] as const
+              ).map(([key, label, on, hides]) => (
+                <button
+                  key={key}
+                  type="button"
+                  data-origin-toggle={key}
+                  aria-pressed={on}
+                  onClick={() =>
+                    onOriginFilters(
+                      key === 'agent'
+                        ? { ...originFilters, hideAgentStarted: !on }
+                        : { ...originFilters, onlyPrompted: !on },
+                    )
+                  }
+                  className={[
+                    'flex w-full cursor-pointer items-center gap-2 rounded-[7px] border px-2 py-1.5 text-left text-[11px]',
+                    on
+                      ? 'border-line-loud bg-raised text-ink'
+                      : 'border-line text-ink-dim hover:border-line-strong',
+                  ].join(' ')}
+                >
+                  <span
+                    className={[
+                      'h-[7px] w-[7px] flex-none rounded-full',
+                      on ? 'bg-running' : 'bg-line-strong',
+                    ].join(' ')}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{label}</span>
+                  <span className="flex-none font-mono text-[9.5px] text-ink-faint">−{hides}</span>
+                </button>
+              ))}
             </div>
           )}
         </div>
