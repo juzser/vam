@@ -76,13 +76,13 @@ describe('SessionFanNode', () => {
     expect(pills[0]?.textContent).toBe('7 steps');
   });
 
-  it("positions the pill's box at svg-local left:16px top:135px 50x17", () => {
+  it("positions the pill's box at svg-local left:16px top:135px 44x15", () => {
     const { container } = render(<SessionFanNode id="fan-4" data={fanData({ totalSteps: 5 })} />);
     const pill = container.querySelector('[data-fan-pill]') as HTMLElement;
     expect(pill.style.left).toBe('16px');
     expect(pill.style.top).toBe('135px');
-    expect(pill.style.width).toBe('50px');
-    expect(pill.style.height).toBe('17px');
+    expect(pill.style.width).toBe('44px');
+    expect(pill.style.height).toBe('15px');
   });
 
   it('gives the pill two tones: the number carries the status colour, the word `steps` stays fixed', () => {

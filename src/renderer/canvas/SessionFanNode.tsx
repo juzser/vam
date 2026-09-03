@@ -138,8 +138,8 @@ export function SessionFanNode({ data }: SessionFanNodeProps) {
           position: 'absolute',
           left: '16px',
           top: '135px',
-          width: '50px',
-          height: '17px',
+          width: '44px',
+          height: '15px',
           borderRadius: '999px',
           // The mockup's pill is outlined, and the outline is what separates it
           // from the connector it sits on. `--color-waiting-tint` already
@@ -156,12 +156,14 @@ export function SessionFanNode({ data }: SessionFanNodeProps) {
           alignItems: 'center',
           justifyContent: 'center',
           background: 'var(--color-canvas)',
-          // BELOW the mockup's own scale (58x20 at 9.5px), at the operator's
-          // request after seeing it in place: the pill labels the connector, it
-          // is not a thing to read on the way past, and at mockup size it drew
-          // more attention than the line it sits on.
+          // WELL below the mockup's own scale (58x20 at 9.5px), in two steps,
+          // both at the operator's request after seeing it on the canvas: the
+          // pill labels the connector, it is not a thing to read on the way
+          // past, and at mockup size it drew more attention than the line it
+          // sits on. 7.5px is the floor here — the digits stop being legible
+          // below it, and an unreadable count is worse than no pill.
           fontFamily: 'var(--font-mono)',
-          fontSize: '8.5px',
+          fontSize: '7.5px',
         }}
       >
         {/* Two-tone per the mockup: the number carries the session's status
