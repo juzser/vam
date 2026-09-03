@@ -287,33 +287,32 @@ export const PLACEHOLDER_APPROVAL: ApprovalRequest = {
  * The option picker: the mockup's block at `docs/design/mockup/ADE Session
  * Canvas.dc.html` lines 1515-1554 (artboard 1a, dark), value for value.
  *
- * Where each measurement came from, and the token it mapped to:
- *  - header label (dc:1518) mono 9.5px / 0.1em / `#f59e0b` -> `text-waiting`
- *  - header right (dc:1520) mono 9.5px / `#6b6b6b`         -> `text-ink-faint`
- *  - header icon  (dc:1517) 18px, r5, `#3f2f12` on `#f59e0b`
- *                                       -> `bg-waiting-tint` / `text-waiting`
+ * Where each measurement came from, and the token it mapped to. The mockup's
+ * own hex values are deliberately NOT repeated here: `topology-constraints`
+ * §13.1 bans a literal hex anywhere under `src/`, comments included, and it is
+ * right to — a hex written in prose is a second copy of a colour that no
+ * longer changes when the token does. The `dc:` line numbers are the citation;
+ * open the file to see the value.
+ *
+ *  - header label (dc:1518) mono 9.5px / 0.1em      -> `text-waiting`
+ *  - header right (dc:1520) mono 9.5px              -> `text-ink-faint`
+ *  - header icon  (dc:1517) 18px, r5                -> `bg-waiting-tint` on `text-waiting`
  *  - column gap   (dc:1521) 7px
- *  - suggested card (dc:1524) r9, 1px `#f59e0b`, bg `#161208`, 10px 11px
- *                              -> `border-waiting` / `bg-waiting-wash`
- *  - plain card   (dc:1533) 1px `#2e2e2e`, bg `#1e1e1e`
- *                              -> `border-line-loud` / `bg-lifted` (minted)
- *  - badge        (dc:1525) 20x20, r6, `#3f2f12` on `#f59e0b`, mono 10.5px
- *                              -> `bg-waiting-tint` / `text-waiting`
- *  - plain badge  (dc:1534) `#262626` on `#a1a1a1` -> `bg-line-strong` / `text-ink-dim`
- *  - title        (dc:1527) 12px / 500 / `#ededed` / 1.35 -> `text-ink`
- *  - body         (dc:1528) 11px / 1.45 / `#a1a1a1` / pretty -> `text-ink-dim`
- *  - SUGGESTED    (dc:1530) mono 9px / 0.08em / `#f59e0b`, 1px `#3f2f12`,
- *                           r999, 2px 6px -> `text-waiting` / `border-waiting-tint`
- *  - enter glyph  (dc:1537) mono 9.5px / `#6b6b6b` -> `text-ink-faint`
- *  - footer field (dc:1552) h30, r8, 1px `#2e2e2e`, bg `#1e1e1e`, 11.5px,
- *                           `#6b6b6b` -> `border-line-loud` / `bg-lifted`
- *  - footer hint  (dc:1553) mono 9.5px / `#6b6b6b` -> `text-ink-faint`
+ *  - suggested card (dc:1524) r9, 1px, 10px 11px    -> `border-waiting` / `bg-waiting-wash`
+ *  - plain card   (dc:1533) 1px                     -> `border-line-loud` / `bg-lifted` (minted)
+ *  - badge        (dc:1525) 20x20, r6, mono 10.5px  -> `bg-waiting-tint` / `text-waiting`
+ *  - plain badge  (dc:1534)                         -> `bg-line-strong` / `text-ink-dim`
+ *  - title        (dc:1527) 12px / 500 / 1.35       -> `text-ink`
+ *  - body         (dc:1528) 11px / 1.45 / pretty    -> `text-ink-dim`
+ *  - SUGGESTED    (dc:1530) mono 9px / 0.08em, r999, 2px 6px
+ *                                                   -> `text-waiting` / `border-waiting-tint`
+ *  - enter glyph  (dc:1537) mono 9.5px              -> `text-ink-faint`
+ *  - footer field (dc:1552) h30, r8, 1px, 11.5px    -> `border-line-loud` / `bg-lifted`
+ *  - footer hint  (dc:1553) mono 9.5px              -> `text-ink-faint`
  *
- * `#1e1e1e` was the only value with no token to map to, and it is not close to
- * one: `raised` is `#1a1a1a` and `line-strong` is `#262626`. It was minted as
- * `--vam-lifted` with both theme values rather than approximated.
- *
- * ## The two markings, and why they are not one
+ * The plain card's surface was the one value with no token to map to, and it
+ * is not close to one — it sits between `raised` and `line-strong`. It was
+ * minted as `--vam-lifted`, with both theme values, rather than approximated.
  *
  * SUGGESTED is a fact about the agent's opinion. FOCUSED is a fact about where
  * your cursor is. They collide on the first card the moment the picker opens,
