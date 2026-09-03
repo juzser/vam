@@ -159,6 +159,18 @@ export type Session = {
    * places. `null` where the source cannot say.
    */
   readonly age: string | null;
+  /**
+   * The git branch the session's working directory is on, drawn on the left
+   * of the same row `age` right-aligns.
+   *
+   * `null` means the source cannot say -- not "no branch". A source that has
+   * no notion of a working directory at all (black-smith, today) reports
+   * `null` for every session; a source that does but hits an unreadable or
+   * malformed repository for one particular session reports `null` for that
+   * session alone. Neither is "not on a branch", which git itself has no
+   * concept of.
+   */
+  readonly branch: string | null;
   /** Newest first. The canvas shows the first three; §3. */
   readonly decisions: readonly Decision[];
   /**

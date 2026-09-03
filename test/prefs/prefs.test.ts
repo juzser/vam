@@ -46,6 +46,7 @@ function session(id: string, icon: string | null = null) {
     title: id,
     icon,
     epic: null,
+    branch: null,
     status: 'done' as const,
     runningAgents: 0,
     activity: null,

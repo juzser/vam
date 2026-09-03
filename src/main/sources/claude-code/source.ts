@@ -39,6 +39,7 @@ import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { MainSource } from '../source.js';
 import { type LiveAgent, listLiveAgents } from './agents.js';
 import { deliverPromptViaCli, deliverToSession } from './deliver.js';
+import { createBranchLookup } from './repo-branch.js';
 import {
   compactAge,
   EMPTY_FACTS,
@@ -166,6 +167,10 @@ export async function loadClaudeCodeProjects(
   root: string,
   agents: readonly LiveAgent[],
   nowMs: number = Date.now(),
+  // Cached per call to this function -- one `load()` worth of sessions -- per
+  // `repo-branch.ts`'s contract. Injectable so tests never touch a real
+  // directory on the machine running them.
+  branchOf: (cwd: string) => Promise<string | null> = createBranchLookup(),
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
 
@@ -199,6 +204,12 @@ export async function loadClaudeCodeProjects(
       // would read as days old while it is answering right now; it is the
       // fallback only because a session with no transcript has nothing better.
       age: compactAge(nowMs - (read.mtimeMs ?? agent.startedAt ?? nowMs)),
+      // TRANSCRIPT FIRST, `.git/HEAD` AS FALLBACK. `read.facts.branch` is
+      // `gitBranch` as Claude Code itself recorded it per turn -- the branch
+      // the session actually ran on, and it costs nothing extra since the
+      // transcript is already read. `.git/HEAD` only stands in when there is
+      // no transcript yet, or an older one that never wrote `gitBranch`.
+      branch: read.facts.branch ?? (await branchOf(agent.cwd)),
       decisions: read.facts.decisions,
       source: 'claude-code',
       // A session the CLI lists is one a PERSON started -- agent traffic lives

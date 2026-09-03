@@ -27,6 +27,7 @@ function makeSession(over: Partial<Session> = {}): Session {
     title: 'alpha-refactor',
     icon: null,
     epic: null,
+    branch: 'work',
     status: 'running',
     runningAgents: 2,
     activity: 'Editing 3 files',
@@ -128,10 +129,10 @@ describe('SessionList placeholder row', () => {
     const session = makeSession();
     const { container } = mount(entriesOf([session]));
 
-    const worktree = container.querySelector('[data-placeholder="worktree"]');
-    expect(worktree).not.toBeNull();
-    // Still a placeholder, still saying so: no source reports a worktree yet.
-    expect(worktree?.textContent).toBe('—');
+    // The branch is real now where a source knows one; this fixture supplies
+    // it, so the row shows a name rather than the gap it used to show always.
+    const branch = container.querySelector('[data-session-branch]');
+    expect(branch?.textContent).toBe('work');
 
     // The time is real, not a placeholder. `age` is what the source measured.
     const age = container.querySelector('[data-session-age]');
@@ -140,6 +141,25 @@ describe('SessionList placeholder row', () => {
     // The two the operator asked to be rid of.
     expect(container.querySelector('[data-placeholder="step-verb"]')).toBeNull();
     expect(container.querySelector('[data-session-progress]')).toBeNull();
+  });
+
+  it('shows the real branch when the source knows one, with the full name on hover', () => {
+    // The visible text truncates -- branch names here run to
+    // `smith/specs/vam-seam-plan` -- so the tooltip has to carry the whole
+    // thing or the row shows a prefix with no way to read the rest.
+    const { container } = mount(entriesOf([makeSession({ branch: 'smith/specs/vam-seam-plan' })]));
+    const branch = container.querySelector('[data-session-branch]');
+    expect(branch?.textContent).toBe('smith/specs/vam-seam-plan');
+    expect(branch?.getAttribute('title')).toContain('smith/specs/vam-seam-plan');
+  });
+
+  it('shows an em-dash for the branch when the source cannot say, and names the gap', () => {
+    const { container } = mount(entriesOf([makeSession({ branch: null })]));
+    const branch = container.querySelector('[data-session-branch]');
+    expect(branch?.textContent).toBe('—');
+    // Not the old claim, which named black-smith on every row including a
+    // Claude Code one that simply had no transcript yet.
+    expect(branch?.getAttribute('title')).toContain('cannot say');
   });
 
   it('shows an em-dash for the time when the source cannot say, never a zero', () => {
@@ -156,9 +176,8 @@ describe('SessionList placeholder row', () => {
     const waiting = makeSession({ id: 's2', status: 'waiting' });
     const { container } = mount(entriesOf([running, waiting]));
 
-    const worktree = container.querySelector('[data-placeholder="worktree"]');
-    expect(worktree).not.toBeNull();
-    expect(worktree?.getAttribute('title')).toBe('black-smith reports no worktree per session');
+    const branch = container.querySelector('[data-session-branch]');
+    expect(branch).not.toBeNull();
 
     // The pill carried a per-status border colour, so a status-sensitive check:
     // neither of the two statuses may bring it back.
@@ -377,10 +396,11 @@ describe('SessionList placeholder row', () => {
     const title = screen.getByText('alpha-refactor'); // (A)
     const card = title.closest('[data-session-row="s1"]');
     expect(card).not.toBeNull(); // (B)
-    // One placeholder, not the three this row used to carry: `step-verb` and
-    // `step-duration` are gone, and the time in the latter's place is a real
-    // value from the source rather than a named gap.
-    expect(card?.querySelectorAll('[data-placeholder]')).toHaveLength(1); // (C)
+    // No placeholders at all now. `step-verb` and `step-duration` are gone,
+    // and the two that remain -- branch and time -- carry real values from the
+    // source, falling back to a gap that names itself rather than to a
+    // hardcoded dash that named the wrong source.
+    expect(card?.querySelectorAll('[data-placeholder]')).toHaveLength(0); // (C)
     expect(card?.textContent).not.toMatch(/\b\d+\s+steps\b/); // (D)
     expect(card?.textContent).not.toContain('Editing 3 files'); // (E)
   });

@@ -9,6 +9,7 @@ function session(id: string, over: Partial<Session> = {}): Session {
     title: id,
     icon: null,
     epic: null,
+    branch: null,
     status: 'done',
     runningAgents: 0,
     activity: null,

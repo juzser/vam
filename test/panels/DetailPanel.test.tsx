@@ -68,6 +68,7 @@ const SESSION: Session = {
   title: 'Sprint board reorder',
   icon: null,
   epic: 'board',
+  branch: null,
   status: 'waiting',
   runningAgents: 2,
   activity: 'just now',
