@@ -147,7 +147,7 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
   ];
 
   for (const [channel, capability] of gated) {
-    ipcMain.handle(channel, (_event, ...args): IpcResult<void> => {
+    ipcMain.handle(channel, async (_event, ...args): Promise<IpcResult<void>> => {
       const invalid = validate(channel, args);
       if (invalid !== null) {
         return { ok: false, error: invalid };
@@ -161,9 +161,18 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
           ),
         };
       }
-      // Reached only by a source that ADVERTISES the capability, which no
-      // source main serves does yet. The write surface is a later task; until
-      // it exists, saying so is more honest than a silent success.
+      // `recordPrompt` is the one write main can perform today, so it is the
+      // one channel with a surface behind it. Validation and the capability
+      // gate above both ran first: nothing reaches a source's write path
+      // unvalidated, and nothing reaches it that the source did not advertise.
+      if (channel === CHANNELS.recordPrompt && source.recordPrompt !== undefined) {
+        const failure = await source.recordPrompt(args[0] as string, args[1] as string);
+        // The source's own error, forwarded whole. Re-wrapping it here would
+        // cost the `code` a consumer branches on and the message it renders.
+        return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
+      }
+      // Advertised, but this source carries no member for it. Saying so beats
+      // a silent success.
       return {
         ok: false,
         error: refused('not-implemented', `${capability} is advertised but not yet wired in main`),

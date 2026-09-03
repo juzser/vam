@@ -359,10 +359,28 @@ describe('loadClaudeCodeProjects', () => {
     expect(project?.sessions[0]?.origin?.startedBy).toBe('human');
   });
 
+  it('claims delivery, which it can really do, and carries a write surface to prove it', () => {
+    const { capabilities } = CLAUDE_CODE_SOURCE.descriptor;
+    expect(capabilities.deliverPrompt).toBe(true);
+    expect(capabilities.recordPrompt).toBe(true);
+    // The port requires a write surface behind recordPrompt; a true flag with
+    // no member is the one shape that typechecks and cannot work.
+    expect(typeof CLAUDE_CODE_SOURCE.recordPrompt).toBe('function');
+  });
+
+  it('gives no decline for a capability it actually has', () => {
+    const { capabilities, declines } = CLAUDE_CODE_SOURCE.descriptor;
+    for (const [name, able] of Object.entries(capabilities)) {
+      if (!able) continue;
+      expect(
+        declines[name as keyof typeof capabilities],
+        `stale decline for ${name}`,
+      ).toBeUndefined();
+    }
+  });
+
   it('declares no capability it cannot perform, and gives a reason for each', () => {
     const { capabilities, declines, viewerScope } = CLAUDE_CODE_SOURCE.descriptor;
-    expect(capabilities.recordPrompt).toBe(false);
-    expect(capabilities.deliverPrompt).toBe(false);
     expect(capabilities.liveUpdates).toBe(false);
     for (const [name, able] of Object.entries(capabilities)) {
       if (able) continue;

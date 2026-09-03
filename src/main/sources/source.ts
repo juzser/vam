@@ -12,8 +12,21 @@
 
 import type { Project } from '../../renderer/domain/model.js';
 import type { SourceDescriptor } from '../../shared/preload-api.js';
+import type { SourceError } from '../ipc/channels.js';
 
 export type MainSource = {
   readonly descriptor: SourceDescriptor;
   load(): Promise<readonly Project[]>;
+  /**
+   * The write surface, present only on a source that can actually write.
+   * Optional because most cannot: the descriptor's `recordPrompt` capability
+   * is what a consumer reads, and this is what main calls once it is true.
+   *
+   * RESOLVES to a `SourceError`, never throws one. A thrown error reaches the
+   * handler's catch-all and comes back as `unreachable/source-failed`, which
+   * would flatten the one outcome that matters most here -- a refusal naming
+   * the busy session and the command that frees it -- into a generic failure.
+   * Returning the error keeps its `kind`, `code` and message intact.
+   */
+  recordPrompt?(sessionId: string, prompt: string): Promise<SourceError | null>;
 };
