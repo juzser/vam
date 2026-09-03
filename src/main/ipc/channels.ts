@@ -36,6 +36,11 @@ export const CHANNELS = {
   streamSubscribe: 'vam:stream:subscribe',
   /** Preload-internal only, the other half of `streamSubscribe`'s ref count. */
   streamUnsubscribe: 'vam:stream:unsubscribe',
+  /**
+   * The usage channel. Unlike every channel above, it answers with a bare
+   * `UsageSnapshot`, never an `IpcResult` -- see `src/main/usage/ipc.ts`.
+   */
+  usageGet: 'vam:usage:get',
 } as const;
 
 /**

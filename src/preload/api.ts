@@ -21,6 +21,7 @@
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
 import type { Project } from '../renderer/domain/model.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
+import type { UsageSnapshot } from '../shared/usage.js';
 
 /** The slice of `ipcRenderer` used here, so this module is testable without electron. */
 export type InvokerLike = { invoke(channel: string, ...args: unknown[]): Promise<unknown> };
@@ -74,6 +75,25 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
   } satisfies Pick<PreloadSourceApi, 'applyWaivers' | 'transitionLesson'>;
 
   return { ...reads, ...writes, ...governance };
+}
+
+/** The bridge's usage member: one read, no write, no argument. */
+export type UsageApi = {
+  get(): Promise<UsageSnapshot>;
+};
+
+/**
+ * `usage.get` forwards straight to `vam:usage:get` -- no `unwrap`, because
+ * that channel answers with a bare `UsageSnapshot`, never an `IpcResult`
+ * (see `src/main/usage/ipc.ts`). The cast is the one place this file trusts
+ * main: `ipcRenderer.invoke`'s return type is `unknown` by construction, and
+ * `UsageSnapshot`'s own two-branch shape is what a caller can safely narrow
+ * on regardless of what actually arrived.
+ */
+export function createUsageApi(ipc: InvokerLike): UsageApi {
+  return {
+    get: () => ipc.invoke(CHANNELS.usageGet) as Promise<UsageSnapshot>,
+  };
 }
 
 /**

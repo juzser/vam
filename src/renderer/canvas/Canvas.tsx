@@ -35,6 +35,7 @@ import {
 } from '@xyflow/react';
 import { Maximize } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { describeUsage, POLL_INTERVAL_MS, type UsageSnapshot } from '../../shared/usage.js';
 import { SmithApiError } from '../adapter/client.js';
 import { useReviewQueue } from '../adapter/useReviewQueue.js';
 import type { CanvasModel, Decision, Project, SessionStatus, SourceId } from '../domain/model.js';
@@ -46,6 +47,7 @@ import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../key
 import { nextNode } from '../keyboard/spatial-nav.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
 import { IconPicker } from '../panels/IconPicker.js';
+import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
 import { SessionList } from '../panels/SessionList.js';
 import { DEFAULT_PANES, renderedWidth } from '../prefs/panes.js';
@@ -192,6 +194,44 @@ type ProjectIconTarget = {
   readonly name: string;
 };
 
+/** Neither `window.api` nor its `usage` member exists in the browser build. */
+const UNKNOWN_SNAPSHOT: UsageSnapshot = { kind: 'unknown', reason: 'unavailable' };
+
+/**
+ * Polls `window.api.usage.get()` on `POLL_INTERVAL_MS` and clears the
+ * interval on unmount. `getUsage` is `undefined` in the browser build --
+ * there is no main process behind it and its CSP would refuse the call
+ * regardless -- so this hook then makes no request at all and holds the
+ * unknown snapshot forever, rather than trying and failing.
+ */
+function useUsageSnapshot(getUsage: (() => Promise<UsageSnapshot>) | undefined): UsageSnapshot {
+  const [snapshot, setSnapshot] = useState<UsageSnapshot>(UNKNOWN_SNAPSHOT);
+
+  useEffect(() => {
+    if (getUsage === undefined) {
+      return;
+    }
+    let cancelled = false;
+    const poll = () => {
+      getUsage()
+        .then((next) => {
+          if (!cancelled) setSnapshot(next);
+        })
+        .catch(() => {
+          if (!cancelled) setSnapshot(UNKNOWN_SNAPSHOT);
+        });
+    };
+    poll();
+    const id = window.setInterval(poll, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [getUsage]);
+
+  return snapshot;
+}
+
 function CanvasInner({
   model: factoryModel,
   source,
@@ -199,6 +239,11 @@ function CanvasInner({
   model: CanvasModel;
   source: CanvasSource;
 }) {
+  // `window.api` exists only in the Electron shell (App.tsx); in the browser
+  // build `usage` is `undefined` and the hook below never calls anything.
+  const usageSnapshot = useUsageSnapshot(window.api?.usage?.get);
+  const usage = describeUsage(usageSnapshot, new Date());
+
   /**
    * What you arranged, as opposed to what the factory reported. Read once —
    * `localStorage` is synchronous and this is two small maps — and written on
@@ -1626,6 +1671,17 @@ function CanvasInner({
             ? '—'
             : `${focusedEntry.project.name}/${focusedEntry.session.title}`}
         </span>
+
+        <span className="h-3 w-px bg-line" />
+        {usage.reason === null ? (
+          <span data-usage className={usage.highUsage ? 'text-failed' : undefined}>
+            {usage.text}
+          </span>
+        ) : (
+          <Note text={usage.reason}>
+            <span data-usage>{usage.text}</span>
+          </Note>
+        )}
 
         <span className="h-3 w-px bg-line" />
         <span>
