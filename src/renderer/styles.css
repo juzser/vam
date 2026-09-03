@@ -108,7 +108,12 @@
   --vam-panel: #141414;
   --vam-raised: #1a1a1a;
   --vam-header: #111111;
-  --vam-dots: #1c1c1c;
+  /* The canvas grid dot. Measured against its own canvas rather than picked
+     by eye: dark sat at 1.16 contrast while light was already at 1.37, so the
+     two themes did not agree on how present the grid was. Both are ~1.50 now,
+     which is a visible grid that still reads as texture rather than as
+     content. */
+  --vam-dots: #303030;
   --vam-well: #101010;
   --vam-sidebar: #171717;
 
@@ -151,7 +156,7 @@ html.light {
   --vam-panel: #ffffff;
   --vam-raised: #f0f0ee;
   --vam-header: #f4f4f2;
-  --vam-dots: #dedcd7;
+  --vam-dots: #d4d2cb;
   --vam-well: #eeece7;
   --vam-sidebar: #f0eeea;
 
