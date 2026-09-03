@@ -218,9 +218,13 @@ describe('in and out are labelled differently in the node and in the pane', () =
     // Three regions, three scrollers. Before this the pane scrolled as one
     // column, so reading a long answer pushed the request that prompted it off
     // the top — the two things you compare were never on screen together.
-    for (const block of [inBlock, progress, outBlock]) {
+    // `progress` renders no list until it is opened, so its scroller is behind
+    // its own toggle; the other two are always there.
+    for (const block of [inBlock, outBlock]) {
       expect(block?.querySelector('.vam-no-scrollbar')).not.toBeNull();
     }
+    act(() => progress?.querySelector<HTMLButtonElement>('[data-progress-toggle]')?.click());
+    expect(progress?.querySelector('.vam-no-scrollbar')).not.toBeNull();
     // And `out` is the one that grows: context stays short, the answer gets
     // the height.
     expect(outBlock?.className).toContain('flex-1');
@@ -945,9 +949,13 @@ describe('waiting on you', () => {
     expect(focused()).toBe('alpha/urgent');
   });
 
-  it('says so in the detail panel, where the answer gets given', () => {
+  it('says so with the pane\u2019s status dot, not with a line of prose', () => {
     render(<Canvas model={WAITING} />);
-    expect(screen.getByText('session stopped, waiting on you')).toBeTruthy();
+    // The operator asked for the sentence under the tab bar to go. The state
+    // it carried is still on screen: the header dot is amber and breathing,
+    // and nothing else in the pane turns that class on.
+    expect(screen.queryByText('session stopped, waiting on you')).toBeNull();
+    expect(document.querySelector('[data-action-pane] .vam-breathe.bg-waiting')).not.toBeNull();
   });
 
   it('groups it apart in the palette', () => {

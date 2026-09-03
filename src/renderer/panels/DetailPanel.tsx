@@ -171,21 +171,27 @@ function Rule({
 }
 
 /**
- * How tall three lines of `in` are, in pixels.
+ * How tall two lines of `in` are, in pixels.
  *
- * The operator asked for three lines of `in` and three of `progress`, with the
- * height they give up going to `out`. A percentage of the pane would be a
- * promise about the window instead of a promise about the text, so this is
- * derived from the type it caps: three lines of the 12px/1.55 body, plus the
- * box's own 10px padding top and bottom and its 1px border.
+ * The operator asked for two lines of `in`, with the height it gives up going
+ * to `out`. A percentage of the pane would be a promise about the window
+ * instead of a promise about the text, so this is derived from the type it
+ * caps: two lines of the 12px/1.55 body, plus the box's own 10px padding top
+ * and bottom and its 1px border.
  */
 const IN_BODY_PX = 12;
 const IN_LEADING = 1.55;
-const IN_LINES = 3;
+const IN_LINES = 2;
 const IN_MAX_HEIGHT = Math.round(IN_BODY_PX * IN_LEADING * IN_LINES) + 22;
 
-/** How many turns `progress` keeps while collapsed — three truncated lines. */
-const PROGRESS_LINES = 3;
+/**
+ * How many turns `progress` shows once opened — the five most recent.
+ *
+ * Collapsed it shows NONE: it is context, and the operator asked for the whole
+ * region to cost only its own header until it is asked for. Five is what opens
+ * behind the toggle, and the list scrolls past that rather than growing.
+ */
+const PROGRESS_LINES = 5;
 
 /** What `to-canvas.ts` joins each summarised answer with, and splits on here. */
 const ANSWER_SEPARATOR = ' · ';
@@ -299,8 +305,8 @@ export function DetailPanel(props: DetailPanelProps) {
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /**
-   * `progress` is context, not the thing you read, so it opens showing its last
-   * line only — the newest turn — and the rest is one keystroke away.
+   * `progress` is context, not the thing you read, so it opens showing no turn
+   * at all — the newest five are one keystroke away.
    * Component state rather than a prop: nothing outside this pane has an
    * opinion about it, and routing it through the canvas would put a
    * presentation toggle in the model every other pane has to carry.
@@ -365,11 +371,12 @@ export function DetailPanel(props: DetailPanelProps) {
   const needsYou = entry?.session.status === 'waiting';
   const commands = decision?.commands ?? [];
   const total = entry?.session.decisions.length ?? 0;
-  // Oldest first, like the ribbon: `decisions` arrives newest first. Collapsed,
-  // that ordering is what makes "the last line" and "the newest turn" the same
-  // line, so the one kept is taken off the end.
+  // Oldest first, like the ribbon: `decisions` arrives newest first. That
+  // ordering is what makes "the last line" and "the newest turn" the same
+  // line, so the ones kept are taken off the end.
   const orderedTurns = [...(entry?.session.decisions ?? [])].reverse();
-  const visibleTurns = progressOpen ? orderedTurns : orderedTurns.slice(-PROGRESS_LINES);
+  // Nothing while closed — not a shorter list, no list at all.
+  const visibleTurns = progressOpen ? orderedTurns.slice(-PROGRESS_LINES) : [];
   const index = decision === null ? 0 : total - (entry?.session.decisions.indexOf(decision) ?? 0);
   const stepNote =
     decision === null
@@ -477,20 +484,6 @@ export function DetailPanel(props: DetailPanelProps) {
         <TabBar runningAgents={entry?.session.runningAgents ?? 0} />
       </div>
 
-      {/* The waiting banner. Loud on purpose: this panel is where the answer
-          gets given, so the request has to be unmissable at the top of it. The
-          mockup carries the same signal in its amber approval box; vam keeps a
-          banner too, because a session can be waiting with nothing in the
-          review queue and the box would then not be drawn at all. */}
-      {needsYou && (
-        <div className="vam-breathe flex items-center gap-2 border-waiting-tint border-b bg-waiting-wash px-3.5 py-2">
-          <span className="text-[12px] text-waiting">⏸</span>
-          <span className="font-medium text-[11.5px] text-waiting">
-            session stopped, waiting on you
-          </span>
-        </div>
-      )}
-
       {/*
         Three regions, three scrollbars, one decision.
         Before this the whole pane scrolled as one column, so reading a long
@@ -530,17 +523,18 @@ export function DetailPanel(props: DetailPanelProps) {
             {/* The mockup lists the actions inside one step. black-smith's unit
                 is the turn, so this lists the session's turns — the same shape
                 answering the same question, off data that exists. */}
-            {/* Collapsed to its last line. The three regions compete for one
-                pane's height, and a turn list is the least of the three to
-                read — so it keeps the newest line, states how many it is
-                hiding, and opens on a real <button>. A button, not a new key:
-                Enter and Space already activate one, it is reachable by Tab
-                from the composer, and the modal keymap loses nothing to it. */}
+            {/* Closed, this is a rule and a toggle and nothing else. The three
+                regions compete for one pane's height and a turn list is the
+                least of the three to read, so it costs its own header until it
+                is asked for — and then it costs the newest five lines, scrolled.
+                A real <button>, not a new key: Enter and Space already activate
+                one, it is reachable by Tab from the composer, and the modal
+                keymap loses nothing to it. */}
             <section
               data-detail-block="progress"
               className={[
-                'flex flex-none flex-col gap-1.5',
-                progressOpen ? 'max-h-[22%] min-h-[56px]' : '',
+                'flex flex-none flex-col',
+                progressOpen ? 'max-h-[22%] min-h-[56px] gap-1.5' : '',
               ].join(' ')}
             >
               <Rule
@@ -563,18 +557,20 @@ export function DetailPanel(props: DetailPanelProps) {
                 }
                 icon={<GitCommitVertical size={12} strokeWidth={1.7} />}
               />
-              <ul className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-0.5 font-mono text-[10px] text-ink-faint">
-                {visibleTurns.map((d) => (
-                  <li key={d.id} data-progress-turn className="flex items-center gap-2">
-                    <span className={d.output === null ? 'text-waiting' : 'text-ink-ghost'}>
-                      {d.output === null ? '◌' : '✓'}
-                    </span>
-                    <span className={`truncate ${d.id === decision.id ? 'text-ink-dim' : ''}`}>
-                      {d.label}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              {progressOpen && (
+                <ul className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-0.5 font-mono text-[10px] text-ink-faint">
+                  {visibleTurns.map((d) => (
+                    <li key={d.id} data-progress-turn className="flex items-center gap-2">
+                      <span className={d.output === null ? 'text-waiting' : 'text-ink-ghost'}>
+                        {d.output === null ? '◌' : '✓'}
+                      </span>
+                      <span className={`truncate ${d.id === decision.id ? 'text-ink-dim' : ''}`}>
+                        {d.label}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
 
             <section data-detail-block="out" className="flex min-h-0 flex-1 flex-col gap-1.5">
