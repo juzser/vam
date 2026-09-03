@@ -1245,7 +1245,7 @@ function CanvasInner({
           reading the sidebar's. */}
       <footer
         data-status-bar
-        className="flex h-8 flex-none items-center gap-3 border-line border-t bg-sunken px-3 font-mono text-[10px] text-ink-faint"
+        className="flex h-8 flex-none items-center gap-3 border-line border-t bg-sidebar px-3 font-mono text-[10px] text-ink-faint"
       >
         {/* The mode indicator is not in the mockup, and it stays: ADE is a
             mouse-and-keyboard app, vam is a modal one, and a modal app that

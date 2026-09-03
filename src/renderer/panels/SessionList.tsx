@@ -406,17 +406,16 @@ export function SessionList(props: SessionListProps) {
         </button>
       </div>
 
-      <footer className="flex items-center gap-2 border-line border-t px-3 py-2.5">
-        <span className="flex h-[19px] w-[19px] flex-none items-center justify-center rounded-full bg-line-strong font-mono text-[9.5px] text-ink-dim">
+      <footer className="flex items-center gap-[7px] border-line border-t px-[11px] py-2.5">
+        <span className="flex h-[24px] w-[24px] flex-none items-center justify-center rounded-full bg-line-strong font-mono text-[10px] text-ink-dim">
           {workspace.slice(0, 1).toUpperCase()}
         </span>
-        <span className="truncate font-mono text-[11px] text-ink-dim">{workspace}</span>
         <span className="flex-1" />
         <button
           type="button"
           onClick={onSettings}
           aria-label="settings"
-          className="flex cursor-pointer items-center text-ink-faint hover:text-ink"
+          className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
         >
           <Settings size={14} strokeWidth={1.5} />
         </button>
@@ -424,7 +423,7 @@ export function SessionList(props: SessionListProps) {
           type="button"
           onClick={onToggleTheme}
           aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
-          className="flex cursor-pointer items-center text-ink-faint hover:text-ink"
+          className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
         >
           <Sun size={14} strokeWidth={1.5} />
         </button>

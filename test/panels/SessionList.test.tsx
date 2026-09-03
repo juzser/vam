@@ -301,3 +301,23 @@ describe('SessionList placeholder row', () => {
     expect(card?.textContent).not.toContain('Editing 3 files'); // (E)
   });
 });
+
+describe('SessionList footer', () => {
+  it('shows only the workspace avatar, not the workspace name, beside two 26x26 icon buttons', () => {
+    mount(entriesOf([]));
+
+    const settings = screen.getByLabelText('settings');
+    const theme = screen.getByLabelText('switch to light theme');
+    const footer = settings.closest('footer');
+    expect(footer).not.toBeNull();
+
+    // The mockup's footer has an avatar circle and two icon buttons, but no
+    // workspace name text — that text moved out with this change.
+    expect(footer?.textContent).not.toContain('vam');
+
+    for (const button of [settings, theme]) {
+      expect(button.className).toContain('h-[26px]');
+      expect(button.className).toContain('w-[26px]');
+    }
+  });
+});
