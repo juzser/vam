@@ -162,6 +162,13 @@ export type Project = {
    */
   readonly source?: SourceId;
   readonly sessions: readonly Session[];
+  /**
+   * A single glyph the operator picked for this project's heading, or `null`
+   * for none — one level up from `Session.icon`, same idea. Optional (unlike
+   * `Session.icon`, which is required) so every existing `Project` literal
+   * across the fixtures and adapters stays legal without an edit.
+   */
+  readonly icon?: string | null;
 };
 
 /** Everything the canvas draws in one frame. */

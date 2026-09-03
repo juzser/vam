@@ -1,24 +1,23 @@
 /**
  * The left sidebar: every session, grouped by project.
  *
- * The grouping is a per-project CARD, one card per contiguous run of
- * `entries` sharing a project — `entries` arrives project-major from
- * `orderedSessions`, so one pass building `[{ project, items }]` groups is
- * enough, no re-sort. The heading inside each card is a plain `<div>` — not a
- * control, not focusable, never a stop for `j`. Grouping must not cost the one
- * property this list has, which is that `j` pressed N times lands N sessions
- * further down no matter how many project boundaries lie between, so the
- * `data-session-row` and `data-project-heading` markers stay exactly as they
- * were on the flat list — only the DOM nesting around them changed.
+ * FLAT, not a card (operator request, sidebar-flat): a project's heading is a
+ * caption above its own rows, not a bordered box around them — orca's shape.
+ * The grouping is still one pass over `entries`, which arrives project-major
+ * from `orderedSessions`, building `[{ project, items }]` groups — no re-sort.
+ * The heading is a plain `<div>` — not a control, not focusable, never a stop
+ * for `j`. Grouping must not cost the one property this list has, which is
+ * that `j` pressed N times lands N sessions further down no matter how many
+ * project boundaries lie between, so `data-session-row` and
+ * `data-project-heading` stay exactly where they were.
  *
- * The shape is the ADE mockup's: a workspace line, a search box, then cards
- * rather than list rows, with one loud "New session" strip at the bottom —
- * last, after the session rows, not first. A card costs vertical space and
- * buys a second line — what the session is doing, how many steps in, how long
- * ago — which is the line you actually scan a sidebar for.
+ * The shape is the ADE mockup's: a workspace line, a search box, then project
+ * headings with their rows beneath, with one loud "New session" strip at the
+ * bottom — last, after the session rows, not first.
  *
- * The icon PICKER is not here. It is wider than this column, so `Canvas` floats
- * it the way it floats the command palette; the row only draws what came back.
+ * Both PICKERS — the session's and the project's — live in `Canvas`, not
+ * here. They are wider than this column, so `Canvas` floats them the way it
+ * floats the command palette; the row only draws what came back.
  */
 
 import { GitBranch, Plus, Search, Settings, Sun } from 'lucide-react';
@@ -69,6 +68,9 @@ export type SessionListProps = {
    * moment there is a route to create a session in one.
    */
   readonly onAddInProject: (project: Project) => void;
+  /** Opens the icon picker for a project's heading — the mouse route; there
+   * is no keyboard shortcut for it, unlike the session picker's `s`. */
+  readonly onPickIcon: (project: Project) => void;
   readonly onSettings: () => void;
   readonly theme: Theme;
   readonly onToggleTheme: () => void;
@@ -123,6 +125,7 @@ export function SessionList(props: SessionListProps) {
     onClose,
     onAdd,
     onAddInProject,
+    onPickIcon,
     onSettings,
     theme,
     onToggleTheme,
@@ -215,19 +218,20 @@ export function SessionList(props: SessionListProps) {
       <OverlayScroll className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-2.5 py-2.5">
         <ul className="flex flex-col gap-3.5">
           {groups.map((group) => (
-            <li
-              key={group.project.id}
-              // The card is what makes "grouped by project" structural rather
-              // than a caption you have to read. Named so a test can assert
-              // containment — that a row sits INSIDE its own project's card —
-              // instead of asserting on a class list, which would pass on a flat
-              // list that merely looked right.
-              data-project-group={group.project.id}
-              className="flex flex-col gap-[5px] rounded-[11px] border border-line-strong bg-well px-[7px] pt-[9px] pb-2"
-            >
+            <li key={group.project.id} className="flex flex-col gap-[5px]">
               {/* A caption, not a stop. A plain <div>, so nothing can focus it
                 and `j` never lands on a heading. */}
               <div data-project-heading className="flex items-center gap-[7px] px-1 pb-0.5">
+                <button
+                  type="button"
+                  data-project-icon={group.project.id}
+                  onClick={() => onPickIcon(group.project)}
+                  aria-label={`change icon for ${group.project.name}`}
+                  title="change project icon"
+                  className="flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-[11px] leading-none text-ink-faint hover:text-ink-dim"
+                >
+                  {group.project.icon ?? '·'}
+                </button>
                 <span className="truncate font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
                   {group.project.name}
                 </span>

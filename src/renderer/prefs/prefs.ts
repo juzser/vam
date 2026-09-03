@@ -95,9 +95,25 @@ export type Prefs = {
    * that already exempts `theme` (epic.md §4.1).
    */
   readonly panes: { readonly sidebar: number; readonly detail: number };
+  /**
+   * Source id → project id → the emoji you gave that project's heading.
+   *
+   * Same idiom as `icons`, one level up, for the same reason: a project id is
+   * unique only within a source (`to-canvas.ts` builds it from that source's
+   * own `overview.runningSessions`), so a bare `{ projectId: IconChoice }`
+   * would let two sources' projects collide the way session ids already do.
+   * There is no legacy flat shape to migrate here — this key never shipped
+   * before this field existed.
+   */
+  readonly projectIcons: Readonly<Record<string, IconsBySession>>;
 };
 
-export const EMPTY_PREFS: Prefs = { icons: {}, theme: DEFAULT_THEME, panes: DEFAULT_PANES };
+export const EMPTY_PREFS: Prefs = {
+  icons: {},
+  theme: DEFAULT_THEME,
+  panes: DEFAULT_PANES,
+  projectIcons: {},
+};
 
 /**
  * The real `localStorage`, or null if this browser will not give us one.
@@ -142,7 +158,7 @@ export function readPrefs(
   if (typeof parsed !== 'object' || parsed === null) {
     return EMPTY_PREFS;
   }
-  const record = parsed as { icons?: unknown; panes?: unknown };
+  const record = parsed as { icons?: unknown; panes?: unknown; projectIcons?: unknown };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   return {
     icons: pruneIcons(readIcons(record.icons, migrateSource), cutoff),
@@ -153,7 +169,26 @@ export function readPrefs(
     // field (today's shipped payloads have none), a non-object, or garbage
     // numbers left by devtools or an older vam.
     panes: readPanes(record.panes),
+    // Same TTL as session icons, same reasoning: a project's glyph is not
+    // worth remembering forever either.
+    projectIcons: pruneIcons(readProjectIcons(record.projectIcons), cutoff),
   };
+}
+
+/** No legacy flat shape to migrate — unlike `readIcons`, every top-level
+ * entry here is already `projectId → IconChoice`. */
+function readProjectIcons(raw: unknown): Prefs['projectIcons'] {
+  if (typeof raw !== 'object' || raw === null) {
+    return emptyMap<IconsBySession>();
+  }
+  const out = emptyMap<IconsBySession>();
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const nested = readMap(value, readIcon);
+    if (Object.keys(nested).length > 0) {
+      out[key] = nested;
+    }
+  }
+  return out;
 }
 
 function readTheme(raw: unknown): Theme {
@@ -273,6 +308,26 @@ export function setIcon(
   return { ...prefs, icons };
 }
 
+/** An empty icon clears the project's choice, same as `setIcon`. */
+export function setProjectIcon(
+  prefs: Prefs,
+  sourceId: SourceId,
+  projectId: string,
+  icon: string,
+  now: Date,
+): Prefs {
+  const bucket = prefs.projectIcons[sourceId] ?? emptyMap<IconChoice>();
+  const nextBucket =
+    icon === ''
+      ? withoutEntry(bucket, projectId)
+      : withEntry(bucket, projectId, { icon, at: now.toISOString() });
+  const projectIcons =
+    Object.keys(nextBucket).length > 0
+      ? withEntry(prefs.projectIcons, sourceId, nextBucket)
+      : withoutEntry(prefs.projectIcons, sourceId);
+  return { ...prefs, projectIcons };
+}
+
 /**
  * Put the stored icons onto the model, once, before anything reads it.
  *
@@ -280,10 +335,16 @@ export function setIcon(
  * should know that an icon is a local preference rather than something the
  * factory said. Applying it here means one place knows. Looked up per
  * project's `source`, not by session id alone — two sources can name a
- * session the same thing (AC-1).
+ * session the same thing (AC-1). `projectIcons` follows the same rule one
+ * level up, and defaults to `{}` so every existing two-argument call site
+ * (session icons only) still compiles.
  */
-export function applyIcons(model: CanvasModel, icons: Prefs['icons']): CanvasModel {
-  if (Object.keys(icons).length === 0) {
+export function applyIcons(
+  model: CanvasModel,
+  icons: Prefs['icons'],
+  projectIcons: Prefs['projectIcons'] = {},
+): CanvasModel {
+  if (Object.keys(icons).length === 0 && Object.keys(projectIcons).length === 0) {
     return model;
   }
   return {
@@ -295,12 +356,16 @@ export function applyIcons(model: CanvasModel, icons: Prefs['icons']): CanvasMod
         return project;
       }
       const bucket = icons[project.source];
+      const projectBucket = projectIcons[project.source];
+      const projectChoice = projectBucket?.[project.id];
+      const withIcon =
+        projectChoice === undefined ? project : { ...project, icon: projectChoice.icon };
       if (bucket === undefined) {
-        return project;
+        return withIcon;
       }
       return {
-        ...project,
-        sessions: project.sessions.map((session) => {
+        ...withIcon,
+        sessions: withIcon.sessions.map((session) => {
           const choice = bucket[session.id];
           return choice === undefined ? session : { ...session, icon: choice.icon };
         }),
