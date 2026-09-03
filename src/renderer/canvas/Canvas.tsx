@@ -32,6 +32,7 @@ import {
   ReactFlowProvider,
   useNodesState,
   useReactFlow,
+  useStore,
 } from '@xyflow/react';
 import { Bell, Maximize } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -96,6 +97,14 @@ const NO_EDGES: Edge[] = [];
 
 /** Home-row first: the labels you can hit without looking. */
 const JUMP_KEYS = 'asdfghjkl;qwertyuiop';
+
+/**
+ * Where the canvas opens: 80%, centred on the origin until focus moves it.
+ *
+ * `fitView` used to decide this, which meant the opening zoom depended on how
+ * many sessions the workspace happened to have.
+ */
+const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 0.8 } as const;
 
 function jumpLabels(ids: readonly string[]): Map<string, string> {
   const labels = new Map<string, string>();
@@ -237,7 +246,7 @@ function CanvasInner({
   const [writing, setWriting] = useState(false);
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
-  const { getNodes, zoomIn, zoomOut, fitView, getZoom } = useReactFlow();
+  const { getNodes, zoomIn, zoomOut, fitView, setCenter } = useReactFlow();
 
   /** Which session the focused node belongs to — the id all three panes share. */
   const focusedSpec = useMemo(
@@ -245,6 +254,34 @@ function CanvasInner({
     [layout, focusedId],
   );
   const focusedEntry: SessionEntry | null = focusedSpec?.entry ?? null;
+
+  /**
+   * The viewport follows focus.
+   *
+   * `j`/`k` can walk to a session that is off screen, and before this the
+   * canvas simply did not move — the sidebar and the detail panel updated
+   * while the cards stayed put, so the one pane that shows a session's SHAPE
+   * was the one pane that did not follow you. Centring on the focused node
+   * makes the three views agree about where you are, which is the same
+   * "one focus, three views" rule this file opens with.
+   *
+   * The zoom argument is deliberately omitted: `setCenter` keeps the current
+   * scale, so following focus never overrides a zoom the operator chose.
+   */
+  // Lifted out of the effect so the dependency array names exactly what the
+  // effect reads. Depending on `focusedSpec` itself would re-centre on every
+  // layout rebuild — the object is rebuilt each render — and fight a manual pan.
+  const focusCenterX =
+    focusedSpec === null ? null : focusedSpec.position.x + focusedSpec.size.width / 2;
+  const focusCenterY =
+    focusedSpec === null ? null : focusedSpec.position.y + focusedSpec.size.height / 2;
+
+  useEffect(() => {
+    if (focusCenterX === null || focusCenterY === null) {
+      return;
+    }
+    setCenter(focusCenterX, focusCenterY, { duration: 220 });
+  }, [focusCenterX, focusCenterY, setCenter]);
 
   /**
    * What the detail panel expands: the focused step if a step is focused, else
@@ -933,7 +970,19 @@ function CanvasInner({
     savePrefs,
   ]);
 
-  const zoomPct = Math.round(getZoom() * 100);
+  /**
+   * Subscribed, not read.
+   *
+   * This was `Math.round(getZoom() * 100)` computed during render. `getZoom()`
+   * is an imperative call into ReactFlow's store: it returns the right number
+   * at the moment it runs, and it does not make the component re-render when
+   * the viewport changes. So the readout only refreshed when something ELSE
+   * caused a render, and scrolling to zoom left it showing a stale figure.
+   * `useStore` subscribes to `transform[2]` — the viewport's scale — so the
+   * number tracks the canvas.
+   */
+  const zoom = useStore((state) => state.transform[2]);
+  const zoomPct = Math.round(zoom * 100);
 
   return (
     <div className="relative flex h-full flex-col">
@@ -1093,7 +1142,15 @@ function CanvasInner({
               onNodesChange={onNodesChange}
               nodesDraggable={false}
               nodeTypes={NODE_TYPES}
-              fitView
+              // 80%, not `fitView`. Fitting picks whatever scale makes every
+              // node visible, so the canvas opened at a different zoom for
+              // every workspace size and the cards were unreadable in a busy
+              // one. A fixed default means the first frame always looks the
+              // same, and the "move to the focused session" effect below is
+              // what keeps you from having to hunt for where you are.
+              defaultViewport={DEFAULT_VIEWPORT}
+              minZoom={0.2}
+              maxZoom={2}
               proOptions={{ hideAttribution: true }}
             >
               <Background color="var(--color-dots)" gap={24} size={1} />

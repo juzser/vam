@@ -109,9 +109,21 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
         </span>
         <span className="flex-1" />
         {focused && (
-          <span className="flex-none rounded-[4px] border border-line-loud px-1 py-px font-mono text-[8.5px] tracking-[0.08em] text-ink-dim">
-            FOCUSED
-          </span>
+          /* An indicator, not a label — it gives the title back the width the
+             FOCUSED tag was using.
+
+             `role="img"` is load-bearing, not decoration: a bare <span> has no
+             implicit role, and `aria-label` on a roleless element is IGNORED,
+             so the first version of this silently dropped the word for screen
+             readers while looking correct. biome's
+             `useAriaPropsSupportedByRole` caught it. With the role, the label
+             is announced and the word survives the change. */
+          <span
+            data-focus-indicator
+            role="img"
+            aria-label="focused"
+            className="vam-focus-glow h-[7px] w-[7px] flex-none rounded-full bg-ink-dim"
+          />
         )}
       </div>
 
