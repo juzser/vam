@@ -38,6 +38,7 @@ import type { Project, Session } from '../../../renderer/domain/model.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { MainSource } from '../source.js';
 import { type LiveAgent, listLiveAgents } from './agents.js';
+import { deliverPromptViaCli, deliverToSession } from './deliver.js';
 import {
   compactAge,
   EMPTY_FACTS,
@@ -223,20 +224,7 @@ export async function loadClaudeCodeProjects(
   }));
 }
 
-/**
- * Why each `false` is false.
- *
- * `deliverPrompt` is the one to read carefully. `claude --resume <id> -p
- * "<prompt>" --output-format json` DOES deliver into an existing session and
- * returns a machine-readable result -- verified against the real CLI, not
- * read in a doc. So the decline says NOT YET, never "impossible": a future
- * reader must not conclude from this descriptor that the channel does not
- * exist. It refuses only while the target session is busy, and that refusal
- * arrives as the CLI's own message, which is exactly a `SourceError` of kind
- * `refused`. `--fork-session` would make it succeed and must not be used: it
- * would answer the operator's prompt in a copy while the real session carries
- * on elsewhere, which is worse than refusing.
- */
+/** Why each remaining `false` is false. */
 const NOT_YET_WRITTEN =
   'this round reads only; the CLI does support resuming a session with a prompt, so this is unimplemented rather than impossible';
 const NOT_RECORDED = 'a Claude Code transcript records nothing that answers this';
@@ -247,8 +235,15 @@ const DESCRIPTOR: SourceDescriptor = {
   label: 'Claude Code (local sessions, read-only)',
   capabilities: {
     liveUpdates: false,
-    recordPrompt: false,
-    deliverPrompt: false,
+    // Both true, and they mean different things. `deliverPrompt` is the real
+    // claim: `claude --resume <id> -p` appends the turn to the running
+    // session's own history, so what vam sends is ANSWERED, not filed. The
+    // port makes `recordPrompt` the only required member of a write surface,
+    // so delivering is only reachable through it -- which is why it is true
+    // as well. See the note on `recordPrompt` below: for this source the two
+    // are one operation, and the weaker word is the one that is misleading.
+    recordPrompt: true,
+    deliverPrompt: true,
     promptAttachments: false,
     slashCommands: false,
     renameSession: false,
@@ -264,8 +259,8 @@ const DESCRIPTOR: SourceDescriptor = {
     // without one gives the canvas a badge no event ever arrives at.
     liveUpdates:
       'this source re-reads on demand; nothing watches the session list or the transcripts yet',
-    recordPrompt: NOT_YET_WRITTEN,
-    deliverPrompt: NOT_YET_WRITTEN,
+    // No entry for recordPrompt or deliverPrompt: a decline is written only
+    // for a capability that is false, and both are now true.
     promptAttachments: NOT_YET_WRITTEN,
     slashCommands: NOT_YET_WRITTEN,
     renameSession: NO_SURFACE,
@@ -292,4 +287,13 @@ const DESCRIPTOR: SourceDescriptor = {
 export const CLAUDE_CODE_SOURCE: MainSource = {
   descriptor: DESCRIPTOR,
   load: async () => loadClaudeCodeProjects(defaultTranscriptRoot(), await listLiveAgents()),
+  /**
+   * The live list is re-asked here rather than cached from `load()`: it is
+   * where the session's working directory comes from, and a canvas drawn
+   * minutes ago may name a session that has since exited. Asking again costs
+   * one subprocess and is the difference between refusing a dead session and
+   * delivering into the wrong directory.
+   */
+  recordPrompt: async (sessionId, prompt) =>
+    deliverToSession(await listLiveAgents(), sessionId, prompt, deliverPromptViaCli),
 };
