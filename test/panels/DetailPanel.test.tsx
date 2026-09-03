@@ -843,6 +843,45 @@ describe('the picker keeps the promises it prints, and says it is a placeholder'
   });
 });
 
+describe('the picker replaces the prompt box while it is asking', () => {
+  const box = () => q<HTMLElement>('[data-approval]');
+  const promptBox = () => q<HTMLElement>('[data-prompt-box]');
+
+  it('draws no prompt box under the picker, and the way to one is not inert', () => {
+    const composeCalls: string[] = [];
+    draw({ onCompose: () => composeCalls.push('compose') });
+    // The picker answers the question by itself, and it carries its own way
+    // into free text, so a second empty box under it is height with no job.
+    expect(box()).not.toBeNull();
+    expect(promptBox()).toBeNull();
+    // "…or type your own instruction" asks for the box rather than handing
+    // focus to something that is not on screen.
+    act(() => q<HTMLButtonElement>('[data-approval-own]')?.click());
+    expect(composeCalls).toHaveLength(1);
+    cleanup();
+    // And the pane draws it the moment it owns the keyboard, which is what
+    // that call turns on.
+    draw({ composing: true });
+    expect(box()).not.toBeNull();
+    expect(promptBox()).not.toBeNull();
+  });
+
+  it('keeps the box whenever it holds text, so nothing is ever typed into a hidden field', () => {
+    // Picking an option writes its title into the draft. If the box could hide
+    // over a non-empty draft, a pick — or an Escape after one — would leave
+    // the operator's own words on screen nowhere and still recordable.
+    draw({ draft: 'half a sentence' });
+    expect(box()).not.toBeNull();
+    expect(promptBox()).not.toBeNull();
+  });
+
+  it('leaves the box alone when nothing is asking', () => {
+    draw({ entry: { project: PROJECT, session: { ...SESSION, status: 'running' } } });
+    expect(box()).toBeNull();
+    expect(promptBox()).not.toBeNull();
+  });
+});
+
 describe('the composer says what the session’s source actually does', () => {
   const claims = () => {
     const button = q<HTMLButtonElement>('[data-prompt-record]');

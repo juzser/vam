@@ -989,6 +989,23 @@ export function DetailPanel(props: DetailPanelProps) {
   }, [focusKey, output]);
 
   const needsYou = entry?.session.status === 'waiting';
+  /**
+   * While the picker is asking, the prompt box is not drawn.
+   *
+   * The picker already answers the question, and it carries its own way into
+   * free text — "…or type your own instruction" — so a second, empty box
+   * underneath is height that does the picker's job worse. It is REVEALED, not
+   * removed: that button and `i` both turn `composing` on, and the box is
+   * drawn whenever it holds the keyboard, so the control still does something
+   * you can see rather than handing focus to an element that is not there.
+   *
+   * `draft !== ''` is the other half, and it is the important half. Picking an
+   * option WRITES the option's line into the draft. A box that could hide over
+   * a non-empty draft would put the operator's own words nowhere on screen and
+   * still record them — including after the Esc that hands the keyboard back
+   * to the sidebar. So the box hides only when it is empty and holds nothing.
+   */
+  const showPromptBox = !needsYou || composing || draft !== '';
   const commands = decision?.commands ?? [];
   const total = entry?.session.decisions.length ?? 0;
   // Oldest first: `decisions` arrives newest first. That
@@ -1323,151 +1340,157 @@ export function DetailPanel(props: DetailPanelProps) {
           />
         )}
 
-        <div
-          className={[
-            'flex flex-col gap-2.5 rounded-[10px] border bg-panel px-3 py-2.5',
-            active && actionIndex === commands.length ? 'border-waiting' : 'border-line-loud',
-          ].join(' ')}
-        >
-          {/* Multiline, because a prompt is prose and a one-line slot hides
+        {showPromptBox && (
+          <div
+            data-prompt-box
+            className={[
+              'flex flex-col gap-2.5 rounded-[10px] border bg-panel px-3 py-2.5',
+              active && actionIndex === commands.length ? 'border-waiting' : 'border-line-loud',
+            ].join(' ')}
+          >
+            {/* Multiline, because a prompt is prose and a one-line slot hides
               everything but the tail of it. The mockup's own composer is a
               104px-tall block of 12.5px/1.55 text, not an input. */}
-          <div className="flex items-start gap-2">
-            <textarea
-              ref={inputRef}
-              rows={2}
-              value={draft}
-              readOnly={!composing}
-              onFocus={onCompose}
-              onChange={(event) => onDraftChange(event.target.value)}
-              onKeyDown={(event) => {
-                // The window listener ignores keys typed in a textarea, so this
-                // box binds the ones it needs itself. Shift+Enter is left alone
-                // — it is the newline the box became multiline to allow.
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  onSubmit();
-                } else if (event.key === 'Escape') {
-                  event.preventDefault();
-                  // BLUR, not just `composing = false`. Clearing the flag only
-                  // makes this box read-only; while it still holds DOM focus
-                  // the window key listener returns early on every keystroke
-                  // (it ignores keys aimed at an INPUT or a TEXTAREA), so
-                  // `j`/`k` land here and vanish and the sidebar is
-                  // unreachable without a mouse. Releasing focus is what hands
-                  // the keyboard back.
-                  inputRef.current?.blur();
-                  onStopComposing();
+            <div className="flex items-start gap-2">
+              <textarea
+                ref={inputRef}
+                rows={2}
+                value={draft}
+                readOnly={!composing}
+                onFocus={onCompose}
+                onChange={(event) => onDraftChange(event.target.value)}
+                onKeyDown={(event) => {
+                  // The window listener ignores keys typed in a textarea, so this
+                  // box binds the ones it needs itself. Shift+Enter is left alone
+                  // — it is the newline the box became multiline to allow.
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    onSubmit();
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    // BLUR, not just `composing = false`. Clearing the flag only
+                    // makes this box read-only; while it still holds DOM focus
+                    // the window key listener returns early on every keystroke
+                    // (it ignores keys aimed at an INPUT or a TEXTAREA), so
+                    // `j`/`k` land here and vanish and the sidebar is
+                    // unreachable without a mouse. Releasing focus is what hands
+                    // the keyboard back.
+                    inputRef.current?.blur();
+                    onStopComposing();
+                  }
+                }}
+                placeholder={
+                  entry === null
+                    ? 'Pick a session first'
+                    : 'Reply to agent, answer with a number, or paste a plan…'
                 }
-              }}
-              placeholder={
-                entry === null
-                  ? 'Pick a session first'
-                  : 'Reply to agent, answer with a number, or paste a plan…'
-              }
-              className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-[12.5px] text-ink leading-[1.55] outline-none placeholder:text-ink-faint"
-              aria-label="prompt to session"
-            />
-          </div>
+                className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-[12.5px] text-ink leading-[1.55] outline-none placeholder:text-ink-faint"
+                aria-label="prompt to session"
+              />
+            </div>
 
-          {attachError !== null && (
-            <p data-attach-error className="text-[10.5px] text-waiting leading-[1.45]">
-              {attachError}
-            </p>
-          )}
+            {attachError !== null && (
+              <p data-attach-error className="text-[10.5px] text-waiting leading-[1.45]">
+                {attachError}
+              </p>
+            )}
 
-          <div className="flex items-center gap-2">
-            {/* The attachment button, doing the only honest thing there is to
+            <div className="flex items-center gap-2">
+              {/* The attachment button, doing the only honest thing there is to
                 do here: vam's write is a string, so the file is read in the
                 renderer and its text becomes part of the prompt that gets
                 recorded. Nothing is uploaded, and nothing on screen says it
                 is. See `attachIntoDraft` for the limit and the refusals. */}
-            <input
-              ref={fileRef}
-              type="file"
-              tabIndex={-1}
-              aria-hidden="true"
-              onChange={(event) => void takeFile(event.currentTarget)}
-              className="hidden"
-            />
-            <Note text="reads the file here and puts its text into the prompt text that gets recorded — vam uploads nothing">
-              <button
-                type="button"
-                data-attach
-                aria-label="attach a text file to this prompt"
-                onClick={() => fileRef.current?.click()}
-                className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border border-line-strong text-ink-dim hover:bg-raised hover:text-ink"
-              >
-                <Paperclip size={12} strokeWidth={1.7} />
-              </button>
-            </Note>
-            {attachedName !== null && (
-              <span
-                data-attach-chip
-                className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[10px] text-ink-dim"
-              >
-                <span className="truncate">{attachedName}</span>
+              <input
+                ref={fileRef}
+                type="file"
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={(event) => void takeFile(event.currentTarget)}
+                className="hidden"
+              />
+              <Note text="reads the file here and puts its text into the prompt text that gets recorded — vam uploads nothing">
                 <button
                   type="button"
-                  data-attach-remove
-                  aria-label={`remove ${attachedName}`}
-                  onClick={() => {
-                    setAttachError(null);
-                    onDraftChange(detachFromDraft(draft));
-                  }}
-                  className="flex flex-none cursor-pointer items-center text-ink-faint hover:text-ink"
+                  data-attach
+                  aria-label="attach a text file to this prompt"
+                  onClick={() => fileRef.current?.click()}
+                  className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border border-line-strong text-ink-dim hover:bg-raised hover:text-ink"
                 >
-                  <X size={11} strokeWidth={2} />
+                  <Paperclip size={12} strokeWidth={1.7} />
                 </button>
-              </span>
-            )}
-            {/* The model field. Not a menu of names vam made up — vam has no
+              </Note>
+              {attachedName !== null && (
+                <span
+                  data-attach-chip
+                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[10px] text-ink-dim"
+                >
+                  <span className="truncate">{attachedName}</span>
+                  <button
+                    type="button"
+                    data-attach-remove
+                    aria-label={`remove ${attachedName}`}
+                    onClick={() => {
+                      setAttachError(null);
+                      onDraftChange(detachFromDraft(draft));
+                    }}
+                    className="flex flex-none cursor-pointer items-center text-ink-faint hover:text-ink"
+                  >
+                    <X size={11} strokeWidth={2} />
+                  </button>
+                </span>
+              )}
+              {/* The model field. Not a menu of names vam made up — vam has no
                 model API and black-smith does the choosing — but not an inert
                 chip either: what is typed here becomes the prompt's first
                 line, in the recorded text a person reads. */}
-            <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
-              <input
-                data-model-request
-                value={readModelRequest(draft)}
-                onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
-                placeholder="model"
-                aria-label="model requested in this prompt"
-                className="h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[10px] text-ink-dim outline-none placeholder:text-ink-ghost focus:text-ink"
-              />
-            </Note>
-            {/* The way OUT, shown only while you are in — the moment it is the
+              <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
+                <input
+                  data-model-request
+                  value={readModelRequest(draft)}
+                  onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
+                  placeholder="model"
+                  aria-label="model requested in this prompt"
+                  className="h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[10px] text-ink-dim outline-none placeholder:text-ink-ghost focus:text-ink"
+                />
+              </Note>
+              {/* The way OUT, shown only while you are in — the moment it is the
                 thing you need, and no width the rest of the time. It replaces
                 the `i` / `I` notes the operator asked to lose: those advertised
                 the way in, which you have already found by the time you can
                 read them. */}
-            {composing && (
-              <span
-                data-prompt-escape
-                className="flex-none whitespace-nowrap font-mono text-[9.5px] text-ink-faint"
-              >
-                Esc → sidebar
-              </span>
-            )}
-            <span className="min-w-0 flex-1" />
-            {/* The mockup draws a send arrow here. This one says RECORD, in
+              {composing && (
+                <span
+                  data-prompt-escape
+                  className="flex-none whitespace-nowrap font-mono text-[9.5px] text-ink-faint"
+                >
+                  Esc → sidebar
+                </span>
+              )}
+              <span className="min-w-0 flex-1" />
+              {/* The mockup draws a send arrow here. This one says RECORD, in
                 the label and in the tooltip, because black-smith has no channel
                 into a running agent session — the click appends the prompt to
                 the session's log and nothing reads it back out. A button that
                 implied delivery would leave you waiting for an answer nobody is
                 coming to give. */}
-            <button
-              type="button"
-              data-prompt-record
-              onClick={onSubmit}
-              aria-label={composerClaim.label}
-              title={composerClaim.title}
-              className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-[7px] bg-line-strong text-ink hover:bg-line-loud"
-            >
-              <ArrowUp size={14} strokeWidth={1.7} />
-            </button>
+              <button
+                type="button"
+                data-prompt-record
+                onClick={onSubmit}
+                aria-label={composerClaim.label}
+                title={composerClaim.title}
+                className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-[7px] bg-line-strong text-ink hover:bg-line-loud"
+              >
+                <ArrowUp size={14} strokeWidth={1.7} />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
+        {/* The mode row stays while the box is hidden: it is a setting the
+            prompt carries, not part of the box, and it is where the operator
+            sets it before asking for one. */}
         {/* The mockup's mode row, in place of the slash tags that stood here.
             The pills are real buttons and the selection is real: it is written
             into the prompt as a leading `mode:` line, the same way the model
