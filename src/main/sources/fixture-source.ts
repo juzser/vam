@@ -21,8 +21,8 @@ const NOT_YET = 'the desktop shell reads only; no write path has been wired to t
 const NO_BACKEND = 'the bundled sample has no backend to ask';
 
 const DESCRIPTOR: SourceDescriptor = {
-  id: 'black-smith',
-  label: 'sample (bundled)',
+  id: 'bundled-sample',
+  label: 'sample (bundled) -- fictional data, not a live CLI',
   capabilities: {
     liveUpdates: false,
     recordPrompt: false,
@@ -61,7 +61,7 @@ const PROJECTS: readonly Project[] = [
   {
     id: 'vam',
     name: 'vam',
-    source: 'black-smith',
+    source: 'bundled-sample',
     sessions: [
       {
         id: 'vam-electron-shell/task-4',
