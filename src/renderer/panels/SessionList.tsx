@@ -543,11 +543,15 @@ export function SessionList(props: SessionListProps) {
                             <span className="flex min-w-0 flex-1 items-center gap-1">
                               <GitBranch size={10} strokeWidth={1.6} />
                               <span
-                                data-placeholder="worktree"
-                                title="black-smith reports no worktree per session"
+                                data-session-branch
+                                title={
+                                  session.branch === null
+                                    ? 'this source cannot say which branch the session is on'
+                                    : session.branch
+                                }
                                 className="truncate"
                               >
-                                —
+                                {session.branch ?? '—'}
                               </span>
                             </span>
                             <span

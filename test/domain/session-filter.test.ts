@@ -17,6 +17,7 @@ function session(origin?: SessionOrigin): Session {
     title: 's',
     icon: null,
     epic: null,
+    branch: null,
     status: 'done',
     runningAgents: 0,
     activity: null,

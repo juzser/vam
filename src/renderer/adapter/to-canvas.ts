@@ -268,6 +268,11 @@ function toSession(
     // invented. The picker still opens; nothing saves it.
     icon: null,
     epic: epicOf(decisions),
+    // black-smith's API reports no branch or worktree per session -- there is
+    // no field on `ApiRunningSession` to derive one from. `null` is the honest
+    // answer, and the sidebar renders it as a gap that names itself rather
+    // than as an empty string pretending to be a branch name.
+    branch: null,
     status: statusOf(api, decisions),
     runningAgents: api.liveAgentCount,
     activity: activityOf(api),

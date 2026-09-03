@@ -72,6 +72,7 @@ const PROJECTS: readonly Project[] = [
         runningAgents: 0,
         activity: null,
         age: '2m',
+        branch: null,
         decisions: [
           {
             id: 'd-1',
@@ -91,6 +92,7 @@ const PROJECTS: readonly Project[] = [
         runningAgents: 1,
         activity: 'waiting on task 4',
         age: null,
+        branch: null,
         decisions: [
           { id: 'd-2', label: 'gate', input: 'is the shell live yet?', output: null, commands: [] },
         ],

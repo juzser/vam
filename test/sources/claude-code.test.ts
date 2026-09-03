@@ -244,6 +244,36 @@ describe('loadClaudeCodeProjects', () => {
     });
   });
 
+  it("takes the branch from the transcript, not from the directory's git HEAD", async () => {
+    // Precedence, pinned. `gitBranch` is what Claude Code itself recorded on
+    // the turn -- the branch the session actually ran on -- while `.git/HEAD`
+    // is whatever the directory happens to be on NOW, which drifts the moment
+    // anyone checks something else out under a long-running session. The two
+    // are made to disagree here so that whichever wins is the one that was
+    // chosen, not the one that happened to be non-null.
+    writeTranscript('slug-a', 'a', jsonl(reply('hi')));
+    const [project] = await loadClaudeCodeProjects(
+      root,
+      [agent({ key: 'a#1', sessionId: 'a' })],
+      NOW,
+      async () => 'checked-out-since',
+    );
+    expect(project?.sessions[0]?.branch).toBe('main');
+  });
+
+  it("falls back to the directory's git HEAD when the transcript has no branch", async () => {
+    // A session with no transcript yet, or one written before Claude Code
+    // recorded `gitBranch`. The reader is the only thing that can answer, and
+    // showing nothing there would be a gap vam could have filled.
+    const [project] = await loadClaudeCodeProjects(
+      root,
+      [agent({ key: 'b#2', sessionId: 'no-transcript' })],
+      NOW,
+      async () => 'from-git-head',
+    );
+    expect(project?.sessions[0]?.branch).toBe('from-git-head');
+  });
+
   it('never renders a filesystem path into a project id or name', async () => {
     const [project] = await loadClaudeCodeProjects(
       root,

@@ -62,6 +62,7 @@ function entryOf(over: Partial<Session> = {}): SessionEntry {
     title: 'alpha-refactor',
     icon: null,
     epic: null,
+    branch: null,
     status: 'running',
     runningAgents: 1,
     activity: null,

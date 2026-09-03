@@ -93,6 +93,7 @@ const SESSION_SHAPE: Shape = {
   title: isString,
   icon: nullable(isString),
   epic: nullable(isString),
+  branch: nullable(isString),
   status: oneOf('running', 'waiting', 'done', 'failed'),
   runningAgents: (v) => typeof v === 'number' && Number.isInteger(v),
   activity: nullable(isString),

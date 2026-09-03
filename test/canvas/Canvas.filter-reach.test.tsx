@@ -27,6 +27,7 @@ function session(id: string, status: Session['status']): Session {
     title: id,
     icon: null,
     epic: null,
+    branch: null,
     status,
     runningAgents: 0,
     activity: null,
