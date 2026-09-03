@@ -44,3 +44,24 @@ export function shouldStick(state: {
 }): boolean {
   return state.focusChanged || state.stuck;
 }
+
+/**
+ * Is there content above the viewport — i.e. would "to top" move anything?
+ *
+ * Same slack as the bottom rule, for the same reason: a scroller resting a
+ * pixel or two off its own zero has nothing above it worth a control.
+ */
+export function hasContentAbove(m: ScrollMetrics, slack: number = BOTTOM_SLACK_PX): boolean {
+  return m.scrollTop > slack;
+}
+
+/**
+ * Is there content below the viewport — i.e. would "to bottom" move anything?
+ *
+ * Defined as the negation of `isAtBottom` on purpose: the control and the
+ * stick rule must agree about where the bottom is, or the pane offers a jump
+ * to a place it already considers itself to be.
+ */
+export function hasContentBelow(m: ScrollMetrics, slack: number = BOTTOM_SLACK_PX): boolean {
+  return !isAtBottom(m, slack);
+}

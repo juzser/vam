@@ -27,20 +27,152 @@
  * session list. The other three are drawn, disabled, and say why — see the todo.
  */
 
+import * as Tooltip from '@radix-ui/react-tooltip';
 import {
   ArrowBigUp,
   ArrowUp,
   Bot,
   ChevronDown,
   ChevronRight,
+  ChevronsDown,
+  ChevronsUp,
   GitCommitVertical,
+  Paperclip,
   User,
+  X,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import type { Decision } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { ReviewQueue, type ReviewQueueProps } from './ReviewQueue.js';
-import { isAtBottom, shouldStick } from './stick-to-bottom.js';
+import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
+
+/**
+ * A note that a keyboard can read.
+ *
+ * Every explanatory note in this pane used to be a `title`. A `title` opens on
+ * hover and on nothing else — no browser shows one on keyboard focus — so on a
+ * tool driven from the keyboard the explanation was unreadable to its primary
+ * user. Radix opens on focus as well, and `data-note` keeps the string
+ * queryable without waiting for an open portal.
+ */
+function Note({ text, children }: { readonly text: string; readonly children: ReactNode }) {
+  return (
+    // A provider per note rather than one at the pane's root: it renders no DOM
+    // and the only thing a shared one buys is the "second tooltip opens with no
+    // delay" grouping, which is not worth re-indenting the whole pane for.
+    <Tooltip.Provider delayDuration={200}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild data-note={text}>
+          {children}
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content
+            side="top"
+            sideOffset={6}
+            className="z-50 max-w-[260px] rounded-[7px] border border-line-strong bg-raised px-2 py-1.5 text-[11px] text-ink-dim leading-[1.45]"
+          >
+            {text}
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  );
+}
+
+/** The three things this pane needs to know about a file it was handed. */
+export type AttachedFile = {
+  readonly name: string;
+  readonly size: number;
+  /** What `File.text()` decoded, replacement characters and all. */
+  readonly text: string;
+};
+
+/** Refused, with the sentence the composer shows, or accepted with a new draft. */
+export type AttachResult =
+  | { readonly ok: true; readonly draft: string }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * The most text vam will inline into one prompt: 64 KB.
+ *
+ * A number, and a small one, because the prompt is written verbatim onto an
+ * append-only session log. Past the limit the file is refused by name rather
+ * than truncated — half a file in a log reads as a whole one later.
+ */
+export const ATTACH_LIMIT_BYTES = 64 * 1024;
+
+const ATTACH_HEAD = '--- attached: ';
+const ATTACH_TAIL = ' ---';
+const ATTACH_END = '--- end attached ---';
+const ATTACH_BLOCK = /\n*^--- attached: (.+) ---$\n[\s\S]*?^--- end attached ---$/m;
+
+/**
+ * Put a file's own text into the draft, or say why not.
+ *
+ * This is what "the attachment button works" can honestly mean here. vam's one
+ * write is `POST /api/prompt` with `{sessionId, prompt}` — text, nothing else —
+ * and there is no upload route to add one to without changing a different repo.
+ * So the file is read in the renderer and its contents become part of the very
+ * string that gets recorded: the whole thing genuinely arrives, and nothing on
+ * screen implies a transfer vam cannot perform.
+ */
+export function attachIntoDraft(draft: string, file: AttachedFile): AttachResult {
+  const already = readAttachedName(draft);
+  if (already !== null) {
+    return { ok: false, message: `one file at a time — take ${already} off first` };
+  }
+  if (file.size > ATTACH_LIMIT_BYTES) {
+    return {
+      ok: false,
+      message: `${file.name} is larger than 64 KB — vam inlines the file's own text, so it refuses rather than sending half of it`,
+    };
+  }
+  // The replacement character is what a UTF-8 decode leaves behind when the
+  // bytes were never UTF-8, and a NUL is the other reliable sign of the same
+  // thing. Either way what would be inlined is noise, not text.
+  if (file.text.includes('\u{FFFD}') || file.text.includes('\u{0}')) {
+    return { ok: false, message: `${file.name} is not text vam can read — nothing was attached` };
+  }
+  const name = file.name.replace(/[\r\n]+/g, ' ');
+  const head = draft === '' ? '' : `${draft}\n\n`;
+  return {
+    ok: true,
+    draft: `${head}${ATTACH_HEAD}${name}${ATTACH_TAIL}\n${file.text}\n${ATTACH_END}`,
+  };
+}
+
+/** The name of the file inlined in this draft, if there is one. */
+export function readAttachedName(draft: string): string | null {
+  return ATTACH_BLOCK.exec(draft)?.[1] ?? null;
+}
+
+/** Take the inlined block back out, leaving the words the operator typed. */
+export function detachFromDraft(draft: string): string {
+  return draft.replace(ATTACH_BLOCK, '');
+}
+
+const MODEL_LINE = /^model: (.*)\n?/;
+
+/** The model this draft asks for, or `''` when it asks for none. */
+export function readModelRequest(draft: string): string {
+  return MODEL_LINE.exec(draft)?.[1] ?? '';
+}
+
+/**
+ * Write the model request onto the draft's first line, or take it off.
+ *
+ * vam has no model API and must not invent one: black-smith picks the model,
+ * and a control that quietly changed nothing would be worse than the honest
+ * placeholder it replaces. What vam does have is the prompt text it records
+ * verbatim, so the request goes THERE — one leading line, in the words a
+ * person reading the session log will read. It is a request written down, and
+ * the note on the field says exactly that.
+ */
+export function setModelRequest(draft: string, model: string): string {
+  const rest = draft.replace(MODEL_LINE, '');
+  return model === '' ? rest : `model: ${model}\n${rest}`;
+}
 
 export type DetailPanelProps = {
   readonly entry: SessionEntry | null;
@@ -103,11 +235,10 @@ function TabBar({ runningAgents }: { readonly runningAgents: number }) {
       {TABS.map((tab) => {
         const current = tab === 'Response';
         const badge = tab === 'Agents' && runningAgents > 0 ? runningAgents : null;
-        return (
+        const pill = (
           <span
             key={tab}
             data-placeholder={current ? undefined : `tab-${tab.toLowerCase()}`}
-            title={current ? undefined : 'black-smith has no data behind this tab — see the todo'}
             className={[
               'flex h-[26px] flex-1 items-center justify-center gap-[5px] rounded-[7px] text-[12px]',
               current ? 'bg-line-strong font-medium text-ink' : 'text-ink-dim',
@@ -125,6 +256,17 @@ function TabBar({ runningAgents }: { readonly runningAgents: number }) {
               </span>
             )}
           </span>
+        );
+        // The three empty tabs are buttons only so that a keyboard can reach
+        // the note explaining why they are empty; they still do nothing.
+        return current ? (
+          pill
+        ) : (
+          <Note key={tab} text="black-smith has no data behind this tab — see the todo">
+            <button type="button" className="flex flex-1 cursor-default">
+              {pill}
+            </button>
+          </Note>
         );
       })}
     </div>
@@ -330,6 +472,44 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const outRef = useRef<HTMLDivElement>(null);
   const stuckRef = useRef(true);
+  /**
+   * Which of the two jumps would actually move `out`. This one DOES render, so
+   * unlike `stuck` it is state — a control that scrolls nowhere is worse than
+   * no control, so each is drawn only while there is something on its side.
+   */
+  const [jumps, setJumps] = useState({ above: false, below: false });
+  const syncJumps = (box: HTMLElement) => {
+    const next = { above: hasContentAbove(box), below: hasContentBelow(box) };
+    setJumps((now) => (now.above === next.above && now.below === next.below ? now : next));
+  };
+  const jumpTo = (edge: 'top' | 'bottom') => {
+    const box = outRef.current;
+    if (box === null) return;
+    // Going up also lets go of the bottom, and it is done HERE rather than left
+    // to the scroll event: new output arriving before that event lands would
+    // otherwise find `stuck` still true and yank the region straight back down.
+    stuckRef.current = edge === 'bottom';
+    box.scrollTop = edge === 'top' ? 0 : box.scrollHeight;
+    syncJumps(box);
+  };
+
+  /** The file waiting in the draft, and the last refusal, if there was one. */
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const attachedName = readAttachedName(draft);
+  const takeFile = async (input: HTMLInputElement) => {
+    const file = input.files?.[0];
+    // Cleared immediately, so choosing the same file twice still fires.
+    input.value = '';
+    if (file === undefined) return;
+    const result = attachIntoDraft(draft, {
+      name: file.name,
+      size: file.size,
+      text: await file.text(),
+    });
+    setAttachError(result.ok ? null : result.message);
+    if (result.ok) onDraftChange(result.draft);
+  };
 
   // Grow with the text instead of scrolling a one-line slot. Measured from the
   // content each time: shrinking needs the reset to `auto` first, or the box
@@ -363,9 +543,13 @@ export function DetailPanel(props: DetailPanelProps) {
     const focusChanged = focusRef.current !== focusKey;
     focusRef.current = focusKey;
     if (box === null) return;
-    if (!shouldStick({ stuck: stuckRef.current, focusChanged })) return;
+    if (!shouldStick({ stuck: stuckRef.current, focusChanged })) {
+      syncJumps(box);
+      return;
+    }
     box.scrollTop = box.scrollHeight;
     stuckRef.current = true;
+    syncJumps(box);
   }, [focusKey, output]);
 
   const needsYou = entry?.session.status === 'waiting';
@@ -576,7 +760,33 @@ export function DetailPanel(props: DetailPanelProps) {
             <section data-detail-block="out" className="flex min-h-0 flex-1 flex-col gap-1.5">
               <Rule
                 label="out"
-                meta={entry?.session.activity ?? '—'}
+                meta={
+                  <span className="flex items-center gap-1.5">
+                    {entry?.session.activity ?? '—'}
+                    {jumps.above && (
+                      <button
+                        type="button"
+                        data-out-to-top
+                        aria-label="scroll out to the top"
+                        onClick={() => jumpTo('top')}
+                        className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
+                      >
+                        <ChevronsUp size={12} strokeWidth={1.8} />
+                      </button>
+                    )}
+                    {jumps.below && (
+                      <button
+                        type="button"
+                        data-out-to-bottom
+                        aria-label="scroll out to the bottom"
+                        onClick={() => jumpTo('bottom')}
+                        className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
+                      >
+                        <ChevronsDown size={12} strokeWidth={1.8} />
+                      </button>
+                    )}
+                  </span>
+                }
                 icon={
                   <span role="img" aria-label="agent" className="flex">
                     <Bot size={14} strokeWidth={1.75} />
@@ -591,6 +801,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 data-detail-scroll="out"
                 onScroll={(event) => {
                   stuckRef.current = isAtBottom(event.currentTarget);
+                  syncJumps(event.currentTarget);
                 }}
                 className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto"
               >
@@ -702,23 +913,71 @@ export function DetailPanel(props: DetailPanelProps) {
             />
           </div>
 
+          {attachError !== null && (
+            <p data-attach-error className="text-[10.5px] text-waiting leading-[1.45]">
+              {attachError}
+            </p>
+          )}
+
           <div className="flex items-center gap-2">
-            {/* Attachments and a model picker are ADE's; black-smith's prompt
-                route takes a session id and a string. */}
-            <span
-              data-placeholder="attach"
-              title="black-smith's prompt route takes text only — see the todo"
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] border border-line-strong text-ink-ghost"
-            >
-              +
-            </span>
-            <span
-              data-placeholder="model-picker"
-              title="the model is chosen by the factory, not by vam — see the todo"
-              className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] border border-line-strong px-2 font-mono text-[10px] text-ink-ghost"
-            >
-              factory picks
-            </span>
+            {/* The attachment button, doing the only honest thing there is to
+                do here: vam's write is a string, so the file is read in the
+                renderer and its text becomes part of the prompt that gets
+                recorded. Nothing is uploaded, and nothing on screen says it
+                is. See `attachIntoDraft` for the limit and the refusals. */}
+            <input
+              ref={fileRef}
+              type="file"
+              tabIndex={-1}
+              aria-hidden="true"
+              onChange={(event) => void takeFile(event.currentTarget)}
+              className="hidden"
+            />
+            <Note text="reads the file here and puts its text into the prompt text that gets recorded — vam uploads nothing">
+              <button
+                type="button"
+                data-attach
+                aria-label="attach a text file to this prompt"
+                onClick={() => fileRef.current?.click()}
+                className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border border-line-strong text-ink-dim hover:bg-raised hover:text-ink"
+              >
+                <Paperclip size={12} strokeWidth={1.7} />
+              </button>
+            </Note>
+            {attachedName !== null && (
+              <span
+                data-attach-chip
+                className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[10px] text-ink-dim"
+              >
+                <span className="truncate">{attachedName}</span>
+                <button
+                  type="button"
+                  data-attach-remove
+                  aria-label={`remove ${attachedName}`}
+                  onClick={() => {
+                    setAttachError(null);
+                    onDraftChange(detachFromDraft(draft));
+                  }}
+                  className="flex flex-none cursor-pointer items-center text-ink-faint hover:text-ink"
+                >
+                  <X size={11} strokeWidth={2} />
+                </button>
+              </span>
+            )}
+            {/* The model field. Not a menu of names vam made up — vam has no
+                model API and black-smith does the choosing — but not an inert
+                chip either: what is typed here becomes the prompt's first
+                line, in the recorded text a person reads. */}
+            <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
+              <input
+                data-model-request
+                value={readModelRequest(draft)}
+                onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
+                placeholder="model"
+                aria-label="model requested in this prompt"
+                className="h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[10px] text-ink-dim outline-none placeholder:text-ink-ghost focus:text-ink"
+              />
+            </Note>
             {/* The way OUT, shown only while you are in — the moment it is the
                 thing you need, and no width the rest of the time. It replaces
                 the `i` / `I` notes the operator asked to lose: those advertised
@@ -759,13 +1018,18 @@ export function DetailPanel(props: DetailPanelProps) {
             well on `raised`, 24px pills at 11.5px, the current one filled with
             `segment-on`. Values measured off artboards 1a/1b. */}
         <div data-mode-row className="flex items-center gap-2">
-          <span className="flex-none font-mono text-[9.5px] tracking-[0.1em] text-ink-faint">
-            MODE
-          </span>
-          <div
-            title="the mode is the factory's, not vam's — see the todo"
-            className="flex items-center gap-0.5 rounded-[8px] border border-line-strong bg-raised p-0.5"
-          >
+          {/* The note hangs off the MODE label, and the label is a <button> so
+              that a keyboard can reach it. A span with a tabIndex reads as a
+              control to a screen reader without behaving like one. */}
+          <Note text="the mode is the factory's, not vam's — see the todo">
+            <button
+              type="button"
+              className="flex-none cursor-default font-mono text-[9.5px] tracking-[0.1em] text-ink-faint"
+            >
+              MODE
+            </button>
+          </Note>
+          <div className="flex items-center gap-0.5 rounded-[8px] border border-line-strong bg-raised p-0.5">
             {MODES.map((mode) => (
               <span
                 key={mode}
