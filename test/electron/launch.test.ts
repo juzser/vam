@@ -270,15 +270,28 @@ describe('the Electron shell launches', () => {
     expect(result.ok, result.ok ? '' : `rejected: ${result.message}`).toBe(true);
   });
 
-  it('resolves to the same Project/Session shape the browser build produces', () => {
+  /**
+   * SUPERSET, not equality. What this guards is the bridge DROPPING a field:
+   * `contextBridge` structured-clones what it copies, so a `Project` main
+   * built can arrive in the renderer missing members, and every key the
+   * browser build renders must survive that trip. Missing keys still fail.
+   *
+   * It was exact equality until main began serving real sessions instead of a
+   * fixture that mirrored the demo. `Session.origin` and `Session.source` are
+   * OPTIONAL on the model and the demo fixture omits both, so equality did not
+   * assert bridge fidelity any more -- it forbade a richer source from setting
+   * a documented optional field, which is not a defect and is not what the
+   * title of this test claims to check.
+   */
+  it('resolves to at least the Project/Session shape the browser build produces', () => {
     const result = smoke().sourceLoad;
     if (!result.ok) {
       throw new Error(`sourceLoad rejected: ${result.message}`);
     }
     const demoProject = DEMO_MODEL.projects[0];
     const demoSession = demoProject?.sessions[0];
-    expect(result.projectKeys).toEqual(Object.keys(demoProject ?? {}).sort());
-    expect(result.sessionKeys).toEqual(Object.keys(demoSession ?? {}).sort());
+    expect(result.projectKeys).toEqual(expect.arrayContaining(Object.keys(demoProject ?? {})));
+    expect(result.sessionKeys).toEqual(expect.arrayContaining(Object.keys(demoSession ?? {})));
   });
 
   // AC-15(e2e)/task 5: `registerStreamIpc` is actually wired into `createWindow`

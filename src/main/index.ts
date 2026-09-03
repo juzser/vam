@@ -12,27 +12,28 @@ import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, ipcMain, session } from 'electron';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { isSameOrigin } from './origin.js';
-import { FIXTURE_SOURCE } from './sources/fixture-source.js';
+import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
 import { createNodeEventSource } from './stream/event-source.js';
 import { registerStreamIpc } from './stream/register.js';
 
 /**
- * The fixture source, with `liveUpdates` flipped on. Main can push a change
- * tick over `webContents.send` independently of which source answers
- * `load()` (`registerStreamIpc`, below, does not read `MainSource` at all),
- * so the decline that explained why the bundled sample never pushes no
- * longer applies once something does.
+ * What the desktop shell serves: the operator's own Claude Code sessions,
+ * read from `~/.claude/projects`. This replaces the bundled sample, which
+ * showed another tool's bookkeeping and none of the operator's real work.
+ *
+ * Registered UNMODIFIED, unlike the sample it replaces, which had
+ * `liveUpdates` flipped on here because main can push a tick over
+ * `webContents.send`. That push comes from `VAM_STREAM_URL` -- a backend that
+ * knows nothing about transcript files -- so it would never fire for this
+ * source, and the badge would be a promise no event keeps. Watching the
+ * transcript directory is its own task; until it exists the decline in
+ * `claude-code/source.ts` is the true statement.
+ *
+ * ONLY THE ELECTRON BUILD GETS THIS. The source reads the filesystem, so the
+ * browser build cannot use it and does not import it -- `src/renderer` never
+ * names this module, and the web target is unaffected.
  */
-const { liveUpdates: _liveUpdatesDecline, ...declinesWithoutLiveUpdates } =
-  FIXTURE_SOURCE.descriptor.declines;
-const PUSHABLE_SOURCE = {
-  ...FIXTURE_SOURCE,
-  descriptor: {
-    ...FIXTURE_SOURCE.descriptor,
-    capabilities: { ...FIXTURE_SOURCE.descriptor.capabilities, liveUpdates: true },
-    declines: declinesWithoutLiveUpdates,
-  },
-};
+const DESKTOP_SOURCE = CLAUDE_CODE_SOURCE;
 
 /**
  * Where main's own change-stream connects, absolute (main is not served from
@@ -176,7 +177,7 @@ void app.whenReady().then(() => {
   registerContentSecurityPolicy();
   // Registered before the window is created, so the renderer's first call can
   // never race an unregistered channel.
-  registerSourceIpc(ipcMain, PUSHABLE_SOURCE);
+  registerSourceIpc(ipcMain, DESKTOP_SOURCE);
   createWindow();
 });
 
