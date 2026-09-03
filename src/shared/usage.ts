@@ -60,6 +60,12 @@ function parseWindow(raw: unknown): UsageWindow {
   const { utilization, resets_at: resetsAt } = obj;
   if (typeof utilization !== 'number' || !Number.isFinite(utilization)) return { kind: 'unknown' };
   if (typeof resetsAt !== 'string' || resetsAt.length === 0) return { kind: 'unknown' };
+  // A string is not a date. The endpoint is undocumented, so a format change
+  // would hand us a non-empty string that passes the check above and then
+  // reaches `formatCountdown`, where `new Date(...).getTime()` is NaN and the
+  // status bar renders `NaNh NaNm`. Rejecting it here keeps the one promise
+  // this module makes: unknown rather than a number nothing can support.
+  if (Number.isNaN(new Date(resetsAt).getTime())) return { kind: 'unknown' };
   // Already a percentage (40.0 means 40%) — this is not divided or multiplied.
   return { kind: 'known', percent: utilization, resetsAt };
 }

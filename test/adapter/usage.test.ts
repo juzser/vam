@@ -103,6 +103,20 @@ describe('parseUsage', () => {
     expect(result.fiveHour.kind).toBe('known');
     expect(result.sevenDay.kind).toBe('known');
   });
+
+  it('rejects a resets_at that is a string but not a date', () => {
+    // The endpoint is undocumented. If it ever changes its date format, a
+    // non-empty string sails past a `typeof` check and reaches the countdown
+    // arithmetic, where `new Date('soon').getTime()` is NaN and the status bar
+    // renders `NaNh NaNm` — a caption its own number cannot support, which is
+    // the exact failure this module exists to prevent. Unknown, not nonsense.
+    const windows = parseUsage({
+      five_hour: { utilization: 40, resets_at: 'soon' },
+      seven_day: { utilization: 30, resets_at: '2026-13-45T99:99:99Z' },
+    });
+    expect(windows.fiveHour).toEqual({ kind: 'unknown' });
+    expect(windows.sevenDay).toEqual({ kind: 'unknown' });
+  });
 });
 
 describe('formatCountdown', () => {
