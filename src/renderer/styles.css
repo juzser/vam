@@ -73,6 +73,7 @@
      something to ignore — a session waiting on your answer. */
   --color-running: var(--vam-running);
   --color-waiting: var(--vam-waiting);
+  --color-cursor-ring: var(--vam-cursor-ring);
   --color-done: var(--vam-done);
   --color-failed: var(--vam-failed);
 
@@ -130,6 +131,12 @@
 
   --vam-waiting-tint: #3f2f12;
   --vam-waiting-wash: #161208;
+
+  /* The cursor halo's amber. Deliberately the SAME value in both themes, and
+     that is a measurement, not an oversight: the mockup's light artboard keeps
+     the identical amber in its glow even though its waiting TEXT darkens. So
+     this cannot be `--vam-waiting`, which does darken. */
+  --vam-cursor-ring: #f59e0b;
   --vam-done-tint: #24354d;
 
   --vam-shadow-node: 0 8px 28px rgb(0 0 0 / 0.4);
@@ -167,6 +174,9 @@ html.light {
 
   --vam-waiting-tint: #f6dcae;
   --vam-waiting-wash: #fdf6e8;
+
+  /* Same amber as dark — see the note there. */
+  --vam-cursor-ring: #f59e0b;
   --vam-done-tint: #c0d3f4;
 
   /* A card sits above white by a hairline and a whisper, not by the 40% black
@@ -347,23 +357,26 @@ body {
  * on the canvas should be where the cursor is, which a static artboard has no
  * way to say. So the halo marks FOCUS.
  *
- * That forces the colour off amber. This canvas spends colour on states that
- * cost a person something, and focus is not one — it is where you already are.
- * `--color-ink` is achromatic and the brightest token in either theme, so the
- * cursor is unmissable without borrowing a status hue. No mockup value stands
- * behind this choice, because the mockup keys nothing to focus.
+ * The halo is the mockup's own amber `omGlow`, moved from needs-you to focus.
+ *
+ * An earlier version made it achromatic, reasoning that colour belongs to
+ * states that cost a person something and focus is not one. The operator
+ * overruled it: the amber halo is the mockup's signature and it should follow
+ * the cursor. So needs-you keeps its breathing amber DOT and its amber word,
+ * and gives up its edge — no node carries a coloured border any more, which is
+ * what stops the halo and a border competing to mean two different things.
  */
 @keyframes vam-cursor-glow {
   0%,
   100% {
     box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--color-ink) 60%, transparent),
-      0 0 18px color-mix(in srgb, var(--color-ink) 10%, transparent);
+      0 0 0 1px color-mix(in srgb, var(--color-cursor-ring) 60%, transparent),
+      0 0 18px color-mix(in srgb, var(--color-cursor-ring) 10%, transparent);
   }
   50% {
     box-shadow:
-      0 0 0 1px var(--color-ink),
-      0 0 34px color-mix(in srgb, var(--color-ink) 26%, transparent);
+      0 0 0 1px var(--color-cursor-ring),
+      0 0 34px color-mix(in srgb, var(--color-cursor-ring) 26%, transparent);
   }
 }
 
@@ -371,8 +384,8 @@ body {
   /* The resting frame, spelled out: a node rendered before its animation
      starts, or with animations off for any reason, still wears the ring. */
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--color-ink) 60%, transparent),
-    0 0 18px color-mix(in srgb, var(--color-ink) 10%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--color-cursor-ring) 60%, transparent),
+    0 0 18px color-mix(in srgb, var(--color-cursor-ring) 10%, transparent);
   animation: vam-cursor-glow 2.4s ease-in-out infinite;
 }
 
@@ -389,8 +402,8 @@ body {
      full-strength 1px ring with a 24px halo behind it. */
   .vam-cursor-glow {
     box-shadow:
-      0 0 0 1px var(--color-ink),
-      0 0 24px color-mix(in srgb, var(--color-ink) 18%, transparent);
+      0 0 0 1px var(--color-cursor-ring),
+      0 0 24px color-mix(in srgb, var(--color-cursor-ring) 18%, transparent);
   }
   /* A bar that has stopped travelling is a bar parked at 34% of one edge, which
      reads as damage rather than as progress. So: the full width, dimmed, and

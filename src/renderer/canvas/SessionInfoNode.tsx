@@ -95,11 +95,11 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
         // They stack, so a focused needs-you card keeps its amber edge and
         // gains the ring, rather than trading one signal for the other.
         focused ? 'vam-cursor-glow' : '',
-        waiting
-          ? 'border border-waiting'
-          : focused
-            ? 'border border-line-loudest'
-            : 'border border-line',
+        // One border for every card, whatever its status. The amber halo is
+        // the only thing that marks a card out now, and it marks exactly one:
+        // the cursor. A second coloured edge would compete with it for the
+        // same glance.
+        'border border-line',
       ].join(' ')}
     >
       {session.status === 'running' && (
