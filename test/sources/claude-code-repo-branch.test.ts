@@ -51,6 +51,25 @@ describe('createBranchLookup', () => {
     await expect(branchOf('/repo')).resolves.toBe('smith/specs/vam-seam-plan');
   });
 
+  it('treats a ref line with no name after it as cannot-say, not as a blank branch', async () => {
+    // Found by mutation, not by reading: `parseHead`'s `name === '' ? null`
+    // guard was the ONE line in this module that no test held. Removing it
+    // left all nine green while `branch` became `''`, and the sidebar renders
+    // `session.branch ?? '—'` -- an empty string is not null, so the row would
+    // have drawn a BLANK where a branch belongs, with an empty tooltip. A gap
+    // that names itself is the contract; a blank is the one thing it must not
+    // become.
+    //
+    // The transcript path cannot produce this (`transcript.ts`'s `str()`
+    // already rejects `''`), and no real transcript on this machine carries an
+    // empty `gitBranch` -- so `.git/HEAD` written short or truncated is the
+    // only way in, which is exactly why nothing had exercised it.
+    for (const head of ['ref: refs/heads/\n', 'ref: refs/heads/', 'ref: refs/heads/   \n']) {
+      const fs = fakeFs({ '/repo/.git': 'dir', '/repo/.git/HEAD': head });
+      await expect(createBranchLookup(fs)('/repo')).resolves.toBeNull();
+    }
+  });
+
   it('returns a 7-char short sha for a detached HEAD', async () => {
     const fs = fakeFs({
       '/repo/.git': 'dir',
