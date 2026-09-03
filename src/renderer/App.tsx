@@ -14,16 +14,16 @@
  * one you would send a real prompt to.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { DesktopSourceApi, UsageApi } from '../preload/api.js';
 import type { PreloadSourceApi } from '../shared/preload-api.js';
 import { SmithClient } from './adapter/client.js';
 import { useCanvas } from './adapter/useCanvas.js';
 import { Canvas } from './canvas/Canvas.js';
-import type { CanvasModel } from './domain/model.js';
 import { DEMO_MODEL } from './fixtures/demo.js';
 import type { SessionSource } from './sources/port.js';
 import { createSourceFromPreload } from './sources/preload-factory.js';
+import { useSourceModel } from './sources/useSourceModel.js';
 
 declare global {
   interface Window {
@@ -82,57 +82,39 @@ export function App() {
  * not a decision made here.
  */
 function DesktopCanvas({ api }: { readonly api: DesktopSourceApi }) {
-  const [model, setModel] = useState<CanvasModel>({ projects: [] });
-  const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<SessionSource | null>(null);
-  // Holds the current reload so `onWrote` -- fired long after the effect
-  // below has settled -- can still run under the SAME `cancelled` flag: a
-  // reload that lands after unmount must not `setState` either.
-  const reloadRef = useRef<() => void>(() => {});
+  const [assembleError, setAssembleError] = useState<string | null>(null);
 
+  // Assembling the source is a ONE-TIME step -- it reads the descriptor over
+  // IPC and decides which members exist. Re-reading the MODEL is the repeating
+  // part, and it lives in `useSourceModel`.
   useEffect(() => {
     let cancelled = false;
-
-    function load(assembled: SessionSource) {
-      assembled
-        .load()
-        .then((projects) => {
-          if (!cancelled) setModel({ projects });
-        })
-        .catch((reason: unknown) => {
-          if (!cancelled) setError(describeFailure(reason));
-        });
-    }
-
-    // The cast is the `subscribe` member this task does not implement: it needs
-    // `ipcRenderer.on`, not `invoke`. It is genuinely absent at runtime, and
-    // with `liveUpdates: false` the factory never reads it.
+    // The cast is the `subscribe` member this shell does not implement: it
+    // needs `ipcRenderer.on`, not `invoke`. It is genuinely absent at runtime,
+    // and with `liveUpdates: false` the factory never reads it.
     createSourceFromPreload(api as PreloadSourceApi)
       .then((assembled) => {
-        if (cancelled) return;
-        setSource(assembled);
-        reloadRef.current = () => load(assembled);
-        load(assembled);
+        if (!cancelled) setSource(assembled);
       })
       .catch((reason: unknown) => {
-        if (!cancelled) setError(describeFailure(reason));
+        if (!cancelled) setAssembleError(describeFailure(reason));
       });
     return () => {
       cancelled = true;
     };
   }, [api]);
 
+  const { model, error, reload } = useSourceModel(source);
+  const shown = assembleError ?? error;
+
   // Empty and saying why, never a fixture standing in for a source that failed.
   return (
     <>
-      {error !== null && <p className="text-failed">● {error}</p>}
+      {shown !== null && <p className="text-failed">● {shown}</p>}
       <Canvas
         model={model}
-        source={
-          source === null
-            ? undefined
-            : { kind: 'session', source, onWrote: () => reloadRef.current() }
-        }
+        source={source === null ? undefined : { kind: 'session', source, onWrote: reload }}
       />
     </>
   );
