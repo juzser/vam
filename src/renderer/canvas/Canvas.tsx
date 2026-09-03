@@ -1390,15 +1390,27 @@ function CanvasInner({
                 // says the same thing with no lines at all, and degrades
                 // correctly: when everything is visible, nothing is dimmed.
                 maskColor="color-mix(in srgb, var(--color-canvas) 66%, transparent)"
-                maskStrokeWidth={0}
+                // The spotlight is dimmed outside AND outlined. The outline was
+                // dropped once because, drawn in the ink colour, the only part
+                // of it usually on screen is its two vertical edges — the
+                // viewport is wider than the map's content bounds at any
+                // ordinary zoom — and two bright full-height rules do not read
+                // as a rectangle. In a line tone it reads as an edge to the lit
+                // area instead of as decoration, which is what was wanted both
+                // times.
+                maskStrokeColor="var(--color-line-loudest)"
+                maskStrokeWidth={1}
                 // `nodeStrokeWidth` is in FLOW units and is drawn around the
                 // chip, so it is also the only lever that makes a chip bigger
                 // than the node it stands for. A session card is 220 wide, so
                 // 40 is a visible fattening without merging neighbours.
-                nodeStrokeWidth={40}
+                nodeStrokeWidth={70}
                 nodeStrokeColor={minimapChipColor}
                 nodeBorderRadius={3}
-                style={{ width: 176, height: 56 }}
+                // Narrower than the mockup's 176. A minimap earns its corner by
+                // being glanceable, not by being legible on its own, and the
+                // width it gives up is width the canvas gets back.
+                style={{ width: 132, height: 56 }}
                 className="!bottom-3 !right-3 !m-0 !rounded-[8px] !border !border-line !bg-sunken"
                 nodeColor={minimapChipColor}
               />

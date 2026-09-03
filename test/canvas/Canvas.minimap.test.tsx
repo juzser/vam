@@ -117,16 +117,21 @@ describe('the minimap', () => {
     const style = map?.getAttribute('style') ?? '';
     expect(style).toContain('--xy-minimap-mask-background-color-props: color-mix(');
     expect(style).toContain('var(--color-canvas)');
-    // The stroke is what produced the two rules, so its absence is the fix and
-    // is asserted rather than left to follow from the mask.
+    // Outlined too, but in a LINE tone. Drawn in the ink colour the outline
+    // read as two bright full-height rules, because the viewport is wider than
+    // the content bounds at any ordinary zoom and only its vertical edges stay
+    // on screen. Asserting the specific token is the point: `--color-ink` here
+    // is the defect, not merely a different choice.
+    expect(style).toContain('--xy-minimap-mask-stroke-color-props: var(--color-line-loudest)');
     expect(style).not.toContain('--xy-minimap-mask-stroke-color-props: var(--color-ink)');
   });
 
   it('draws chips wider than the node they stand for, so a session is visible', () => {
     // `nodeStrokeWidth` is in FLOW units and is drawn around the chip, which
-    // makes it the only lever that renders a chip larger than its node. At a
-    // 220-wide card, 40 is a visible fattening that still leaves neighbours
-    // apart.
+    // makes it the only lever that renders a chip larger than its node. Raised
+    // to 70 with the map narrowed: a smaller map makes every chip smaller, so
+    // the chip has to grow for the sessions to read larger rather than
+    // smaller, which is what was actually asked for.
     render(<Canvas model={MODEL} />);
     const map = document.querySelector<HTMLElement>('.react-flow__minimap');
     // ReactFlow writes these through inline style, not attributes — the same
@@ -137,6 +142,24 @@ describe('the minimap', () => {
     expect(strokes.length, 'no minimap chips rendered — the test proves nothing').toBeGreaterThan(
       0,
     );
-    expect(strokes.every((w) => Number(w) >= 40)).toBe(true);
+    expect(strokes.every((w) => Number(w) >= 70)).toBe(true);
+  });
+});
+
+/**
+ * The map's own footprint.
+ *
+ * Pinned because it is the value that trades against the chips: a narrower map
+ * scales every chip down, so the width and `nodeStrokeWidth` have to move
+ * together. A future change to one without the other is exactly the regression
+ * worth catching, and neither number is visible from the other's test.
+ */
+describe('the minimap gives its width back to the canvas', () => {
+  it('is narrower than the mockup, and keeps its height', () => {
+    render(<Canvas model={MODEL} />);
+    const map = document.querySelector<HTMLElement>('.react-flow__minimap');
+    expect(map).toBeTruthy();
+    expect(map?.style.width).toBe('132px');
+    expect(map?.style.height).toBe('56px');
   });
 });
