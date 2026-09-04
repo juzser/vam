@@ -4,8 +4,10 @@
  * The `,` settings overlay, wired to a real keydown.
  *
  * This file owns the wiring only: that `,` reaches the grammar, that the
- * overlay traps focus and gives it back on Escape. The round-tripping of
- * each stored setting lives in `test/prefs/prefs.settings.test.ts`.
+ * overlay takes focus on open and gives it back on Escape. It does NOT trap
+ * focus — Tab leaves it, exactly as it does in `KeySheet` — so do not read an
+ * assertion here as covering containment. The round-tripping of each stored
+ * setting lives in `test/prefs/prefs.settings.test.ts`.
  */
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -106,6 +108,17 @@ describe('the settings overlay is reachable and drawable', () => {
     render(<Canvas model={MODEL} />);
     fireEvent.click(screen.getByLabelText('settings'));
     expect(overlay()).not.toBeNull();
+  });
+
+  it('does not collide with the gear button on the name "settings"', () => {
+    // Two elements sharing one accessible name is a getByLabelText that throws
+    // "found multiple" — and the gear is exactly what a test reaches for to
+    // open the thing it then wants to inspect.
+    render(<Canvas model={MODEL} />);
+    press(',');
+    expect(overlay()).not.toBeNull();
+    expect(() => screen.getByLabelText('settings')).not.toThrow();
+    expect(screen.getByLabelText('settings').closest('[data-settings-overlay]')).toBeNull();
   });
 
   it('closes on Escape typed inside one of its own inputs', () => {

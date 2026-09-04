@@ -89,7 +89,10 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
     <div
       data-settings-overlay
       role="dialog"
-      aria-label="settings"
+      // Not plain "settings": the sidebar's gear already owns that accessible
+      // name, and while this is open the two collide — `getByLabelText`
+      // ("found multiple") and a screen reader alike.
+      aria-label="settings panel"
       aria-modal="true"
       className="absolute inset-0 z-50 flex items-start justify-center pt-16"
       onKeyDown={(event) => {
