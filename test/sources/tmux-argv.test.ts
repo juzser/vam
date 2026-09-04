@@ -18,7 +18,6 @@ import { describe, expect, it } from 'vitest';
 import {
   capturePaneArgv,
   hasSessionArgv,
-  killSessionArgv,
   listSessionsArgv,
   newSessionArgv,
   sendKeysArgv,
@@ -89,7 +88,6 @@ describe('tmux argv', () => {
 
   it('targets exactly, never by prefix, for every verb that names a session', () => {
     expect(hasSessionArgv('vam-a1b2c3')).toEqual(['has-session', '-t', '=vam-a1b2c3']);
-    expect(killSessionArgv('vam-a1b2c3')).toEqual(['kill-session', '-t', '=vam-a1b2c3']);
     expect(capturePaneArgv('vam-a1b2c3')).toEqual(['capture-pane', '-p', '-t', '=vam-a1b2c3']);
     expect(sendKeysArgv('vam-a1b2c3', 'hello')).toEqual([
       'send-keys',

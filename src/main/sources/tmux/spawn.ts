@@ -17,6 +17,21 @@
  * The spawn itself is the one part that is not tested, exactly as `deliver.ts`
  * says of its own: a test that ran these would create and kill sessions on the
  * operator's real tmux server. So the runner is a parameter.
+ *
+ * WHAT IS ACTUALLY CALLED IN PRODUCTION, TODAY. Only `createVamSession`, from
+ * `claude-code/create-session.ts`. `listVamSessions` and `readPane` -- and the
+ * `has-session`, `capture-pane` and `send-keys` argv builders behind them --
+ * are the Terminal tab's IPC surface, written ahead of the tab and reachable
+ * from nothing but vitest. They are kept because the Terminal tab is the next
+ * thing to be built on them and their shape is the reviewed part; they are NOT
+ * kept because anything calls them.
+ *
+ * That has one consequence worth stating outright, because it is the rule this
+ * module exists to keep: the no-server-to-EMPTY-LIST mapping in
+ * `listVamSessions` -- the care that stops "vam could not ask" being shown as
+ * "you have no sessions" -- does not execute in production yet. It is asserted
+ * by test only. Whoever wires the Terminal tab is the first person to run it,
+ * and is the one who has to confirm it behaves on a real server.
  */
 
 import { execFile } from 'node:child_process';

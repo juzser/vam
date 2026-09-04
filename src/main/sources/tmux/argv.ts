@@ -66,8 +66,9 @@ export const isVamSession = (name: string): boolean => name.startsWith(VAM_SESSI
 /**
  * Exact targeting. tmux resolves a bare `-t name` by prefix and then by
  * fnmatch, so `-t vam-a1` can reach `vam-a1b2c3`; the leading `=` demands an
- * exact match. On a `kill-session` that difference is the difference between
- * closing one session and closing someone else's.
+ * exact match. On anything that acts ON a session -- `send-keys` above all --
+ * that difference is the difference between reaching the session vam meant
+ * and reaching someone else's.
  */
 const target = (name: string): string => `=${name}`;
 
@@ -124,10 +125,6 @@ export function capturePaneArgv(name: string): readonly string[] {
 /** Type text and press Return. The keys are one element. */
 export function sendKeysArgv(name: string, keys: string): readonly string[] {
   return ['send-keys', '-t', target(name), keys, 'Enter'];
-}
-
-export function killSessionArgv(name: string): readonly string[] {
-  return ['kill-session', '-t', target(name)];
 }
 
 /**
