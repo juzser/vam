@@ -33,9 +33,14 @@ import {
   useReactFlow,
   useStore,
 } from '@xyflow/react';
-import { Maximize } from 'lucide-react';
+import { Box, Factory, FlaskConical, type LucideIcon, Maximize, Terminal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { describeUsage, POLL_INTERVAL_MS, type UsageSnapshot } from '../../shared/usage.js';
+import {
+  describeUsage,
+  POLL_INTERVAL_MS,
+  type UsageSnapshot,
+  type UsageWindow,
+} from '../../shared/usage.js';
 import { SmithApiError } from '../adapter/client.js';
 import { useReviewQueue } from '../adapter/useReviewQueue.js';
 import type { CanvasModel, Decision, Project, SessionStatus, SourceId } from '../domain/model.js';
@@ -1681,11 +1686,19 @@ function CanvasInner({
                   ? 'ACTION'
                   : 'NORMAL'}
         </span>
-        <span data-focus className="truncate">
-          {focusedEntry === null
-            ? '—'
-            : `${focusedEntry.project.name}/${focusedEntry.session.title}`}
-        </span>
+        {/* The `project/session` cell that used to sit here is gone at the
+            operator's request: the slash between a project and a session made
+            the pair read as a git ref, and the sidebar row, the canvas card
+            and the detail header all already say which session the keyboard
+            is on. The REAL branch displays -- the sidebar row's and the
+            card's -- are untouched; only this restatement is gone. */}
+        <SourceGlyph
+          source={
+            focusedEntry === null
+              ? null
+              : (focusedEntry.session.source ?? focusedEntry.project.source ?? null)
+          }
+        />
 
         <span className="h-3 w-px bg-line" />
         {usage.reason === null ? (
@@ -1696,6 +1709,13 @@ function CanvasInner({
           <Note text={usage.reason}>
             <span data-usage>{usage.text}</span>
           </Note>
+        )}
+        {usage.windows !== null && (
+          <span className="flex items-center gap-2">
+            {/* Five hours first: it is the window that moves minute to minute. */}
+            <UsageBar label="5h" usageWindow={usage.windows.fiveHour} high={usage.highUsage} />
+            <UsageBar label="7d" usageWindow={usage.windows.sevenDay} high={usage.highUsage} />
+          </span>
         )}
 
         <span className="h-3 w-px bg-line" />
@@ -1736,6 +1756,87 @@ function CanvasInner({
         <span>hjkl f / gt i yy ^K</span>
       </footer>
     </div>
+  );
+}
+
+/**
+ * One usage window as a few pixels of fill: which window it is, and how much of
+ * it is spent.
+ *
+ * `percent` is ALREADY a percentage (40.0 means 40%), so the width is that
+ * number verbatim -- nothing here divides or multiplies it into a second
+ * interpretation. It is clamped only because the endpoint is undocumented and
+ * a figure past 100 would otherwise paint outside the track.
+ *
+ * A window the reader could not parse draws nothing rather than an empty
+ * track: the same reason `describeUsage` hands over `null` windows for an
+ * unknown or stale snapshot, at which point this component is never reached.
+ *
+ * The fill colour comes from `describeUsage().highUsage` and from no second
+ * threshold of its own, so the bar and the text beside it cannot disagree
+ * about what counts as high.
+ */
+function UsageBar({
+  label,
+  usageWindow,
+  high,
+}: {
+  readonly label: string;
+  readonly usageWindow: UsageWindow;
+  readonly high: boolean;
+}) {
+  if (usageWindow.kind !== 'known') {
+    return null;
+  }
+  return (
+    <span className="flex items-center gap-1">
+      <span className="text-ink-ghost">{label}</span>
+      <span className="h-1 w-8 overflow-hidden rounded-sm bg-line-strong">
+        <span
+          data-usage-bar={label}
+          className={`block h-full ${high ? 'bg-failed' : 'bg-ink-dim'}`}
+          style={{ width: `${Math.min(100, Math.max(0, usageWindow.percent))}%` }}
+        />
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Which system the focused session came from -- a real, varying fact, not a
+ * decoration: `Session.source` is what the Claude Code reader stamps on every
+ * row, `Project.source` is what the factory adapter stamps instead, and a
+ * model assembled without either says nothing here rather than borrowing a
+ * glyph it has not earned.
+ *
+ * A source id is a free string (the registry validates it, this file does
+ * not), so an id nobody here has drawn an icon for still gets one — the
+ * generic box — and its name in words either way.
+ */
+const SOURCE_ICON: Readonly<Record<string, LucideIcon>> = {
+  'claude-code': Terminal,
+  'black-smith': Factory,
+  'bundled-sample': FlaskConical,
+};
+
+function SourceGlyph({ source }: { readonly source: SourceId | null }) {
+  if (source === null || source === undefined || source === '') {
+    return null;
+  }
+  const Icon = SOURCE_ICON[source] ?? Box;
+  return (
+    <Note text={`this session comes from ${source}`}>
+      {/* `role="img"` is load-bearing: `aria-label` on a roleless span is
+          ignored, and the icon itself is hidden. */}
+      <span
+        data-status-source={source}
+        role="img"
+        aria-label={`source: ${source}`}
+        className="flex items-center text-ink-dim"
+      >
+        <Icon size={11} strokeWidth={1.6} aria-hidden="true" />
+      </span>
+    </Note>
   );
 }
 

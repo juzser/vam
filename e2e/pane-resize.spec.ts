@@ -77,18 +77,21 @@ test.describe('pane resize — real-browser probes (vam-pane-resize/task-4)', ()
     // pixel offset from the border — the substantive claim (a click close to
     // the border, on real content, still reaches it) is unchanged.
     await page.mouse.click(rowBox.x + rowBox.width - 4, rowY);
-    await expect(page.locator('[data-focus]')).toHaveText('black-smith/crosscheck-2');
+    // Which session the click focused, read off the detail pane's header: the
+    // status bar's `project/session` cell was removed at the operator's
+    // request, and this is where that fact is stated now.
+    await expect(page.locator('[data-prompt-target]')).toHaveText('crosscheck-2');
 
     // Return to a known baseline before probing the zone itself.
     await page.locator('[data-session-row="factory-sse-1"]').click();
-    await expect(page.locator('[data-focus]')).toHaveText('black-smith/factory-sse-1');
+    await expect(page.locator('[data-prompt-target]')).toHaveText('factory-sse-1');
 
     // (b) at `sidebarRight - 1`, inside the 4px zone — no focus change, no
     // text selection, and the zone (not the row underneath) is what the
     // browser says was actually hit.
-    const focusBefore = await page.locator('[data-focus]').innerText();
+    const focusBefore = await page.locator('[data-prompt-target]').innerText();
     await page.mouse.click(sidebarRight - 1, rowY);
-    await expect(page.locator('[data-focus]')).toHaveText(focusBefore);
+    await expect(page.locator('[data-prompt-target]')).toHaveText(focusBefore);
     const selectionAfterB = await page.evaluate(() => window.getSelection()?.toString() ?? '');
     expect(selectionAfterB).toBe('');
     const hitAtB = await page.evaluate(
