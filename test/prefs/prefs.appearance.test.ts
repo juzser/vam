@@ -15,6 +15,7 @@ import {
   DEFAULT_FOCUS_SHARE,
   EMPTY_PREFS,
   PALETTE_TOKENS,
+  paletteValue,
   readPrefs,
   type StorageLike,
   setKeyBindings,
@@ -149,5 +150,15 @@ describe('a payload written before either field existed', () => {
     expect(prefs.palette).toEqual({});
     expect(prefs.keyBindings).toEqual({});
     expect(prefs.theme).toBe('light');
+  });
+});
+
+describe('what the picker shows', () => {
+  it('prefers the override, falls back to the stylesheet, and shows nothing else', () => {
+    const overridden = setPaletteColor(EMPTY_PREFS, TOKEN, BLUE).palette;
+    expect(paletteValue(overridden, TOKEN, () => `#${'000000'}`)).toBe(BLUE);
+    expect(paletteValue({}, TOKEN, () => ` ${BLUE} `)).toBe(BLUE);
+    expect(paletteValue({}, TOKEN, () => 'oklch(0.2 0 0)')).toBe('');
+    expect(paletteValue({}, TOKEN, () => '')).toBe('');
   });
 });

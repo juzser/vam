@@ -1034,8 +1034,8 @@ export function setPaletteColor(prefs: Prefs, token: string, value: string): Pre
 }
 
 /** Back to the stylesheet for one token — by DELETING the override. Writing
- *  today's value back would look identical on screen and pin the colour
- *  against the other theme forever. */
+ *  today's value back would look identical on screen and would freeze that
+ *  colour against the other theme forever. */
 export function clearPaletteColor(prefs: Prefs, token: string): Prefs {
   return { ...prefs, palette: withoutEntry({ ...prefs.palette }, token) };
 }
@@ -1089,4 +1089,34 @@ export function activatePrefs(prefs: Prefs): Prefs {
   applyPalette(prefs.palette);
   setActiveBindings(prefs.keyBindings);
   return prefs;
+}
+
+/** What the colour picker should show for a token: the operator's override, or
+ *  the value the stylesheet is currently giving that token, or nothing at all.
+ *  The read is injected so a test can state it — and so a document that has no
+ *  cascade to consult (a node environment) costs an empty string, not a throw. */
+export function paletteValue(
+  overrides: PaletteOverrides,
+  token: string,
+  read: (token: string) => string = readComputedToken,
+): string {
+  const chosen = overrides[token];
+  if (chosen !== undefined) {
+    return chosen;
+  }
+  // Trimmed HERE rather than only in the default reader: an injected one is
+  // still a stylesheet value, and a leading space is not a different colour.
+  const current = read(token).trim();
+  // Only a plain six-digit colour can go into a colour input. A token defined
+  // as anything else is shown as empty rather than as a value the input would
+  // silently rewrite.
+  return COLOUR.test(current) ? current : '';
+}
+
+function readComputedToken(token: string): string {
+  const root = globalThis.document?.documentElement ?? null;
+  if (root === null || globalThis.getComputedStyle === undefined) {
+    return '';
+  }
+  return globalThis.getComputedStyle(root).getPropertyValue(token);
 }

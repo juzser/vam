@@ -20,15 +20,31 @@
  * theme still has exactly one path onto `<html>`.
  */
 
-import { useEffect, useRef } from 'react';
-import { buildKeySheet, describeAction } from '../keyboard/keysheet.js';
+import { useEffect, useRef, useState } from 'react';
+import {
+  bindingConflict,
+  bindKey,
+  clearBindings,
+  isReserved,
+  type KeyBindings,
+  MAX_BINDINGS,
+  NO_BINDINGS,
+  normalizeKey,
+} from '../keyboard/chords.js';
+import { type BindingRow, buildBindingSheet, describeAction } from '../keyboard/keysheet.js';
 import { ALL_VISIBLE, columnOrder, LAYOUTS, type LayoutName } from '../prefs/panes.js';
 import {
+  clearPalette,
+  clearPaletteColor,
   FOCUS_SHARE_MAX,
   FOCUS_SHARE_MIN,
+  PALETTE_TOKENS,
   type Prefs,
+  paletteValue,
   setFocusShare,
+  setKeyBindings,
   setLayout,
+  setPaletteColor,
   setPaneVisibility,
   setTheme,
   type Theme,
@@ -74,8 +90,60 @@ export function currentLayout(visibility: Prefs['paneVisibility']): LayoutChoice
 
 const THEMES: readonly Theme[] = ['dark', 'light', 'system'];
 
+/** Which slot is listening for a keystroke, spelled as one value so opening a
+ *  second capture box closes the first by construction. */
+type Capturing = { readonly id: string; readonly slot: number } | null;
+
 export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayProps) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
+  const [capturing, setCapturing] = useState<Capturing>(null);
+  const [message, setMessage] = useState('');
+
+  const bind = (next: KeyBindings) => {
+    setCapturing(null);
+    setMessage('');
+    onChange(setKeyBindings(prefs, next));
+  };
+
+  /**
+   * One captured keystroke, judged.
+   *
+   * `preventDefault` is not politeness: the whole point of this box is that the
+   * keystroke IS the value, so it must not also reach the page — and
+   * `stopPropagation` keeps Escape from reaching the dialog's own handler,
+   * which would close the settings panel instead of cancelling the capture.
+   *
+   * A refusal keeps the box open and says why. Silence would leave the operator
+   * pressing a key that does nothing, with no way to tell a reserved key from
+   * a taken one.
+   */
+  const capture = (row: BindingRow, slot: number, event: React.KeyboardEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const key = normalizeKey(event);
+    if (key === null) {
+      // A bare Shift or Meta is a hand moving, not a keystroke.
+      return;
+    }
+    if (key === 'Escape') {
+      setCapturing(null);
+      setMessage('');
+      return;
+    }
+    if (isReserved(key)) {
+      setMessage(`"${key}" is reserved — Escape cancels and closes, g/y/z open chords`);
+      return;
+    }
+    const clash = bindingConflict(prefs.keyBindings, row.id, key);
+    if (clash !== null) {
+      // Refused rather than stolen, and named. Stealing would leave the other
+      // action silently unbound, discoverable only by pressing its key and
+      // watching nothing happen — the worse of the two failures.
+      setMessage(`"${key}" already does: ${labelFor(prefs.keyBindings, clash)}`);
+      return;
+    }
+    bind(bindKey(prefs.keyBindings, row.id, slot, key));
+  };
 
   useEffect(() => {
     const returnTo = document.activeElement;
@@ -126,75 +194,126 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
           </button>
         </div>
 
-        <Section title="appearance" hint="system follows what the operating system asks for">
-          <div className="flex gap-1">
-            {THEMES.map((theme) => (
-              <Choice
-                key={theme}
-                label={theme}
-                selected={prefs.theme === theme}
-                onPick={() => onChange(setTheme(prefs, theme))}
+        <Section
+          title="appearance"
+          hint="theme, colours, zoom and layout — everything about how vam looks"
+        >
+          <Block label="theme" hint="system follows what the operating system asks for">
+            <div className="flex gap-1">
+              {THEMES.map((theme) => (
+                <Choice
+                  key={theme}
+                  label={theme}
+                  selected={prefs.theme === theme}
+                  onPick={() => onChange(setTheme(prefs, theme))}
+                />
+              ))}
+            </div>
+          </Block>
+
+          <Block
+            label="colours"
+            hint="unset follows the stylesheet, so each theme keeps its own"
+            action={
+              Object.keys(prefs.palette).length === 0 ? null : (
+                <SmallButton label="reset colours" onPick={() => onChange(clearPalette(prefs))} />
+              )
+            }
+          >
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
+              {PALETTE_TOKENS.map(({ token, label }) => (
+                <div key={token} className="flex items-center gap-2 text-xs">
+                  <input
+                    type="color"
+                    aria-label={`${label} colour`}
+                    value={paletteValue(prefs.palette, token)}
+                    onChange={(event) =>
+                      onChange(setPaletteColor(prefs, token, event.target.value))
+                    }
+                    className="h-5 w-8 cursor-pointer rounded border border-line bg-raised"
+                  />
+                  <span className="text-ink-dim">{label}</span>
+                  {prefs.palette[token] === undefined ? null : (
+                    <button
+                      type="button"
+                      aria-label={`reset ${label} colour`}
+                      onClick={() => onChange(clearPaletteColor(prefs, token))}
+                      className="cursor-pointer text-ink-faint"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Block>
+
+          <Block label="focus zoom" hint="how much of the canvas a focused session fills">
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                aria-label="focus zoom share"
+                min={FOCUS_SHARE_MIN}
+                max={FOCUS_SHARE_MAX}
+                step={0.05}
+                value={prefs.focusViewportShare}
+                onChange={(event) => onChange(setFocusShare(prefs, Number(event.target.value)))}
+                className="w-56"
               />
-            ))}
-          </div>
+              <span className="font-mono text-ink-dim text-xs">
+                {Math.round(prefs.focusViewportShare * 100)}%
+              </span>
+            </div>
+          </Block>
+
+          <Block label="layout" hint="the same layouts the z chords apply">
+            <div className="flex gap-1">
+              {LAYOUT_CHOICES.map((choice) => (
+                <Choice
+                  key={choice}
+                  label={layoutLabel(choice)}
+                  marker={choice}
+                  selected={layout === choice}
+                  onPick={() =>
+                    onChange(
+                      choice === FULL
+                        ? setPaneVisibility(prefs, ALL_VISIBLE)
+                        : setLayout(prefs, choice),
+                    )
+                  }
+                />
+              ))}
+            </div>
+          </Block>
         </Section>
 
-        <Section title="focus zoom" hint="how much of the canvas a focused session fills">
-          <div className="flex items-center gap-3">
-            <input
-              type="range"
-              aria-label="focus zoom share"
-              min={FOCUS_SHARE_MIN}
-              max={FOCUS_SHARE_MAX}
-              step={0.05}
-              value={prefs.focusViewportShare}
-              onChange={(event) => onChange(setFocusShare(prefs, Number(event.target.value)))}
-              className="w-56"
-            />
-            <span className="font-mono text-ink-dim text-xs">
-              {Math.round(prefs.focusViewportShare * 100)}%
-            </span>
+        <Section title="keyboard" hint="click a key and press the one you want — Escape cancels">
+          {message === '' ? null : (
+            <p data-binding-message className="mb-2 text-waiting text-xs">
+              {message}
+            </p>
+          )}
+          <div className="mb-2">
+            {Object.keys(prefs.keyBindings).length === 0 ? null : (
+              <SmallButton label="reset shortcuts" onPick={() => bind(NO_BINDINGS)} />
+            )}
           </div>
-        </Section>
-
-        <Section title="layout" hint="the same layouts the z chords apply">
-          <div className="flex gap-1">
-            {LAYOUT_CHOICES.map((choice) => (
-              <Choice
-                key={choice}
-                label={layoutLabel(choice)}
-                marker={choice}
-                selected={layout === choice}
-                onPick={() =>
-                  onChange(
-                    choice === FULL
-                      ? setPaneVisibility(prefs, ALL_VISIBLE)
-                      : setLayout(prefs, choice),
-                  )
-                }
-              />
-            ))}
-          </div>
-        </Section>
-
-        <Section title="keyboard" hint="read-only — generated from the chord tables">
           <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-            {buildKeySheet().map((group) => (
+            {buildBindingSheet(prefs.keyBindings).map((group) => (
               <section key={group.group}>
                 <h4 className="mb-1 text-ink-faint text-xs uppercase tracking-wide">
                   {group.title}
                 </h4>
                 <ul>
                   {group.rows.map((row) => (
-                    <li key={row.keys} className="flex items-baseline gap-2 py-0.5 text-xs">
-                      <kbd
-                        data-settings-keys
-                        className="min-w-12 rounded border border-line bg-raised px-1 text-center font-mono text-ink"
-                      >
-                        {row.keys}
-                      </kbd>
-                      <span className="text-ink-dim">{row.label}</span>
-                    </li>
+                    <BindingLine
+                      key={row.id}
+                      row={row}
+                      capturing={capturing}
+                      onCapture={setCapturing}
+                      onKey={(slot, event) => capture(row, slot, event)}
+                      onReset={() => bind(clearBindings(prefs.keyBindings, row.id))}
+                    />
                   ))}
                 </ul>
               </section>
@@ -246,6 +365,126 @@ function Choice({
       className={`cursor-pointer rounded border px-2 py-1 text-xs ${
         selected ? 'border-line-loudest bg-raised text-ink' : 'border-line text-ink-dim'
       }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** What an action is called, read off the same rows the editor renders. */
+function labelFor(overrides: KeyBindings, id: string): string {
+  for (const group of buildBindingSheet(overrides)) {
+    for (const row of group.rows) {
+      if (row.id === id) return row.label;
+    }
+  }
+  return id;
+}
+
+/** One action: its name, its slots, and a way back to the shipped keys. */
+function BindingLine({
+  row,
+  capturing,
+  onCapture,
+  onKey,
+  onReset,
+}: {
+  readonly row: BindingRow;
+  readonly capturing: Capturing;
+  readonly onCapture: (next: Capturing) => void;
+  readonly onKey: (slot: number, event: React.KeyboardEvent) => void;
+  readonly onReset: () => void;
+}) {
+  const slots = Array.from({ length: MAX_BINDINGS }, (_, slot) => slot);
+  return (
+    <li className="flex items-baseline gap-2 py-0.5 text-xs">
+      {slots.map((slot) => {
+        const keys = row.keys[slot];
+        if (capturing?.id === row.id && capturing.slot === slot) {
+          return (
+            <input
+              key={slot}
+              data-binding-capture
+              aria-label={`press a key for ${row.label}`}
+              readOnly
+              value=""
+              placeholder="press a key"
+              onKeyDown={(event) => onKey(slot, event)}
+              onBlur={() => onCapture(null)}
+              className="min-w-12 rounded border border-line-loudest bg-raised px-1 text-center font-mono text-ink"
+            />
+          );
+        }
+        // An empty second slot is still a control: it is how a second binding
+        // is added, and it is the only affordance that says one is possible.
+        return (
+          <button
+            key={slot}
+            type="button"
+            data-binding-slot={`${row.id}:${slot}`}
+            aria-label={keys === undefined ? `add a key for ${row.label}` : `${keys}, ${row.label}`}
+            onClick={() => onCapture({ id: row.id, slot })}
+            className="cursor-pointer"
+          >
+            {keys === undefined ? (
+              <span className="min-w-12 text-ink-ghost">+</span>
+            ) : (
+              <kbd
+                data-settings-keys
+                className="min-w-12 rounded border border-line bg-raised px-1 text-center font-mono text-ink"
+              >
+                {keys}
+              </kbd>
+            )}
+          </button>
+        );
+      })}
+      <span className="text-ink-dim">{row.label}</span>
+      {row.overridden ? (
+        <button
+          type="button"
+          data-binding-reset={row.id}
+          aria-label={`reset ${row.label} shortcut`}
+          onClick={onReset}
+          className="cursor-pointer text-ink-faint"
+        >
+          ×
+        </button>
+      ) : null}
+    </li>
+  );
+}
+
+/** A labelled sub-block inside a section — appearance holds four of them. */
+function Block({
+  label,
+  hint,
+  action,
+  children,
+}: {
+  readonly label: string;
+  readonly hint: string;
+  readonly action?: React.ReactNode;
+  readonly children: React.ReactNode;
+}) {
+  return (
+    <div className="mb-3 last:mb-0">
+      <div className="mb-1 flex items-baseline gap-2">
+        <h4 className="text-ink-dim text-xs">{label}</h4>
+        <span className="text-ink-faint text-xs">{hint}</span>
+        {action === undefined ? null : <span className="ml-auto">{action}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function SmallButton({ label, onPick }: { readonly label: string; readonly onPick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      className="cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-xs"
     >
       {label}
     </button>
