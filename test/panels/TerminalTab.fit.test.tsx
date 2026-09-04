@@ -101,6 +101,7 @@ describe('the Terminal tab tells tmux how big the pane is', () => {
         rowId="sess-alpha#1"
         read={vi.fn(async () => ok())}
         resize={resize}
+        send={undefined}
       />,
     );
     await settle();
@@ -116,7 +117,14 @@ describe('the Terminal tab tells tmux how big the pane is', () => {
 
   it('asks again when the wrapper changes size, which the pane resizer does', async () => {
     const resize = vi.fn(async () => true);
-    render(<TerminalTab projectId={ATLAS} read={vi.fn(async () => ok())} resize={resize} />);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok())}
+        resize={resize}
+        send={undefined}
+      />,
+    );
     await settle();
     layout({ box: { width: 800, height: 480 }, cell: 8 });
     await fire();
@@ -136,7 +144,14 @@ describe('the Terminal tab tells tmux how big the pane is', () => {
     // frames of a drag produce the size already in force. Each of those would
     // otherwise be a tmux process.
     const resize = vi.fn(async () => true);
-    render(<TerminalTab projectId={ATLAS} read={vi.fn(async () => ok())} resize={resize} />);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok())}
+        resize={resize}
+        send={undefined}
+      />,
+    );
     await settle();
     layout({ box: { width: 800, height: 480 }, cell: 8 });
     await fire();
@@ -152,7 +167,14 @@ describe('the Terminal tab tells tmux how big the pane is', () => {
     // out. A size derived from them would floor to the clamp minimum and
     // resize a working session to 20x5 on every mount.
     const resize = vi.fn(async () => true);
-    render(<TerminalTab projectId={ATLAS} read={vi.fn(async () => ok())} resize={resize} />);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok())}
+        resize={resize}
+        send={undefined}
+      />,
+    );
     await settle();
     await fire();
 
@@ -168,7 +190,14 @@ describe('the Terminal tab tells tmux how big the pane is', () => {
     // pane on screen in any of these states, so there is nothing to fit -- and
     // nothing is observed and nothing is asked.
     const resize = vi.fn(async () => true);
-    render(<TerminalTab projectId={ATLAS} read={vi.fn(async () => view)} resize={resize} />);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => view)}
+        resize={resize}
+        send={undefined}
+      />,
+    );
     await settle();
     await fire();
 
@@ -182,6 +211,7 @@ describe('the Terminal tab tells tmux how big the pane is', () => {
         projectId={ATLAS}
         read={vi.fn(async () => ok())}
         resize={vi.fn(async () => true)}
+        send={undefined}
       />,
     );
     await settle();
@@ -193,7 +223,14 @@ describe('the Terminal tab tells tmux how big the pane is', () => {
   });
 
   it('asks nothing when there is no bridge, as in the browser build', async () => {
-    render(<TerminalTab projectId={ATLAS} read={vi.fn(async () => ok())} resize={undefined} />);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok())}
+        resize={undefined}
+        send={undefined}
+      />,
+    );
     await settle();
     await fire();
     // Nothing to assert but the absence of a crash: the browser build has no
@@ -211,6 +248,7 @@ describe('the pane takes its colours from the theme', () => {
         projectId={ATLAS}
         read={vi.fn(async () => ok())}
         resize={vi.fn(async () => true)}
+        send={undefined}
       />,
     );
     await settle();
@@ -247,6 +285,7 @@ describe('the pane takes its colours from the theme', () => {
         projectId={ATLAS}
         read={vi.fn(async () => ok())}
         resize={vi.fn(async () => true)}
+        send={undefined}
       />,
     );
     await settle();

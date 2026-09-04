@@ -36,7 +36,7 @@ const settle = async () => {
 describe('the Terminal tab shows the focused session pane', () => {
   it('renders the captured screen as text, in a monospace block', async () => {
     const read = vi.fn(async () => ok('$ claude\nthinking about the branch'));
-    render(<TerminalTab projectId={ATLAS} read={read} resize={undefined} />);
+    render(<TerminalTab projectId={ATLAS} read={read} resize={undefined} send={undefined} />);
     await settle();
 
     // No row given here, so the project alone is asked -- the older answer,
@@ -56,14 +56,28 @@ describe('the Terminal tab shows the focused session pane', () => {
     // The empty states are claims about the operator's tmux. Drawing one
     // before an answer arrives would say vam started no session for a session
     // that has one.
-    render(<TerminalTab projectId={ATLAS} read={vi.fn(async () => ok('hi'))} resize={undefined} />);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok('hi'))}
+        resize={undefined}
+        send={undefined}
+      />,
+    );
     expect(q('[data-terminal-pending]')).not.toBeNull();
     expect(q('[data-terminal-empty]')).toBeNull();
     expect(q('[data-terminal-unavailable]')).toBeNull();
   });
 
   it('names the session it is showing, so the text is not attributed to vam', async () => {
-    render(<TerminalTab projectId={ATLAS} read={vi.fn(async () => ok('hi'))} resize={undefined} />);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok('hi'))}
+        resize={undefined}
+        send={undefined}
+      />,
+    );
     await settle();
     expect(q<HTMLElement>('[data-terminal-name]')?.textContent).toContain('vam-atlas-a1b2c3');
   });
@@ -82,6 +96,7 @@ describe('the Terminal tab tells an absent session from an unreachable tmux', ()
         projectId={ATLAS}
         read={vi.fn(async (): Promise<PaneView> => ({ kind: 'not-vam' }))}
         resize={undefined}
+        send={undefined}
       />,
     );
     await settle();
@@ -100,6 +115,7 @@ describe('the Terminal tab tells an absent session from an unreachable tmux', ()
         projectId={ATLAS}
         read={vi.fn(async (): Promise<PaneView> => ({ kind: 'gone' }))}
         resize={undefined}
+        send={undefined}
       />,
     );
     await settle();
@@ -117,6 +133,7 @@ describe('the Terminal tab tells an absent session from an unreachable tmux', ()
         projectId={ATLAS}
         read={vi.fn(async (): Promise<PaneView> => ({ kind: 'unavailable', error }))}
         resize={undefined}
+        send={undefined}
       />,
     );
     await settle();
@@ -133,6 +150,7 @@ describe('the Terminal tab tells an absent session from an unreachable tmux', ()
         projectId={ATLAS}
         read={vi.fn(async () => Promise.reject(new Error('bridge gone')))}
         resize={undefined}
+        send={undefined}
       />,
     );
     await settle();
@@ -146,7 +164,7 @@ describe('the Terminal tab refreshes while it is open and stops when it is not',
     vi.useFakeTimers();
     try {
       const read = vi.fn(async () => ok('one'));
-      render(<TerminalTab projectId={ATLAS} read={read} resize={undefined} />);
+      render(<TerminalTab projectId={ATLAS} read={read} resize={undefined} send={undefined} />);
       expect(read).toHaveBeenCalledTimes(1);
       await act(async () => {
         vi.advanceTimersByTime(REFRESH_MS * 2);
@@ -161,7 +179,9 @@ describe('the Terminal tab refreshes while it is open and stops when it is not',
     vi.useFakeTimers();
     try {
       const read = vi.fn(async () => ok('one'));
-      const view = render(<TerminalTab projectId={ATLAS} read={read} resize={undefined} />);
+      const view = render(
+        <TerminalTab projectId={ATLAS} read={read} resize={undefined} send={undefined} />,
+      );
       view.unmount();
       const before = read.mock.calls.length;
       await act(async () => {
@@ -178,7 +198,7 @@ describe('the Terminal tab refreshes while it is open and stops when it is not',
     const visibility = vi.spyOn(document, 'visibilityState', 'get');
     try {
       const read = vi.fn(async () => ok('one'));
-      render(<TerminalTab projectId={ATLAS} read={read} resize={undefined} />);
+      render(<TerminalTab projectId={ATLAS} read={read} resize={undefined} send={undefined} />);
       const before = read.mock.calls.length;
 
       visibility.mockReturnValue('hidden');
@@ -200,7 +220,7 @@ describe('the Terminal tab refreshes while it is open and stops when it is not',
   });
 
   it('makes no request at all when the bridge is absent, as in the browser build', async () => {
-    render(<TerminalTab projectId={ATLAS} read={undefined} resize={undefined} />);
+    render(<TerminalTab projectId={ATLAS} read={undefined} resize={undefined} send={undefined} />);
     await settle();
     expect(q('[data-terminal-unavailable]')).not.toBeNull();
   });
@@ -219,7 +239,9 @@ describe('the Terminal tab draws the session it was last asked about', () => {
     const read = vi.fn(async (id: string) =>
       id === ATLAS ? ok('atlas screen', 'vam-atlas-a1b2c3') : ok('beacon screen', 'vam-beacon-d4'),
     );
-    const view = render(<TerminalTab projectId={ATLAS} read={read} resize={undefined} />);
+    const view = render(
+      <TerminalTab projectId={ATLAS} read={read} resize={undefined} send={undefined} />,
+    );
     await settle();
     expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).toContain('atlas screen');
 
@@ -230,7 +252,9 @@ describe('the Terminal tab draws the session it was last asked about', () => {
           resolve = r;
         }),
     );
-    view.rerender(<TerminalTab projectId={BEACON} read={read} resize={undefined} />);
+    view.rerender(
+      <TerminalTab projectId={BEACON} read={read} resize={undefined} send={undefined} />,
+    );
     // The claim about atlas is gone BEFORE the answer about beacon arrives.
     expect(q('[data-terminal-pane]')).toBeNull();
     expect(q('[data-terminal-name]')).toBeNull();
@@ -249,7 +273,7 @@ describe('the Terminal tab draws the session it was last asked about', () => {
     // stayed on screen for the rest of the session. vam was claiming to be
     // reading something it had never asked for.
     const read = vi.fn(async () => ok('screen'));
-    render(<TerminalTab projectId={null} read={read} resize={undefined} />);
+    render(<TerminalTab projectId={null} read={read} resize={undefined} send={undefined} />);
     await settle();
     expect(read).not.toHaveBeenCalled();
     expect(q('[data-terminal-pending]')).toBeNull();
@@ -269,6 +293,7 @@ describe('the Terminal tab draws the session it was last asked about', () => {
           }),
         )}
         resize={undefined}
+        send={undefined}
       />,
     );
     await settle();
@@ -288,7 +313,12 @@ describe('the Terminal tab draws the session it was last asked about', () => {
 describe('the pane can be reached and scrolled from the keyboard', () => {
   it('is a focus stop with an accessible name, and takes focus', async () => {
     render(
-      <TerminalTab projectId={ATLAS} read={vi.fn(async () => ok('$ claude'))} resize={undefined} />,
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok('$ claude'))}
+        resize={undefined}
+        send={undefined}
+      />,
     );
     await settle();
     const pane = q<HTMLElement>('[data-terminal-pane]');
@@ -310,7 +340,15 @@ describe('the row it asks about', () => {
     // The project alone answers `ambiguous` when vam started two sessions in
     // it. The row is what main pairs against the pane the session published.
     const read = vi.fn(async () => ok('beta screen'));
-    render(<TerminalTab projectId={ATLAS} rowId="sess-beta#8" read={read} resize={undefined} />);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        rowId="sess-beta#8"
+        read={read}
+        resize={undefined}
+        send={undefined}
+      />,
+    );
     await waitFor(() => expect(read).toHaveBeenCalledWith(ATLAS, 'sess-beta#8'));
   });
 });

@@ -164,13 +164,15 @@ export function TerminalTab({
   readonly read: ReadPane | undefined;
   readonly resize: ResizePane | undefined;
   /**
-   * Optional, and it FALLS BACK TO THE BRIDGE rather than being required,
-   * because the panel that mounts this tab is another task's file: passing it
-   * from there is the wiring, and a prop nobody passes would be a typing
-   * surface that silently does nothing. Tests pass it explicitly, which is
-   * the only way this is ever asserted.
+   * REQUIRED, exactly as `read` and `resize` are, and `undefined` only where
+   * they are: the browser build, which has no main process behind it. It
+   * briefly defaulted to reaching for `window.api` itself, which worked and
+   * was worse -- the wiring was then invisible at the call site, where the
+   * other two are plainly passed, and a member nobody can see being passed is
+   * a member a later edit drops with nothing to notice. As a required prop
+   * the compiler is what notices.
    */
-  readonly send?: SendKey | undefined;
+  readonly send: SendKey | undefined;
 }) {
   /**
    * `null` is "has not answered yet", and it is a state rather than an
@@ -283,11 +285,6 @@ export function TerminalTab({
    */
   const showing = view !== null && view.kind === 'ok';
 
-  /**
-   * The bridge, when the panel that mounts this tab did not hand one over.
-   * See the prop's note: the wiring lives in another task's file.
-   */
-  const sendKey = send ?? globalThis.window?.api?.terminal?.send;
   /** Whether the LAST keystroke landed. `true` is drawn, not swallowed. */
   const [refused, setRefused] = useState(false);
 
@@ -371,14 +368,14 @@ export function TerminalTab({
       if (stroke === null) return;
       event.preventDefault();
       event.stopPropagation();
-      if (sendKey === undefined || projectId === null) return;
+      if (send === undefined || projectId === null) return;
       // Return is NOT sent behind the text: each keystroke is one call, so
       // submitting is the operator pressing Return and never vam adding one.
-      void sendKey(projectId, stroke, rowId)
+      void send(projectId, stroke, rowId)
         .then((landed) => setRefused(!landed))
         .catch(() => setRefused(true));
     },
-    [sendKey, projectId, rowId],
+    [send, projectId, rowId],
   );
 
   useEffect(() => {
@@ -478,7 +475,7 @@ export function TerminalTab({
           longer name a single session for this project. Both are sentences
           here rather than silence. */}
       <p data-terminal-typing className="flex-none text-[10px] text-ink-faint">
-        {sendKey === undefined
+        {send === undefined
           ? 'vam cannot type into this pane here — the desktop app can.'
           : `keys go to ${view.name} — Escape leaves the pane.`}
       </p>

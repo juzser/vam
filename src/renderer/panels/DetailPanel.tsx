@@ -1749,6 +1749,13 @@ export function DetailPanel(props: DetailPanelProps) {
                returns a screen tmux already composed at the session's own
                size, which no style on this side can re-wrap. */
             resize={globalThis.window?.api?.terminal?.resize}
+            /* Typing. Passed here beside the other two rather than reached for
+               inside the tab, so all three halves of the bridge this tab uses
+               are visible at the one call site: a member wired invisibly is
+               one refactor away from being dropped with nothing to notice.
+               `undefined` in the browser build, where the tab says so instead
+               of taking keys it cannot deliver. */
+            send={globalThis.window?.api?.terminal?.send}
           />
         ) : current === 'Agents' ? (
           <AgentsTab agents={entry?.session.agents} />
