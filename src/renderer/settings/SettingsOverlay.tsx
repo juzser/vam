@@ -49,19 +49,14 @@ import {
   setTheme,
   type Theme,
 } from '../prefs/prefs.js';
+import { LayoutPicker } from './LayoutPicker.js';
+import { FULL, type LayoutChoice, SECTIONS, type SectionId } from './sections.js';
 
 export type SettingsOverlayProps = {
   readonly prefs: Prefs;
   readonly onChange: (next: Prefs) => void;
   readonly onClose: () => void;
 };
-
-/** The shipped layout is not in `LAYOUTS` — it is the absence of one, and it is
- *  what `z0` restores. Named here so the picker can offer a way back. */
-const FULL = 'full';
-type LayoutChoice = typeof FULL | LayoutName;
-
-const LAYOUT_CHOICES: readonly LayoutChoice[] = [FULL, ...(Object.keys(LAYOUTS) as LayoutName[])];
 
 /** Derived from the same table the `?` sheet reads, so the picker cannot
  *  advertise a layout the chord layer never built. */
@@ -94,10 +89,52 @@ const THEMES: readonly Theme[] = ['dark', 'light', 'system'];
  *  second capture box closes the first by construction. */
 type Capturing = { readonly id: string; readonly slot: number } | null;
 
+/**
+ * vam has no focus-ring idiom, and the one `focus-visible` in the renderer
+ * (`TerminalTab.tsx`) draws `line-strong`, which is 1.36:1 on `panel` in dark —
+ * invisible in the default theme. `ink` is 15.7 / 17.7 there and clears on
+ * every fill this dialog uses. The offset matters: flush against a tile's own
+ * border, an outline reads as a thicker border rather than as a cursor.
+ */
+const FOCUS_RING =
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
+
+const tabId = (id: SectionId) => `vam-settings-tab-${id}`;
+const panelId = (id: SectionId) => `vam-settings-panel-${id}`;
+
+/** The two-column form's breakpoint, one spelling shared by the media query and
+ *  the Tailwind `md:` classes it agrees with. */
+const WIDE_NAV = '(min-width: 768px)';
+
+/**
+ * Which nav to render — not which to hide.
+ *
+ * `hidden md:flex` alone would leave BOTH markups in the document and announce
+ * every section twice; `inert` is not available in this React version, so the
+ * honest fix is to render exactly one. A missing `matchMedia` (a jsdom-ish
+ * environment) yields the wide form, the same safe direction `prefs.ts` takes.
+ */
+function useWideNav(): boolean {
+  const [wide, setWide] = useState(() => globalThis.matchMedia?.(WIDE_NAV).matches ?? true);
+  useEffect(() => {
+    const query = globalThis.matchMedia?.(WIDE_NAV);
+    if (!query) return;
+    const sync = () => setWide(query.matches);
+    query.addEventListener('change', sync);
+    return () => query.removeEventListener('change', sync);
+  }, []);
+  return wide;
+}
+
 export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayProps) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
+  const dialog = useRef<HTMLDivElement | null>(null);
+  // Component state, not a pref: which pane you last had open is not a setting,
+  // and persisting it would open the overlay somewhere different every time.
+  const [section, setSection] = useState<SectionId>('appearance');
   const [capturing, setCapturing] = useState<Capturing>(null);
   const [message, setMessage] = useState('');
+  const wide = useWideNav();
 
   const bind = (next: KeyBindings) => {
     setCapturing(null);
@@ -145,9 +182,32 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
     bind(bindKey(prefs.keyBindings, row.id, slot, key));
   };
 
+  /**
+   * Section changes take focus to the nav item, never into the panel: with
+   * automatic activation, arrowing through four sections would throw the cursor
+   * into four different panels. It is also not optional for `Ctrl-Tab` — the
+   * panel the cursor was in has just become `hidden`, and focus inside a hidden
+   * subtree is no focus at all.
+   */
+  const go = (next: SectionId) => {
+    setSection(next);
+    dialog.current?.querySelector<HTMLElement>(`[data-settings-nav-item="${next}"]`)?.focus();
+  };
+
+  const step = (delta: number) => {
+    const at = SECTIONS.findIndex((entry) => entry.id === section);
+    const next = SECTIONS[(at + delta + SECTIONS.length) % SECTIONS.length];
+    if (next !== undefined) {
+      go(next.id);
+    }
+  };
+
   useEffect(() => {
     const returnTo = document.activeElement;
-    closeButton.current?.focus();
+    // The nav is the top of the reading order and the first thing to steer;
+    // Escape works from anywhere in the dialog, so the close button gains
+    // nothing from being first.
+    dialog.current?.querySelector<HTMLElement>('[data-settings-nav-item]')?.focus();
     return () => {
       if (returnTo instanceof HTMLElement && document.contains(returnTo)) {
         returnTo.focus();
@@ -160,6 +220,7 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
   return (
     <div
       data-settings-overlay
+      ref={dialog}
       role="dialog"
       // Not plain "settings": the sidebar's gear already owns that accessible
       // name, and while this is open the two collide — `getByLabelText`
@@ -171,6 +232,15 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
         if (event.key === 'Escape') {
           event.preventDefault();
           onClose();
+          return;
+        }
+        // The section switch that survives a text field — and this panel has
+        // one today and gains colour and key-capture fields beside it. A bare
+        // `j`/`k` that stops working depending on where the cursor sits is
+        // worse than no chord at all.
+        if (event.key === 'Tab' && event.ctrlKey) {
+          event.preventDefault();
+          step(event.shiftKey ? -1 : 1);
         }
       }}
     >
@@ -180,165 +250,335 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
         className="absolute inset-0 cursor-default bg-canvas/70"
         onMouseDown={onClose}
       />
-      <div className="relative max-h-[80vh] w-[min(720px,92vw)] overflow-y-auto rounded-md border border-line bg-panel p-4">
-        <div className="mb-3 flex items-baseline gap-2">
-          <h2 className="font-semibold text-ink text-sm">settings</h2>
-          <span className="text-ink-faint text-xs">stored in this browser, not in a session</span>
+      {/* Fixed height, not `max-h`: with a nav column, a box that resizes per
+          section makes the nav jump under the cursor between a short pane and a
+          long one. One height, one nav position; the panel scrolls. */}
+      <div className="relative flex h-[min(600px,80vh)] w-[min(880px,94vw)] flex-col overflow-hidden rounded-md border border-line bg-panel">
+        <div className="flex h-[38px] flex-none items-center gap-2 border-line border-b px-3">
+          <h2 className="font-semibold text-[13px] text-ink">settings</h2>
+          {/* `ink-faint` measures 3.44 / 3.46 against `panel` — it fails 4.5:1
+              in both themes, and every hint in this overlay used to wear it. */}
+          <span className="text-[11px] text-ink-dim">stored in this browser, not in a session</span>
+          <span className="flex-1" />
           <button
             ref={closeButton}
             type="button"
             onClick={onClose}
-            className="ml-auto rounded border border-line px-2 py-0.5 text-ink-dim text-xs"
+            className={`rounded border border-line px-2 py-0.5 text-ink-dim text-xs ${FOCUS_RING}`}
           >
             Esc
           </button>
         </div>
 
-        <Section
-          title="appearance"
-          hint="theme, colours, zoom and layout — everything about how vam looks"
-        >
-          <Block label="theme" hint="system follows what the operating system asks for">
-            <div className="flex gap-1">
-              {THEMES.map((theme) => (
-                <Choice
-                  key={theme}
-                  label={theme}
-                  selected={prefs.theme === theme}
-                  onPick={() => onChange(setTheme(prefs, theme))}
-                />
-              ))}
-            </div>
-          </Block>
+        {/* `min-h-0` or the panel's scroll container will not shrink inside the
+            flex column, and the fixed height above becomes an overflow. */}
+        <div className="flex min-h-0 flex-1">
+          {wide ? <SectionRail section={section} onGo={go} onStep={step} /> : null}
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            {wide ? null : <SectionStrip section={section} onGo={go} onStep={step} />}
 
-          <Block
-            label="colours"
-            hint="unset follows the stylesheet, so each theme keeps its own"
-            action={
-              Object.keys(prefs.palette).length === 0 ? null : (
-                <SmallButton label="reset colours" onPick={() => onChange(clearPalette(prefs))} />
-              )
-            }
-          >
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
-              {PALETTE_TOKENS.map(({ token, label }) => (
-                <div key={token} className="flex items-center gap-2 text-xs">
-                  <input
-                    type="color"
-                    aria-label={`${label} colour`}
-                    value={paletteValue(prefs.palette, token)}
-                    onChange={(event) =>
-                      onChange(setPaletteColor(prefs, token, event.target.value))
-                    }
-                    className="h-5 w-8 cursor-pointer rounded border border-line bg-raised"
-                  />
-                  <span className="text-ink-dim">{label}</span>
-                  {prefs.palette[token] === undefined ? null : (
-                    <button
-                      type="button"
-                      aria-label={`reset ${label} colour`}
-                      onClick={() => onChange(clearPaletteColor(prefs, token))}
-                      className="cursor-pointer text-ink-faint"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </Block>
-
-          <Block label="focus zoom" hint="how much of the canvas a focused session fills">
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                aria-label="focus zoom share"
-                min={FOCUS_SHARE_MIN}
-                max={FOCUS_SHARE_MAX}
-                step={0.05}
-                value={prefs.focusViewportShare}
-                onChange={(event) => onChange(setFocusShare(prefs, Number(event.target.value)))}
-                className="w-56"
-              />
-              <span className="font-mono text-ink-dim text-xs">
-                {Math.round(prefs.focusViewportShare * 100)}%
-              </span>
-            </div>
-          </Block>
-
-          <Block label="layout" hint="the same layouts the z chords apply">
-            <div className="flex gap-1">
-              {LAYOUT_CHOICES.map((choice) => (
-                <Choice
-                  key={choice}
-                  label={layoutLabel(choice)}
-                  marker={choice}
-                  selected={layout === choice}
-                  onPick={() =>
-                    onChange(
-                      choice === FULL
-                        ? setPaneVisibility(prefs, ALL_VISIBLE)
-                        : setLayout(prefs, choice),
-                    )
-                  }
-                />
-              ))}
-            </div>
-          </Block>
-        </Section>
-
-        <Section title="keyboard" hint="click a key and press the one you want — Escape cancels">
-          {message === '' ? null : (
-            <p data-binding-message className="mb-2 text-waiting text-xs">
-              {message}
-            </p>
-          )}
-          <div className="mb-2">
-            {Object.keys(prefs.keyBindings).length === 0 ? null : (
-              <SmallButton label="reset shortcuts" onPick={() => bind(NO_BINDINGS)} />
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-            {buildBindingSheet(prefs.keyBindings).map((group) => (
-              <section key={group.group}>
-                <h4 className="mb-1 text-ink-faint text-xs uppercase tracking-wide">
-                  {group.title}
-                </h4>
-                <ul>
-                  {group.rows.map((row) => (
-                    <BindingLine
-                      key={row.id}
-                      row={row}
-                      capturing={capturing}
-                      onCapture={setCapturing}
-                      onKey={(slot, event) => capture(row, slot, event)}
-                      onReset={() => bind(clearBindings(prefs.keyBindings, row.id))}
+            <Panel id="appearance" active={section === 'appearance'} hint="theme and colours">
+              <Block label="theme" hint="system follows what the operating system asks for">
+                <div className="flex gap-1">
+                  {THEMES.map((theme) => (
+                    <Choice
+                      key={theme}
+                      label={theme}
+                      selected={prefs.theme === theme}
+                      onPick={() => onChange(setTheme(prefs, theme))}
                     />
                   ))}
-                </ul>
-              </section>
-            ))}
+                </div>
+              </Block>
+
+              <Block
+                label="colours"
+                hint="unset follows the stylesheet, so each theme keeps its own"
+                action={
+                  Object.keys(prefs.palette).length === 0 ? null : (
+                    <SmallButton
+                      label="reset colours"
+                      onPick={() => onChange(clearPalette(prefs))}
+                    />
+                  )
+                }
+              >
+                <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
+                  {PALETTE_TOKENS.map(({ token, label }) => (
+                    <div key={token} className="flex items-center gap-2 text-xs">
+                      <input
+                        type="color"
+                        aria-label={`${label} colour`}
+                        value={paletteValue(prefs.palette, token)}
+                        onChange={(event) =>
+                          onChange(setPaletteColor(prefs, token, event.target.value))
+                        }
+                        className={`h-5 w-8 cursor-pointer rounded border border-line bg-raised ${FOCUS_RING}`}
+                      />
+                      <span className="text-ink-dim">{label}</span>
+                      {prefs.palette[token] === undefined ? null : (
+                        <button
+                          type="button"
+                          aria-label={`reset ${label} colour`}
+                          onClick={() => onChange(clearPaletteColor(prefs, token))}
+                          className={`cursor-pointer text-ink-dim ${FOCUS_RING}`}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </Block>
+            </Panel>
+
+            <Panel
+              id="layout"
+              active={section === 'layout'}
+              hint="the same layouts the z chords apply"
+            >
+              <LayoutPicker
+                current={layout}
+                label={layoutLabel}
+                onPick={(choice) =>
+                  onChange(
+                    choice === FULL
+                      ? setPaneVisibility(prefs, ALL_VISIBLE)
+                      : setLayout(prefs, choice),
+                  )
+                }
+              />
+            </Panel>
+
+            <Panel
+              id="canvas"
+              active={section === 'canvas'}
+              hint="how the canvas itself behaves — not a colour, and not chrome"
+            >
+              <Block label="focus zoom" hint="how much of the canvas a focused session fills">
+                <div className="flex items-center gap-3">
+                  <label className="text-ink-dim text-xs" htmlFor="vam-focus-share">
+                    share
+                  </label>
+                  <input
+                    id="vam-focus-share"
+                    type="range"
+                    aria-label="focus zoom share"
+                    min={FOCUS_SHARE_MIN}
+                    max={FOCUS_SHARE_MAX}
+                    step={0.05}
+                    value={prefs.focusViewportShare}
+                    onChange={(event) => onChange(setFocusShare(prefs, Number(event.target.value)))}
+                    className={`w-56 ${FOCUS_RING}`}
+                  />
+                  <span className="font-mono text-ink-dim text-xs">
+                    {Math.round(prefs.focusViewportShare * 100)}%
+                  </span>
+                </div>
+              </Block>
+            </Panel>
+
+            <Panel
+              id="keyboard"
+              active={section === 'keyboard'}
+              hint="click a key and press the one you want — Escape cancels"
+            >
+              {message === '' ? null : (
+                <p data-binding-message className="mb-2 text-waiting text-xs">
+                  {message}
+                </p>
+              )}
+              <div className="mb-2">
+                {Object.keys(prefs.keyBindings).length === 0 ? null : (
+                  <SmallButton label="reset shortcuts" onPick={() => bind(NO_BINDINGS)} />
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+                {buildBindingSheet(prefs.keyBindings).map((group) => (
+                  <section key={group.group}>
+                    <h4 className="mb-1 text-ink-dim text-xs uppercase tracking-wide">
+                      {group.title}
+                    </h4>
+                    <ul>
+                      {group.rows.map((row) => (
+                        <BindingLine
+                          key={row.id}
+                          row={row}
+                          capturing={capturing}
+                          onCapture={setCapturing}
+                          onKey={(slot, event) => capture(row, slot, event)}
+                          onReset={() => bind(clearBindings(prefs.keyBindings, row.id))}
+                        />
+                      ))}
+                    </ul>
+                  </section>
+                ))}
+              </div>
+            </Panel>
           </div>
-        </Section>
+        </div>
       </div>
     </div>
   );
 }
 
-function Section({
-  title,
+type NavProps = {
+  readonly section: SectionId;
+  readonly onGo: (next: SectionId) => void;
+  readonly onStep: (delta: number) => void;
+};
+
+/** The arrows move the SELECTION, and the panel changes with them: every panel
+ *  here is already mounted, so the extra keystroke manual activation costs
+ *  would buy nothing. Home/End are the ends. */
+function navKeys({ onGo, onStep }: NavProps, event: React.KeyboardEvent) {
+  const first = SECTIONS[0];
+  const last = SECTIONS[SECTIONS.length - 1];
+  if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+    event.preventDefault();
+    onStep(1);
+  } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+    event.preventDefault();
+    onStep(-1);
+  } else if (event.key === 'Home' && first !== undefined) {
+    event.preventDefault();
+    onGo(first.id);
+  } else if (event.key === 'End' && last !== undefined) {
+    event.preventDefault();
+    onGo(last.id);
+  }
+}
+
+/** Shared by both forms so a section cannot be selectable in one and not the
+ *  other, and so there is exactly one nav state. */
+function tabProps(props: NavProps, id: SectionId) {
+  const selected = props.section === id;
+  return {
+    type: 'button' as const,
+    role: 'tab',
+    id: tabId(id),
+    'data-settings-nav-item': id,
+    'aria-selected': selected,
+    'aria-controls': panelId(id),
+    // Roving: the nav is one tab stop, and Tab from it lands in the panel.
+    tabIndex: selected ? 0 : -1,
+    onClick: () => props.onGo(id),
+    onKeyDown: (event: React.KeyboardEvent) => navKeys(props, event),
+  };
+}
+
+/**
+ * The two-column form: the narrow left column `bg-sidebar` names, wearing the
+ * `data-projects-header` caption vocabulary verbatim.
+ *
+ * `sidebar` against `panel` is 1.03:1 in dark — the fill alone cannot separate
+ * the columns and the `border-r` does the separating, which is exactly how the
+ * app's real sidebar seam is drawn.
+ */
+function SectionRail(props: NavProps) {
+  return (
+    <nav
+      data-settings-nav
+      className="hidden w-[168px] flex-none flex-col border-line border-r bg-sidebar md:flex"
+    >
+      <div className="flex flex-none items-center border-line border-b px-3 py-2">
+        <span className="font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
+          Sections
+        </span>
+      </div>
+      <div role="tablist" aria-orientation="vertical" className="flex flex-col gap-0.5 p-1.5">
+        {SECTIONS.map(({ id, label, Icon }) => {
+          const selected = props.section === id;
+          return (
+            <button
+              key={id}
+              {...tabProps(props, id)}
+              // `segment-on` on `sidebar` is 1.36:1 — below the 3:1 an
+              // author-drawn state needs — so a 2px rail in `ink` (15.3:1)
+              // carries the selection. The unselected items reserve the same
+              // 2px in `transparent`, or the label jumps when selection moves.
+              className={`flex h-[28px] w-full cursor-pointer items-center gap-2 rounded-[7px] border-l-2 pr-2 pl-[6px] text-left text-[12px] ${FOCUS_RING} ${
+                selected
+                  ? 'border-ink bg-segment-on font-medium text-ink'
+                  : 'border-transparent text-ink-dim hover:text-ink'
+              }`}
+            >
+              <Icon size={13} strokeWidth={1.6} />
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+/**
+ * The narrow form: `DetailPanel`'s tab-bar geometry, reused rather than
+ * re-invented. Not an icon rail — `lucide-react` has no glyph that
+ * unambiguously means "Layout" at 13px with no label, and four new symbols is a
+ * poor trade for 168px on a window size a desktop tool is rarely at.
+ */
+function SectionStrip(props: NavProps) {
+  return (
+    <div
+      data-settings-nav
+      role="tablist"
+      aria-orientation="horizontal"
+      className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px] md:hidden"
+    >
+      {SECTIONS.map(({ id, label, Icon }) => (
+        <button
+          key={id}
+          {...tabProps(props, id)}
+          className={`flex h-[26px] flex-1 cursor-pointer items-center justify-center gap-[5px] rounded-[7px] text-[12px] ${FOCUS_RING} ${
+            props.section === id
+              ? 'bg-segment-on font-medium text-ink'
+              : 'text-ink-dim hover:text-ink'
+          }`}
+        >
+          <Icon size={13} strokeWidth={1.6} />
+          {/* Four labels at 12px do not fit 300px of strip. */}
+          <span className="hidden sm:inline">{label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One section's panel. All four are mounted and the inactive three carry the
+ * plain HTML `hidden` attribute: that is the standard tabs implementation, it
+ * removes the subtree from the accessibility tree, and it keeps every
+ * `querySelectorAll`/`getByLabelText` assertion that reads this overlay
+ * immediately after `,` — without navigating anywhere — asserting what it was
+ * written to assert.
+ */
+function Panel({
+  id,
+  active,
   hint,
   children,
 }: {
-  readonly title: string;
+  readonly id: SectionId;
+  readonly active: boolean;
   readonly hint: string;
   readonly children: React.ReactNode;
 }) {
   return (
-    <section className="border-line border-t py-3">
+    <section
+      data-settings-panel={id}
+      role="tabpanel"
+      id={panelId(id)}
+      aria-labelledby={tabId(id)}
+      hidden={!active}
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: the tabs pattern asks for exactly this -- the nav is ONE tab stop, so Tab out of it must land in the panel
+      tabIndex={0}
+      className={FOCUS_RING}
+    >
       <div className="mb-2 flex items-baseline gap-2">
-        <h3 className="text-ink text-xs uppercase tracking-wide">{title}</h3>
-        <span className="text-ink-faint text-xs">{hint}</span>
+        <h3 className="text-ink text-xs uppercase tracking-wide">{id}</h3>
+        <span className="text-ink-dim text-xs">{hint}</span>
       </div>
       {children}
     </section>
@@ -347,22 +587,19 @@ function Section({
 
 function Choice({
   label,
-  marker,
   selected,
   onPick,
 }: {
   readonly label: string;
-  readonly marker?: string;
   readonly selected: boolean;
   readonly onPick: () => void;
 }) {
   return (
     <button
       type="button"
-      {...(marker === undefined ? {} : { 'data-layout-option': marker })}
       aria-pressed={selected}
       onClick={onPick}
-      className={`cursor-pointer rounded border px-2 py-1 text-xs ${
+      className={`cursor-pointer rounded border px-2 py-1 text-xs ${FOCUS_RING} ${
         selected ? 'border-line-loudest bg-raised text-ink' : 'border-line text-ink-dim'
       }`}
     >
@@ -408,10 +645,15 @@ function BindingLine({
               aria-label={`press a key for ${row.label}`}
               readOnly
               value=""
-              placeholder="press a key"
+              // Self-describing, because while this box is armed it swallows
+              // every key except Escape — including `Ctrl-Tab` — and a state
+              // that eats the keyboard has to be readable rather than inferred.
+              placeholder="press a key… Esc to cancel"
               onKeyDown={(event) => onKey(slot, event)}
               onBlur={() => onCapture(null)}
-              className="min-w-12 rounded border border-line-loudest bg-raised px-1 text-center font-mono text-ink"
+              // The ring is drawn permanently here, not on `focus-visible`: it
+              // is showing the armed state, not the cursor.
+              className="min-w-40 rounded border border-line-loudest bg-raised px-1 text-center font-mono text-ink outline-2 outline-ink outline-offset-2"
             />
           );
         }

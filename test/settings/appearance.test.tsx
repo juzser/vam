@@ -188,8 +188,24 @@ describe('a binding is edited by pressing the key', () => {
     const { onChange } = open(prefs);
     fireEvent.click(document.querySelector('[data-binding-reset="rename"]') as HTMLElement);
     expect(changed(onChange, 0).keyBindings).toEqual({ icon: ['q'] });
+    // The overlay opens on Appearance, and the three panels it is not showing
+    // carry the HTML `hidden` attribute — which `getByRole` respects, unlike
+    // the `querySelector` above. Navigating is what an operator does anyway.
+    fireEvent.click(screen.getByRole('tab', { name: 'Keyboard' }));
     fireEvent.click(screen.getByRole('button', { name: 'reset shortcuts' }));
     expect(changed(onChange, 1).keyBindings).toEqual({});
+  });
+
+  it('says out loud that it is swallowing keys, and draws the ring while it is', () => {
+    // An armed chip eats Ctrl-Tab and everything else for one keystroke. The
+    // only thing that makes that state honest is the chip saying so, and the
+    // focus ring being drawn rather than merely `focus-visible`.
+    open();
+    fireEvent.click(slot('rename', 0) as HTMLElement);
+    const box = capture() as HTMLInputElement;
+    expect(box.placeholder).toContain('Esc to cancel');
+    expect(box.className).toContain('outline-ink');
+    expect(box.className).not.toContain('focus-visible:outline-ink');
   });
 
   it('shows the operator’s binding in the reference, not the default', () => {

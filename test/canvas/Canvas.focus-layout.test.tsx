@@ -270,7 +270,7 @@ describe('the settings picker offers it', () => {
     fireEvent.click(option as HTMLElement);
     expect(columnOrder()).toEqual(['sidebar', 'detail', 'canvas']);
     expect(
-      document.querySelector('[data-layout-option="focusResponse"]')?.getAttribute('aria-pressed'),
+      document.querySelector('[data-layout-option="focusResponse"]')?.getAttribute('aria-checked'),
     ).toBe('true');
   });
 });

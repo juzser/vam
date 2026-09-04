@@ -46,6 +46,13 @@ const stored = (): Partial<Prefs> => JSON.parse(localStorage.getItem(KEY) ?? '{}
 const seed = (payload: Record<string, unknown>) =>
   localStorage.setItem(KEY, JSON.stringify(payload));
 const option = (name: string) => screen.getByRole('button', { name });
+/** A layout tile is a radio in a panel the overlay does not open on, and its
+ *  accessible name now carries the drawn column order after the label — so:
+ *  navigate first, then match the label rather than the whole name. */
+const layoutTile = (label: string) => {
+  fireEvent.click(screen.getByRole('tab', { name: 'Layout' }));
+  return screen.getByRole('radio', { name: new RegExp(label) });
+};
 
 function press(key: string, modifiers: KeyboardEventInit = {}) {
   act(() => {
@@ -199,10 +206,10 @@ describe('the layout section picks from the layouts that exist', () => {
     press(',');
     const current = () =>
       overlay()
-        ?.querySelector('[data-layout-option][aria-pressed="true"]')
+        ?.querySelector('[data-layout-option][aria-checked="true"]')
         ?.getAttribute('data-layout-option');
     expect(current()).toBe('full');
-    fireEvent.click(option('hide the canvas'));
+    fireEvent.click(layoutTile('hide the canvas'));
     expect(current()).toBe('noCanvas');
   });
 
@@ -216,7 +223,7 @@ describe('the layout section picks from the layouts that exist', () => {
 
     render(<Canvas model={MODEL} />);
     press(',');
-    fireEvent.click(option('hide the canvas'));
+    fireEvent.click(layoutTile('hide the canvas'));
     expect(localStorage.getItem(KEY)).toBe(fromChord);
   });
 });
