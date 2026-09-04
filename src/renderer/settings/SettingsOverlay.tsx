@@ -21,6 +21,7 @@
 
 import { Minus, Plus, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { PROVIDERS, resolveProvider } from '../../shared/providers.js';
 import {
   bindingConflict,
   bindKey,
@@ -41,6 +42,7 @@ import {
   PALETTE_TOKENS,
   type Prefs,
   paletteValue,
+  setDefaultProvider,
   setKeyBindings,
   setLayout,
   setOutFontSize,
@@ -96,6 +98,18 @@ type Capturing = { readonly id: string; readonly slot: number } | null;
  * every fill this dialog uses. The offset matters: flush against a tile's own
  * border, an outline reads as a thicker border rather than as a cursor.
  */
+/**
+ * Why the list is one item long, said where the operator can read it rather
+ * than only in a source comment. Codex CLI and Cursor CLI are on the roadmap
+ * and neither is implemented: a provider is not a command to spawn, it is a
+ * source that can read back what that command is doing, and vam has one of
+ * those. Offering a provider that cannot start would be worse than offering a
+ * single honest choice.
+ */
+const PROVIDER_HINT =
+  'the agent o starts in a new session. Claude Code is the only one vam can ' +
+  'read back today, so it is the only one offered.';
+
 const FOCUS_RING =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
 
@@ -414,6 +428,40 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
                   )
                 }
               />
+            </Panel>
+
+            <Panel
+              id="sessions"
+              active={section === 'sessions'}
+              hint="which agent a new session starts"
+            >
+              <Block label="default provider" hint={PROVIDER_HINT}>
+                <div className="flex gap-1">
+                  {PROVIDERS.map((provider) => (
+                    <button
+                      key={provider.id}
+                      type="button"
+                      data-provider-option={provider.id}
+                      aria-pressed={prefs.defaultProvider === provider.id}
+                      onClick={() => onChange(setDefaultProvider(prefs, provider.id))}
+                      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-[12px] ${FOCUS_RING} ${
+                        prefs.defaultProvider === provider.id
+                          ? 'border-line-loudest bg-raised text-ink'
+                          : 'border-line text-ink-dim'
+                      }`}
+                    >
+                      {provider.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-3 text-[12px] text-ink-dim">
+                  o runs{' '}
+                  <code className="text-ink">
+                    {resolveProvider(prefs.defaultProvider).command.join(' ')}
+                  </code>{' '}
+                  in the project’s directory.
+                </p>
+              </Block>
             </Panel>
 
             <Panel

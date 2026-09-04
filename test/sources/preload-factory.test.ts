@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SourceCapabilities, SourceDeclines } from '../../src/renderer/sources/port.js';
 import { canGovernWith, canSubscribeTo, canWriteTo } from '../../src/renderer/sources/port.js';
 import { createSourceFromPreload } from '../../src/renderer/sources/preload-factory.js';
+import { activeProviderId, setActiveProvider } from '../../src/renderer/sources/provider.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../../src/shared/preload-api.js';
+import { DEFAULT_PROVIDER_ID } from '../../src/shared/providers.js';
 
 const NO_CAPABILITIES: SourceCapabilities = {
   liveUpdates: false,
@@ -192,14 +194,45 @@ describe('createSourceFromPreload', () => {
     expect(api.recordPrompt).toHaveBeenCalledWith('s1', 'hello');
     expect(api.renameSession).toHaveBeenCalledWith('s1', 'new title');
     expect(api.closeSession).toHaveBeenCalledWith('s1');
-    expect(api.createSession).toHaveBeenCalledWith('p1', 'fresh');
-    // By value and in order: (cwd, name), never the reverse.
-    expect(api.createSessionIn).toHaveBeenCalledWith('/srv/work/orchard', 'orchard');
+    // The provider the operator chose in settings, BY VALUE and third: the
+    // call site names a project and a title, and the factory is the one place
+    // that knows which agent a new session should run.
+    expect(api.createSession).toHaveBeenCalledWith('p1', 'fresh', activeProviderId());
+    // By value and in order: (cwd, name, provider), never the reverse.
+    expect(api.createSessionIn).toHaveBeenCalledWith(
+      '/srv/work/orchard',
+      'orchard',
+      activeProviderId(),
+    );
 
     if (!canGovernWith(source)) throw new Error('expected a governing source');
     await source.governance.applyWaivers('s1', ['f1']);
     await source.governance.transitionLesson('s1', 'l1', 'approved');
     expect(api.applyWaivers).toHaveBeenCalledWith('s1', ['f1']);
     expect(api.transitionLesson).toHaveBeenCalledWith('s1', 'l1', 'approved');
+  });
+});
+
+/**
+ * The provider a new session runs is a stored preference, and the port's write
+ * surface is built once outside React -- so the factory reads what
+ * `activatePrefs` put in force rather than taking it as an argument the canvas
+ * would have to thread through every call site.
+ */
+describe('the chosen provider reaches the api', () => {
+  it('sends whatever the store put in force, by value', async () => {
+    const api = makeApi(makeDescriptor(ALL_CAPABILITIES));
+    const source = await createSourceFromPreload(api);
+    if (!canWriteTo(source)) throw new Error('expected a writable source');
+
+    setActiveProvider('claude-code');
+    await source.write.createSession?.('p1', 'fresh');
+    expect(api.createSession).toHaveBeenCalledWith('p1', 'fresh', 'claude-code');
+
+    // And an id no provider answers to never leaves the renderer: it was
+    // normalised where it was put into force.
+    setActiveProvider('codex-cli');
+    await source.write.createSession?.('p2', 'second');
+    expect(api.createSession).toHaveBeenCalledWith('p2', 'second', DEFAULT_PROVIDER_ID);
   });
 });

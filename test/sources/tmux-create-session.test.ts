@@ -19,6 +19,7 @@ import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
 import { FIXTURE_SOURCE } from '../../src/main/sources/fixture-source.js';
 import type { MainSource } from '../../src/main/sources/source.js';
 import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
+import { DEFAULT_PROVIDER_ID, resolveProvider } from '../../src/shared/providers.js';
 
 function recordingTmux(stderr = ''): TmuxRun & { calls: (readonly string[])[] } {
   const calls: (readonly string[])[] = [];
@@ -180,5 +181,91 @@ describe('a new session in a chosen directory', () => {
     expect(result.ok === false && result.error.code).toBe('unsupported:createSession');
     // The gate came first: the recorder is empty, not merely apologised to.
     expect(spawned).toEqual([]);
+  });
+});
+
+/**
+ * Which agent the new session runs, and what happens when the renderer names
+ * one main has never heard of. The argv is asserted BY VALUE: "it passed the
+ * provider along" is not the claim -- the claim is that the words tmux runs
+ * are that provider's own command.
+ */
+describe('the provider the session is started with', () => {
+  it('runs the chosen provider’s command, by value', async () => {
+    const run = recordingTmux();
+    const failure = await createSessionInDirectory({
+      cwd: '/srv/work/orchard',
+      title: 'orchard',
+      run,
+      name: 'vam-orchard-a1b2c3',
+      provider: 'claude-code',
+    });
+
+    expect(failure).toBeNull();
+    expect(run.calls[0]).toEqual([
+      'new-session',
+      '-d',
+      '-s',
+      'vam-orchard-a1b2c3',
+      '-c',
+      '/srv/work/orchard',
+      ...resolveProvider('claude-code').command,
+    ]);
+  });
+
+  it('falls back to the default provider for an id nothing answers to', async () => {
+    const run = recordingTmux();
+    const failure = await createSessionInProject({
+      agents: [agent('/w/demo')],
+      projectId: projectIdOf('/w/demo'),
+      title: 'new work',
+      run,
+      name: 'vam-new-work-a1b2c3',
+      // A provider a later vam may add, stored by a browser that has been
+      // through a downgrade -- or simply hand-edited. The session must still
+      // start.
+      provider: 'codex-cli',
+    });
+
+    expect(failure).toBeNull();
+    expect(run.calls[0]).toEqual([
+      'new-session',
+      '-d',
+      '-s',
+      'vam-new-work-a1b2c3',
+      '-c',
+      '/w/demo',
+      ...resolveProvider(DEFAULT_PROVIDER_ID).command,
+    ]);
+  });
+
+  it('carries the renderer’s choice across the IPC boundary, and defaults without one', async () => {
+    const seen: unknown[] = [];
+    const source = {
+      descriptor: {
+        ...FIXTURE_SOURCE.descriptor,
+        capabilities: { ...FIXTURE_SOURCE.descriptor.capabilities, createSession: true },
+      },
+      load: FIXTURE_SOURCE.load,
+      createSession: async (_projectId: string, _title: string, provider?: string) => {
+        seen.push(provider);
+        return null;
+      },
+      createSessionInDirectory: async (_cwd: string, _title: string, provider?: string) => {
+        seen.push(provider);
+        return null;
+      },
+    } as unknown as MainSource;
+    const invoke = handlerFor(source);
+
+    expect((await invoke(CHANNELS.createSession, 'p1', 'a title', 'claude-code')).ok).toBe(true);
+    expect((await invoke(CHANNELS.createSessionIn, '/srv/work/orchard', 'orchard')).ok).toBe(true);
+    expect(seen).toEqual(['claude-code', undefined]);
+
+    // A provider id is a string like every other argument on these channels;
+    // a payload that is not one is refused before any spawn.
+    const bad = await invoke(CHANNELS.createSession, 'p1', 'a title', 7);
+    expect(bad.ok).toBe(false);
+    expect(seen).toEqual(['claude-code', undefined]);
   });
 });

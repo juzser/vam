@@ -61,9 +61,22 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
     renameSession: (sessionId, title) =>
       unwrap<void>(ipc.invoke(CHANNELS.renameSession, sessionId, title)),
     closeSession: (sessionId) => unwrap<void>(ipc.invoke(CHANNELS.closeSession, sessionId)),
-    createSession: (projectId, title) =>
-      unwrap<void>(ipc.invoke(CHANNELS.createSession, projectId, title)),
-    createSessionIn: (cwd, title) => unwrap<void>(ipc.invoke(CHANNELS.createSessionIn, cwd, title)),
+    // The provider is forwarded ONLY when the renderer named one: main takes
+    // an absent third argument as "your default provider", and sending an
+    // explicit `undefined` would make the arity two-or-three at every layer
+    // for no gain.
+    createSession: (projectId, title, provider) =>
+      unwrap<void>(
+        provider === undefined
+          ? ipc.invoke(CHANNELS.createSession, projectId, title)
+          : ipc.invoke(CHANNELS.createSession, projectId, title, provider),
+      ),
+    createSessionIn: (cwd, title, provider) =>
+      unwrap<void>(
+        provider === undefined
+          ? ipc.invoke(CHANNELS.createSessionIn, cwd, title)
+          : ipc.invoke(CHANNELS.createSessionIn, cwd, title, provider),
+      ),
   } satisfies Pick<
     PreloadSourceApi,
     'recordPrompt' | 'renameSession' | 'closeSession' | 'createSession' | 'createSessionIn'
