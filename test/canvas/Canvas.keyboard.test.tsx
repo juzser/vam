@@ -1826,7 +1826,7 @@ describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
 /**
  * Ten sessions under one project, all `done`, so the status ranking cannot
  * reorder them and the sidebar prints exactly source order. Nine of anything
- * is the whole point of `Mod-9`, and MODEL's three cannot reach it.
+ * is the whole point of `Mod-Shift-9`, and MODEL's three cannot reach it.
  */
 const MANY: CanvasModel = {
   projects: [
@@ -1839,12 +1839,25 @@ const MANY: CanvasModel = {
   ],
 };
 
-describe('Cmd-number jumps to a session in the sidebar', () => {
-  it('Mod-1 lands on the first row from wherever the cursor was', () => {
+/**
+ * `Cmd+Shift+<n>` — the sidebar's positions, which is where they moved when
+ * the tabs took the bare digit row (the operator's collision report).
+ *
+ * Pressed as a real keydown carries them: on a US layout the browser shifts
+ * the digit to `!`, `@`, `#`…, and only `event.code` says which POSITION was
+ * struck. Passing the shifted character here is what makes these tests fail if
+ * `normalizeKey` is ever simplified back to reading `event.key`.
+ */
+const SHIFTED = ['!', '@', '#', '$', '%', '^', '&', '*', '('] as const;
+const sessionAt = (n: number, extra: KeyboardEventInit = {}) =>
+  press(SHIFTED[n - 1] as string, { metaKey: true, shiftKey: true, code: `Digit${n}`, ...extra });
+
+describe('Cmd-Shift-number jumps to a session in the sidebar', () => {
+  it('lands on the first row from wherever the cursor was', () => {
     render(<Canvas model={MODEL} />);
     press('j');
     expect(focused()).toBe('alpha/a2');
-    press('1', { metaKey: true });
+    sessionAt(1);
     expect(focused()).toBe('alpha/a1');
   });
 
@@ -1852,24 +1865,24 @@ describe('Cmd-number jumps to a session in the sidebar', () => {
     render(<Canvas model={MODEL} />);
     // a1, a2 sit under alpha and b1 under beta; the third digit is the third
     // SESSION, not the third row of a list that counted its own headings.
-    press('3', { ctrlKey: true });
+    press('#', { ctrlKey: true, shiftKey: true, code: 'Digit3' });
     expect(focused()).toBe('beta/b1');
   });
 
-  it('Mod-9 is the last session, past nine and short of it alike', () => {
+  it('the ninth is the last session, past nine and short of it alike', () => {
     const { unmount } = render(<Canvas model={MANY} />);
-    press('9', { metaKey: true });
+    sessionAt(9);
     expect(focused()).toBe('gamma/s10'); // the LAST, not the ninth
     unmount();
 
     render(<Canvas model={MODEL} />);
-    press('9', { metaKey: true });
+    sessionAt(9);
     expect(focused()).toBe('beta/b1'); // three sessions, and it still lands
   });
 
   it('an out-of-range digit says so instead of clamping to the last row', () => {
     render(<Canvas model={MODEL} />);
-    press('7', { metaKey: true });
+    sessionAt(7);
     expect(focused()).toBe('alpha/a1'); // unmoved
     expect(statusBar()).toContain('only 3 sessions');
   });
@@ -1881,11 +1894,11 @@ describe('Cmd-number jumps to a session in the sidebar', () => {
     keyOn(filterInput() as HTMLInputElement, 'Enter');
     expect(rows().map((el) => el.getAttribute('data-session-row'))).toEqual(['a1', 'a2']);
 
-    press('2', { metaKey: true });
+    sessionAt(2);
     expect(focused()).toBe('alpha/a2');
     // b1 is still in the model and still the third session there. Counting it
     // would land the cursor on a row the operator cannot see.
-    press('3', { metaKey: true });
+    sessionAt(3);
     expect(focused()).toBe('alpha/a2');
     expect(statusBar()).toContain('only 2 sessions');
   });
@@ -1895,15 +1908,15 @@ describe('Cmd-number jumps to a session in the sidebar', () => {
     // keystroke aimed at an INPUT or a TEXTAREA, which killed Cmd-chords
     // exactly where an operator's hands are. A Cmd/Ctrl chord is not text
     // entry on any layout, so the box has no claim on it — the rule that lets
-    // `Mod-Shift-<digit>` reach the tab bar from the prompt box is the same
-    // rule here, and one rule is what keeps it predictable. What the box does
-    // keep is everything unmodified, including the draft already typed.
+    // `Mod-<digit>` reach the tab bar from the prompt box is the same rule
+    // here, and one rule is what keeps it predictable. What the box does keep
+    // is everything unmodified, including the draft already typed.
     render(<Canvas model={MODEL} />);
     press('j');
     press('i'); // the composer, aimed at alpha/a2
     const box = promptInput() as HTMLTextAreaElement;
     typeInto(box, 'half a prompt');
-    keyOn(box, '1', { metaKey: true, code: 'Digit1' });
+    keyOn(box, '!', { metaKey: true, shiftKey: true, code: 'Digit1' });
     expect(focused()).toBe('alpha/a1');
     expect(promptInput()?.value).toBe('half a prompt');
   });
@@ -1911,8 +1924,10 @@ describe('Cmd-number jumps to a session in the sidebar', () => {
   it('consumes the event, so the host does not also act on it', () => {
     render(<Canvas model={MODEL} />);
     const event = new KeyboardEvent('keydown', {
-      key: '2',
+      key: '@',
+      code: 'Digit2',
       metaKey: true,
+      shiftKey: true,
       bubbles: true,
       cancelable: true,
     });
@@ -1929,8 +1944,8 @@ describe('the grammar hint in the footer', () => {
     render(<Canvas model={MODEL} />);
     // The operator asked for one cell at the right end. The digit jump did
     // not become invisible with it: the `?` sheet is generated from
-    // BINDING_TABLES, so `Mod-1..9` is named there, and the bar now points
-    // at the sheet instead of paraphrasing it.
+    // BINDING_TABLES, so `Mod-Shift-1..9` is named there, and the bar now
+    // points at the sheet instead of paraphrasing it.
     const bar = document.querySelector('[data-status-bar]')?.textContent ?? '';
     expect(bar).not.toMatch(/\^1-9/);
     expect(bar).toMatch(/\?/);

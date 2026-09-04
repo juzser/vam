@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
 
 /**
- * `Mod-Shift-<digit>` picks the detail pane's tab, and `p` joins the grammar.
+ * `Mod-<digit>` picks the detail pane's tab, and `p` joins the grammar.
  *
- * Both families are pressed here on purpose: the digit row now means a
- * POSITION twice over — `Mod-1` a session, `Mod-Shift-1` a tab — and the
- * failure mode of that pair is one answering the other.
+ * Both families are pressed here on purpose: the digit row means a POSITION
+ * twice over — `Mod-1` a tab, `Mod-Shift-1` a session — and the failure mode
+ * of that pair is one answering the other. They shipped the other way round
+ * and the operator reported the collision: Cmd+number is the tab gesture
+ * everywhere else, so the tabs took the bare row.
  *
  * `p` was real but ungoverned: hand-wired to its own window listener in
  * `SessionList.tsx`, it appeared in no key sheet and fired straight through an
@@ -60,14 +62,17 @@ function press(key: string, modifiers: KeyboardEventInit = {}, target?: HTMLElem
   });
 }
 
-/** `Cmd+Shift+<n>`, spelled the way a real keyboard reports it. */
+/** `Cmd+<n>` — the tab, spelled the way a real keyboard reports it. */
 function tabChord(n: number, target?: HTMLElement) {
-  press(String(n), { metaKey: true, shiftKey: true, code: `Digit${n}` }, target);
+  press(String(n), { metaKey: true, code: `Digit${n}` }, target);
 }
 
-/** `Cmd+<n>` — the session jump that shares the digit row. */
+/** `Cmd+Shift+<n>` — the session jump that shares the digit row. On a US
+ *  layout the browser hands us `!` for Shift+1, so the shifted characters are
+ *  what a real keydown carries; the POSITION is in `code`. */
+const SHIFTED = ['!', '@', '#', '$', '%', '^', '&', '*', '('] as const;
 function sessionChord(n: number) {
-  press(String(n), { metaKey: true, code: `Digit${n}` });
+  press(SHIFTED[n - 1] as string, { metaKey: true, shiftKey: true, code: `Digit${n}` });
 }
 
 /** A focused session, which is what makes the detail pane draw its tabs. */
@@ -110,7 +115,7 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe('Mod-Shift-<digit> switches the detail pane tab', () => {
+describe('Mod-<digit> switches the detail pane tab', () => {
   it('selects the tab at that position', () => {
     mountFocused();
     expect(selectedTab()).toBe('response');
@@ -122,7 +127,7 @@ describe('Mod-Shift-<digit> switches the detail pane tab', () => {
     expect(selectedTab()).toBe('response');
   });
 
-  it('leaves Mod-<digit> jumping to a session', () => {
+  it('leaves Mod-Shift-<digit> jumping to a session', () => {
     mountFocused();
     expect(focusedTitle()).toBe('a1');
     sessionChord(2);
@@ -176,18 +181,31 @@ describe('`p` is a binding like every other', () => {
 
 describe('the generated key sheet lists both', () => {
   const rows = () => buildKeySheet().flatMap((group) => group.rows);
+  const keyFor = (label: string) =>
+    rows()
+      .filter((row) => row.label === label)
+      .map((row) => row.keys);
 
-  it('lists every Mod-Shift digit the tab bar offers', () => {
-    const keys = rows().map((row) => row.keys);
-    expect(keys).toContain('Mod-Shift-1');
-    expect(keys).toContain('Mod-Shift-2');
-    expect(keys).toContain('Mod-Shift-3');
-    expect(keys).toContain('Mod-Shift-4');
+  it('lists the tabs on the bare digits, by value', () => {
+    expect(keyFor('the response tab')).toEqual(['Mod-1']);
+    expect(keyFor('the prs tab')).toEqual(['Mod-2']);
+    expect(keyFor('the terminal tab')).toEqual(['Mod-3']);
+    expect(keyFor('the agents tab')).toEqual(['Mod-4']);
   });
 
-  it('names each tab rather than its number', () => {
-    const row = rows().find((candidate) => candidate.keys === 'Mod-Shift-4');
-    expect(row?.label).toBe('the agents tab');
+  it('lists the sessions on the shifted digits, by value', () => {
+    for (let position = 1; position <= 8; position += 1) {
+      expect(keyFor(`session ${position} in the sidebar`)).toEqual([`Mod-Shift-${position}`]);
+    }
+    // `last` holds two keys, and the ninth shifted digit is the second.
+    expect(keyFor('last session')).toEqual(['G', 'Mod-Shift-9']);
+  });
+
+  it('names no digit nothing is bound to', () => {
+    const keys = rows().map((row) => row.keys);
+    for (const digit of ['Mod-5', 'Mod-6', 'Mod-7', 'Mod-8', 'Mod-9', 'Mod-0']) {
+      expect(keys, digit).not.toContain(digit);
+    }
   });
 
   it('lists `p`, which was bound and invisible', () => {

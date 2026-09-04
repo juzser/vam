@@ -69,9 +69,11 @@ function digitPosition(event: KeyEventLike): string | null {
  * table's own comment says "1..8 are positions". A character-based spelling
  * cannot keep that promise, and failed it twice. Shift alters a digit, so
  * `Cmd+Shift+1` arrives as `!` and would have to be written `Mod-!` — a
- * spelling no key sheet can render as a position. And on any layout whose
- * digit row is shifted (AZERTY), plain `Cmd+1` arrives as `&`, so the shipped
- * `sessionAt` bindings were simply DEAD there.
+ * spelling no key sheet can render as a position, and today that is the whole
+ * `sessionAt` family. And on any layout whose digit row is shifted (AZERTY),
+ * plain `Cmd+1` arrives as `&`, which is how the digit bindings of the day
+ * came to be simply DEAD there — the hazard is the row, not the family that
+ * happens to be sitting on it, and the families have since swapped.
  *
  * `event.code` answers both: `Digit1` is the position, whatever the layout put
  * on it, so the digit row keeps one spelling everywhere and Shift can carry a
@@ -154,15 +156,16 @@ export type KeyAction =
   | { readonly kind: 'resetPanes' }
   /** `zc` / `zC` hide columns, `zf` reorders them. See `AFTER_Z`. */
   | { readonly kind: 'layout'; readonly name: LayoutName }
-  /** `Mod-1` … `Mod-8` — jump straight to a session by its position in the
-      sidebar, zero-based here because that is what an index into the list is.
-      `Mod-9` is deliberately NOT in this family: it is `last` (below). */
+  /** `Mod-Shift-1` … `Mod-Shift-8` — jump straight to a session by its
+      position in the sidebar, zero-based here because that is what an index
+      into the list is. `Mod-Shift-9` is deliberately NOT in this family: it is
+      `last` (below). */
   | { readonly kind: 'sessionAt'; readonly index: number }
-  /** `Mod-Shift-1` … `Mod-Shift-4` — show one of the detail pane's tabs. Named
-      rather than numbered because a position is what the KEY means, not what
-      the action does: reorder the bar and the binding follows the name, and
-      the sheet keeps saying which tab it opens. Type-only import, so the
-      grammar still pulls no component in at runtime. */
+  /** `Mod-1` … `Mod-4` — show one of the detail pane's tabs. Named rather than
+      numbered because a position is what the KEY means, not what the action
+      does: reorder the bar and the binding follows the name, and the sheet
+      keeps saying which tab it opens. Type-only import, so the grammar still
+      pulls no component in at runtime. */
   | { readonly kind: 'detailTab'; readonly tab: DetailTab }
   /** `p` — reveal the focused session's project in the sidebar and put the
       keyboard on its fold. */
@@ -220,30 +223,48 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   N: { kind: 'searchPrev' },
   Enter: { kind: 'open' },
   'Mod-k': { kind: 'palette' },
-  // Cmd/Ctrl + a digit, the one shortcut every browser and terminal already
-  // taught: 1..8 are positions, and 9 is the LAST one whatever the count —
-  // far more use than a ninth position once the list outgrows nine. Written
-  // out rather than generated so the table stays the one place every binding
-  // can be read off. `Mod-0` is left unbound: `z0` already owns the zero.
-  'Mod-1': { kind: 'sessionAt', index: 0 },
-  'Mod-2': { kind: 'sessionAt', index: 1 },
-  'Mod-3': { kind: 'sessionAt', index: 2 },
-  'Mod-4': { kind: 'sessionAt', index: 3 },
-  'Mod-5': { kind: 'sessionAt', index: 4 },
-  'Mod-6': { kind: 'sessionAt', index: 5 },
-  'Mod-7': { kind: 'sessionAt', index: 6 },
-  'Mod-8': { kind: 'sessionAt', index: 7 },
-  'Mod-9': { kind: 'last' },
-  // The same digit row, one row up: Shift makes it a POSITION IN THE TAB BAR
-  // rather than in the sidebar. A letter would have fought the prompt box,
-  // which is where an operator's hands are when they want another tab, and
-  // `Mod-1`..`Mod-9` were already taken. Spelled by position (`normalizeKey`
-  // reads `event.code` for the digit row), so `Cmd+Shift+1` is this binding
-  // and not the `!` the browser would otherwise have handed us.
-  'Mod-Shift-1': { kind: 'detailTab', tab: 'Response' },
-  'Mod-Shift-2': { kind: 'detailTab', tab: 'PRs' },
-  'Mod-Shift-3': { kind: 'detailTab', tab: 'Terminal' },
-  'Mod-Shift-4': { kind: 'detailTab', tab: 'Agents' },
+  // Cmd/Ctrl + a digit is the TAB, because that is what Cmd+number has meant
+  // in every browser and editor for twenty years and the tab bar is what it
+  // points at there too. The sidebar's sessions had it first, and the operator
+  // reported the result as a collision: reaching for Cmd+2 to read the PRs
+  // moved the cursor in the sidebar instead.
+  //
+  // The tabs win the bare row on the merits, not by seniority. There are
+  // exactly FOUR of them, they are the same four in every session, and they
+  // are always on screen — so the digit is a label an operator can read off
+  // the bar rather than a count they have to make. Sessions are many, they
+  // reorder, and past the eighth the number stops being reachable at all;
+  // a position you have to count is the one that can afford the extra
+  // modifier. Written out rather than generated so the table stays the one
+  // place every binding can be read off.
+  //
+  // Named by tab rather than by number: a position is what the KEY means, not
+  // what the action does, so reordering the bar follows the name and the sheet
+  // keeps saying which tab it opens. Type-only import, so the grammar still
+  // pulls no component in at runtime.
+  'Mod-1': { kind: 'detailTab', tab: 'Response' },
+  'Mod-2': { kind: 'detailTab', tab: 'PRs' },
+  'Mod-3': { kind: 'detailTab', tab: 'Terminal' },
+  'Mod-4': { kind: 'detailTab', tab: 'Agents' },
+  // `Mod-5`..`Mod-9` are deliberately unbound: there are four tabs, and a
+  // fifth digit that does nothing is better than a fifth digit that does
+  // something else. `Mod-0` stays unbound too — `z0` already owns the zero.
+  //
+  // The same digit row, one row up: Shift makes it a POSITION IN THE SIDEBAR.
+  // 1..8 are positions and 9 is the LAST session whatever the count — far more
+  // use than a ninth position once the list outgrows nine. Spelled by position
+  // (`normalizeKey` reads `event.code` for the digit row), so `Cmd+Shift+1` is
+  // this binding and not the `!` the browser would otherwise have handed us —
+  // which is also what keeps it alive on a layout whose digit row is shifted.
+  'Mod-Shift-1': { kind: 'sessionAt', index: 0 },
+  'Mod-Shift-2': { kind: 'sessionAt', index: 1 },
+  'Mod-Shift-3': { kind: 'sessionAt', index: 2 },
+  'Mod-Shift-4': { kind: 'sessionAt', index: 3 },
+  'Mod-Shift-5': { kind: 'sessionAt', index: 4 },
+  'Mod-Shift-6': { kind: 'sessionAt', index: 5 },
+  'Mod-Shift-7': { kind: 'sessionAt', index: 6 },
+  'Mod-Shift-8': { kind: 'sessionAt', index: 7 },
+  'Mod-Shift-9': { kind: 'last' },
   // `p` for project. It shipped hand-wired to its own window listener in
   // SessionList.tsx, which cost it both properties this table exists to give:
   // it appeared in no key sheet, and it fired straight through an open

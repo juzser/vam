@@ -167,10 +167,38 @@ No real modes. A handful of vim-style chords plus a command palette.
 | `i` | opens the input for whatever the cursor is on — a waiver's reason, a lesson's note, or the prompt |
 | `H` | leaves the action pane, back to the session list |
 | `gr` | clears every pinned position, returns the canvas to auto-layout |
+| `o` `Mod-n` | starts a session — the vim gesture, and the chord every application spells "new" |
+| `Mod-1` … `Mod-4` | shows one of the detail pane's four tabs |
+| `Mod-Shift-1` … `Mod-Shift-8` | jumps to the session at that position in the sidebar |
+| `Mod-Shift-9` | jumps to the LAST session, whatever the count |
+| `1` … `9` (in an open question) | marks the option beside that number |
 
 `hjkl` must be computed from real coordinates at press time, **not** from a
 fixed index — that is the condition that lets drag-and-drop and keyboard
 navigation coexist.
+
+**The digit row, and which family holds the bare `Mod-<digit>`.** It shipped
+the other way round — sessions on `Mod-1..9`, tabs pushed onto
+`Mod-Shift-1..4` because the plain row was taken — and the operator reported
+that as a collision: `Cmd+number` is the tab gesture in every browser and
+editor, so reaching for a tab moved the cursor in the sidebar. The tabs hold
+the bare row. There are exactly four of them, they are the same four in every
+session and always on screen, so the digit is a label read off the bar;
+sessions are many, they reorder, and past the eighth the number is not
+reachable at all, so the position you have to count is the one that can afford
+the extra modifier. `Mod-5`..`Mod-9` and `Mod-0` are unbound.
+
+Both families are spelled from `event.code`, not from the character: under
+Shift a digit arrives as `!`, and on a layout whose digit row is shifted
+(AZERTY) an unshifted `Cmd+1` arrives as `&`. Reading the position is what
+keeps either family alive there, and it is not an implementation detail to
+simplify away.
+
+The option digits are BARE, and safe by scope rather than by luck: they are
+handled by the question listbox itself, so they can only fire while the
+keyboard is already in the options list (`i` puts it there). The canvas
+grammar binds no bare digit at all. Marking by number is still marking — vam
+has no channel that could deliver an answer, and the card says so.
 
 ### 4.1 What orca gives the keyboard layer (read on 2026-08-27)
 
