@@ -455,13 +455,6 @@ export function bindKey(
   return { ...overrides, [id]: next.slice(0, MAX_BINDINGS) };
 }
 
-/** Empty one slot. The action may end up with no binding at all, which is a
- *  state the operator asked for and not the same as "back to shipped". */
-export function unbindSlot(overrides: KeyBindings, id: string, slot: number): KeyBindings {
-  const next = bindingChords(overrides, id).filter((_, index) => index !== slot);
-  return { ...overrides, [id]: next };
-}
-
 /** Back to the shipped bindings for one action — by REMOVING the override,
  *  never by storing today's keys, which would freeze them forever. */
 export function clearBindings(overrides: KeyBindings, id: string): KeyBindings {
