@@ -1481,3 +1481,70 @@ describe('removing a project', () => {
     expect(container.querySelector('[data-restore-project="p1"]')).not.toBeNull();
   });
 });
+
+/**
+ * The confirm counts the PROJECT, not the page.
+ *
+ * `Canvas` narrows `entries` by search, status and the two origin rules --
+ * `hideAgentStarted` DEFAULTS TO TRUE -- and then hides the whole project. A
+ * plan computed over the narrowed list therefore understates both numbers: it
+ * promises to end one session, ends one, and hides four, leaving three
+ * vam-started sessions running with no row to reach them by. The direction is
+ * under-kill, so nothing unowned dies -- but a confirm that misstates what it
+ * is about to do is the thing that teaches an operator to click through it.
+ *
+ * So the plan and the restore strip read `allEntries`, which is the set before
+ * any filter.
+ */
+describe('removing a project, under a filter', () => {
+  const alpha = makeProject({ id: 'p1', name: 'alpha' }, []);
+  const beta = makeProject({ id: 'p2', name: 'beta' }, []);
+  const all: SessionEntry[] = [
+    { project: alpha, session: makeSession({ id: 'a1', title: 'one', vamControlled: true }) },
+    { project: alpha, session: makeSession({ id: 'a2', title: 'two', vamControlled: true }) },
+    { project: alpha, session: makeSession({ id: 'a3', title: 'three' }) },
+    { project: beta, session: makeSession({ id: 'b1', title: 'beta one' }) },
+  ];
+  /** What a default `hideAgentStarted` leaves of alpha: one row of three. */
+  const narrowed = [all[0] as SessionEntry];
+
+  it('counts every session in the project, not the ones a filter left', () => {
+    const { container } = render(<SessionList {...baseProps(narrowed)} allEntries={all} />);
+    fireEvent.click(container.querySelector('[data-project-menu="p1"]') as HTMLElement);
+    fireEvent.click(container.querySelector('[data-project-menu-item="remove"]') as HTMLElement);
+    expect(container.querySelector('[data-confirm-end-count]')?.textContent).toBe('2');
+    expect(container.querySelector('[data-confirm-hide-count]')?.textContent).toBe('1');
+  });
+
+  it('ends every vam-controlled session in the project, including filtered-out rows', () => {
+    const onClose = vi.fn();
+    const { container } = render(
+      <SessionList {...baseProps(narrowed)} allEntries={all} onClose={onClose} />,
+    );
+    fireEvent.click(container.querySelector('[data-project-menu="p1"]') as HTMLElement);
+    fireEvent.click(container.querySelector('[data-project-menu-item="remove"]') as HTMLElement);
+    fireEvent.click(container.querySelector('[data-confirm-remove-go]') as HTMLElement);
+    // `a2` has no row on screen. Hiding the project would strand it.
+    expect(onClose.mock.calls).toEqual([['a1'], ['a2']]);
+  });
+
+  it('keeps the restore control when a search matches only another project', () => {
+    const { container, rerender } = render(
+      <SessionList {...baseProps(narrowed)} allEntries={all} />,
+    );
+    fireEvent.click(container.querySelector('[data-project-menu="p1"]') as HTMLElement);
+    fireEvent.click(container.querySelector('[data-project-menu-item="remove"]') as HTMLElement);
+    fireEvent.click(container.querySelector('[data-confirm-remove-go]') as HTMLElement);
+    // The operator now searches for something only beta matches. The removed
+    // project has no entry left in `entries` -- and its only way back must not
+    // vanish with it.
+    rerender(
+      <SessionList
+        {...baseProps([all[3] as SessionEntry])}
+        allEntries={all}
+        hiddenProjects={['p1']}
+      />,
+    );
+    expect(container.querySelector('[data-restore-project="p1"]')?.textContent).toContain('alpha');
+  });
+});

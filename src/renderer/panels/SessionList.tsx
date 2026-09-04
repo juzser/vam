@@ -94,6 +94,25 @@ const FILTER_POPOVER_GUTTER = 24;
 
 export type SessionListProps = {
   readonly entries: readonly SessionEntry[];
+  /**
+   * The same sessions BEFORE any narrowing -- `Canvas`'s `allEntries`.
+   *
+   * `entries` has been through search, the status pills and the two origin
+   * rules, one of which (`hideAgentStarted`) is ON BY DEFAULT. Everything this
+   * component DRAWS comes from `entries`, which is right: the list is the
+   * filter's result. Two things must not, and both are about removing a
+   * project, because removal acts on the whole project while a filter shows
+   * part of it:
+   *
+   *   - the confirm's counts and the plan they describe, or the dialog states
+   *     a number smaller than what it is about to do; and
+   *   - the restore strip, or searching for another project unmounts the only
+   *     control that brings this one back.
+   *
+   * Optional, defaulting to `entries`, so a caller that does not filter can
+   * pass nothing and get identical behaviour.
+   */
+  readonly allEntries?: readonly SessionEntry[];
   readonly focusedSessionId: string | null;
   /** Which factory this is. The mockup calls it a workspace; vam has one. */
   readonly workspace: string;
@@ -217,6 +236,7 @@ export type SessionListProps = {
 export function SessionList(props: SessionListProps) {
   const {
     entries,
+    allEntries: unfiltered,
     focusedSessionId,
     workspace,
     filter,
@@ -362,6 +382,8 @@ export function SessionList(props: SessionListProps) {
    */
   const [localCollapsed, setLocalCollapsed] = useState<readonly string[]>([]);
   const collapsed = collapsedProjects ?? localCollapsed;
+  /** Never `entries`. See `allEntries` on the props for what reads this. */
+  const allEntries = unfiltered ?? entries;
   const [localHidden, setLocalHidden] = useState<readonly string[]>([]);
   const hidden = hiddenProjects ?? localHidden;
   /** The project whose removal is being confirmed, or null. One at a time. */
@@ -404,6 +426,19 @@ export function SessionList(props: SessionListProps) {
       );
     },
     [onHideProject],
+  );
+
+  /**
+   * What removing this project would do, over the project's WHOLE membership.
+   * The dialog and the click that confirms it call this, so the sentence the
+   * operator read and the act they authorised cannot come apart.
+   */
+  const planFor = useCallback(
+    (project: Project) =>
+      removalPlan(
+        allEntries.filter((e) => e.project.id === project.id).map((entry) => entry.session),
+      ),
+    [allEntries],
   );
 
   /**
@@ -540,7 +575,12 @@ export function SessionList(props: SessionListProps) {
    * the header still includes them, which is honest: they exist, this list has
    * stopped drawing them.
    */
-  const removed = groups.filter((group) => hidden.includes(group.project.id));
+  const removed: Project[] = [];
+  for (const entry of allEntries) {
+    if (hidden.includes(entry.project.id) && !removed.some((p) => p.id === entry.project.id)) {
+      removed.push(entry.project);
+    }
+  }
 
   /** The same groups, each carrying the two flags its heading renders from. */
   const folded = groups
@@ -1239,17 +1279,17 @@ export function SessionList(props: SessionListProps) {
           <span className="w-full font-mono text-[9px] text-ink-faint uppercase tracking-[0.12em]">
             Removed
           </span>
-          {removed.map((group) => (
+          {removed.map((project) => (
             <button
-              key={group.project.id}
+              key={project.id}
               type="button"
-              data-restore-project={group.project.id}
-              aria-label={`restore ${group.project.name}`}
-              onClick={() => setHidden(group.project, false)}
+              data-restore-project={project.id}
+              aria-label={`restore ${project.name}`}
+              onClick={() => setHidden(project, false)}
               className="flex cursor-pointer items-center gap-1 rounded-[6px] border border-line px-1.5 py-0.5 text-[10.5px] text-ink-faint hover:border-line-strong hover:text-ink"
             >
               <RotateCcw size={10} strokeWidth={1.8} />
-              {group.project.name}
+              {project.name}
             </button>
           ))}
         </div>
@@ -1258,18 +1298,10 @@ export function SessionList(props: SessionListProps) {
       {confirming !== null && (
         <ConfirmRemoveProject
           projectName={confirming.name}
-          plan={removalPlan(
-            entries
-              .filter((entry) => entry.project.id === confirming.id)
-              .map((entry) => entry.session),
-          )}
+          plan={planFor(confirming)}
           onCancel={() => setConfirming(null)}
           onConfirm={() => {
-            const plan = removalPlan(
-              entries
-                .filter((entry) => entry.project.id === confirming.id)
-                .map((entry) => entry.session),
-            );
+            const plan = planFor(confirming);
             // Ending comes first: the hide is what makes the project stay
             // gone, and doing it first would drop the sessions out of this
             // component's own reach before it had closed them.

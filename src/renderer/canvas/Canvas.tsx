@@ -1765,6 +1765,11 @@ function CanvasInner({
           key="sidebar"
           show={visible.sidebar}
           entries={entries}
+          // The UNFILTERED set, for the two things about removing a project
+          // that must not read a narrowed list -- see `allEntries` on
+          // `SessionListProps`. `entries` above has already been through
+          // search, the status pills and the origin rules.
+          allEntries={allEntries}
           focusedSessionId={focusedEntry?.session.id ?? null}
           workspace="black-smith"
           theme={effective}
