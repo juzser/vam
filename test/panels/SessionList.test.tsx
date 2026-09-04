@@ -399,17 +399,17 @@ describe('SessionList placeholder row', () => {
    * the same way.
    */
   it('makes the per-project add a real button that names its own project', () => {
-    // The button only exists for the project holding focus, so this walks the
-    // two projects one focused session at a time rather than expecting both
-    // buttons at once.
-    for (const [sessionId, name] of [
-      ['a1', 'alpha'],
-      ['b1', 'beta'],
+    // One button per project now, whichever holds focus, so both are asserted
+    // from a single mount and each is picked by the project it belongs to.
+    const { container } = mountWith(twoProjects(), { focusedSessionId: 'a1' });
+    expect(addButtons(container)).toHaveLength(2);
+    for (const [projectId, name] of [
+      ['p1', 'alpha'],
+      ['p2', 'beta'],
     ] as const) {
-      const { container } = mountWith(twoProjects(), { focusedSessionId: sessionId });
-      const adds = addButtons(container);
-      expect(adds).toHaveLength(1);
-      const add = adds[0];
+      const add = container.querySelector<HTMLElement>(
+        `[data-new-session-in-project="${projectId}"]`,
+      );
       expect(add?.tagName).toBe('BUTTON');
       // Unclickable to assistive tech is what `aria-hidden` meant; it is a
       // control now, so it must be reachable and it must say which project.
@@ -417,7 +417,6 @@ describe('SessionList placeholder row', () => {
       expect(add?.className).toContain('cursor-pointer');
       expect(add?.className).toMatch(/hover:/);
       expect(add?.getAttribute('aria-label')).toBe(`new session in ${name}`);
-      cleanup();
     }
   });
 
@@ -456,8 +455,7 @@ describe('SessionList placeholder row', () => {
         } satisfies SessionListProps)}
       />,
     );
-    const adds = document.querySelectorAll<HTMLButtonElement>('[data-new-session-in-project]');
-    adds[0]?.click();
+    document.querySelector<HTMLButtonElement>('[data-new-session-in-project="p2"]')?.click();
     expect(seen).toEqual(['beta']);
   });
 
@@ -595,37 +593,50 @@ describe('the new-session button is dim until hovered', () => {
 });
 
 /**
- * The per-project add follows focus.
+ * The per-project add is present everywhere; only its reveal follows focus.
  *
- * Four projects meant four `+` boxes standing over the session names at all
- * times, for a control you can only mean for the project you are working in.
- * It now renders for exactly the project whose session is focused, and is
- * absent -- not merely invisible -- everywhere else, so nothing off-screen can
- * be clicked or tabbed into.
+ * Four projects once meant four `+` boxes standing over the session names at
+ * all times, so the add was cut from every heading but the focused one -- and
+ * that read, correctly, as the button having vanished. The column is answered
+ * by opacity now, the same way the `...` menu answers it: every project has an
+ * add, at rest it is transparent, and the project holding focus keeps its own
+ * opaque. So these assert which add is *lit*, not which one exists.
  */
-describe('the per-project add appears only for the focused project', () => {
-  it('shows no add at all while nothing is focused', () => {
+function litAdd(root: ParentNode, projectId: string) {
+  const add = root.querySelector<HTMLElement>(`[data-new-session-in-project="${projectId}"]`);
+  expect(add, `no add for ${projectId}`).not.toBeNull();
+  // `opacity-100` also occurs inside `focus:opacity-100`, which is on every
+  // one of them; only the standalone class means "lit at rest".
+  return /(^|\s)opacity-100(\s|$)/.test(add?.className ?? '');
+}
+
+describe('the per-project add follows focus by reveal, not by existing', () => {
+  it('lights no add while nothing is focused, and still offers one per project', () => {
     const { container } = mountWith(twoProjects(), { focusedSessionId: null });
-    expect(addButtons(container)).toHaveLength(0);
+    expect(addButtons(container)).toHaveLength(2);
+    expect(litAdd(container, 'p1')).toBe(false);
+    expect(litAdd(container, 'p2')).toBe(false);
   });
 
-  it("shows exactly one add, on the focused session's own project", () => {
+  it("lights exactly one add, on the focused session's own project", () => {
     const { container } = mountWith(twoProjects(), { focusedSessionId: 'a2' });
-    const adds = addButtons(container);
-    expect(adds).toHaveLength(1);
-    expect(adds[0]?.getAttribute('aria-label')).toBe('new session in alpha');
+    expect(litAdd(container, 'p1')).toBe(true);
+    expect(litAdd(container, 'p2')).toBe(false);
     // And it is inside alpha's heading, not merely somewhere in the list.
-    expect(adds[0]?.closest('[data-project-heading]')?.textContent).toContain('alpha');
+    expect(
+      container
+        .querySelector('[data-new-session-in-project="p1"]')
+        ?.closest('[data-project-heading]')?.textContent,
+    ).toContain('alpha');
   });
 
-  it('moves the add when focus moves to a session in another project', () => {
+  it('moves the lit add when focus moves to a session in another project', () => {
     const { container, rerender } = mountWith(twoProjects(), { focusedSessionId: 'a1' });
-    expect(addButtons(container)[0]?.getAttribute('aria-label')).toBe('new session in alpha');
+    expect(litAdd(container, 'p1')).toBe(true);
 
     rerender(<SessionList {...baseProps(twoProjects())} focusedSessionId="b1" />);
-    const adds = addButtons(container);
-    expect(adds).toHaveLength(1);
-    expect(adds[0]?.getAttribute('aria-label')).toBe('new session in beta');
+    expect(litAdd(container, 'p1')).toBe(false);
+    expect(litAdd(container, 'p2')).toBe(true);
   });
 
   /**
@@ -1011,26 +1022,83 @@ describe('SessionList project controls', () => {
     // were present before the move too, so a presence check would have passed
     // against the old order and proved nothing.
     const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
-    const row = heading(container, 'p2');
-    const controls = [...row.querySelectorAll('button')].map((node) =>
-      node.getAttribute('data-project-collapse') !== null
-        ? 'fold'
-        : node.getAttribute('data-project-menu') !== null
-          ? 'menu'
-          : node.getAttribute('data-new-session-in-project') !== null
-            ? 'add'
-            : 'other',
-    );
-    expect(controls.indexOf('add')).toBeGreaterThan(controls.indexOf('fold'));
-    expect(controls.indexOf('add')).toBeGreaterThan(controls.indexOf('menu'));
-    expect(controls.indexOf('fold')).toBeGreaterThan(-1);
-    expect(controls.indexOf('menu')).toBeGreaterThan(-1);
+    for (const projectId of ['p1', 'p2'] as const) {
+      const row = heading(container, projectId);
+      const controls = [...row.querySelectorAll('button')].map((node) =>
+        node.getAttribute('data-project-collapse') !== null
+          ? 'fold'
+          : node.getAttribute('data-project-menu') !== null
+            ? 'menu'
+            : node.getAttribute('data-new-session-in-project') !== null
+              ? 'add'
+              : 'other',
+      );
+      expect(controls.indexOf('add')).toBeGreaterThan(controls.indexOf('fold'));
+      expect(controls.indexOf('add')).toBeGreaterThan(controls.indexOf('menu'));
+      expect(controls.indexOf('fold')).toBeGreaterThan(-1);
+      expect(controls.indexOf('menu')).toBeGreaterThan(-1);
+    }
   });
 
-  it('still omits the `+` entirely for a project that does not hold focus', () => {
+  it('keeps the `+` reachable for a project that does not hold focus', () => {
+    // The operator's report: the `+` had "disappeared" from every heading but
+    // one. It is in the DOM for all of them now, on the same idiom as the `...`
+    // menu -- transparent at rest, opaque on hover or for the focused project.
     const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
-    expect(heading(container, 'p1').querySelector('[data-new-session-in-project]')).toBeNull();
-    expect(heading(container, 'p2').querySelector('[data-new-session-in-project]')).not.toBeNull();
+    const away = heading(container, 'p1').querySelector<HTMLElement>(
+      '[data-new-session-in-project="p1"]',
+    );
+    const home = heading(container, 'p2').querySelector<HTMLElement>(
+      '[data-new-session-in-project="p2"]',
+    );
+    expect(away).not.toBeNull();
+    // `toContain` would match inside `focus:opacity-100`, which every one of
+    // these carries; the class has to stand alone to mean anything.
+    expect(away?.className).toMatch(/(^|\s)opacity-0(\s|$)/);
+    expect(away?.className).toContain('focus:opacity-100');
+    expect(home?.className).toMatch(/(^|\s)opacity-100(\s|$)/);
+
+    act(() => {
+      fireEvent.mouseEnter(heading(container, 'p1'));
+    });
+    expect(
+      heading(container, 'p1').querySelector<HTMLElement>('[data-new-session-in-project="p1"]')
+        ?.className,
+    ).toMatch(/(^|\s)opacity-100(\s|$)/);
+  });
+
+  it('puts the `+` at the far right of the heading row', () => {
+    // Far right is the spacer's doing, not a margin: everything after the
+    // `flex-1` span is pushed to the end of the row, and `+` is the last of
+    // them. Asserted against the spacer so a stray control appended after the
+    // add would fail here rather than only in the order test.
+    const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
+    for (const projectId of ['p1', 'p2'] as const) {
+      const row = heading(container, projectId);
+      const children = [...row.children];
+      const add = row.querySelector(`[data-new-session-in-project="${projectId}"]`) as HTMLElement;
+      const spacer = children.find((node) => node.className.includes('flex-1')) as HTMLElement;
+      expect(spacer).not.toBeUndefined();
+      expect(children.indexOf(add)).toBeGreaterThan(children.indexOf(spacer));
+      expect(children.at(-1)).toBe(add);
+    }
+  });
+
+  it('creates in the project whose `+` was clicked, focused or not', () => {
+    // Argument value, in click order: an untested argument order on this exact
+    // call was a review finding once, and the away project is the new path.
+    const seen: string[] = [];
+    const { container } = mountWith(twoProjects(), {
+      focusedSessionId: 'b1',
+      onAddInProject: (project: Project) => seen.push(project.name),
+    });
+    act(() => {
+      (container.querySelector('[data-new-session-in-project="p1"]') as HTMLElement).click();
+    });
+    act(() => {
+      (container.querySelector('[data-new-session-in-project="p2"]') as HTMLElement).click();
+    });
+    expect(seen).toEqual(['alpha', 'beta']);
   });
 });
 
@@ -1146,7 +1214,7 @@ describe('SessionList new-project control', () => {
     const entries = twoProjects();
     const { container } = mountWith(entries, { focusedSessionId: 'b1' });
     expect(container.querySelector('[data-placeholder="new-session-in-project"]')).toBeNull();
-    const add = container.querySelector<HTMLButtonElement>('[data-new-session-in-project]');
+    const add = container.querySelector<HTMLButtonElement>('[data-new-session-in-project="p2"]');
     expect(add?.getAttribute('title')).toBe('New session in beta');
   });
 

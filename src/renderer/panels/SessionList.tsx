@@ -818,14 +818,25 @@ export function SessionList(props: SessionListProps) {
                   answers on the status bar: refusing on click and saying why
                   is honest; refusing by being unclickable just reads as
                   broken. */}
-                {/* Only for the project you are actually in. One per heading
-                  meant a column of `+` boxes standing over the session names
-                  at all times, for a control that can only mean the project
-                  holding focus. Removed from the DOM rather than hidden, so
-                  there is nothing invisible left to click or tab into -- which
-                  is a different strategy from the fold and the menu above, and
-                  deliberately so: those two are always present and merely
-                  transparent, because they have no keyboard twin. */}
+                {/* This used to render only for the project holding focus, on
+                  the reasoning that one `+` per heading meant a column of
+                  boxes standing over the session names at all times, for a
+                  control that "can only mean the project holding focus". Half
+                  of that has expired: since the add genuinely creates a
+                  session in the project it names, adding to a project you are
+                  not currently in is an ordinary thing to want, and gating on
+                  focus read to the operator as the button having disappeared.
+                  So it follows the menu's idiom now -- always in the DOM,
+                  revealed on hover of its own heading, and left opaque for the
+                  project that holds focus. The column-of-boxes objection is
+                  answered by the reveal, not by absence. The cost the old
+                  comment was buying off is real and accepted: every heading is
+                  a tab stop again, so Tab through a sidebar of N projects
+                  passes 3N heading controls before the rows. `focus:opacity-100`
+                  keeps each stop visible when you land on it, and the keyboard
+                  path that matters -- `j`/`k` down the sessions, `p` to the
+                  focused project's controls -- does not go through Tab at
+                  all. */}
                 {/* Last in the row, and last in tab order with it. The two
                   controls that act on the heading itself come first; the one
                   that adds something to the project comes after them. DOM
@@ -833,19 +844,22 @@ export function SessionList(props: SessionListProps) {
                   tabindex anywhere in this row -- so moving the markup moved
                   the keyboard path, and that is the intent, not a side
                   effect. */}
-                {group.items.some((entry) => entry.session.id === focusedSessionId) && (
-                  <button
-                    type="button"
-                    data-new-session-in-project={group.project.id}
-                    onClick={() => onAddInProject(group.project)}
-                    title={newSessionDecline ?? `New session in ${group.project.name}`}
-                    aria-label={`new session in ${group.project.name}`}
-                    className="flex h-[19px] w-[19px] cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim"
-                    {...pending(group.project.id, `Starting a session in ${group.project.name}…`)}
-                  >
-                    <Plus size={13} strokeWidth={1.7} />
-                  </button>
-                )}
+                <button
+                  type="button"
+                  data-new-session-in-project={group.project.id}
+                  onClick={() => onAddInProject(group.project)}
+                  title={newSessionDecline ?? `New session in ${group.project.name}`}
+                  aria-label={`new session in ${group.project.name}`}
+                  className={[
+                    'flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                    isRevealed || group.items.some((entry) => entry.session.id === focusedSessionId)
+                      ? 'opacity-100'
+                      : 'opacity-0',
+                  ].join(' ')}
+                  {...pending(group.project.id, `Starting a session in ${group.project.name}…`)}
+                >
+                  <Plus size={13} strokeWidth={1.7} />
+                </button>
 
                 {/* Two items, and both of them do something. There is no
                     "Project settings" because vam has no per-project setting
