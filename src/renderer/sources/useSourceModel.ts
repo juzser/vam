@@ -22,7 +22,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CanvasModel } from '../domain/model.js';
-import { describeFailure, type SessionSource } from './port.js';
+import { noteFailure } from '../errors/log.js';
+import type { SessionSource } from './port.js';
 
 /**
  * How often to re-read the source.
@@ -78,7 +79,7 @@ export function useSourceModel(source: SessionSource | null): {
         // not blank a list the operator is in the middle of reading. The
         // error says what happened beside it.
         if (mine()) {
-          setError(describeFailure(reason));
+          setError(noteFailure('load projects', reason));
         }
       })
       .finally(() => {

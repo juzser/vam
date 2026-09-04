@@ -15,10 +15,11 @@
  * different, unasked-for change.
  */
 
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas, StatusCell } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import { clearEvents, recordFailure, recordRefusal } from '../../src/renderer/errors/log.js';
 import { describeFailure } from '../../src/renderer/sources/port.js';
 
 function session(id: string, status: Session['status']): Session {
@@ -207,5 +208,36 @@ describe('the status cell with a long failure in it', () => {
     const classes = (cell()?.className ?? '').split(/\s+/);
     expect(classes).toContain('min-w-0');
     expect(classes).toContain('truncate');
+  });
+});
+
+/**
+ * The one new cell: the way back to a failure the status line has already
+ * replaced. It is left of the spacer, so the "`?` is the only thing on the
+ * right" assertion above still holds and still means what it says.
+ */
+describe('the failure cell', () => {
+  afterEach(() => {
+    clearEvents();
+  });
+
+  it('is absent while nothing has broken -- a permanent 0 is noise', () => {
+    render(<Canvas model={MODEL} />);
+    expect(statusBar()?.querySelector('[data-error-log-button]')).toBeNull();
+  });
+
+  it('counts failures and opens the log', () => {
+    recordFailure('close session', { code: 'cli-failed', message: 'pairing refused' });
+    render(<Canvas model={MODEL} />);
+    const button = statusBar()?.querySelector('[data-error-log-button]');
+    expect(button?.textContent).toBe('1 failure');
+    fireEvent.click(button as Element);
+    expect(document.querySelector('[data-error-log]')).not.toBeNull();
+  });
+
+  it('does not count an intended refusal', () => {
+    recordRefusal('new project', 'this source cannot start sessions');
+    render(<Canvas model={MODEL} />);
+    expect(statusBar()?.querySelector('[data-error-log-button]')).toBeNull();
   });
 });
