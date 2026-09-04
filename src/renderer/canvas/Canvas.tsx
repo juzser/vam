@@ -1844,16 +1844,25 @@ function CanvasInner({
             setPane('list');
           }}
           width={detailWidth}
+          /* Only where it would move something. The detail pane is a fixed
+             column with the leftover room beside it exactly while the canvas
+             is the main column; everywhere else its width is derived from the
+             sidebar and the canvas's reserve, so its own edge has nothing to
+             drag and the seam that does move is the sidebar's. A handle that
+             moves nothing is worse than no handle: it advertises a gesture the
+             layout cannot honour. */
           resizeHandle={
-            <PaneResizer
-              pane="detail"
-              ariaLabel="resize detail panel"
-              layout={visible}
-              stored={{ sidebar: storedSidebar, detail: storedDetail }}
-              viewportWidth={viewportWidth}
-              onChange={onPaneChange}
-              onCommit={onPaneCommit}
-            />
+            canvasIsMain(visible) ? (
+              <PaneResizer
+                pane="detail"
+                ariaLabel="resize detail panel"
+                layout={visible}
+                stored={{ sidebar: storedSidebar, detail: storedDetail }}
+                viewportWidth={viewportWidth}
+                onChange={onPaneChange}
+                onCommit={onPaneCommit}
+              />
+            ) : null
           }
         />
       </Columns>

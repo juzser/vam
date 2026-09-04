@@ -272,3 +272,46 @@ describe('the settings picker offers it', () => {
     ).toBe('true');
   });
 });
+
+/**
+ * A handle exists only where it moves something.
+ *
+ * The detail pane is resizable exactly while the canvas is the main column: it
+ * is then a fixed pane with leftover room beside it, and its own edge is the
+ * seam that moves it. In every other layout its width is DERIVED — from the
+ * viewport, the sidebar and whatever the canvas reserves — so there is nothing
+ * for a detail handle to drag, and the seam the operator can actually move is
+ * the sidebar's. Drawing one anyway is what this branch shipped: a handle sat
+ * on the wrong edge of the middle column and moved nothing at all, in the focus
+ * layout and (since before this branch) in `noCanvas` too.
+ */
+const detailHandle = () => document.querySelector('[data-pane-resize-handle="detail"]');
+const sidebarHandle = () => document.querySelector('[data-pane-resize-handle="sidebar"]');
+
+describe('the detail pane has a handle only where one would move it', () => {
+  it('draws it in the shipped layout, where the detail width is stored', () => {
+    render(<Canvas model={MODEL} />);
+    expect(detailHandle()).not.toBeNull();
+    expect(sidebarHandle()).not.toBeNull();
+  });
+
+  it('omits it in the focus layout, and keeps the sidebar seam that does move', () => {
+    seed({ paneVisibility: LAYOUTS.focusResponse });
+    render(<Canvas model={MODEL} />);
+    expect(detailHandle()).toBeNull();
+    expect(sidebarHandle()).not.toBeNull();
+  });
+
+  it('omits it with the canvas hidden, where it was inert before this branch too', () => {
+    seed({ paneVisibility: LAYOUTS.noCanvas });
+    render(<Canvas model={MODEL} />);
+    expect(detailHandle()).toBeNull();
+    expect(sidebarHandle()).not.toBeNull();
+  });
+
+  it('omits it when the response is the only column left', () => {
+    seed({ paneVisibility: LAYOUTS.responseOnly });
+    render(<Canvas model={MODEL} />);
+    expect(detailHandle()).toBeNull();
+  });
+});
