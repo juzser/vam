@@ -235,6 +235,20 @@ export async function loadClaudeCodeProjects(
       // asked has no business claiming (model.ts).
       ...(prs === null ? {} : { pullRequests: prs }),
       decisions: read.facts.decisions,
+      // The questions the session asked through `AskUserQuestion`, from the
+      // same tail. Always present for this source -- empty means vam READ the
+      // window and found none, which is the common case (model.ts).
+      //
+      // WHAT THE WINDOW COSTS. Only the last `TAIL_BYTES` are read, so a
+      // question asked far enough back has scrolled out and is simply not
+      // here. That is the correct behaviour -- vam reports what it read, not
+      // what it supposes -- but it means an empty list is never evidence that
+      // a session is not blocked on a question, and nothing downstream may
+      // treat it as such. Widening the window to be sure would cost the whole
+      // point of reading a tail, and the case it would buy (a session that
+      // asked and then produced 128 KB of output while still waiting) is the
+      // one where the question is stale anyway.
+      questions: read.facts.questions,
       source: 'claude-code',
       // An INTERACTIVE row is a terminal a person is sitting in front of, so
       // `human` is a fact there. A BACKGROUND row is not: measured against
