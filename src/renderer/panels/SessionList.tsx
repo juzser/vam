@@ -36,7 +36,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { resolveSessionIcon } from '../canvas/session-icon.js';
+import { SessionIcon } from '../canvas/session-icon.js';
 import type { Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
@@ -1122,7 +1122,7 @@ export function SessionList(props: SessionListProps) {
                         {renamingId === session.id ? (
                           <div className="flex items-center gap-1.5 rounded-[9px] border border-line-loud bg-raised px-2.5 py-2.5">
                             <span className="text-[11px] text-ink-faint">
-                              {resolveSessionIcon(entry)}
+                              <SessionIcon entry={entry} size={11} />
                             </span>
                             <input
                               ref={renameRef}
@@ -1201,16 +1201,17 @@ export function SessionList(props: SessionListProps) {
                                   ].join(' ')}
                                 />
                                 {/* Always drawn, never conditional, and never
-                                    its own opinion: `resolveSessionIcon` states
-                                    the chain -- session glyph, else project
-                                    glyph, else the neutral mark -- and the
-                                    canvas root node reads the same function, so
-                                    the two surfaces cannot answer differently. */}
+                                    its own opinion: `SessionIcon` states the
+                                    chain -- session glyph, else project glyph,
+                                    else the same Monitor the project heading
+                                    above draws -- and the canvas root node
+                                    renders the same component, so the two
+                                    surfaces cannot answer differently. */}
                                 <span
                                   data-row-icon={session.id}
                                   className="text-[11px] leading-none"
                                 >
-                                  {resolveSessionIcon(entry)}
+                                  <SessionIcon entry={entry} size={11} />
                                 </span>
                                 <span
                                   className={`truncate text-[13px] ${isFocused ? 'font-medium text-ink' : 'text-ink-dim'}`}

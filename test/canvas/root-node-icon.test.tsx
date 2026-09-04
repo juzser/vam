@@ -3,8 +3,8 @@
 /**
  * The root node's icon: one fallback chain, one picker.
  *
- * The chain is session glyph -> project glyph -> a neutral mark, and it lives
- * in exactly one function because two call sites already draw a session's
+ * The chain is session glyph -> project glyph -> a drawn placeholder, and it
+ * lives in exactly one module because two call sites already draw a session's
  * icon. The tests below pin the chain itself, the two ways a session's own
  * choice can go away (cleared by hand, pruned by the TTL), and the fact that
  * the node's icon is a control that opens the picker the `s` chord opens.
@@ -14,10 +14,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionInfoNode } from '../../src/renderer/canvas/SessionInfoNode.js';
-import {
-  NEUTRAL_SESSION_ICON,
-  resolveSessionIcon,
-} from '../../src/renderer/canvas/session-icon.js';
+import { resolveSessionGlyph } from '../../src/renderer/canvas/session-icon.js';
 import type { CanvasModel, Project, Session, SourceId } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import {
@@ -106,16 +103,16 @@ function renderNode(entry: SessionEntry, onPickIcon: (entry: SessionEntry) => vo
 
 describe('the fallback chain is stated once', () => {
   it('prefers the session own glyph over the project one', () => {
-    expect(resolveSessionIcon(entryOf('🦊', '🏭'))).toBe('🦊');
+    expect(resolveSessionGlyph(entryOf('🦊', '🏭'))).toBe('🦊');
   });
 
   it('falls back to the project glyph, which is the operator default', () => {
-    expect(resolveSessionIcon(entryOf(null, '🏭'))).toBe('🏭');
+    expect(resolveSessionGlyph(entryOf(null, '🏭'))).toBe('🏭');
   });
 
   it('falls back to the neutral mark when neither has been chosen', () => {
-    expect(resolveSessionIcon(entryOf(null, null))).toBe(NEUTRAL_SESSION_ICON);
-    expect(resolveSessionIcon(entryOf(null))).toBe(NEUTRAL_SESSION_ICON);
+    expect(resolveSessionGlyph(entryOf(null, null))).toBe(null);
+    expect(resolveSessionGlyph(entryOf(null))).toBe(null);
   });
 });
 
@@ -125,11 +122,11 @@ describe('clearing a session icon gives the project one back', () => {
     let prefs = setProjectIcon(readPrefs(null, now), SOURCE, 'p1', '🏭', now);
     prefs = setIcon(prefs, SOURCE, 's1', '🦊', now);
     const chosen = entryFrom(applyIcons(modelOf(entryOf(null)), prefs.icons, prefs.projectIcons));
-    expect(resolveSessionIcon(chosen)).toBe('🦊');
+    expect(resolveSessionGlyph(chosen)).toBe('🦊');
 
     prefs = setIcon(prefs, SOURCE, 's1', '', now);
     const cleared = entryFrom(applyIcons(modelOf(entryOf(null)), prefs.icons, prefs.projectIcons));
-    expect(resolveSessionIcon(cleared)).toBe('🏭');
+    expect(resolveSessionGlyph(cleared)).toBe('🏭');
   });
 });
 
@@ -147,7 +144,7 @@ describe('a pruned session choice falls back rather than going blank', () => {
     );
     expect(prefs.icons[SOURCE]?.s1).toBeUndefined();
     const entry = entryFrom(applyIcons(modelOf(entryOf(null)), prefs.icons, prefs.projectIcons));
-    expect(resolveSessionIcon(entry)).toBe('🏭');
+    expect(resolveSessionGlyph(entry)).toBe('🏭');
   });
 });
 
