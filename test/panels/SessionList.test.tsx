@@ -1227,3 +1227,91 @@ describe('SessionList new-project control', () => {
     expect(add?.getAttribute('title')).toBe('black-smith has no new-session command');
   });
 });
+
+/**
+ * The wiring half of `reveal-row.ts`: does focus moving actually hand the
+ * scroller what the rule computed?
+ *
+ * happy-dom does no layout, so every rect and `clientHeight` here is stubbed —
+ * which is exactly why the arithmetic is not tested through this seam. What is
+ * worth holding here, and only here, is that the component reads the row and
+ * the scroller (not the window), passes the numbers through, and stays still
+ * when the rule says `null`. An assertion that `scrollTo` was called would
+ * prove none of that.
+ */
+describe('SessionList reveals the focused row', () => {
+  /** The element OverlayScroll actually scrolls, with a fake 600px window. */
+  function stubScroller(container: HTMLElement) {
+    const scroller = container.querySelector('.vam-no-scrollbar') as HTMLElement;
+    Object.defineProperty(scroller, 'clientHeight', { value: 600, configurable: true });
+    scroller.getBoundingClientRect = () => new DOMRect(0, 0, 264, 600);
+    scroller.scrollTop = 0;
+    const calls: { top?: number; behavior?: string }[] = [];
+    scroller.scrollTo = (options?: unknown) => {
+      calls.push(options as { top?: number; behavior?: string });
+    };
+    return calls;
+  }
+
+  /** Put a row's box wherever the case needs it, in viewport coordinates. */
+  function stubRow(container: HTMLElement, id: string, top: number) {
+    const row = container.querySelector(`[data-session-row="${id}"]`) as HTMLElement;
+    row.getBoundingClientRect = () => new DOMRect(0, top, 244, 60);
+  }
+
+  it('scrolls the minimum distance to a row below the fold', () => {
+    const entries = twoProjects();
+    const props = baseProps(entries);
+    const { container, rerender } = render(<SessionList {...props} />);
+    const calls = stubScroller(container);
+    // 1000px down a 600px viewport parked at 0: its bottom edge is 460.
+    stubRow(container, 'a2', 1000);
+
+    act(() => {
+      rerender(<SessionList {...props} focusedSessionId="a2" />);
+    });
+
+    expect(calls).toEqual([{ top: 460, behavior: 'smooth' }]);
+  });
+
+  it('does not move for a row that is already in view', () => {
+    const entries = twoProjects();
+    const props = baseProps(entries);
+    const { container, rerender } = render(<SessionList {...props} />);
+    const calls = stubScroller(container);
+    stubRow(container, 'a2', 100);
+
+    act(() => {
+      rerender(<SessionList {...props} focusedSessionId="a2" />);
+    });
+
+    expect(calls).toEqual([]);
+  });
+
+  it('jumps instead of gliding under prefers-reduced-motion', () => {
+    const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({ matches: query.includes('reduced-motion') }),
+    });
+    try {
+      const entries = twoProjects();
+      const props = baseProps(entries);
+      const { container, rerender } = render(<SessionList {...props} />);
+      const calls = stubScroller(container);
+      stubRow(container, 'a2', 1000);
+
+      act(() => {
+        rerender(<SessionList {...props} focusedSessionId="a2" />);
+      });
+
+      expect(calls).toEqual([{ top: 460, behavior: 'auto' }]);
+    } finally {
+      if (original === undefined) {
+        Reflect.deleteProperty(window, 'matchMedia');
+      } else {
+        Object.defineProperty(window, 'matchMedia', original);
+      }
+    }
+  });
+});

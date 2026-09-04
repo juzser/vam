@@ -39,6 +39,7 @@ import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filter.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { OverlayScroll } from './OverlayScroll.js';
+import { revealScrollTop } from './reveal-row.js';
 
 const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   running: 'bg-running',
@@ -332,6 +333,8 @@ export function SessionList(props: SessionListProps) {
 
   const projectMenuRefs = useRef(new Map<string, HTMLButtonElement>());
   const foldRefs = useRef(new Map<string, HTMLButtonElement>());
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
   const projectPanelRef = useRef<HTMLDivElement>(null);
   const openMenuWas = useRef<string | null>(null);
 
@@ -387,6 +390,49 @@ export function SessionList(props: SessionListProps) {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [entries, focusedSessionId]);
+
+  /**
+   * Bring the focused row into view when it is not.
+   *
+   * `j`/`k`, `Cmd+number`, `gg`/`G` and search all move focus, so the cursor
+   * routinely lands on a row scrolled out of sight. `reveal-row.ts` decides
+   * how far — minimum distance, and `null` for a row already visible, so
+   * ordinary `j`/`k` movement inside the viewport never repositions anything.
+   *
+   * Keyed on `focusedSessionId` ALONE, deliberately. The entries re-arrive on
+   * every poll, and depending on them would re-run this after a scroll the
+   * operator performed themselves, dragging them back to a row they had
+   * chosen to scroll away from. Focus moving is the only thing that earns a
+   * scroll.
+   *
+   * A session inside a collapsed project has no row rendered at all: the map
+   * misses, and nothing scrolls. That is the honest answer — the fold is what
+   * hides it, and `p` (or the fold control) is what shows it again.
+   */
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    const row = focusedSessionId === null ? undefined : rowRefs.current.get(focusedSessionId);
+    if (scroller === null || row === undefined) {
+      return;
+    }
+    const box = row.getBoundingClientRect();
+    const top = revealScrollTop({
+      // Into the scroller's content coordinates: both rects are viewport-
+      // relative, and the difference plus the current scroll is where the row
+      // sits in the list itself.
+      rowTop: box.top - scroller.getBoundingClientRect().top + scroller.scrollTop,
+      rowHeight: box.height,
+      scrollTop: scroller.scrollTop,
+      viewportHeight: scroller.clientHeight,
+    });
+    if (top === null) {
+      return;
+    }
+    // Smooth scrolling is motion; someone who asked for less of it gets the
+    // jump, not the loss of the behaviour.
+    const reduced = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+    scroller.scrollTo({ top, behavior: reduced ? 'auto' : 'smooth' });
+  }, [focusedSessionId]);
 
   /** Same contract as the filter popover above: in on open, back out on close. */
   useEffect(() => {
@@ -700,7 +746,12 @@ export function SessionList(props: SessionListProps) {
         )}
       </div>
 
-      <OverlayScroll className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-2.5 py-2.5">
+      <OverlayScroll
+        className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-2.5 py-2.5"
+        scrollRef={(el) => {
+          scrollerRef.current = el;
+        }}
+      >
         <ul className="flex flex-col gap-3.5">
           {folded.map(({ isCollapsed, isRevealed, ...group }) => (
             <li key={group.project.id} className="flex flex-col gap-[5px]">
@@ -972,6 +1023,17 @@ export function SessionList(props: SessionListProps) {
                           >
                             <button
                               type="button"
+                              // Held by id, like `foldRefs` above: the reveal
+                              // effect needs THIS session's row, and a
+                              // querySelector on every focus change would go
+                              // looking for it in the document instead.
+                              ref={(node) => {
+                                if (node === null) {
+                                  rowRefs.current.delete(session.id);
+                                } else {
+                                  rowRefs.current.set(session.id, node);
+                                }
+                              }}
                               data-session-row={session.id}
                               onClick={() => onPick(session.id)}
                               className={[
