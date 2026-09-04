@@ -340,3 +340,89 @@ describe('a digit picks the option beside it', () => {
     expect(all('[data-question-option][data-picked="true"]')).toHaveLength(0);
   });
 });
+
+/**
+ * While a question is open, the options ARE the interaction.
+ *
+ * Claude Code's own picker owns the screen and offers a free-text entry as the
+ * last choice; vam drew both at once, so the operator was reading a list of
+ * options above a box that could not answer them. So the composer stands down
+ * while an open question is drawn, and "Chat about this" is what brings it
+ * back — the one entry whose behaviour differs from a mark.
+ *
+ * The entry is SYNTHESIZED. `AskUserQuestion`'s `tool_use` records only the
+ * model's own `options[]`; the free-text row is the CLI's own UI. So it is
+ * drawn outside the listbox, marked as vam's, and is not a `role="option"`:
+ * it is not something the agent offered and not something a pick can mark.
+ *
+ * The scope line is unchanged and deliberate: nothing here delivers an answer.
+ * Vam cannot see a TUI picker's cursor, so answering one blind would risk
+ * submitting the wrong choice to a running agent. "Chat about this" opens the
+ * composer, which is the path that already delivers where it can.
+ */
+describe('the composer stands down while a question is open', () => {
+  const composer = () => q('[data-prompt-box]');
+  const chat = () => q('[data-question-chat]');
+
+  it('draws no composer while an open question is on screen', () => {
+    draw([QUESTION]);
+    expect(q('[data-question-open="true"]')).not.toBeNull();
+    expect(composer()).toBeNull();
+  });
+
+  it('draws the composer exactly as before when nothing is being asked', () => {
+    draw([]);
+    expect(composer()).not.toBeNull();
+    expect(chat()).toBeNull();
+  });
+
+  it('draws the composer again once the question is resolved', () => {
+    draw([{ ...QUESTION, answer: 'Codex CLI' }]);
+    expect(composer()).not.toBeNull();
+    // A resolved question is not a picker: no options, and no synthetic entry.
+    expect(chat()).toBeNull();
+  });
+
+  it('reveals the composer when "Chat about this" is picked, and focuses it', () => {
+    draw([QUESTION]);
+    expect(chat()?.textContent).toContain('Chat about this');
+    fireEvent.click(chat() as HTMLElement);
+    const box = composer()?.querySelector('textarea') ?? null;
+    expect(box).not.toBeNull();
+    expect(document.activeElement).toBe(box);
+  });
+
+  it('reveals it from the keyboard too, on `c`', () => {
+    draw([QUESTION]);
+    fireEvent.keyDown(q('[role="listbox"]') as HTMLElement, { key: 'c', bubbles: true });
+    expect(composer()).not.toBeNull();
+  });
+
+  it('is the LAST entry, and is not one of the recorded options', () => {
+    draw([QUESTION]);
+    const marked = all('[data-question-option]');
+    expect(marked).toHaveLength(2); // the two the transcript recorded
+    expect(chat()?.getAttribute('data-question-synthetic')).toBe('true');
+    expect(chat()?.getAttribute('role')).not.toBe('option');
+    // Last in the card, after every option the agent actually offered.
+    const card = q('[data-question]') as HTMLElement;
+    const entries = [...card.querySelectorAll('[data-question-option],[data-question-chat]')];
+    expect(entries.at(-1)).toBe(chat());
+  });
+
+  it('says the entry is vam’s, not the agent’s', () => {
+    draw([QUESTION]);
+    expect(text()).toContain('vam adds this one');
+  });
+
+  it('still claims nothing was sent, once the composer is open', () => {
+    draw([QUESTION]);
+    fireEvent.click(all('[data-question-option]')[0] as HTMLElement);
+    fireEvent.click(chat() as HTMLElement);
+    const pane = text();
+    for (const claim of ['sent', 'submitted', 'answered', 'delivered', 'replied']) {
+      expect(pane.toLowerCase(), claim).not.toContain(claim);
+    }
+    expect(all('[data-question-option][data-picked="true"]')).toHaveLength(1);
+  });
+});

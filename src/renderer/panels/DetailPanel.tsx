@@ -1154,9 +1154,12 @@ const NUMBERED_OPTIONS: readonly (string | undefined)[] = Array.from({ length: 9
 function QuestionCard({
   question,
   firstOptionRef,
+  onChat,
 }: {
   readonly question: AgentQuestion;
   readonly firstOptionRef: RefObject<HTMLButtonElement | null>;
+  /** "Chat about this" — the one entry that does something rather than mark. */
+  readonly onChat: () => void;
 }) {
   const [picked, setPicked] = useState<readonly string[]>([]);
   const open = question.answer === null;
@@ -1182,6 +1185,16 @@ function QuestionCard({
   // are letters. So a number here cannot be a keystroke meant for somewhere
   // else -- and with no question open there is no list to hold focus.
   const onKeys = (event: KeyboardEvent<HTMLDivElement>) => {
+    // `c` for chat, the way out of the picker and into prose. Scoped like the
+    // digits: the listener is the listbox's, so it only hears a key while the
+    // keyboard is already in the options list -- which is where `i` puts it.
+    // The entry itself is a button outside the list, reached by Tab or mouse
+    // and activated by Enter, Space or a click, like any other.
+    if (event.key === 'c') {
+      event.preventDefault();
+      onChat();
+      return;
+    }
     const buttons = [
       ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-question-option]'),
     ];
@@ -1267,6 +1280,24 @@ function QuestionCard({
               </button>
             ))}
           </div>
+          {/* Not in the transcript: `AskUserQuestion`'s tool_use records the
+              model's own options and nothing else, and the free-text row is
+              the CLI's own UI. So vam appends it and SAYS it appended it —
+              outside the listbox, because it is neither something the agent
+              offered nor something a mark applies to. */}
+          <button
+            type="button"
+            data-question-chat
+            data-question-synthetic="true"
+            onClick={onChat}
+            className="flex cursor-pointer items-baseline gap-1.5 rounded-[6px] border border-line border-dashed px-1.5 py-1 text-left hover:bg-raised"
+          >
+            <span className="text-[10px] text-ink-faint tabular-nums">c</span>
+            <span className="min-w-0 text-[11px] text-ink">Chat about this</span>
+            <span className="min-w-0 text-[10.5px] text-ink-faint">
+              — vam adds this one; it opens the box below
+            </span>
+          </button>
           <p data-question-note className="text-[10px] text-ink-faint">
             vam cannot answer this for you — a pick is only a mark, and nothing goes back to the
             session; type your choice in the box below.
@@ -1498,6 +1529,27 @@ export function DetailPanel(props: DetailPanelProps) {
   const questions = entry?.session.questions ?? [];
   const newestQuestion =
     [...questions].reverse().find((one) => one.answer === null) ?? questions.at(-1) ?? null;
+  /**
+   * While a question is open the options are the interaction, so the composer
+   * stands down: an operator was reading a list of choices above a box that
+   * cannot answer them. "Chat about this" is the way back, per question — the
+   * id is the reset, so the next question opens as a picker again rather than
+   * inheriting the last one's answer.
+   *
+   * Nothing is stranded by the absence. `i` already prefers the first option
+   * over the box when a question is open, `I` + Enter sets `composing`, which
+   * lands in the same place, and Esc still does the one thing it did.
+   */
+  const openQuestion = newestQuestion !== null && newestQuestion.answer === null;
+  const [chattingAbout, setChattingAbout] = useState<string | null>(null);
+  const composerHidden = openQuestion && chattingAbout !== newestQuestion?.id;
+  const startChat = () => {
+    if (newestQuestion !== null) setChattingAbout(newestQuestion.id);
+    onCompose();
+  };
+  useEffect(() => {
+    if (chattingAbout !== null) inputRef.current?.focus();
+  }, [chattingAbout]);
   /**
    * The one detail clause vam can source for the running caption.
    *
@@ -1942,8 +1994,22 @@ export function DetailPanel(props: DetailPanelProps) {
               key={newestQuestion.id}
               question={newestQuestion}
               firstOptionRef={firstOptionRef}
+              onChat={startChat}
             />
           )}
+        </div>
+      )}
+      {/* The composer, in its own block so that it can stand down while a
+        question is open without the card standing down with it. Its top border
+        is the seam between the two, and belongs to whichever of them is
+        drawn first. */}
+      {current !== 'Terminal' && !composerHidden && (
+        <div
+          className={[
+            'flex flex-none flex-col gap-2.5 bg-header px-3.5 py-3',
+            newestQuestion === null ? 'border-line border-t' : '',
+          ].join(' ')}
+        >
           {suggesting && (
             <div
               data-bang-suggest
