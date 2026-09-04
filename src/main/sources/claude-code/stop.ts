@@ -26,6 +26,7 @@ import type { SourceError } from '../../ipc/channels.js';
 import { killSessionArgv } from '../tmux/argv.js';
 import { classifyTmuxFailure, listVamSessions, type TmuxRun } from '../tmux/spawn.js';
 import { sessionIdOf } from './deliver.js';
+import { projectIdOf } from './project-id.js';
 import { paneForRow } from './reply.js';
 
 /** Stopping is a signal, not a model call, so this is far shorter than delivery's. */
@@ -166,7 +167,25 @@ export async function stopSession(
     if (run !== undefined) {
       const listed = await listVamSessions(run);
       const pane = listed.kind === 'ok' ? paneForRow(listed.sessions, agents, row, panes) : null;
-      if (pane !== null) {
+      // A SECOND PROOF, and it is main's own rather than a repeat of the
+      // renderer's. `paneForRow` establishes that the pane is one of VAM'S --
+      // the published name is checked against `listVamSessions`, so a terminal
+      // the operator opened is already never killed. What it does not
+      // establish is that the vam session it matched belongs to THIS ROW'S
+      // project: the published name comes from the session's own file and the
+      // cwd from the process table, and nothing had made the two agree. A row
+      // that names a pane tagged for another project is refused here rather
+      // than killed, because the sentence the operator confirmed was about
+      // one project and killing is not undoable. Everything the renderer
+      // planned still has to survive this, so a renderer that plans wrongly
+      // cannot end a session on its own say-so.
+      const ownsPane =
+        pane !== null &&
+        listed.kind === 'ok' &&
+        listed.sessions.some(
+          (candidate) => candidate.name === pane && candidate.project === projectIdOf(row.cwd),
+        );
+      if (pane !== null && ownsPane) {
         const { failure, stderr } = await run(killSessionArgv(pane));
         return failure === null
           ? null
