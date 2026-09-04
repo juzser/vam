@@ -1269,3 +1269,56 @@ describe('a turn with no answer says which kind of nothing it is', () => {
     }
   });
 });
+
+/**
+ * A running session's `out` used to read exactly like a dead one's: one static
+ * sentence, identical whether the agent was mid-tool-call or had quietly
+ * stopped. `Session.activity` already carries what it is doing right now
+ * (model.ts), so the empty `out` says that instead, and breathes while it is
+ * true -- the same `vam-breathe` idiom the header dot uses, and the same
+ * reason it is withheld from `done` and `failed`: a pulse on a stopped session
+ * reads as activity that is not there.
+ *
+ * `null` activity is a source that cannot say, and model.ts is explicit that
+ * it must render as no line rather than as an empty spinner pretending to be
+ * live -- so the sentence stays and nothing is invented in its place.
+ */
+describe('the out region shows live work while the session is running', () => {
+  const live = () => q<HTMLElement>('[data-out-empty]');
+  const running = (activity: string | null) => ({
+    project: PROJECT,
+    session: { ...SESSION, status: 'running' as const, activity },
+  });
+
+  it('renders the activity line, breathing, on the turn being worked', () => {
+    draw({ entry: running('editing transcript.ts') });
+    expect(live()?.textContent ?? '').toContain('editing transcript.ts');
+    expect(live()?.getAttribute('class') ?? '').toContain('vam-breathe');
+  });
+
+  it('keeps the sentence and invents no words when the source cannot say', () => {
+    draw({ entry: running(null) });
+    const text = live()?.textContent ?? '';
+    expect(text).toContain('still running');
+    expect(text.trim()).not.toBe('');
+    expect(live()?.getAttribute('class') ?? '').toContain('vam-breathe');
+  });
+
+  it('does not animate a session that has stopped', () => {
+    for (const s of ['done', 'failed'] as const) {
+      cleanup();
+      draw({ entry: { project: PROJECT, session: { ...SESSION, status: s } } });
+      const node = live();
+      expect(node?.getAttribute('class') ?? '', `status ${s}`).not.toContain('vam-breathe');
+      expect(node?.textContent ?? '', `status ${s}`).not.toContain('just now');
+    }
+  });
+
+  it('does not animate an older turn of a running session', () => {
+    // `decisions` is newest first, so d3 is three turns back: the activity
+    // would be describing the present while the operator reads the past.
+    draw({ entry: running('editing transcript.ts'), decision: DECISIONS[2] as Decision });
+    expect(all('[data-out-empty]')).toHaveLength(0);
+    expect(document.body.textContent ?? '').not.toContain('editing transcript.ts');
+  });
+});
