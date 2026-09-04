@@ -1805,8 +1805,10 @@ export function DetailPanel(props: DetailPanelProps) {
                          from assistive tech, which should read the activity and
                          not a star and three dots. */
                       <span data-out-running className="text-running">
-                        <span aria-hidden="true">{'\u2733'}</span>{' '}
-                        <span data-out-running-word>
+                        <span aria-hidden="true" data-out-running-star className="vam-running-star">
+                          {'\u2733'}
+                        </span>{' '}
+                        <span data-out-running-word className="vam-running-word">
                           {liveActivity ??
                             noAnswerNote(decision.output, entry?.session.status ?? null)}
                         </span>

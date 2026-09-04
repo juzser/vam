@@ -421,6 +421,50 @@ body {
   animation-delay: 0.4s;
 }
 
+/* The running caption's WORD, and its star.
+ *
+ * The caption shipped with the three dots as its only motion, and at 11.5px an
+ * eased opacity ramp on three periods is not motion anyone reads -- the
+ * operator's report was that the line looks like text, not like work. So the
+ * word carries a sheen that travels across it and the star turns, which is two
+ * more channels of the same one idea rather than a second idiom.
+ *
+ * IT STAYS A STATUS LINE. The sheen is the `running` token brightening to `ink`
+ * and back, clipped to the glyphs -- the word's own colour moving through it,
+ * not a highlight laid over the pane -- and the star's turn is slow enough to
+ * read as a pulse rather than as a spinner. Both animate one property on one
+ * short inline element, so neither reflows or repaints anything around it.
+ */
+@keyframes vam-running-sheen {
+  from {
+    background-position: 180% 0;
+  }
+  to {
+    background-position: -80% 0;
+  }
+}
+
+.vam-running-word {
+  background-image: linear-gradient(
+    100deg,
+    var(--color-running) 0%,
+    var(--color-running) 38%,
+    var(--color-ink) 50%,
+    var(--color-running) 62%,
+    var(--color-running) 100%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: vam-running-sheen 2.4s linear infinite;
+}
+
+.vam-running-star {
+  display: inline-block;
+  animation: vam-spin 3s linear infinite;
+}
+
 /*
  * Measured off the mockup's running card: a 1px strip flush with the top edge,
  * INSIDE the card and clipped by it, carrying a 34%-wide gradient bar.
@@ -541,6 +585,18 @@ body {
      is working. */
   .vam-ellipsis > span {
     opacity: 1;
+  }
+  /* The sheen paints the word by clipping a gradient to its glyphs, so simply
+     stopping it would leave transparent text. Off, the word is its own colour
+     flat -- the `running` token, which is what said "working" before any of
+     this moved -- and the star parks upright beside it. */
+  .vam-running-word,
+  .vam-running-star {
+    animation: none;
+  }
+  .vam-running-word {
+    background-image: none;
+    color: var(--color-running);
   }
   /* The halo carried the signal; with motion off, a static ring has to — the
      shape the mockup itself freezes to on its non-animating boards, a
