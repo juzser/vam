@@ -195,9 +195,9 @@ function stubClipboard() {
   });
 }
 
-function keyOn(element: Element, key: string) {
+function keyOn(element: Element, key: string, modifiers: KeyboardEventInit = {}) {
   act(() => {
-    element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...modifiers }));
   });
 }
 
@@ -1759,5 +1759,108 @@ describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
     keyOn(input as HTMLInputElement, '<');
     keyOn(input as HTMLInputElement, '>');
     expect(width(sidebarAside())).toBe(before);
+  });
+});
+
+/**
+ * Ten sessions under one project, all `done`, so the status ranking cannot
+ * reorder them and the sidebar prints exactly source order. Nine of anything
+ * is the whole point of `Mod-9`, and MODEL's three cannot reach it.
+ */
+const MANY: CanvasModel = {
+  projects: [
+    {
+      id: 'p9',
+      name: 'gamma',
+      source: 'black-smith',
+      sessions: Array.from({ length: 10 }, (_, i) => session(`s${i + 1}`)),
+    },
+  ],
+};
+
+describe('Cmd-number jumps to a session in the sidebar', () => {
+  it('Mod-1 lands on the first row from wherever the cursor was', () => {
+    render(<Canvas model={MODEL} />);
+    press('j');
+    expect(focused()).toBe('alpha/a2');
+    press('1', { metaKey: true });
+    expect(focused()).toBe('alpha/a1');
+  });
+
+  it('counts across project headings, which are captions and not rows', () => {
+    render(<Canvas model={MODEL} />);
+    // a1, a2 sit under alpha and b1 under beta; the third digit is the third
+    // SESSION, not the third row of a list that counted its own headings.
+    press('3', { ctrlKey: true });
+    expect(focused()).toBe('beta/b1');
+  });
+
+  it('Mod-9 is the last session, past nine and short of it alike', () => {
+    const { unmount } = render(<Canvas model={MANY} />);
+    press('9', { metaKey: true });
+    expect(focused()).toBe('gamma/s10'); // the LAST, not the ninth
+    unmount();
+
+    render(<Canvas model={MODEL} />);
+    press('9', { metaKey: true });
+    expect(focused()).toBe('beta/b1'); // three sessions, and it still lands
+  });
+
+  it('an out-of-range digit says so instead of clamping to the last row', () => {
+    render(<Canvas model={MODEL} />);
+    press('7', { metaKey: true });
+    expect(focused()).toBe('alpha/a1'); // unmoved
+    expect(statusBar()).toContain('only 3 sessions');
+  });
+
+  it('counts what the filter left visible, not what the model holds', () => {
+    render(<Canvas model={MODEL} />);
+    press('/');
+    typeInto(filterInput() as HTMLInputElement, 'alpha');
+    keyOn(filterInput() as HTMLInputElement, 'Enter');
+    expect(rows().map((el) => el.getAttribute('data-session-row'))).toEqual(['a1', 'a2']);
+
+    press('2', { metaKey: true });
+    expect(focused()).toBe('alpha/a2');
+    // b1 is still in the model and still the third session there. Counting it
+    // would land the cursor on a row the operator cannot see.
+    press('3', { metaKey: true });
+    expect(focused()).toBe('alpha/a2');
+    expect(statusBar()).toContain('only 2 sessions');
+  });
+
+  it('leaves the keystroke alone while a text box has it', () => {
+    render(<Canvas model={MODEL} />);
+    press('j');
+    press('i'); // the composer, aimed at alpha/a2
+    const box = promptInput() as HTMLTextAreaElement;
+    typeInto(box, 'half a prompt');
+    keyOn(box, '1', { metaKey: true });
+    expect(focused()).toBe('alpha/a2');
+    expect(promptInput()?.value).toBe('half a prompt');
+  });
+
+  it('consumes the event, so the host does not also act on it', () => {
+    render(<Canvas model={MODEL} />);
+    const event = new KeyboardEvent('keydown', {
+      key: '2',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+    expect(event.defaultPrevented).toBe(true);
+    expect(focused()).toBe('alpha/a2');
+  });
+});
+
+describe('the grammar hint in the footer', () => {
+  it('names the digit jump, which is otherwise invisible', () => {
+    render(<Canvas model={MODEL} />);
+    // `^` is how the bar already spells a Mod key (`^K` is the palette), so
+    // the range reads in the same alphabet rather than introducing ⌘ next to it.
+    expect(screen.getByText(/\^K \^1-9/)).toBeTruthy();
   });
 });

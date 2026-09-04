@@ -231,3 +231,30 @@ describe('the new resize chords (AC-5c continued)', () => {
     expect(state.pending).toBeNull();
   });
 });
+
+describe('Mod-digit jumps to a session in the sidebar', () => {
+  it('Mod-1 … Mod-8 name the 1st … 8th row, zero-based in the action', () => {
+    expect(type(['Mod-1']).actions).toEqual([{ kind: 'sessionAt', index: 0 }]);
+    expect(type(['Mod-4']).actions).toEqual([{ kind: 'sessionAt', index: 3 }]);
+    expect(type(['Mod-8']).actions).toEqual([{ kind: 'sessionAt', index: 7 }]);
+  });
+
+  it('Mod-9 is the LAST row, not the ninth — the browser-tab convention', () => {
+    expect(type(['Mod-9']).actions).toEqual([{ kind: 'last' }]);
+  });
+
+  it('a bare digit stays unbound, so a stray 7 does not move the cursor', () => {
+    expect(type(['1']).actions).toEqual([]);
+    expect(type(['9']).actions).toEqual([]);
+  });
+
+  it('Mod-0 stays unbound — z0 already owns the zero', () => {
+    expect(type(['Mod-0']).actions).toEqual([]);
+    expect(type(['z', '0']).actions).toEqual([{ kind: 'resetPanes' }]);
+  });
+
+  it('a real Cmd-1 keydown normalizes to the string the table is written in', () => {
+    expect(normalizeKey({ key: '1', metaKey: true })).toBe('Mod-1');
+    expect(normalizeKey({ key: '1', ctrlKey: true })).toBe('Mod-1');
+  });
+});
