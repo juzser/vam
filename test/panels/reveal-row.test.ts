@@ -29,9 +29,9 @@ describe('revealScrollTop', () => {
   });
 
   it('brings a row above the viewport to the top edge', () => {
-    expect(revealScrollTop({ rowTop: 200, rowHeight: 60, scrollTop: 500, viewportHeight: 600 })).toBe(
-      200,
-    );
+    expect(
+      revealScrollTop({ rowTop: 200, rowHeight: 60, scrollTop: 500, viewportHeight: 600 }),
+    ).toBe(200);
   });
 
   it('brings a row below the viewport to the bottom edge, not to the middle', () => {
@@ -62,6 +62,8 @@ describe('revealScrollTop', () => {
 
   it('does nothing in an unmeasured viewport, rather than jumping to zero', () => {
     // happy-dom, and any element not laid out yet, report 0 for everything.
-    expect(revealScrollTop({ rowTop: 0, rowHeight: 0, scrollTop: 0, viewportHeight: 0 })).toBeNull();
+    expect(
+      revealScrollTop({ rowTop: 0, rowHeight: 0, scrollTop: 0, viewportHeight: 0 }),
+    ).toBeNull();
   });
 });
