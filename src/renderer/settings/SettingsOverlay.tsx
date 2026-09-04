@@ -38,12 +38,15 @@ import {
   clearPaletteColor,
   FOCUS_SHARE_MAX,
   FOCUS_SHARE_MIN,
+  OUT_FONT_SIZE_MAX,
+  OUT_FONT_SIZE_MIN,
   PALETTE_TOKENS,
   type Prefs,
   paletteValue,
   setFocusShare,
   setKeyBindings,
   setLayout,
+  setOutFontSize,
   setPaletteColor,
   setPaneVisibility,
   setTheme,
@@ -277,7 +280,11 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
             {wide ? null : <SectionStrip section={section} onGo={go} onStep={step} />}
 
-            <Panel id="appearance" active={section === 'appearance'} hint="theme and colours">
+            <Panel
+              id="appearance"
+              active={section === 'appearance'}
+              hint="theme, colours and the size of the text in out"
+            >
               <Block label="theme" hint="system follows what the operating system asks for">
                 <div className="flex gap-1">
                   {THEMES.map((theme) => (
@@ -328,6 +335,38 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
                       )}
                     </div>
                   ))}
+                </div>
+              </Block>
+
+              {/* Here rather than in Canvas, by Canvas's own argument: focus
+                  zoom went there because it is how the canvas VIEWPORT
+                  behaves. A text size is not behaviour, it is the paint — the
+                  family the theme and the palette above it are in. And `out`
+                  is the right pane, drawn by two layouts that hide the canvas
+                  entirely; a fifth section for one control is the padding the
+                  settings spec rules out. */}
+              <Block
+                label="out text"
+                hint="how large the agent's answer is drawn in the right pane"
+              >
+                <div className="flex items-center gap-3">
+                  <label className="text-ink-dim text-xs" htmlFor="vam-out-font-size">
+                    size
+                  </label>
+                  <input
+                    id="vam-out-font-size"
+                    type="range"
+                    aria-label="out text size"
+                    min={OUT_FONT_SIZE_MIN}
+                    max={OUT_FONT_SIZE_MAX}
+                    step={1}
+                    value={prefs.outFontSize}
+                    onChange={(event) =>
+                      onChange(setOutFontSize(prefs, Number(event.target.value)))
+                    }
+                    className={`w-56 ${FOCUS_RING}`}
+                  />
+                  <span className="font-mono text-ink-dim text-xs">{prefs.outFontSize}px</span>
                 </div>
               </Block>
             </Panel>

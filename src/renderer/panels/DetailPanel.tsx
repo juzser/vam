@@ -960,20 +960,35 @@ function Fence({ code, lang }: { readonly code: string; readonly lang: Highlight
   );
 }
 
+/**
+ * `out`'s type scale, in `em` against the root the pane's container carries
+ * (`OUT_FONT_SIZE_VAR`, a pref).
+ *
+ * These were pixels — 13 / 12.5 / 12 headings, 12 body, 11.5 tables, 11 code,
+ * 10.5 hints — a designed hierarchy rather than arbitrary numbers, so the
+ * setting had to move all of them at once without flattening them. Each is its
+ * old pixel size over the 12px root `body` already gave the pane, to three
+ * decimals: 1.083 = 13/12, 1.042 = 12.5/12, 0.958 = 11.5/12, 0.917 = 11/12,
+ * and 0.875 = 10.5/12 exactly. Rounding costs at most 0.01px at the largest
+ * size offered, under one device pixel, so the scale is the shipped one.
+ *
+ * `em` not `rem`: the multiplier composes down the tree, so inline code stays
+ * 11/12 OF ITS PARAGRAPH — which is what kept it a chip, not a body size.
+ */
 export const OUT_MARKDOWN: Components = {
-  p: ({ children }) => <p className="text-[12px] text-ink-dim leading-[1.6]">{children}</p>,
-  h1: ({ children }) => <h1 className="font-medium text-[13px] text-ink">{children}</h1>,
-  h2: ({ children }) => <h2 className="font-medium text-[12.5px] text-ink">{children}</h2>,
+  p: ({ children }) => <p className="text-[1em] text-ink-dim leading-[1.6]">{children}</p>,
+  h1: ({ children }) => <h1 className="font-medium text-[1.083em] text-ink">{children}</h1>,
+  h2: ({ children }) => <h2 className="font-medium text-[1.042em] text-ink">{children}</h2>,
   h3: ({ children }) => (
-    <h3 className="font-medium text-[12px] text-ink tracking-[0.01em]">{children}</h3>
+    <h3 className="font-medium text-[1em] text-ink tracking-[0.01em]">{children}</h3>
   ),
   ul: ({ children }) => (
-    <ul className="flex list-disc flex-col gap-1 pl-4 text-[12px] text-ink-dim leading-[1.6]">
+    <ul className="flex list-disc flex-col gap-1 pl-4 text-[1em] text-ink-dim leading-[1.6]">
       {children}
     </ul>
   ),
   ol: ({ children }) => (
-    <ol className="flex list-decimal flex-col gap-1 pl-4 text-[12px] text-ink-dim leading-[1.6]">
+    <ol className="flex list-decimal flex-col gap-1 pl-4 text-[1em] text-ink-dim leading-[1.6]">
       {children}
     </ol>
   ),
@@ -983,7 +998,7 @@ export const OUT_MARKDOWN: Components = {
   del: ({ children }) => <del className="text-ink-faint">{children}</del>,
   hr: () => <hr className="border-line border-t" />,
   blockquote: ({ children }) => (
-    <blockquote className="border-quote border-l-2 pl-2.5 text-[12px] text-quote leading-[1.6]">
+    <blockquote className="border-quote border-l-2 pl-2.5 text-[1em] text-quote leading-[1.6]">
       {children}
     </blockquote>
   ),
@@ -991,7 +1006,7 @@ export const OUT_MARKDOWN: Components = {
   // the `pre` rule below — react-markdown stopped telling a component which of
   // the two it is, and the parent knows without being told.
   code: ({ children }) => (
-    <code className="rounded-[4px] bg-raised px-1 py-[1px] font-mono text-[11px] text-chip">
+    <code className="rounded-[4px] bg-raised px-1 py-[1px] font-mono text-[0.917em] text-chip">
       {children}
     </code>
   ),
@@ -999,14 +1014,14 @@ export const OUT_MARKDOWN: Components = {
     const fence = readFence(children);
     const lang = fence === null ? null : resolveLang(fence.lang);
     return (
-      <pre className="vam-no-scrollbar overflow-x-auto rounded-[7px] border border-line bg-canvas px-2.5 py-2 font-mono text-[11px] text-ink-dim leading-[1.55] [&_code]:bg-transparent [&_code]:px-0 [&_code]:text-ink-dim">
+      <pre className="vam-no-scrollbar overflow-x-auto rounded-[7px] border border-line bg-canvas px-2.5 py-2 font-mono text-[0.917em] text-ink-dim leading-[1.55] [&_code]:bg-transparent [&_code]:px-0 [&_code]:text-ink-dim">
         {fence !== null && lang !== null ? <Fence code={fence.code} lang={lang} /> : children}
       </pre>
     );
   },
   table: ({ children }) => (
     <div className="vam-no-scrollbar overflow-x-auto">
-      <table className="w-max border-collapse text-[11.5px] text-ink-dim">{children}</table>
+      <table className="w-max border-collapse text-[0.958em] text-ink-dim">{children}</table>
     </div>
   ),
   th: ({ children }) => (
@@ -1019,12 +1034,12 @@ export const OUT_MARKDOWN: Components = {
     <span className="text-done">
       {children}
       {href !== undefined && (
-        <span className="font-mono text-[10.5px] text-ink-faint"> ({href})</span>
+        <span className="font-mono text-[0.875em] text-ink-faint"> ({href})</span>
       )}
     </span>
   ),
   img: ({ alt }) => (
-    <span className="font-mono text-[10.5px] text-ink-faint">{alt === '' ? 'image' : alt}</span>
+    <span className="font-mono text-[0.875em] text-ink-faint">{alt === '' ? 'image' : alt}</span>
   ),
 };
 
@@ -1070,7 +1085,7 @@ function OutText({ output }: { readonly output: string }) {
             className="flex min-w-0 flex-col gap-1 break-words"
           >
             {head !== null && (
-              <span data-out-head className="font-mono text-[11px] text-ink">
+              <span data-out-head className="font-mono text-[0.917em] text-ink">
                 {head}
               </span>
             )}
@@ -1761,7 +1776,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   stuckRef.current = isAtBottom(event.currentTarget);
                   syncJumps(event.currentTarget);
                 }}
-                className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto"
+                className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto text-[length:var(--vam-out-font-size,12px)]"
               >
                 {decision.output !== null && decision.output !== '' && (
                   <OutText output={decision.output} />
