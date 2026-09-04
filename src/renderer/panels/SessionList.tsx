@@ -239,6 +239,7 @@ export function SessionList(props: SessionListProps) {
 
   return (
     <aside
+      data-sidebar-pane
       className="relative flex h-full shrink-0 flex-col border-line border-r bg-sidebar"
       style={{ width }}
     >

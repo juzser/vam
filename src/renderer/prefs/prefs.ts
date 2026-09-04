@@ -23,7 +23,15 @@
 
 import type { CanvasModel, SourceId } from '../domain/model.js';
 import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
-import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
+import {
+  ALL_VISIBLE,
+  clampPaneWidth,
+  DEFAULT_PANES,
+  LAYOUTS,
+  type LayoutName,
+  type Pane,
+  type PaneVisibility,
+} from './panes.js';
 
 const KEY = 'vam.prefs.v1';
 
@@ -97,6 +105,14 @@ export type Prefs = {
    */
   readonly panes: { readonly sidebar: number; readonly detail: number };
   /**
+   * Which panes are drawn. NEXT TO `panes`, not inside it: a width is a
+   * number every path already clamps into `[MIN, MAX]`, and folding "not
+   * drawn" into that number would mean unpicking the clamp that keeps a
+   * garbage width from rendering as a pane that has vanished. Same TTL
+   * exemption as `panes` and `theme`, for the same reason.
+   */
+  readonly paneVisibility: PaneVisibility;
+  /**
    * Source id → project id → the emoji you gave that project's heading.
    *
    * Same idiom as `icons`, one level up, for the same reason: a project id is
@@ -119,6 +135,7 @@ export const EMPTY_PREFS: Prefs = {
   icons: {},
   theme: DEFAULT_THEME,
   panes: DEFAULT_PANES,
+  paneVisibility: ALL_VISIBLE,
   projectIcons: {},
   filters: DEFAULT_SESSION_FILTERS,
 };
@@ -169,6 +186,7 @@ export function readPrefs(
   const record = parsed as {
     icons?: unknown;
     panes?: unknown;
+    paneVisibility?: unknown;
     projectIcons?: unknown;
     filters?: unknown;
   };
@@ -182,6 +200,11 @@ export function readPrefs(
     // field (today's shipped payloads have none), a non-object, or garbage
     // numbers left by devtools or an older vam.
     panes: readPanes(record.panes),
+    // Per FIELD again, which is the whole reason this sits beside `panes`
+    // rather than in it: every payload already in a browser has no
+    // `paneVisibility` key at all, and each of those reads back as "all three
+    // panes are drawn" without a version number or a migration.
+    paneVisibility: readPaneVisibility(record.paneVisibility),
     // Same TTL as session icons, same reasoning: a project's glyph is not
     // worth remembering forever either.
     projectIcons: pruneIcons(readProjectIcons(record.projectIcons), cutoff),
@@ -241,6 +264,31 @@ function readPanes(raw: unknown): Prefs['panes'] {
     sidebar: readPaneWidth('sidebar', sidebar),
     detail: readPaneWidth('detail', detail),
   };
+}
+
+/** A missing or garbage field means "drawn", per field: the safe direction to
+ * fail is showing a pane you wanted hidden, never hiding one you did not. */
+function readPaneVisibility(raw: unknown): PaneVisibility {
+  const { sidebar, canvas, detail } = (typeof raw === 'object' && raw !== null ? raw : {}) as {
+    sidebar?: unknown;
+    canvas?: unknown;
+    detail?: unknown;
+  };
+  return {
+    sidebar: sidebar !== false,
+    canvas: canvas !== false,
+    detail: detail !== false,
+  };
+}
+
+/** Written by the layout chords. */
+export function setPaneVisibility(prefs: Prefs, paneVisibility: PaneVisibility): Prefs {
+  return { ...prefs, paneVisibility };
+}
+
+/** One of the named layouts, applied. */
+export function setLayout(prefs: Prefs, layout: LayoutName): Prefs {
+  return setPaneVisibility(prefs, LAYOUTS[layout]);
 }
 
 /** `clampPaneWidth` is already total, so a non-number falls through to `NaN`

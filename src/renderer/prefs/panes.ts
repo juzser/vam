@@ -115,3 +115,101 @@ export function renderedWidth(
   const ceiling = dragCeiling(pane, otherStored, viewportWidth);
   return Math.min(ceiling, clampPaneWidth(pane, storedWidth));
 }
+
+/**
+ * Which panes are drawn at all.
+ *
+ * Visibility is NOT a width. Every function above floors at the pane's MIN,
+ * on purpose (see `clampPaneWidth`), so "hide it by storing 0" renders a 200px
+ * sidebar. A pane is hidden by not being mounted, and this is the flag that
+ * says so. It is stored NEXT TO `panes`, never inside it, so the width
+ * arithmetic and its stored payloads stay exactly as they were.
+ *
+ * The canvas is in here even though it has no stored width: it is the third
+ * column, it is the thing the two layouts below hide, and a visibility record
+ * that could not name it would push that knowledge into the render tree.
+ * Three named fields rather than a keyed map, for the reason `Prefs.panes`
+ * already gives: the columns are known at compile time.
+ */
+export type PaneVisibility = {
+  readonly sidebar: boolean;
+  readonly canvas: boolean;
+  readonly detail: boolean;
+};
+
+/** The shipped layout: everything on screen. */
+export const ALL_VISIBLE: PaneVisibility = { sidebar: true, canvas: true, detail: true };
+
+/**
+ * The named layouts, keyboard-reachable (`chords.ts`).
+ *
+ * Two, not a general mechanism: both are subtractive — they hide columns and
+ * change nothing else. A layout that REORDERED the columns (a canvas demoted
+ * to a narrow right-hand strip, say) cannot be expressed here at all, because
+ * the order lives in Canvas.tsx's JSX and the `Pane` type has no word for a
+ * third resizable column. That needs a layout descriptor, and a separate
+ * decision about whether a 360px canvas is still a canvas.
+ */
+export const LAYOUTS = {
+  /** The response, alone: the detail pane is the whole window. */
+  responseOnly: { sidebar: false, canvas: false, detail: true },
+  /** List plus response, for reading and answering without the graph. */
+  noCanvas: { sidebar: true, canvas: false, detail: true },
+} as const satisfies Readonly<Record<string, PaneVisibility>>;
+
+export type LayoutName = keyof typeof LAYOUTS;
+
+/**
+ * The two rendered widths, for a given visibility.
+ *
+ * Three rules, and the last two are why this exists rather than two bare
+ * `renderedWidth` calls:
+ *
+ * 1. A hidden pane renders at 0 — it is not drawn, so it has no width. This
+ *    is the one place a 0 is legal, and it never reaches storage.
+ * 2. A hidden pane costs its sibling nothing. `renderedWidth` subtracts the
+ *    other pane's width from what the viewport can give this one; passing a
+ *    hidden pane's stored 320 there would let an unmounted detail pane keep
+ *    taking room away from a visible sidebar.
+ * 3. With the canvas hidden there is no `CANVAS_MIN` to reserve and nothing
+ *    to be subordinate to, so the survivors divide the whole viewport and the
+ *    detail pane takes what is left over — deliberately past `DETAIL_MAX`,
+ *    because that bound exists to stop the detail pane overshadowing the
+ *    canvas, and there is no canvas.
+ */
+export function layoutWidths(
+  visible: PaneVisibility,
+  stored: { readonly sidebar: number; readonly detail: number },
+  viewportWidth: number,
+): { readonly sidebar: number; readonly detail: number } {
+  if (visible.canvas) {
+    return {
+      sidebar: visible.sidebar
+        ? renderedWidth(
+            'sidebar',
+            stored.sidebar,
+            visible.detail ? stored.detail : 0,
+            viewportWidth,
+          )
+        : 0,
+      detail: visible.detail
+        ? renderedWidth(
+            'detail',
+            stored.detail,
+            visible.sidebar ? stored.sidebar : 0,
+            viewportWidth,
+          )
+        : 0,
+    };
+  }
+  if (!visible.detail) {
+    return { sidebar: visible.sidebar ? Math.max(SIDEBAR_MIN, viewportWidth) : 0, detail: 0 };
+  }
+  const sidebar = visible.sidebar
+    ? Math.min(
+        clampPaneWidth('sidebar', stored.sidebar),
+        Math.max(SIDEBAR_MIN, viewportWidth - DETAIL_MIN),
+      )
+    : 0;
+  return { sidebar, detail: Math.max(DETAIL_MIN, viewportWidth - sidebar) };
+}
