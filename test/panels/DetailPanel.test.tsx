@@ -974,6 +974,13 @@ describe('the Agents tab', () => {
     expect(q<HTMLElement>('[data-agents-empty]')?.textContent).toContain('does not report');
   });
 
+  const idleToggle = () => q<HTMLButtonElement>('[data-agents-toggle]');
+  const clickToggle = () => {
+    const button = idleToggle();
+    if (button === null) throw new Error('no idle toggle to click');
+    fireEvent.click(button);
+  };
+
   it('lists each agent with its type, its description and whether it is running', () => {
     draw({
       entry: withAgents([
@@ -982,6 +989,9 @@ describe('the Agents tab', () => {
       ]),
     });
     openAgents();
+    // The idle one is behind the toggle by default; revealed, the roster is
+    // the whole roster, in source order.
+    clickToggle();
 
     const rows = all('[data-agent-row]');
     expect(rows).toHaveLength(2);
@@ -989,6 +999,90 @@ describe('the Agents tab', () => {
     expect(rows[0]?.textContent).toContain('write the parser');
     expect(rows[0]?.getAttribute('data-agent-running')).toBe('true');
     expect(rows[1]?.getAttribute('data-agent-running')).toBe('false');
+  });
+
+  it('shows only the running agents by default, hiding the finished ones', () => {
+    draw({
+      entry: withAgents([
+        { id: 'agent-one', type: 'coder', description: 'write the parser', running: true },
+        { id: 'agent-two', type: 'uiux', description: 'review the pane', running: false },
+        { id: 'agent-three', type: 'planner', description: 'plan it', running: false },
+      ]),
+    });
+    openAgents();
+
+    const rows = all('[data-agent-row]');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.getAttribute('data-agent-running')).toBe('true');
+    // Hidden rows are never silently invisible: the toggle carries their count.
+    expect(idleToggle()?.textContent).toContain('2');
+    expect(q('[data-agents-empty]')).toBeNull();
+  });
+
+  it('reveals the idle agents when the toggle is pressed, and hides them again', () => {
+    draw({
+      entry: withAgents([
+        { id: 'agent-one', type: 'coder', description: 'write the parser', running: true },
+        { id: 'agent-two', type: 'uiux', description: 'review the pane', running: false },
+      ]),
+    });
+    openAgents();
+    expect(idleToggle()?.getAttribute('aria-pressed')).toBe('false');
+
+    clickToggle();
+    expect(all('[data-agent-row]')).toHaveLength(2);
+    expect(idleToggle()?.getAttribute('aria-pressed')).toBe('true');
+
+    clickToggle();
+    expect(all('[data-agent-row]')).toHaveLength(1);
+    expect(idleToggle()?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('draws no toggle at all when every agent is running', () => {
+    draw({
+      entry: withAgents([
+        { id: 'agent-one', type: 'coder', description: 'write the parser', running: true },
+      ]),
+    });
+    openAgents();
+
+    expect(all('[data-agent-row]')).toHaveLength(1);
+    expect(idleToggle()).toBeNull();
+  });
+
+  it('says none is running -- not that none was spawned -- when all are idle', () => {
+    // The third state the filter introduces. Telling an operator with twenty
+    // finished agents that the session "spawned no agents" is the caption
+    // outrunning the data, and the toggle that would disprove it is right
+    // there.
+    draw({
+      entry: withAgents([
+        { id: 'agent-one', type: 'coder', description: 'write the parser', running: false },
+        { id: 'agent-two', type: 'uiux', description: 'review the pane', running: false },
+      ]),
+    });
+    openAgents();
+
+    expect(all('[data-agent-row]')).toHaveLength(0);
+    const empty = q<HTMLElement>('[data-agents-empty]');
+    expect(empty?.textContent).not.toContain('spawned no agents');
+    expect(empty?.textContent).toContain('2');
+    expect(empty?.textContent).toContain('none');
+    // The way out of the state is on screen with it.
+    expect(idleToggle()).not.toBeNull();
+    clickToggle();
+    expect(all('[data-agent-row]')).toHaveLength(2);
+    expect(q('[data-agents-empty]')).toBeNull();
+  });
+
+  it('offers no toggle for the two absences, which have nothing to reveal', () => {
+    draw({ entry: withAgents([]) });
+    openAgents();
+    expect(idleToggle()).toBeNull();
+
+    draw({ entry: withAgents(undefined) });
+    openAgents();
+    expect(idleToggle()).toBeNull();
   });
 
   it('keeps an agent whose meta could not be read, naming what is unknown', () => {
