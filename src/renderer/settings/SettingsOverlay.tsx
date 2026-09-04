@@ -22,7 +22,7 @@
 
 import { useEffect, useRef } from 'react';
 import { buildKeySheet, describeAction } from '../keyboard/keysheet.js';
-import { ALL_VISIBLE, LAYOUTS, type LayoutName } from '../prefs/panes.js';
+import { ALL_VISIBLE, columnOrder, LAYOUTS, type LayoutName } from '../prefs/panes.js';
 import {
   FOCUS_SHARE_MAX,
   FOCUS_SHARE_MIN,
@@ -58,10 +58,14 @@ function layoutLabel(choice: LayoutChoice): string {
 /** Which choice the stored visibility IS, or null when a hand-set combination
  *  matches none of them — an unmarked picker is honest, a wrong mark is not. */
 export function currentLayout(visibility: Prefs['paneVisibility']): LayoutChoice | null {
+  const order = columnOrder(visibility);
   const same = (other: Prefs['paneVisibility']) =>
     other.sidebar === visibility.sidebar &&
     other.canvas === visibility.canvas &&
-    other.detail === visibility.detail;
+    other.detail === visibility.detail &&
+    // The order as well as the visibility, or the focus layout — which draws
+    // all three columns, like the shipped one — would light up the `full` mark.
+    columnOrder(other).join() === order.join();
   if (same(ALL_VISIBLE)) {
     return FULL;
   }

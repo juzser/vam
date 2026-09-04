@@ -14,6 +14,7 @@
  * read what a key does.
  */
 
+import type { LayoutName } from '../prefs/panes.js';
 import { BINDING_TABLES, type KeyAction } from './chords.js';
 
 /**
@@ -56,6 +57,17 @@ type Meta<K extends KeyAction['kind']> = {
  * compiler demand an entry for every kind in the union — the day a binding is
  * added, this file is where the build stops.
  */
+/**
+ * One caption per layout, keyed by name so the compiler stops the build the day
+ * a layout is added without one — which is what the comment on `layout` below
+ * promises and a ternary could not keep.
+ */
+const LAYOUT_LABELS: Readonly<Record<LayoutName, string>> = {
+  noCanvas: 'hide the canvas',
+  responseOnly: 'response pane only',
+  focusResponse: 'response in the middle, canvas as a strip',
+};
+
 export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   move: { group: 'navigation', label: (a) => `move ${a.direction}` },
   // Derived from the action's own `name`, so a third layout added to the
@@ -63,7 +75,7 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // with a name this switch does not cover fails to compile.
   layout: {
     group: 'panes',
-    label: (a) => (a.name === 'noCanvas' ? 'hide the canvas' : 'response pane only'),
+    label: (a) => LAYOUT_LABELS[a.name],
   },
   first: { group: 'navigation', label: () => 'first session' },
   last: { group: 'navigation', label: () => 'last session' },

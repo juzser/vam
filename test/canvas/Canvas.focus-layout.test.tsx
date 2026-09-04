@@ -19,7 +19,13 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
-import { DEFAULT_ORDER, LAYOUTS } from '../../src/renderer/prefs/panes.js';
+import {
+  ALL_VISIBLE,
+  DEFAULT_ORDER,
+  DEFAULT_PANES,
+  LAYOUTS,
+  layoutWidths,
+} from '../../src/renderer/prefs/panes.js';
 
 function decision(id: string): Decision {
   return { id, label: id, input: `in-${id}`, output: `out-${id}`, commands: [] };
@@ -93,16 +99,31 @@ function press(key: string) {
   });
 }
 
+// The same three shims `Canvas.pane-visibility.test.tsx` installs, for the same
+// reason: ReactFlow measures, and this happy-dom has neither a layout engine nor
+// a `localStorage`.
 beforeAll(() => {
-  // ReactFlow measures; happy-dom has no layout engine.
-  Object.defineProperty(window, 'ResizeObserver', {
-    writable: true,
-    value: class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  });
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+  globalThis.DOMMatrixReadOnly ??= class {
+    m22 = 1;
+  } as unknown as typeof DOMMatrixReadOnly;
+  globalThis.localStorage ??= (() => {
+    const map = new Map<string, string>();
+    return {
+      getItem: (key: string) => map.get(key) ?? null,
+      setItem: (key: string, value: string) => void map.set(key, String(value)),
+      removeItem: (key: string) => void map.delete(key),
+      clear: () => map.clear(),
+      key: (index: number) => [...map.keys()][index] ?? null,
+      get length() {
+        return map.size;
+      },
+    };
+  })() as unknown as Storage;
 });
 
 afterEach(() => {
@@ -161,16 +182,31 @@ describe('z0 undoes it', () => {
     });
     render(<Canvas model={MODEL} />);
     expect(columnOrder()).toEqual(['sidebar', 'detail', 'canvas']);
+    // The reordering layout leaves the widths you dragged exactly where they
+    // were: the sidebar still renders at its stored 300.
+    const sidebar = document.querySelector('[data-sidebar-pane]') as HTMLElement | null;
+    expect(Number.parseFloat(sidebar?.style.width ?? 'NaN')).toBe(300);
+    expect(stored().panes).toEqual({ sidebar: 300, detail: 420 });
 
     press('z');
     press('0');
 
     expect(columnOrder()).toEqual(['sidebar', 'canvas', 'detail']);
     expect(stored().paneVisibility.order ?? DEFAULT_ORDER).toEqual([...DEFAULT_ORDER]);
-    const sidebar = document.querySelector('[data-sidebar-pane]') as HTMLElement | null;
+    // `z0` has always restored the DEFAULT widths as well as the shipped
+    // columns — one idea, not two, per the `resetPanes` handler — so the widths
+    // that come back are those, not the 300/420 this test stored. The property
+    // that matters for a reordering layout is the one asserted above it: going
+    // into the focus layout does not touch the stored widths, so `z0` is
+    // restoring from an unchanged store rather than from one this layout wrote.
+    expect(stored().panes).toEqual(DEFAULT_PANES);
     const detail = document.querySelector('[data-action-pane]') as HTMLElement | null;
-    expect(Number.parseFloat(sidebar?.style.width ?? 'NaN')).toBe(300);
-    expect(Number.parseFloat(detail?.style.width ?? 'NaN')).toBe(420);
+    // What reaches the DOM is the render-time clamp of those defaults against
+    // this window, which is the shipped layout's own arithmetic and not this
+    // layout's business — so it is asked for rather than hard-coded.
+    expect(Number.parseFloat(detail?.style.width ?? 'NaN')).toBe(
+      layoutWidths(ALL_VISIBLE, DEFAULT_PANES, window.innerWidth).detail,
+    );
   });
 
   it('is reachable by its own chord', () => {
