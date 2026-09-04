@@ -177,9 +177,12 @@ describe('the focus zoom share is editable', () => {
   it('starts at the stored value and writes what you set, clamped', () => {
     render(<Canvas model={MODEL} />);
     press(',');
-    const slider = screen.getByLabelText('focus zoom share') as HTMLInputElement;
-    expect(Number(slider.value)).toBe(DEFAULT_FOCUS_SHARE);
-    fireEvent.change(slider, { target: { value: '0.9' } });
+    // The stepper reads the percentage integer, not the 0..1 share: a
+    // spinbutton showing `0.45` is one nobody can use, and `45%` is what this
+    // surface already printed. The stored share is unchanged.
+    const stepper = screen.getByLabelText('focus zoom share') as HTMLInputElement;
+    expect(Number(stepper.value)).toBe(DEFAULT_FOCUS_SHARE * 100);
+    fireEvent.change(stepper, { target: { value: '90' } });
     expect(stored().focusViewportShare).toBe(0.9);
   });
 });

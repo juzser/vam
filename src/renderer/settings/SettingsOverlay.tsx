@@ -20,6 +20,7 @@
  * theme still has exactly one path onto `<html>`.
  */
 
+import { Minus, Plus, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   bindingConflict,
@@ -275,8 +276,17 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
         <div className="flex h-[38px] flex-none items-center gap-2 border-line border-b px-3">
           <h2 className="font-semibold text-[13px] text-ink">settings</h2>
           {/* `ink-faint` measures 3.44 / 3.46 against `panel` — it fails 4.5:1
-              in both themes, and every hint in this overlay used to wear it. */}
-          <span className="text-[11px] text-ink-dim">stored in this browser, not in a session</span>
+              in both themes, and every hint in this overlay used to wear it.
+
+              This is the only line on the surface visible regardless of scroll
+              position and of which section is open, so it is where the two
+              Escapes get named, in the order they will happen. `polite`
+              announces the mode change without stealing the keystroke. */}
+          <span role="status" aria-live="polite" className="text-[11px] text-ink-dim">
+            {capturing === null
+              ? 'stored in this browser, not in a session'
+              : 'waiting for a key — Esc cancels, Esc again closes'}
+          </span>
           <span className="flex-1" />
           <button
             ref={closeButton}
@@ -292,7 +302,7 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
             flex column, and the fixed height above becomes an overflow. */}
         <div className="flex min-h-0 flex-1">
           {wide ? <SectionRail section={section} onGo={go} onStep={step} /> : null}
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {wide ? null : <SectionStrip section={section} onGo={go} onStep={step} />}
 
             <Panel
@@ -325,31 +335,47 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
                   )
                 }
               >
-                <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
-                  {PALETTE_TOKENS.map(({ token, label }) => (
-                    <div key={token} className="flex items-center gap-2 text-xs">
-                      <input
-                        type="color"
-                        aria-label={`${label} colour`}
-                        value={paletteValue(prefs.palette, token)}
-                        onChange={(event) =>
-                          onChange(setPaletteColor(prefs, token, event.target.value))
-                        }
-                        className={`h-5 w-8 cursor-pointer rounded border border-line bg-raised ${FOCUS_RING}`}
-                      />
-                      <span className="text-ink-dim">{label}</span>
-                      {prefs.palette[token] === undefined ? null : (
-                        <button
-                          type="button"
-                          aria-label={`reset ${label} colour`}
-                          onClick={() => onChange(clearPaletteColor(prefs, token))}
-                          className={`cursor-pointer text-ink-dim ${FOCUS_RING}`}
-                        >
-                          ×
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                <div className="grid grid-cols-2 gap-x-6 gap-y-[10px] sm:grid-cols-3">
+                  {PALETTE_TOKENS.map(({ token, label }) => {
+                    const overridden = prefs.palette[token] !== undefined;
+                    return (
+                      <div key={token} className="flex items-center gap-[10px]">
+                        {/* The fill here is operator data — an override of the
+                            panel's own colour paints a disc invisible against
+                            the surface it sits on — so the EDGE identifies the
+                            control, and owes 3:1. `ink-faint` is the only kit
+                            token that clears it in both themes.
+                            Overridden reads as weight and lightness (1px faint
+                            to 2px ink), never as hue, and the reset button
+                            beside it carries the same state as a shape. */}
+                        <input
+                          type="color"
+                          data-palette-swatch={token}
+                          aria-label={`${label} colour`}
+                          value={paletteValue(prefs.palette, token)}
+                          onChange={(event) =>
+                            onChange(setPaletteColor(prefs, token, event.target.value))
+                          }
+                          className={`vam-swatch h-[22px] w-[22px] cursor-pointer rounded-full border-none bg-transparent p-0 ${FOCUS_RING} ${
+                            overridden ? 'ring-2 ring-ink' : 'ring-1 ring-ink-faint'
+                          }`}
+                        />
+                        <span className="text-[13px] text-ink">{label}</span>
+                        {overridden ? (
+                          <button
+                            type="button"
+                            aria-label={`reset ${label} colour`}
+                            onClick={() => onChange(clearPaletteColor(prefs, token))}
+                            className={`cursor-pointer text-ink-dim hover:text-ink ${FOCUS_RING}`}
+                          >
+                            {/* `×` reads as "remove this colour"; the action is
+                                "go back to the stylesheet's". */}
+                            <RotateCcw size={12} strokeWidth={1.8} aria-hidden="true" />
+                          </button>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
               </Block>
 
@@ -364,25 +390,15 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
                 label="out text"
                 hint="how large the agent's answer is drawn in the right pane"
               >
-                <div className="flex items-center gap-3">
-                  <label className="text-ink-dim text-xs" htmlFor="vam-out-font-size">
-                    size
-                  </label>
-                  <input
-                    id="vam-out-font-size"
-                    type="range"
-                    aria-label="out text size"
-                    min={OUT_FONT_SIZE_MIN}
-                    max={OUT_FONT_SIZE_MAX}
-                    step={1}
-                    value={prefs.outFontSize}
-                    onChange={(event) =>
-                      onChange(setOutFontSize(prefs, Number(event.target.value)))
-                    }
-                    className={`w-56 ${FOCUS_RING}`}
-                  />
-                  <span className="font-mono text-ink-dim text-xs">{prefs.outFontSize}px</span>
-                </div>
+                <Stepper
+                  name="out text size"
+                  min={OUT_FONT_SIZE_MIN}
+                  max={OUT_FONT_SIZE_MAX}
+                  step={1}
+                  value={prefs.outFontSize}
+                  unit="px"
+                  onCommit={(next) => onChange(setOutFontSize(prefs, next))}
+                />
               </Block>
             </Panel>
 
@@ -410,25 +426,18 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
               hint="how the canvas itself behaves — not a colour, and not chrome"
             >
               <Block label="focus zoom" hint="how much of the canvas a focused session fills">
-                <div className="flex items-center gap-3">
-                  <label className="text-ink-dim text-xs" htmlFor="vam-focus-share">
-                    share
-                  </label>
-                  <input
-                    id="vam-focus-share"
-                    type="range"
-                    aria-label="focus zoom share"
-                    min={FOCUS_SHARE_MIN}
-                    max={FOCUS_SHARE_MAX}
-                    step={0.05}
-                    value={prefs.focusViewportShare}
-                    onChange={(event) => onChange(setFocusShare(prefs, Number(event.target.value)))}
-                    className={`w-56 ${FOCUS_RING}`}
-                  />
-                  <span className="font-mono text-ink-dim text-xs">
-                    {Math.round(prefs.focusViewportShare * 100)}%
-                  </span>
-                </div>
+                {/* The units change at the control boundary: a spinbutton
+                    reading `0.45` is one nobody can use, and `45%` is already
+                    what this surface printed. The share itself is unchanged. */}
+                <Stepper
+                  name="focus zoom share"
+                  min={Math.round(FOCUS_SHARE_MIN * 100)}
+                  max={Math.round(FOCUS_SHARE_MAX * 100)}
+                  step={5}
+                  value={Math.round(prefs.focusViewportShare * 100)}
+                  unit="%"
+                  onCommit={(next) => onChange(setFocusShare(prefs, next / 100))}
+                />
               </Block>
             </Panel>
 
@@ -447,10 +456,14 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
                   <SmallButton label="reset shortcuts" onPick={() => bind(NO_BINDINGS)} />
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+              {/* One column, not two. Groups of unequal length interleaved
+                  vertically, so a heading marked the top of one of two parallel
+                  streams rather than a boundary; the cost is scroll length on a
+                  panel that already scrolls, which is the cheaper thing. */}
+              <div className="flex flex-col">
                 {buildBindingSheet(prefs.keyBindings).map((group) => (
-                  <section key={group.group}>
-                    <h4 className="mb-1 text-ink-dim text-xs uppercase tracking-wide">
+                  <section key={group.group} className="mt-7 first:mt-0">
+                    <h4 className="mb-[10px] border-line-loud border-b pb-[6px] font-semibold text-[13px] text-ink">
                       {group.title}
                     </h4>
                     <ul>
@@ -630,11 +643,16 @@ function Panel({
       tabIndex={0}
       className={FOCUS_RING}
     >
-      <div className="mb-2 flex items-baseline gap-2">
-        <h3 className="text-ink text-xs uppercase tracking-wide">{id}</h3>
-        <span className="text-ink-dim text-xs">{hint}</span>
+      {/* 15px is a step the declared scale does not have, and it is deliberate:
+          the heading has to out-rank four setting labels already at 13px. No
+          uppercase — at this size it reads as shouting and costs the word-shape
+          a scanned list is read by. */}
+      <div className="mb-5 border-line-loud border-b pb-3">
+        <h3 className="font-semibold text-[15px] text-ink">{id}</h3>
+        <span className="text-[12px] text-ink-dim">{hint}</span>
       </div>
-      {children}
+      {/* Its own wrapper, so `first:` in `Block` means the first ROW. */}
+      <div data-settings-rows>{children}</div>
     </section>
   );
 }
@@ -672,6 +690,12 @@ function labelFor(overrides: KeyBindings, id: string): string {
   return id;
 }
 
+/** One box, one geometry, three fills — a slot is field-shaped in every state,
+ *  not a chip that turns into an input. The border is `ink-faint` for the
+ *  stepper's reason: `sunken` on `panel` is 1.04:1, so the edge is the sole
+ *  identifier of the control and owes 1.4.11 its 3:1. */
+const SLOT_BOX = 'h-[26px] w-[68px] rounded-[6px] border px-2 text-center font-mono text-[12px]';
+
 /** One action: its name, its slots, and a way back to the shipped keys. */
 function BindingLine({
   row,
@@ -687,11 +711,14 @@ function BindingLine({
   readonly onReset: () => void;
 }) {
   const slots = Array.from({ length: MAX_BINDINGS }, (_, slot) => slot);
+  const armed = capturing?.id === row.id;
   return (
-    <li className="flex items-baseline gap-2 py-0.5 text-xs">
+    // Fixed key columns are what makes the list scan: every label starts at the
+    // same x, so the eye reads a column of actions rather than a ragged edge.
+    <li className="grid grid-cols-[68px_68px_1fr_auto] items-center gap-x-[10px] py-[3px]">
       {slots.map((slot) => {
         const keys = row.keys[slot];
-        if (capturing?.id === row.id && capturing.slot === slot) {
+        if (armed && capturing.slot === slot) {
           return (
             <input
               key={slot}
@@ -716,8 +743,10 @@ function BindingLine({
               onKeyDown={(event) => onKey(slot, event)}
               onBlur={() => onCapture(null)}
               // The ring is drawn permanently here, not on `focus-visible`: it
-              // is showing the armed state, not the cursor.
-              className="min-w-40 rounded border border-line-loudest bg-raised px-1 text-center font-mono text-ink outline-2 outline-ink outline-offset-2"
+              // is showing the armed state, not the cursor. It is also the only
+              // permanent ring on this surface, which is how the operator tells
+              // which Escape they are about to press.
+              className={`${SLOT_BOX} border-ink bg-raised text-ink outline-2 outline-ink outline-offset-2`}
             />
           );
         }
@@ -730,38 +759,56 @@ function BindingLine({
             data-binding-slot={`${row.id}:${slot}`}
             aria-label={keys === undefined ? `add a key for ${row.label}` : `${keys}, ${row.label}`}
             onClick={() => onCapture({ id: row.id, slot })}
-            className="cursor-pointer"
+            className={`${SLOT_BOX} cursor-pointer hover:border-ink hover:text-ink ${FOCUS_RING} ${
+              keys === undefined
+                ? 'border-ink-faint border-dashed bg-transparent text-ink-dim'
+                : 'border-ink-faint bg-sunken text-ink'
+            }`}
           >
             {keys === undefined ? (
-              <span className="min-w-12 text-ink-ghost">+</span>
+              // `ink-ghost` is 1.75:1 in dark — a `+` nobody can see is not an
+              // affordance. This is a meaningful non-text mark at 7.13 / 7.73.
+              <Plus size={12} strokeWidth={2} className="mx-auto" aria-hidden="true" />
             ) : (
-              <kbd
-                data-settings-keys
-                className="min-w-12 rounded border border-line bg-raised px-1 text-center font-mono text-ink"
-              >
+              <kbd data-settings-keys className="border-none bg-transparent">
                 {keys}
               </kbd>
             )}
           </button>
         );
       })}
-      <span className="text-ink-dim">{row.label}</span>
+      {/* While the row is armed its label column carries the instruction that
+          used to live in the capture box's 160px placeholder — which is how the
+          box keeps the same 68px geometry in every state. */}
+      <span className="text-[13px] text-ink">
+        {armed ? 'press a key — Esc cancels' : row.label}
+      </span>
       {row.overridden ? (
         <button
           type="button"
           data-binding-reset={row.id}
           aria-label={`reset ${row.label} shortcut`}
           onClick={onReset}
-          className="cursor-pointer text-ink-faint"
+          className={`cursor-pointer text-ink-dim hover:text-ink ${FOCUS_RING}`}
         >
-          ×
+          <RotateCcw size={12} strokeWidth={1.8} aria-hidden="true" />
         </button>
       ) : null}
     </li>
   );
 }
 
-/** A labelled sub-block inside a section — appearance holds four of them. */
+/**
+ * One setting: its name, what it is for underneath rather than beside, and the
+ * control under both. 24px and a hairline separate one from the next — the
+ * space is the separator and the rule only confirms it, which is why the rule
+ * stays a hairline: at 2px each row would start reading as a card it is not.
+ *
+ * `first:` matches the first DOM sibling, so these live inside their own
+ * `[data-settings-rows]` wrapper (see `Panel`) — as siblings of the section
+ * heading, the first row would draw a top rule directly under the heading's
+ * bottom one.
+ */
 function Block({
   label,
   hint,
@@ -774,13 +821,15 @@ function Block({
   readonly children: React.ReactNode;
 }) {
   return (
-    <div className="mb-3 last:mb-0">
-      <div className="mb-1 flex items-baseline gap-2">
-        <h4 className="text-ink-dim text-xs">{label}</h4>
-        <span className="text-ink-faint text-xs">{hint}</span>
+    <div className="mt-6 border-line-loud border-t pt-6 first:mt-0 first:border-t-0 first:pt-0">
+      <div className="flex items-baseline gap-3">
+        <h4 className="font-medium text-[13px] text-ink">{label}</h4>
         {action === undefined ? null : <span className="ml-auto">{action}</span>}
       </div>
-      {children}
+      {/* A 12px line running the full ~660px panel is a paragraph, not a
+          caption. */}
+      <p className="mt-1 max-w-[52ch] text-[12px] text-ink-dim">{hint}</p>
+      <div className="mt-3">{children}</div>
     </div>
   );
 }
@@ -790,9 +839,121 @@ function SmallButton({ label, onPick }: { readonly label: string; readonly onPic
     <button
       type="button"
       onClick={onPick}
-      className="cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-xs"
+      className={`cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-xs ${FOCUS_RING}`}
     >
       {label}
     </button>
+  );
+}
+
+const STEP_BUTTON =
+  'flex h-[24px] w-[24px] cursor-pointer items-center justify-center rounded-[6px] text-ink-dim hover:bg-segment-on hover:text-ink disabled:cursor-default disabled:text-ink-faint disabled:hover:bg-transparent disabled:hover:text-ink-faint';
+
+/**
+ * A native `type="number"` between two token-drawn buttons.
+ *
+ * Not a range input, whose track and thumb take the OS accent colour that no
+ * `--vam-*` token reaches — that unstyleable chrome is the whole of what needed
+ * to look better here. Not a hand-rolled `role="spinbutton"` either: native
+ * gives the role, the arrow stepping and `min`/`max`/`value` for free, and both
+ * values are fifteen and eleven discrete steps, which is a stepper's range.
+ *
+ * The pill's border is `ink-faint` rather than a `line-*` token because `well`
+ * on `panel` is 1.03:1 — the fill does not draw the control at all, so the
+ * border is its sole identifier and owes 1.4.11 its 3:1. `line-loudest` is 2.08
+ * in dark and fails that; `ink-faint` (3.46 / 3.44) is the only token in the kit
+ * that clears it in both themes. See the refinement spec before substituting.
+ */
+function Stepper({
+  name,
+  min,
+  max,
+  step,
+  value,
+  unit,
+  onCommit,
+}: {
+  readonly name: string;
+  readonly min: number;
+  readonly max: number;
+  readonly step: number;
+  readonly value: number;
+  readonly unit: string;
+  readonly onCommit: (next: number) => void;
+}) {
+  // What is being typed, while it is being typed. Without it, clearing the box
+  // to retype `18` would commit `0`, which the setter clamps to the minimum
+  // under the cursor. The setters clamp totally either way — this is about the
+  // typing, not about safety.
+  const [draft, setDraft] = useState<string | null>(null);
+  const nudge = (to: number) => {
+    setDraft(null);
+    onCommit(Math.min(max, Math.max(min, to)));
+  };
+  return (
+    <div className="flex items-center">
+      <div className="inline-flex h-[30px] items-center rounded-[8px] border border-ink-faint bg-well p-[3px] has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ink has-[:focus-visible]:outline-offset-2">
+        {/* The ring is on the pill, not the field: at `outline-offset-2` around
+            a field inset by 3px it would land on the pill's own border and read
+            as a thicker border rather than as a cursor. */}
+        {/* One tab stop, the field: the arrows do by keyboard what these do by
+            mouse, which is the ARIA spinbutton pattern and the roving idiom the
+            nav and the layout picker already use in this overlay. */}
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`decrease ${name}`}
+          disabled={value <= min}
+          onClick={() => nudge(value - step)}
+          className={STEP_BUTTON}
+        >
+          <Minus size={13} strokeWidth={2} />
+        </button>
+        <input
+          type="number"
+          aria-label={name}
+          min={min}
+          max={max}
+          step={step}
+          value={draft ?? value}
+          onChange={(event) => {
+            const raw = event.target.value;
+            setDraft(raw);
+            if (raw !== '' && Number.isFinite(Number(raw))) {
+              onCommit(Number(raw));
+            }
+          }}
+          onBlur={() => setDraft(null)}
+          onKeyDown={(event) => {
+            // The arrows are the browser's; only these four need a handler.
+            const to =
+              event.key === 'PageUp'
+                ? value + step * 5
+                : event.key === 'PageDown'
+                  ? value - step * 5
+                  : event.key === 'Home'
+                    ? min
+                    : event.key === 'End'
+                      ? max
+                      : null;
+            if (to === null) return;
+            event.preventDefault();
+            nudge(to);
+          }}
+          className="h-[24px] w-[52px] bg-transparent text-center font-mono text-[12px] text-ink outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`increase ${name}`}
+          disabled={value >= max}
+          onClick={() => nudge(value + step)}
+          className={STEP_BUTTON}
+        >
+          <Plus size={13} strokeWidth={2} />
+        </button>
+      </div>
+      <span className="ml-2 font-mono text-[12px] text-ink-dim">{unit}</span>
+    </div>
   );
 }
