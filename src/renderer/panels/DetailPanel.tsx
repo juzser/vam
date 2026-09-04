@@ -693,26 +693,53 @@ function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | unde
  * labels small repeated things with an icon, not a word, and reserves letter-
  * spaced capitals for state (NEEDS YOU, RUNNING, DONE).
  *
- * Direction is the whole meaning here, so the two that carry it are arrows and
- * they oppose: in arrives (down-left), out leaves (up-right). `aria-label`
- * carries the word that was removed, and `role="img"` is what makes that
- * label announced at all — a bare <span> has no implicit role and would drop
- * it silently, which this codebase has already shipped once.
+ * The three glyphs are a head-and-shoulders, a commit line and a bot, measured
+ * off the Response artboards in #53 — which replaced the opposing arrows vam
+ * started with, so the paragraph here that still described arrows was wrong
+ * and is gone. `aria-label` carries the word that was removed, and
+ * `role="img"` is what makes that label announced at all — a bare <span> has
+ * no implicit role and would drop it silently, which this codebase has already
+ * shipped once.
+ *
+ * `tone` colours the ICON only, and only the icon. Three faint-grey headings
+ * were indistinguishable at a glance, which is what the operator reported; the
+ * label stays `text-ink-faint` because letter-spaced capitals are this
+ * design's idiom for STATE (NEEDS YOU, RUNNING, DONE) and three coloured ones
+ * would make a region heading read as a session status. The hairline and the
+ * meta stay grey too: the hairline is the structure all three share and
+ * colouring it would triple the pane's colour weight while adding no
+ * distinction, and the meta carries VALUES (`you`, `12 turns`, the activity),
+ * which are data, not a label. Colour is added to the glyph and the announced
+ * label, never substituted for either — a colour-only distinction is no
+ * distinction to a colour-blind operator.
  */
 function Rule({
   label,
   meta,
   icon,
+  iconLabel,
+  tone,
 }: {
   readonly label: string;
   /** Usually a value; `progress` puts its expand control here instead. */
   readonly meta: ReactNode;
   readonly icon: ReactNode;
+  /**
+   * What a screen reader says for the glyph — `you`, not `in`. It is a
+   * separate prop, and required, so that adding a section cannot ship a
+   * silent icon: `progress` had exactly that gap, drawing its glyph outside
+   * any `role="img"` and announcing nothing.
+   */
+  readonly iconLabel: string;
+  /** The section's own colour token, worn by the icon and nothing else. */
+  readonly tone: string;
 }) {
   return (
     <div className="flex items-center gap-[7px]">
       <span className="flex flex-none items-center gap-[5px] text-ink-faint">
-        {icon}
+        <span role="img" aria-label={iconLabel} className={`flex ${tone}`}>
+          {icon}
+        </span>
         <span className="font-mono text-[9.5px] tracking-[0.12em] uppercase">{label}</span>
       </span>
       <span className="h-px flex-1 bg-line" />
@@ -1452,11 +1479,9 @@ export function DetailPanel(props: DetailPanelProps) {
                 // describing the present. The session's age is on its sidebar
                 // row, where it is true.
                 meta="you"
-                icon={
-                  <span role="img" aria-label="you" className="flex">
-                    <User size={13} strokeWidth={1.6} />
-                  </span>
-                }
+                iconLabel="you"
+                tone="text-rule-in"
+                icon={<User size={13} strokeWidth={1.6} />}
               />
               <div
                 data-detail-scroll="in"
@@ -1504,6 +1529,11 @@ export function DetailPanel(props: DetailPanelProps) {
                     )}
                   </button>
                 }
+                // `turns`, not `progress`: the visible label already says
+                // progress, and a glyph that only repeats it is a word said
+                // twice. The commit line means the session's turns.
+                iconLabel="turns"
+                tone="text-rule-progress"
                 icon={<GitCommitVertical size={12} strokeWidth={1.7} />}
               />
               {progressOpen && (
@@ -1558,11 +1588,9 @@ export function DetailPanel(props: DetailPanelProps) {
                     )}
                   </span>
                 }
-                icon={
-                  <span role="img" aria-label="agent" className="flex">
-                    <Bot size={14} strokeWidth={1.75} />
-                  </span>
-                }
+                iconLabel="agent"
+                tone="text-rule-out"
+                icon={<Bot size={14} strokeWidth={1.75} />}
               />
               {/* The one region that grows. Everything the operator reads to
                   decide lives in here, so it gets the height and its own
