@@ -84,6 +84,28 @@
   --color-waiting-wash: var(--vam-waiting-wash);
   --color-done-tint: var(--vam-done-tint);
 
+  /* The `out` pane's syntax palette. Separate names from the four STATUS
+     tokens above on purpose, even where a hue repeats: `running` green means a
+     session is running, and painting an added diff line with it would make the
+     colour stop carrying that meaning — the status row would start lying by
+     association. These say "this text is a string / a removal / a hunk head",
+     nothing about any session. */
+  --color-diff-add: var(--vam-diff-add);
+  --color-diff-del: var(--vam-diff-del);
+  --color-diff-hunk: var(--vam-diff-hunk);
+  --color-diff-file: var(--vam-diff-file);
+
+  --color-syn-comment: var(--vam-syn-comment);
+  --color-syn-string: var(--vam-syn-string);
+  --color-syn-number: var(--vam-syn-number);
+  --color-syn-keyword: var(--vam-syn-keyword);
+
+  /* A symbol or a path lifted out of prose: the inline code chip, and a table
+     header, which is the same kind of thing — a label, not a sentence. */
+  --color-chip: var(--vam-chip);
+  /* Quoted text: someone else's words inside the agent's. */
+  --color-quote: var(--vam-quote);
+
   --radius-base: 0.625rem;
   --radius-sm: calc(var(--radius-base) * 0.6);
   --radius-md: calc(var(--radius-base) * 0.8);
@@ -146,6 +168,22 @@
 
   --vam-shadow-node: 0 8px 28px rgb(0 0 0 / 0.4);
 
+  /* Syntax, dark. Measured against `--vam-canvas` (#0a0a0a), the fence fill:
+     every value below clears 4.5:1 there, which the grey it replaces did not
+     do while also being the same grey as everything around it. */
+  --vam-diff-add: #3fb950;
+  --vam-diff-del: #ff7b72;
+  --vam-diff-hunk: #58a6ff;
+  --vam-diff-file: #d2a8ff;
+
+  --vam-syn-comment: #8b949e;
+  --vam-syn-string: #a5d6ff;
+  --vam-syn-number: #f0883e;
+  --vam-syn-keyword: #ff7b72;
+
+  --vam-chip: #d2a8ff;
+  --vam-quote: #56d4ca;
+
   color-scheme: dark;
 }
 
@@ -192,6 +230,21 @@ html.light {
   /* A card sits above white by a hairline and a whisper, not by the 40% black
      that reads as a hole in a light document. */
   --vam-shadow-node: 0 8px 28px rgb(0 0 0 / 0.06);
+
+  /* Syntax, light. Not the dark values dimmed: a fence sits on #ffffff here,
+     so each hue is taken down to its dark-on-white step instead. */
+  --vam-diff-add: #0f7b34;
+  --vam-diff-del: #b32218;
+  --vam-diff-hunk: #0550ae;
+  --vam-diff-file: #6639ba;
+
+  --vam-syn-comment: #6e7781;
+  --vam-syn-string: #0a3069;
+  --vam-syn-number: #953800;
+  --vam-syn-keyword: #cf222e;
+
+  --vam-chip: #6639ba;
+  --vam-quote: #0f6b62;
 
   color-scheme: light;
 }

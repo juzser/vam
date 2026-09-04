@@ -52,7 +52,7 @@ import {
   User,
   X,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { isValidElement, type ReactNode, useEffect, useRef, useState } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type {
@@ -63,6 +63,14 @@ import type {
   SessionStatus,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import {
+  type DiffKind,
+  diffLineKind,
+  type HighlightLang,
+  resolveLang,
+  type TokenKind,
+  tokenizeCode,
+} from './highlight.js';
 import { Note } from './Note.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 
@@ -756,7 +764,96 @@ function noAnswerNote(output: string | null, status: SessionStatus | null): stri
  * is the correct policy. So the address is printed instead, in a region where
  * text is selectable, and opening it is a deliberate copy-and-paste.
  */
-const OUT_MARKDOWN: Components = {
+/**
+ * The fence palette: which token kind wears which colour.
+ *
+ * Every class here is a TOKEN utility, never a literal colour (13.1), and none
+ * of them is one of the four status colours — see the note beside them in
+ * styles.css for why an added line must not be `running` green.
+ */
+const SYNTAX_CLASS: Record<TokenKind, string> = {
+  plain: '',
+  comment: 'text-syn-comment',
+  string: 'text-syn-string',
+  number: 'text-syn-number',
+  keyword: 'text-syn-keyword',
+};
+
+const DIFF_CLASS: Record<DiffKind, string> = {
+  plain: '',
+  add: 'text-diff-add',
+  del: 'text-diff-del',
+  hunk: 'text-diff-hunk',
+  file: 'text-diff-file',
+};
+
+/**
+ * The `<code>` react-markdown puts inside a `<pre>`, read back as text plus
+ * the fence's infostring.
+ *
+ * Returns null rather than guessing whenever the child is not the single plain
+ * string a fence produces — a fence whose content is anything else is rendered
+ * exactly as it was.
+ */
+function readFence(
+  children: ReactNode,
+): { readonly code: string; readonly lang: string | null } | null {
+  const only = Array.isArray(children) && children.length === 1 ? children[0] : children;
+  if (!isValidElement<{ className?: string; children?: ReactNode }>(only)) return null;
+  const inner = only.props.children;
+  const code =
+    typeof inner === 'string'
+      ? inner
+      : Array.isArray(inner) && inner.every((k) => typeof k === 'string')
+        ? inner.join('')
+        : null;
+  if (code === null) return null;
+  return { code, lang: /language-([\w+#-]+)/.exec(only.props.className ?? '')?.[1] ?? null };
+}
+
+/**
+ * A fence, coloured.
+ *
+ * Elements, never an HTML string: `out` is untrusted text and this is the wall
+ * `OUT_MARKDOWN`'s note describes. A `<script>` an agent printed reaches the
+ * DOM here as the characters of a `<script>`, as it did before there was any
+ * colour at all.
+ */
+function Fence({ code, lang }: { readonly code: string; readonly lang: HighlightLang }) {
+  // Keyed by BYTE OFFSET, not by list index: offsets are unique even when the
+  // same line or the same token repeats, which in a patch they constantly do.
+  let at = 0;
+  const parts: { readonly key: string; readonly text: string; readonly cls: string }[] = [];
+  if (lang === 'diff') {
+    const lines = code.split('\n');
+    for (const [i, line] of lines.entries()) {
+      const text = i === lines.length - 1 ? line : `${line}\n`;
+      parts.push({ key: `${at}`, text, cls: DIFF_CLASS[diffLineKind(line)] });
+      at += text.length;
+    }
+  } else {
+    for (const tok of tokenizeCode(code, lang)) {
+      parts.push({ key: `${at}`, text: tok.text, cls: SYNTAX_CLASS[tok.kind] });
+      at += tok.text.length;
+    }
+  }
+  // Wrapped in a `<code>`, unclassed: the untouched path keeps react-markdown's
+  // `<pre><code>`, so this one must too, or the fence's DOM shape would depend
+  // on its infostring and the `<pre>`'s own `[&_code]` rules would reach only
+  // half the fences. Unclassed because those rules are exactly what is left of
+  // the chip styling once the `<pre>` has reset it.
+  return (
+    <code>
+      {parts.map((part) => (
+        <span key={part.key} className={part.cls}>
+          {part.text}
+        </span>
+      ))}
+    </code>
+  );
+}
+
+export const OUT_MARKDOWN: Components = {
   p: ({ children }) => <p className="text-[12px] text-ink-dim leading-[1.6]">{children}</p>,
   h1: ({ children }) => <h1 className="font-medium text-[13px] text-ink">{children}</h1>,
   h2: ({ children }) => <h2 className="font-medium text-[12.5px] text-ink">{children}</h2>,
@@ -779,7 +876,7 @@ const OUT_MARKDOWN: Components = {
   del: ({ children }) => <del className="text-ink-faint">{children}</del>,
   hr: () => <hr className="border-line border-t" />,
   blockquote: ({ children }) => (
-    <blockquote className="border-line-strong border-l-2 pl-2.5 text-[12px] text-ink-faint leading-[1.6]">
+    <blockquote className="border-quote border-l-2 pl-2.5 text-[12px] text-quote leading-[1.6]">
       {children}
     </blockquote>
   ),
@@ -787,22 +884,28 @@ const OUT_MARKDOWN: Components = {
   // the `pre` rule below — react-markdown stopped telling a component which of
   // the two it is, and the parent knows without being told.
   code: ({ children }) => (
-    <code className="rounded-[4px] bg-raised px-1 py-[1px] font-mono text-[11px] text-ink">
+    <code className="rounded-[4px] bg-raised px-1 py-[1px] font-mono text-[11px] text-chip">
       {children}
     </code>
   ),
-  pre: ({ children }) => (
-    <pre className="vam-no-scrollbar overflow-x-auto rounded-[7px] border border-line bg-canvas px-2.5 py-2 font-mono text-[11px] text-ink-dim leading-[1.55] [&_code]:bg-transparent [&_code]:px-0 [&_code]:text-ink-dim">
-      {children}
-    </pre>
-  ),
+  pre: ({ children }) => {
+    const fence = readFence(children);
+    const lang = fence === null ? null : resolveLang(fence.lang);
+    return (
+      <pre className="vam-no-scrollbar overflow-x-auto rounded-[7px] border border-line bg-canvas px-2.5 py-2 font-mono text-[11px] text-ink-dim leading-[1.55] [&_code]:bg-transparent [&_code]:px-0 [&_code]:text-ink-dim">
+        {fence !== null && lang !== null ? <Fence code={fence.code} lang={lang} /> : children}
+      </pre>
+    );
+  },
   table: ({ children }) => (
     <div className="vam-no-scrollbar overflow-x-auto">
       <table className="w-max border-collapse text-[11.5px] text-ink-dim">{children}</table>
     </div>
   ),
   th: ({ children }) => (
-    <th className="border border-line px-2 py-1 text-left font-medium text-ink">{children}</th>
+    <th className="border border-line bg-raised px-2 py-1 text-left font-medium text-chip">
+      {children}
+    </th>
   ),
   td: ({ children }) => <td className="border border-line px-2 py-1 align-top">{children}</td>,
   a: ({ href, children }) => (

@@ -1229,12 +1229,19 @@ describe('the pane’s minted surfaces are token pairs, not dark-only hexes', ()
     // `--vam-lifted` was minted for the option picker's unchosen cards. The
     // picker is gone, and `--color-lifted` reached no rule, component or
     // class anywhere under `src/` -- a three-line chain feeding nothing.
-    // Pinned as an absence so the dead pair is not reintroduced without the
+    // Asserted as an absence so the dead pair is not reintroduced without the
     // surface that would justify it.
+    //
+    // The two TOKEN names, not the bare substring. This file is mostly prose,
+    // and `lifted` is an ordinary English word -- the substring form of this
+    // guard fired on the comment "a path lifted out of prose" in an unrelated
+    // branch, which is a false positive on a word no rule can consume. A
+    // guard that bans English is a guard someone will delete.
     // `import.meta.url` is not a file URL under happy-dom, so the path is
     // resolved from the runner's own root instead.
     const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
-    expect(css).not.toContain('lifted');
+    expect(css).not.toContain('--vam-lifted');
+    expect(css).not.toContain('--color-lifted');
   });
 
   it('pins the light line-loud to the value the light artboard actually draws', () => {
