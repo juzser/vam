@@ -45,6 +45,12 @@ const MODEL: CanvasModel = {
 };
 
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
+/** The status cell shows a shortened message and carries the whole one on its
+ *  tooltip, so an assertion about the tail of a message reads THIS, not the
+ *  bar's visible text. See `StatusCell` in `Canvas.tsx`. */
+const statusFull = () =>
+  document.querySelector('[data-status-bar] [data-status]')?.getAttribute('data-note') ?? '';
+
 const renameInput = () =>
   document.querySelector<HTMLInputElement>('input[aria-label="rename session"]');
 const sidebarText = () => document.querySelectorAll('aside')[0]?.textContent ?? '';
@@ -159,7 +165,8 @@ describe('closing a session with `x`', () => {
     await pressAsync('x');
     expect(closed).toEqual(['a1']);
     expect(statusBar()).toContain('nightly sweep');
-    expect(statusBar()).toMatch(/attach/i);
+    // How to resume sits at the end of the sentence, past where the cell cuts.
+    expect(statusFull()).toMatch(/attach/i);
     expect(wrote.count).toBe(1);
   });
 

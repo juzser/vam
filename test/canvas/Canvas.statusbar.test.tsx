@@ -17,8 +17,9 @@
 
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { Canvas } from '../../src/renderer/canvas/Canvas.js';
+import { Canvas, StatusCell } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import { describeFailure } from '../../src/renderer/sources/port.js';
 
 function session(id: string, status: Session['status']): Session {
   return {
@@ -136,5 +137,75 @@ describe('the status bar after the trim', () => {
     render(<Canvas model={MODEL} />);
     expect(statusBar()?.querySelector('[data-mode]')?.textContent).toBe('NORMAL');
     expect(statusBar()?.querySelector('[data-usage]')).not.toBeNull();
+  });
+});
+
+/**
+ * The status cell carries `code: message` from `describeFailure`, and those
+ * messages are long on purpose -- a code per distinct failure, and a sentence
+ * that says what to do about it. Shortening them at the source would undo
+ * that, so the cell shortens the PRESENTATION and keeps the whole string
+ * reachable.
+ */
+describe('the status cell with a long failure in it', () => {
+  // A real one: `stopSession`'s refusal for an interactive row, as
+  // `describeFailure` renders it. Not lorem ipsum -- the shape being tested
+  // is `code: message`, and only a real pair has a real code on the front.
+  const REFUSAL = describeFailure({
+    kind: 'refused',
+    code: 'interactive-session',
+    message:
+      '"orca-3" is an interactive session — a terminal you are sitting in. Claude Code can only stop background sessions, and vam will not kill the process behind your window: close that terminal yourself.',
+  });
+
+  const cell = () => document.querySelector('[data-status]');
+
+  it('renders it shorter than it is', () => {
+    render(<StatusCell text={REFUSAL} />);
+    const shown = cell()?.textContent ?? '';
+    expect(shown.length).toBeLessThan(REFUSAL.length);
+    expect(shown).toMatch(/…$/);
+  });
+
+  it('keeps the code, which is the half that says WHICH failure this is', () => {
+    render(<StatusCell text={REFUSAL} />);
+    // The code leads, so what survives is the identifying part; a truncation
+    // that kept the sentence and dropped `interactive-session` would leave a
+    // cell that cannot be told apart from any other refusal.
+    expect(cell()?.textContent).toMatch(/^interactive-session: /);
+  });
+
+  it('hands the whole message to the tooltip', () => {
+    render(<StatusCell text={REFUSAL} />);
+    // `Note` is Radix, which opens on focus as well as hover; `data-note`
+    // is the string it will show, queryable without an open portal.
+    expect(cell()?.getAttribute('data-note')).toBe(REFUSAL);
+  });
+
+  it('is reachable by keyboard, which is how the tooltip opens on focus', () => {
+    render(<StatusCell text={REFUSAL} />);
+    expect(cell()?.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('leaves a message that already fits exactly as it was', () => {
+    const short = describeFailure({
+      kind: 'refused',
+      code: 'unknown-session',
+      message: 'no such session',
+    });
+    render(<StatusCell text={short} />);
+    expect(cell()?.textContent).toBe(short);
+    expect(cell()?.textContent).not.toMatch(/…/);
+  });
+
+  it('can shrink further than the character backstop when the window is narrow', () => {
+    render(<StatusCell text={REFUSAL} />);
+    // The backstop is a cap on how much of the bar one cell may claim; the
+    // width-responsive half is CSS, and `min-w-0` is what lets a flex child
+    // shrink below its content at all -- without it the cell pushes the line
+    // out instead of ellipsing.
+    const classes = (cell()?.className ?? '').split(/\s+/);
+    expect(classes).toContain('min-w-0');
+    expect(classes).toContain('truncate');
   });
 });
