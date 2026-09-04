@@ -980,6 +980,22 @@ function CanvasInner({
    * lie in the other direction — the operator would think nothing happened
    * when an agent is about to answer.
    *
+   * WHAT THE WORDING IS ACTUALLY DERIVED FROM, said here because it reads
+   * like a per-call outcome and is not one. `deliverPrompt` is the source's
+   * own DECLARATION, and no layer under it returns what happened:
+   * `SourceWrites.recordPrompt` is `Promise<void>` (`sources/port.ts`), the
+   * preload unwraps it as `void` (`preload/api.ts`), and main's
+   * `recordPrompt` resolves to `SourceError | null` -- a refusal or nothing
+   * (`main/sources/source.ts`). The Claude Code source routes a reply two
+   * ways, into a tmux pane it owns or into `claude --resume`
+   * (`main/sources/claude-code/reply.ts`), and reports neither: both count as
+   * delivered, and both refuse loudly rather than quietly recording, which is
+   * why resolving without an error is enough to say "sent" here. The gap that
+   * remains is a source declaring `deliverPrompt` while its write only
+   * appends -- vam cannot see that, and it cannot be closed in this file. It
+   * needs an outcome carried back through those four layers. Do not paper
+   * over it here with a wording that guesses.
+   *
    * A refusal is reported in the factory's own words. `events.unknown-causal-session`
    * and `write.bad-request` each name a different mistake, and collapsing them
    * into "error" throws away the one thing black-smith just told us. A

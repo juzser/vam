@@ -1349,6 +1349,9 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
     await submit(source, 'hello');
     expect(calls).toEqual([{ sessionId: 'a1', prompt: 'hello' }]);
     expect(statusBar()).toContain('recorded, not sent to the agent');
+    // Both directions, so the two outcomes cannot collapse into one wording
+    // that happens to contain the word the assertion looked for.
+    expect(statusBar()).not.toContain('sent into the running session');
     expect(statusBar()).not.toContain('sent into the running session');
     expect(wrote.count).toBe(1);
   });
