@@ -69,6 +69,10 @@ async function main() {
     // would satisfy it while the status bar could never read a number. This is
     // the field that notices that.
     bridgeUsageGetType: await run("typeof ((window.api ?? {}).usage ?? {}).get"),
+    // Likewise for the clipboard member: the renderer's own
+    // `navigator.clipboard` is refused by this app's permission policy, so
+    // this forwarder is the only route a copy has.
+    bridgeClipboardWriteType: await run("typeof ((window.api ?? {}).clipboard ?? {}).writeText"),
     // AC-20, measured rather than asserted, and measured in the RIGHT
     // process: this file runs in main, so `typeof EventSource` here is main's
     // answer. Plain `node` is a different runtime and would be the wrong

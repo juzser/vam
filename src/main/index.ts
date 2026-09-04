@@ -9,7 +9,8 @@
 
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, session } from 'electron';
+import { registerClipboardIpc } from './clipboard/ipc.js';
 import { contentSecurityPolicy } from './csp.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { isSameOrigin } from './origin.js';
@@ -173,6 +174,10 @@ void app.whenReady().then(() => {
   // module's -- main-process-only because a Keychain read is not a thing the
   // renderer, the least trusted process here, may ever perform.
   registerUsageIpc(ipcMain, () => readUsage());
+  // Electron's clipboard, not the page's: the permission policy above denies
+  // `clipboard-sanitized-write`, so a renderer-side write is refused in the
+  // packaged app. See `./clipboard/ipc.ts`.
+  registerClipboardIpc(ipcMain, clipboard);
   createWindow();
 });
 

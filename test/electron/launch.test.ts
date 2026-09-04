@@ -32,6 +32,7 @@ interface SmokeResult {
   bridgeKeys: string[];
   bridgeLoadType: string;
   bridgeUsageGetType: string;
+  bridgeClipboardWriteType: string;
   crossOriginRead: string;
   windowCountAfterOpen: number;
   urlBeforeNavigate: string;
@@ -201,6 +202,7 @@ describe('the Electron shell launches', () => {
   it('runs the preload, which exposes the bridge', () => {
     expect(smoke().bridgeKeys).toEqual([
       'applyWaivers',
+      'clipboard',
       'closeSession',
       'createSession',
       'describe',
@@ -216,6 +218,11 @@ describe('the Electron shell launches', () => {
     // callable `get`. The key-presence assertion would pass over a `usage`
     // that was an empty object, which is a bridge the status bar cannot use.
     expect(smoke().bridgeUsageGetType).toBe('function');
+    // And the same question for `clipboard`. Copying is the one thing the
+    // renderer CANNOT do for itself here -- the permission policy denies a
+    // page-side clipboard write -- so a `clipboard` key without a callable
+    // `writeText` is a packaged app in which every copy silently fails.
+    expect(smoke().bridgeClipboardWriteType).toBe('function');
   });
 
   // `subscribe` now joins the bridge over `ipcRenderer.on`, not `invoke`
