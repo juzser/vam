@@ -11,7 +11,7 @@
  * values, which is what these tests hold.
  */
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Decision, Project, Session, SourceId } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
@@ -751,5 +751,187 @@ describe('SessionList projects header', () => {
       originFilters: { hideAgentStarted: true, onlyPrompted: true },
     });
     expect(three.querySelector('[data-filter-badge]')?.textContent).toBe('3');
+  });
+});
+
+/**
+ * A project heading's own controls: a fold, and a menu.
+ *
+ * Revealed on hover the way orca reveals them, and revealed by `p` as well,
+ * because a control that only exists under a pointer does not exist at all
+ * for a keyboard-first app. Both routes set the same state, so there is one
+ * answer to "is this heading showing its controls" rather than two.
+ */
+function heading(root: ParentNode, projectId: string) {
+  return root.querySelector(`[data-project-heading][data-project-id="${projectId}"]`) as HTMLElement;
+}
+
+function pressKey(key: string, target: Element = document.body) {
+  act(() => {
+    fireEvent.keyDown(target, { key });
+  });
+}
+
+describe('SessionList project controls', () => {
+  it('reveals the fold and the menu on hover, and hides them again', () => {
+    const { container } = mount(twoProjects());
+    const alpha = heading(container, 'p1');
+    expect(alpha.getAttribute('data-project-revealed')).toBeNull();
+
+    act(() => {
+      fireEvent.mouseEnter(alpha);
+    });
+    expect(alpha.getAttribute('data-project-revealed')).toBe('true');
+    expect(alpha.querySelector('[data-project-collapse="p1"]')).not.toBeNull();
+    expect(alpha.querySelector('[data-project-menu="p1"]')).not.toBeNull();
+
+    act(() => {
+      fireEvent.mouseLeave(alpha);
+    });
+    expect(alpha.getAttribute('data-project-revealed')).toBeNull();
+  });
+
+  it('keeps both controls in the DOM unrevealed, so Tab can still reach them', () => {
+    // The close button on a row is removed from the DOM until hover; these are
+    // not, because the fold is the only route to a fold and Tab has to have
+    // one. Unrevealed means transparent, not absent -- and focus reveals it.
+    const { container } = mount(twoProjects());
+    const fold = container.querySelector('[data-project-collapse="p1"]') as HTMLElement;
+    expect(fold).not.toBeNull();
+    expect(fold.className).toContain('focus:opacity-100');
+    expect(fold.tabIndex).toBe(0);
+  });
+
+  it('reveals the focused session project on p, and puts focus on its fold', () => {
+    const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
+    pressKey('p');
+    expect(heading(container, 'p2').getAttribute('data-project-revealed')).toBe('true');
+    expect(heading(container, 'p1').getAttribute('data-project-revealed')).toBeNull();
+    expect(document.activeElement).toBe(container.querySelector('[data-project-collapse="p2"]'));
+  });
+
+  it('leaves p alone while text is being typed', () => {
+    const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1', filtering: true });
+    const input = container.querySelector('[aria-label="filter sessions"]') as HTMLInputElement;
+    pressKey('p', input);
+    expect(heading(container, 'p2').getAttribute('data-project-revealed')).toBeNull();
+  });
+
+  it('does nothing on p when no session is focused', () => {
+    const { container } = mountWith(twoProjects(), { focusedSessionId: null });
+    pressKey('p');
+    expect(container.querySelector('[data-project-revealed]')).toBeNull();
+  });
+
+  it('hides a collapsed project rows and keeps its heading', () => {
+    const { container } = mountWith(twoProjects(), { collapsedProjects: ['p1'] });
+    expect(heading(container, 'p1')).not.toBeNull();
+    expect(container.querySelector('[data-project-rows="p1"]')).toBeNull();
+    expect(container.querySelector('[data-session-row="a1"]')).toBeNull();
+    // The other project is untouched.
+    expect(container.querySelector('[data-session-row="b1"]')).not.toBeNull();
+    expect(
+      heading(container, 'p1').querySelector('[data-project-collapse="p1"]')?.getAttribute(
+        'aria-expanded',
+      ),
+    ).toBe('false');
+  });
+
+  it('asks the caller to fold when the chevron is pressed', () => {
+    const asked: string[] = [];
+    const { container } = mountWith(twoProjects(), {
+      onToggleCollapse: (project) => asked.push(project.id),
+    });
+    act(() => {
+      (container.querySelector('[data-project-collapse="p1"]') as HTMLElement).click();
+    });
+    expect(asked).toEqual(['p1']);
+  });
+
+  it('folds on its own when the caller does not own the state', () => {
+    // No `collapsedProjects` prop: the component keeps the fold itself, so it
+    // works today rather than waiting for a caller to be wired.
+    const { container } = mount(twoProjects());
+    act(() => {
+      (container.querySelector('[data-project-collapse="p1"]') as HTMLElement).click();
+    });
+    expect(container.querySelector('[data-session-row="a1"]')).toBeNull();
+    act(() => {
+      (container.querySelector('[data-project-collapse="p1"]') as HTMLElement).click();
+    });
+    expect(container.querySelector('[data-session-row="a1"]')).not.toBeNull();
+  });
+});
+
+describe('SessionList project menu', () => {
+  function openMenu(container: ParentNode, projectId = 'p1') {
+    act(() => {
+      (container.querySelector(`[data-project-menu="${projectId}"]`) as HTMLElement).click();
+    });
+  }
+
+  it('opens on the ... button and focuses its first item', () => {
+    const { container } = mount(twoProjects());
+    expect(container.querySelector('[data-project-menu-panel]')).toBeNull();
+    openMenu(container);
+    const panel = container.querySelector('[data-project-menu-panel="p1"]') as HTMLElement;
+    expect(panel).not.toBeNull();
+    expect(panel.getAttribute('role')).toBe('menu');
+    expect(container.querySelector('[data-project-menu="p1"]')?.getAttribute('aria-expanded')).toBe(
+      'true',
+    );
+    expect(document.activeElement).toBe(panel.querySelector('[role="menuitem"]'));
+  });
+
+  it('offers only items that do something, and never a settings item', () => {
+    const { container } = mount(twoProjects());
+    openMenu(container);
+    const items = [
+      ...(container.querySelectorAll('[data-project-menu-panel="p1"] [role="menuitem"]') ?? []),
+    ];
+    expect(items.map((i) => i.getAttribute('data-project-menu-item'))).toEqual([
+      'collapse',
+      'icon',
+    ]);
+    expect(container.textContent).not.toContain('Project settings');
+    expect(container.textContent).not.toContain('Remove project');
+  });
+
+  it('closes on Escape and puts focus back on the button that opened it', () => {
+    const { container } = mount(twoProjects());
+    openMenu(container);
+    const panel = container.querySelector('[data-project-menu-panel="p1"]') as HTMLElement;
+    pressKey('Escape', panel);
+    expect(container.querySelector('[data-project-menu-panel]')).toBeNull();
+    expect(document.activeElement).toBe(container.querySelector('[data-project-menu="p1"]'));
+  });
+
+  it('folds the project from its menu item, then says Expand', () => {
+    const { container } = mount(twoProjects());
+    openMenu(container);
+    act(() => {
+      (
+        container.querySelector('[data-project-menu-item="collapse"]') as HTMLElement
+      ).click();
+    });
+    expect(container.querySelector('[data-session-row="a1"]')).toBeNull();
+    expect(container.querySelector('[data-project-menu-panel]')).toBeNull();
+    openMenu(container);
+    expect(container.querySelector('[data-project-menu-item="collapse"]')?.textContent).toContain(
+      'Expand',
+    );
+  });
+
+  it('opens the icon picker from its menu item', () => {
+    const picked: string[] = [];
+    const { container } = mountWith(twoProjects(), {
+      onPickIcon: (project) => picked.push(project.id),
+    });
+    openMenu(container, 'p2');
+    act(() => {
+      (container.querySelector('[data-project-menu-item="icon"]') as HTMLElement).click();
+    });
+    expect(picked).toEqual(['p2']);
+    expect(container.querySelector('[data-project-menu-panel]')).toBeNull();
   });
 });
