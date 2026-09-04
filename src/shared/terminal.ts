@@ -86,10 +86,9 @@ export function isPaneSize(size: PaneSize): boolean {
  * THE LIST IS DELIBERATELY THIS SHORT. It is not a key-forwarding mechanism:
  * three of these are what typing is made of -- characters, submit, correct --
  * and anything else that ever belongs here is a decision, not an addition.
- * `back-tab` is that decision made once: it is the chord a Claude Code
- * session binds to cycling its own mode, and it is a KIND rather than a key
- * name in a field because a field would let the least trusted process in the
- * app ask for `C-c`. What arrives here can only be one of four words.
+ * `back-tab` is that decision made once: the chord a Claude Code session
+ * binds to cycling its own mode, a KIND rather than a key name in a field --
+ * a field would let the least trusted process in the app ask for `C-c`.
  *
  * A discriminated pair rather than a string with a flag: the renderer is the
  * least trusted process in the app, and "was this literal?" must not be a

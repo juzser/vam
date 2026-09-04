@@ -82,6 +82,7 @@ import {
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AnswerRequest, AnswerResult } from '../../shared/answer.js';
+import type { PaneSendResult } from '../../shared/terminal.js';
 import type {
   AgentQuestion,
   Command,
@@ -1227,6 +1228,23 @@ function outcomeWording(result: AnswerResult): string {
   }
 }
 
+/**
+ * What the mode row may claim after a Shift-Tab. ONE SENTENCE PER OUTCOME,
+ * for the reason `outcomeWording` has one -- and saying NOTHING is the
+ * outcome to avoid: the chord is invisible once pressed, so silence reads as
+ * "the mode changed" for an agent that was never put into it.
+ */
+function cycleWording(result: PaneSendResult): string | null {
+  switch (result) {
+    case 'sent':
+      return null;
+    case 'unaimed':
+      return 'not sent — vam could not name one session of its own for this row';
+    default:
+      return 'not sent — tmux would not deliver to that session';
+  }
+}
+
 function QuestionCard({
   question,
   firstOptionRef,
@@ -1510,6 +1528,48 @@ export function DetailPanel(props: DetailPanelProps) {
   } = props;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * Why the last Shift-Tab did not reach the pane, or `null` when it did.
+   *
+   * Component state because it is about ONE keypress in this pane and nothing
+   * outside has an opinion about it -- the same reason the tab and the
+   * progress region are held here.
+   */
+  const [cycleRefusal, setCycleRefusal] = useState<string | null>(null);
+  /**
+   * Whether a mode can ACTUALLY be chosen for the focused session -- the one
+   * condition the row is drawn on: hidden where the factory has already
+   * chosen and vam cannot change it, shown only where a choice is possible.
+   *
+   * TWO FACTS, NEITHER ALONE. `vamControlled` is the necessary one: vam can
+   * press a key only in a pane it started, because no process may take over
+   * another's controlling TTY (`main/sources/tmux/argv.ts`). It is not
+   * sufficient -- the source's `terminal` capability is what says there is a
+   * pane surface at all, and absent is "nobody established this", not a fact
+   * to draw a control on. ABSENT, NOT DISABLED: a dimmed switcher still says
+   * a mode is choosable here, which is what this row was deleted for once.
+   */
+  const canCycleMode = entry !== null && terminal !== false && entry.session.vamControlled === true;
+  /**
+   * Press the session's own Shift-Tab, OVER THE ONE CHANNEL THAT ALREADY
+   * TYPES INTO A PANE: `terminal.send` resolves the pane in main and refuses
+   * every answer but a single session it can prove is this row's, so a second
+   * path would be a second chance to get that wrong -- into somebody's
+   * running agent. `window.api` exists only in the Electron shell, and its
+   * absence is reported rather than made into a no-op.
+   */
+  const cycleMode = async () => {
+    const send = globalThis.window?.api?.terminal?.send;
+    if (entry === null) return;
+    if (send === undefined) {
+      setCycleRefusal('not sent — this build has no keyboard into a session’s pane');
+      return;
+    }
+    const landed = await send(entry.project.id, { kind: 'back-tab' }, entry.session.id).catch(
+      (): PaneSendResult => 'refused',
+    );
+    setCycleRefusal(cycleWording(landed));
+  };
   /** The first option of the open question, when one is being asked. */
   const firstOptionRef = useRef<HTMLButtonElement>(null);
   /**
@@ -2382,7 +2442,19 @@ export function DetailPanel(props: DetailPanelProps) {
                   // The window listener ignores keys typed in a textarea, so this
                   // box binds the ones it needs itself. Shift+Enter is left alone
                   // — it is the newline the box became multiline to allow.
-                  if (event.key === 'Enter' && !event.shiftKey) {
+                  //
+                  // Shift+Tab is bound HERE, and deliberately not in the chord
+                  // tables (`keyboard/chords.ts`), for two reasons that both
+                  // decide it: that listener never sees a key typed in this
+                  // box, which is where this one is pressed — the same place a
+                  // person presses it in the session's own terminal — and
+                  // `normalizeKey` gives Shift no token, so a table entry for
+                  // `Tab` would answer a PLAIN Tab as well. Plain Tab is left
+                  // alone: it is how a keyboard gets out of a textarea.
+                  if (event.key === 'Tab' && event.shiftKey && canCycleMode) {
+                    event.preventDefault();
+                    void cycleMode();
+                  } else if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
                     onSubmit();
                   } else if (event.key === 'Escape') {
@@ -2519,53 +2591,74 @@ export function DetailPanel(props: DetailPanelProps) {
             </div>
           </div>
 
-          {/* The mockup's mode row, in place of the slash tags that stood here.
-            The pills are real buttons and the selection is real: it is written
-            into the prompt as a leading `mode:` line, the same way the model
-            request is, because that is the only thing vam can actually make
-            happen. black-smith has no per-session mode to switch, so a control
-            that only changed vam's own state would look like it worked and do
-            nothing. Selecting Auto clears the line rather than writing
-            "unchanged". The well's geometry is the mockup's: 2px on `raised`,
+          {/* The mockup's mode row — drawn ONLY where a mode can actually be
+            chosen (`canCycleMode`), and gone entirely otherwise, which is the
+            operator's own request: a switcher for a session whose model the
+            factory picked and vam cannot touch is a control that lies, and
+            dimming it would still say a choice lives here.
+
+            The pills write the choice into the prompt as a leading `mode:`
+            line, so what was selected is in the recorded text; Shift+Tab
+            presses the session's OWN chord in the pane vam started, which is
+            what makes the row more than a highlight. Selecting Auto clears
+            the line. The well's geometry is the mockup's: 2px on `raised`,
             24px pills at 11.5px, the current one filled with `segment-on`. */}
-          <div data-mode-row className="flex items-center gap-2">
-            {/* The note hangs off the MODE label, and the label is a <button> so
+          {canCycleMode && (
+            <div data-mode-row className="flex items-center gap-2">
+              {/* The note hangs off the MODE label, and the label is a <button> so
               that a keyboard can reach it. A span with a tabIndex reads as a
               control to a screen reader without behaving like one. */}
-            <Note text="the mode is the factory's, not vam's — see the todo">
-              <button
-                type="button"
-                className="flex-none cursor-default font-mono text-[9.5px] tracking-[0.1em] text-ink-faint"
+              <Note text="the mode belongs to the session — Shift+Tab presses its own chord in the pane vam started, and the pills write the choice into the prompt text that gets recorded">
+                <button
+                  type="button"
+                  className="flex-none cursor-default font-mono text-[9.5px] tracking-[0.1em] text-ink-faint"
+                >
+                  MODE
+                </button>
+              </Note>
+              <div className="flex items-center gap-0.5 rounded-[8px] border border-line-strong bg-raised p-0.5">
+                {MODES.map((mode) => {
+                  // Derived from the draft, never a second copy of it: a mirror
+                  // in component state is a thing that can disagree with the text
+                  // actually being recorded.
+                  const selected = mode === (readModeRequest(draft) || DEFAULT_MODE);
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      data-mode-pill={mode.toLowerCase()}
+                      aria-pressed={selected}
+                      onClick={() => onDraftChange(setModeRequest(draft, mode))}
+                      className={[
+                        'flex h-6 cursor-pointer items-center rounded-[6px] px-2.5 text-[11.5px]',
+                        selected
+                          ? 'bg-segment-on font-medium text-ink'
+                          : 'text-ink-dim hover:text-ink',
+                      ].join(' ')}
+                    >
+                      {mode}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* The tip, at the right-hand end as the mockup draws it, with the
+                refusal in its place when the last press did not land. It names
+                a chord the prompt box really binds, and it exists only where
+                that binding does — this caption was deleted once for naming a
+                key no table answered to, on the stated terms that a real
+                binding may bring it back and the caption alone may not. */}
+              <span
+                data-mode-cycle
+                data-mode-refusal={cycleRefusal === null ? undefined : 'true'}
+                className={[
+                  'ml-auto flex-none whitespace-nowrap font-mono text-[9.5px]',
+                  cycleRefusal === null ? 'text-ink-faint' : 'text-waiting',
+                ].join(' ')}
               >
-                MODE
-              </button>
-            </Note>
-            <div className="flex items-center gap-0.5 rounded-[8px] border border-line-strong bg-raised p-0.5">
-              {MODES.map((mode) => {
-                // Derived from the draft, never a second copy of it: a mirror
-                // in component state is a thing that can disagree with the text
-                // actually being recorded.
-                const selected = mode === (readModeRequest(draft) || DEFAULT_MODE);
-                return (
-                  <button
-                    key={mode}
-                    type="button"
-                    data-mode-pill={mode.toLowerCase()}
-                    aria-pressed={selected}
-                    onClick={() => onDraftChange(setModeRequest(draft, mode))}
-                    className={[
-                      'flex h-6 cursor-pointer items-center rounded-[6px] px-2.5 text-[11.5px]',
-                      selected
-                        ? 'bg-segment-on font-medium text-ink'
-                        : 'text-ink-dim hover:text-ink',
-                    ].join(' ')}
-                  >
-                    {mode}
-                  </button>
-                );
-              })}
+                {cycleRefusal ?? '⇧Tab · cycle mode'}
+              </span>
             </div>
-          </div>
+          )}
         </div>
       )}
     </aside>

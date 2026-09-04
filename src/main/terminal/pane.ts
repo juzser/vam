@@ -285,9 +285,8 @@ export async function sendSessionKey(
       : key.kind === 'backspace'
         ? sendBackspaceArgv(match.name)
         : key.kind === 'back-tab'
-          ? // Cycling the mode is aimed by the SAME guard as a character,
-            // deliberately: a mode changed in the wrong agent is a change to
-            // how somebody else's running work behaves.
+          ? // Aimed by the SAME guard as a character: a mode changed in the
+            // wrong agent changes how somebody else's running work behaves.
             sendBackTabArgv(match.name)
           : sendTextArgv(match.name, key.text);
   return (await run(argv)).failure === null ? 'sent' : 'refused';

@@ -77,8 +77,8 @@ describe('typing into the session vam started for a project', () => {
     // BY VALUE, because the wrong spelling of this one is SILENT. Measured on
     // tmux 3.7b over a private `-L` socket: `send-keys BTab` delivered `^[[Z`,
     // the escape sequence Shift-Tab is, while `send-keys S-Tab` exited 0 and
-    // delivered a plain tab. An agent given a plain tab does not cycle its
-    // mode -- it completes, or indents -- and nothing reports a failure.
+    // delivered a plain tab -- which completes or indents, and reports
+    // nothing.
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'BTab']);
     expect(argvs[1]).not.toContain('-l');
     expect(argvs[1]).not.toContain('Tab');
@@ -87,9 +87,9 @@ describe('typing into the session vam started for a project', () => {
   });
 
   it('sends NO BTab into a session vam cannot prove it started', async () => {
-    // The mode key is aimed by the same guard as every other: the pane vam
-    // started for THIS project. Cycling the mode of somebody else's agent is
-    // not a smaller mistake than typing into it.
+    // Aimed by the same guard as every other key: the pane vam started for
+    // THIS project. Cycling somebody else's agent is not a smaller mistake
+    // than typing into it.
     const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
     expect(await sendSessionKey(run, ATLAS, { kind: 'back-tab' })).toBe('unaimed');
     expect(verbs()).toEqual(['list-sessions']);
