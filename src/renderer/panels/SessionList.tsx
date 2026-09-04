@@ -225,6 +225,19 @@ export function SessionList(props: SessionListProps) {
     }
   }, [renamingId]);
 
+  /**
+   * How many rules are narrowing the list right now — the badge's number.
+   *
+   * Derived, never stored: the status choice counts once when it is not
+   * `all`, and each origin toggle counts once when it is on. That is exactly
+   * the set of things the popover can turn on, so the badge can never drift
+   * from what the popover shows.
+   */
+  const activeFilters =
+    (statusFilter === 'all' ? 0 : 1) +
+    (originFilters.hideAgentStarted ? 1 : 0) +
+    (originFilters.onlyPrompted ? 1 : 0);
+
   // `entries` arrives project-major (see the file doc comment), so one pass
   // collapsing consecutive same-project runs is a grouping, not a sort.
   const groups: { readonly project: Project; readonly items: readonly SessionEntry[] }[] = [];
@@ -274,7 +287,7 @@ export function SessionList(props: SessionListProps) {
           </button>
         </div>
 
-        <div className="relative flex items-center gap-2">
+        <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
             {filtering ? (
               <div className="flex h-[30px] items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5">
@@ -313,120 +326,145 @@ export function SessionList(props: SessionListProps) {
               </button>
             )}
           </div>
-
-          {/* The operator's ask: an icon beside the search box, toggling a
-              popover that narrows this list. Search answers "the one called
-              permalink"; this answers "the ones that stopped" — two different
-              questions, so two controls, side by side. */}
-          <button
-            type="button"
-            ref={menuButtonRef}
-            data-filter-toggle
-            aria-haspopup="dialog"
-            aria-expanded={filterMenuOpen}
-            aria-label="filter sessions"
-            onClick={() => onFilterMenuToggle(!filterMenuOpen)}
-            className={[
-              'flex h-[30px] w-[30px] flex-none cursor-pointer items-center justify-center rounded-[8px] border bg-panel',
-              filterMenuOpen || statusFilter !== 'all'
-                ? 'border-line-loud text-ink'
-                : 'border-line text-ink-faint hover:border-line-strong',
-            ].join(' ')}
-          >
-            <Filter size={14} strokeWidth={1.6} />
-          </button>
-
-          {filterMenuOpen && (
-            <div
-              ref={menuRef}
-              data-filter-menu
-              role="dialog"
-              aria-label="session filters"
-              className="absolute top-[36px] right-0 z-20 flex w-[212px] flex-col gap-2 rounded-[9px] border border-line-strong bg-panel p-2.5 shadow-lg"
-            >
-              <span className="font-mono text-[9.5px] text-ink-faint uppercase tracking-[0.12em]">
-                Status
-              </span>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {STATUS_FILTERS.map(([key, label]) => {
-                  const on = statusFilter === key;
-                  const count = statusTally[key];
-                  const loud = key === 'waiting' && count > 0;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      data-status-pill={key}
-                      aria-pressed={on}
-                      onClick={() => onStatusFilter(key)}
-                      className={[
-                        'cursor-pointer rounded-full border bg-canvas px-2.5 py-1 font-mono text-[10px]',
-                        on
-                          ? 'border-line-loud bg-raised text-ink'
-                          : loud
-                            ? 'border-waiting-tint text-waiting'
-                            : 'border-line text-ink-dim hover:border-line-strong',
-                      ].join(' ')}
-                    >
-                      {label} {count}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <span className="mt-0.5 font-mono text-[9.5px] text-ink-faint uppercase tracking-[0.12em]">
-                Origin
-              </span>
-              {/* Each row says what it takes away. A count is the difference
-                  between narrowing a list and losing something out of it. */}
-              {(
-                [
-                  [
-                    'agent',
-                    'Hide agent/test sessions',
-                    originFilters.hideAgentStarted,
-                    hiddenCounts.agent,
-                  ],
-                  [
-                    'prompted',
-                    'Only ones I have prompted',
-                    originFilters.onlyPrompted,
-                    hiddenCounts.unprompted,
-                  ],
-                ] as const
-              ).map(([key, label, on, hides]) => (
-                <button
-                  key={key}
-                  type="button"
-                  data-origin-toggle={key}
-                  aria-pressed={on}
-                  onClick={() =>
-                    onOriginFilters(
-                      key === 'agent'
-                        ? { ...originFilters, hideAgentStarted: !on }
-                        : { ...originFilters, onlyPrompted: !on },
-                    )
-                  }
-                  className={[
-                    'flex w-full cursor-pointer items-center gap-2 rounded-[7px] border px-2 py-1.5 text-left text-[11px]',
-                    on
-                      ? 'border-line-loud bg-raised text-ink'
-                      : 'border-line text-ink-dim hover:border-line-strong',
-                  ].join(' ')}
-                >
-                  <span
-                    className={[
-                      'h-[7px] w-[7px] flex-none rounded-full',
-                      on ? 'bg-running' : 'bg-line-strong',
-                    ].join(' ')}
-                  />
-                  <span className="min-w-0 flex-1 truncate">{label}</span>
-                  <span className="flex-none font-mono text-[9.5px] text-ink-faint">−{hides}</span>
-                </button>
-              ))}
-            </div>
-          )}
         </div>
+      </div>
+
+      {/* The seam between the two blocks, at the operator's request: search
+          is one thing, the projects are another, and this row says so.
+          Orca's shape. The filter control MOVED here from beside the search
+          box -- moved, not copied: two controls answering the same question
+          in one column is how a sidebar stops being readable. It belongs to
+          the project list rather than to search, because what it narrows is
+          the list below it. */}
+      <div
+        data-projects-header
+        className="relative flex items-center gap-1.5 border-line border-b px-3 py-2"
+      >
+        <span className="font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
+          Projects
+        </span>
+        <span className="flex-1" />
+        {/* Search answers "the one called permalink"; this answers "the ones
+            that stopped" — two different questions, so two controls. */}
+        <button
+          type="button"
+          ref={menuButtonRef}
+          data-filter-toggle
+          aria-haspopup="dialog"
+          aria-expanded={filterMenuOpen}
+          aria-label="filter sessions"
+          onClick={() => onFilterMenuToggle(!filterMenuOpen)}
+          className={[
+            'relative flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border bg-panel',
+            filterMenuOpen || activeFilters > 0
+              ? 'border-line-loud text-ink'
+              : 'border-line text-ink-faint hover:border-line-strong',
+          ].join(' ')}
+        >
+          <Filter size={13} strokeWidth={1.6} />
+          {/* Absent at zero, not a zero. A badge reading "0" is a badge
+              claiming something is narrowed when nothing is, and the count
+              this draws is the count of rules actually excluding sessions. */}
+          {activeFilters > 0 && (
+            <span
+              data-filter-badge
+              className="-top-1 -right-1 absolute flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-line-loudest px-[3px] font-mono text-[8.5px] text-ink"
+            >
+              {activeFilters}
+            </span>
+          )}
+        </button>
+
+        {filterMenuOpen && (
+          <div
+            ref={menuRef}
+            data-filter-menu
+            role="dialog"
+            aria-label="session filters"
+            className="absolute top-[36px] right-0 z-20 flex w-[212px] flex-col gap-2 rounded-[9px] border border-line-strong bg-panel p-2.5 shadow-lg"
+          >
+            <span className="font-mono text-[9.5px] text-ink-faint uppercase tracking-[0.12em]">
+              Status
+            </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {STATUS_FILTERS.map(([key, label]) => {
+                const on = statusFilter === key;
+                const count = statusTally[key];
+                const loud = key === 'waiting' && count > 0;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    data-status-pill={key}
+                    aria-pressed={on}
+                    onClick={() => onStatusFilter(key)}
+                    className={[
+                      'cursor-pointer rounded-full border bg-canvas px-2.5 py-1 font-mono text-[10px]',
+                      on
+                        ? 'border-line-loud bg-raised text-ink'
+                        : loud
+                          ? 'border-waiting-tint text-waiting'
+                          : 'border-line text-ink-dim hover:border-line-strong',
+                    ].join(' ')}
+                  >
+                    {label} {count}
+                  </button>
+                );
+              })}
+            </div>
+
+            <span className="mt-0.5 font-mono text-[9.5px] text-ink-faint uppercase tracking-[0.12em]">
+              Origin
+            </span>
+            {/* Each row says what it takes away. A count is the difference
+                between narrowing a list and losing something out of it. */}
+            {(
+              [
+                [
+                  'agent',
+                  'Hide agent/test sessions',
+                  originFilters.hideAgentStarted,
+                  hiddenCounts.agent,
+                ],
+                [
+                  'prompted',
+                  'Only ones I have prompted',
+                  originFilters.onlyPrompted,
+                  hiddenCounts.unprompted,
+                ],
+              ] as const
+            ).map(([key, label, on, hides]) => (
+              <button
+                key={key}
+                type="button"
+                data-origin-toggle={key}
+                aria-pressed={on}
+                onClick={() =>
+                  onOriginFilters(
+                    key === 'agent'
+                      ? { ...originFilters, hideAgentStarted: !on }
+                      : { ...originFilters, onlyPrompted: !on },
+                  )
+                }
+                className={[
+                  'flex w-full cursor-pointer items-center gap-2 rounded-[7px] border px-2 py-1.5 text-left text-[11px]',
+                  on
+                    ? 'border-line-loud bg-raised text-ink'
+                    : 'border-line text-ink-dim hover:border-line-strong',
+                ].join(' ')}
+              >
+                <span
+                  className={[
+                    'h-[7px] w-[7px] flex-none rounded-full',
+                    on ? 'bg-running' : 'bg-line-strong',
+                  ].join(' ')}
+                />
+                <span className="min-w-0 flex-1 truncate">{label}</span>
+                <span className="flex-none font-mono text-[9.5px] text-ink-faint">−{hides}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <OverlayScroll className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-2.5 py-2.5">

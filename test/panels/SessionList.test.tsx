@@ -696,3 +696,60 @@ describe('the session rows are indented under their project heading', () => {
     expect(container.querySelector('[data-session-row="a1"]')).toBeNull();
   });
 });
+
+/**
+ * The "Projects" header row (operator request, sidebar-projects).
+ *
+ * A caption between the search box and the list, carrying the filter control
+ * that used to sit beside the search box. Orca's shape: search is one block,
+ * the projects are another, and the row is the seam between them.
+ */
+describe('SessionList projects header', () => {
+  it('renders a Projects row between the search box and the list', () => {
+    const { container } = mount(twoProjects());
+    const header = container.querySelector('[data-projects-header]');
+    expect(header?.textContent).toContain('Projects');
+
+    // Document order is the layout claim: search, then this row, then the list.
+    const search = container.querySelector('[aria-label="search sessions"]');
+    const list = container.querySelector('ul');
+    expect(search).not.toBeNull();
+    expect(list).not.toBeNull();
+    expect(
+      (search as Element).compareDocumentPosition(header as Element) &
+        globalThis.Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      (header as Element).compareDocumentPosition(list as Element) &
+        globalThis.Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('moves the filter control into that row, leaving no second one', () => {
+    const { container } = mount(twoProjects());
+    const toggles = container.querySelectorAll('[data-filter-toggle]');
+    expect(toggles).toHaveLength(1);
+    expect(container.querySelector('[data-projects-header]')?.contains(toggles[0] as Element)).toBe(
+      true,
+    );
+  });
+
+  it('badges how many filters are narrowing the list, and nothing at zero', () => {
+    const { container } = mount(twoProjects());
+    expect(container.querySelector('[data-filter-badge]')).toBeNull();
+    cleanup();
+
+    const { container: two } = mountWith(twoProjects(), {
+      statusFilter: 'waiting',
+      originFilters: { hideAgentStarted: true, onlyPrompted: false },
+    });
+    expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('2');
+    cleanup();
+
+    const { container: three } = mountWith(twoProjects(), {
+      statusFilter: 'done',
+      originFilters: { hideAgentStarted: true, onlyPrompted: true },
+    });
+    expect(three.querySelector('[data-filter-badge]')?.textContent).toBe('3');
+  });
+});
