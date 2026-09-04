@@ -4,12 +4,14 @@
  * The minimap, measured against the ADE mockup.
  *
  * The mockup draws it as a chip per session cell, each carrying its status
- * colour, over a panel the same greys as the canvas — and it does NOT dim the
- * world outside the viewport. The viewport is an OUTLINE: a hairline in the
- * ink colour around the part you are looking at, with the rest left legible.
- * A dark mask (xyflow's default, and what vam shipped) turns the one control
- * that answers "where am I in this canvas" into the one control that hides
- * most of the answer.
+ * colour, over a panel the same greys as the canvas, with the viewport as a
+ * hairline OUTLINE. vam reproduces the chips and not the outline: xyflow draws
+ * that outline as a full rectangle, and at any ordinary zoom the viewport is
+ * wider than the content, so its horizontal edges land off the map and only
+ * two cut-off vertical rules remain. A light mask outside the viewport says
+ * the same thing with no lines — light enough that the map still answers
+ * "where am I in this canvas" rather than hiding the answer, which is what
+ * xyflow's opaque default mask did.
  *
  * Colours are asserted as token references, never as values: `styles.css` owns
  * both themes, and a test that hard-coded the dark hex would pass while the
@@ -118,13 +120,13 @@ describe('the minimap', () => {
     const style = map?.getAttribute('style') ?? '';
     expect(style).toContain('--xy-minimap-mask-background-color-props: color-mix(');
     expect(style).toContain('var(--color-canvas)');
-    // Outlined too, but in a LINE tone. Drawn in the ink colour the outline
-    // read as two bright full-height rules, because the viewport is wider than
-    // the content bounds at any ordinary zoom and only its vertical edges stay
-    // on screen. Asserting the specific token is the point: `--color-ink` here
-    // is the defect, not merely a different choice.
-    expect(style).toContain('--xy-minimap-mask-stroke-color-props: var(--color-line-loudest)');
-    expect(style).not.toContain('--xy-minimap-mask-stroke-color-props: var(--color-ink)');
+    // And NOT outlined, in any tone. The outline has now been removed twice:
+    // once in the ink colour, once in a line tone, and both times for the same
+    // reason — the tone was never the problem, the geometry was. Re-adding it
+    // must fail here rather than ship, so this asserts the absence of the
+    // property itself and not of one particular colour.
+    expect(style).not.toContain('--xy-minimap-mask-stroke-color-props');
+    expect(style).not.toContain('--xy-minimap-mask-stroke-width-props');
   });
 
   it('draws chips wider than the node they stand for, so a session is visible', () => {

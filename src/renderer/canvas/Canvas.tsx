@@ -1541,39 +1541,36 @@ function CanvasInner({
             >
               <Background color="var(--color-dots)" gap={24} size={1} />
               {/* Measured off the mockup's minimap: 176x56, one chip per
-                  session cell in that session's status colour, and a viewport
-                  drawn as a 1px outline in the ink colour over an UNDIMMED
-                  map. `maskColor` transparent is the whole point — the mockup
-                  has no dark wash, and xyflow's default one hid the part of
-                  the canvas the map exists to show you. `maskStrokeWidth` is
-                  in pixels (xyflow multiplies it by the map's own scale), so 1
-                  is the mockup's hairline. `nodeStrokeWidth` is NOT: it is in
-                  flow units, where 1px is ~26 at this scale, so the mockup's
-                  bordered chip is drawn as a filled one instead — at 8px wide
-                  the fill is what carries the colour anyway. */}
+                  session cell in that session's status colour. The mockup's
+                  viewport outline is the one measurement not reproduced — see
+                  the note on `maskColor` below. `nodeStrokeWidth` is in flow
+                  units, not pixels, where 1px is ~26 at this scale, so the
+                  mockup's bordered chip is drawn as a filled one instead — at
+                  8px wide the fill is what carries the colour anyway. */}
               <MiniMap
                 pannable
                 zoomable
                 ariaLabel="canvas minimap"
-                // The spotlight is a DIMMED OUTSIDE, not an outlined viewport.
-                // An outline draws a rectangle around the visible area, and
-                // when that area is wider than the content — the normal case —
-                // its top and bottom edges fall outside the map and only the
-                // two vertical edges survive, reading as two bright rules down
-                // the sides rather than as a spotlight. Masking outside instead
-                // says the same thing with no lines at all, and degrades
-                // correctly: when everything is visible, nothing is dimmed.
+                // The spotlight is a DIMMED OUTSIDE and NOTHING ELSE — no
+                // `maskStrokeColor`, no `maskStrokeWidth`. An outline draws a
+                // rectangle around the visible area, and when that area is
+                // wider than the content — the normal case at any ordinary
+                // zoom — its top and bottom edges fall outside the map. Only
+                // the two vertical edges survive, and they read as two bright
+                // rules cut off down the sides, not as a rectangle.
+                //
+                // This has now been removed TWICE: once with the outline in the
+                // ink colour, and again after it was re-added in a quieter line
+                // tone on the argument that a softer tone would read as the
+                // edge of the lit area. It does not. The tone was never the
+                // problem — the geometry is, and no colour fixes a rectangle
+                // whose horizontal edges are off-canvas. Please do not
+                // re-litigate it a third time; masking outside says the same
+                // thing with no lines at all and degrades correctly, dimming
+                // nothing when everything is visible. The absence is guarded
+                // by `test/canvas/Canvas.minimap.test.tsx`, so re-adding
+                // either prop fails a test rather than shipping.
                 maskColor="color-mix(in srgb, var(--color-canvas) 66%, transparent)"
-                // The spotlight is dimmed outside AND outlined. The outline was
-                // dropped once because, drawn in the ink colour, the only part
-                // of it usually on screen is its two vertical edges — the
-                // viewport is wider than the map's content bounds at any
-                // ordinary zoom — and two bright full-height rules do not read
-                // as a rectangle. In a line tone it reads as an edge to the lit
-                // area instead of as decoration, which is what was wanted both
-                // times.
-                maskStrokeColor="var(--color-line-loudest)"
-                maskStrokeWidth={1}
                 // `nodeStrokeWidth` is in FLOW units and is drawn around the
                 // chip, so it is also the only lever that makes a chip bigger
                 // than the node it stands for. A session card is 220 wide, so
