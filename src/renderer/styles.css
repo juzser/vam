@@ -286,6 +286,21 @@ body {
   }
 }
 
+/* A terminal's caret: hard on, hard off, no fade in between. `steps(1)` is
+   what makes it a BLINK rather than a pulse -- an eased opacity ramp is the
+   `vam-breathe` idiom, and the point of this one is that it reads as a shell
+   waiting on its next character. 1.06s is a VT100's own rate, near enough. */
+@keyframes vam-term-cursor {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
 /* A travelling highlight along the node's top edge: the one signal you can read
    from across the room without reading anything.
 
@@ -309,6 +324,23 @@ body {
 
 .vam-breathe {
   animation: vam-breathe 1.8s ease-in-out infinite;
+}
+
+/* The block itself is drawn, not typed: a filled rectangle in the line's own
+   colour, so it inherits whatever the text around it is wearing and needs no
+   token of its own. `currentColor` rather than a variable is deliberate -- the
+   caret belongs to the line, and a line that dims should dim its caret too.
+   `0.9em` keeps it inside the cap height of an 11.5px line instead of pushing
+   the row taller. */
+.vam-term-cursor {
+  display: inline-block;
+  width: 0.5em;
+  height: 0.9em;
+  margin-left: 0.25em;
+  vertical-align: text-bottom;
+  background: currentColor;
+  opacity: 1;
+  animation: vam-term-cursor 1.06s steps(1, end) infinite;
 }
 
 /*
@@ -419,10 +451,18 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .vam-spin,
   .vam-breathe,
+  .vam-term-cursor,
   .vam-running-edge::after,
   .vam-focus-glow,
   .vam-cursor-glow {
     animation: none;
+  }
+  /* A caret frozen mid-blink is either invisible or a stray mark at some
+     arbitrary opacity. Stopped, it parks ON: a solid block after the words,
+     which is what a terminal looks like between keystrokes anyway, and still
+     says the line is being written. */
+  .vam-term-cursor {
+    opacity: 1;
   }
   /* The halo carried the signal; with motion off, a static ring has to — the
      shape the mockup itself freezes to on its non-animating boards, a
