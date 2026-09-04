@@ -812,7 +812,6 @@ function CanvasInner({
    * panel once the focus has landed, so pressing `i` twice on the same row
    * asks twice, rather than the first press being the only one that lands.
    */
-  const [commandFocus, setCommandFocus] = useState<string | null>(null);
 
   /**
    * Everything the action pane can land on, in the order it is drawn.
@@ -821,7 +820,7 @@ function CanvasInner({
    * and `Enter` is handled by the window listener. A panel that owned its own
    * cursor would be a second source of truth about what is selected.
    */
-  const actions = useMemo(() => buildActions(focusedDecision?.commands ?? []), [focusedDecision]);
+  const actions = useMemo(() => buildActions(), []);
 
   const labels = useMemo(
     () => (jumping ? jumpLabels(nodeIds) : new Map<string, string>()),
@@ -968,24 +967,6 @@ function CanvasInner({
   const focusSession = useCallback((sessionId: string) => {
     setFocusedId(infoNodeId(sessionId));
   }, []);
-
-  const copyCommand = useCallback(
-    async (commandId: string) => {
-      const command = focusedDecision?.commands.find((c) => c.id === commandId);
-      if (command === undefined) {
-        return;
-      }
-      // Vam copies. Vam does not run — §4: the nod is still yours.
-      //
-      // Awaited, and the outcome is what the status bar reports. The old
-      // shape fired the write and announced success on the next line, so in
-      // the packaged app — where the permission policy refuses a renderer-side
-      // clipboard write — every copy failed and every copy said "copied".
-      const copied = await copyText(command.command);
-      setStatus(copied ? `copied: ${command.label}` : `could not copy: ${command.label}`);
-    },
-    [focusedDecision],
-  );
 
   /**
    * Write what you typed into the focused session's log — or, for a `'session'`
@@ -1619,17 +1600,11 @@ function CanvasInner({
             setStatus('pick a session first');
             return;
           }
-          // `i` means "type something into the thing I am pointing at". In the
-          // action pane that is a command row, whose copy control it puts
-          // the keyboard on — the row is then genuinely focused rather than
-          // the composer having stolen the keys. On the prompt row, which has
-          // no control of its own, `i` opens the composer.
-          const selected =
-            pane === 'action' ? actions[clampIndex(actionIndex, actions.length)] : undefined;
-          if (selected !== undefined && selected.kind === 'command') {
-            setCommandFocus(selected.rowId);
-            return;
-          }
+          // `i` means "type something into the thing I am pointing at", and
+          // the prompt is now the only thing in this pane: the command rows it
+          // used to land on went with the strip the operator asked to remove,
+          // and their commands are offered by the `!` typeahead inside the
+          // composer instead.
           setComposing(true);
           return;
         }
@@ -1638,34 +1613,13 @@ function CanvasInner({
             setStatus('the full detail is already in the right panel');
             return;
           }
-          const chosen = actions[clampIndex(actionIndex, actions.length)];
-          if (chosen === undefined) {
-            return;
+          // The prompt is the only action this pane has left, so Enter on it
+          // opens the composer. It was a switch over the action kinds while a
+          // command row was one of them.
+          if (actions[clampIndex(actionIndex, actions.length)] !== undefined) {
+            setComposing(true);
           }
-          switch (chosen.kind) {
-            case 'command': {
-              const command = focusedDecision?.commands.find((c) => c.id === chosen.rowId);
-              if (command === undefined) {
-                return;
-              }
-              void copyText(command.command).then((copied) => {
-                setStatus(
-                  copied
-                    ? `vam does not run them — copied "${command.label}", run it yourself`
-                    : `could not copy "${command.label}"`,
-                );
-              });
-              return;
-            }
-            case 'prompt':
-              setComposing(true);
-              return;
-            default: {
-              const unhandled: never = chosen;
-              void unhandled;
-              return;
-            }
-          }
+          return;
         }
         case 'cancel':
           // Esc peels one layer at a time and always ends up back in the list —
@@ -1715,7 +1669,6 @@ function CanvasInner({
     focusSession,
     pane,
     actionIndex,
-    focusedDecision,
     actions,
     prefs,
     savePrefs,
@@ -2016,10 +1969,6 @@ function CanvasInner({
           draft={draft}
           onDraftChange={setDraft}
           onSubmit={sendPrompt}
-          onCopyCommand={copyCommand}
-          onCopyAllCommands={copyAllCommands}
-          focusCommandId={commandFocus}
-          onCommandFocused={() => setCommandFocus(null)}
           active={pane === 'action'}
           actionIndex={actionIndex}
           composing={composing}

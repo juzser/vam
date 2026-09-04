@@ -70,8 +70,6 @@ function draw(commands: readonly Command[], over: Partial<DetailPanelProps> = {}
     draft: '',
     onDraftChange: () => {},
     onSubmit: () => {},
-    onCopyCommand: () => {},
-    onCopyAllCommands: () => {},
     composing: false,
     onCompose: () => {},
     onStopComposing: () => {},
@@ -99,7 +97,7 @@ afterEach(cleanup);
 describe('the action list contains exactly what the pane renders', () => {
   it('draws one element per action, in the order the cursor walks them', () => {
     draw(COMMANDS);
-    expect(drawnIds()).toEqual(buildActions(COMMANDS).map((action) => action.id));
+    expect(drawnIds()).toEqual(buildActions().map((action) => action.id));
   });
 
   it('still agrees when the step proposed no commands', () => {
@@ -107,7 +105,7 @@ describe('the action list contains exactly what the pane renders', () => {
     // asked anything, so `I` always has somewhere to land — and something to
     // look at when it lands.
     draw([]);
-    expect(buildActions([]).map((a) => a.id)).toEqual(['prompt']);
+    expect(buildActions().map((a) => a.id)).toEqual(['prompt']);
     expect(drawnIds()).toEqual(['prompt']);
   });
 
@@ -115,7 +113,7 @@ describe('the action list contains exactly what the pane renders', () => {
     // The failure this catches is an off-by-N: actions the pane does not draw
     // shift every index, so the ring sits on a row the operator did not pick
     // while `Enter` fires something else.
-    const actions = buildActions(COMMANDS);
+    const actions = buildActions();
     for (const [index, action] of actions.entries()) {
       draw(COMMANDS, { active: true, actionIndex: index });
       expect(ringed()).toEqual([action.id]);
