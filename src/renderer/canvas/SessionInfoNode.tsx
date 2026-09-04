@@ -24,6 +24,7 @@ import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { GitBranch } from 'lucide-react';
 import type { Session, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import { resolveSessionIcon } from './session-icon.js';
 
 const STATUS_INK: Readonly<Record<SessionStatus, string>> = {
   running: 'text-running',
@@ -58,6 +59,13 @@ export type SessionInfoNodeData = {
   readonly entry: SessionEntry;
   readonly focused: boolean;
   readonly jumpLabel: string | null;
+  /**
+   * Open the icon chooser for this session. The whole entry travels, not an
+   * id: the host needs the project's source to know which bucket to write,
+   * and a node that handed over an id would send it back for a second lookup
+   * of what it was already holding.
+   */
+  readonly onPickIcon: (entry: SessionEntry) => void;
 };
 
 /**
@@ -80,7 +88,7 @@ export function progressOf(session: Session): number {
 }
 
 export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeData }) {
-  const { entry, focused, jumpLabel } = data;
+  const { entry, focused, jumpLabel, onPickIcon } = data;
   const session: Session = entry.session;
   const waiting = session.status === 'waiting';
   const pct = Math.round(progressOf(session) * 100);
@@ -145,7 +153,28 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
       </div>
 
       <div className="flex items-start gap-1.5">
-        {session.icon !== null && <span className="text-[13px] leading-tight">{session.icon}</span>}
+        {/* The glyph is a control, not decoration: the operator asked for an
+            icon that can be changed, and the cheapest place to change it is
+            the thing you are already looking at. It routes to the same picker
+            the `s` chord opens, so there is one chooser and one write path.
+            `nodrag` keeps ReactFlow's pointer handling off the button.
+
+            Always drawn, never conditional: `resolveSessionIcon` answers for
+            every session, and a control that appears only once you have used
+            it is a control nobody finds. */}
+        <button
+          type="button"
+          data-session-icon={session.id}
+          aria-label={`change icon for ${session.title}`}
+          title="change session icon"
+          onClick={(event) => {
+            event.stopPropagation();
+            onPickIcon(entry);
+          }}
+          className="nodrag flex-none rounded-[var(--radius-sm)] text-[13px] leading-tight hover:bg-line-strong"
+        >
+          {resolveSessionIcon(entry)}
+        </button>
         <span className="vam-clamp-2 font-medium text-[13.5px] text-ink leading-[1.32]">
           {session.title}
         </span>
