@@ -466,8 +466,44 @@ export function applyTheme(
   theme: Theme,
   root: Element | null = globalThis.document?.documentElement ?? null,
   prefersLight: () => boolean = osPrefersLight,
-): void {
-  root?.classList.toggle('light', theme === 'system' ? prefersLight() : theme === 'light');
+): EffectiveTheme {
+  const effective = effectiveTheme(theme, prefersLight);
+  root?.classList.toggle('light', effective === 'light');
+  return effective;
+}
+
+/** What is on screen. `system` is not one of these — that is the whole point. */
+export type EffectiveTheme = 'dark' | 'light';
+
+/**
+ * Resolve `system` to the colour it currently means.
+ *
+ * Anything that reads the theme to DESCRIBE it — the sidebar's toggle and its
+ * label — has to read this rather than `prefs.theme`, or a two-way ternary
+ * quietly files `system` under its `else` arm and describes the wrong screen.
+ */
+export function effectiveTheme(
+  theme: Theme,
+  prefersLight: () => boolean = osPrefersLight,
+): EffectiveTheme {
+  if (theme === 'system') return prefersLight() ? 'light' : 'dark';
+  return theme;
+}
+
+/**
+ * Follow the OS for as long as the caller cares to.
+ *
+ * `system` promises the overlay's own words — "follows what the operating
+ * system asks for" — and a sampled-once read breaks that promise on the first
+ * dashboard left open past sunset. Returns the unsubscribe, so the caller's
+ * effect cleanup is the whole story; a `matchMedia` that does not exist yields
+ * a no-op, the same safe direction the rest of this section documents.
+ */
+export function watchOsTheme(onChange: () => void): () => void {
+  const query = globalThis.matchMedia?.(PREFERS_LIGHT);
+  if (!query) return () => {};
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
 }
 
 /**
@@ -478,8 +514,11 @@ export function applyTheme(
  * the one `applyTheme` already documents — no class, therefore dark.
  */
 function osPrefersLight(): boolean {
-  return globalThis.matchMedia?.('(prefers-color-scheme: light)').matches === true;
+  return globalThis.matchMedia?.(PREFERS_LIGHT).matches === true;
 }
+
+/** One spelling, shared by the sample and the subscription that follows it. */
+const PREFERS_LIGHT = '(prefers-color-scheme: light)';
 
 /**
  * Store what you dragged, clamped. Called on drag end and on the resize

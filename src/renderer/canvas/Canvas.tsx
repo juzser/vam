@@ -68,6 +68,7 @@ import {
   applyTheme,
   browserStorage,
   DEFAULT_FOCUS_SHARE,
+  type EffectiveTheme,
   type Prefs,
   readPrefs,
   setIcon,
@@ -78,6 +79,7 @@ import {
   setRename,
   setSessionFilters,
   setTheme,
+  watchOsTheme,
   writePrefs,
 } from '../prefs/prefs.js';
 import { SettingsOverlay } from '../settings/SettingsOverlay.js';
@@ -373,8 +375,16 @@ function CanvasInner({
   // source for it — so this effect, not the toggle's click handler, is what
   // moves the document. A handler that also wrote the class would be a second
   // writer, and the two disagree the first time prefs is restored from storage.
+  // `system` is a subscription, not a sample: without the listener the OS
+  // flipping at sunset leaves a dashboard on the appearance it had at mount,
+  // which is not what the overlay's own hint promises. Keeping the resolved
+  // value in state is what lets the sidebar's label and its click describe the
+  // screen rather than the store.
+  const [effective, setEffective] = useState<EffectiveTheme>('dark');
   useEffect(() => {
-    applyTheme(prefs.theme);
+    setEffective(applyTheme(prefs.theme));
+    if (prefs.theme !== 'system') return;
+    return watchOsTheme(() => setEffective(applyTheme('system')));
   }, [prefs.theme]);
 
   const model = useMemo(
@@ -1417,10 +1427,8 @@ function CanvasInner({
           entries={entries}
           focusedSessionId={focusedEntry?.session.id ?? null}
           workspace="black-smith"
-          theme={prefs.theme}
-          onToggleTheme={() =>
-            savePrefs(setTheme(prefs, prefs.theme === 'dark' ? 'light' : 'dark'))
-          }
+          theme={effective}
+          onToggleTheme={() => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark'))}
           onOpenFilter={() => {
             searchOrigin.current = focusedId;
             setFiltering(true);

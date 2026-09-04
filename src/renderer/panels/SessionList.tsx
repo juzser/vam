@@ -37,7 +37,7 @@ import type { Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { STATUS_FILTERS } from '../domain/session-filter.js';
-import type { Theme } from '../prefs/prefs.js';
+import type { EffectiveTheme } from '../prefs/prefs.js';
 import { OverlayScroll } from './OverlayScroll.js';
 
 const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
@@ -127,7 +127,12 @@ export type SessionListProps = {
   readonly collapsedProjects?: readonly string[];
   readonly onToggleCollapse?: (project: Project) => void;
   readonly onSettings: () => void;
-  readonly theme: Theme;
+  /**
+   * The theme ON SCREEN, already resolved — never `prefs.theme`, which can be
+   * `system`. The two-way ternary below is exactly why: a third value would
+   * land in its `else` arm, label the wrong direction and typecheck anyway.
+   */
+  readonly theme: EffectiveTheme;
   readonly onToggleTheme: () => void;
   /** The current rendered width (task-1's `renderedWidth`), applied inline. */
   readonly width: number;
