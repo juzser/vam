@@ -172,6 +172,20 @@ export type Prefs = {
    * The share of the viewport a focused row is framed to occupy. Same TTL
    * exemption as `theme` and `panes`, for the same reason: it is a fact about
    * how you like to read the canvas, not about a session.
+   *
+   * @deprecated NOTHING READS THIS ANY MORE. The behaviour it configured --
+   * the canvas automatically scaling to frame the focused session -- was
+   * removed at the operator's request; following focus now pans and leaves
+   * the zoom exactly where the operator put it, so there is no framing target
+   * left to tune.
+   *
+   * DELETING IT IS A PERSISTED-DATA MIGRATION, NOT A DELETE, the same rule
+   * `Project.source` records. The value sits at the top level of stored JSON
+   * that shipped vams have already written; the reader below still parses and
+   * clamps it, which costs nothing and keeps `readPrefs` total. Whoever drops
+   * the field drops the stored key with it and ships a migration for existing
+   * stores -- until then a dead field is the cheap, safe state, because reads
+   * here degrade per field and an unknown key is simply ignored.
    */
   readonly focusViewportShare: number;
   /**
