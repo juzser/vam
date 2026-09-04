@@ -1288,10 +1288,12 @@ describe('the Agents tab', () => {
  * `waiting`, so a merely IDLE session was told an agent was asking it
  * something.
  *
- * Nothing takes their place, because the pane already showed the honest
- * answer: `Decision.output` in `out`, which is the session's real final turn.
- * So these tests are an absence and a presence -- nothing invented above the
- * composer, and the real turn on screen underneath.
+ * Nothing invented takes their place. A session that asked through the
+ * `AskUserQuestion` tool now gets a card built from that record
+ * (`DetailPanel.questions.test.tsx`); a session that asked nothing -- the one
+ * these tests draw -- gets what it always had: `Decision.output` in `out`,
+ * its real final turn. So these tests are an absence and a presence: nothing
+ * invented above the composer, and the real turn on screen underneath.
  *
  * The tests that stood here pinned the placeholder: that three cards rendered,
  * that the badges counted 1-3, and that clicking one wrote the card's own
