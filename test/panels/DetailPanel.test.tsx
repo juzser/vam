@@ -1067,7 +1067,7 @@ describe('the Agents tab', () => {
     const empty = q<HTMLElement>('[data-agents-empty]');
     expect(empty?.textContent).not.toContain('spawned no agents');
     expect(empty?.textContent).toContain('2');
-    expect(empty?.textContent).toContain('none');
+    expect(empty?.textContent).toContain('None');
     // The way out of the state is on screen with it.
     expect(idleToggle()).not.toBeNull();
     clickToggle();
@@ -1107,6 +1107,7 @@ describe('the Agents tab', () => {
       ]),
     });
     openAgents();
+    clickToggle();
 
     expect(q<HTMLElement>('[data-agent-description]')?.className).toContain('truncate');
   });

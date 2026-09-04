@@ -492,23 +492,45 @@ function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestL
 }
 
 /**
- * The Agents tab's content: which subagents this session spawned.
+ * The Agents tab's content: which subagents this session spawned, running
+ * ones first and by default running ones only.
  *
- * THREE STATES, AND TWO OF THEM ARE ABSENCES THAT MEAN DIFFERENT THINGS
+ * FOUR STATES, AND THREE OF THEM DRAW NO ROW FOR DIFFERENT REASONS
  * (model.ts). Absent is a source with no agent surface at all — black-smith
  * reports a live count and nothing about which agents they are — and empty is
  * a source that looked and found none, which is the common case, since most
- * sessions never spawn a subagent. Each gets one plain sentence. Neither gets
- * a spinner or a placeholder row: this pane has spent several rounds having
- * invented content removed from it.
+ * sessions never spawn a subagent. The third is new with the filter: agents
+ * exist and none of them is running. That one must NOT fall through to
+ * "spawned no agents", which would be the caption outrunning the data while
+ * twenty finished agents sit one keypress away; it says how many there are and
+ * keeps the toggle on screen beside it. Each gets one plain sentence. None
+ * gets a spinner or a placeholder row: this pane has spent several rounds
+ * having invented content removed from it.
+ *
+ * The default is running-only because that is what the operator opened the tab
+ * to see; the toggle exists because a filter with no way out hides work. It
+ * carries the count of what it is hiding, so a hidden row is never silently
+ * invisible — and it counts IDLE agents, never running ones, precisely so it
+ * cannot be read against the tab's `●N` running badge, which counts the whole
+ * directory before the roster cap and may legitimately exceed the rows here.
+ *
+ * The toggle's state is component state, not a `prefs.ts` field, for the same
+ * reason the chosen tab is: nothing outside this pane has an opinion about it,
+ * and persisting a presentation toggle would put it in a payload every other
+ * surface has to migrate around. Unlike the tab it resets per pane render,
+ * which is the wanted default — the next session is asked the same question.
+ *
+ * It is a button, not a key chord: nothing binds it, so nothing captions it as
+ * bound.
  *
  * A row survives an unreadable meta file. The agent's id and whether it is
  * running come from its own transcript, so they are facts whatever the meta
  * file says; the labels are what goes `unknown`, and the row still says who is
  * working. The roster is capped at the source (`agent-roster.ts`), so this
- * renders everything it is given and counts nothing.
+ * renders everything it is given and counts only what it hides.
  */
 function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | undefined }) {
+  const [showIdle, setShowIdle] = useState(false);
   if (agents === undefined || agents.length === 0) {
     return (
       <p data-agents data-agents-empty className="text-[11px] text-ink-faint">
@@ -518,46 +540,68 @@ function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | unde
       </p>
     );
   }
+  const idleCount = agents.filter((agent) => !agent.running).length;
+  const shown = showIdle ? agents : agents.filter((agent) => agent.running);
+  const toggle =
+    idleCount === 0 ? null : (
+      <button
+        type="button"
+        data-agents-toggle
+        aria-pressed={showIdle}
+        onClick={() => setShowIdle((open) => !open)}
+        className="flex-none cursor-pointer self-start rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10.5px] text-ink-faint hover:bg-raised hover:text-ink"
+      >
+        {showIdle ? `hide ${idleCount} idle` : `show ${idleCount} idle`}
+      </button>
+    );
   return (
-    <ul
-      data-agents
-      className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto"
-    >
-      {agents.map((agent) => (
-        <li
-          key={agent.id}
-          data-agent-row
-          data-agent-running={agent.running ? 'true' : 'false'}
-          className="flex items-center gap-2 rounded-[9px] border border-line bg-panel px-3 py-2"
-        >
-          {/* The same dot the pane header uses for a session, meaning the same
+    <div data-agents className="flex min-h-0 flex-1 flex-col gap-1.5">
+      {shown.length === 0 ? (
+        <p data-agents-empty className="text-[11px] text-ink-faint">
+          {agents.length === 1
+            ? 'This session’s one agent is not running right now.'
+            : `None of this session’s ${agents.length} agents is running right now.`}
+        </p>
+      ) : (
+        <ul className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
+          {shown.map((agent) => (
+            <li
+              key={agent.id}
+              data-agent-row
+              data-agent-running={agent.running ? 'true' : 'false'}
+              className="flex items-center gap-2 rounded-[9px] border border-line bg-panel px-3 py-2"
+            >
+              {/* The same dot the pane header uses for a session, meaning the same
               thing: filled and breathing while it works, quiet when it is
               done. `running` here is "wrote to its transcript in the last few
               minutes", which is all the source can see. */}
-          <span
-            className={[
-              'h-1.5 w-1.5 flex-none rounded-full',
-              agent.running ? 'bg-running vam-breathe' : 'bg-line-strong',
-            ].join(' ')}
-          />
-          <span className="min-w-0 flex-1">
-            <span data-agent-type className="block truncate text-[11.5px] text-ink">
-              {/* No type means no readable meta file beside the transcript, so
+              <span
+                className={[
+                  'h-1.5 w-1.5 flex-none rounded-full',
+                  agent.running ? 'bg-running vam-breathe' : 'bg-line-strong',
+                ].join(' ')}
+              />
+              <span className="min-w-0 flex-1">
+                <span data-agent-type className="block truncate text-[11.5px] text-ink">
+                  {/* No type means no readable meta file beside the transcript, so
                   the id is the only name this agent has. */}
-              {agent.type ?? `${agent.id} (type unknown)`}
-            </span>
-            <span
-              data-agent-description
-              className="mt-0.5 block truncate text-[10.5px] text-ink-faint"
-            >
-              {/* Truncated, not wrapped: the pane is 408px and a spawn
+                  {agent.type ?? `${agent.id} (type unknown)`}
+                </span>
+                <span
+                  data-agent-description
+                  className="mt-0.5 block truncate text-[10.5px] text-ink-faint"
+                >
+                  {/* Truncated, not wrapped: the pane is 408px and a spawn
                   description is a sentence. The whole roster stays scannable. */}
-              {agent.description ?? 'no description recorded'}
-            </span>
-          </span>
-        </li>
-      ))}
-    </ul>
+                  {agent.description ?? 'no description recorded'}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {toggle}
+    </div>
   );
 }
 
