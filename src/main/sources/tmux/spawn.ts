@@ -36,12 +36,14 @@
  */
 
 import { execFile } from 'node:child_process';
+import type { PaneSize } from '../../../shared/terminal.js';
 import type { SourceError } from '../../ipc/channels.js';
 import {
   capturePaneArgv,
   isVamSession,
   listSessionsArgv,
   newSessionArgv,
+  resizeWindowArgv,
   tagSessionArgv,
 } from './argv.js';
 
@@ -280,4 +282,23 @@ export async function readPane(run: TmuxRun, name: string): Promise<TmuxText> {
         kind: 'unavailable',
         error: classifyTmuxFailure({ failure, stderr, action: `reading session ${name}` }),
       };
+}
+
+/**
+ * Give a session the size the pane can actually show. Resolves to `null` when
+ * tmux did it, and to the `SourceError` otherwise.
+ *
+ * The CALLER decides whether this session may be touched at all
+ * (`main/terminal/pane.ts` -- only a session vam recorded for this project).
+ * Nothing here re-derives that from a name.
+ */
+export async function resizeWindow(
+  run: TmuxRun,
+  name: string,
+  size: PaneSize,
+): Promise<SourceError | null> {
+  const { failure, stderr } = await run(resizeWindowArgv(name, size.columns, size.rows));
+  return failure === null
+    ? null
+    : classifyTmuxFailure({ failure, stderr, action: `resizing session ${name}` });
 }

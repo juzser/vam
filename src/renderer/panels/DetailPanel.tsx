@@ -1602,6 +1602,10 @@ export function DetailPanel(props: DetailPanelProps) {
             projectId={entry?.project.id ?? null}
             rowId={entry?.session.id}
             read={globalThis.window?.api?.terminal?.read}
+            /* The pane fits because tmux is TOLD the size: `capture-pane`
+               returns a screen tmux already composed at the session's own
+               size, which no style on this side can re-wrap. */
+            resize={globalThis.window?.api?.terminal?.resize}
           />
         ) : current === 'Agents' ? (
           <AgentsTab agents={entry?.session.agents} />
@@ -1836,275 +1840,276 @@ export function DetailPanel(props: DetailPanelProps) {
         )}
       </div>
 
-      <div className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3">
-        {/* black-smith's governance queue — findings awaiting a waiver, and
+      {current !== 'Terminal' && (
+        <div className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3">
+          {/* black-smith's governance queue — findings awaiting a waiver, and
             lesson candidates — used to stand here. The operator asked for it
             to go, and it is gone from `buildActions` too: it went on
             contributing keyboard stops and a live `Enter` to this pane long
             after the rows themselves stopped being drawn. */}
-        {/* The `!` typeahead, above the box it completes into -- where the
+          {/* The `!` typeahead, above the box it completes into -- where the
             standing command strip used to be, and only while it is being
             asked for. The strip drew every proposed command on every turn
             that mentioned one; this draws the same list, from the same
             extraction, at the moment the operator types the glyph it belongs
             to. */}
-        {/* The question the session is asking, where the placeholder picker
+          {/* The question the session is asking, where the placeholder picker
             used to stand -- the newest one, because a card per question would
             turn a pane into a queue. It answers nothing; see `QuestionCard`.
             A session that asked none, or asked outside the tail vam reads
             (`TAIL_BYTES`), draws nothing here rather than an empty box. */}
-        {newestQuestion !== null && (
-          <QuestionCard
-            key={newestQuestion.id}
-            question={newestQuestion}
-            firstOptionRef={firstOptionRef}
-          />
-        )}
-        {suggesting && (
-          <div
-            data-bang-suggest
-            className="flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-panel px-1.5 py-1.5"
-          >
-            <p className="px-1.5 pb-0.5 text-[10px] text-ink-faint">
-              the agent proposed these — vam does not run them; Enter picks one, Esc keeps what you
-              typed
-            </p>
-            {matches.map((command, index) => (
-              <button
-                key={command.id}
-                type="button"
-                data-bang-suggestion
-                data-selected={index === picked ? 'true' : undefined}
-                onClick={() => acceptSuggestion(command)}
-                className={[
-                  'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
-                  index === picked ? 'bg-raised' : 'hover:bg-raised',
-                ].join(' ')}
-              >
-                <span className="max-w-full truncate text-[11px] text-ink">{command.label}</span>
-                <span
-                  data-bang-command
-                  className="max-w-full truncate font-mono text-[10.5px] text-ink-dim"
+          {newestQuestion !== null && (
+            <QuestionCard
+              key={newestQuestion.id}
+              question={newestQuestion}
+              firstOptionRef={firstOptionRef}
+            />
+          )}
+          {suggesting && (
+            <div
+              data-bang-suggest
+              className="flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-panel px-1.5 py-1.5"
+            >
+              <p className="px-1.5 pb-0.5 text-[10px] text-ink-faint">
+                the agent proposed these — vam does not run them; Enter picks one, Esc keeps what
+                you typed
+              </p>
+              {matches.map((command, index) => (
+                <button
+                  key={command.id}
+                  type="button"
+                  data-bang-suggestion
+                  data-selected={index === picked ? 'true' : undefined}
+                  onClick={() => acceptSuggestion(command)}
+                  className={[
+                    'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
+                    index === picked ? 'bg-raised' : 'hover:bg-raised',
+                  ].join(' ')}
                 >
-                  {command.command}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-        <div
-          data-prompt-box
-          data-action-id="prompt"
-          className={[
-            'flex flex-col gap-2.5 rounded-[10px] border bg-panel px-3 py-2.5',
-            active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
-          ].join(' ')}
-        >
-          {/* Multiline, because a prompt is prose and a one-line slot hides
+                  <span className="max-w-full truncate text-[11px] text-ink">{command.label}</span>
+                  <span
+                    data-bang-command
+                    className="max-w-full truncate font-mono text-[10.5px] text-ink-dim"
+                  >
+                    {command.command}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div
+            data-prompt-box
+            data-action-id="prompt"
+            className={[
+              'flex flex-col gap-2.5 rounded-[10px] border bg-panel px-3 py-2.5',
+              active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
+            ].join(' ')}
+          >
+            {/* Multiline, because a prompt is prose and a one-line slot hides
             everything but the tail of it. The mockup's own composer is a
             104px-tall block of 12.5px/1.55 text, not an input. */}
-          <div className="flex items-start gap-2">
-            <textarea
-              ref={inputRef}
-              rows={2}
-              value={draft}
-              readOnly={!composing}
-              onFocus={onCompose}
-              onChange={(event) => {
-                setCaret(event.target.selectionStart ?? event.target.value.length);
-                // Typing is how a dismissed list comes back, and how the
-                // highlight returns to the top of a freshly filtered one.
-                setDismissed(false);
-                setPick(0);
-                onDraftChange(event.target.value);
-              }}
-              onPaste={(event) => {
-                // A paste event carries its own `DataTransfer`, so this needs
-                // no permission and no trip through main -- unlike
-                // `navigator.clipboard`, which Electron's deny-all policy
-                // breaks (`src/main/clipboard/ipc.ts` exists for that).
-                const data = event.clipboardData;
-                const outcome = readPastedImages(data, images.length + 1);
-                if (outcome.kind === 'text') return;
-                event.preventDefault();
-                const box = event.currentTarget;
-                onDraftChange(
-                  spliceDraft(draft, box.selectionStart, box.selectionEnd, outcome.text),
-                );
-                setImages([...images, ...outcome.images]);
-              }}
-              onKeyDown={(event) => {
-                // THE ENTER COLLISION, decided here. With the suggestion list
-                // open Enter ACCEPTS and sends nothing; only a closed list
-                // lets Enter through to `onSubmit`. Since the reply PR a send
-                // really delivers — into a tmux pane for a session vam
-                // started, with a CLI fallback — so an Enter that completed
-                // the word and shipped it as well would put a half-typed
-                // command into a running agent. Escape closes the list and NOT the composer,
-                // and leaves the typed `!` where it is: the operator may be
-                // writing a command of their own, and a second Escape still
-                // hands the keyboard back to the sidebar.
-                const suggestion = suggesting ? matches[picked] : undefined;
-                if (suggestion !== undefined) {
-                  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                    event.preventDefault();
-                    const delta = event.key === 'ArrowDown' ? 1 : -1;
-                    // Clamped, not wrapped, like every other cursor in this app.
-                    setPick(Math.min(Math.max(0, picked + delta), matches.length - 1));
-                    return;
+            <div className="flex items-start gap-2">
+              <textarea
+                ref={inputRef}
+                rows={2}
+                value={draft}
+                readOnly={!composing}
+                onFocus={onCompose}
+                onChange={(event) => {
+                  setCaret(event.target.selectionStart ?? event.target.value.length);
+                  // Typing is how a dismissed list comes back, and how the
+                  // highlight returns to the top of a freshly filtered one.
+                  setDismissed(false);
+                  setPick(0);
+                  onDraftChange(event.target.value);
+                }}
+                onPaste={(event) => {
+                  // A paste event carries its own `DataTransfer`, so this needs
+                  // no permission and no trip through main -- unlike
+                  // `navigator.clipboard`, which Electron's deny-all policy
+                  // breaks (`src/main/clipboard/ipc.ts` exists for that).
+                  const data = event.clipboardData;
+                  const outcome = readPastedImages(data, images.length + 1);
+                  if (outcome.kind === 'text') return;
+                  event.preventDefault();
+                  const box = event.currentTarget;
+                  onDraftChange(
+                    spliceDraft(draft, box.selectionStart, box.selectionEnd, outcome.text),
+                  );
+                  setImages([...images, ...outcome.images]);
+                }}
+                onKeyDown={(event) => {
+                  // THE ENTER COLLISION, decided here. With the suggestion list
+                  // open Enter ACCEPTS and sends nothing; only a closed list
+                  // lets Enter through to `onSubmit`. Since the reply PR a send
+                  // really delivers — into a tmux pane for a session vam
+                  // started, with a CLI fallback — so an Enter that completed
+                  // the word and shipped it as well would put a half-typed
+                  // command into a running agent. Escape closes the list and NOT the composer,
+                  // and leaves the typed `!` where it is: the operator may be
+                  // writing a command of their own, and a second Escape still
+                  // hands the keyboard back to the sidebar.
+                  const suggestion = suggesting ? matches[picked] : undefined;
+                  if (suggestion !== undefined) {
+                    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                      event.preventDefault();
+                      const delta = event.key === 'ArrowDown' ? 1 : -1;
+                      // Clamped, not wrapped, like every other cursor in this app.
+                      setPick(Math.min(Math.max(0, picked + delta), matches.length - 1));
+                      return;
+                    }
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      acceptSuggestion(suggestion);
+                      return;
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      setDismissed(true);
+                      return;
+                    }
                   }
+                  // The window listener ignores keys typed in a textarea, so this
+                  // box binds the ones it needs itself. Shift+Enter is left alone
+                  // — it is the newline the box became multiline to allow.
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
-                    acceptSuggestion(suggestion);
-                    return;
-                  }
-                  if (event.key === 'Escape') {
+                    onSubmit();
+                  } else if (event.key === 'Escape') {
                     event.preventDefault();
-                    setDismissed(true);
-                    return;
+                    // BLUR, not just `composing = false`. Clearing the flag only
+                    // makes this box read-only; while it still holds DOM focus
+                    // the window key listener returns early on every keystroke
+                    // (it ignores keys aimed at an INPUT or a TEXTAREA), so
+                    // `j`/`k` land here and vanish and the sidebar is
+                    // unreachable without a mouse. Releasing focus is what hands
+                    // the keyboard back.
+                    inputRef.current?.blur();
+                    onStopComposing();
                   }
+                }}
+                placeholder={
+                  entry === null
+                    ? 'Pick a session first'
+                    : 'Reply to agent, answer with a number, or paste a plan…'
                 }
-                // The window listener ignores keys typed in a textarea, so this
-                // box binds the ones it needs itself. Shift+Enter is left alone
-                // — it is the newline the box became multiline to allow.
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  onSubmit();
-                } else if (event.key === 'Escape') {
-                  event.preventDefault();
-                  // BLUR, not just `composing = false`. Clearing the flag only
-                  // makes this box read-only; while it still holds DOM focus
-                  // the window key listener returns early on every keystroke
-                  // (it ignores keys aimed at an INPUT or a TEXTAREA), so
-                  // `j`/`k` land here and vanish and the sidebar is
-                  // unreachable without a mouse. Releasing focus is what hands
-                  // the keyboard back.
-                  inputRef.current?.blur();
-                  onStopComposing();
-                }
-              }}
-              placeholder={
-                entry === null
-                  ? 'Pick a session first'
-                  : 'Reply to agent, answer with a number, or paste a plan…'
-              }
-              className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-[12.5px] text-ink leading-[1.55] outline-none placeholder:text-ink-faint"
-              aria-label="prompt to session"
-            />
-          </div>
+                className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-[12.5px] text-ink leading-[1.55] outline-none placeholder:text-ink-faint"
+                aria-label="prompt to session"
+              />
+            </div>
 
-          {images.length > 0 && (
-            <p data-pasted-images className="text-[10.5px] text-ink-dim leading-[1.45]">
-              {images.length === 1 ? '1 image' : `${images.length} images`} pasted and kept here —
-              vam writes text to a session, so only the {'`[image #N]`'} placeholder is sent, not
-              the image.
-            </p>
-          )}
+            {images.length > 0 && (
+              <p data-pasted-images className="text-[10.5px] text-ink-dim leading-[1.45]">
+                {images.length === 1 ? '1 image' : `${images.length} images`} pasted and kept here —
+                vam writes text to a session, so only the {'`[image #N]`'} placeholder is sent, not
+                the image.
+              </p>
+            )}
 
-          {attachError !== null && (
-            <p data-attach-error className="text-[10.5px] text-waiting leading-[1.45]">
-              {attachError}
-            </p>
-          )}
+            {attachError !== null && (
+              <p data-attach-error className="text-[10.5px] text-waiting leading-[1.45]">
+                {attachError}
+              </p>
+            )}
 
-          <div className="flex items-center gap-2">
-            {/* The attachment button, doing the only honest thing there is to
+            <div className="flex items-center gap-2">
+              {/* The attachment button, doing the only honest thing there is to
               do here: vam's write is a string, so the file is read in the
               renderer and its text becomes part of the prompt that gets
               recorded. Nothing is uploaded, and nothing on screen says it
               is. See `attachIntoDraft` for the limit and the refusals. */}
-            <input
-              ref={fileRef}
-              type="file"
-              tabIndex={-1}
-              aria-hidden="true"
-              onChange={(event) => void takeFile(event.currentTarget)}
-              className="hidden"
-            />
-            <Note text="reads the file here and puts its text into the prompt text that gets recorded — vam uploads nothing">
-              <button
-                type="button"
-                data-attach
-                aria-label="attach a text file to this prompt"
-                onClick={() => fileRef.current?.click()}
-                className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border border-line-strong text-ink-dim hover:bg-raised hover:text-ink"
-              >
-                <Paperclip size={12} strokeWidth={1.7} />
-              </button>
-            </Note>
-            {attachedName !== null && (
-              <span
-                data-attach-chip
-                className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[10px] text-ink-dim"
-              >
-                <span className="truncate">{attachedName}</span>
+              <input
+                ref={fileRef}
+                type="file"
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={(event) => void takeFile(event.currentTarget)}
+                className="hidden"
+              />
+              <Note text="reads the file here and puts its text into the prompt text that gets recorded — vam uploads nothing">
                 <button
                   type="button"
-                  data-attach-remove
-                  aria-label={`remove ${attachedName}`}
-                  onClick={() => {
-                    setAttachError(null);
-                    onDraftChange(detachFromDraft(draft));
-                  }}
-                  className="flex flex-none cursor-pointer items-center text-ink-faint hover:text-ink"
+                  data-attach
+                  aria-label="attach a text file to this prompt"
+                  onClick={() => fileRef.current?.click()}
+                  className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border border-line-strong text-ink-dim hover:bg-raised hover:text-ink"
                 >
-                  <X size={11} strokeWidth={2} />
+                  <Paperclip size={12} strokeWidth={1.7} />
                 </button>
-              </span>
-            )}
-            {/* The model field. Not a menu of names vam made up — vam has no
+              </Note>
+              {attachedName !== null && (
+                <span
+                  data-attach-chip
+                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[10px] text-ink-dim"
+                >
+                  <span className="truncate">{attachedName}</span>
+                  <button
+                    type="button"
+                    data-attach-remove
+                    aria-label={`remove ${attachedName}`}
+                    onClick={() => {
+                      setAttachError(null);
+                      onDraftChange(detachFromDraft(draft));
+                    }}
+                    className="flex flex-none cursor-pointer items-center text-ink-faint hover:text-ink"
+                  >
+                    <X size={11} strokeWidth={2} />
+                  </button>
+                </span>
+              )}
+              {/* The model field. Not a menu of names vam made up — vam has no
               model API and black-smith does the choosing — but not an inert
               chip either: what is typed here becomes the prompt's first
               line, in the recorded text a person reads. */}
-            <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
-              <input
-                data-model-request
-                value={readModelRequest(draft)}
-                onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
-                placeholder="model"
-                aria-label="model requested in this prompt"
-                className="h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[10px] text-ink-dim outline-none placeholder:text-ink-ghost focus:text-ink"
-              />
-            </Note>
-            {/* The way OUT, shown only while you are in — the moment it is the
+              <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
+                <input
+                  data-model-request
+                  value={readModelRequest(draft)}
+                  onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
+                  placeholder="model"
+                  aria-label="model requested in this prompt"
+                  className="h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[10px] text-ink-dim outline-none placeholder:text-ink-ghost focus:text-ink"
+                />
+              </Note>
+              {/* The way OUT, shown only while you are in — the moment it is the
               thing you need, and no width the rest of the time. It replaces
               the `i` / `I` notes the operator asked to lose: those advertised
               the way in, which you have already found by the time you can
               read them. */}
-            {composing && (
-              <span
-                data-prompt-escape
-                className="flex-none whitespace-nowrap font-mono text-[9.5px] text-ink-faint"
-              >
-                Esc → sidebar
-              </span>
-            )}
-            <span className="min-w-0 flex-1" />
-            {/* The mockup draws a send arrow here. This one says RECORD, in
+              {composing && (
+                <span
+                  data-prompt-escape
+                  className="flex-none whitespace-nowrap font-mono text-[9.5px] text-ink-faint"
+                >
+                  Esc → sidebar
+                </span>
+              )}
+              <span className="min-w-0 flex-1" />
+              {/* The mockup draws a send arrow here. This one says RECORD, in
               the label and in the tooltip, because black-smith has no channel
               into a running agent session — the click appends the prompt to
               the session's log and nothing reads it back out. A button that
               implied delivery would leave you waiting for an answer nobody is
               coming to give. */}
-            <button
-              type="button"
-              data-prompt-record
-              onClick={onSubmit}
-              disabled={sending}
-              aria-busy={sending}
-              aria-label={composerClaim.label}
-              title={composerClaim.title}
-              className={[
-                'flex h-7 w-7 flex-none items-center justify-center rounded-[7px] bg-line-strong text-ink',
-                sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
-              ].join(' ')}
-            >
-              <ArrowUp size={14} strokeWidth={1.7} className={sending ? 'vam-breathe' : ''} />
-            </button>
+              <button
+                type="button"
+                data-prompt-record
+                onClick={onSubmit}
+                disabled={sending}
+                aria-busy={sending}
+                aria-label={composerClaim.label}
+                title={composerClaim.title}
+                className={[
+                  'flex h-7 w-7 flex-none items-center justify-center rounded-[7px] bg-line-strong text-ink',
+                  sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
+                ].join(' ')}
+              >
+                <ArrowUp size={14} strokeWidth={1.7} className={sending ? 'vam-breathe' : ''} />
+              </button>
+            </div>
           </div>
-        </div>
 
-        {/* The mockup's mode row, in place of the slash tags that stood here.
+          {/* The mockup's mode row, in place of the slash tags that stood here.
             The pills are real buttons and the selection is real: it is written
             into the prompt as a leading `mode:` line, the same way the model
             request is, because that is the only thing vam can actually make
@@ -2113,43 +2118,46 @@ export function DetailPanel(props: DetailPanelProps) {
             nothing. Selecting Auto clears the line rather than writing
             "unchanged". The well's geometry is the mockup's: 2px on `raised`,
             24px pills at 11.5px, the current one filled with `segment-on`. */}
-        <div data-mode-row className="flex items-center gap-2">
-          {/* The note hangs off the MODE label, and the label is a <button> so
+          <div data-mode-row className="flex items-center gap-2">
+            {/* The note hangs off the MODE label, and the label is a <button> so
               that a keyboard can reach it. A span with a tabIndex reads as a
               control to a screen reader without behaving like one. */}
-          <Note text="the mode is the factory's, not vam's — see the todo">
-            <button
-              type="button"
-              className="flex-none cursor-default font-mono text-[9.5px] tracking-[0.1em] text-ink-faint"
-            >
-              MODE
-            </button>
-          </Note>
-          <div className="flex items-center gap-0.5 rounded-[8px] border border-line-strong bg-raised p-0.5">
-            {MODES.map((mode) => {
-              // Derived from the draft, never a second copy of it: a mirror
-              // in component state is a thing that can disagree with the text
-              // actually being recorded.
-              const selected = mode === (readModeRequest(draft) || DEFAULT_MODE);
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  data-mode-pill={mode.toLowerCase()}
-                  aria-pressed={selected}
-                  onClick={() => onDraftChange(setModeRequest(draft, mode))}
-                  className={[
-                    'flex h-6 cursor-pointer items-center rounded-[6px] px-2.5 text-[11.5px]',
-                    selected ? 'bg-segment-on font-medium text-ink' : 'text-ink-dim hover:text-ink',
-                  ].join(' ')}
-                >
-                  {mode}
-                </button>
-              );
-            })}
+            <Note text="the mode is the factory's, not vam's — see the todo">
+              <button
+                type="button"
+                className="flex-none cursor-default font-mono text-[9.5px] tracking-[0.1em] text-ink-faint"
+              >
+                MODE
+              </button>
+            </Note>
+            <div className="flex items-center gap-0.5 rounded-[8px] border border-line-strong bg-raised p-0.5">
+              {MODES.map((mode) => {
+                // Derived from the draft, never a second copy of it: a mirror
+                // in component state is a thing that can disagree with the text
+                // actually being recorded.
+                const selected = mode === (readModeRequest(draft) || DEFAULT_MODE);
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    data-mode-pill={mode.toLowerCase()}
+                    aria-pressed={selected}
+                    onClick={() => onDraftChange(setModeRequest(draft, mode))}
+                    className={[
+                      'flex h-6 cursor-pointer items-center rounded-[6px] px-2.5 text-[11.5px]',
+                      selected
+                        ? 'bg-segment-on font-medium text-ink'
+                        : 'text-ink-dim hover:text-ink',
+                    ].join(' ')}
+                  >
+                    {mode}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </aside>
   );
 }

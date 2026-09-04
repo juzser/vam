@@ -21,7 +21,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PaneView } from '../../shared/terminal.js';
+import type { PaneSize, PaneView } from '../../shared/terminal.js';
+import { fitPane, sameSize } from './terminal-size.js';
 
 /**
  * How often the open tab re-reads the pane.
@@ -47,6 +48,79 @@ export const REFRESH_MS = 1_000;
 export type ReadPane = (projectId: string, rowId?: string) => Promise<PaneView>;
 
 /**
+ * Telling tmux how big to draw: `window.api.terminal.resize`, or nothing.
+ *
+ * THE PANE FITS BECAUSE OF THIS AND NOT BECAUSE OF ANY STYLE. `capture-pane`
+ * returns the screen tmux has ALREADY composed, at the size the session was
+ * created with, so a line tmux wrapped at 80 columns is 80 columns of text by
+ * the time it reaches this component. Wrapping, truncation and the column
+ * count are decided in tmux; the only thing on this side that can change them
+ * is saying what the size should be.
+ *
+ * It lands only on a session vam recorded as its own for this project
+ * (`main/terminal/pane.ts`), which is the guard that matters: this is the one
+ * thing the tab does that CHANGES a terminal rather than reading one.
+ */
+export type ResizePane = (
+  projectId: string,
+  columns: number,
+  rows: number,
+  rowId?: string,
+) => Promise<boolean>;
+
+/**
+ * How long a wrapper has to stop moving before tmux is told about it.
+ *
+ * A resize per `ResizeObserver` callback would be a `tmux resize-window`
+ * PROCESS PER ANIMATION FRAME while the pane resizer is dragged. The debounce
+ * and the unchanged-size check are the two halves of not doing that: the
+ * debounce collapses a drag into its last frame, and the check drops even that
+ * one when the pixels moved without the cell count changing -- which is most
+ * of them, since a cell is several pixels wide.
+ */
+export const RESIZE_DEBOUNCE_MS = 120;
+
+/**
+ * The measuring stick: real characters, in the pane's own font, rendered but
+ * not shown.
+ *
+ * A MEASUREMENT AND NOT A RATIO. The advance width of a monospace face is a
+ * property of the face, the size, the platform's hinting and the operator's
+ * zoom -- Geist Mono at 10.5px measures 6.6015625px here, where the
+ * plausible-looking 0.6 of the font size would have said 6.3 and lost a column
+ * every seventeen. Ten characters rather than one because the browser rounds a
+ * rectangle, and a tenth of that rounding is a tenth of the error.
+ */
+const RULER_TEXT = 'M'.repeat(10);
+
+const px = (value: string): number => {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+/**
+ * The pane's content box, in cells -- or `null` while there is no layout to
+ * measure, which is every render before the first paint and every render while
+ * the tab is hidden.
+ *
+ * The padding is subtracted because it is the TEXT that has to fit: a column
+ * counted across the padding is a column that wraps against it.
+ */
+function measurePane(pane: HTMLElement, ruler: HTMLElement): PaneSize | null {
+  const advance = ruler.getBoundingClientRect();
+  const style = globalThis.getComputedStyle(pane);
+  const inset = (start: string, end: string): number =>
+    px(style.getPropertyValue(start)) + px(style.getPropertyValue(end));
+  return fitPane(
+    {
+      width: pane.clientWidth - inset('padding-left', 'padding-right'),
+      height: pane.clientHeight - inset('padding-top', 'padding-bottom'),
+    },
+    { width: advance.width / RULER_TEXT.length, height: advance.height },
+  );
+}
+
+/**
  * What is shown when there is no bridge -- the browser build has no main
  * process behind it. Not an empty pane: vam has not looked, so it may not say
  * there is nothing there.
@@ -64,6 +138,7 @@ export function TerminalTab({
   projectId,
   rowId,
   read,
+  resize,
 }: {
   readonly projectId: string | null;
   /**
@@ -74,6 +149,7 @@ export function TerminalTab({
    */
   readonly rowId?: string | undefined;
   readonly read: ReadPane | undefined;
+  readonly resize: ResizePane | undefined;
 }) {
   /**
    * `null` is "has not answered yet", and it is a state rather than an
@@ -94,8 +170,14 @@ export function TerminalTab({
    * applied when the prop changed.
    */
   const shownFor = useRef(projectId);
+  /** The size tmux was last told, for the session it was told about. */
+  const sent = useRef<PaneSize | null>(null);
   if (shownFor.current !== projectId) {
     shownFor.current = projectId;
+    // The remembered size belongs to the session it was sent for. Keeping it
+    // across a change of project would leave the next session unresized
+    // whenever the two panes happen to be the same shape.
+    sent.current = null;
     if (view !== null && read !== undefined) setView(null);
   }
 
@@ -168,6 +250,54 @@ export function TerminalTab({
     };
   }, [poll, read, projectId]);
 
+  const paneRef = useRef<HTMLElement | null>(null);
+  const rulerRef = useRef<HTMLElement | null>(null);
+  /**
+   * Only a pane that is actually being drawn is measured -- and a pane is
+   * drawn only for a session vam RECORDED as its own for this project. Every
+   * other answer (`not-vam`, `gone`, `ambiguous`, `unavailable`) draws a
+   * sentence and no pane, so there is nothing to fit and nothing is observed.
+   * That is not a nicety: a resize aimed at a session vam cannot prove would
+   * reflow a terminal belonging to work vam has nothing to do with.
+   */
+  const showing = view !== null && view.kind === 'ok';
+
+  useEffect(() => {
+    const pane = paneRef.current;
+    const ruler = rulerRef.current;
+    if (!showing || resize === undefined || projectId === null || pane === null || ruler === null) {
+      return;
+    }
+    let timer: number | undefined;
+    const apply = () => {
+      const size = measurePane(pane, ruler);
+      // `null` is "no layout yet", not "very small". Sending a size derived
+      // from a zero box would resize the session to the clamp floor.
+      if (size === null || sameSize(sent.current, size)) return;
+      sent.current = size;
+      // Fire and forget: the answer is whether tmux did it, and the next
+      // capture shows that better than any message could. A rejected bridge
+      // call must not become an unhandled rejection over a cosmetic ask.
+      // The ROW travels with it, so the session resized is the session whose
+      // screen is being drawn: a project vam started two sessions in has two
+      // panes, and only the session itself knows which one it is in.
+      void resize(projectId, size.columns, size.rows, rowId).catch(() => undefined);
+    };
+    // The observer, and not a window `resize` listener: the pane changes width
+    // when the pane RESIZER is dragged and when a layout preset moves the
+    // canvas strip, neither of which resizes the window. `observe` delivers the
+    // element's initial size, so this is also the first measurement.
+    const observer = new ResizeObserver(() => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(apply, RESIZE_DEBOUNCE_MS);
+    });
+    observer.observe(pane);
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [showing, resize, projectId, rowId]);
+
   // Nothing is focused, so there is no project to ask about and the effect
   // above never asks. Saying "reading the session's screen" here -- which is
   // what the pending state below says -- would be vam claiming to be looking
@@ -239,12 +369,28 @@ export function TerminalTab({
           by no key at all. It is a named <section> rather than a role, so the
           region is the element's own semantics, and nothing is bound to it. */}
       <section
+        ref={paneRef}
         data-terminal-pane
         // biome-ignore lint/a11y/noNoninteractiveTabindex: see above -- a scrollable region is the one case WCAG 2.1.1 requires this
         tabIndex={0}
         aria-label={`terminal output of ${view.name}`}
-        className="vam-no-scrollbar min-h-0 flex-1 overflow-auto rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-[10.5px] text-ink leading-[1.45] focus-visible:outline focus-visible:outline-2 focus-visible:outline-line-strong"
+        className="vam-no-scrollbar relative min-h-0 flex-1 overflow-auto rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-[10.5px] text-ink leading-[1.45] focus-visible:outline focus-visible:outline-2 focus-visible:outline-line-strong"
       >
+        {/* The ruler. It is INSIDE the pane so that it inherits the exact font
+            family, size and line height the text is drawn in -- measuring a
+            character anywhere else would measure a different character. It is
+            transparent and out of the flow rather than `display: none`,
+            because a box that is not laid out has no size to read; it is
+            hidden from assistive tech and from the pointer, so nothing but the
+            measurement notices it. */}
+        <span
+          ref={rulerRef}
+          data-terminal-ruler
+          aria-hidden="true"
+          className="pointer-events-none absolute top-0 left-0 whitespace-pre opacity-0"
+        >
+          {RULER_TEXT}
+        </span>
         <pre className="whitespace-pre">{view.text}</pre>
       </section>
     </div>

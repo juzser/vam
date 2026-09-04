@@ -1,5 +1,5 @@
 /**
- * The terminal channel: one read, answered by a `PaneView`.
+ * The terminal channels: one read, answered by a `PaneView`, and one resize.
  *
  * Bare, never an `IpcResult`, for the reason `usage/ipc.ts` and
  * `clipboard/ipc.ts` answer bare: `PaneView` already carries its own failure
@@ -12,13 +12,13 @@
  * requirement for this tab, and the reason main holds no timer of its own.
  */
 
-import type { PaneView } from '../../shared/terminal.js';
+import { isPaneSize, type PaneView } from '../../shared/terminal.js';
 import { CHANNELS } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
 import { readPublishedPanes } from '../sources/claude-code/session-pane.js';
 import { defaultSessionsRoot } from '../sources/claude-code/session-status.js';
 import type { TmuxRun } from '../sources/tmux/spawn.js';
-import { readSessionPane } from './pane.js';
+import { readSessionPane, resizeSessionPane } from './pane.js';
 
 /**
  * A project id is a digest (`sources/claude-code/project-id.ts`), and it
@@ -67,6 +67,48 @@ export function registerTerminalIpc(
     return readSessionPane(
       run,
       projectId,
+      rowId,
+      rowId === undefined ? undefined : await readPanes(),
+    );
+  });
+
+  /**
+   * The fit. The renderer measures its wrapper in pixels, turns that into
+   * cells and asks for it here -- and it is asked for rather than obeyed.
+   *
+   * BOTH BOUNDS ARE RE-CHECKED, against the same constants the renderer used
+   * (`shared/terminal.ts`), because this is the first channel that CHANGES
+   * something on the operator's tmux server. A size is an allocation request
+   * to a program on their machine, and the renderer is the least trusted
+   * process in the app; that its own arithmetic clamps is not a reason for
+   * this to take its word for the result.
+   *
+   * `false` covers every refusal, including a session vam did not start. There
+   * is nothing on the tab to draw a reason into, and a pane that cannot be
+   * resized is one whose own `PaneView` already says why.
+   */
+  ipcMain.handle(CHANNELS.terminalResize, async (_event, ...args: unknown[]): Promise<boolean> => {
+    const [projectId, columns, rows, rowId] = args;
+    if (
+      args.length < 3 ||
+      args.length > 4 ||
+      typeof projectId !== 'string' ||
+      projectId.length > MAX_PROJECT_ID_LENGTH ||
+      typeof columns !== 'number' ||
+      typeof rows !== 'number' ||
+      !isPaneSize({ columns, rows }) ||
+      (rowId !== undefined && (typeof rowId !== 'string' || rowId.length > MAX_PROJECT_ID_LENGTH))
+    ) {
+      return false;
+    }
+    // The row travels with the ask for the read's reason and one more: the
+    // session being resized has to be the session whose screen is on screen,
+    // and the published pane is what makes that per SESSION rather than per
+    // project (`terminal/pane.ts`).
+    return resizeSessionPane(
+      run,
+      projectId,
+      { columns, rows },
       rowId,
       rowId === undefined ? undefined : await readPanes(),
     );

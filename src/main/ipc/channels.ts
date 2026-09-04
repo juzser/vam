@@ -62,6 +62,14 @@ export const CHANNELS = {
    */
   terminalRead: 'vam:terminal:read',
   /**
+   * The size the Terminal tab's pane can show, in cells. Answers a bare
+   * boolean -- did vam resize a session it could prove was its own -- because
+   * there is nowhere on the tab to draw a reason: the screen itself already
+   * says what state the session is in. Invoked only while the tab is open, and
+   * only when the measured size has actually changed.
+   */
+  terminalResize: 'vam:terminal:resize',
+  /**
    * The directory picker. Answers BARE -- a path or `null` -- never an
    * `IpcResult`: "which directory" has exactly two answers and a cancelled
    * dialog is one of them, not a failure to report in a source's words. There

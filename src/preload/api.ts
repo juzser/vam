@@ -130,6 +130,14 @@ export type TerminalApi = {
    * knows which one it is in (`main/sources/claude-code/session-pane.ts`).
    */
   read(projectId: string, rowId?: string): Promise<PaneView>;
+  /**
+   * How big the pane can draw, in cells. tmux composes the screen at the
+   * session's own size, so this is the only thing that makes a captured screen
+   * fit the wrapper. It is aimed by the SAME pairing the read is -- the pane
+   * the session published, checked against vam's own listing -- because this
+   * one CHANGES a terminal, and the wrong target reflows someone else's work.
+   */
+  resize(projectId: string, columns: number, rows: number, rowId?: string): Promise<boolean>;
 };
 
 /**
@@ -144,6 +152,10 @@ export function createTerminalApi(ipc: InvokerLike): TerminalApi {
       (rowId === undefined
         ? ipc.invoke(CHANNELS.terminalRead, projectId)
         : ipc.invoke(CHANNELS.terminalRead, projectId, rowId)) as Promise<PaneView>,
+    resize: (projectId, columns, rows, rowId) =>
+      (rowId === undefined
+        ? ipc.invoke(CHANNELS.terminalResize, projectId, columns, rows)
+        : ipc.invoke(CHANNELS.terminalResize, projectId, columns, rows, rowId)) as Promise<boolean>,
   };
 }
 

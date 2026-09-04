@@ -166,6 +166,36 @@ export function capturePaneArgv(name: string): readonly string[] {
 }
 
 /**
+ * Set the size of the session's window, in cells.
+ *
+ * WHY THIS EXISTS AT ALL. `capture-pane` returns the screen tmux has ALREADY
+ * composed, at the size the session was created with -- 80x24 for a detached
+ * session nobody sized. Every line longer than that was wrapped by tmux before
+ * vam saw it, so no styling of the wrapper can make the screen fit it. Telling
+ * tmux the size is the only thing that does.
+ *
+ * A TARGET-WINDOW, so the string is the `capture-pane` form and not the
+ * `kill-session` one: `=name:` names the session exactly (the `=` stops tmux
+ * resolving `vam-a1` onto `vam-a1b2c3` by prefix and then by fnmatch) and the
+ * colon is what keeps tmux reading the name as a session rather than as a
+ * window of the current one. Omitting the window index leaves tmux with the
+ * session's current window, which for a vam session is the only one it has.
+ *
+ * The numbers are formatted here and bounded by the caller
+ * (`shared/terminal.ts`): they originate in the renderer, and a resize is the
+ * first thing vam does that CHANGES a session on the operator's server.
+ *
+ * MEASURED, on a real tmux over a private `-L` socket, because none of it may
+ * be assumed: a detached session nobody sized reports `80x24` -- which is the
+ * premise of this whole file, since that is the width every captured line was
+ * already wrapped at -- and `resize-window -t '=name:' -x 137 -y 41` exits 0
+ * and moves the window to exactly that, with no client attached.
+ */
+export function resizeWindowArgv(name: string, columns: number, rows: number): readonly string[] {
+  return ['resize-window', '-t', paneTarget(name), '-x', String(columns), '-y', String(rows)];
+}
+
+/**
  * Type the operator's text into the pane, LITERALLY.
  *
  * `-l` is the whole of this function's correctness and it is not obvious.

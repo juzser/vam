@@ -26,11 +26,12 @@
  * nobody set reads back as the empty string, which is exactly that answer.
  */
 
-import type { PaneView } from '../../shared/terminal.js';
+import type { PaneSize, PaneView } from '../../shared/terminal.js';
 import { sessionIdOf } from '../sources/claude-code/deliver.js';
 import {
   listVamSessions,
   readPane,
+  resizeWindow,
   type TmuxRun,
   type TmuxSession,
 } from '../sources/tmux/spawn.js';
@@ -63,6 +64,34 @@ export function matchVamSession(sessions: readonly TmuxSession[], projectId: str
 }
 
 /**
+ * WHICH tmux session a row is about -- the one rule, used by everything that
+ * reads or touches a session.
+ *
+ * THE PUBLISHED PANE FIRST, and it is what makes `ambiguous` rare instead of
+ * usual: a project with two sessions vam started has two panes, and only the
+ * session itself knows which one it is in (`sources/claude-code/
+ * session-pane.ts`). It is checked against vam's own listing, so a pane the
+ * operator started -- published in the same directory -- is never acted on.
+ * The project tag is the fallback for a session that published nothing.
+ *
+ * One function rather than one per caller: a second pairing rule would be a
+ * second answer to "whose terminal is this", and the callers that CHANGE a
+ * session are exactly the ones that must not have their own opinion.
+ */
+export function targetSession(
+  sessions: readonly TmuxSession[],
+  projectId: string,
+  rowId: string | undefined,
+  panes: ReadonlyMap<string, string> | undefined,
+): SessionMatch {
+  const published = rowId === undefined ? undefined : panes?.get(sessionIdOf(rowId));
+  if (published !== undefined && sessions.some((session) => session.name === published)) {
+    return { kind: 'one', name: published };
+  }
+  return matchVamSession(sessions, projectId);
+}
+
+/**
  * The screen for `projectId`, or the honest reason there is none.
  *
  * A `no-such-session` on the capture is reported as `gone` rather than as a
@@ -82,20 +111,7 @@ export async function readSessionPane(
   if (listed.kind === 'unavailable') {
     return { kind: 'unavailable', error: listed.error };
   }
-  // THE PUBLISHED PANE FIRST, and it is what makes `ambiguous` rare instead of
-  // usual: a project with two sessions vam started has two panes, and only the
-  // session itself knows which one it is in (`sources/claude-code/
-  // session-pane.ts`). Checked against vam's own listing, so a pane the
-  // operator started -- published in the same directory -- is never drawn.
-  const published = rowId === undefined ? undefined : panes?.get(sessionIdOf(rowId));
-  if (published !== undefined && listed.sessions.some((s) => s.name === published)) {
-    const screen = await readPane(run, published);
-    if (screen.kind === 'ok') return { kind: 'ok', name: published, text: screen.text };
-    return screen.error.code === 'no-such-session'
-      ? { kind: 'gone' }
-      : { kind: 'unavailable', error: screen.error };
-  }
-  const match = matchVamSession(listed.sessions, projectId);
+  const match = targetSession(listed.sessions, projectId, rowId, panes);
   if (match.kind === 'none') {
     return { kind: 'not-vam' };
   }
@@ -109,4 +125,43 @@ export async function readSessionPane(
   return pane.error.code === 'no-such-session'
     ? { kind: 'gone' }
     : { kind: 'unavailable', error: pane.error };
+}
+
+/**
+ * Make the session's screen the size the pane can show -- and only ever a
+ * session vam can PROVE it started for this project.
+ *
+ * THIS IS THE FIRST THING IN VAM THAT CHANGES A TMUX SESSION rather than
+ * reading one, so the pairing above stops being a display decision and starts
+ * being a safety one. vam shares one server with whatever the operator is
+ * running; a resize aimed by anything looser than the recorded `@vam-project`
+ * would reflow a terminal vam has no business touching, and the operator would
+ * see their own work reformat itself for no reason they could trace.
+ *
+ * `none` and `ambiguous` therefore both do NOTHING, and the second is the one
+ * worth naming: the tab draws no screen when two sessions answer to one
+ * project, so there is nothing on it to fit, and picking one of the two would
+ * be a coin toss landing in a real terminal.
+ *
+ * The answer is a plain boolean because the only caller is the pane fitting
+ * itself: there is nothing on screen that a reason could be drawn into, and
+ * every refusal here is either normal (no session) or already visible in the
+ * pane's own `PaneView`.
+ */
+export async function resizeSessionPane(
+  run: TmuxRun,
+  projectId: string,
+  size: PaneSize,
+  rowId?: string,
+  panes?: ReadonlyMap<string, string>,
+): Promise<boolean> {
+  const listed = await listVamSessions(run);
+  if (listed.kind === 'unavailable') return false;
+  // THE SAME `targetSession` THE READ USES, and that is the whole safety
+  // argument: the session being resized is the session whose screen is on
+  // screen. A second rule here could aim the resize at a terminal the tab is
+  // not showing, and nothing in the app would look wrong while it happened.
+  const match = targetSession(listed.sessions, projectId, rowId, panes);
+  if (match.kind !== 'one') return false;
+  return (await resizeWindow(run, match.name, size)) === null;
 }
