@@ -173,7 +173,7 @@ export async function listVamSessions(run: TmuxRun): Promise<TmuxNames> {
  */
 export async function createVamSession(
   run: TmuxRun,
-  input: { name: string; cwd: string; command: string },
+  input: { name: string; cwd: string; command: readonly string[] },
 ): Promise<SourceError | null> {
   const { failure, stderr } = await run(newSessionArgv(input));
   return failure === null

@@ -23,8 +23,13 @@ import { createVamSession, type TmuxRun } from '../tmux/spawn.js';
 import type { LiveAgent } from './agents.js';
 import { projectIdOf } from './project-id.js';
 
-/** What a new session runs. Bare `claude` -- an interactive session, not a query. */
-const NEW_SESSION_COMMAND = 'claude';
+/**
+ * What a new session runs. Bare `claude` -- an interactive session, not a
+ * query. An ARRAY of words, not a string: tmux runs a one-argument
+ * `shell-command` through `sh -c` and only a multi-argument one directly, so
+ * the split is what keeps a shell out of the path (`tmux/argv.ts`).
+ */
+const NEW_SESSION_COMMAND = ['claude'] as const;
 
 /**
  * Resolves to `null` when the session started, and to the `SourceError`

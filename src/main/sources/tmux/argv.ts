@@ -14,9 +14,19 @@
  * There is no flag, no permission and no tmux verb that changes that.
  *
  * As in `deliver.ts`: `execFile` with an argv ARRAY and no shell, so a session
- * name, a path or a command the operator typed has no meaning beyond being a
- * name, a path or a command. Nothing here needs quoting, and nothing here may
- * ever be assembled into a string.
+ * name or a path the operator typed has no meaning beyond being a name or a
+ * path. Nothing here needs quoting, and nothing here may ever be assembled
+ * into a string.
+ *
+ * THAT IS NOT THE WHOLE STORY FOR A COMMAND, and the difference is the one
+ * thing in this file worth reading twice. `execFile` running no shell on VAM'S
+ * side does not mean no shell runs: tmux takes a `shell-command` given as ONE
+ * argument and hands it to `sh -c`, and only a `shell-command` given as
+ * MULTIPLE arguments is executed directly. So passing a command through as a
+ * single array element -- which looks like the safe thing, and reads like it --
+ * is precisely what would let `claude; anything` run both halves. The command
+ * is therefore an argv array here too, spread into tmux's own argv, and each
+ * element reaches the exec'd program as one word whatever it contains.
  */
 
 /**
@@ -63,15 +73,35 @@ const target = (name: string): string => `=${name}`;
 
 /**
  * Create a DETACHED session: vam is not a terminal and has nothing to attach
- * to. The command is the last element -- one element, never interpolated.
+ * to. The command is SPREAD across the trailing elements, so tmux execs it
+ * directly instead of running it through `sh -c` (see the module note).
+ *
+ * The two refusals are the price of that shape. An empty command would leave
+ * tmux to start the operator's login shell, which is not what any caller here
+ * means. And a first word beginning with `-` would be read by tmux as one of
+ * `new-session`'s own options: there is no `--` terminator in this argv,
+ * because whether tmux consumes one before a `shell-command` is not something
+ * vam can verify without creating a real session on the operator's server, and
+ * a guess there would break every session vam starts.
  */
 export function newSessionArgv(input: {
   name: string;
   cwd: string;
-  command: string;
+  command: readonly string[];
 }): readonly string[] {
-  return ['new-session', '-d', '-s', input.name, '-c', input.cwd, input.command];
+  const [program] = input.command;
+  if (program === undefined) {
+    return failCommand('the command is empty, and tmux would start a login shell instead');
+  }
+  if (program.startsWith('-')) {
+    return failCommand(`tmux would read \`${program}\` as an option, not as the program to run`);
+  }
+  return ['new-session', '-d', '-s', input.name, '-c', input.cwd, ...input.command];
 }
+
+const failCommand = (why: string): never => {
+  throw new Error(`vam will not build a tmux new-session argv: ${why}`);
+};
 
 /** Does this session exist? Exit status is the whole answer. */
 export function hasSessionArgv(name: string): readonly string[] {

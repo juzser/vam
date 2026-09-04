@@ -103,7 +103,7 @@ describe('createVamSession', () => {
     const created = await createVamSession(run, {
       name: 'vam-demo-a1b2c3',
       cwd: '/w/demo',
-      command: 'claude',
+      command: ['claude'],
     });
     expect(created).toBeNull();
     expect(run.calls).toEqual([
@@ -119,7 +119,7 @@ describe('createVamSession', () => {
     const created = await createVamSession(run, {
       name: 'vam-demo-a1b2c3',
       cwd: '/w/demo',
-      command: 'claude',
+      command: ['claude'],
     });
     expect(created?.code).toBe('session-exists');
   });
