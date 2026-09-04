@@ -44,16 +44,32 @@ export const SIDEBAR_MAX = 480;
 export const DETAIL_MIN = 320;
 
 /**
- * Symmetric to the sidebar: past this, the canvas becomes subordinate to a
- * detail pane rather than the other way around (epic.md §4.2).
- */
-export const DETAIL_MAX = 640;
-
-/**
  * The canvas must keep a session's fan legible; below ~360px the grid still
  * renders but is no longer a canvas (epic.md §4.2).
  */
 export const CANVAS_MIN = 360;
+
+/**
+ * How wide a detail pane may be STORED at.
+ *
+ * It used to be a flat 640, "symmetric to the sidebar: past this, the canvas
+ * becomes subordinate to a detail pane rather than the other way around"
+ * (epic.md §4.2). That concern is real and is now enforced where it actually
+ * lives — `dragCeiling` reserves `canvasReserved(layout)` out of the viewport
+ * on every drag and every render, so the canvas keeps its floor at any window
+ * size no matter what this constant says. With that guarantee in place a flat
+ * 640 was doing a second, different job badly: on a 1600px window it stopped
+ * the pane at 640 while 976 could have been given away without the canvas
+ * losing a pixel, and the operator asked twice for that room.
+ *
+ * So the ceiling is raised to the only bound left that is about the pane
+ * rather than about the window: the narrowest window in which all three
+ * columns fit at their floors. A pane stored wider than an entire
+ * three-column app is not a wide pane, it is a stored width no layout could
+ * ever honour. Derived from the three floors rather than picked, so it moves
+ * when they do.
+ */
+export const DETAIL_MAX = SIDEBAR_MIN + DETAIL_MIN + CANVAS_MIN;
 
 /**
  * Today's hardcoded values (`SessionList.tsx:154` and `DetailPanel.tsx:146`),

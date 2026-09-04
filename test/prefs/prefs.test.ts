@@ -10,7 +10,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CanvasModel } from '../../src/renderer/domain/model.js';
 import { DEMO_MODEL } from '../../src/renderer/fixtures/demo.js';
-import { DEFAULT_PANES, renderedWidth } from '../../src/renderer/prefs/panes.js';
+import { DEFAULT_PANES, DETAIL_MAX, renderedWidth } from '../../src/renderer/prefs/panes.js';
 import {
   applyIcons,
   EMPTY_PREFS,
@@ -300,7 +300,7 @@ describe('readPanes is defensive on every field', () => {
 
   it('clamps a number larger than any screen', () => {
     const store = fake(JSON.stringify({ panes: { sidebar: 264, detail: 1e9 } }));
-    expect(readPrefs(store, NOW).panes.detail).toBe(640);
+    expect(readPrefs(store, NOW).panes.detail).toBe(DETAIL_MAX);
   });
 
   it('defaults a NaN-shaped (string) field', () => {

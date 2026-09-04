@@ -147,18 +147,29 @@ describe("the detail pane's ceiling is the layout's, not one constant", () => {
   const STORED = { sidebar: DEFAULT_PANES.sidebar, detail: 4000 };
   const VIEWPORT = 1400;
 
-  it('holds the detail pane at DETAIL_MAX where the canvas is the main column', () => {
+  it('reserves the canvas its own floor where the canvas is the main column', () => {
     expect(canvasIsMain(ALL_VISIBLE)).toBe(true);
-    expect(layoutWidths(ALL_VISIBLE, STORED, VIEWPORT).detail).toBe(DETAIL_MAX);
+    const { detail } = layoutWidths(ALL_VISIBLE, STORED, VIEWPORT);
+    // The pane takes everything the window has left once the sidebar's own
+    // stored width and the canvas's floor are paid for — no flat cap in
+    // between. `DETAIL_MAX` is the ceiling on a STORED width, and at this
+    // viewport it is not what binds; the canvas's floor is.
+    expect(detail).toBe(VIEWPORT - STORED.sidebar - CANVAS_MIN);
+    expect(detail).toBeLessThanOrEqual(DETAIL_MAX);
   });
 
-  it('lets it past DETAIL_MAX in focusResponse, where the canvas is a strip', () => {
+  it('reserves only the strip in focusResponse, where the canvas is one', () => {
     expect(canvasIsMain(LAYOUTS.focusResponse)).toBe(false);
     const { sidebar, detail } = layoutWidths(LAYOUTS.focusResponse, STORED, VIEWPORT);
-    expect(detail).toBeGreaterThan(DETAIL_MAX);
     // Derived, not a second magic number: what is preserved is the sidebar's
-    // width and the strip's own floor, and the detail pane takes the rest.
+    // width and the strip's own floor, and the detail pane takes the rest —
+    // which is `CANVAS_MIN - CANVAS_STRIP` more than the default layout gives.
     expect(detail).toBe(VIEWPORT - sidebar - CANVAS_STRIP);
+    expect(detail).toBeGreaterThan(layoutWidths(ALL_VISIBLE, STORED, VIEWPORT).detail);
+  });
+
+  it('lets focusResponse past DETAIL_MAX itself, once the window is wide enough', () => {
+    expect(layoutWidths(LAYOUTS.focusResponse, STORED, 2000).detail).toBeGreaterThan(DETAIL_MAX);
   });
 
   it("never eats the strip's floor, however wide the detail pane is stored", () => {
@@ -216,11 +227,56 @@ describe('a width stored under the old cap survives the read', () => {
     expect(prefs.focusViewportShare).toBe(0.42);
   });
 
-  it('renders that stored width past the old cap once the layout allows it', () => {
+  it('renders that stored width past the old 640 cap, in the default layout', () => {
     const prefs = readPrefs(storageHolding({ panes: { sidebar: 264, detail: 900 } }));
-    expect(layoutWidths(ALL_VISIBLE, prefs.panes, 1400).detail).toBe(DETAIL_MAX);
-    expect(layoutWidths(LAYOUTS.focusResponse, prefs.panes, 1400).detail).toBeGreaterThan(
-      DETAIL_MAX,
-    );
+    const { detail } = layoutWidths(ALL_VISIBLE, prefs.panes, 1400);
+    expect(detail).toBeGreaterThan(640);
+    expect(detail).toBe(1400 - prefs.panes.sidebar - CANVAS_MIN);
+    expect(layoutWidths(LAYOUTS.focusResponse, prefs.panes, 1400).detail).toBeGreaterThan(detail);
+  });
+});
+
+/**
+ * The operator asked twice for more room on the right, and the two numbers
+ * that answer are not the same number.
+ *
+ * `DEFAULT_PANES.detail` is where the pane OPENS and must not move: nobody
+ * asked for a wider pane on launch, they asked to be able to drag one. So the
+ * default is pinned to its literal here — a derived expectation would follow
+ * the constant wherever it went and prove nothing.
+ *
+ * `DETAIL_MAX` is what the drag hits, and it is what moves. What has to
+ * survive is stated as arithmetic rather than as a second magic number: the
+ * canvas keeps `CANVAS_MIN` in every window, whatever the pane is stored at.
+ */
+describe('the detail pane drags wider than 640 without swallowing the canvas', () => {
+  /** The width the pane opens at, unchanged by any of this. */
+  it('opens at the width it has always opened at', () => {
+    expect(DEFAULT_PANES.detail).toBe(408);
+    expect(layoutWidths(ALL_VISIBLE, DEFAULT_PANES, 1400).detail).toBe(408);
+  });
+
+  it('lets a drag past the old 640 ceiling in the default layout', () => {
+    const dragged = layoutWidths(ALL_VISIBLE, { sidebar: SIDEBAR_MIN, detail: 4000 }, 1600).detail;
+    expect(dragged).toBeGreaterThan(640);
+  });
+
+  it('still leaves the canvas a canvas, at every width and every window', () => {
+    for (const viewport of [900, 1200, 1400, 1800, 2600]) {
+      const stored = { sidebar: SIDEBAR_MIN, detail: 4000 };
+      const { sidebar, detail } = layoutWidths(ALL_VISIBLE, stored, viewport);
+      expect(viewport - sidebar - detail).toBeGreaterThanOrEqual(CANVAS_MIN);
+    }
+  });
+
+  /**
+   * The ceiling is derived, not chosen: a pane wider than the narrowest window
+   * in which all three columns fit is one pane wider than a whole three-column
+   * app, which is where "the detail pane has swallowed vam" stops depending on
+   * the viewport.
+   */
+  it('caps a stored width at the narrowest three-column window', () => {
+    expect(DETAIL_MAX).toBe(SIDEBAR_MIN + DETAIL_MIN + CANVAS_MIN);
+    expect(clampPaneWidth('detail', 4000)).toBe(DETAIL_MAX);
   });
 });
