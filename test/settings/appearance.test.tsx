@@ -168,6 +168,70 @@ describe('a binding is edited by pressing the key', () => {
     expect(capture()).toBeNull();
   });
 
+  /**
+   * The same subject as the test above, driven the way an operator drives it.
+   *
+   * The isolated version passes against the bug for two reasons that both
+   * disappear in a real window: it dispatches the keydown ON the box, so focus
+   * is irrelevant, and it mounts the overlay alone, so `Canvas`'s window
+   * listener does not exist. Armed and unfocused, the box was DEAF — every key
+   * but Escape was swallowed by the overlay guard, and Escape closed settings.
+   */
+  it('arms the box with the keyboard in it, so the first Escape cancels and the second closes', () => {
+    render(<Canvas model={MODEL} />);
+    const press = (key: string) =>
+      act(() => {
+        (document.activeElement ?? window).dispatchEvent(
+          new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+        );
+      });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'Keyboard' }));
+    fireEvent.click(slot('rename', 0) as HTMLElement);
+
+    // The whole bug in one assertion: without it the capture box is armed with
+    // focus on <body>, outside React's root, where neither guard can run.
+    expect(document.activeElement, 'the armed box must hold the keyboard').toBe(capture());
+
+    press('Escape');
+    expect(document.querySelector('[data-settings-overlay]')).not.toBeNull();
+    expect(capture()).toBeNull();
+    press('Escape');
+    expect(document.querySelector('[data-settings-overlay]')).toBeNull();
+  });
+
+  it('takes a real keystroke at the armed box, dispatched where the keyboard is', () => {
+    render(<Canvas model={MODEL} />);
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'Keyboard' }));
+    fireEvent.click(slot('rename', 0) as HTMLElement);
+    act(() => {
+      (document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'q', bubbles: true, cancelable: true }),
+      );
+    });
+    expect(capture(), 'a captured key closes the box').toBeNull();
+    expect(
+      [...document.querySelectorAll('[data-settings-keys]')].map((el) => el.textContent),
+    ).toContain('q');
+  });
+
+  /** `onBlur` on the capture box was dead code until it had focus to lose:
+   *  clicking a second slot now fires blur before click, so the later
+   *  `setCapturing` has to win. Exercised rather than reasoned about. */
+  it('moves the armed box when a second slot is clicked', () => {
+    open();
+    fireEvent.click(slot('rename', 0) as HTMLElement);
+    fireEvent.click(slot('icon', 0) as HTMLElement);
+    expect(capture()).not.toBeNull();
+    expect(slot('rename', 0)).not.toBeNull();
+    expect(slot('icon', 0)).toBeNull();
+  });
+
   it('refuses a reserved key and says which it was', () => {
     const { onChange } = open();
     fireEvent.click(slot('rename', 0) as HTMLElement);
@@ -250,11 +314,14 @@ describe('the captured key is really in force', () => {
 });
 
 /**
- * Where an `out` text size belongs, by the argument the settings spec used to
- * keep focus zoom OUT of Appearance: focus zoom is how the canvas viewport
- * behaves, not how anything is painted. A text size is the other case — the
- * paint, alongside the theme and the palette — and it is not a canvas setting,
- * since two of the four layouts hide the canvas while still drawing `out`.
+ * Where an `out` text size belongs: with the paint, alongside the theme and the
+ * palette. It is not a canvas setting — `out` is the right pane, and layouts
+ * that hide the canvas still draw it.
+ *
+ * This used to be asserted twice, the second time as "not in the same section
+ * as focus zoom". Both that control and the Canvas section it lived in are
+ * gone, so the second assertion has no subject left and is deleted rather than
+ * pointed at a `querySelector` that now returns null and could not fail.
  */
 describe('the out text size is an appearance setting', () => {
   const control = () => screen.getByLabelText('out text size');
@@ -262,11 +329,6 @@ describe('the out text size is an appearance setting', () => {
   it('lives in Appearance, beside the theme and the colours', () => {
     open();
     expect(control().closest('section')?.querySelector('h2, h3')?.textContent).toBe('appearance');
-    // Not in Canvas: `out` is the right pane, and it is drawn by layouts that
-    // hide the canvas entirely.
-    expect(screen.getByText('focus zoom').closest('section')).not.toBe(
-      control().closest('section'),
-    );
   });
 
   it('shows the size in force and writes the one you pick', () => {

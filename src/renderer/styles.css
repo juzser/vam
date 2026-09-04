@@ -303,7 +303,10 @@ body {
   background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
-  /* 12px is orca's workhorse size; 13px is reserved for titles. */
+  /* 12px is orca's workhorse size; 13px is reserved for titles. A fourth
+     step, 15px, is drawn by the settings overlay's section headings only:
+     they head four labels already at 13px and had nothing to out-rank them
+     with. Recorded here rather than absorbed silently. */
   font-size: 12px;
   -webkit-font-smoothing: antialiased;
   /* This is a keyboard tool. A stray double-click that selects half the canvas
@@ -697,4 +700,24 @@ body {
 }
 .vam-no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/*
+ * A colour swatch drawn as a disc.
+ *
+ * `input[type="color"]` paints its fill in a shadow part, so `border-radius` on
+ * the element itself rounds nothing — Chromium honours it only on
+ * `::-webkit-color-swatch`, and the renderer is Chromium, so there is no
+ * `::-moz-` twin to write. Structural only: the fill is operator data and the
+ * ring that identifies the control is a Tailwind token on the element.
+ */
+.vam-swatch {
+  appearance: none;
+}
+.vam-swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.vam-swatch::-webkit-color-swatch {
+  border: none;
+  border-radius: 9999px;
 }
