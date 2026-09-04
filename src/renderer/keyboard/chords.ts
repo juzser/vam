@@ -134,10 +134,8 @@ export type KeyAction =
   | { readonly kind: 'icon' }
   /** `x` — close the focused session. */
   | { readonly kind: 'close' }
-  /** `o` — start a new session, the way `o` opens a new line. Bound plain
-      because vam is browser-tested for now; once it runs in an Electron
-      shell (like orca) the intended chord is `Mod-t`, which a desktop
-      window can capture and a browser tab cannot. */
+  /** `o` / `Mod-n` — start a new session. `o` the way `o` opens a new line,
+      and `Mod-n` because that is what "new" is bound to everywhere else. */
   | { readonly kind: 'newSession' }
   /** `F` — open or close the sidebar's filter popover. Shift-f, because
       plain `f` is already the jump-label move and this is its stronger,
@@ -261,6 +259,17 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // `src/main/menu.ts` releases that one item at startup; without it this
   // binding would be dead in the packaged app while passing every test here.
   'Mod-w': { kind: 'close' },
+  // And the same shape for creating one: `o` is the vim gesture, `Mod-n` is
+  // the chord every application on the machine already spells "new". Both, not
+  // one — an operator whose hands are on the prompt box reaches for Cmd-N, and
+  // an operator navigating the canvas reaches for `o`.
+  //
+  // Free: plain `n` is `searchNext` and stays that way, since `normalizeKey`
+  // gives a modified letter its own `Mod-` spelling. Deliberately reachable
+  // from inside the prompt box — the tab chords let modifier keystrokes past
+  // the INPUT|TEXTAREA guard, and a Cmd chord produces no character on any layout,
+  // so it cannot be a keystroke the operator meant for the text.
+  'Mod-n': { kind: 'newSession' },
   // Vim's own "shift this leftwards / rightwards" — literally what moving a
   // side pane's boundary is. A real Shift+, / Shift+. keydown normalizes to
   // the browser-applied `<` / `>` here, distinct from the plain `,` above

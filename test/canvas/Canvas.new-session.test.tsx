@@ -9,11 +9,12 @@
  * create must call nothing at all, not call and then apologise.
  */
 
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasSource } from '../../src/renderer/canvas/source.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import { buildKeySheet } from '../../src/renderer/keyboard/keysheet.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
 
 const session = (id: string): Session => ({
@@ -41,9 +42,9 @@ async function clickAsync(label: string) {
   });
 }
 
-async function pressAsync(key: string) {
+async function pressAsync(key: string, modifiers: KeyboardEventInit = {}) {
   await act(async () => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...modifiers }));
   });
 }
 
@@ -194,5 +195,77 @@ describe('creating a session with `o`', () => {
     await pressAsync('o');
     expect(statusBar()).toContain('session-exists');
     expect(statusBar()).not.toMatch(/^started/i);
+  });
+});
+
+/**
+ * `Mod-n` — the same action under the chord every application already spells
+ * "new". ALONGSIDE `o`, not instead of it: `o` is the vim gesture the rest of
+ * this grammar is built on, and the two are one binding with two keys, the way
+ * `close` already holds `x` and `Mod-w`.
+ *
+ * Asserted through `buildKeySheet` rather than against a written-out list,
+ * because the sheet is generated: a binding that reached the table without a
+ * label cannot reach the sheet, and a list written here would pass either way.
+ */
+describe('creating a session with `Mod-n`', () => {
+  it('starts a session, exactly as `o` does', async () => {
+    const created: [string, string][] = [];
+    const { source, wrote } = sourceWith(async (projectId, title) => {
+      created.push([projectId, title]);
+    });
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('n', { metaKey: true });
+    expect(created).toEqual([['p1', 'alpha']]);
+    expect(wrote.count).toBe(1);
+  });
+
+  it('leaves plain `n` to the search, which is a different action', async () => {
+    const created: string[] = [];
+    const { source } = sourceWith(async (projectId) => void created.push(projectId));
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('n');
+    expect(created).toEqual([]);
+  });
+
+  /**
+   * `#154` let modifier chords past the `INPUT|TEXTAREA` early return, so this
+   * is a decision rather than an inheritance: mid-prompt, `Mod-n` DOES start a
+   * session. A Cmd chord produces no character on any layout, so it cannot be
+   * something the operator meant to type; and the moment you want another
+   * session is usually while you are already writing to one. The draft is not
+   * touched — starting a session neither sends nor clears it.
+   */
+  it('starts one from inside the prompt box, without disturbing the draft', async () => {
+    const created: string[] = [];
+    const { source } = sourceWith(async (projectId) => void created.push(projectId));
+    render(<Canvas model={MODEL} source={source} />);
+    const box = document.querySelector('textarea');
+    expect(box).not.toBeNull();
+    await act(async () => {
+      fireEvent.change(box as HTMLTextAreaElement, { target: { value: 'half a thought' } });
+    });
+    await act(async () => {
+      (box as HTMLTextAreaElement).focus();
+      fireEvent.keyDown(box as HTMLTextAreaElement, { key: 'n', metaKey: true, bubbles: true });
+    });
+    expect(created).toEqual(['p1']);
+    expect((box as HTMLTextAreaElement).value).toBe('half a thought');
+  });
+
+  it('does nothing while an overlay owns the keyboard', async () => {
+    const created: string[] = [];
+    const { source } = sourceWith(async (projectId) => void created.push(projectId));
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('?');
+    expect(document.querySelector('[data-key-sheet]')).not.toBeNull();
+    await pressAsync('n', { metaKey: true });
+    expect(created).toEqual([]);
+  });
+
+  it('appears in the generated key sheet, next to `o`', () => {
+    const rows = buildKeySheet().flatMap((group) => group.rows);
+    const start = rows.filter((row) => row.label === 'start a new session');
+    expect(start.map((row) => row.keys).sort()).toEqual(['Mod-n', 'o']);
   });
 });
