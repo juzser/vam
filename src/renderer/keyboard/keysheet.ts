@@ -58,6 +58,13 @@ type Meta<K extends KeyAction['kind']> = {
  */
 export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   move: { group: 'navigation', label: (a) => `move ${a.direction}` },
+  // Derived from the action's own `name`, so a third layout added to the
+  // table gets a row here without anyone editing this file — and one added
+  // with a name this switch does not cover fails to compile.
+  layout: {
+    group: 'panes',
+    label: (a) => (a.name === 'noCanvas' ? 'hide the canvas' : 'response pane only'),
+  },
   first: { group: 'navigation', label: () => 'first session' },
   last: { group: 'navigation', label: () => 'last session' },
   project: {
