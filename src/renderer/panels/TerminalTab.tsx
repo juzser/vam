@@ -223,15 +223,22 @@ export function TerminalTab({
           bound and `buildKeySheet` has nothing to list. It is a named region
           rather than a button: it activates nothing, and a focus stop that
           activates nothing while looking activatable is its own trap. */}
-      <pre
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a SCROLLABLE region
+          is the one case where WCAG 2.1.1 requires exactly this. The rule
+          reads a focus stop on a non-interactive element as a keyboard trap
+          with nothing to activate, which is right almost everywhere and wrong
+          here: without the focus stop the content below the fold is reachable
+          by no key at all. It is a named <section> rather than a role, so the
+          region is the element's own semantics, and nothing is bound to it. */}
+      <section
         data-terminal-pane
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: see above -- a scrollable region is the one case WCAG 2.1.1 requires this
         tabIndex={0}
-        role="region"
         aria-label={`terminal output of ${view.name}`}
-        className="vam-no-scrollbar min-h-0 flex-1 overflow-auto whitespace-pre rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-[10.5px] text-ink leading-[1.45] focus-visible:outline focus-visible:outline-2 focus-visible:outline-line-strong"
+        className="vam-no-scrollbar min-h-0 flex-1 overflow-auto rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-[10.5px] text-ink leading-[1.45] focus-visible:outline focus-visible:outline-2 focus-visible:outline-line-strong"
       >
-        {view.text}
-      </pre>
+        <pre className="whitespace-pre">{view.text}</pre>
+      </section>
     </div>
   );
 }

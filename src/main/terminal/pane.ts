@@ -48,10 +48,7 @@ export type SessionMatch =
   | { readonly kind: 'one'; readonly name: string }
   | { readonly kind: 'ambiguous'; readonly names: readonly string[] };
 
-export function matchVamSession(
-  sessions: readonly TmuxSession[],
-  projectId: string,
-): SessionMatch {
+export function matchVamSession(sessions: readonly TmuxSession[], projectId: string): SessionMatch {
   // An empty id is what an UNSET option reads back as, so an empty id asking
   // would sweep up every session vam did not tag. It matches nothing.
   if (projectId === '') return { kind: 'none' };

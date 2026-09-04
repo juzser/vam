@@ -93,7 +93,10 @@ describe('the Terminal tab tells an absent session from an unreachable tmux', ()
 
   it('says the session has ended when the tmux session is gone', async () => {
     render(
-      <TerminalTab projectId={ATLAS} read={vi.fn(async (): Promise<PaneView> => ({ kind: 'gone' }))} />,
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async (): Promise<PaneView> => ({ kind: 'gone' }))}
+      />,
     );
     await settle();
     expect(q<HTMLElement>('[data-terminal-empty]')?.textContent).toMatch(/ended/i);
@@ -282,10 +285,11 @@ describe('the pane can be reached and scrolled from the keyboard', () => {
     const pane = q<HTMLElement>('[data-terminal-pane]');
     if (pane === null) throw new Error('no pane');
     expect(pane.getAttribute('tabindex')).toBe('0');
-    // A focus stop that says nothing is a trap with a focus ring. It is a
-    // named region, not a button: nothing is bound to Enter, and nothing
-    // captions it as bound.
-    expect(pane.getAttribute('role')).toBe('region');
+    // A focus stop that says nothing is a trap with a focus ring. A NAMED
+    // <section> is a region by its own semantics, not by a role attribute, and
+    // it is not a button: nothing is bound to Enter, and nothing captions it
+    // as bound.
+    expect(pane.tagName).toBe('SECTION');
     expect(pane.getAttribute('aria-label')).toBeTruthy();
     pane.focus();
     expect(document.activeElement).toBe(pane);
