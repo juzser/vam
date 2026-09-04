@@ -194,6 +194,39 @@ export async function resizeSessionPane(
  *
  * The refusal is a bare `false` because the tab has somewhere to put it: the
  * pane says so on the surface rather than swallowing what was typed.
+ *
+ * THE RACE THIS DOES NOT CLOSE, stated plainly because it is real and because
+ * a comment that implied otherwise would be worse than none. Ownership is
+ * decided by `list-sessions` and the key is delivered by a SECOND tmux
+ * command. A session that exits between the two normally fails safe -- tmux
+ * answers `can't find pane` and this returns false -- but if its exact name
+ * is taken by a new session in that window, the keystroke lands there.
+ *
+ * WHY THAT IS IMPROBABLE AND NOT IMPOSSIBLE. A vam session name carries six
+ * base-36 characters of randomness (`vamSessionName`), about 2.2e9 values, so
+ * the collision is not something a fresh vam session stumbles into: it takes
+ * a process that creates a tmux session with that exact name inside a window
+ * a few milliseconds wide. Improbable is the honest word. Not impossible.
+ *
+ * HOW IT WOULD BE CLOSED, so the next reader does not have to rediscover it.
+ * tmux has no compare-and-send: no verb sends a key conditional on a session
+ * still being the one you looked at. But it has something that works better,
+ * and it is MEASURED on tmux 3.7b over a private `-L` socket rather than
+ * assumed: session IDS are not reused. Killing `$1` and immediately creating
+ * a session with the same NAME produced `$2`, `send-keys -t '$3'` delivers,
+ * and a dead id answers `can't find session: $3` and exits 1 instead of
+ * landing somewhere else. Carrying `#{session_id}` out of the SAME
+ * `list-sessions` that proved the project and sending to the id would make
+ * the reuse case impossible for the lifetime of the server -- leaving only a
+ * server restart between the two calls, which kills every vam session anyway.
+ *
+ * It is not done here because the id has to come from that one listing to be
+ * worth anything, which means changing the listing's wire format
+ * (`listSessionsArgv`), its parser and `TmuxSession` -- read by five call
+ * sites and stubbed by six test files, one directory of which is being
+ * edited by another task. That is its own change, with its own tests, and
+ * doing it inside this one would be the kind of drive-by that breaks a peer.
+ * Every write path here shares this window, not just the keystroke.
  */
 export async function sendSessionKey(
   run: TmuxRun,
