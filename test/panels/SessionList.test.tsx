@@ -649,3 +649,50 @@ describe('the per-project add appears only for the focused project', () => {
     expect(heights[0]).toBe(heights[1]);
   });
 });
+
+/**
+ * happy-dom does no layout: it computes no boxes and resolves no Tailwind
+ * class into a pixel. So none of these assertions claim a measured offset.
+ * What they hold is the STRUCTURAL contract the indent is made of -- the
+ * mapped rows live inside one padded container per project, and the heading
+ * stays outside it -- which is the part that can silently regress. The actual
+ * few-pixel shift is a visual judgement, made once, in the class itself.
+ */
+describe('the session rows are indented under their project heading', () => {
+  it('wraps each project rows in one padded container the heading is outside of', () => {
+    const { container } = mount(twoProjects());
+
+    const wrappers = [...container.querySelectorAll('[data-project-rows]')];
+    // One per project, not one per row: the indent belongs to the group, so
+    // every row keeps its own padding contract and the focused-row
+    // background cannot drift out of line with its neighbours.
+    expect(wrappers).toHaveLength(2);
+
+    for (const wrapper of wrappers) {
+      // A left inset of some kind -- the value is a visual call, the
+      // existence of it is the contract.
+      expect(wrapper.className).toMatch(/(^|\s)(pl|ps|ml)-/);
+      expect(wrapper.querySelector('[data-project-heading]')).toBeNull();
+    }
+
+    for (const heading of container.querySelectorAll('[data-project-heading]')) {
+      expect(heading.closest('[data-project-rows]')).toBeNull();
+    }
+
+    // Every row is inside its OWN project's wrapper, so the indent cannot be
+    // there for some rows and missing for others.
+    const rows = [...container.querySelectorAll('[data-session-row]')];
+    expect(rows).toHaveLength(3);
+    expect(
+      rows.map((row) => wrappers.indexOf(row.closest('[data-project-rows]') as Element)),
+    ).toEqual([0, 0, 1]);
+  });
+
+  it('indents the inline rename editor with the rows, not with the heading', () => {
+    const { container } = mountWith(twoProjects(), { renamingId: 'a1', renameDraft: 'alpha one' });
+    const input = screen.getByLabelText('rename session');
+    expect(input.closest('[data-project-rows]')).not.toBeNull();
+    // And it replaced a row rather than appearing beside one.
+    expect(container.querySelector('[data-session-row="a1"]')).toBeNull();
+  });
+});

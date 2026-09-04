@@ -493,143 +493,161 @@ export function SessionList(props: SessionListProps) {
                 )}
               </div>
 
-              {group.items.map((entry) => {
-                const { session } = entry;
-                const isFocused = session.id === focusedSessionId;
-                const needsYou = session.status === 'waiting';
+              {/* The indent lives on ONE container per project, not on each
+                  row. A margin per row would have to be repeated on the
+                  rename editor too, and any row that missed it would sit a
+                  few pixels out of line with its neighbours' hover and focus
+                  backgrounds -- the failure mode that makes an indent look
+                  like a bug. Here the rows keep their own padding contract
+                  untouched, and the focused row's slab and its status stripe
+                  move inward WITH the row: the stripe then lands exactly on
+                  the indent line, which is the edge that says "these belong
+                  to that heading". Full-bleed highlight was the alternative
+                  and it is the wrong one -- a background wider than the row
+                  it highlights re-erases the grouping the indent just drew.
+                  Six pixels, because the sidebar is narrow: the rows already
+                  carry 10px of their own left padding, so this is a visible
+                  step without spending a tab stop of a column where the
+                  title, the branch and the age all truncate. */}
+              <div data-project-rows className="flex flex-col gap-[5px] pl-1.5">
+                {group.items.map((entry) => {
+                  const { session } = entry;
+                  const isFocused = session.id === focusedSessionId;
+                  const needsYou = session.status === 'waiting';
 
-                return (
-                  <div key={session.id}>
-                    {renamingId === session.id ? (
-                      <div className="flex items-center gap-1.5 rounded-[9px] border border-line-loud bg-raised px-2.5 py-2.5">
-                        <span className="text-[11px] text-ink-faint">{session.icon ?? '·'}</span>
-                        <input
-                          ref={renameRef}
-                          value={renameDraft}
-                          onChange={(event) => onRenameChange(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') {
-                              event.preventDefault();
-                              onRenameCommit();
-                            } else if (event.key === 'Escape') {
-                              event.preventDefault();
-                              onRenameCancel();
-                            }
-                          }}
-                          className="min-w-0 flex-1 rounded-[var(--radius-sm)] bg-panel px-1 font-mono text-[12px] text-ink outline-none ring-1 ring-waiting"
-                          aria-label="rename session"
-                        />
-                      </div>
-                    ) : (
-                      <div
-                        // A NAMED group. `group-hover:` matches ANY ancestor
-                        // carrying `group`, and OverlayScroll wraps this whole
-                        // list in one — so an unnamed group here meant hovering
-                        // anywhere in the sidebar revealed every row's close
-                        // button at once, the exact opposite of what the class
-                        // was there to do.
-                        className="group/row relative"
-                      >
-                        <button
-                          type="button"
-                          data-session-row={session.id}
-                          onClick={() => onPick(session.id)}
-                          className={[
-                            'relative flex w-full cursor-pointer flex-col gap-[7px] overflow-hidden rounded-[9px] px-2.5 py-2.5 text-left',
-                            isFocused
-                              ? 'border border-line-loud bg-raised'
-                              : 'border border-transparent',
-                          ].join(' ')}
+                  return (
+                    <div key={session.id}>
+                      {renamingId === session.id ? (
+                        <div className="flex items-center gap-1.5 rounded-[9px] border border-line-loud bg-raised px-2.5 py-2.5">
+                          <span className="text-[11px] text-ink-faint">{session.icon ?? '·'}</span>
+                          <input
+                            ref={renameRef}
+                            value={renameDraft}
+                            onChange={(event) => onRenameChange(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                onRenameCommit();
+                              } else if (event.key === 'Escape') {
+                                event.preventDefault();
+                                onRenameCancel();
+                              }
+                            }}
+                            className="min-w-0 flex-1 rounded-[var(--radius-sm)] bg-panel px-1 font-mono text-[12px] text-ink outline-none ring-1 ring-waiting"
+                            aria-label="rename session"
+                          />
+                        </div>
+                      ) : (
+                        <div
+                          // A NAMED group. `group-hover:` matches ANY ancestor
+                          // carrying `group`, and OverlayScroll wraps this whole
+                          // list in one — so an unnamed group here meant hovering
+                          // anywhere in the sidebar revealed every row's close
+                          // button at once, the exact opposite of what the class
+                          // was there to do.
+                          className="group/row relative"
                         >
-                          {isFocused && (
-                            <span
-                              className={`absolute top-0 bottom-0 left-0 w-0.5 ${STATUS_DOT[session.status]}`}
-                            />
-                          )}
-
-                          <span className="flex items-center gap-2">
-                            <span
-                              className={[
-                                'h-[7px] w-[7px] flex-none rounded-full',
-                                STATUS_DOT[session.status],
-                                needsYou || session.status === 'running' ? 'vam-breathe' : '',
-                              ].join(' ')}
-                            />
-                            {session.icon !== null && (
-                              <span className="text-[11px] leading-none">{session.icon}</span>
-                            )}
-                            <span
-                              className={`truncate text-[13px] ${isFocused ? 'font-medium text-ink' : 'text-ink-dim'}`}
-                            >
-                              {session.title}
-                            </span>
-                          </span>
-
-                          {/* Branch on the left, time on the right, and nothing
-                              between them. The step-verb pill and the progress
-                              bar that used to sit here were removed at the
-                              operator's request: both drew a per-status colour
-                              channel over data no source supplies, so a row at
-                              rest read as a dashboard reporting nothing. */}
-                          <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
-                            <span className="flex min-w-0 flex-1 items-center gap-1">
-                              <GitBranch size={10} strokeWidth={1.6} />
+                          <button
+                            type="button"
+                            data-session-row={session.id}
+                            onClick={() => onPick(session.id)}
+                            className={[
+                              'relative flex w-full cursor-pointer flex-col gap-[7px] overflow-hidden rounded-[9px] px-2.5 py-2.5 text-left',
+                              isFocused
+                                ? 'border border-line-loud bg-raised'
+                                : 'border border-transparent',
+                            ].join(' ')}
+                          >
+                            {isFocused && (
                               <span
-                                data-session-branch
-                                title={
-                                  session.branch === null
-                                    ? 'this source cannot say which branch the session is on'
-                                    : session.branch
-                                }
-                                className="flex min-w-0 items-center"
+                                className={`absolute top-0 bottom-0 left-0 w-0.5 ${STATUS_DOT[session.status]}`}
+                              />
+                            )}
+
+                            <span className="flex items-center gap-2">
+                              <span
+                                className={[
+                                  'h-[7px] w-[7px] flex-none rounded-full',
+                                  STATUS_DOT[session.status],
+                                  needsYou || session.status === 'running' ? 'vam-breathe' : '',
+                                ].join(' ')}
+                              />
+                              {session.icon !== null && (
+                                <span className="text-[11px] leading-none">{session.icon}</span>
+                              )}
+                              <span
+                                className={`truncate text-[13px] ${isFocused ? 'font-medium text-ink' : 'text-ink-dim'}`}
                               >
-                                {session.branch === null ? (
-                                  '—'
-                                ) : (
-                                  <>
-                                    <span data-branch-head className="truncate">
-                                      {splitBranch(session.branch).head}
-                                    </span>
-                                    <span data-branch-tail className="flex-none">
-                                      {splitBranch(session.branch).tail}
-                                    </span>
-                                  </>
-                                )}
+                                {session.title}
                               </span>
                             </span>
-                            <span
-                              data-session-age
-                              title={
-                                session.age === null
-                                  ? 'this source cannot say when the session last did anything'
-                                  : `last activity ${session.age} ago`
-                              }
-                              className="flex-none"
-                            >
-                              {session.age ?? '—'}
-                            </span>
-                          </span>
-                        </button>
 
-                        {/* Mouse route to the same thing `x` does. Hidden until the
-                          row is hovered, so a list at rest is a list of names
-                          rather than a row of buttons. */}
-                        <button
-                          type="button"
-                          onClick={() => onClose(session.id)}
-                          aria-label={`close ${session.title}`}
-                          className={[
-                            'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
-                            'opacity-0 hover:bg-panel hover:text-failed group-hover/row:opacity-100',
-                          ].join(' ')}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                            {/* Branch on the left, time on the right, and nothing
+                                between them. The step-verb pill and the progress
+                                bar that used to sit here were removed at the
+                                operator's request: both drew a per-status colour
+                                channel over data no source supplies, so a row at
+                                rest read as a dashboard reporting nothing. */}
+                            <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
+                              <span className="flex min-w-0 flex-1 items-center gap-1">
+                                <GitBranch size={10} strokeWidth={1.6} />
+                                <span
+                                  data-session-branch
+                                  title={
+                                    session.branch === null
+                                      ? 'this source cannot say which branch the session is on'
+                                      : session.branch
+                                  }
+                                  className="flex min-w-0 items-center"
+                                >
+                                  {session.branch === null ? (
+                                    '—'
+                                  ) : (
+                                    <>
+                                      <span data-branch-head className="truncate">
+                                        {splitBranch(session.branch).head}
+                                      </span>
+                                      <span data-branch-tail className="flex-none">
+                                        {splitBranch(session.branch).tail}
+                                      </span>
+                                    </>
+                                  )}
+                                </span>
+                              </span>
+                              <span
+                                data-session-age
+                                title={
+                                  session.age === null
+                                    ? 'this source cannot say when the session last did anything'
+                                    : `last activity ${session.age} ago`
+                                }
+                                className="flex-none"
+                              >
+                                {session.age ?? '—'}
+                              </span>
+                            </span>
+                          </button>
+
+                          {/* Mouse route to the same thing `x` does. Hidden until the
+                            row is hovered, so a list at rest is a list of names
+                            rather than a row of buttons. */}
+                          <button
+                            type="button"
+                            onClick={() => onClose(session.id)}
+                            aria-label={`close ${session.title}`}
+                            className={[
+                              'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
+                              'opacity-0 hover:bg-panel hover:text-failed group-hover/row:opacity-100',
+                            ].join(' ')}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </li>
           ))}
 
