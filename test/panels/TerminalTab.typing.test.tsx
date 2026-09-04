@@ -179,12 +179,26 @@ describe('the pane declines the keys that are not its own', () => {
   it('leaves the scrolling keys to the browser, which is why the focus stop exists', async () => {
     const send = await open();
     for (const key of ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End']) {
-      fireEvent.keyDown(pane() as HTMLElement, { key });
+      // NOT PREVENTED, and asserting that is the whole test. `fireEvent`
+      // answers false when the default was prevented, and the browser's
+      // scrolling of a focused overflow element IS that default: checking
+      // only that nothing was sent to tmux would stay green while a stray
+      // `preventDefault()` killed keyboard scrolling outright -- which is the
+      // one thing this focus stop was created to provide.
+      expect(fireEvent.keyDown(pane() as HTMLElement, { key })).toBe(true);
     }
     await settle();
-    // The pane has a hidden scrollbar: if these were typed away, the content
-    // below the fold would be reachable by nothing at all.
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('DOES prevent the default for the keys it takes, so the page cannot act on them too', async () => {
+    const send = await open();
+    expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'h' })).toBe(false);
+    expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Enter' })).toBe(false);
+    // Backspace above all: unprevented it is the browser's history-back.
+    expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Backspace' })).toBe(false);
+    await settle();
+    expect(send).toHaveBeenCalledTimes(3);
   });
 
   it('leaves Tab alone, so the focus order still gets out', async () => {
