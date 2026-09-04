@@ -147,6 +147,12 @@ export function clampOutFontSize(size: number): number {
 /** Session id → the emoji you gave it, for one source. */
 export type IconsBySession = Readonly<Record<string, IconChoice>>;
 
+/**
+ * A session, named the way the store names sessions everywhere else: by source
+ * AND id, because an id is unique only within its source.
+ */
+export type FocusChoice = { readonly source: string; readonly session: string };
+
 export type Prefs = {
   /**
    * Source id → session id → the emoji you gave it.
@@ -284,6 +290,27 @@ export type Prefs = {
    * reason -- it describes the person, not a session that stopped existing.
    */
   readonly defaultProvider: ProviderId;
+  /**
+   * Where the operator was looking when they last quit: a SESSION, keyed by
+   * its source, or `null` for "nothing was focused".
+   *
+   * A session rather than a node id, which is the whole decision here. Node
+   * ids are derived from the layout and change whenever the model, the filters
+   * or the fold state change, so a stored node id would go stale between one
+   * launch and the next without anything having ended. A session id under its
+   * source is the identity `icons` and `renames` already store, and it is what
+   * a re-laid-out canvas can still be matched against (`focus.ts`).
+   *
+   * EXEMPT FROM THE ICON TTL, and for a different reason than `theme` is. This
+   * IS a fact about a session, so the "not about the person" argument does not
+   * save it. It is exempt because the TTL exists to stop the store growing a
+   * row per session forever, and this is ONE pointer that each write replaces
+   * -- there is nothing to accumulate. The staleness the TTL would guard
+   * against is already handled better downstream: `resolveFocusNodeId` falls
+   * back to the first candidate for any pointer that no longer names a session
+   * on screen, whether it went stale in a day or in a year.
+   */
+  readonly lastFocus: FocusChoice | null;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -301,6 +328,7 @@ export const EMPTY_PREFS: Prefs = {
   keyBindings: {},
   outFontSize: DEFAULT_OUT_FONT_SIZE,
   defaultProvider: DEFAULT_PROVIDER_ID,
+  lastFocus: null,
 };
 
 /**
@@ -424,6 +452,12 @@ function parsePrefs(
     // stored provider vam cannot start would otherwise be an app that cannot
     // start a session at all.
     defaultProvider: readProviderId((parsed as { defaultProvider?: unknown }).defaultProvider),
+    // Per field like every line above it: every payload already in a browser
+    // has no `lastFocus` key at all and reads back as "nothing remembered",
+    // which is precisely what a first launch means -- no version number, no
+    // migration. Not pruned; see the field's own note for why the TTL would
+    // buy nothing here.
+    lastFocus: readLastFocus((parsed as { lastFocus?: unknown }).lastFocus),
   };
 }
 
@@ -573,6 +607,29 @@ function readFocusShare(raw: unknown): number {
  *  lands on the default, and a number out of range is pulled into it. */
 function readOutFontSize(raw: unknown): number {
   return clampOutFontSize(typeof raw === 'number' ? raw : Number.NaN);
+}
+
+/**
+ * Both halves or neither. A pointer missing its source could be matched
+ * against the wrong source's session of the same name, which is the exact
+ * collision the two-level keying exists to prevent -- so a half-written value
+ * is dropped whole rather than half-trusted. Costs only itself: a garbage
+ * pointer leaves every neighbouring field alone.
+ */
+function readLastFocus(raw: unknown): FocusChoice | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return null;
+  }
+  const { source, session } = raw as { source?: unknown; session?: unknown };
+  if (typeof source !== 'string' || typeof session !== 'string') {
+    return null;
+  }
+  return { source, session };
+}
+
+/** Written whenever focus lands somewhere; `null` forgets the pointer. */
+export function setLastFocus(prefs: Prefs, lastFocus: FocusChoice | null): Prefs {
+  return { ...prefs, lastFocus };
 }
 
 function readPanes(raw: unknown): Prefs['panes'] {
