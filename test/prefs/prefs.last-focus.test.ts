@@ -84,6 +84,7 @@ describe('the remembered focus, persisted', () => {
 
   it('answers null only when there is genuinely nothing to point at', () => {
     expect(resolveFocusNodeId({ source: 'black-smith', session: 'beta' }, [])).toBe(null);
+    expect(resolveFocusNodeId(null, [])).toBe(null);
   });
 
   it('forgets the pointer when the operator focuses nothing', () => {
