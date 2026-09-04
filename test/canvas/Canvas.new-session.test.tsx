@@ -164,6 +164,19 @@ describe('creating a session with `o`', () => {
     expect(created).toEqual([['p1', 'alpha']]);
   });
 
+  it('does not claim the new session is visible yet', async () => {
+    // `tmux new-session -d` returns as soon as the session exists, before the
+    // agent inside it has registered anywhere vam can read, so the reload that
+    // follows will not show the new row. Saying it started is true; implying
+    // it is on screen is not, and the operator would read a missing row as a
+    // failure.
+    const { source } = sourceWith(async () => {});
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('o');
+    expect(statusBar()).toContain('alpha');
+    expect(statusBar()).toMatch(/moment to appear|not showing yet/i);
+  });
+
   it('refuses in the source’s own words, and CALLS NOTHING, when it cannot', async () => {
     const { source, wrote } = sourceWith();
     render(<Canvas model={MODEL} source={source} />);

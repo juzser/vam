@@ -940,7 +940,8 @@ function CanvasInner({
    * The refusal is rendered in the source's own words. A source that cannot
    * create carries no `createSession` member at all (the port's promise:
    * absent means absent), so the guard below is what makes "it cannot" and
-   * "it failed" two different sentences.
+   * "it failed" two different sentences -- and, on the success side, what
+   * keeps "it started" and "you can see it" two different sentences too.
    */
   const createSession = useCallback(
     async (projectId: string, projectName: string) => {
@@ -959,7 +960,15 @@ function CanvasInner({
       }
       try {
         await sessionSource.write.createSession(projectId, projectName);
-        setStatus(`started a new session in ${projectName}`);
+        // The write resolves when the SESSION exists, not when the agent
+        // inside it has registered where vam can see it -- `tmux new-session
+        // -d` returns immediately. So the reload below very often comes back
+        // without the new row, and the status has to say so: an operator who
+        // was told the session is there and cannot see it reads a success as a
+        // failure. vam has nothing to wait ON here (registration is the
+        // agent's own, on its own schedule), so the honest sentence is the fix
+        // rather than a poll.
+        setStatus(`started a new session in ${projectName} — it may take a moment to appear`);
         source.onWrote();
       } catch (cause) {
         setStatus(describeFailure(cause));
