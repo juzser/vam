@@ -140,6 +140,63 @@ describe('the focused session, across a relaunch', () => {
   });
 });
 
+/**
+ * Recording focus means a launch writes preferences without the operator
+ * touching anything, which is a real behaviour change and the one worth
+ * bounding. These pin what it costs: ONE write, on the launch that has nothing
+ * remembered yet, and none at all on every launch after -- because the pointer
+ * the landing effect resolves FROM storage is the pointer it would write back,
+ * and the guard compares by value, so a fresh object each render still matches.
+ * A launch that wrote every time would be a store rewritten on every open, and
+ * a rewrite drops any key this version does not model.
+ */
+describe('what a launch that touches nothing costs', () => {
+  /** Every write to the prefs key, in order, while `body` runs. */
+  function writes(body: () => void): string[] {
+    const seen: string[] = [];
+    const real = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = (key: string, value: string) => {
+      if (key === PREFS_KEY) seen.push(value);
+      real(key, value);
+    };
+    try {
+      body();
+    } finally {
+      localStorage.setItem = real;
+    }
+    return seen;
+  }
+
+  it('writes twice on the first launch — once per field — and then settles', () => {
+    const first = writes(() => render(<Canvas model={MODEL} />));
+    // Two, not one, and the count is asserted rather than bounded: the tab
+    // settles to its default and focus lands, each once, from two independent
+    // effects. Anything more than two would be an effect re-triggering itself.
+    expect(first).toHaveLength(2);
+    expect(JSON.parse(first[0] ?? '{}').detailTab).toBe('Response');
+    expect(JSON.parse(first[1] ?? '{}').lastFocus).toEqual({
+      source: 'black-smith',
+      session: 'a1',
+    });
+  });
+
+  it('writes nothing at all on the next launch, having nothing new to say', () => {
+    render(<Canvas model={MODEL} />);
+    cleanup();
+    expect(writes(() => render(<Canvas model={MODEL} />))).toEqual([]);
+  });
+
+  it('keeps every key it does not model, because it never rewrites unprompted', () => {
+    seed({
+      lastFocus: { source: 'black-smith', session: 'a1' },
+      detailTab: 'Response',
+      somethingNewer: 7,
+    });
+    render(<Canvas model={MODEL} />);
+    expect(stored().somethingNewer).toBe(7);
+  });
+});
+
 describe('the detail tab, across a relaunch', () => {
   it('comes back to the tab the operator left it on', () => {
     render(<Canvas model={MODEL} />);
