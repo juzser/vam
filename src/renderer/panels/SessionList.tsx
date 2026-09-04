@@ -171,6 +171,15 @@ export type SessionListProps = {
    */
   readonly collapsedProjects?: readonly string[];
   readonly onToggleCollapse?: (project: Project) => void;
+  /**
+   * The project `p` has just asked to reveal, or null when nothing has been
+   * asked. A fresh object each press, so pressing `p` twice reveals twice.
+   *
+   * The ask arrives as a prop because the KEY is not this component's: it is
+   * `revealProject` in the chord table, resolved by the one window listener in
+   * `Canvas.tsx`. See the effect below for what that bought.
+   */
+  readonly revealRequest?: { readonly projectId: string } | null;
   readonly onSettings: () => void;
   /**
    * The theme ON SCREEN, already resolved — never `prefs.theme`, which can be
@@ -217,6 +226,7 @@ export function SessionList(props: SessionListProps) {
     newSessionDecline,
     pendingAction,
     onPickIcon,
+    revealRequest,
     collapsedProjects,
     onToggleCollapse,
     onSettings,
@@ -362,34 +372,28 @@ export function SessionList(props: SessionListProps) {
    * Chosen over "toggle the fold directly" because a key that folds without
    * showing you the control teaches nothing about where the control is.
    *
-   * Handled HERE rather than in the chord table on purpose. The table is read
-   * by an exhaustive switch and by the `?` keysheet's label map, both in files
-   * this task does not own; a new action kind there is a compile error in
-   * two other people's files. This listener is deliberately narrow — a bare
-   * `p`, no modifiers, never while text is being typed — so it cannot eat a
-   * keystroke the chord layer wanted.
+   * IT USED TO OWN ITS OWN WINDOW LISTENER HERE, on the argument that a new
+   * action kind would be a compile error in two files that task did not own.
+   * The argument was sound and the price was two defects this project has
+   * fixed everywhere else: the key was in no `buildKeySheet` row, because the
+   * sheet is derived from the chord tables and this was not in one; and it
+   * fired while an overlay was open, because the overlay guard lives in the
+   * one listener this one bypassed. So the key moved into the table and
+   * only its EFFECT stayed here — the reveal and the focus are this
+   * component's own state and refs, and lifting those would have put a hover
+   * highlight in the canvas's model.
    */
   useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'p' || event.ctrlKey || event.metaKey || event.altKey) {
-        return;
-      }
-      const target = event.target as HTMLElement | null;
-      const tag = target?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable === true) {
-        return;
-      }
-      const entry = entries.find((candidate) => candidate.session.id === focusedSessionId);
-      if (entry === undefined) {
-        return;
-      }
-      event.preventDefault();
-      setRevealed(entry.project.id);
-      foldRefs.current.get(entry.project.id)?.focus();
+    if (revealRequest === null || revealRequest === undefined) {
+      return;
     }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [entries, focusedSessionId]);
+    const { projectId } = revealRequest;
+    if (!entries.some((candidate) => candidate.project.id === projectId)) {
+      return;
+    }
+    setRevealed(projectId);
+    foldRefs.current.get(projectId)?.focus();
+  }, [entries, revealRequest]);
 
   /**
    * Bring the focused row into view when it is not.

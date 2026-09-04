@@ -1890,14 +1890,21 @@ describe('Cmd-number jumps to a session in the sidebar', () => {
     expect(statusBar()).toContain('only 2 sessions');
   });
 
-  it('leaves the keystroke alone while a text box has it', () => {
+  it('still jumps while a text box has the keyboard, and keeps the draft', () => {
+    // REVERSED, deliberately. The window listener used to step aside for every
+    // keystroke aimed at an INPUT or a TEXTAREA, which killed Cmd-chords
+    // exactly where an operator's hands are. A Cmd/Ctrl chord is not text
+    // entry on any layout, so the box has no claim on it — the rule that lets
+    // `Mod-Shift-<digit>` reach the tab bar from the prompt box is the same
+    // rule here, and one rule is what keeps it predictable. What the box does
+    // keep is everything unmodified, including the draft already typed.
     render(<Canvas model={MODEL} />);
     press('j');
     press('i'); // the composer, aimed at alpha/a2
     const box = promptInput() as HTMLTextAreaElement;
     typeInto(box, 'half a prompt');
-    keyOn(box, '1', { metaKey: true });
-    expect(focused()).toBe('alpha/a2');
+    keyOn(box, '1', { metaKey: true, code: 'Digit1' });
+    expect(focused()).toBe('alpha/a1');
     expect(promptInput()?.value).toBe('half a prompt');
   });
 

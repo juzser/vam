@@ -91,6 +91,11 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   },
   jump: { group: 'navigation', label: () => 'jump to a labelled node' },
   sessionAt: { group: 'navigation', label: (a) => `session ${a.index + 1} in the sidebar` },
+  // Named from the action's own tab, so the sheet cannot drift from the bar:
+  // renaming a tab renames its row, and a tab this table cannot spell fails
+  // to compile rather than shipping a caption for a tab nobody has.
+  detailTab: { group: 'panes', label: (a) => `the ${a.tab.toLowerCase()} tab` },
+  revealProject: { group: 'navigation', label: () => 'reveal this session’s project' },
   search: { group: 'navigation', label: () => 'search sessions' },
   searchNext: { group: 'navigation', label: () => 'next match' },
   searchPrev: { group: 'navigation', label: () => 'previous match' },
