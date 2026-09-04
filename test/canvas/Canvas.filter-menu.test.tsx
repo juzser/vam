@@ -98,11 +98,13 @@ describe('the filter popover beside the sidebar search box', () => {
     expect(pill('all')?.closest('aside')).toBeTruthy();
   });
 
-  it('is closed at first and opens on the control beside the search box', () => {
+  it('is closed at first and opens on the control in the Projects row', () => {
     render(<Canvas model={MODEL} />);
     const button = trigger();
-    // Beside the search box means: same sidebar header block as it.
-    expect(button?.closest('div')?.querySelector('[aria-label="search sessions"]')).toBeTruthy();
+    // It used to live beside the search box. The operator moved it down into
+    // the Projects header row (sidebar-projects), which is where it now has
+    // to be found -- the list it narrows is the one below that row.
+    expect(button?.closest('[data-projects-header]')).toBeTruthy();
     expect(menu()).toBeNull();
     expect(button?.getAttribute('aria-expanded')).toBe('false');
 

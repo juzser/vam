@@ -129,6 +129,18 @@ export type Prefs = {
    * session that may have stopped existing.
    */
   readonly filters: SessionFilters;
+  /**
+   * Source id → the ids of that source's projects you folded shut.
+   *
+   * Two levels for the same reason `projectIcons` has two: a project id is
+   * unique only within its source, so a flat list would let one source's fold
+   * close another source's project. A list rather than a map of booleans
+   * because the only value it could hold is `true` — an expanded project is
+   * an ABSENT entry, not a stored `false`, so the store never accumulates a
+   * row per project you merely looked at. Exempt from the icon TTL, like
+   * `theme`, `panes` and `filters`: a fold is a fact about the person.
+   */
+  readonly collapsedProjects: Readonly<Record<string, readonly string[]>>;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -138,6 +150,7 @@ export const EMPTY_PREFS: Prefs = {
   paneVisibility: ALL_VISIBLE,
   projectIcons: {},
   filters: DEFAULT_SESSION_FILTERS,
+  collapsedProjects: {},
 };
 
 /**
@@ -189,6 +202,7 @@ export function readPrefs(
     paneVisibility?: unknown;
     projectIcons?: unknown;
     filters?: unknown;
+    collapsedProjects?: unknown;
   };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   return {
@@ -211,7 +225,63 @@ export function readPrefs(
     // Same argument again: not pruned, and per-field defensive so one garbage
     // toggle cannot drag the other back to its default with it.
     filters: readFilters(record.filters),
+    // Not pruned either, and per-source defensive: one garbage bucket cannot
+    // unfold the projects another source folded.
+    collapsedProjects: readCollapsed(record.collapsedProjects),
   };
+}
+
+/**
+ * Whatever is under the key, reduced to source → string ids.
+ *
+ * Every level is checked because every level can be someone else's data: an
+ * older vam with no key at all, a devtools edit, a half-written value. A
+ * non-array bucket is dropped whole; a non-string id inside an otherwise good
+ * bucket is dropped alone, so one bad element cannot unfold the rest.
+ */
+function readCollapsed(raw: unknown): Prefs['collapsedProjects'] {
+  if (typeof raw !== 'object' || raw === null) {
+    return {};
+  }
+  const out = emptyMap<readonly string[]>();
+  for (const [source, bucket] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(bucket)) {
+      continue;
+    }
+    out[source] = bucket.filter((id): id is string => typeof id === 'string');
+  }
+  return out;
+}
+
+/** Is this source's project folded shut? */
+export function isProjectCollapsed(prefs: Prefs, source: string, projectId: string): boolean {
+  return prefs.collapsedProjects[source]?.includes(projectId) === true;
+}
+
+/**
+ * Fold or unfold one project.
+ *
+ * Unfolding REMOVES the id, and removing the last id removes the source's
+ * bucket: the stored shape then matches a fresh install exactly, which is
+ * what makes "expand everything" leave no residue behind to read back.
+ */
+export function setProjectCollapsed(
+  prefs: Prefs,
+  source: string,
+  projectId: string,
+  collapsed: boolean,
+): Prefs {
+  const bucket = prefs.collapsedProjects[source] ?? [];
+  const next = collapsed
+    ? bucket.includes(projectId)
+      ? bucket
+      : [...bucket, projectId]
+    : bucket.filter((id) => id !== projectId);
+  const collapsedProjects =
+    next.length > 0
+      ? withEntry(prefs.collapsedProjects as Record<string, readonly string[]>, source, next)
+      : withoutEntry(prefs.collapsedProjects as Record<string, readonly string[]>, source);
+  return { ...prefs, collapsedProjects };
 }
 
 /** Per FIELD, not per object: a payload from an older vam has neither key,
