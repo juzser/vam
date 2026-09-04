@@ -19,15 +19,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import {
-  ApprovalBox,
-  type ApprovalRequest,
   ATTACH_LIMIT_BYTES,
   type AttachedFile,
   attachIntoDraft,
   DetailPanel,
   type DetailPanelProps,
   detachFromDraft,
-  PLACEHOLDER_APPROVAL,
   readAttachedName,
   readModelRequest,
   readModeRequest,
@@ -899,202 +896,90 @@ describe('the empty tabs carry no tooltip, and the other notes stay', () => {
 });
 
 /**
- * The option picker the mockup draws above the composer (artboard 1a dark,
- * `ADE Session Canvas.dc.html` lines 1515-1554).
+ * What stands above the composer while a session is waiting.
  *
- * Read the component's own doc before reading these: nothing in
- * `domain/model.ts` expresses "the agent asked a question with numbered
- * options", so what is under test is a LAYOUT fed by a declared placeholder.
- * The assertions are therefore about geometry, marking and keyboard reach —
- * never about a value having come from a session.
+ * Three cards used to: an amber `SUGGESTED` one and two offering `↵`, with a
+ * header reading "the agent is asking". Every word of that was a constant in
+ * `DetailPanel.tsx`. A census of every transcript on this machine, plus the
+ * CLI and `~/.claude/`, found no surface vam reads that records what a session
+ * is asking or what its options are -- the file's own comment said exactly
+ * that while the cards rendered anyway. Worse, `statusOf`
+ * (`main/sources/claude-code/agents.ts`) maps everything that is not `busy` to
+ * `waiting`, so a merely IDLE session was told an agent was asking it
+ * something.
+ *
+ * Nothing takes their place, because the pane already showed the honest
+ * answer: `Decision.output` in `out`, which is the session's real final turn.
+ * So these tests are an absence and a presence -- nothing invented above the
+ * composer, and the real turn on screen underneath.
+ *
+ * The tests that stood here pinned the placeholder: that three cards rendered,
+ * that the badges counted 1-3, and that clicking one wrote the card's own
+ * title into the draft. They are removed rather than repointed -- there is no
+ * component left to assert against, and a test for "the picker is honest about
+ * being a placeholder" cannot be repointed at not drawing one.
  */
-describe('the option picker is the mockup layout over a declared placeholder', () => {
-  const box = () => q<HTMLElement>('[data-approval]');
-  const options = () => all('[data-approval-option]');
+describe('a waiting session is shown its real turn, not invented options', () => {
+  const withOutput = (output: string | null): Decision => ({
+    id: 'd9',
+    label: 'sign-off',
+    input: 'ship it',
+    output,
+    commands: [],
+  });
 
-  it('draws the header, three option cards and the pick hint, marked as a placeholder', () => {
+  it('draws no option cards, no pick hint, and no “the agent is asking” label', () => {
+    // The default entry is `waiting` -- the exact state that drew the cards.
     draw();
-    // Marked in the markup, exactly like the tab bar's unbacked tabs: a reader
-    // of the DOM can tell this holds no session data.
-    expect(box()?.getAttribute('data-placeholder')).toBe('approval-options');
-    // `waiting <age>` is the one real value in the header — the session's own.
-    expect(box()?.textContent).toContain('waiting 12m');
-
-    expect(options()).toHaveLength(3);
-    // The badges count from one, which is what the hint promises.
-    expect(options().map((o) => o.querySelector('[data-approval-number]')?.textContent)).toEqual([
-      '1',
-      '2',
-      '3',
-    ]);
-    expect(box()?.textContent).toContain('1–3 to pick');
-
-    // The suggested card carries the pill; the others carry the enter glyph.
-    expect(options()[0]?.getAttribute('data-suggested')).toBe('true');
-    expect(options()[0]?.textContent).toContain('SUGGESTED');
-    expect(options()[1]?.getAttribute('data-suggested')).toBeNull();
-    expect(options()[2]?.textContent).toContain('↵');
+    expect(q<HTMLElement>('[data-approval]')).toBeNull();
+    expect(all('[data-approval-option]')).toHaveLength(0);
+    expect(q<HTMLElement>('[data-placeholder="approval-options"]')).toBeNull();
+    expect(all('[aria-label="the agent is asking"]')).toHaveLength(0);
+    // Every one of these was a string literal in the source file, on screen as
+    // if a session had said it.
+    const pane = document.body.textContent ?? '';
+    for (const invented of [
+      'SUGGESTED',
+      'to pick',
+      'type your own instruction',
+      'The option the agent leans towards',
+      'A second way to go',
+      'A third way to go',
+      'option picker',
+    ]) {
+      expect(pane, invented).not.toContain(invented);
+    }
   });
 
-  it('holds no cursor until focus lands, and the mouse never moves one', () => {
-    draw();
-    const [first, second] = options();
-    // At rest the picker marks no cursor at all. The ring is a `focus-visible`
-    // variant, so it cannot be painted without DOM focus — and in particular
-    // the amber card does not wear it merely for being the suggested one.
-    expect(all('[data-focused]')).toHaveLength(0);
-    expect(first?.className).toContain('focus-visible:outline-2');
-    // Focusing, and clicking behind it, leave no painted cursor in the DOM:
-    // there is no mirror of DOM focus left that could drift out of step with
-    // it, and a mouse click cannot move a keyboard cursor.
-    fireEvent.focus(second as Element);
-    act(() => (second as HTMLButtonElement).click());
-    expect(all('[data-focused]')).toHaveLength(0);
-    // The suggestion is still its own separate marking, in its own language.
-    expect(first?.getAttribute('data-suggested')).toBe('true');
-    expect(second?.getAttribute('data-suggested')).toBeNull();
-    expect(second?.className).not.toBe(first?.className);
+  it('shows the session’s own final answer as the content of the turn', () => {
+    draw({ decision: withOutput('The migration ran clean; nothing is left to approve.') });
+    const out = q<HTMLElement>('[data-detail-scroll="out"]')?.textContent ?? '';
+    expect(out).toContain('The migration ran clean; nothing is left to approve.');
+    // A real answer is not the empty-turn sentence, and never was a card.
+    expect(q<HTMLElement>('[data-out-empty]')).toBeNull();
+    expect(q<HTMLElement>('[data-approval]')).toBeNull();
   });
 
-  it('is reachable and activatable without a mouse, and a digit picks directly', () => {
-    const drafts: string[] = [];
-    draw({ onDraftChange: (value) => drafts.push(value) });
-    // Real buttons, so Tab reaches them and Enter/Space activate them without
-    // a single new key binding.
-    expect(options().every((o) => o.tagName === 'BUTTON')).toBe(true);
-
-    act(() => (options()[1] as HTMLButtonElement).click());
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0]).toBe(options()[1]?.querySelector('[data-approval-title]')?.textContent);
-
-    // The mockup's own hint is `1-3 to pick`, so a digit typed while the
-    // picker holds the keyboard picks that card.
-    fireEvent.keyDown(options()[0] as Element, { key: '3' });
-    expect(drafts).toHaveLength(2);
-    expect(drafts[1]).toBe(options()[2]?.querySelector('[data-approval-title]')?.textContent);
-
-    // A digit past the end of the list does nothing rather than wrapping.
-    fireEvent.keyDown(options()[0] as Element, { key: '7' });
-    expect(drafts).toHaveLength(2);
-  });
-
-  it('appears only while the session is the one waiting on you', () => {
-    draw({ entry: { project: PROJECT, session: { ...SESSION, status: 'running' } } });
-    expect(box()).toBeNull();
-  });
-});
-
-describe('the picker keeps the promises it prints, and says it is a placeholder', () => {
-  const box = () => q<HTMLElement>('[data-approval]');
-  const options = () => all('[data-approval-option]');
-
-  /** A request with `n` options, to reach the counts the placeholder cannot. */
-  const many = (n: number): ApprovalRequest => ({
-    label: 'many options',
-    options: Array.from({ length: n }, (_, i) => ({
-      id: `o${i}`,
-      suggested: i === 0,
-      title: `option ${i + 1}`,
-      body: 'body',
-    })),
-  });
-
-  const drawBox = (request: ApprovalRequest, onChoose: (o: { title: string }) => void) =>
-    render(<ApprovalBox request={request} age="12m" onChoose={onChoose} onCompose={() => {}} />);
-
-  it('takes a digit from anywhere inside the picker, not only from a focused card', () => {
-    const drafts: string[] = [];
-    draw({ onDraftChange: (value) => drafts.push(value) });
-    // The hint promises `1-3 to pick` to anyone reading the pane, so the key is
-    // caught by the group rather than by whichever card happens to hold focus.
-    fireEvent.keyDown(box() as Element, { key: '2' });
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0]).toBe(options()[1]?.querySelector('[data-approval-title]')?.textContent);
-    // Reachable as a target for that key without joining the Tab order.
-    expect(box()?.getAttribute('tabindex')).toBe('-1');
-  });
-
-  it('promises only the digits that exist, and prints no badge it cannot honour', () => {
-    const picked: string[] = [];
-    drawBox(many(12), (o) => picked.push(o.title));
-    // `pickDigit` reads one key, so ten and up are unreachable: the hint stops
-    // where the keys stop instead of counting the whole list.
-    expect(box()?.textContent).toContain('1–9 to pick');
-    const badges = options().map((o) => o.querySelector('[data-approval-number]')?.textContent);
-    expect(badges.slice(0, 9)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
-    // Past nine the badge says it has no key, rather than printing a number
-    // that looks like one and does nothing.
-    expect(badges.slice(9)).toEqual(['—', '—', '—']);
-    fireEvent.keyDown(box() as Element, { key: '9' });
-    expect(picked).toEqual(['option 9']);
-  });
-
-  it('names the gap where a keyboard can read it, and draws the cards as not real', () => {
-    draw();
-    // `docs/ade-redesign.md`: a placeholder is a `data-placeholder` element
-    // whose note names the gap. A `Note`, not a `title`, because this pane's
-    // explanations have to be readable without a mouse.
-    const note = q<HTMLElement>('[data-approval] [data-note]')?.getAttribute('data-note') ?? '';
-    expect(note.toLowerCase()).toContain('no source');
-    // Dashed is this app's own vocabulary for "nothing real here" — the same
-    // one the canvas uses for a step that has not happened. It survives both
-    // themes without anyone having to parse small amber capitals.
-    expect(options().every((o) => o.className.includes('border-dashed'))).toBe(true);
-  });
-
-  it('names the group, marks the suggestion, and keeps the glyph out of the name', () => {
-    draw();
-    // A <fieldset> is a group without needing `role="group"` on a div.
-    expect(box()?.tagName).toBe('FIELDSET');
-    const labelledBy = box()?.getAttribute('aria-labelledby') ?? '';
-    expect(document.getElementById(labelledBy)?.textContent).toBe(PLACEHOLDER_APPROVAL.label);
-    // The pill spells SUGGESTED out for a sighted reader; this is the same
-    // fact for a reader who gets the button's name and nothing else.
-    expect(options()[0]?.getAttribute('aria-current')).toBe('true');
-    expect(options()[1]?.getAttribute('aria-current')).toBeNull();
-    // The return arrow is a picture of a key. It must not end card 2's name.
-    expect(options()[1]?.querySelector('[data-approval-enter]')?.getAttribute('aria-hidden')).toBe(
-      'true',
+  it('keeps the existing no-answer sentences instead of falling back to invented content', () => {
+    // `null`: the turn collected no answer event. Still the pane's own words.
+    draw({ decision: withOutput(null) });
+    expect(q<HTMLElement>('[data-out-empty]')?.textContent ?? '').toContain(
+      'no answer for this turn yet',
     );
-  });
-});
-
-describe('the picker replaces the prompt box while it is asking', () => {
-  const box = () => q<HTMLElement>('[data-approval]');
-  const promptBox = () => q<HTMLElement>('[data-prompt-box]');
-
-  it('draws no prompt box under the picker, and the way to one is not inert', () => {
-    const composeCalls: string[] = [];
-    draw({ onCompose: () => composeCalls.push('compose') });
-    // The picker answers the question by itself, and it carries its own way
-    // into free text, so a second empty box under it is height with no job.
-    expect(box()).not.toBeNull();
-    expect(promptBox()).toBeNull();
-    // "…or type your own instruction" asks for the box rather than handing
-    // focus to something that is not on screen.
-    act(() => q<HTMLButtonElement>('[data-approval-own]')?.click());
-    expect(composeCalls).toHaveLength(1);
+    expect(q<HTMLElement>('[data-approval]')).toBeNull();
     cleanup();
-    // And the pane draws it the moment it owns the keyboard, which is what
-    // that call turns on.
-    draw({ composing: true });
-    expect(box()).not.toBeNull();
-    expect(promptBox()).not.toBeNull();
+    // `''`: a turn that resolved to nothing -- the other absence, unchanged.
+    draw({ decision: withOutput('') });
+    expect(q<HTMLElement>('[data-out-empty]')?.textContent ?? '').toContain('resolved to nothing');
+    expect(all('[data-approval-option]')).toHaveLength(0);
   });
 
-  it('keeps the box whenever it holds text, so nothing is ever typed into a hidden field', () => {
-    // Picking an option writes its title into the draft. If the box could hide
-    // over a non-empty draft, a pick — or an Escape after one — would leave
-    // the operator's own words on screen nowhere and still recordable.
-    draw({ draft: 'half a sentence' });
-    expect(box()).not.toBeNull();
-    expect(promptBox()).not.toBeNull();
-  });
-
-  it('leaves the box alone when nothing is asking', () => {
-    draw({ entry: { project: PROJECT, session: { ...SESSION, status: 'running' } } });
-    expect(box()).toBeNull();
-    expect(promptBox()).not.toBeNull();
+  it('draws the prompt box while waiting, since nothing else offers a way to answer', () => {
+    // Waiting, not composing, empty draft: the one case the picker used to
+    // take the box's place in. With the picker gone the box must be there, or
+    // a waiting session has no visible way to reply at all.
+    draw();
+    expect(q<HTMLElement>('[data-prompt-box]')).not.toBeNull();
   });
 });
 
@@ -1121,7 +1006,7 @@ describe('the composer says what the session’s source actually does', () => {
   });
 });
 
-describe('the surface the picker sits on is a token pair, not a dark-only hex', () => {
+describe('the pane’s minted surface is a token pair, not a dark-only hex', () => {
   it('defines --vam-lifted in both themes', () => {
     // `import.meta.url` is not a file URL under happy-dom, so the path is
     // resolved from the runner's own root instead.
@@ -1133,10 +1018,10 @@ describe('the surface the picker sits on is a token pair, not a dark-only hex', 
   });
 
   it('pins the light line-loud to the value the light artboard actually draws', () => {
-    // The border of the plain option card and of the "type your own" field.
-    // The light artboard draws no picker, so this is read off the surfaces it
-    // does draw at that weight: the composer card and the answer pills. It was
-    // a few units too dark before, which is why the value is pinned here.
+    // The composer card's own border, among others. The value is read off the
+    // light artboard's surfaces at that weight -- the composer card and the
+    // answer pills. It was a few units too dark before, which is why it is
+    // pinned here.
     const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
     const light = css.slice(css.indexOf('html.light {'));
     expect(light).toContain('--vam-line-loud: #c9c7c1;');
