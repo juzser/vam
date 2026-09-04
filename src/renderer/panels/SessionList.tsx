@@ -28,9 +28,11 @@ import {
   Monitor,
   MoreHorizontal,
   Plus,
+  RotateCcw,
   Search,
   Settings,
   Sun,
+  Trash2,
 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { Project, SessionStatus } from '../domain/model.js';
@@ -38,7 +40,9 @@ import type { SessionEntry } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filter.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
+import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { OverlayScroll } from './OverlayScroll.js';
+import { removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
 
 const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
@@ -172,6 +176,22 @@ export type SessionListProps = {
   readonly collapsedProjects?: readonly string[];
   readonly onToggleCollapse?: (project: Project) => void;
   /**
+   * The ids of the projects REMOVED from vam, and the ask to remove one or
+   * bring it back.
+   *
+   * Optional on exactly the terms `collapsedProjects` is, and for the same
+   * reason: without them the component keeps the list in its own state, so
+   * removal works the day it ships; pass them -- from `prefs.hiddenProjects`
+   * via `isProjectHidden`/`setProjectHidden` -- and it survives a reload.
+   *
+   * Ending the sessions is NOT one of these. It goes through `onClose`, which
+   * is already the route a row's close button takes and already reaches the
+   * one place allowed to kill a tmux session; a second route to the same act
+   * would be a second thing to keep correct.
+   */
+  readonly hiddenProjects?: readonly string[];
+  readonly onHideProject?: (project: Project, hidden: boolean) => void;
+  /**
    * The project `p` has just asked to reveal, or null when nothing has been
    * asked. A fresh object each press, so pressing `p` twice reveals twice.
    *
@@ -229,6 +249,8 @@ export function SessionList(props: SessionListProps) {
     revealRequest,
     collapsedProjects,
     onToggleCollapse,
+    hiddenProjects,
+    onHideProject,
     onSettings,
     theme,
     onToggleTheme,
@@ -340,6 +362,10 @@ export function SessionList(props: SessionListProps) {
    */
   const [localCollapsed, setLocalCollapsed] = useState<readonly string[]>([]);
   const collapsed = collapsedProjects ?? localCollapsed;
+  const [localHidden, setLocalHidden] = useState<readonly string[]>([]);
+  const hidden = hiddenProjects ?? localHidden;
+  /** The project whose removal is being confirmed, or null. One at a time. */
+  const [confirming, setConfirming] = useState<Project | null>(null);
 
   const projectMenuRefs = useRef(new Map<string, HTMLButtonElement>());
   const foldRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -361,6 +387,23 @@ export function SessionList(props: SessionListProps) {
       );
     },
     [onToggleCollapse],
+  );
+
+  const setHidden = useCallback(
+    (project: Project, next: boolean) => {
+      if (onHideProject !== undefined) {
+        onHideProject(project, next);
+        return;
+      }
+      setLocalHidden((current) =>
+        next
+          ? current.includes(project.id)
+            ? current
+            : [...current, project.id]
+          : current.filter((id) => id !== project.id),
+      );
+    },
+    [onHideProject],
   );
 
   /**
@@ -440,11 +483,14 @@ export function SessionList(props: SessionListProps) {
   useEffect(() => {
     if (openMenu !== null) {
       projectPanelRef.current?.querySelector('button')?.focus();
-    } else if (openMenuWas.current !== null) {
+    } else if (openMenuWas.current !== null && confirming === null) {
+      // Not when the menu closed BECAUSE it opened a dialog. A parent effect
+      // runs after its child's, so without this the restore lands after the
+      // confirm has taken focus and drags the keyboard back out of the modal.
       projectMenuRefs.current.get(openMenuWas.current)?.focus();
     }
     openMenuWas.current = openMenu;
-  }, [openMenu]);
+  }, [openMenu, confirming]);
 
   /**
    * How many rules are narrowing the list right now — the badge's number.
@@ -487,12 +533,23 @@ export function SessionList(props: SessionListProps) {
     }
   }
 
+  /**
+   * A removed project is dropped from the list HERE rather than upstream, and
+   * its group is kept so the restore strip below can name it. Its sessions are
+   * still in `entries` -- most of them are still running -- and the count in
+   * the header still includes them, which is honest: they exist, this list has
+   * stopped drawing them.
+   */
+  const removed = groups.filter((group) => hidden.includes(group.project.id));
+
   /** The same groups, each carrying the two flags its heading renders from. */
-  const folded = groups.map((group) => ({
-    ...group,
-    isCollapsed: collapsed.includes(group.project.id),
-    isRevealed: revealed === group.project.id,
-  }));
+  const folded = groups
+    .filter((group) => !hidden.includes(group.project.id))
+    .map((group) => ({
+      ...group,
+      isCollapsed: collapsed.includes(group.project.id),
+      isRevealed: revealed === group.project.id,
+    }));
 
   return (
     <aside
@@ -914,13 +971,20 @@ export function SessionList(props: SessionListProps) {
                   <Plus size={13} strokeWidth={1.7} />
                 </button>
 
-                {/* Two items, and both of them do something. There is no
-                    "Project settings" because vam has no per-project setting
-                    to open, and no "Remove project" because a project here is
-                    a grouping of live sessions on their cwd -- there is
-                    nothing to remove, and a menu item whose only behaviour is
-                    to report that would be the fifth such control removed from
-                    this app this week. */}
+                {/* There is still no "Project settings": vam has no
+                    per-project setting to open.
+
+                    "Remove project" USED TO BE ABSENT FOR A REASON THAT HAS
+                    ONLY HALF EXPIRED, and the surviving half is what shapes
+                    it. A project here is a grouping of live sessions on their
+                    cwd, so there is nothing stored to delete and ending every
+                    session vam can end still leaves the project on screen at
+                    the next refresh. What changed is that `Session.
+                    vamControlled` now says, per session, whether vam started
+                    it -- so the item can end what it is entitled to end,
+                    persist a removal for the remainder, and state both counts
+                    instead of reporting its own inability. It is destructive
+                    and it is last, behind a confirm. */}
                 {openMenu === group.project.id && (
                   <div
                     ref={projectPanelRef}
@@ -958,6 +1022,23 @@ export function SessionList(props: SessionListProps) {
                       className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
                     >
                       Change project icon
+                    </button>
+                    {/* Last, and the only red thing in the menu. The icon is
+                        LEFT of the label, where the two items above have
+                        nothing, because this is the one item you must not
+                        press by mistake. */}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-project-menu-item="remove"
+                      onClick={() => {
+                        setConfirming(group.project);
+                        setOpenMenu(null);
+                      }}
+                      className="flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-danger hover:bg-raised"
+                    >
+                      <Trash2 size={12} strokeWidth={1.8} />
+                      Remove project
                     </button>
                   </div>
                 )}
@@ -1147,6 +1228,59 @@ export function SessionList(props: SessionListProps) {
           )}
         </ul>
       </OverlayScroll>
+
+      {/* Where a removed project comes back from.
+          Present only while something is removed, and it names each one:
+          a removal that left no visible trace would be indistinguishable from
+          a project that stopped existing, which is the one thing this list
+          must never be ambiguous about. */}
+      {removed.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 border-line border-t px-[11px] py-2">
+          <span className="w-full font-mono text-[9px] text-ink-faint uppercase tracking-[0.12em]">
+            Removed
+          </span>
+          {removed.map((group) => (
+            <button
+              key={group.project.id}
+              type="button"
+              data-restore-project={group.project.id}
+              aria-label={`restore ${group.project.name}`}
+              onClick={() => setHidden(group.project, false)}
+              className="flex cursor-pointer items-center gap-1 rounded-[6px] border border-line px-1.5 py-0.5 text-[10.5px] text-ink-faint hover:border-line-strong hover:text-ink"
+            >
+              <RotateCcw size={10} strokeWidth={1.8} />
+              {group.project.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {confirming !== null && (
+        <ConfirmRemoveProject
+          projectName={confirming.name}
+          plan={removalPlan(
+            entries
+              .filter((entry) => entry.project.id === confirming.id)
+              .map((entry) => entry.session),
+          )}
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => {
+            const plan = removalPlan(
+              entries
+                .filter((entry) => entry.project.id === confirming.id)
+                .map((entry) => entry.session),
+            );
+            // Ending comes first: the hide is what makes the project stay
+            // gone, and doing it first would drop the sessions out of this
+            // component's own reach before it had closed them.
+            for (const sessionId of plan.end) {
+              onClose(sessionId);
+            }
+            setHidden(confirming, true);
+            setConfirming(null);
+          }}
+        />
+      )}
 
       {/* The mockup's own footer strip: workspace line, search, session rows,
           then this — last, not first. It sits above the workspace/settings

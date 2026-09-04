@@ -86,6 +86,12 @@
      the one hue that means "a session needs you" on a decoration. */
   --color-filter-badge: var(--vam-filter-badge);
 
+  /* A destructive ACTION, which is not a session state. `--vam-failed` means
+     a session failed; a menu item painted with it would read as a status
+     report on the project it sits above rather than as a control that ends
+     things. Its own name, like `cursor-ring` and `filter-badge` before it. */
+  --color-danger: var(--vam-danger);
+
   --color-waiting-tint: var(--vam-waiting-tint);
   --color-waiting-wash: var(--vam-waiting-wash);
   --color-done-tint: var(--vam-done-tint);
@@ -178,6 +184,11 @@
      status colour that has stopped meaning anything. */
   --vam-filter-badge: #f59e0b;
 
+  /* Hotter than `--vam-failed` on purpose: the two appear a few pixels apart
+     in the sidebar, and an action must not be mistakable for the status of
+     the row beside it. */
+  --vam-danger: #fb7185;
+
   --vam-waiting-tint: #3f2f12;
   --vam-waiting-wash: #161208;
 
@@ -255,6 +266,10 @@ html.light {
   /* Waiting's light value, again by coincidence of role and not by sharing —
      see the note in the dark block. */
   --vam-filter-badge: #b45309;
+
+  /* Darker than the dark theme's for contrast on a light panel, and still a
+     step off `--vam-failed` here -- see the note there. */
+  --vam-danger: #be123c;
 
   --vam-waiting-tint: #f6dcae;
   --vam-waiting-wash: #fdf6e8;

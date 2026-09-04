@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Decision, Project, Session, SourceId } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import {
@@ -1136,12 +1136,17 @@ describe('SessionList project menu', () => {
     const items = [
       ...(container.querySelectorAll('[data-project-menu-panel="p1"] [role="menuitem"]') ?? []),
     ];
+    // `remove` is LAST, and the destructive item being last is the point of
+    // the order rather than an artefact of when it was added. It used to be
+    // absent from this list along with `Project settings`, on the reasoning
+    // that a derived project has nothing to remove -- see the note at the
+    // menu itself for which half of that expired and which half did not.
     expect(items.map((i) => i.getAttribute('data-project-menu-item'))).toEqual([
       'collapse',
       'icon',
+      'remove',
     ]);
     expect(container.textContent).not.toContain('Project settings');
-    expect(container.textContent).not.toContain('Remove project');
   });
 
   it('closes on Escape and puts focus back on the button that opened it', () => {
@@ -1321,5 +1326,158 @@ describe('SessionList reveals the focused row', () => {
         Object.defineProperty(window, 'matchMedia', original);
       }
     }
+  });
+});
+
+/**
+ * Removing a project: what it ends, what it merely hides, and what it says
+ * before doing either.
+ *
+ * The item exists BECAUSE a project is derived from live sessions, not in
+ * spite of it. Ending every session vam started leaves the project on screen
+ * -- some other terminal is still running in that directory -- so removal is
+ * an end AND a hide, and the confirm has to say which sessions get which,
+ * with the real counts rather than a general warning. `removalPlan` owns that
+ * split and is tested apart; these hold the surface over it.
+ *
+ * The destructive path is asserted BY VALUE in both directions: cancelling
+ * closes nothing at all, and confirming closes exactly the ids vam controls.
+ */
+describe('removing a project', () => {
+  /** One project vam started half of: `a1` is vam's, `a2` is somebody's terminal. */
+  function mixed(): SessionEntry[] {
+    const alpha = makeProject({ id: 'p1', name: 'alpha' }, []);
+    return [
+      { project: alpha, session: makeSession({ id: 'a1', title: 'one', vamControlled: true }) },
+      { project: alpha, session: makeSession({ id: 'a2', title: 'two', vamControlled: false }) },
+    ];
+  }
+
+  function openMenu(container: HTMLElement) {
+    fireEvent.click(container.querySelector('[data-project-menu="p1"]') as HTMLElement);
+  }
+
+  function openConfirm(container: HTMLElement) {
+    openMenu(container);
+    fireEvent.click(container.querySelector('[data-project-menu-item="remove"]') as HTMLElement);
+  }
+
+  it('offers the item in red, with a trash icon at its left', () => {
+    const { container } = mount(mixed());
+    openMenu(container);
+    const item = container.querySelector('[data-project-menu-item="remove"]') as HTMLElement;
+    expect(item.textContent).toContain('Remove project');
+    // Its own token, never `failed`: `--vam-failed` means a session failed,
+    // and a menu item wearing it would read as a status.
+    expect(item.className).toContain('text-danger');
+    const icon = item.querySelector('svg');
+    expect(icon?.getAttribute('class')).toContain('lucide-trash');
+    // Left of the label, which is DOM order here -- the row is a flex row.
+    expect(item.firstElementChild).toBe(icon);
+  });
+
+  it('opens a confirm instead of acting', () => {
+    const onClose = vi.fn();
+    const { container } = render(<SessionList {...baseProps(mixed())} onClose={onClose} />);
+    openConfirm(container);
+    expect(container.querySelector('[data-confirm-remove]')).not.toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    // Still on screen: nothing has been removed yet.
+    expect(container.querySelector('[data-project-id="p1"]')).not.toBeNull();
+  });
+
+  it('counts what it will end and what it will only hide, from the real sessions', () => {
+    const { container } = mount(mixed());
+    openConfirm(container);
+    expect(container.querySelector('[data-confirm-end-count]')?.textContent).toBe('1');
+    expect(container.querySelector('[data-confirm-hide-count]')?.textContent).toBe('1');
+  });
+
+  it('does not put the destructive button under the keyboard', () => {
+    const { container } = mount(mixed());
+    openConfirm(container);
+    expect(document.activeElement).toBe(container.querySelector('[data-confirm-cancel]'));
+  });
+
+  it('CLOSES NOTHING when cancelled', () => {
+    const onClose = vi.fn();
+    const { container } = render(<SessionList {...baseProps(mixed())} onClose={onClose} />);
+    openConfirm(container);
+    fireEvent.click(container.querySelector('[data-confirm-cancel]') as HTMLElement);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-confirm-remove]')).toBeNull();
+    expect(container.querySelector('[data-project-id="p1"]')).not.toBeNull();
+  });
+
+  it('cancels on Escape too, and keeps the key to itself', () => {
+    const onClose = vi.fn();
+    const seen: string[] = [];
+    const listener = (event: KeyboardEvent) => seen.push(event.key);
+    window.addEventListener('keydown', listener);
+    try {
+      const { container } = render(<SessionList {...baseProps(mixed())} onClose={onClose} />);
+      openConfirm(container);
+      const shell = container.querySelector('[data-confirm-remove]') as HTMLElement;
+      fireEvent.keyDown(shell, { key: 'j' });
+      fireEvent.keyDown(shell, { key: 'Escape' });
+      expect(container.querySelector('[data-confirm-remove]')).toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+      // An open overlay owns the keyboard: neither key reached the window.
+      expect(seen).toEqual([]);
+    } finally {
+      window.removeEventListener('keydown', listener);
+    }
+  });
+
+  it('ends EXACTLY the sessions vam controls, and hides the project', () => {
+    const onClose = vi.fn();
+    const { container } = render(<SessionList {...baseProps(mixed())} onClose={onClose} />);
+    openConfirm(container);
+    fireEvent.click(container.querySelector('[data-confirm-remove-go]') as HTMLElement);
+    expect(onClose.mock.calls).toEqual([['a1']]);
+    expect(container.querySelector('[data-project-id="p1"]')).toBeNull();
+  });
+
+  it('removes a project vam cannot end a single session of', () => {
+    const alpha = makeProject({ id: 'p1', name: 'alpha' }, []);
+    const onClose = vi.fn();
+    const entries = [{ project: alpha, session: makeSession({ id: 'a1', title: 'one' }) }];
+    const { container } = render(<SessionList {...baseProps(entries)} onClose={onClose} />);
+    openConfirm(container);
+    expect(container.querySelector('[data-confirm-end-count]')?.textContent).toBe('0');
+    fireEvent.click(container.querySelector('[data-confirm-remove-go]') as HTMLElement);
+    expect(onClose).not.toHaveBeenCalled();
+    // The sessions keep running; the project stops being drawn. That IS the
+    // removal for a project vam did not start.
+    expect(container.querySelector('[data-project-id="p1"]')).toBeNull();
+  });
+
+  it('tells the caller to persist the removal when it is given the route', () => {
+    const onHideProject = vi.fn();
+    const { container } = render(
+      <SessionList {...baseProps(mixed())} hiddenProjects={[]} onHideProject={onHideProject} />,
+    );
+    openConfirm(container);
+    fireEvent.click(container.querySelector('[data-confirm-remove-go]') as HTMLElement);
+    expect(onHideProject.mock.calls).toEqual([[expect.objectContaining({ id: 'p1' }), true]]);
+  });
+
+  it('brings a removed project back', () => {
+    const { container } = mount(mixed());
+    openConfirm(container);
+    fireEvent.click(container.querySelector('[data-confirm-remove-go]') as HTMLElement);
+    const restore = container.querySelector('[data-restore-project="p1"]') as HTMLElement;
+    expect(restore.textContent).toContain('alpha');
+    fireEvent.click(restore);
+    expect(container.querySelector('[data-project-id="p1"]')).not.toBeNull();
+    expect(container.querySelector('[data-restore-project="p1"]')).toBeNull();
+  });
+
+  it('draws a hidden project the caller passed in as hidden', () => {
+    const { container } = render(
+      <SessionList {...baseProps(mixed())} hiddenProjects={['p1']} onHideProject={noop} />,
+    );
+    expect(container.querySelector('[data-project-id="p1"]')).toBeNull();
+    expect(container.querySelector('[data-restore-project="p1"]')).not.toBeNull();
   });
 });
