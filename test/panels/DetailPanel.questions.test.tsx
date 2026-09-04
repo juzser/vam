@@ -231,3 +231,112 @@ describe('the running caption is unmistakably running', () => {
     expect(q('[data-out-running-star]')?.className).toContain('vam-running-star');
   });
 });
+
+/**
+ * Picking by number — the fast path.
+ *
+ * `i` already lands on the first option and the arrows walk from there, which
+ * makes the third option three keystrokes. Numbering them is the idiom every
+ * terminal picker uses and the one this app already uses twice (`Mod-<digit>`
+ * for a session, `Mod-Shift-<digit>` for a tab), so the third option is `i`
+ * then `3`.
+ *
+ * A BARE digit, and the safety argument is scope rather than luck: this
+ * listener is on the listbox, so it can only fire while the keyboard is
+ * already inside the options list. `j`, `k` and the other bare letters that
+ * mean something on the canvas are untouched — they are letters — and a digit
+ * pressed anywhere else in the app reaches the canvas grammar, which binds no
+ * bare digit at all. With no question open there is no listbox to hold focus,
+ * so there is nothing to fire.
+ *
+ * And it changes nothing about what a pick IS: a mark. The honesty assertions
+ * below are the click test's, repeated for the keyboard, because a second way
+ * in is a second way to imply an answer was sent.
+ */
+describe('a digit picks the option beside it', () => {
+  const THREE: AgentQuestion = {
+    ...QUESTION,
+    multiSelect: false,
+    options: [
+      { label: 'first', description: null },
+      { label: 'second', description: null },
+      { label: 'third', description: null },
+    ],
+  };
+
+  const pressDigit = (digit: string) =>
+    fireEvent.keyDown(q('[role="listbox"]') as HTMLElement, { key: digit, bubbles: true });
+
+  it('shows the number beside every option, in order', () => {
+    draw([THREE]);
+    expect(
+      all('[data-question-option]').map((o) => o.getAttribute('data-question-number')),
+    ).toEqual(['1', '2', '3']);
+  });
+
+  it('marks the third option on `3`, without three arrow presses', () => {
+    draw([THREE]);
+    pressDigit('3');
+    const picked = all('[data-question-option][data-picked="true"]');
+    expect(picked).toHaveLength(1);
+    expect(picked[0]?.textContent).toContain('third');
+    // And the keyboard follows the mark, so the arrows walk on from there.
+    expect(document.activeElement).toBe(picked[0]);
+  });
+
+  it('does nothing for a digit with no option under it', () => {
+    draw([THREE]);
+    pressDigit('7');
+    pressDigit('0');
+    expect(all('[data-question-option][data-picked="true"]')).toHaveLength(0);
+  });
+
+  it('numbers only the first nine, because there is no tenth digit', () => {
+    const many = Array.from({ length: 11 }, (_, index) => ({
+      label: `option ${index + 1}`,
+      description: null,
+    }));
+    draw([{ ...THREE, options: many }]);
+    const numbers = all('[data-question-option]').map((o) =>
+      o.getAttribute('data-question-number'),
+    );
+    expect(numbers.slice(0, 9)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+    expect(numbers.slice(9)).toEqual([null, null]);
+  });
+
+  it('obeys multiSelect, exactly as a click does', () => {
+    draw([THREE]);
+    pressDigit('1');
+    pressDigit('2');
+    // Single-select: the second mark replaces the first rather than joining it.
+    expect(all('[data-question-option][data-picked="true"]')).toHaveLength(1);
+    cleanup();
+    draw([{ ...THREE, multiSelect: true }]);
+    pressDigit('1');
+    pressDigit('2');
+    expect(all('[data-question-option][data-picked="true"]')).toHaveLength(2);
+  });
+
+  it('claims nothing was sent, on the keyboard path too', () => {
+    draw([THREE]);
+    pressDigit('2');
+    const pane = text();
+    for (const claim of ['sent', 'submitted', 'answered', 'delivered', 'replied']) {
+      expect(pane.toLowerCase(), claim).not.toContain(claim);
+    }
+    expect(pane).toContain('cannot answer');
+  });
+
+  it('has nothing to fire on when no question is open', () => {
+    draw([]);
+    expect(q('[role="listbox"]')).toBeNull();
+    fireEvent.keyDown(document.body, { key: '1', bubbles: true });
+    expect(all('[data-question-option]')).toHaveLength(0);
+    cleanup();
+    // A resolved question draws its card but no list: same absence, on purpose.
+    draw([{ ...THREE, answer: 'first' }]);
+    expect(q('[role="listbox"]')).toBeNull();
+    fireEvent.keyDown(document.body, { key: '1', bubbles: true });
+    expect(all('[data-question-option][data-picked="true"]')).toHaveLength(0);
+  });
+});

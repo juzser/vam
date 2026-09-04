@@ -1132,8 +1132,25 @@ function OutText({ output }: { readonly output: string }) {
  *
  * `multiSelect` decides the shape, so the roles are `checkbox` or `radio`
  * accordingly and a single-select card cannot hold two marks. Arrow keys walk
- * the list, because `i` lands here whenever a question is open.
+ * the list and the digits jump straight to an option, because `i` lands here
+ * whenever a question is open -- and picking the third option should not cost
+ * three arrow presses. Marking by number is still marking: nothing about the
+ * paragraph above changes because the keystroke got shorter.
  */
+/**
+ * The number an option is picked by, or `undefined` past the ninth.
+ *
+ * Nine, because that is how many digits there are once `0` is left out -- and
+ * `0` is left out for the reason `Mod-0` is unbound in the chord table: a
+ * zeroth option is not a position anyone counts. An option past the ninth is
+ * still there, still clickable and still reachable with the arrows; it simply
+ * has no number, which is honest, where numbering it `0` or `10` would be a
+ * badge for a key that does nothing.
+ */
+const NUMBERED_OPTIONS: readonly (string | undefined)[] = Array.from({ length: 9 }, (_, index) =>
+  String(index + 1),
+);
+
 function QuestionCard({
   question,
   firstOptionRef,
@@ -1155,13 +1172,31 @@ function QuestionCard({
           : [label],
     );
 
-  // The list walks with the arrows; every option is a real button, so Enter and
-  // Space already mark one and Tab already leaves.
-  const walk = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+  // The list walks with the arrows, and jumps with the numbers; every option is
+  // a real button, so Enter and Space already mark one and Tab already leaves.
+  //
+  // The digits are BARE, and safely so because this listener is the listbox's:
+  // it can only fire while the keyboard is already inside the options list,
+  // which is where `i` puts it. The canvas grammar binds no bare digit at all,
+  // and the bare letters that do mean something there (`j`, `k`, and the rest)
+  // are letters. So a number here cannot be a keystroke meant for somewhere
+  // else -- and with no question open there is no list to hold focus.
+  const onKeys = (event: KeyboardEvent<HTMLDivElement>) => {
     const buttons = [
       ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-question-option]'),
     ];
+    if (/^[1-9]$/.test(event.key)) {
+      const at = Number(event.key) - 1;
+      const option = question.options[at];
+      if (option === undefined) return;
+      event.preventDefault();
+      toggle(option.label);
+      // The keyboard follows the mark, so the arrows walk on from where you
+      // landed rather than from wherever you were.
+      buttons[at]?.focus();
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if (at === -1 || buttons.length === 0) return;
     event.preventDefault();
@@ -1195,7 +1230,7 @@ function QuestionCard({
             role="listbox"
             aria-multiselectable={question.multiSelect}
             aria-label="the options this question offers"
-            onKeyDown={walk}
+            onKeyDown={onKeys}
             className="flex flex-col gap-1"
           >
             {question.options.map((option, index) => (
@@ -1206,6 +1241,7 @@ function QuestionCard({
                 role="option"
                 aria-selected={picked.includes(option.label)}
                 data-question-option
+                data-question-number={NUMBERED_OPTIONS[index]}
                 data-picked={picked.includes(option.label) ? 'true' : undefined}
                 onClick={() => toggle(option.label)}
                 className={[
@@ -1215,7 +1251,14 @@ function QuestionCard({
                     : 'border-line hover:bg-raised',
                 ].join(' ')}
               >
-                <span className="max-w-full text-[11px] text-ink">{option.label}</span>
+                <span className="flex max-w-full items-baseline gap-1.5 text-[11px] text-ink">
+                  {NUMBERED_OPTIONS[index] !== undefined && (
+                    <span className="text-[10px] text-ink-faint tabular-nums">
+                      {NUMBERED_OPTIONS[index]}
+                    </span>
+                  )}
+                  <span className="min-w-0">{option.label}</span>
+                </span>
                 {option.description !== null && (
                   <span data-question-description className="max-w-full text-[10.5px] text-ink-dim">
                     {option.description}
