@@ -113,7 +113,7 @@ function renderInfo(over: Partial<Session>, focused: boolean) {
     <ReactFlowProvider>
       <SessionInfoNode
         id="info"
-        data={{ entry: entryOf(over), focused, jumpLabel: null }}
+        data={{ entry: entryOf(over), focused, jumpLabel: null, onPickIcon: () => undefined }}
         {...FLOW_PROPS}
       />
     </ReactFlowProvider>,
@@ -331,7 +331,12 @@ describe('the root node survives a long activity', () => {
       <ReactFlowProvider>
         <SessionInfoNode
           id="info"
-          data={{ entry: entryOf(over), focused: false, jumpLabel: null }}
+          data={{
+            entry: entryOf(over),
+            focused: false,
+            jumpLabel: null,
+            onPickIcon: () => undefined,
+          }}
           {...FLOW_PROPS}
         />
       </ReactFlowProvider>,

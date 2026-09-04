@@ -617,6 +617,35 @@ function CanvasInner({
    * canvas draws.
    */
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+
+  /**
+   * The one route into the session icon chooser.
+   *
+   * Both askers come through here — the `s` chord and the root node's own
+   * glyph — because two openers writing through two copies of this is how
+   * they drift, and only one of them would keep the refusal below. Stable by
+   * construction (functional setState, no model read), so it can sit in a
+   * node's data without going stale as the model refreshes.
+   */
+  const openSessionIconPicker = useCallback((entry: SessionEntry) => {
+    // A project with no source cannot store an icon under one: guessing a
+    // fallback here would reintroduce the exact cross-source collision this
+    // epic's storage re-key removed.
+    const projectSource = entry.project.source;
+    if (projectSource === undefined) {
+      setStatus('this project has no source — icon unavailable');
+      return;
+    }
+    setPickingIconFor((current) =>
+      current !== null && current.sessionId === entry.session.id && current.source === projectSource
+        ? null
+        : {
+            source: projectSource,
+            sessionId: entry.session.id,
+            title: entry.session.title,
+          },
+    );
+  }, []);
   /** The sidebar's filter popover — the ONE home for narrowing (SessionList). */
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   /**
@@ -906,7 +935,7 @@ function CanvasInner({
         style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
         data: {
           ...(spec.kind === 'info'
-            ? { entry: spec.entry }
+            ? { entry: spec.entry, onPickIcon: openSessionIconPicker }
             : { entry: spec.entry, decision: spec.decision, recall: spec.recall }),
           focused: false,
           jumpLabel: null,
@@ -915,7 +944,7 @@ function CanvasInner({
         },
       })),
     ],
-    [layout],
+    [layout, openSessionIconPicker],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -1562,32 +1591,13 @@ function CanvasInner({
           });
           setRenamingId(focusedEntry.session.id);
           return;
-        case 'icon': {
+        case 'icon':
           if (focusedEntry === null) {
             setStatus('pick a session first');
             return;
           }
-          // A project with no source cannot store an icon under one: guessing
-          // a fallback here would reintroduce the exact cross-source
-          // collision this epic's storage re-key removed.
-          const projectSource = focusedEntry.project.source;
-          if (projectSource === undefined) {
-            setStatus('this project has no source — icon unavailable');
-            return;
-          }
-          setPickingIconFor((current) =>
-            current !== null &&
-            current.sessionId === focusedEntry.session.id &&
-            current.source === projectSource
-              ? null
-              : {
-                  source: projectSource,
-                  sessionId: focusedEntry.session.id,
-                  title: focusedEntry.session.title,
-                },
-          );
+          openSessionIconPicker(focusedEntry);
           return;
-        }
         case 'close':
           if (focusedEntry === null) {
             setStatus('pick a session first');
@@ -1764,6 +1774,7 @@ function CanvasInner({
     savePrefs,
     visible,
     overlayOpen,
+    openSessionIconPicker,
   ]);
 
   /**
