@@ -1056,6 +1056,15 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const isNewestTurn =
     decision !== null && entry !== null && entry.session.decisions[0]?.id === decision.id;
+  /**
+   * Whether the empty `out` describes work still happening. Both halves are
+   * required: only a `running` session is still working, and only the newest
+   * turn is the one it is working on.
+   */
+  const outIsLive = isNewestTurn && entry?.session.status === 'running';
+  /** The words themselves — `null` when there is no live turn, or when the
+   * source cannot say what it is doing. */
+  const liveActivity = outIsLive ? entry.session.activity : null;
   const total = entry?.session.decisions.length ?? 0;
   // Oldest first: `decisions` arrives newest first. That
   // ordering is what makes "the last line" and "the newest turn" the same
@@ -1379,8 +1388,26 @@ export function DetailPanel(props: DetailPanelProps) {
                 className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto"
               >
                 {decision.output === null || decision.output === '' ? (
-                  <p data-out-empty className="text-[11.5px] text-ink-faint">
-                    {noAnswerNote(decision.output, entry?.session.status ?? null)}
+                  /* While the session is working, this line is the only thing
+                     in the pane that changes -- so it carries the work rather
+                     than a sentence that reads the same on a session that has
+                     quietly died. `vam-breathe` is the header dot's own idiom
+                     (and stops under `prefers-reduced-motion`, styles.css), and
+                     it is withheld from every stopped status for the reason
+                     recorded at PANE_STATUS_BREATHES. A null `activity` is a
+                     source that cannot say (model.ts): the sentence stays,
+                     because motion is honest here only about the fact that the
+                     session is running, which it still is. */
+                  <p
+                    data-out-empty
+                    data-out-live={outIsLive ? 'true' : undefined}
+                    className={[
+                      'text-[11.5px] text-ink-faint',
+                      outIsLive ? 'vam-breathe' : '',
+                    ].join(' ')}
+                  >
+                    {liveActivity ??
+                      noAnswerNote(decision.output, entry?.session.status ?? null)}
                   </p>
                 ) : (
                   <OutText output={decision.output} />
