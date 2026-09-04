@@ -21,6 +21,7 @@
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
 import type { Project } from '../renderer/domain/model.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
+import type { PaneView } from '../shared/terminal.js';
 import type { UsageSnapshot } from '../shared/usage.js';
 
 /** The slice of `ipcRenderer` used here, so this module is testable without electron. */
@@ -110,6 +111,23 @@ export type ClipboardApi = {
 export function createClipboardApi(ipc: InvokerLike): ClipboardApi {
   return {
     writeText: (text) => ipc.invoke(CHANNELS.clipboardWrite, text) as Promise<boolean>,
+  };
+}
+
+/** The bridge's terminal member: one read, answered by a bare `PaneView`. */
+export type TerminalApi = {
+  read(title: string): Promise<PaneView>;
+};
+
+/**
+ * `terminal.read` forwards straight to `vam:terminal:read` -- no `unwrap`,
+ * because that channel answers bare (see `src/main/terminal/ipc.ts`).
+ * Called only while the Terminal tab is open: nothing here polls, and the
+ * preload starts nothing at expose time.
+ */
+export function createTerminalApi(ipc: InvokerLike): TerminalApi {
+  return {
+    read: (title) => ipc.invoke(CHANNELS.terminalRead, title) as Promise<PaneView>,
   };
 }
 

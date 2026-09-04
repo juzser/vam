@@ -16,6 +16,7 @@ import {
   createClipboardApi,
   createPreloadApi,
   createStreamSubscribe,
+  createTerminalApi,
   createUsageApi,
 } from './api.js';
 
@@ -24,4 +25,5 @@ contextBridge.exposeInMainWorld('api', {
   subscribe: createStreamSubscribe(ipcRenderer),
   usage: createUsageApi(ipcRenderer),
   clipboard: createClipboardApi(ipcRenderer),
+  terminal: createTerminalApi(ipcRenderer),
 });
