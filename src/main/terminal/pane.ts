@@ -86,7 +86,19 @@ export function targetSession(
   panes: ReadonlyMap<string, string> | undefined,
 ): SessionMatch {
   const published = rowId === undefined ? undefined : panes?.get(sessionIdOf(rowId));
-  if (published !== undefined && sessions.some((session) => session.name === published)) {
+  // BOTH CONDITIONS, and the second one was missing. Matching the name alone
+  // made this fast path strictly WEAKER than the fallback it exists to
+  // bypass, which has always filtered on the project: a row in one project
+  // whose published value is stale -- or simply wrong -- and happens to name
+  // a vam session belonging to ANOTHER project resolved here as a confident
+  // single match, and the caller typed into that project's running agent.
+  // An empty id is what an unset option reads back as, so it may not match at
+  // all; `matchVamSession` refuses it for the same reason.
+  if (
+    published !== undefined &&
+    projectId !== '' &&
+    sessions.some((session) => session.name === published && session.project === projectId)
+  ) {
     return { kind: 'one', name: published };
   }
   return matchVamSession(sessions, projectId);

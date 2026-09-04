@@ -124,6 +124,26 @@ describe('typing into the session vam started for a project', () => {
     expect(argvs[1]?.[2]).toBe('=vam-atlas-g7h8i9:');
   });
 
+  it('refuses a published pane belonging to ANOTHER project', async () => {
+    // The fast path asked only whether the name was in vam's listing, while
+    // the fallback filtered on the project: a stale published value naming a
+    // session of Beacon's resolved as a confident single Atlas match, and the
+    // keystroke was typed into Beacon's running agent.
+    const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
+    const panes = new Map([[ATLAS, 'vam-beacon-d4e5f6']]);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(false);
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
+  it('falls back to the project’s own session when the published one is another’s', async () => {
+    const { run, argvs } = runner(
+      listing(`${ATLAS}\tvam-atlas-a1b2c3\n${BEACON}\tvam-beacon-d4e5f6\n`),
+    );
+    const panes = new Map([[ATLAS, 'vam-beacon-d4e5f6']]);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(true);
+    expect(argvs[1]?.[2]).toBe('=vam-atlas-a1b2c3:');
+  });
+
   it('ignores a published pane that is not in vam’s own listing', async () => {
     // A pane the OPERATOR started publishes into the same directory. It is
     // never acted on: the fallback is the project tag, which does not name it.

@@ -98,14 +98,24 @@ export function paneForRow(
   row: ReplyRow,
   panes?: ReadonlyMap<string, string>,
 ): string | null {
-  const published = panes?.get(row.sessionId);
-  if (published !== undefined && sessions.some((session) => session.name === published)) {
-    return published;
-  }
   const projectId = projectIdOf(row.cwd);
   // An unset option reads back as the empty string, so an empty id would
-  // sweep up every session vam did NOT start.
+  // sweep up every session vam did NOT start. Checked before the published
+  // path as well as the tag one: it disqualifies both.
   if (projectId === '') return null;
+  const published = panes?.get(row.sessionId);
+  // THE PROJECT IS CHECKED HERE TOO, and it was not. Matching the published
+  // name alone made this fast path strictly weaker than the fallback below
+  // it, which has always filtered on the project -- so a row whose published
+  // value named a vam session of ANOTHER project resolved as a confident
+  // match, and reply and close both aimed at that project's session. The two
+  // paths now demand the same thing of a session and can only agree.
+  if (
+    published !== undefined &&
+    sessions.some((session) => session.name === published && session.project === projectId)
+  ) {
+    return published;
+  }
   const here = agents.filter((agent) => projectIdOf(agent.cwd) === projectId);
   if (here.length !== 1) return null;
   const tagged = sessions.filter((session) => session.project === projectId);

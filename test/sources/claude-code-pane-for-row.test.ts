@@ -86,6 +86,40 @@ describe('paneForRow with published panes', () => {
  * is why `vamControlled` was false everywhere and close refused every row.
  * The published field settles it per session, and the counts stop mattering.
  */
+describe('a published pane is checked against the row’s OWN project', () => {
+  /**
+   * THE HOLE THIS PINS. The published fast path asked only whether the name
+   * appeared anywhere in vam's listing, while the fallback below it filtered
+   * on the project -- so the path added to BYPASS the slow one was strictly
+   * weaker than it. A row in Atlas whose published value is stale, or simply
+   * wrong, and happens to name a vam session belonging to BEACON resolved as
+   * a confident single match: a reply typed into another project's agent, and
+   * a close aimed at its session.
+   */
+  const BEACON = '/work/beacon';
+  const elsewhere: readonly TmuxSession[] = [
+    { project: projectIdOf(BEACON), name: 'vam-beacon-ee33ff' },
+  ];
+
+  it('refuses a published pane that belongs to another project', () => {
+    const panes = new Map([['sess-alpha', 'vam-beacon-ee33ff']]);
+    expect(paneForRow(elsewhere, [ALPHA], ALPHA, panes)).toBeNull();
+  });
+
+  it('still refuses when the right session is listed beside the wrong one', () => {
+    // The fallback cannot rescue this either, and must not: the row published
+    // a pane, and vam does not get to substitute a different one for it.
+    const panes = new Map([['sess-alpha', 'vam-beacon-ee33ff']]);
+    expect(paneForRow([...one, ...elsewhere], [ALPHA], ALPHA, panes)).toBe('vam-atlas-aa11bb');
+  });
+
+  it('never matches a session no one tagged, whose project reads back empty', () => {
+    const untagged: readonly TmuxSession[] = [{ project: '', name: 'someone-elses' }];
+    const panes = new Map([['sess-alpha', 'someone-elses']]);
+    expect(paneForRow(untagged, [ALPHA], ALPHA, panes)).toBeNull();
+  });
+});
+
 describe('paneForRow with three live sessions in one cwd', () => {
   const GAMMA = { key: 'sess-gamma#9', sessionId: 'sess-gamma', cwd: CWD };
   const all = [ALPHA, BETA, GAMMA];
