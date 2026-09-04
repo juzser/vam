@@ -88,6 +88,18 @@ const DECISION_SHAPE: Shape = {
   output: nullable(isString),
   commands: (v) => Array.isArray(v) && v.every((c) => matches(c, COMMAND_SHAPE).length === 0),
 };
+/**
+ * `Session.agents`, which crosses the bridge as plain data like everything
+ * else. Declared here because the key set below is EXACT: a field main starts
+ * sending that this file does not know about fails as "not declared in
+ * model.ts", which is the failure mode a new field has.
+ */
+const AGENT_SHAPE: Shape = {
+  id: isString,
+  type: nullable(isString),
+  description: nullable(isString),
+  running: (v) => typeof v === 'boolean',
+};
 const SESSION_SHAPE: Shape = {
   id: isString,
   title: isString,
@@ -99,6 +111,7 @@ const SESSION_SHAPE: Shape = {
   activity: nullable(isString),
   age: nullable(isString),
   decisions: (v) => Array.isArray(v) && v.every((d) => matches(d, DECISION_SHAPE).length === 0),
+  agents: (v) => Array.isArray(v) && v.every((a) => matches(a, AGENT_SHAPE).length === 0),
 };
 const PROJECT_SHAPE: Shape = {
   id: isString,

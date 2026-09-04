@@ -37,6 +37,7 @@ import { basename, join } from 'node:path';
 import type { Project, Session } from '../../../renderer/domain/model.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { MainSource } from '../source.js';
+import { type AgentRoster, readAgentRoster } from './agent-roster.js';
 import { type LiveAgent, listLiveAgents } from './agents.js';
 import { deliverPromptViaCli, deliverToSession } from './deliver.js';
 import { createBranchLookup } from './repo-branch.js';
@@ -62,9 +63,6 @@ import {
  * single-digit kilobytes on top of the tails.
  */
 const TAIL_BYTES = 128 * 1024;
-
-/** A subagent transcript touched this recently belongs to an agent still working. */
-const RUNNING_WINDOW_MS = 5 * 60_000;
 
 /** Where Claude Code keeps transcripts. Derived, never a literal home path. */
 export const defaultTranscriptRoot = (): string => join(homedir(), '.claude', 'projects');
@@ -113,30 +111,25 @@ async function indexTranscripts(root: string): Promise<Map<string, string>> {
   return index;
 }
 
-/** Subagent transcripts written within the running window: agents still working. */
-async function countRunningAgents(transcriptPath: string, nowMs: number): Promise<number> {
-  const dir = join(`${transcriptPath.slice(0, -'.jsonl'.length)}`, 'subagents');
-  let running = 0;
-  try {
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
-      const info = await stat(join(dir, entry.name));
-      if (nowMs - info.mtimeMs <= RUNNING_WINDOW_MS) running += 1;
-    }
-  } catch {
-    // No subagents directory: this session never spawned one.
-  }
-  return running;
-}
-
 type TranscriptRead = {
   readonly facts: TranscriptFacts;
-  readonly runningAgents: number;
+  /**
+   * The subagents beside this transcript: the `●N` count and the roster the
+   * pane's Agents tab lists, off ONE walk of the directory. The count was
+   * always this walk's output; the roster is the rest of what it touched.
+   */
+  readonly roster: AgentRoster;
   /** Last activity, which `startedAt` is not. `null` when there is no file. */
   readonly mtimeMs: number | null;
 };
 
-const NO_TRANSCRIPT: TranscriptRead = { facts: EMPTY_FACTS, runningAgents: 0, mtimeMs: null };
+const NO_TRANSCRIPT: TranscriptRead = {
+  facts: EMPTY_FACTS,
+  // Empty, not absent: a session vam READ and found no agents under is a
+  // different thing from a source that cannot answer at all (model.ts).
+  roster: { agents: [], running: 0 },
+  mtimeMs: null,
+};
 
 async function readTranscript(
   path: string,
@@ -148,7 +141,7 @@ async function readTranscript(
     const tail = await readTail(path, info.size, TAIL_BYTES);
     return {
       facts: summarizeTranscript(tail, sessionId),
-      runningAgents: await countRunningAgents(path, nowMs),
+      roster: await readAgentRoster(path, nowMs),
       mtimeMs: info.mtimeMs,
     };
   } catch {
@@ -210,7 +203,8 @@ export async function loadClaudeCodeProjects(
       // sessions on the same project at a glance.
       epic: read.facts.branch,
       status: agent.status,
-      runningAgents: read.runningAgents,
+      runningAgents: read.roster.running,
+      agents: read.roster.agents,
       activity: agent.status === 'running' ? read.facts.activity : null,
       // Age is LAST ACTIVITY, per PROCESS. `~/.claude/sessions/<pid>.json`'s
       // `statusUpdatedAt` is the only surface that answers per process: two
@@ -293,7 +287,10 @@ const DESCRIPTOR: SourceDescriptor = {
     governance: false,
     pullRequests: false,
     terminal: false,
-    agentRoster: false,
+    // `<sessionId>/subagents/` is real and is now read: each agent's own
+    // transcript for whether it is running, and the `meta.json` beside it for
+    // what it is. See `agent-roster.ts`.
+    agentRoster: true,
   },
   declines: {
     // No watch is implemented, so no live badge is claimed: flipping this on
@@ -310,7 +307,8 @@ const DESCRIPTOR: SourceDescriptor = {
     governance: NOT_RECORDED,
     pullRequests: NOT_RECORDED,
     terminal: 'vam holds no PTY, and attaching to a session needs one',
-    agentRoster: NOT_RECORDED,
+    // No entry for agentRoster: a decline is written only for a capability
+    // that is false, and this one is now true.
   },
   /**
    * `connection`, and the connection is the operating-system user. The CLI

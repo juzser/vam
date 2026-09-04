@@ -73,6 +73,9 @@ const PROJECTS: readonly Project[] = [
         activity: null,
         age: '2m',
         branch: null,
+        // Empty, and it means what model.ts says it means: the sample looked
+        // and has none. It is not a source that cannot answer.
+        agents: [],
         decisions: [
           {
             id: 'd-1',
@@ -93,6 +96,7 @@ const PROJECTS: readonly Project[] = [
         activity: 'waiting on task 4',
         age: null,
         branch: null,
+        agents: [],
         decisions: [
           { id: 'd-2', label: 'gate', input: 'is the shell live yet?', output: null, commands: [] },
         ],
