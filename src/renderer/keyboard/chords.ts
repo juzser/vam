@@ -150,6 +150,11 @@ export type KeyAction =
   | { readonly kind: 'filterMenu' }
   /** `,` — settings, the convention most editors already use. */
   | { readonly kind: 'settings' }
+  /** `E` — the scrubbed event log and the report vam composes from it. It
+      shipped reachable only by clicking the status bar, which on a
+      keyboard-first tool means the surface most wanted at the worst moment was
+      the one that needed a mouse. */
+  | { readonly kind: 'errorLog' }
   /** `?` — the shortcut sheet, generated from the tables below. Free on this
       layout, and a real Shift+`/` keydown normalizes to `?` itself (proven in
       test/keyboard/chords.test.ts, not assumed). */
@@ -216,6 +221,9 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   x: { kind: 'close' },
   o: { kind: 'newSession' },
   ',': { kind: 'settings' },
+  // `E` for error, and Shift-e because plain `e` is worth keeping free while
+  // the single-key space is this thin. Nothing in any table holds either.
+  E: { kind: 'errorLog' },
   '?': { kind: 'help' },
   f: { kind: 'jump' },
   F: { kind: 'filterMenu' },

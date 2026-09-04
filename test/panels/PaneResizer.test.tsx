@@ -260,12 +260,17 @@ describe('DetailPanel active-pane signal survives with the handle mounted (AC-6 
     };
   }
 
-  it('carries border-l-2 and border-waiting when active, with the handle present', () => {
+  // The token moved from `waiting` to `focus-edge` when the focus indicator
+  // landed: the amber means "a session is waiting on your answer" everywhere
+  // else, and this pane was spending it on "the keyboard is here". The
+  // assertion this file cares about is unchanged -- the signal, whatever its
+  // colour, survives the handle being mounted -- so only the name moved.
+  it('carries border-l-2 and the focus token when active, with the handle present', () => {
     const { container } = render(<DetailPanel {...detailPanelProps(true)} />);
     const aside = container.querySelector('[data-action-pane="active"]');
     expect(aside).not.toBeNull();
     expect(aside?.className).toMatch(/border-l-2/);
-    expect(aside?.className).toMatch(/border-waiting/);
+    expect(aside?.className).toMatch(/border-focus-edge/);
     expect(container.querySelector('[data-pane-resize-handle="detail"]')).not.toBeNull();
   });
 

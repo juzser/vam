@@ -63,6 +63,7 @@ import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../key
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { nextNode } from '../keyboard/spatial-nav.js';
 import { DetailPanel, type Tab as DetailTab, TABS } from '../panels/DetailPanel.js';
+import { FocusEdge } from '../panels/FocusEdge.js';
 import { IconPicker } from '../panels/IconPicker.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
@@ -416,10 +417,14 @@ function DetailSlot({ show, ...props }: ComponentProps<typeof DetailPanel> & { s
 function CanvasColumn({
   show,
   strip,
+  keyboardHere,
   children,
 }: {
   show: boolean;
   strip: boolean;
+  /** Select is ONE cursor drawn in two columns -- the sidebar row's ring and
+      the canvas card's -- so in that mode this column wears the line too. */
+  keyboardHere: boolean;
   children: ReactNode;
 }) {
   return show ? (
@@ -428,6 +433,7 @@ function CanvasColumn({
       className={`relative flex min-w-0 flex-col bg-canvas ${strip ? 'flex-none border-line border-l' : 'flex-1'}`}
       style={strip ? { width: CANVAS_STRIP } : undefined}
     >
+      {keyboardHere && <FocusEdge />}
       {children}
     </div>
   ) : null;
@@ -1750,6 +1756,9 @@ function CanvasInner({
         case 'palette':
           setPaletteOpen(true);
           return;
+        case 'errorLog':
+          setErrorLogOpen(true);
+          return;
         case 'filterMenu':
           setFilterMenuOpen((open) => !open);
           return;
@@ -1994,6 +2003,11 @@ function CanvasInner({
         <SidebarSlot
           key="sidebar"
           show={visible.sidebar}
+          // The line at this column's top edge, off the SAME `mode` the status
+          // bar's word reads. A hidden column is not rendered at all, so
+          // "every shown column Select is drawn in" needs no second test
+          // against `visible` here -- the slot already is that test.
+          keyboardHere={mode === 'select'}
           entries={entries}
           // The UNFILTERED set, for the two things about removing a project
           // that must not read a narrowed list -- see `allEntries` on
@@ -2109,7 +2123,12 @@ function CanvasInner({
           }
         />
 
-        <CanvasColumn key="canvas" show={visible.canvas} strip={canvasStrip}>
+        <CanvasColumn
+          key="canvas"
+          show={visible.canvas}
+          strip={canvasStrip}
+          keyboardHere={mode === 'select'}
+        >
           {/* The toolbar is chrome inside a column, not a column: hidden rather
               than unmounted in the strip, where 300px has no room for a source
               readout and four filters. The unmount rule this file argues for

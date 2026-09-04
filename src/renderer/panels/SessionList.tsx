@@ -43,6 +43,7 @@ import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filter.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
+import { FocusEdge } from './FocusEdge.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { type RemovalPlan, removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
@@ -116,6 +117,16 @@ export type SessionListProps = {
    */
   readonly allEntries?: readonly SessionEntry[];
   readonly focusedSessionId: string | null;
+  /**
+   * Whether the keyboard is in this column -- the Select half of the cursor
+   * mode, passed down rather than re-derived, so the line and the status bar's
+   * word are two readings of ONE piece of state and cannot come apart.
+   *
+   * Optional and defaulting to false: every test that renders this pane
+   * directly is about something else, and a required flag would have made this
+   * change edit all of them to say "not focused".
+   */
+  readonly keyboardHere?: boolean;
   /** Which factory this is. The mockup calls it a workspace; vam has one. */
   readonly workspace: string;
   readonly filter: string;
@@ -255,6 +266,7 @@ export function SessionList(props: SessionListProps) {
     entries,
     allEntries: unfiltered,
     focusedSessionId,
+    keyboardHere = false,
     workspace,
     filter,
     filtering,
@@ -597,6 +609,7 @@ export function SessionList(props: SessionListProps) {
       className="relative flex h-full shrink-0 flex-col border-line border-r bg-sidebar"
       style={{ width }}
     >
+      {keyboardHere && <FocusEdge />}
       {resizeHandle}
       <div className="flex flex-col gap-2.5 border-line border-b p-3">
         {/* The avatar bar, which used to be the sidebar's footer.
