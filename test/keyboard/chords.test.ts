@@ -283,3 +283,54 @@ describe('? opens the shortcut sheet', () => {
     expect(type(['/']).actions).toEqual([{ kind: 'search' }]);
   });
 });
+
+/**
+ * The digit row under a modifier, spelled from the KEY'S POSITION.
+ *
+ * Two separate questions, and the answers differ from the ones the `Tab`
+ * finding produced for named keys. Shift gets no token in `normalizeKey`
+ * because the browser already applied it — true for `?` and `<`, and the
+ * reason a `Tab` entry would also answer a plain Tab. A digit is the other
+ * case: Shift DOES alter it, so `Cmd+Shift+1` arrives as `!`, which is
+ * distinct from `Mod-1` but is not the position the binding is about — and on
+ * a layout whose digit row is shifted (AZERTY) plain `Cmd+1` arrives as `&`
+ * and the shipped `sessionAt` bindings are simply dead.
+ *
+ * `event.code` is the fix for both: it names the physical digit, which is
+ * exactly what "1..8 are positions" already claimed to mean.
+ */
+describe('normalizeKey — the digit row is a position, not a character', () => {
+  it('spells a shifted digit by its position, distinctly from the unshifted one', () => {
+    // A real macOS US-layout Cmd+Shift+1: the browser shifted the digit to `!`.
+    const shifted = normalizeKey({ key: '!', code: 'Digit1', metaKey: true, shiftKey: true });
+    const plain = normalizeKey({ key: '1', code: 'Digit1', metaKey: true });
+    expect(plain).toBe('Mod-1');
+    expect(shifted).toBe('Mod-Shift-1');
+    // The whole point: one gesture must not answer the other's binding.
+    expect(shifted).not.toBe(plain);
+  });
+
+  it('reads the digit off the position on a layout whose digit row is shifted', () => {
+    // AZERTY: the unshifted key at Digit1 is `&`. Before this, `Mod-&`.
+    expect(normalizeKey({ key: '&', code: 'Digit1', metaKey: true })).toBe('Mod-1');
+    expect(normalizeKey({ key: '1', code: 'Digit1', metaKey: true, shiftKey: true })).toBe(
+      'Mod-Shift-1',
+    );
+  });
+
+  it('leaves shifted LETTERS folded, as the table comment requires', () => {
+    // Cmd-K and Cmd-Shift-K stay one gesture: `palette` is bound once.
+    expect(normalizeKey({ key: 'K', code: 'KeyK', metaKey: true, shiftKey: true })).toBe('Mod-k');
+    expect(normalizeKey({ key: 'k', code: 'KeyK', metaKey: true })).toBe('Mod-k');
+  });
+
+  it('is unchanged for a digit typed with no modifier at all', () => {
+    // The `!` typeahead in the sidebar filter must keep receiving `!`.
+    expect(normalizeKey({ key: '!', code: 'Digit1', shiftKey: true })).toBe('!');
+    expect(normalizeKey({ key: '1', code: 'Digit1' })).toBe('1');
+  });
+
+  it('falls back to the character when no code is reported', () => {
+    expect(normalizeKey({ key: '1', metaKey: true })).toBe('Mod-1');
+  });
+});

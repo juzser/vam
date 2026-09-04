@@ -18,6 +18,12 @@ import type { Direction } from './spatial-nav.js';
 /** A `KeyboardEvent`, narrowed to what the grammar reads. */
 export type KeyEventLike = {
   readonly key: string;
+  /**
+   * The PHYSICAL key, when the event reports one. Read for the digit row only
+   * (see `normalizeKey`), and optional because every other caller in this
+   * codebase builds these by hand from a `key` alone.
+   */
+  readonly code?: string | undefined;
   readonly ctrlKey?: boolean | undefined;
   readonly metaKey?: boolean | undefined;
   readonly altKey?: boolean | undefined;
@@ -28,6 +34,24 @@ export type KeyEventLike = {
 const MODIFIER_KEYS = new Set(['Control', 'Meta', 'Alt', 'Shift']);
 
 /**
+ * The number row's position, `'0'`..`'9'`, or null when this is not one of
+ * those keys.
+ *
+ * `code` first, because that is the position; `key` only as the fallback for
+ * an event that reports no code — every hand-built `KeyEventLike` in the tests
+ * and, historically, every browser before `code` existed. `Numpad1` is
+ * deliberately not matched: it is a different key, and under Shift it does not
+ * even produce a digit.
+ */
+function digitPosition(event: KeyEventLike): string | null {
+  const fromCode = /^Digit([0-9])$/.exec(event.code ?? '');
+  if (fromCode?.[1] !== undefined) {
+    return fromCode[1];
+  }
+  return /^[0-9]$/.test(event.key) ? event.key : null;
+}
+
+/**
  * A `KeyboardEvent` reduced to the one string a binding is written in, or
  * `null` when the event is not a keystroke at all.
  *
@@ -35,9 +59,22 @@ const MODIFIER_KEYS = new Set(['Control', 'Meta', 'Alt', 'Shift']);
  * one machine at a time, both spellings mean the same intent, and keeping them
  * apart would mean declaring every binding twice.
  *
- * Shift deliberately gets no token. The browser already applied it — `G` and
- * `?` arrive as themselves — so adding one would give the same keystroke two
- * spellings, and only one of them would ever match.
+ * Shift deliberately gets no token *for characters*. The browser already
+ * applied it — `G` and `?` arrive as themselves — so adding one would give the
+ * same keystroke two spellings, and only one of them would ever match.
+ *
+ * THE DIGIT ROW UNDER A MODIFIER IS THE EXCEPTION, and it is an exception
+ * because those bindings are about a POSITION rather than a character: the
+ * table's own comment says "1..8 are positions". A character-based spelling
+ * cannot keep that promise, and failed it twice. Shift alters a digit, so
+ * `Cmd+Shift+1` arrives as `!` and would have to be written `Mod-!` — a
+ * spelling no key sheet can render as a position. And on any layout whose
+ * digit row is shifted (AZERTY), plain `Cmd+1` arrives as `&`, so the shipped
+ * `sessionAt` bindings were simply DEAD there.
+ *
+ * `event.code` answers both: `Digit1` is the position, whatever the layout put
+ * on it, so the digit row keeps one spelling everywhere and Shift can carry a
+ * token there without giving any keystroke a second one. Letters stay folded.
  *
  * Returning `null` for a bare modifier is what stops reaching for a shortcut
  * and thinking better of it from silently eating a half-typed `g`.
@@ -50,6 +87,10 @@ export function normalizeKey(event: KeyEventLike): string | null {
   const alt = event.altKey === true;
   if (!mod && !alt) {
     return event.key;
+  }
+  const digit = digitPosition(event);
+  if (digit !== null) {
+    return `${mod ? 'Mod-' : ''}${alt ? 'Alt-' : ''}${event.shiftKey === true ? 'Shift-' : ''}${digit}`;
   }
   // Under a modifier the letter is lower-cased so Cmd-K and Cmd-Shift-K do not
   // become two different bindings for one gesture.
