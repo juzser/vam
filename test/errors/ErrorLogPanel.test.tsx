@@ -24,7 +24,10 @@ afterEach(() => {
 
 function writeText(): ReturnType<typeof vi.fn> {
   const spy = vi.fn(async () => true);
-  vi.stubGlobal('window', Object.assign(globalThis.window, { api: { clipboard: { writeText: spy } } }));
+  vi.stubGlobal(
+    'window',
+    Object.assign(globalThis.window, { api: { clipboard: { writeText: spy } } }),
+  );
   return spy;
 }
 

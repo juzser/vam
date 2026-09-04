@@ -135,3 +135,23 @@ describe('loggedEvents', () => {
     expect(loggedEvents()).toHaveLength(2);
   });
 });
+
+describe('a repeating failure', () => {
+  it('is recorded once, not once per poll', () => {
+    // `useSourceModel` reloads on a timer. A source that is down fails every
+    // time, and without this the 100-event bound would be spent on 100
+    // copies of one sentence -- evicting the entries that explain how it
+    // started.
+    for (let index = 0; index < 5; index += 1) {
+      recordFailure('load projects', { code: 'cli-missing', message: 'no claude on PATH' });
+    }
+    expect(loggedEvents()).toHaveLength(1);
+  });
+
+  it('is recorded again once something else happened in between', () => {
+    recordFailure('load projects', { code: 'cli-missing', message: 'gone' });
+    recordFailure('send prompt', { code: 'session-running', message: 'busy' });
+    recordFailure('load projects', { code: 'cli-missing', message: 'gone' });
+    expect(loggedEvents()).toHaveLength(3);
+  });
+});

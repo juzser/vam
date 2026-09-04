@@ -44,6 +44,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import {
   describeUsage,
@@ -56,6 +57,8 @@ import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { StatusFilter } from '../domain/session-filter.js';
 import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain/session-filter.js';
+import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
+import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
 import { nextNode } from '../keyboard/spatial-nav.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
@@ -94,12 +97,7 @@ import {
   writePrefs,
 } from '../prefs/prefs.js';
 import { SettingsOverlay } from '../settings/SettingsOverlay.js';
-import {
-  canWriteTo,
-  describeFailure,
-  type SessionSource,
-  type SourceWrites,
-} from '../sources/port.js';
+import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/port.js';
 import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
 import { copyText } from './clipboard.js';
@@ -574,8 +572,16 @@ function CanvasInner({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [keySheetOpen, setKeySheetOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [errorLogOpen, setErrorLogOpen] = useState(false);
   /** Any full-screen overlay on screen. See the keydown handler for the rule. */
-  const overlayOpen = paletteOpen || keySheetOpen || settingsOpen;
+  const overlayOpen = paletteOpen || keySheetOpen || settingsOpen || errorLogOpen;
+  /**
+   * How many things have BROKEN this session. Refusals are excluded on
+   * purpose: a badge that counted vam's intended "no"s would be a number that
+   * grows during correct use, and a number like that is one nobody reads.
+   */
+  const events = useSyncExternalStore(subscribeEvents, loggedEvents, loggedEvents);
+  const failureCount = events.filter((event) => event.kind === 'failure').length;
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState('');
   /**
@@ -1057,7 +1063,7 @@ function CanvasInner({
         source.onWrote();
       }
     } catch (cause) {
-      setStatus(describeFailure(cause));
+      setStatus(noteFailure('send prompt', cause));
     } finally {
       setWriting(false);
     }
@@ -1108,7 +1114,7 @@ function CanvasInner({
         );
         source.onWrote();
       } catch (cause) {
-        setStatus(describeFailure(cause));
+        setStatus(noteFailure('close session', cause));
       } finally {
         // EVERY path, and that is the whole of this `finally`. A spinner still
         // spinning after a refusal turns a clear failure into an apparent
@@ -1163,7 +1169,7 @@ function CanvasInner({
         setStatus(`started a new session in ${projectName} — it may take a moment to appear`);
         if (source.kind === 'session') source.onWrote();
       } catch (cause) {
-        setStatus(describeFailure(cause));
+        setStatus(noteFailure('new session', cause));
       } finally {
         setPendingAction(null);
       }
@@ -1189,6 +1195,9 @@ function CanvasInner({
   const newProject = useCallback(async () => {
     const route = newSessionRoute(source);
     if (!route.ok) {
+      // A refusal vam INTENDED. Recorded, because an operator who cannot see
+      // why the control did nothing is still stuck -- but never as a failure.
+      recordRefusal('new project', route.decline);
       setStatus(route.decline);
       return;
     }
@@ -1201,7 +1210,7 @@ function CanvasInner({
     try {
       cwd = await choose();
     } catch (cause) {
-      setStatus(describeFailure(cause));
+      setStatus(noteFailure('choose a directory', cause));
       return;
     }
     if (cwd === null) {
@@ -1214,7 +1223,7 @@ function CanvasInner({
       setStatus(`started a new session in ${name} — it may take a moment to appear`);
       if (source.kind === 'session') source.onWrote();
     } catch (cause) {
-      setStatus(describeFailure(cause));
+      setStatus(noteFailure('new project', cause));
     }
   }, [source]);
 
@@ -2066,6 +2075,11 @@ function CanvasInner({
           canvas would otherwise open a sheet nothing could draw. */}
       {keySheetOpen && <KeySheet onClose={() => setKeySheetOpen(false)} />}
 
+      {/* Same reason as the sheet above, and one more of its own: the log is
+          opened FROM the status bar, so it must be able to draw over whatever
+          the layout is showing at the time. */}
+      {errorLogOpen && <ErrorLogPanel onClose={() => setErrorLogOpen(false)} />}
+
       {/* Same reason again: settings is a window overlay, so it sits with the
           palette and the sheet rather than inside the canvas column. */}
       {settingsOpen && (
@@ -2194,6 +2208,22 @@ function CanvasInner({
             `tally` itself stays: the sidebar's filter counts read it. */}
 
         {status !== null && <StatusCell text={status} />}
+
+        {/* The way back to a failure that has already scrolled past. A status
+            line lives until the next status replaces it, which in practice is
+            seconds; before this cell existed the only record of a `cli-failed`
+            was whatever the operator managed to read. Hidden entirely while
+            nothing has broken -- a permanent `0` is noise. */}
+        {failureCount > 0 && (
+          <button
+            type="button"
+            data-error-log-button
+            onClick={() => setErrorLogOpen(true)}
+            className="rounded-[4px] border border-line-strong px-1.5 py-px text-failed"
+          >
+            {failureCount} {failureCount === 1 ? 'failure' : 'failures'}
+          </button>
+        )}
 
         <span className="flex-1" />
         {/* The right-hand end is one cell wide, again at the operator's

@@ -10,8 +10,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { composeReport, NEW_ISSUE_URL } from '../../src/renderer/errors/report.js';
 import type { LoggedEvent } from '../../src/renderer/errors/log.js';
+import { composeReport, NEW_ISSUE_URL } from '../../src/renderer/errors/report.js';
 
 const HOME = '/Users/ada';
 
@@ -75,10 +75,13 @@ describe('composeReport', () => {
   it('sends nothing: no network call, no shell', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const open = vi.fn();
-    vi.stubGlobal('XMLHttpRequest', class {
-      open = open;
-      send = open;
-    });
+    vi.stubGlobal(
+      'XMLHttpRequest',
+      class {
+        open = open;
+        send = open;
+      },
+    );
     composeReport(LEAKY, HOME);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();

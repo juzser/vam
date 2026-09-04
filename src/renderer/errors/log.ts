@@ -85,6 +85,21 @@ function changed(): void {
 }
 
 function push(event: Omit<LoggedEvent, 'id' | 'at'>): LoggedEvent {
+  // A consecutive repeat is not new information. `useSourceModel` reloads on
+  // a timer, so a source that is down produces the same sentence on every
+  // poll, and 100 copies of it would evict the entries that say how the
+  // session got there. Only the IMMEDIATELY preceding event is compared:
+  // failing, recovering and failing again is a different story and is kept.
+  const last = events.at(-1);
+  if (
+    last !== undefined &&
+    last.kind === event.kind &&
+    last.action === event.action &&
+    last.code === event.code &&
+    last.message === event.message
+  ) {
+    return last;
+  }
   const recorded: LoggedEvent = { ...event, id: nextId, at: new Date().toISOString() };
   nextId += 1;
   events.push(recorded);

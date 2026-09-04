@@ -7,7 +7,7 @@
  * from one of those verbatim publishes all of it, permanently, to a tracker
  * anyone can read. That is the entire risk of the report feature, so the
  * scrubber is a pure function with no I/O, no clock and no dependency on the
- * app -- everything a test can pin exhaustively -- and `report.ts` is the
+ * app -- everything a test can cover exhaustively -- and `report.ts` is the
  * only caller, which makes it the only door.
  *
  * WHAT IS REMOVED, and why each one is here rather than merely plausible:
