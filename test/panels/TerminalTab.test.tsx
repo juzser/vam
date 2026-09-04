@@ -310,7 +310,7 @@ describe('the row it asks about', () => {
     // The project alone answers `ambiguous` when vam started two sessions in
     // it. The row is what main pairs against the pane the session published.
     const read = vi.fn(async () => ok('beta screen'));
-    render(<TerminalTab projectId={ATLAS} rowId="sess-beta#8" read={read} />);
+    render(<TerminalTab projectId={ATLAS} rowId="sess-beta#8" read={read} resize={undefined} />);
     await waitFor(() => expect(read).toHaveBeenCalledWith(ATLAS, 'sess-beta#8'));
   });
 });

@@ -61,7 +61,12 @@ export type ReadPane = (projectId: string, rowId?: string) => Promise<PaneView>;
  * (`main/terminal/pane.ts`), which is the guard that matters: this is the one
  * thing the tab does that CHANGES a terminal rather than reading one.
  */
-export type ResizePane = (projectId: string, columns: number, rows: number) => Promise<boolean>;
+export type ResizePane = (
+  projectId: string,
+  columns: number,
+  rows: number,
+  rowId?: string,
+) => Promise<boolean>;
 
 /**
  * How long a wrapper has to stop moving before tmux is told about it.
@@ -273,7 +278,10 @@ export function TerminalTab({
       // Fire and forget: the answer is whether tmux did it, and the next
       // capture shows that better than any message could. A rejected bridge
       // call must not become an unhandled rejection over a cosmetic ask.
-      void resize(projectId, size.columns, size.rows).catch(() => undefined);
+      // The ROW travels with it, so the session resized is the session whose
+      // screen is being drawn: a project vam started two sessions in has two
+      // panes, and only the session itself knows which one it is in.
+      void resize(projectId, size.columns, size.rows, rowId).catch(() => undefined);
     };
     // The observer, and not a window `resize` listener: the pane changes width
     // when the pane RESIZER is dragged and when a layout preset moves the
@@ -288,7 +296,7 @@ export function TerminalTab({
       if (timer !== undefined) window.clearTimeout(timer);
       observer.disconnect();
     };
-  }, [showing, resize, projectId]);
+  }, [showing, resize, projectId, rowId]);
 
   // Nothing is focused, so there is no project to ask about and the effect
   // above never asks. Saying "reading the session's screen" here -- which is

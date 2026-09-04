@@ -95,14 +95,23 @@ afterEach(() => {
 describe('the Terminal tab tells tmux how big the pane is', () => {
   it('measures a rendered character and asks for the columns and rows that fit', async () => {
     const resize = vi.fn(async () => true);
-    render(<TerminalTab projectId={ATLAS} read={vi.fn(async () => ok())} resize={resize} />);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        rowId="sess-alpha#1"
+        read={vi.fn(async () => ok())}
+        resize={resize}
+      />,
+    );
     await settle();
     // 800 / 8 = 100 columns, 480 / 16 = 30 rows. The cell width is MEASURED --
     // a plausible 0.6 ratio off the 10.5px font size would have said 127.
     layout({ box: { width: 800, height: 480 }, cell: 8 });
     await fire();
 
-    expect(resize).toHaveBeenCalledWith(ATLAS, 100, 30);
+    // The ROW travels with the size: a project vam started two sessions in has
+    // two panes, and the one resized has to be the one on screen.
+    expect(resize).toHaveBeenCalledWith(ATLAS, 100, 30, 'sess-alpha#1');
   });
 
   it('asks again when the wrapper changes size, which the pane resizer does', async () => {
@@ -117,8 +126,8 @@ describe('the Terminal tab tells tmux how big the pane is', () => {
     await fire();
 
     expect(resize.mock.calls).toEqual([
-      [ATLAS, 100, 30],
-      [ATLAS, 62, 30],
+      [ATLAS, 100, 30, undefined],
+      [ATLAS, 62, 30, undefined],
     ]);
   });
 

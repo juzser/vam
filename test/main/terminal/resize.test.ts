@@ -61,6 +61,33 @@ describe('resizing the session vam started for a project', () => {
     ]);
   });
 
+  it('resizes the pane the SESSION published, not the project-wide guess', async () => {
+    // A project vam started two sessions in has two panes, and the project
+    // alone answers `ambiguous` for both. The row resolves it -- the same rule
+    // the read draws by, so the session resized is the one on screen.
+    const { run, argvs } = runner({
+      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-d4e5f6\n`),
+      'resize-window': ok(''),
+    });
+    const panes = new Map([['sess-beta', 'vam-atlas-d4e5f6']]);
+    expect(await resizeSessionPane(run, ATLAS, SIZE, 'sess-beta#8', panes)).toBe(true);
+    expect(argvs[1]?.[2]).toBe('=vam-atlas-d4e5f6:');
+  });
+
+  it('will not resize a pane a session published that vam did not start', async () => {
+    // The operator's own sessions publish into the same directory. A published
+    // name is checked against vam's own listing before anything acts on it --
+    // this is the difference between fitting a pane and reflowing someone
+    // else's terminal.
+    const { run, verbs } = runner({
+      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'resize-window': ok(''),
+    });
+    const panes = new Map([['sess-beta', 'notes']]);
+    await resizeSessionPane(run, BEACON, SIZE, 'sess-beta#8', panes);
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
   it('does nothing at all for a session vam did not start', async () => {
     // The operator's own sessions are on the same server. vam can see them and
     // must never touch them: no `@vam-project`, no resize.
@@ -129,7 +156,8 @@ describe('the terminal resize channel', () => {
     ['zero columns, which tmux cannot draw in', [ATLAS, 0, 40]],
     ['more rows than any screen has', [ATLAS, 120, 100_000]],
     ['a NaN row count', [ATLAS, 120, Number.NaN]],
-    ['an extra argument nobody sent', [ATLAS, 120, 40, 'and more']],
+    ['a row id that is not a string', [ATLAS, 120, 40, 7]],
+    ['an extra argument nobody sent', [ATLAS, 120, 40, 'row', 'and more']],
   ])('refuses %s, and spawns nothing', async (_why, args) => {
     // The renderer is the least trusted process in the app. A size it sends is
     // an allocation request to a program on the operator's machine, so it is
