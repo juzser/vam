@@ -985,7 +985,7 @@ describe('the Agents tab', () => {
     expect(all('[data-agent-row]')).toHaveLength(0);
     expect(q<HTMLElement>('[data-agents-empty]')?.textContent).toContain('spawned no agents');
     expect(q('[data-agents] .vam-breathe')).toBeNull();
-    expect(q('[data-agents] [data-out-cursor]')).toBeNull();
+    expect(q('[data-agents] [data-out-running]')).toBeNull();
   });
 
   it('distinguishes a source that has no roster at all from a session with none', () => {
@@ -1431,21 +1431,31 @@ describe('the out region shows live work while the session is running', () => {
     session: { ...SESSION, status: 'running' as const, activity },
   });
 
-  const cursor = () => q<HTMLElement>('[data-out-empty] [data-out-cursor]');
+  const cursor = () => q<HTMLElement>('[data-out-empty] [data-out-running]');
 
-  it('renders the activity line with a terminal cursor on the turn being worked', () => {
+  it('renders the activity as the running word on the turn being worked', () => {
     draw({ entry: running('editing transcript.ts') });
     expect(live()?.textContent ?? '').toContain('editing transcript.ts');
     expect(cursor()).not.toBeNull();
-    expect(cursor()?.getAttribute('class') ?? '').toContain('vam-term-cursor');
+    // The word IS the activity: nothing invents a second one beside it.
+    expect(q<HTMLElement>('[data-out-running-word]')?.textContent).toBe('editing transcript.ts');
     // One motion story, not two: the pulse this line shipped with is gone.
     expect(live()?.getAttribute('class') ?? '').not.toContain('vam-breathe');
   });
 
-  it('hides the cursor glyph from assistive tech', () => {
+  it('leaves no blinking terminal cursor behind', () => {
     draw({ entry: running('editing transcript.ts') });
-    // A screen reader should read the activity, not a block character.
-    expect(cursor()?.getAttribute('aria-hidden')).toBe('true');
+    expect(all('[data-out-cursor]')).toHaveLength(0);
+    expect(document.body.innerHTML).not.toContain('vam-term-cursor');
+  });
+
+  it('hides the decorative marks from assistive tech', () => {
+    draw({ entry: running('editing transcript.ts') });
+    // A screen reader should read the activity, not a star and three dots.
+    for (const decorative of all('[data-out-running] [aria-hidden]')) {
+      expect(decorative.getAttribute('aria-hidden')).toBe('true');
+    }
+    expect(q('[data-out-ellipsis]')?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('keeps the sentence and invents no words when the source cannot say', () => {
@@ -1479,13 +1489,55 @@ describe('the out region shows live work while the session is running', () => {
     expect(document.body.textContent ?? '').not.toContain('editing transcript.ts');
   });
 
-  it('leaves the cursor readable and still blinking-free under reduced motion', () => {
-    // The frozen state has to remain a cursor: visible, full opacity, no
-    // animation -- not a glyph stuck mid-blink at some arbitrary opacity.
+  it('still says the session is working under reduced motion', () => {
+    // Stopped, the ellipsis has to stay READ: all three dots at full opacity
+    // after the word, which is what says "still going" without moving.
     const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
     const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
-    expect(reduced).toContain('.vam-term-cursor');
-    expect(css).toContain('@keyframes vam-term-cursor');
+    expect(reduced).toContain('.vam-ellipsis');
+    expect(reduced).toMatch(/\.vam-ellipsis[^}]*\{[^}]*opacity:\s*1/s);
+    expect(css).toContain('@keyframes vam-ellipsis');
+    // The cursor it replaces is gone from the stylesheet entirely.
+    expect(css).not.toContain('vam-term-cursor');
+  });
+
+  /**
+   * The reference caption vam is modelled on reads
+   * `Improvising... (5m 3s - 15.2k tokens - xhigh effort)`, and vam can source
+   * exactly one of those clauses: `Session.age`, the compact "how long ago it
+   * last did anything" the sidebar right-aligns. There is no per-session token
+   * count in the model (`CanvasBudget` is the FACTORY's figure, for the whole
+   * canvas) and no effort level at all, so neither is printed -- an omitted
+   * clause, never a faked one.
+   */
+  describe('the detail beside the word is sourced or absent', () => {
+    const withAge = (age: string | null) => ({
+      project: PROJECT,
+      session: { ...SESSION, status: 'running' as const, activity: 'editing transcript.ts', age },
+    });
+
+    it('shows the age vam has, dimmed beside the word', () => {
+      draw({ entry: withAge('12m') });
+      expect(q<HTMLElement>('[data-out-running-detail]')?.textContent ?? '').toContain('12m');
+      expect(q<HTMLElement>('[data-out-running-detail]')?.getAttribute('class') ?? '').toContain(
+        'text-ink-faint',
+      );
+    });
+
+    it('omits the clause rather than faking one when the source cannot say', () => {
+      draw({ entry: withAge(null) });
+      expect(all('[data-out-running-detail]')).toHaveLength(0);
+      // Still a running word: the caption degrades to the word alone.
+      expect(q<HTMLElement>('[data-out-running-word]')?.textContent).toBe('editing transcript.ts');
+    });
+
+    it('claims no tokens and no effort, which vam cannot source', () => {
+      draw({ entry: withAge('12m') });
+      const text = q<HTMLElement>('[data-out-running]')?.textContent ?? '';
+      expect(text).not.toContain('token');
+      expect(text).not.toContain('effort');
+      expect(text).not.toMatch(/\b0\b/);
+    });
   });
 });
 
@@ -1524,7 +1576,7 @@ describe('the live line stands beside the answer, not instead of it', () => {
       decision: turn(output),
     });
   const liveLine = () => q<HTMLElement>('[data-out-live]');
-  const cursor = () => q<HTMLElement>('[data-out-live] [data-out-cursor]');
+  const cursor = () => q<HTMLElement>('[data-out-live] [data-out-running]');
 
   it('shows the answer AND the live line while a running turn has output', () => {
     show(ANSWER);
@@ -1532,8 +1584,7 @@ describe('the live line stands beside the answer, not instead of it', () => {
     expect(out).toContain(ANSWER);
     expect(liveLine()?.textContent ?? '').toContain('editing transcript.ts');
     expect(cursor()).not.toBeNull();
-    expect(cursor()?.getAttribute('aria-hidden')).toBe('true');
-    expect(cursor()?.getAttribute('class') ?? '').toContain('vam-term-cursor');
+    expect(q('[data-out-live] [data-out-ellipsis]')).not.toBeNull();
   });
 
   it('puts the live line after the answer, not above it', () => {
@@ -1555,7 +1606,7 @@ describe('the live line stands beside the answer, not instead of it', () => {
         'editing transcript.ts',
       );
       // The sentence must not print alongside the words that replaced it.
-      expect(all('[data-out-cursor]'), `output ${JSON.stringify(empty)}`).toHaveLength(1);
+      expect(all('[data-out-running]'), `output ${JSON.stringify(empty)}`).toHaveLength(1);
     }
   });
 
@@ -1574,7 +1625,7 @@ describe('the live line stands beside the answer, not instead of it', () => {
       cleanup();
       show(ANSWER, 'editing transcript.ts', s);
       expect(all('[data-out-live]'), `status ${s}`).toHaveLength(0);
-      expect(all('[data-out-cursor]'), `status ${s}`).toHaveLength(0);
+      expect(all('[data-out-running]'), `status ${s}`).toHaveLength(0);
       // Scoped to the body: the `out` rule's meta carries the session's
       // current activity on the newest turn whatever its status, and that
       // caption is not what this test is about.
@@ -1593,7 +1644,7 @@ describe('the live line stands beside the answer, not instead of it', () => {
       decision: DECISIONS[2] as Decision,
     });
     expect(all('[data-out-live]')).toHaveLength(0);
-    expect(all('[data-out-cursor]')).toHaveLength(0);
+    expect(all('[data-out-running]')).toHaveLength(0);
     expect(document.body.textContent ?? '').not.toContain('editing transcript.ts');
   });
 });
