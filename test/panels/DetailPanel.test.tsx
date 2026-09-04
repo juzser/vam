@@ -39,7 +39,7 @@ import {
   isAtBottom,
 } from '../../src/renderer/panels/stick-to-bottom.js';
 import { OUT_FONT_SIZE_VAR } from '../../src/renderer/prefs/prefs.js';
-import type { PaneView } from '../../src/shared/terminal.js';
+import type { PaneSendResult, PaneView } from '../../src/shared/terminal.js';
 
 /** `attachIntoDraft` for the cases a test knows will be accepted. */
 function attachOk(draft: string, file: AttachedFile): string {
@@ -74,6 +74,11 @@ const SESSION: Session = {
   activity: 'just now',
   age: '12m',
   decisions: DECISIONS,
+  // A session VAM STARTED -- the ordinary case for this pane, and the one the
+  // mode row exists for. On the shared fixture rather than on the tests that
+  // care, because the tests that pin the row's ABSENCE are the ones that say
+  // so, by taking the flag away.
+  vamControlled: true,
 };
 
 const PROJECT: Project = { id: 'p1', name: 'atlas', sessions: [SESSION] };
@@ -561,16 +566,138 @@ describe('the row under the composer is the mockup’s mode row', () => {
     expect(document.querySelector('[data-placeholder="slash-diff"]')).toBeNull();
   });
 
-  it('advertises no chord in the row, because none is bound', () => {
+  it('advertises the chord now that one is bound, at the right-hand end', () => {
+    // THE CAPTION CAME BACK, on the terms its own deletion set: it went for
+    // naming a chord no table answered to, under a note saying a real binding
+    // may bring it back and the caption alone may not. The binding is the
+    // prompt box's Shift+Tab, which presses the session's own chord in the
+    // pane vam started for it.
     draw();
-    // The `⇧Tab · cycle mode` tag that sat at the right-hand end named a
-    // chord no table ever answered to -- the same hand-written caption
-    // `keysheet.ts` cites as the reason the key sheet is DERIVED from the
-    // chord tables. Pinned as an absence so a re-add fails here rather than
-    // quietly promising the key again. A real binding may bring it back;
-    // the caption alone may not.
-    expect(q<HTMLElement>('[data-mode-cycle]')).toBeNull();
-    expect(q<HTMLElement>('[data-mode-row]')?.textContent).not.toContain('cycle mode');
+    const tip = q<HTMLElement>('[data-mode-cycle]');
+    expect(tip).not.toBeNull();
+    expect(tip?.textContent).toContain('cycle mode');
+    // On the RIGHT, as the mockup draws it: pushed there by `ml-auto` and
+    // last in the row, which is the only way "on the right" is checkable
+    // without a layout engine.
+    expect(tip?.className).toContain('ml-auto');
+    expect(q<HTMLElement>('[data-mode-row]')?.lastElementChild).toBe(tip);
+  });
+});
+
+/**
+ * WHO MAY SEE A MODE SWITCHER -- the operator's request in their own words:
+ * hidden where the factory has already chosen and vam cannot change anything,
+ * shown only where a choice is really possible. TWO CONDITIONS, NEITHER
+ * SUFFICIENT ALONE: `vamControlled`, the per-session fact that vam started
+ * this pane, and the source's `terminal` capability, which is what says there
+ * is a pane surface at all. ABSENT, NOT DISABLED -- a dimmed switcher still
+ * says a mode is choosable here, which is what the row went for once already.
+ */
+describe('the mode row is drawn only where a mode can actually be chosen', () => {
+  const withBridge = (send: (...args: unknown[]) => Promise<PaneSendResult>) => {
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { terminal: { send } },
+    });
+  };
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'api');
+  });
+
+  /** Shift+Tab (or a plain Tab) in the prompt box, where the chord is bound. */
+  const press = async (shiftKey: boolean) => {
+    const box = q<HTMLTextAreaElement>('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.keyDown(box, { key: 'Tab', shiftKey });
+      await Promise.resolve();
+    });
+  };
+
+  it('hides the whole row for a session vam did not start', () => {
+    draw({ entry: { project: PROJECT, session: { ...SESSION, vamControlled: false } } });
+    expect(q('[data-mode-row]')).toBeNull();
+    expect(q('[data-mode-pill]')).toBeNull();
+    expect(q('[data-mode-cycle]')).toBeNull();
+  });
+
+  it('hides it when nobody has said whether vam owns the pane', () => {
+    // Three-state on purpose: `undefined` is "not established", and a
+    // switcher drawn on an unstated fact is the same lie as one drawn on a
+    // false one.
+    const { vamControlled: _dropped, ...unowned } = SESSION;
+    draw({ entry: { project: PROJECT, session: unowned } });
+    expect(q('[data-mode-row]')).toBeNull();
+  });
+
+  it('hides it where the source has no terminal surface at all', () => {
+    draw({ terminal: false });
+    expect(q('[data-mode-row]')).toBeNull();
+  });
+
+  it('draws it for a session vam started, on a source that has a terminal', () => {
+    draw({ terminal: true });
+    expect(q('[data-mode-row]')).not.toBeNull();
+    expect(all('[data-mode-pill]')).toHaveLength(3);
+  });
+
+  it('presses the session’s own Shift-Tab, and does not submit the draft', async () => {
+    const sent: unknown[][] = [];
+    withBridge(async (...args) => {
+      sent.push(args);
+      return 'sent';
+    });
+    let submitted = 0;
+    draw({
+      onSubmit: () => {
+        submitted += 1;
+      },
+    });
+    // A PLAIN Tab first, and it must send nothing: it is how a keyboard gets
+    // out of a textarea, and a mode cycled by it would be one the operator
+    // never asked for.
+    await press(false);
+    expect(sent).toEqual([]);
+    await press(true);
+    // The kind, the project and the ROW: aimed at the session on screen, not
+    // at whatever pane the project alone resolves to.
+    expect(sent).toEqual([[PROJECT.id, { kind: 'back-tab' }, SESSION.id]]);
+    expect(submitted).toBe(0);
+  });
+
+  /**
+   * Every outcome of the press is DRAWN. `unaimed` is main declining to guess
+   * which pane this row is in and `refused` is tmux turning the delivery
+   * down: different sentences, because they send a person to different
+   * places. Saying nothing for either leaves the operator believing a mode
+   * moved that did not.
+   */
+  it.each([
+    ['unaimed' as PaneSendResult, 'not sent', 'tmux'],
+    ['refused' as PaneSendResult, 'tmux', 'could not name'],
+  ])('draws the refusal for %s, in its own words', async (result, says, notSays) => {
+    withBridge(async () => result);
+    draw();
+    await press(true);
+    const said = q<HTMLElement>('[data-mode-refusal]');
+    expect(said?.textContent).toContain(says);
+    expect(said?.textContent).not.toContain(notSays);
+  });
+
+  it('draws no refusal when the key landed', async () => {
+    withBridge(async () => 'sent');
+    draw();
+    await press(true);
+    expect(q('[data-mode-refusal]')).toBeNull();
+  });
+
+  it('says so when there is no bridge to press the key with', async () => {
+    // The browser build has no `window.api`. The row is drawn from the
+    // session's own facts, so this is the one case where it can be on screen
+    // with nothing behind it -- and it says so instead of doing nothing.
+    draw();
+    await press(true);
+    expect(q('[data-mode-refusal]')).not.toBeNull();
   });
 });
 

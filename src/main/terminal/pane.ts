@@ -28,7 +28,12 @@
 
 import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
 import { sessionIdOf } from '../sources/claude-code/deliver.js';
-import { sendBackspaceArgv, sendEnterArgv, sendTextArgv } from '../sources/tmux/argv.js';
+import {
+  sendBackspaceArgv,
+  sendBackTabArgv,
+  sendEnterArgv,
+  sendTextArgv,
+} from '../sources/tmux/argv.js';
 import {
   listVamSessions,
   readPane,
@@ -268,15 +273,21 @@ export async function sendSessionKey(
   if (listed.kind === 'unavailable') return 'unaimed';
   const match = targetSession(listed.sessions, projectId, rowId, panes);
   if (match.kind !== 'one') return 'unaimed';
-  // The three builders are kept apart in `tmux/argv.ts` for the one reason
-  // that matters here: `-l` types, and Return and Backspace have to be
+  // The builders are kept apart in `tmux/argv.ts` for the one reason that
+  // matters here: `-l` types, and Return, Backspace and Shift-Tab have to be
   // PRESSED. There is deliberately no builder that takes a key name, so
-  // nothing here can turn the operator's text into a keypress by accident.
+  // nothing here can turn the operator's text into a keypress by accident --
+  // and this switch is where that holds: a `kind` off the bridge selects one
+  // of three fixed argvs, and only `text` carries anything the operator wrote.
   const argv =
     key.kind === 'enter'
       ? sendEnterArgv(match.name)
       : key.kind === 'backspace'
         ? sendBackspaceArgv(match.name)
-        : sendTextArgv(match.name, key.text);
+        : key.kind === 'back-tab'
+          ? // Aimed by the SAME guard as a character: a mode changed in the
+            // wrong agent changes how somebody else's running work behaves.
+            sendBackTabArgv(match.name)
+          : sendTextArgv(match.name, key.text);
   return (await run(argv)).failure === null ? 'sent' : 'refused';
 }

@@ -71,6 +71,39 @@ describe('typing into the session vam started for a project', () => {
     expect(verbs()).toEqual(['list-sessions']);
   });
 
+  it('cycles the mode with the interpreted BTab, never a plain tab', async () => {
+    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'back-tab' })).toBe('sent');
+    // BY VALUE, because the wrong spelling of this one is SILENT. Measured on
+    // tmux 3.7b over a private `-L` socket: `send-keys BTab` delivered `^[[Z`,
+    // the escape sequence Shift-Tab is, while `send-keys S-Tab` exited 0 and
+    // delivered a plain tab -- which completes or indents, and reports
+    // nothing.
+    expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'BTab']);
+    expect(argvs[1]).not.toContain('-l');
+    expect(argvs[1]).not.toContain('Tab');
+    expect(argvs[1]).not.toContain('S-Tab');
+    expect(argvs).toHaveLength(2);
+  });
+
+  it('sends NO BTab into a session vam cannot prove it started', async () => {
+    // Aimed by the same guard as every other key: the pane vam started for
+    // THIS project. Cycling somebody else's agent is not a smaller mistake
+    // than typing into it.
+    const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'back-tab' })).toBe('unaimed');
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
+  it('sends NO BTab through a published pane of another project', async () => {
+    const { run, verbs } = runner(
+      listing(`${ATLAS}\tvam-atlas-a1b2c3\n${BEACON}\tvam-beacon-d4e5f6\n`),
+    );
+    const panes = new Map([[ATLAS, 'vam-beacon-d4e5f6']]);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'back-tab' }, ATLAS, panes)).toBe('unaimed');
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
   it('sends text that reads as a key name as the characters it is', async () => {
     const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
     await sendSessionKey(run, ATLAS, { kind: 'text', text: 'Escape' });
@@ -217,6 +250,22 @@ describe('the send channel refuses what the renderer may not ask', () => {
     const { send, argvs } = handler();
     expect(await send({}, ATLAS, { kind: 'backspace' })).toBe('sent');
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'BSpace']);
+  });
+
+  it('carries a BTab across the bridge, and nothing that only looks like one', async () => {
+    const { send, argvs } = handler();
+    expect(await send({}, ATLAS, { kind: 'back-tab' })).toBe('sent');
+    expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'BTab']);
+  });
+
+  it('refuses a key NAME dressed as a keystroke, so no verb can be asked for', async () => {
+    // The channel gained one verb, not a key-forwarding mechanism: `back-tab`
+    // is a kind the main side maps to its own builder, and a `keyName` field
+    // is not a way to ask for `C-c`.
+    const { send, argvs } = handler();
+    expect(await send({}, ATLAS, { kind: 'key', keyName: 'C-c' })).toBe('unaimed');
+    expect(await send({}, ATLAS, { kind: 'back-tab', keyName: 'C-c' })).toBe('sent');
+    expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'BTab']);
   });
 
   it('answers a plain boolean, and true only when the key landed', async () => {

@@ -74,18 +74,21 @@ export function isPaneSize(size: PaneSize): boolean {
 }
 
 /**
- * ONE KEYSTROKE, on its way to the pane -- and there are exactly two kinds
- * because tmux has exactly two ways to deliver one (`sources/tmux/argv.ts`).
+ * ONE KEYSTROKE, on its way to the pane -- and every kind is one of the two
+ * ways tmux can deliver one (`sources/tmux/argv.ts`).
  *
  * `text` is typed LITERALLY (`send-keys -l --`), which is what stops a pane
- * being sent `^[` because the operator typed the letters of `Escape`. `enter`
- * and `backspace` are the two keys that have to be INTERPRETED, which `-l`
- * forbids, so each is its own kind rather than a character inside the text --
- * measured, `send-keys -l -- 'BSpace'` types the word into the line.
+ * being sent `^[` because the operator typed the letters of `Escape`. `enter`,
+ * `backspace` and `back-tab` have to be INTERPRETED, which `-l` forbids, so
+ * each is its own kind rather than a character inside the text -- measured,
+ * `send-keys -l -- 'BSpace'` types the word into the line.
  *
  * THE LIST IS DELIBERATELY THIS SHORT. It is not a key-forwarding mechanism:
- * these are the keys typing is made of -- characters, submit, correct -- and
- * anything else that ever belongs here is a decision, not an addition.
+ * three of these are what typing is made of -- characters, submit, correct --
+ * and anything else that ever belongs here is a decision, not an addition.
+ * `back-tab` is that decision made once: the chord a Claude Code session
+ * binds to cycling its own mode, a KIND rather than a key name in a field --
+ * a field would let the least trusted process in the app ask for `C-c`.
  *
  * A discriminated pair rather than a string with a flag: the renderer is the
  * least trusted process in the app, and "was this literal?" must not be a
@@ -94,7 +97,9 @@ export function isPaneSize(size: PaneSize): boolean {
 export type PaneKey =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'enter' }
-  | { readonly kind: 'backspace' };
+  | { readonly kind: 'backspace' }
+  /** Shift-Tab, `BTab` to tmux -- the session's own cycle-the-mode chord. */
+  | { readonly kind: 'back-tab' };
 
 /**
  * The longest text one keystroke may carry. A `KeyboardEvent.key` for a
@@ -122,7 +127,7 @@ export type PaneSendResult = 'sent' | 'unaimed' | 'refused';
 export function isPaneKey(value: unknown): value is PaneKey {
   if (typeof value !== 'object' || value === null) return false;
   const key = value as { kind?: unknown; text?: unknown };
-  if (key.kind === 'enter' || key.kind === 'backspace') return true;
+  if (key.kind === 'enter' || key.kind === 'backspace' || key.kind === 'back-tab') return true;
   return (
     key.kind === 'text' &&
     typeof key.text === 'string' &&

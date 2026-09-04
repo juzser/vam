@@ -233,7 +233,7 @@ export function sendEnterArgv(name: string): readonly string[] {
  * operator's text just as happily, and the day something passed a reply
  * through it, a message reading `C-c` would interrupt the agent instead of
  * being typed to it. One named builder per key that vam actually presses
- * keeps that impossible, and there are now exactly four of them.
+ * keeps that impossible, and there are now exactly five of them.
  *
  * MEASURED, on tmux 3.7b over a private `-L` socket, because the choice
  * between the key name and a literal `0x7f` may not be guessed: typing `abX`,
@@ -282,6 +282,24 @@ export function sendDownArgv(name: string): readonly string[] {
  */
 export function sendRightArgv(name: string): readonly string[] {
   return ['send-keys', '-t', paneTarget(name), 'Right'];
+}
+
+/**
+ * Press Shift-Tab -- the FIFTH named key, and the one that cycles a session's
+ * mode. Claude Code's footer reads `auto mode on (shift+tab to cycle)`: the
+ * mode lives in the agent and the chord is its binding, so the honest control
+ * is the key itself, pressed in the pane vam started.
+ *
+ * `BTab`, AND THE SPELLING IS THE WHOLE OF IT. Measured on tmux 3.7b over a
+ * private `-L` socket against `cat -v` in the pane: `send-keys BTab` put
+ * `^[[Z` on the screen -- the escape sequence Shift-Tab is -- while
+ * `send-keys S-Tab` EXITED 0 and delivered a plain tab, and `send-keys -l --
+ * 'BTab'` typed the four letters. `S-Tab` is the worst of the three: the
+ * spelling a person reaches for, reporting success, and arriving as a
+ * completion or an indent in a running agent.
+ */
+export function sendBackTabArgv(name: string): readonly string[] {
+  return ['send-keys', '-t', paneTarget(name), 'BTab'];
 }
 
 /**
