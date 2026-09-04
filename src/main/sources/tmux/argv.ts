@@ -165,9 +165,32 @@ export function capturePaneArgv(name: string): readonly string[] {
   return ['capture-pane', '-p', '-t', paneTarget(name)];
 }
 
-/** Type text and press Return. The keys are one element. */
-export function sendKeysArgv(name: string, keys: string): readonly string[] {
-  return ['send-keys', '-t', paneTarget(name), keys, 'Enter'];
+/**
+ * Type the operator's text into the pane, LITERALLY.
+ *
+ * `-l` is the whole of this function's correctness and it is not obvious.
+ * Without it tmux looks each argument up as a KEY NAME first, so a reply that
+ * happens to read `Escape` or `C-c` is not typed at all -- it is pressed.
+ * Measured on tmux 3.7b over a private `-L` socket: `send-keys 'Escape'`
+ * delivered `^[` to the pane, while `send-keys -l -- 'Escape'` delivered the
+ * six characters. The same probe confirmed `--` is honoured here, so text
+ * beginning with `-` reaches the pane instead of being read as an option.
+ *
+ * NEWLINES INSIDE THE TEXT ARE TYPED AS TYPED. A pane running a TUI will
+ * generally act on each one, so a multi-line reply can arrive as several
+ * submissions. Nothing here silently rewrites the operator's text to hide
+ * that.
+ */
+export function sendTextArgv(name: string, text: string): readonly string[] {
+  return ['send-keys', '-t', paneTarget(name), '-l', '--', text];
+}
+
+/**
+ * Press Return -- a SEPARATE call, because it is the one key that must be
+ * interpreted rather than typed, and `-l` above forbids exactly that.
+ */
+export function sendEnterArgv(name: string): readonly string[] {
+  return ['send-keys', '-t', paneTarget(name), 'Enter'];
 }
 
 /**

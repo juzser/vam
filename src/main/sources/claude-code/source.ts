@@ -40,13 +40,14 @@ import { createTmuxRunner } from '../tmux/spawn.js';
 import { type AgentRoster, readAgentRoster } from './agent-roster.js';
 import { type LiveAgent, listLiveAgents } from './agents.js';
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
-import { deliverPromptViaCli, deliverToSession } from './deliver.js';
+import { deliverPromptViaCli } from './deliver.js';
 import { projectIdOf } from './project-id.js';
 import {
   createPullRequestReader,
   type ReadPullRequests,
   readPullRequestsViaCli,
 } from './pull-requests.js';
+import { replyToSession } from './reply.js';
 import { createBranchLookup } from './repo-branch.js';
 import { defaultSessionsRoot, readStatusUpdatedAt } from './session-status.js';
 import { stopSession, stopSessionViaCli } from './stop.js';
@@ -380,7 +381,13 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    * delivering into the wrong directory.
    */
   recordPrompt: async (sessionId, prompt) =>
-    deliverToSession(await listLiveAgents(), sessionId, prompt, deliverPromptViaCli),
+    replyToSession({
+      agents: await listLiveAgents(),
+      rowId: sessionId,
+      prompt,
+      run: createTmuxRunner(),
+      deliver: deliverPromptViaCli,
+    }),
   /**
    * The live list is re-asked for the same reason `recordPrompt` re-asks it,
    * plus one of its own: `kind` is what decides whether this session can be

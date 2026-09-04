@@ -20,7 +20,8 @@ import {
   hasSessionArgv,
   listSessionsArgv,
   newSessionArgv,
-  sendKeysArgv,
+  sendEnterArgv,
+  sendTextArgv,
   tagSessionArgv,
   VAM_PROJECT_OPTION,
   VAM_SESSION_PREFIX,
@@ -103,12 +104,29 @@ describe('tmux argv', () => {
     // and `send-keys` reaching a session other than the one vam meant is the
     // thing the exactness is there to prevent.
     expect(capturePaneArgv('vam-a1b2c3')).toEqual(['capture-pane', '-p', '-t', '=vam-a1b2c3:']);
-    expect(sendKeysArgv('vam-a1b2c3', 'hello')).toEqual([
+    expect(sendTextArgv('vam-a1b2c3', 'hello')).toEqual([
       'send-keys',
       '-t',
       '=vam-a1b2c3:',
+      '-l',
+      '--',
       'hello',
-      'Enter',
+    ]);
+    expect(sendEnterArgv('vam-a1b2c3')).toEqual(['send-keys', '-t', '=vam-a1b2c3:', 'Enter']);
+  });
+
+  it('types text tmux would otherwise read as a key or as an option', () => {
+    // Measured on tmux 3.7b over a private `-L` socket: without `-l` the pane
+    // received `^[` for this text, and with it the six characters. A reply of
+    // `Escape` or `C-c` is the operator answering, never a key to press.
+    expect(sendTextArgv('vam-a1b2c3', 'Escape')).toContain('-l');
+    expect(sendTextArgv('vam-a1b2c3', '-N 5')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '-l',
+      '--',
+      '-N 5',
     ]);
   });
 
