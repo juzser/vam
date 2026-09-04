@@ -112,6 +112,16 @@
   /* Quoted text: someone else's words inside the agent's. */
   --color-quote: var(--vam-quote);
 
+  /* The detail pane's three section rules. Own names again, for the same
+     reason as the palette above: `in`, `progress` and `out` are REGIONS of a
+     turn, not session states, and reaching for `--color-running` or
+     `--color-done` to head one would spend a status hue on a heading and make
+     the status row lie by association. Colour is added to the glyph and the
+     announced label here, never instead of them. */
+  --color-rule-in: var(--vam-rule-in);
+  --color-rule-progress: var(--vam-rule-progress);
+  --color-rule-out: var(--vam-rule-out);
+
   --radius-base: 0.625rem;
   --radius-sm: calc(var(--radius-base) * 0.6);
   --radius-md: calc(var(--radius-base) * 0.8);
@@ -196,6 +206,16 @@
   --vam-chip: #d2a8ff;
   --vam-quote: #56d4ca;
 
+  /* Section rules, dark. Measured against `--vam-panel` (#141414), the pane
+     they sit on: teal 9.90:1, violet 6.77:1, pink 6.96:1. The hues are ordered
+     the way the pane is -- in, progress, out -- so the two the operator reads
+     against each other, `in` and `out`, land furthest apart on the wheel and
+     `progress` sits between them there as well as on screen. None of the four
+     status hues (green, amber, blue, red) appears. */
+  --vam-rule-in: #2dd4bf;
+  --vam-rule-progress: #a78bfa;
+  --vam-rule-out: #f472b6;
+
   color-scheme: dark;
 }
 
@@ -261,6 +281,13 @@ html.light {
 
   --vam-chip: #6639ba;
   --vam-quote: #0f6b62;
+
+  /* Section rules, light. Not the dark values dimmed: the pane is #ffffff
+     here, so each hue is taken to its dark-on-white step -- teal 5.47:1,
+     violet 7.10:1, pink 6.04:1. */
+  --vam-rule-in: #0f766e;
+  --vam-rule-progress: #6d28d9;
+  --vam-rule-out: #be185d;
 
   color-scheme: light;
 }

@@ -785,6 +785,71 @@ describe('the in and out rules wear the mockup’s own glyphs', () => {
   });
 });
 
+/**
+ * Three section rules, three colours.
+ *
+ * The operator could not tell `in`, `progress` and `out` apart at a glance:
+ * all three drew their icon inside the rule's one `text-ink-faint` span, so
+ * the pane had three headings in the same faint grey. Colour is ADDED to the
+ * existing scheme, never substituted for it — a colour-only distinction is
+ * invisible to a colour-blind operator, so the distinct glyph and the
+ * announced `aria-label` are asserted here beside the colour and are what
+ * carries the meaning when the colour does not arrive.
+ */
+describe('the three section rules are told apart by colour as well as by glyph', () => {
+  const BLOCKS = ['in', 'progress', 'out'] as const;
+
+  const icon = (block: string) =>
+    q<HTMLElement>(`[data-detail-block="${block}"] [role="img"]`) ?? null;
+
+  /** The colour utility on an icon, e.g. `text-rule-in`. */
+  const tone = (block: string) =>
+    (icon(block)?.getAttribute('class') ?? '').split(/\s+/).find((c) => c.startsWith('text-')) ??
+    '';
+
+  it('paints each icon with its own token, pairwise distinct', () => {
+    draw();
+    const tones = BLOCKS.map(tone);
+    for (const [i, block] of BLOCKS.entries()) {
+      // Not merely non-empty: the faint grey they all shared is a `text-`
+      // class too, and three of it would pass an "each has a colour" check.
+      expect(tones[i], `${block} carries a colour token`).not.toBe('');
+      expect(tones[i], `${block} is no longer the shared faint grey`).not.toBe('text-ink-faint');
+    }
+    // Pairwise, so two sections sharing one hue fails rather than passing on
+    // the third being different.
+    expect(new Set(tones).size, `three distinct tokens, got ${tones.join(', ')}`).toBe(3);
+  });
+
+  it('keeps every icon announced, so colour is never the only channel', () => {
+    draw();
+    const labels = BLOCKS.map((block) => {
+      const el = icon(block);
+      // `role="img"` is what makes the label announced at all; on a bare
+      // <span> aria-label is dropped in silence, which this codebase has
+      // shipped once already.
+      expect(el, `${block} has a role="img" icon`).not.toBeNull();
+      return el?.getAttribute('aria-label') ?? '';
+    });
+    // Each word is what the GLYPH means, complementing the visible label
+    // rather than repeating it: `in` is you, `out` is the agent, and the
+    // commit line is the session's turns.
+    expect(labels).toEqual(['you', 'turns', 'agent']);
+  });
+
+  it('draws three different glyphs, which is the distinction without colour', () => {
+    draw();
+    // The glyphs are a head-and-shoulders, a commit line and a bot, measured
+    // off the Response artboards in #53 — not the opposing arrows vam started
+    // with. Compare the drawn geometry, so a shared icon fails here even when
+    // the three colours pass above.
+    const shapes = BLOCKS.map((block) => icon(block)?.querySelector('svg')?.innerHTML ?? '');
+    for (const [i, block] of BLOCKS.entries())
+      expect(shapes[i], `${block} draws a glyph`).not.toBe('');
+    expect(new Set(shapes).size).toBe(3);
+  });
+});
+
 describe('the attachment button inlines a file into the text that gets recorded', () => {
   const file = (over: Partial<AttachedFile> = {}): AttachedFile => ({
     name: 'notes.md',
