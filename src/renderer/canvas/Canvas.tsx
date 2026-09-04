@@ -55,7 +55,7 @@ import type { CanvasModel, Decision, Project, SessionStatus, SourceId } from '..
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { StatusFilter } from '../domain/session-filter.js';
-import { isAgentStarted, isUnprompted } from '../domain/session-filter.js';
+import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain/session-filter.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
 import { nextNode } from '../keyboard/spatial-nav.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
@@ -649,10 +649,7 @@ function CanvasInner({
     // — see `session-filter.ts`. A session whose timeline has not arrived is
     // `unknown` and survives both, because hiding what you did not check is
     // how a filter loses work rather than narrowing it.
-    const byOrigin = prefs.filters.hideAgentStarted
-      ? byStatus.filter((e) => !isAgentStarted(e.session))
-      : byStatus;
-    return prefs.filters.onlyPrompted ? byOrigin.filter((e) => !isUnprompted(e.session)) : byOrigin;
+    return byStatus.filter((e) => !isHiddenByOriginFilters(e.session, prefs.filters));
   }, [allEntries, matches, query, statusFilter, prefs.filters]);
 
   /**

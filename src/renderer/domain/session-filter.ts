@@ -109,3 +109,22 @@ export function isAgentStarted(session: Session): boolean {
 export function isUnprompted(session: Session): boolean {
   return session.origin?.promptCount === 0;
 }
+
+/**
+ * Does the origin narrowing remove this session from the list?
+ *
+ * The two predicates above say what each rule MATCHES; this says what the
+ * rules currently in force DO, which is the question the list and its tests
+ * both ask. One function rather than a filter chain at the call site, so the
+ * default that hides agent and test sessions is a thing that can be run
+ * against a real session instead of a ternary nobody can reach.
+ *
+ * Fails safe in one direction, like its parts: a session vam never classified
+ * is hidden by neither rule.
+ */
+export function isHiddenByOriginFilters(session: Session, filters: SessionFilters): boolean {
+  return (
+    (filters.hideAgentStarted && isAgentStarted(session)) ||
+    (filters.onlyPrompted && isUnprompted(session))
+  );
+}

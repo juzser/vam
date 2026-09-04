@@ -80,6 +80,12 @@
   /* Tints: the same three hues at fill strength, for a chip's ground or a
      card's border. Read off the mockup rather than derived, because its light
      tints are hand-warmed too. */
+  /* The sidebar filter badge. Its own name for its own role, the way
+     `cursor-ring` has one: the badge says "this list is narrowed", which is
+     not a session state, and painting it with `--color-waiting` would spend
+     the one hue that means "a session needs you" on a decoration. */
+  --color-filter-badge: var(--vam-filter-badge);
+
   --color-waiting-tint: var(--vam-waiting-tint);
   --color-waiting-wash: var(--vam-waiting-wash);
   --color-done-tint: var(--vam-done-tint);
@@ -156,6 +162,12 @@
   --vam-done: #60a5fa;
   --vam-failed: #f87171;
 
+  /* Deliberately the SAME value as `--vam-waiting` in this theme, and taken
+     under its own name rather than borrowed: the filter badge is decoration,
+     the waiting amber is a status, and a token shared between them is a
+     status colour that has stopped meaning anything. */
+  --vam-filter-badge: #f59e0b;
+
   --vam-waiting-tint: #3f2f12;
   --vam-waiting-wash: #161208;
 
@@ -219,6 +231,10 @@ html.light {
   --vam-waiting: #b45309;
   --vam-done: #1d4ed8;
   --vam-failed: #b91c1c;
+
+  /* Waiting's light value, again by coincidence of role and not by sharing —
+     see the note in the dark block. */
+  --vam-filter-badge: #b45309;
 
   --vam-waiting-tint: #f6dcae;
   --vam-waiting-wash: #fdf6e8;

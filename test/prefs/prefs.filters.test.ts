@@ -46,6 +46,33 @@ describe('the session-origin filters, persisted', () => {
     expect(readPrefs(store('{"theme":"light"}')).filters).toEqual(DEFAULT_SESSION_FILTERS);
   });
 
+  it('leaves a pre-filters payload with every setting it had, plus the default', () => {
+    // The migration decision: an operator who never expressed a choice about
+    // origin filtering has no choice to preserve, so the shipped default
+    // applies to them too -- an ABSENT key is unset, not "off". The popover
+    // shows the rule in force and how many rows it holds back, so it is a
+    // visible default rather than a silent one, and one click ends it. What
+    // they DID choose survives untouched.
+    const raw = JSON.stringify({
+      theme: 'light',
+      panes: { sidebar: 320, detail: 408 },
+      collapsedProjects: { 'black-smith': ['p1'] },
+    });
+    const prefs = readPrefs(store(raw));
+    expect(prefs.theme).toBe('light');
+    expect(prefs.panes.sidebar).toBe(320);
+    expect(prefs.collapsedProjects).toEqual({ 'black-smith': ['p1'] });
+    expect(prefs.filters).toEqual(DEFAULT_SESSION_FILTERS);
+  });
+
+  it('never overrides a choice already stored -- an explicit `false` stays false', () => {
+    const raw = '{"theme":"light","filters":{"hideAgentStarted":false,"onlyPrompted":true}}';
+    expect(readPrefs(store(raw)).filters).toEqual({
+      hideAgentStarted: false,
+      onlyPrompted: true,
+    });
+  });
+
   it('takes only real booleans — garbage falls back per field, not wholesale', () => {
     const raw = '{"filters":{"hideAgentStarted":false,"onlyPrompted":"yes"}}';
     expect(readPrefs(store(raw)).filters).toEqual({ hideAgentStarted: false, onlyPrompted: false });
