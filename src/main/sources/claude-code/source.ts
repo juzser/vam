@@ -36,17 +36,17 @@ import { basename, join } from 'node:path';
 import type { Project, Session } from '../../../renderer/domain/model.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { MainSource } from '../source.js';
+import { createTmuxRunner } from '../tmux/spawn.js';
 import { type AgentRoster, readAgentRoster } from './agent-roster.js';
 import { type LiveAgent, listLiveAgents } from './agents.js';
-import { createTmuxRunner } from '../tmux/spawn.js';
 import { createSessionInProject } from './create-session.js';
 import { deliverPromptViaCli, deliverToSession } from './deliver.js';
+import { projectIdOf } from './project-id.js';
 import {
   createPullRequestReader,
   type ReadPullRequests,
   readPullRequestsViaCli,
 } from './pull-requests.js';
-import { projectIdOf } from './project-id.js';
 import { createBranchLookup } from './repo-branch.js';
 import { defaultSessionsRoot, readStatusUpdatedAt } from './session-status.js';
 import { stopSession, stopSessionViaCli } from './stop.js';

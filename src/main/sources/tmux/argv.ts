@@ -41,7 +41,10 @@ const UNSAFE_NAME = /[^A-Za-z0-9_-]+/g;
  * project must not collide with the first, and tmux rejects a duplicate name.
  */
 export function vamSessionName(label: string, suffix = randomSuffix()): string {
-  const slug = label.replace(UNSAFE_NAME, '-').replace(/^-+|-+$/g, '').slice(0, 24);
+  const slug = label
+    .replace(UNSAFE_NAME, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24);
   return `${VAM_SESSION_PREFIX}${slug === '' ? 'session' : slug}-${suffix}`;
 }
 

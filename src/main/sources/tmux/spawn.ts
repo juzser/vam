@@ -21,12 +21,7 @@
 
 import { execFile } from 'node:child_process';
 import type { SourceError } from '../../ipc/channels.js';
-import {
-  capturePaneArgv,
-  isVamSession,
-  listSessionsArgv,
-  newSessionArgv,
-} from './argv.js';
+import { capturePaneArgv, isVamSession, listSessionsArgv, newSessionArgv } from './argv.js';
 
 /** tmux answers in milliseconds; a slow one is a broken one. */
 const TMUX_TIMEOUT_MS = 10_000;

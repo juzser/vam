@@ -1440,6 +1440,7 @@ function CanvasInner({
     query,
     copyAllCommands,
     closeSession,
+    createSession,
     stepSession,
     focusSession,
     pane,
