@@ -1,8 +1,9 @@
 /**
  * One step in a session's chain — a strict summary, nothing more.
  *
- * It shows what kind of step it was, one line of `IN` and two clamped lines of
- * `OUT`. That is a deliberate ceiling, not a limitation to be lifted later: the
+ * It shows what kind of step it was, plus three lines shared between `IN` and
+ * `OUT` — two for `OUT` and one for `IN`, or the other way round on the two
+ * steps just before the current one (`ROW_WIDE`). That is a deliberate ceiling, not a limitation to be lifted later: the
  * detail panel shows the focused step in full, so anything this card grew would
  * be a second, worse copy of that. The canvas answers "where is this session up
  * to"; the panel answers "what exactly did it say".
@@ -27,7 +28,31 @@ export type StepNodeData = {
   readonly decision: Decision;
   readonly focused: boolean;
   readonly jumpLabel: string | null;
+  /** One of the two steps just before the current one — see `IO_LINES`. */
+  readonly recall: boolean;
 };
+
+/**
+ * Which of the two rows gets the second line, and why it is a swap.
+ *
+ * For a step already behind you, the question a glance asks is WHAT WAS ASKED:
+ * the answer is why you moved on from it, and it is in the detail panel if you
+ * want it. So the two steps immediately before the current one hand their
+ * spare line from `OUT` to `IN`, and every other step keeps the original
+ * balance.
+ *
+ * A SWAP, not a growth, and that is the whole design: the two rows go on
+ * costing three lines together, so the card's height stays the 90px `grid.ts`
+ * declares and no position has to move — including in the 300px strip, which
+ * draws the same cards at the same size. Growing the marked card instead would
+ * have meant a second step pitch and a fan geometry that varies per session,
+ * which is a great deal of arithmetic for one line of text.
+ *
+ * Neither row is ever clamped away: the loser of the swap keeps one truncated
+ * line, so a step is still identifiable from either side.
+ */
+const ROW_WIDE = 'vam-clamp-2';
+const ROW_NARROW = 'truncate';
 
 /**
  * What the icon says this step was.
@@ -73,7 +98,7 @@ function KindIcon({ kind }: { readonly kind: StepKind }) {
 }
 
 export function StepNode({ data }: NodeProps & { data: StepNodeData }) {
-  const { entry, decision, focused, jumpLabel } = data;
+  const { entry, decision, focused, jumpLabel, recall } = data;
   const kind = stepKind(entry, decision);
   const asking = kind === 'ask';
 
@@ -151,7 +176,12 @@ export function StepNode({ data }: NodeProps & { data: StepNodeData }) {
               which are lucide's `User` and `Bot`. */}
           <User size={11} strokeWidth={1.7} />
         </span>
-        <span className="truncate text-[10.5px] text-ink-faint">{decision.input}</span>
+        <span
+          data-step-input
+          className={`${recall ? ROW_WIDE : ROW_NARROW} text-[10.5px] text-ink-faint`}
+        >
+          {decision.input}
+        </span>
       </div>
       <div className="flex gap-[7px]">
         <span
@@ -161,7 +191,10 @@ export function StepNode({ data }: NodeProps & { data: StepNodeData }) {
         >
           <Bot size={11} strokeWidth={1.7} />
         </span>
-        <span className={`vam-clamp-2 text-[10.5px] ${asking ? 'text-ink' : 'text-ink-dim'}`}>
+        <span
+          data-step-output
+          className={`${recall ? ROW_NARROW : ROW_WIDE} text-[10.5px] ${asking ? 'text-ink' : 'text-ink-dim'}`}
+        >
           {decision.output === null ? (
             <span className="text-ink-faint">— running —</span>
           ) : (
