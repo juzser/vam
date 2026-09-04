@@ -91,12 +91,24 @@ export function clampPaneWidth(pane: Pane, width: number): number {
  * own floor, whichever is smaller — floored at this pane's MIN.
  *
  * Below `SIDEBAR_MIN + DETAIL_MIN + CANVAS_MIN = 880`, the absolute minimums
- * win and `CANVAS_MIN` yields: you can always drag a pane down to its
+ * win and the reserve yields: you can always drag a pane down to its
  * minimum, never below it (epic.md §4.2 point 4).
+ *
+ * `reserved` is what the canvas costs IN THIS LAYOUT, and it is not optional
+ * information — a ceiling that reserves 360 for a column rendering at 300 is
+ * a sidebar that snaps back on its first drag. It defaults to `CANVAS_MIN`
+ * because that is what the shipped layout reserves; every other layout has
+ * `canvasReserved` tell it, and `layoutWidths` below is the only caller that
+ * needs to.
  */
-export function dragCeiling(pane: Pane, otherRendered: number, viewportWidth: number): number {
+export function dragCeiling(
+  pane: Pane,
+  otherRendered: number,
+  viewportWidth: number,
+  reserved: number = CANVAS_MIN,
+): number {
   const { min, max } = bounds(pane);
-  const ceiling = Math.min(max, viewportWidth - otherRendered - CANVAS_MIN);
+  const ceiling = Math.min(max, viewportWidth - otherRendered - reserved);
   return Math.max(min, ceiling);
 }
 
@@ -111,8 +123,9 @@ export function renderedWidth(
   storedWidth: number,
   otherStored: number,
   viewportWidth: number,
+  reserved: number = CANVAS_MIN,
 ): number {
-  const ceiling = dragCeiling(pane, otherStored, viewportWidth);
+  const ceiling = dragCeiling(pane, otherStored, viewportWidth, reserved);
   return Math.min(ceiling, clampPaneWidth(pane, storedWidth));
 }
 
@@ -225,6 +238,55 @@ export const LAYOUTS = {
 export type LayoutName = keyof typeof LAYOUTS;
 
 /**
+ * What the canvas costs the other two columns, in this layout.
+ *
+ * The one place that answers it. Three cases, and they are the three the
+ * layouts can be in: the main column keeps `CANVAS_MIN`, a demoted canvas keeps
+ * one `CANVAS_STRIP`, and a hidden canvas keeps nothing. Both the rendered
+ * widths and the live drag ceiling read it here, because the alternative —
+ * `layoutWidths` handing the resizer a 716px detail pane while `dragCeiling`
+ * privately reserved 360 for a column drawn at 300 — is a sidebar that snaps
+ * back the moment you drag it.
+ */
+export function canvasReserved(layout: Layout): number {
+  if (!layout.canvas) {
+    return 0;
+  }
+  return canvasIsMain(layout) ? CANVAS_MIN : CANVAS_STRIP;
+}
+
+/**
+ * The narrowest window the demoted canvas fits in: the two fixed columns at
+ * their floors, plus the strip.
+ */
+export const FOCUS_MIN_VIEWPORT = SIDEBAR_MIN + DETAIL_MIN + CANVAS_STRIP;
+
+/**
+ * The layout as this window can actually draw it.
+ *
+ * With the canvas demoted, all three columns are fixed — the strip does not
+ * flex and neither pane may go under its floor — so below `FOCUS_MIN_VIEWPORT`
+ * their sum exceeds the window and something has to give. Of the three ways to
+ * give (overflow, shrink a column past its floor, scroll) this takes a fourth
+ * and says so out loud: DROP the strip, which turns the focus layout into
+ * `noCanvas` until the window is wide enough again. The strip is the column
+ * that was already demoted to a glance, and a glance is the first thing worth
+ * losing; shrinking it instead would keep a canvas nobody can read at the cost
+ * of the response the layout exists to show, and a horizontal scrollbar in a
+ * three-column app hides a whole column behind a gesture nobody makes.
+ *
+ * Pure, and render-time only — like every clamp in this file it changes what is
+ * DRAWN, never what is stored, so widening the window back past 820 restores
+ * the strip with the order and the widths untouched.
+ */
+export function layoutForViewport(layout: Layout, viewportWidth: number): Layout {
+  if (!layout.canvas || canvasIsMain(layout) || viewportWidth >= FOCUS_MIN_VIEWPORT) {
+    return layout;
+  }
+  return { ...layout, canvas: false };
+}
+
+/**
  * The two rendered widths, for a given layout.
  *
  * Derived from the layout's ORDER, not from a `visible.canvas` test: the
@@ -253,19 +315,29 @@ export function layoutWidths(
   stored: { readonly sidebar: number; readonly detail: number },
   viewportWidth: number,
 ): { readonly sidebar: number; readonly detail: number } {
+  const reserved = canvasReserved(layout);
   if (canvasIsMain(layout)) {
     return {
       sidebar: layout.sidebar
-        ? renderedWidth('sidebar', stored.sidebar, layout.detail ? stored.detail : 0, viewportWidth)
+        ? renderedWidth(
+            'sidebar',
+            stored.sidebar,
+            layout.detail ? stored.detail : 0,
+            viewportWidth,
+            reserved,
+          )
         : 0,
       detail: layout.detail
-        ? renderedWidth('detail', stored.detail, layout.sidebar ? stored.sidebar : 0, viewportWidth)
+        ? renderedWidth(
+            'detail',
+            stored.detail,
+            layout.sidebar ? stored.sidebar : 0,
+            viewportWidth,
+            reserved,
+          )
         : 0,
     };
   }
-  // Whatever the canvas still costs when it is not the main column: nothing at
-  // all when it is hidden, one strip when it is demoted.
-  const reserved = layout.canvas ? CANVAS_STRIP : 0;
   if (!layout.detail) {
     return {
       sidebar: layout.sidebar ? Math.max(SIDEBAR_MIN, viewportWidth - reserved) : 0,

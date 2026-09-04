@@ -24,8 +24,9 @@ import { useCallback, useRef, useState } from 'react';
 import {
   DETAIL_MAX,
   DETAIL_MIN,
+  type Layout,
+  layoutWidths,
   type Pane,
-  renderedWidth,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
 } from '../prefs/panes.js';
@@ -33,10 +34,19 @@ import {
 export type PaneResizerProps = {
   readonly pane: Pane;
   readonly ariaLabel: string;
-  /** The pane's current rendered width — the drag's starting point. */
-  readonly width: number;
-  /** The other pane's current rendered width, held fixed for the drag. */
-  readonly otherRendered: number;
+  /**
+   * The layout being dragged in, and both stored widths — not this pane's
+   * rendered width and its sibling's.
+   *
+   * A drag is not "clamp this pane against a fixed sibling": in every layout
+   * where the canvas is not the main column the sibling is DERIVED from this
+   * pane, so a sibling held fixed for the drag is a sidebar that cannot move.
+   * The resizer therefore proposes a stored width and asks `layoutWidths` what
+   * that layout would render — the same call the canvas itself makes, so the
+   * handle cannot disagree with the columns it is moving.
+   */
+  readonly layout: Layout;
+  readonly stored: { readonly sidebar: number; readonly detail: number };
   readonly viewportWidth: number;
   /** Fired on every pointermove while dragging, with the arithmetic result. */
   readonly onChange: (pane: Pane, width: number) => void;
@@ -55,7 +65,8 @@ const SIDE: Readonly<Record<Pane, string>> = {
 };
 
 export function PaneResizer(props: PaneResizerProps) {
-  const { pane, ariaLabel, width, otherRendered, viewportWidth, onChange, onCommit } = props;
+  const { pane, ariaLabel, layout, stored, viewportWidth, onChange, onCommit } = props;
+  const width = layoutWidths(layout, stored, viewportWidth)[pane];
   const bounds = BOUNDS[pane];
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -67,9 +78,9 @@ export function PaneResizer(props: PaneResizerProps) {
       // it; the detail pane's handle sits on its left edge, so dragging left
       // (a negative delta) is what grows it.
       const raw = pane === 'sidebar' ? startWidth + delta : startWidth - delta;
-      return renderedWidth(pane, raw, otherRendered, viewportWidth);
+      return layoutWidths(layout, { ...stored, [pane]: raw }, viewportWidth)[pane];
     },
-    [pane, otherRendered, viewportWidth],
+    [pane, layout, stored, viewportWidth],
   );
 
   function onPointerDown(event: React.PointerEvent<HTMLHRElement>) {

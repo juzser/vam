@@ -1643,8 +1643,8 @@ function CanvasInner({
             <PaneResizer
               pane="sidebar"
               ariaLabel="resize sessions panel"
-              width={sidebarWidth}
-              otherRendered={detailWidth}
+              layout={visible}
+              stored={{ sidebar: storedSidebar, detail: storedDetail }}
               viewportWidth={viewportWidth}
               onChange={onPaneChange}
               onCommit={onPaneCommit}
@@ -1848,8 +1848,8 @@ function CanvasInner({
             <PaneResizer
               pane="detail"
               ariaLabel="resize detail panel"
-              width={detailWidth}
-              otherRendered={sidebarWidth}
+              layout={visible}
+              stored={{ sidebar: storedSidebar, detail: storedDetail }}
               viewportWidth={viewportWidth}
               onChange={onPaneChange}
               onCommit={onPaneCommit}
