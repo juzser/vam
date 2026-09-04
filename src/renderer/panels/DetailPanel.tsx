@@ -14,13 +14,16 @@
  * The composer at the bottom is a prompt box, plus whatever bash commands the
  * session handed back for you to run by hand.
  *
- * This doc used to say there was no option chooser and there should not be
- * one, on the grounds that what a stopped session wants is words rather than a
- * pick from a menu somebody invented. The mockup has one, and the operator
- * asked for its layout; the objection survives intact as the reason
- * `ApprovalBox` is fed by a DECLARED PLACEHOLDER rather than by a field added
- * to the model. Nothing here invents a question a source did not ask, and a
- * pick writes its line into the prompt box rather than answering anything.
+ * There is no option chooser above the composer, and there should not be one.
+ * A picker stood here briefly, drawn from the mockup and fed by a placeholder
+ * declared in this file: a header reading "the agent is asking" and three
+ * cards whose every word was a constant. Nothing vam reads records what a
+ * session is asking or what its options are -- a census of the transcripts,
+ * the CLI and `~/.claude/` found no such field -- and `statusOf`
+ * (`main/sources/claude-code/agents.ts`) calls every non-busy session
+ * `waiting`, so the cards were shown to merely idle sessions as well. What a
+ * waiting session actually has is its last turn, and `out` below already
+ * renders it. So the pane shows that and invents nothing above it.
  *
  * What the composer's button claims is now the SOURCE's to say. PR #70 gave
  * the Claude Code source a real channel into a running session, so for that
@@ -44,7 +47,6 @@ import {
   ChevronRight,
   ChevronsDown,
   ChevronsUp,
-  CircleHelp,
   CircleSlash,
   GitCommitVertical,
   Paperclip,
@@ -183,152 +185,6 @@ export function setModeRequest(draft: string, mode: string): string {
 }
 
 /**
- * One option in the picker the mockup draws above the composer.
- *
- * ## THIS IS A PLACEHOLDER SHAPE, NOT A DOMAIN TYPE — read this before using it
- *
- * Nothing in `domain/model.ts` expresses "the agent asked a question with
- * numbered options". A `Decision` has an `input` (what the operator typed), an
- * `output` (the session's final response) and a list of `commands` the agent
- * handed back for a person to run — and that is the whole surface. Neither
- * adapter produces anything else: `to-canvas.ts` builds decisions out of
- * black-smith events, and the Claude Code source builds them out of a
- * transcript. No source vam reads returns a numbered question.
- *
- * So this type describes the MOCKUP, not the data, and it deliberately lives
- * in this file rather than in the model. Adding an `options` field to
- * `Session` or `Decision` would be inventing a fact no adapter can supply, and
- * every fixture would then carry a field nothing fills. When a source really
- * does return a question with options, the honest move is to add it to the
- * model THEN and hand it to `DetailPanel` as a prop — at which point
- * `PLACEHOLDER_APPROVAL` below is deleted and nothing else here changes.
- */
-export type ApprovalOption = {
-  readonly id: string;
-  /** The one line the option is chosen by; it is what a pick writes. */
-  readonly title: string;
-  readonly body: string;
-  /** The one the agent leans towards — the mockup's amber card. */
-  readonly suggested: boolean;
-};
-
-export type ApprovalRequest = {
-  /** Rendered in letter-spaced capitals, the mockup's own idiom for state. */
-  readonly label: string;
-  readonly options: readonly ApprovalOption[];
-};
-
-/**
- * The layout's stand-in content, and it says so in every line of itself.
- *
- * The alternative was three plausible-looking migration choices copied out of
- * the mockup, which would have put words on screen that read exactly like an
- * agent's own and are not. Nothing here can be mistaken for a session's answer:
- * the header says placeholder, the DOM node says `data-placeholder`, and each
- * card describes the slot it occupies instead of filling it.
- */
-export const PLACEHOLDER_APPROVAL: ApprovalRequest = {
-  label: 'option picker · placeholder layout',
-  options: [
-    {
-      id: 'suggested',
-      suggested: true,
-      title: 'The option the agent leans towards',
-      body: 'Wears the amber card. No source vam reads returns a question with numbered options today, so this text describes the slot rather than filling it.',
-    },
-    {
-      id: 'second',
-      suggested: false,
-      title: 'A second way to go',
-      body: 'A plain card. Choosing one writes its title into the prompt box below — the only thing vam can honestly do with a choice it was never handed.',
-    },
-    {
-      id: 'third',
-      suggested: false,
-      title: 'A third way to go',
-      body: "Three is the mockup's own count, and the hint under the list counts with it rather than promising a fixed three.",
-    },
-  ],
-};
-
-/**
- * The option picker: the mockup's block at `docs/design/mockup/ADE Session
- * Canvas.dc.html` lines 1515-1554, value for value.
- *
- * Those lines are in artboard **2b** ("Agent offers three options instead of an
- * approval gate", opening at dc:812), not 1a — 1a is the approval-gate board
- * and only starts at dc:1576, after this block ends. The difference matters
- * beyond a citation: 1a has a light twin, 1b at dc:2336, and **2b has none**.
- * The mockup draws this component in dark only. So every dark value below is
- * measured and every light value it reaches through a token is DERIVED — read
- * off the nearest surface the light artboard does draw at the same weight.
- * `styles.css` says so at `--vam-lifted`; it is true of the whole block.
- *
- * Where each measurement came from, and the token it mapped to. The mockup's
- * own hex values are deliberately NOT repeated here: `topology-constraints`
- * §13.1 bans a literal hex anywhere under `src/`, comments included, and it is
- * right to — a hex written in prose is a second copy of a colour that no
- * longer changes when the token does. The `dc:` line numbers are the citation;
- * open the file to see the value.
- *
- *  - header label (dc:1518) mono 9.5px / 0.1em      -> `text-waiting`
- *  - header right (dc:1520) mono 9.5px              -> `text-ink-faint`
- *  - header icon  (dc:1517) 18px, r5                -> `bg-waiting-tint` on `text-waiting`
- *  - column gap   (dc:1521) 7px
- *  - suggested card (dc:1524) r9, 1px, 10px 11px    -> `border-waiting` / `bg-waiting-wash`
- *  - plain card   (dc:1533) 1px                     -> `border-line-loud` / `bg-lifted` (minted)
- *  - badge        (dc:1525) 20x20, r6, mono 10.5px  -> `bg-waiting-tint` / `text-waiting`
- *  - plain badge  (dc:1534)                         -> `bg-line-strong` / `text-ink-dim`
- *  - title        (dc:1527) 12px / 500 / 1.35       -> `text-ink`
- *  - body         (dc:1528) 11px / 1.45 / pretty    -> `text-ink-dim`
- *  - SUGGESTED    (dc:1530) mono 9px / 0.08em, r999, 2px 6px
- *                                                   -> `text-waiting` / `border-waiting-tint`
- *  - enter glyph  (dc:1537) mono 9.5px              -> `text-ink-faint`
- *  - footer field (dc:1552) h30, r8, 1px, 11.5px    -> `border-line-loud` / `bg-lifted`
- *  - footer hint  (dc:1553) mono 9.5px              -> `text-ink-faint`
- *
- * The plain card's surface was minted as `--vam-lifted`. What that token buys
- * is exactly one value: the dark one, which the mockup measures directly at
- * dc:1533 and which no existing token holds. It is NOT far from its
- * neighbours — dark `raised` is four steps of 255 below it — and in light it
- * is an exact duplicate of both `--vam-panel` and `--vam-canvas`, so in that
- * theme it carries no information at all. It exists so the one measured dark
- * value is written once, under a name, instead of being approximated by
- * `raised` or copied as a hex.
- *
- * SUGGESTED is a fact about the agent's opinion. FOCUSED is a fact about where
- * your cursor is, and they collide on the first card. So focus is not painted
- * from state at all: the ring is a `focus-visible` outline, which cannot exist
- * without the browser's own focus BY CONSTRUCTION. It therefore cannot be worn
- * at rest by the suggested card, cannot be moved by a mouse click, and cannot
- * drift out of step with where the keyboard actually is. Suggested stays the
- * amber card and the amber pill; sharing a treatment would make moving the
- * cursor look like changing the recommendation.
- *
- * ## Keyboard
- *
- * Every option is a real `<button>`, so Tab reaches it and Enter and Space
- * activate it with no new binding at all. On top of that a digit typed while
- * the picker holds focus picks that card, which is the mockup's own `1-3 to
- * pick`. Digits are free in `keyboard/chords.ts`: `SINGLE` binds none of them
- * and `0` is only ever read after the `z` prefix, so nothing was taken.
- *
- * The handler sits on the GROUP, not on each card, so the hint holds anywhere
- * inside the picker — including the "type your own" button — rather than only
- * once a card already has DOM focus. And because one keypress carries one
- * digit, only nine options are reachable: the hint stops at nine and a badge
- * past nine prints no number, so nothing on screen promises a key that does
- * not exist. The placeholder has three; a real adapter may not.
- *
- * The digit binding is scoped to this component rather than added to the chord
- * table because the global table's actions are dispatched from `Canvas.tsx`,
- * which this task must not edit. What the follow-up would be, exactly: add
- * `{ kind: 'pickOption', index: number }` to `KeyAction`, map `'1'`-`'9'` in
- * `SINGLE`, and have `Canvas.tsx` route it to the same `onChoose` this
- * component already calls.
- */
-/** The header label, so the group can point an accessible name at it. */
-/**
  * The header dot, per status.
  *
  * This was `needsYou ? waiting : running`, which is two values for four
@@ -361,152 +217,6 @@ const PANE_STATUS_BREATHES: Readonly<Record<SessionStatus, boolean>> = {
   done: false,
   failed: false,
 };
-
-const APPROVAL_LABEL_ID = 'vam-approval-label';
-
-export function ApprovalBox({
-  request,
-  age,
-  onChoose,
-  onCompose,
-}: {
-  readonly request: ApprovalRequest;
-  /** The session's own age — the only real value in this block. */
-  readonly age: string;
-  readonly onChoose: (option: ApprovalOption) => void;
-  readonly onCompose: () => void;
-}) {
-  const { options } = request;
-  const pickDigit = (key: string) => {
-    if (!/^[1-9]$/.test(key)) return false;
-    const option = options[Number(key) - 1];
-    // A digit past the end does nothing, rather than wrapping onto a card the
-    // operator was not looking at.
-    if (option === undefined) return false;
-    onChoose(option);
-    return true;
-  };
-
-  return (
-    // A <fieldset>, which IS a group, rather than a div wearing `role="group"`:
-    // one grouped question with a set of answers is what the element is for,
-    // and it carries the role without an attribute. The name comes from
-    // `aria-labelledby` rather than a <legend> because the label is the third
-    // thing in the header row, after the icon, not a heading above it.
-    // `tabIndex={-1}` so the digit handler catches from any descendant without
-    // adding a second Tab stop in front of the cards themselves.
-    <fieldset
-      data-approval
-      data-placeholder="approval-options"
-      aria-labelledby={APPROVAL_LABEL_ID}
-      tabIndex={-1}
-      onKeyDown={(event) => {
-        if (pickDigit(event.key)) event.preventDefault();
-      }}
-      className="flex flex-col gap-[11px]"
-    >
-      <div className="flex items-center gap-[7px]">
-        <span
-          role="img"
-          aria-label="the agent is asking"
-          className="flex h-[18px] w-[18px] flex-none items-center justify-center rounded-[5px] bg-waiting-tint text-waiting"
-        >
-          <CircleHelp size={12} strokeWidth={1.7} />
-        </span>
-        {/* The gap this block stands in, named where a keyboard can read it:
-            `docs/ade-redesign.md` asks a placeholder to say what it is, and a
-            `title` says it to a mouse only. The trigger is a real <button>
-            for the same reason the MODE label below is one. */}
-        <Note text="no source vam reads returns a question with numbered options, so these three cards are a drawn layout, not a real request">
-          <button
-            type="button"
-            id={APPROVAL_LABEL_ID}
-            className="min-w-0 cursor-default truncate font-mono text-[9.5px] tracking-[0.1em] text-waiting uppercase"
-          >
-            {request.label}
-          </button>
-        </Note>
-        <span className="flex-1" />
-        <span className="flex-none font-mono text-[9.5px] text-ink-faint">waiting {age}</span>
-      </div>
-
-      <div className="flex flex-col gap-[7px]">
-        {options.map((option, i) => (
-          <button
-            key={option.id}
-            type="button"
-            data-approval-option={option.id}
-            data-suggested={option.suggested ? 'true' : undefined}
-            aria-current={option.suggested ? 'true' : undefined}
-            onClick={() => onChoose(option)}
-            className={[
-              // Dashed, the app's own vocabulary for "nothing real here" — the
-              // same one the canvas draws a step that has not happened in. It
-              // reads in both themes, which small amber capitals do not.
-              'flex cursor-pointer items-start gap-[10px] rounded-[9px] border border-dashed px-[11px] py-[10px] text-left',
-              option.suggested ? 'border-waiting bg-waiting-wash' : 'border-line-loud bg-lifted',
-              'focus-visible:outline-2 focus-visible:outline-line-loudest focus-visible:outline-offset-1',
-            ].join(' ')}
-          >
-            <span
-              data-approval-number
-              className={[
-                'flex h-5 w-5 flex-none items-center justify-center rounded-[6px] font-mono text-[10.5px]',
-                option.suggested ? 'bg-waiting-tint text-waiting' : 'bg-line-strong text-ink-dim',
-              ].join(' ')}
-            >
-              {/* A tenth card has no key to print: one keypress is one digit,
-                  so a badge past nine would name a shortcut that does not
-                  exist. It says it has none instead. */}
-              {i < 9 ? i + 1 : '—'}
-            </span>
-            <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
-              <span data-approval-title className="font-medium text-[12px] text-ink leading-[1.35]">
-                {option.title}
-              </span>
-              {/* `text-wrap: pretty` is the mockup's own (dc:1528): it is what
-                  keeps a two-line description off a one-word last line. */}
-              <span className="text-[11px] text-ink-dim leading-[1.45] [text-wrap:pretty]">
-                {option.body}
-              </span>
-            </span>
-            {option.suggested ? (
-              <span className="flex-none rounded-full border border-waiting-tint px-1.5 py-[2px] font-mono text-[9px] tracking-[0.08em] text-waiting">
-                SUGGESTED
-              </span>
-            ) : (
-              <span
-                data-approval-enter
-                aria-hidden="true"
-                className="flex-none font-mono text-[9.5px] text-ink-faint"
-              >
-                ↵
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex items-center gap-2">
-        {/* The mockup draws this as an inert `<span>` that looks like a field.
-            A second thing that looks like a prompt box, two lines above the
-            real one, is a trap — so it is a real button and it does the one
-            useful thing available: it hands the keyboard to the composer. */}
-        <button
-          type="button"
-          data-approval-own
-          onClick={onCompose}
-          className="flex h-[30px] min-w-0 flex-1 cursor-pointer items-center rounded-[8px] border border-line-loud bg-lifted px-[11px] text-left text-[11.5px] text-ink-faint hover:text-ink-dim"
-        >
-          …or type your own instruction
-        </button>
-        <span className="flex-none font-mono text-[9.5px] text-ink-faint">
-          1–{Math.min(options.length, 9)} to pick
-        </span>
-      </div>
-    </fieldset>
-  );
-}
 
 export type DetailPanelProps = {
   readonly entry: SessionEntry | null;
@@ -1051,24 +761,6 @@ export function DetailPanel(props: DetailPanelProps) {
     syncJumps(box);
   }, [focusKey, output]);
 
-  const needsYou = entry?.session.status === 'waiting';
-  /**
-   * While the picker is asking, the prompt box is not drawn.
-   *
-   * The picker already answers the question, and it carries its own way into
-   * free text — "…or type your own instruction" — so a second, empty box
-   * underneath is height that does the picker's job worse. It is REVEALED, not
-   * removed: that button and `i` both turn `composing` on, and the box is
-   * drawn whenever it holds the keyboard, so the control still does something
-   * you can see rather than handing focus to an element that is not there.
-   *
-   * `draft !== ''` is the other half, and it is the important half. Picking an
-   * option WRITES the option's line into the draft. A box that could hide over
-   * a non-empty draft would put the operator's own words nowhere on screen and
-   * still record them — including after the Esc that hands the keyboard back
-   * to the sidebar. So the box hides only when it is empty and holds nothing.
-   */
-  const showPromptBox = !needsYou || composing || draft !== '';
   const commands = decision?.commands ?? [];
   /**
    * Whether the decision on screen is the one the session is working on.
@@ -1127,21 +819,6 @@ export function DetailPanel(props: DetailPanelProps) {
           title:
             'appends the prompt to this session\u2019s log — vam cannot hand it to a running agent',
         };
-
-  /**
-   * What picking an option can honestly do: write its line into the draft.
-   *
-   * Not a submit and not a new write path — vam has neither an options API nor
-   * a source that asked the question. The pick fills the prompt box the
-   * operator was going to type into anyway, and they still record or send it
-   * themselves. Appended rather than substituted, so a half-typed reply is
-   * never silently thrown away by a keystroke meant to add to it.
-   */
-  const chooseOption = (option: ApprovalOption) => {
-    onDraftChange(draft === '' ? option.title : `${draft}\n${option.title}`);
-    onCompose();
-  };
-
   return (
     <aside
       data-action-pane={active ? 'active' : 'idle'}
@@ -1514,177 +1191,157 @@ export function DetailPanel(props: DetailPanelProps) {
             deleted: it is working code for a real black-smith surface, and no
             other source has governance to show anyway, so restoring it is one
             line here plus the prop. */}
-
-        {/* The mockup puts the picker here: the last thing you read before you
-            answer, above the box you answer in. Drawn only while the session is
-            the one waiting on you, because a question nobody asked is not
-            layout worth the height. See `ApprovalBox` for what is placeholder
-            here and what is not. */}
-        {needsYou && (
-          <ApprovalBox
-            request={PLACEHOLDER_APPROVAL}
-            age={entry?.session.age ?? '—'}
-            onChoose={chooseOption}
-            onCompose={onCompose}
-          />
-        )}
-
-        {showPromptBox && (
-          <div
-            data-prompt-box
-            className={[
-              'flex flex-col gap-2.5 rounded-[10px] border bg-panel px-3 py-2.5',
-              active && actionIndex === commands.length ? 'border-waiting' : 'border-line-loud',
-            ].join(' ')}
-          >
-            {/* Multiline, because a prompt is prose and a one-line slot hides
-              everything but the tail of it. The mockup's own composer is a
-              104px-tall block of 12.5px/1.55 text, not an input. */}
-            <div className="flex items-start gap-2">
-              <textarea
-                ref={inputRef}
-                rows={2}
-                value={draft}
-                readOnly={!composing}
-                onFocus={onCompose}
-                onChange={(event) => onDraftChange(event.target.value)}
-                onKeyDown={(event) => {
-                  // The window listener ignores keys typed in a textarea, so this
-                  // box binds the ones it needs itself. Shift+Enter is left alone
-                  // — it is the newline the box became multiline to allow.
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    onSubmit();
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    // BLUR, not just `composing = false`. Clearing the flag only
-                    // makes this box read-only; while it still holds DOM focus
-                    // the window key listener returns early on every keystroke
-                    // (it ignores keys aimed at an INPUT or a TEXTAREA), so
-                    // `j`/`k` land here and vanish and the sidebar is
-                    // unreachable without a mouse. Releasing focus is what hands
-                    // the keyboard back.
-                    inputRef.current?.blur();
-                    onStopComposing();
-                  }
-                }}
-                placeholder={
-                  entry === null
-                    ? 'Pick a session first'
-                    : 'Reply to agent, answer with a number, or paste a plan…'
+        <div
+          data-prompt-box
+          className={[
+            'flex flex-col gap-2.5 rounded-[10px] border bg-panel px-3 py-2.5',
+            active && actionIndex === commands.length ? 'border-waiting' : 'border-line-loud',
+          ].join(' ')}
+        >
+          {/* Multiline, because a prompt is prose and a one-line slot hides
+            everything but the tail of it. The mockup's own composer is a
+            104px-tall block of 12.5px/1.55 text, not an input. */}
+          <div className="flex items-start gap-2">
+            <textarea
+              ref={inputRef}
+              rows={2}
+              value={draft}
+              readOnly={!composing}
+              onFocus={onCompose}
+              onChange={(event) => onDraftChange(event.target.value)}
+              onKeyDown={(event) => {
+                // The window listener ignores keys typed in a textarea, so this
+                // box binds the ones it needs itself. Shift+Enter is left alone
+                // — it is the newline the box became multiline to allow.
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  onSubmit();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  // BLUR, not just `composing = false`. Clearing the flag only
+                  // makes this box read-only; while it still holds DOM focus
+                  // the window key listener returns early on every keystroke
+                  // (it ignores keys aimed at an INPUT or a TEXTAREA), so
+                  // `j`/`k` land here and vanish and the sidebar is
+                  // unreachable without a mouse. Releasing focus is what hands
+                  // the keyboard back.
+                  inputRef.current?.blur();
+                  onStopComposing();
                 }
-                className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-[12.5px] text-ink leading-[1.55] outline-none placeholder:text-ink-faint"
-                aria-label="prompt to session"
-              />
-            </div>
+              }}
+              placeholder={
+                entry === null
+                  ? 'Pick a session first'
+                  : 'Reply to agent, answer with a number, or paste a plan…'
+              }
+              className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-[12.5px] text-ink leading-[1.55] outline-none placeholder:text-ink-faint"
+              aria-label="prompt to session"
+            />
+          </div>
 
-            {attachError !== null && (
-              <p data-attach-error className="text-[10.5px] text-waiting leading-[1.45]">
-                {attachError}
-              </p>
-            )}
+          {attachError !== null && (
+            <p data-attach-error className="text-[10.5px] text-waiting leading-[1.45]">
+              {attachError}
+            </p>
+          )}
 
-            <div className="flex items-center gap-2">
-              {/* The attachment button, doing the only honest thing there is to
-                do here: vam's write is a string, so the file is read in the
-                renderer and its text becomes part of the prompt that gets
-                recorded. Nothing is uploaded, and nothing on screen says it
-                is. See `attachIntoDraft` for the limit and the refusals. */}
-              <input
-                ref={fileRef}
-                type="file"
-                tabIndex={-1}
-                aria-hidden="true"
-                onChange={(event) => void takeFile(event.currentTarget)}
-                className="hidden"
-              />
-              <Note text="reads the file here and puts its text into the prompt text that gets recorded — vam uploads nothing">
-                <button
-                  type="button"
-                  data-attach
-                  aria-label="attach a text file to this prompt"
-                  onClick={() => fileRef.current?.click()}
-                  className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border border-line-strong text-ink-dim hover:bg-raised hover:text-ink"
-                >
-                  <Paperclip size={12} strokeWidth={1.7} />
-                </button>
-              </Note>
-              {attachedName !== null && (
-                <span
-                  data-attach-chip
-                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[10px] text-ink-dim"
-                >
-                  <span className="truncate">{attachedName}</span>
-                  <button
-                    type="button"
-                    data-attach-remove
-                    aria-label={`remove ${attachedName}`}
-                    onClick={() => {
-                      setAttachError(null);
-                      onDraftChange(detachFromDraft(draft));
-                    }}
-                    className="flex flex-none cursor-pointer items-center text-ink-faint hover:text-ink"
-                  >
-                    <X size={11} strokeWidth={2} />
-                  </button>
-                </span>
-              )}
-              {/* The model field. Not a menu of names vam made up — vam has no
-                model API and black-smith does the choosing — but not an inert
-                chip either: what is typed here becomes the prompt's first
-                line, in the recorded text a person reads. */}
-              <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
-                <input
-                  data-model-request
-                  value={readModelRequest(draft)}
-                  onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
-                  placeholder="model"
-                  aria-label="model requested in this prompt"
-                  className="h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[10px] text-ink-dim outline-none placeholder:text-ink-ghost focus:text-ink"
-                />
-              </Note>
-              {/* The way OUT, shown only while you are in — the moment it is the
-                thing you need, and no width the rest of the time. It replaces
-                the `i` / `I` notes the operator asked to lose: those advertised
-                the way in, which you have already found by the time you can
-                read them. */}
-              {composing && (
-                <span
-                  data-prompt-escape
-                  className="flex-none whitespace-nowrap font-mono text-[9.5px] text-ink-faint"
-                >
-                  Esc → sidebar
-                </span>
-              )}
-              <span className="min-w-0 flex-1" />
-              {/* The mockup draws a send arrow here. This one says RECORD, in
-                the label and in the tooltip, because black-smith has no channel
-                into a running agent session — the click appends the prompt to
-                the session's log and nothing reads it back out. A button that
-                implied delivery would leave you waiting for an answer nobody is
-                coming to give. */}
+          <div className="flex items-center gap-2">
+            {/* The attachment button, doing the only honest thing there is to
+              do here: vam's write is a string, so the file is read in the
+              renderer and its text becomes part of the prompt that gets
+              recorded. Nothing is uploaded, and nothing on screen says it
+              is. See `attachIntoDraft` for the limit and the refusals. */}
+            <input
+              ref={fileRef}
+              type="file"
+              tabIndex={-1}
+              aria-hidden="true"
+              onChange={(event) => void takeFile(event.currentTarget)}
+              className="hidden"
+            />
+            <Note text="reads the file here and puts its text into the prompt text that gets recorded — vam uploads nothing">
               <button
                 type="button"
-                data-prompt-record
-                onClick={onSubmit}
-                disabled={sending}
-                aria-busy={sending}
-                aria-label={composerClaim.label}
-                title={composerClaim.title}
-                className={[
-                  'flex h-7 w-7 flex-none items-center justify-center rounded-[7px] bg-line-strong text-ink',
-                  sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
-                ].join(' ')}
+                data-attach
+                aria-label="attach a text file to this prompt"
+                onClick={() => fileRef.current?.click()}
+                className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border border-line-strong text-ink-dim hover:bg-raised hover:text-ink"
               >
-                <ArrowUp size={14} strokeWidth={1.7} className={sending ? 'vam-breathe' : ''} />
+                <Paperclip size={12} strokeWidth={1.7} />
               </button>
-            </div>
+            </Note>
+            {attachedName !== null && (
+              <span
+                data-attach-chip
+                className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[10px] text-ink-dim"
+              >
+                <span className="truncate">{attachedName}</span>
+                <button
+                  type="button"
+                  data-attach-remove
+                  aria-label={`remove ${attachedName}`}
+                  onClick={() => {
+                    setAttachError(null);
+                    onDraftChange(detachFromDraft(draft));
+                  }}
+                  className="flex flex-none cursor-pointer items-center text-ink-faint hover:text-ink"
+                >
+                  <X size={11} strokeWidth={2} />
+                </button>
+              </span>
+            )}
+            {/* The model field. Not a menu of names vam made up — vam has no
+              model API and black-smith does the choosing — but not an inert
+              chip either: what is typed here becomes the prompt's first
+              line, in the recorded text a person reads. */}
+            <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
+              <input
+                data-model-request
+                value={readModelRequest(draft)}
+                onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
+                placeholder="model"
+                aria-label="model requested in this prompt"
+                className="h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[10px] text-ink-dim outline-none placeholder:text-ink-ghost focus:text-ink"
+              />
+            </Note>
+            {/* The way OUT, shown only while you are in — the moment it is the
+              thing you need, and no width the rest of the time. It replaces
+              the `i` / `I` notes the operator asked to lose: those advertised
+              the way in, which you have already found by the time you can
+              read them. */}
+            {composing && (
+              <span
+                data-prompt-escape
+                className="flex-none whitespace-nowrap font-mono text-[9.5px] text-ink-faint"
+              >
+                Esc → sidebar
+              </span>
+            )}
+            <span className="min-w-0 flex-1" />
+            {/* The mockup draws a send arrow here. This one says RECORD, in
+              the label and in the tooltip, because black-smith has no channel
+              into a running agent session — the click appends the prompt to
+              the session's log and nothing reads it back out. A button that
+              implied delivery would leave you waiting for an answer nobody is
+              coming to give. */}
+            <button
+              type="button"
+              data-prompt-record
+              onClick={onSubmit}
+              disabled={sending}
+              aria-busy={sending}
+              aria-label={composerClaim.label}
+              title={composerClaim.title}
+              className={[
+                'flex h-7 w-7 flex-none items-center justify-center rounded-[7px] bg-line-strong text-ink',
+                sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
+              ].join(' ')}
+            >
+              <ArrowUp size={14} strokeWidth={1.7} className={sending ? 'vam-breathe' : ''} />
+            </button>
           </div>
-        )}
+        </div>
 
-        {/* The mode row stays while the box is hidden: it is a setting the
-            prompt carries, not part of the box, and it is where the operator
-            sets it before asking for one. */}
         {/* The mockup's mode row, in place of the slash tags that stood here.
             The pills are real buttons and the selection is real: it is written
             into the prompt as a leading `mode:` line, the same way the model
