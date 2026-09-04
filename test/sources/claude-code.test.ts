@@ -44,6 +44,9 @@ const toolCall = (name: string, description: string) => ({
 const agent = (over: Partial<LiveAgent> = {}): LiveAgent => ({
   key: 'sess-1#100',
   sessionId: 'sess-1',
+  // Null by default so that no test in this file reaches for a status file:
+  // the rows that exercise `~/.claude/sessions` set a pid AND a fixture root.
+  pid: null,
   name: 'demo',
   cwd: '/w/alpha',
   status: 'running',
@@ -207,12 +210,22 @@ describe('summarizeTranscript', () => {
 
 describe('loadClaudeCodeProjects', () => {
   let root: string;
+  let sessionsRoot: string;
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'vam-cc-'));
+    sessionsRoot = mkdtempSync(join(tmpdir(), 'vam-cc-sessions-'));
   });
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
+    rmSync(sessionsRoot, { recursive: true, force: true });
   });
+
+  const writeStatusFile = (pid: number, statusUpdatedAt: unknown) => {
+    writeFileSync(
+      join(sessionsRoot, `${pid}.json`),
+      JSON.stringify({ pid, sessionId: 'sess-1', status: 'idle', statusUpdatedAt }),
+    );
+  };
 
   const writeTranscript = (dir: string, sessionId: string, body: string, ageMs = 60_000) => {
     mkdirSync(join(root, dir), { recursive: true });
@@ -392,6 +405,73 @@ describe('loadClaudeCodeProjects', () => {
       NOW,
     );
     expect(without?.sessions[0]?.age).toBe('3d');
+  });
+
+  it('ages two processes that resumed one session apart, from their own status files', async () => {
+    // The regression. Both rows share ONE transcript, so an age taken from
+    // the transcript's mtime is identical for both -- measured on a real
+    // machine as two rows whose true status times were 18 hours apart. The
+    // per-pid status file is the only thing that tells them apart.
+    writeTranscript('slug-a', 'sess-1', jsonl(reply('x')), 2 * 3_600_000);
+    writeStatusFile(4242, NOW - 5 * 60_000);
+    writeStatusFile(4343, NOW - 20 * 3_600_000);
+    const [project] = await loadClaudeCodeProjects(
+      root,
+      [agent({ key: 'sess-1#4242', pid: 4242 }), agent({ key: 'sess-1#4343', pid: 4343 })],
+      NOW,
+      async () => null,
+      sessionsRoot,
+    );
+    const byId = new Map(project?.sessions.map((x) => [x.id, x.age]) ?? []);
+    expect(byId.get('sess-1#4242')).toBe('5m');
+    expect(byId.get('sess-1#4343')).toBe('20h');
+  });
+
+  it('falls back to the transcript mtime when the pid has no status file', async () => {
+    writeTranscript('slug-a', 'sess-1', jsonl(reply('x')), 2 * 3_600_000);
+    const [project] = await loadClaudeCodeProjects(
+      root,
+      [agent({ key: 'sess-1#4242', pid: 4242 })],
+      NOW,
+      async () => null,
+      sessionsRoot,
+    );
+    expect(project?.sessions[0]?.age).toBe('2h');
+  });
+
+  it.each([
+    ['{ not json'],
+    [JSON.stringify({ pid: 4242 })],
+    [JSON.stringify({ statusUpdatedAt: 'soon' })],
+  ])('falls back rather than throwing on an unusable status file (%s)', async (body) => {
+    writeTranscript('slug-a', 'sess-1', jsonl(reply('x')), 2 * 3_600_000);
+    writeFileSync(join(sessionsRoot, '4242.json'), body);
+    const [project] = await loadClaudeCodeProjects(
+      root,
+      [agent({ key: 'sess-1#4242', pid: 4242 })],
+      NOW,
+      async () => null,
+      sessionsRoot,
+    );
+    expect(project?.sessions[0]?.age).toBe('2h');
+  });
+
+  it('falls back to the start time when there is neither a status file nor a transcript', async () => {
+    const [project] = await loadClaudeCodeProjects(
+      root,
+      [
+        agent({
+          key: 'absent#4242',
+          pid: 4242,
+          sessionId: 'absent',
+          startedAt: NOW - 3 * 86_400_000,
+        }),
+      ],
+      NOW,
+      async () => null,
+      sessionsRoot,
+    );
+    expect(project?.sessions[0]?.age).toBe('3d');
   });
 
   it('reads only a bounded tail, so a huge transcript costs the same as a small one', async () => {
