@@ -374,6 +374,16 @@ export type DetailPanelProps = {
    * further Enter was swallowed without a word.
    */
   readonly sending?: boolean;
+  /**
+   * The tab `Mod-Shift-<digit>` has just asked for, or null when nothing has
+   * been asked.
+   *
+   * A REQUEST, not the selection: the tab stays this pane's own state, so the
+   * bar keeps working with no caller at all and the canvas gets no
+   * presentation toggle in its model. A fresh object each press is what keeps
+   * asking twice for the same tab an ask, which `Tab | null` could not say.
+   */
+  readonly tabRequest?: { readonly tab: Tab } | null;
   /** The current rendered width (task-1's `renderedWidth`), applied inline. */
   readonly width: number;
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
@@ -392,7 +402,9 @@ export type DetailPanelProps = {
  */
 const TABS = ['Response', 'PRs', 'Terminal', 'Agents'] as const;
 
-type Tab = (typeof TABS)[number];
+/** Exported for the chord table alone, which names the tab its digit opens.
+ *  A type-only import there, so nothing of this file reaches the grammar. */
+export type Tab = (typeof TABS)[number];
 
 /**
  * The mockup's mode segments, and which one it draws as current. Presentation
@@ -1263,6 +1275,15 @@ export function DetailPanel(props: DetailPanelProps) {
    * is looking at agents, not at whichever tab the last session left behind.
    */
   const [tab, setTab] = useState<Tab>('Response');
+  const tabRequest = props.tabRequest ?? null;
+  // A withdrawn tab is not refused here: `current` below already falls back to
+  // Response when the showing tab is not on offer, so asking for Terminal
+  // where there is none lands exactly where clicking would have.
+  useEffect(() => {
+    if (tabRequest !== null) {
+      setTab(tabRequest.tab);
+    }
+  }, [tabRequest]);
   // Which tabs this source actually has. A withdrawn tab cannot stay SHOWING:
   // the operator can be on Terminal when focus moves to a session from a
   // source without one, and a tab bar with nothing selected over a pane

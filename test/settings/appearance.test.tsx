@@ -150,10 +150,13 @@ describe('a binding is edited by pressing the key', () => {
     fireEvent.click(slot('rename', 0) as HTMLElement);
     const box = capture();
     expect(box).not.toBeNull();
-    const event = new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true });
+    // `q`, not `p`: `p` used to be free and is now `revealProject` in the
+    // chord table, so capturing it here would be refused as a conflict — which
+    // is the capture box working, not this test's subject.
+    const event = new KeyboardEvent('keydown', { key: 'q', bubbles: true, cancelable: true });
     act(() => void box?.dispatchEvent(event));
     expect(event.defaultPrevented, 'the keystroke must not also reach the app').toBe(true);
-    expect(changed(onChange, 0).keyBindings['rename']).toEqual(['p']);
+    expect(changed(onChange, 0).keyBindings['rename']).toEqual(['q']);
   });
 
   it('cancels on Escape without binding anything and without closing the panel', () => {
@@ -233,7 +236,7 @@ describe('the captured key is really in force', () => {
       });
     press(',');
     fireEvent.click(slot('help', 0) as HTMLElement);
-    fireEvent.keyDown(capture() as HTMLElement, { key: 'p' });
+    fireEvent.keyDown(capture() as HTMLElement, { key: 'q' });
     press('Escape');
     expect(document.querySelector('[data-settings-overlay]')).toBeNull();
     press('?');
@@ -241,7 +244,7 @@ describe('the captured key is really in force', () => {
       document.querySelector('[data-key-sheet]'),
       '? must no longer open the sheet',
     ).toBeNull();
-    press('p');
+    press('q');
     expect(document.querySelector('[data-key-sheet]')).not.toBeNull();
   });
 });

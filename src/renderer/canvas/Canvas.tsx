@@ -61,7 +61,7 @@ import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
 import { nextNode } from '../keyboard/spatial-nav.js';
-import { DetailPanel } from '../panels/DetailPanel.js';
+import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
 import { IconPicker } from '../panels/IconPicker.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
@@ -619,6 +619,16 @@ function CanvasInner({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   /** The sidebar's filter popover — the ONE home for narrowing (SessionList). */
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  /**
+   * The two chords whose EFFECT belongs to a panel: `Mod-Shift-<digit>` picks
+   * a detail tab, `p` reveals a project. A fresh object per press, never the
+   * state itself — the tab and the reveal stay where they are drawn and only
+   * the ask travels, which keeps both keys in the chord table (so the sheet
+   * lists them and an open overlay silences them) without pulling a panel's
+   * presentation into the canvas's model.
+   */
+  const [tabRequest, setTabRequest] = useState<{ readonly tab: DetailTab } | null>(null);
+  const [revealRequest, setRevealRequest] = useState<{ readonly projectId: string } | null>(null);
   /** True while a write is in flight — Enter must not fire twice. */
   const [writing, setWriting] = useState(false);
   /** The same guard for `x`: one keypress must not become two stop attempts. */
@@ -1298,7 +1308,15 @@ function CanvasInner({
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target;
-      if (target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName)) {
+      const typing = target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName);
+      // A Cmd/Ctrl chord is never text entry — no layout produces a character
+      // from one — so a box that is capturing letters has no claim on it. That
+      // matters for exactly the case `Mod-Shift-<digit>` was added for: the
+      // operator is in the prompt box, which is where the reason to look at
+      // another tab comes from, so a shortcut dead there is dead. Unmodified,
+      // everything still belongs to the box: the palette's filtering, the
+      // search line, the prompt's `!` typeahead and its Enter and Escape.
+      if (typing && !(event.metaKey || event.ctrlKey)) {
         return; // the palette, the search line and the prompt own their own keys
       }
 
@@ -1591,6 +1609,23 @@ function CanvasInner({
         case 'settings':
           setSettingsOpen(true);
           return;
+        case 'detailTab':
+          // Same guard as `I`: a pane that is not drawn cannot be asked to
+          // show a tab, and a keystroke that silently changed a hidden pane's
+          // state would surface later as a tab nobody chose.
+          if (!visible.detail) {
+            setStatus('the detail pane is hidden — z0 brings it back');
+            return;
+          }
+          setTabRequest({ tab: action.tab });
+          return;
+        case 'revealProject':
+          if (focusedEntry === null) {
+            setStatus('pick a session first');
+            return;
+          }
+          setRevealRequest({ projectId: focusedEntry.project.id });
+          return;
         case 'resizePane': {
           // Which pane owns the keyboard right now decides which one moves —
           // the same `pane` state `I`/`H` already set, nothing new (epic.md §4.5).
@@ -1821,6 +1856,7 @@ function CanvasInner({
           }}
           onAddInProject={(project) => void createSession(project.id, project.name)}
           pendingAction={pendingAction}
+          revealRequest={revealRequest}
           onNewProject={() => void newProject()}
           newSessionDecline={newSessionDecline}
           onPickIcon={(project: Project) => {
@@ -2022,6 +2058,7 @@ function CanvasInner({
           // written; the pane never saw it, so a two-minute `claude --resume`
           // looked like Enter doing nothing.
           sending={writing}
+          tabRequest={tabRequest}
           draft={draft}
           onDraftChange={setDraft}
           onSubmit={sendPrompt}

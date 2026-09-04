@@ -12,6 +12,7 @@
  * hook that owns the listener has no rules in it to drift from these.
  */
 
+import type { Tab as DetailTab } from '../panels/DetailPanel.js';
 import type { LayoutName } from '../prefs/panes.js';
 import type { Direction } from './spatial-nav.js';
 
@@ -159,6 +160,15 @@ export type KeyAction =
       sidebar, zero-based here because that is what an index into the list is.
       `Mod-9` is deliberately NOT in this family: it is `last` (below). */
   | { readonly kind: 'sessionAt'; readonly index: number }
+  /** `Mod-Shift-1` … `Mod-Shift-4` — show one of the detail pane's tabs. Named
+      rather than numbered because a position is what the KEY means, not what
+      the action does: reorder the bar and the binding follows the name, and
+      the sheet keeps saying which tab it opens. Type-only import, so the
+      grammar still pulls no component in at runtime. */
+  | { readonly kind: 'detailTab'; readonly tab: DetailTab }
+  /** `p` — reveal the focused session's project in the sidebar and put the
+      keyboard on its fold. */
+  | { readonly kind: 'revealProject' }
   | { readonly kind: 'cancel' };
 
 export type ChordStep = {
@@ -226,6 +236,21 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   'Mod-7': { kind: 'sessionAt', index: 6 },
   'Mod-8': { kind: 'sessionAt', index: 7 },
   'Mod-9': { kind: 'last' },
+  // The same digit row, one row up: Shift makes it a POSITION IN THE TAB BAR
+  // rather than in the sidebar. A letter would have fought the prompt box,
+  // which is where an operator's hands are when they want another tab, and
+  // `Mod-1`..`Mod-9` were already taken. Spelled by position (`normalizeKey`
+  // reads `event.code` for the digit row), so `Cmd+Shift+1` is this binding
+  // and not the `!` the browser would otherwise have handed us.
+  'Mod-Shift-1': { kind: 'detailTab', tab: 'Response' },
+  'Mod-Shift-2': { kind: 'detailTab', tab: 'PRs' },
+  'Mod-Shift-3': { kind: 'detailTab', tab: 'Terminal' },
+  'Mod-Shift-4': { kind: 'detailTab', tab: 'Agents' },
+  // `p` for project. It shipped hand-wired to its own window listener in
+  // SessionList.tsx, which cost it both properties this table exists to give:
+  // it appeared in no key sheet, and it fired straight through an open
+  // overlay. Being here is the fix for both at once.
+  p: { kind: 'revealProject' },
   // The same action as `x`, under the chord a person coming from a browser or
   // a terminal already has in their fingers. It is `Mod-w` rather than a
   // second letter because "close this thing" IS Cmd-W everywhere else.
@@ -380,6 +405,8 @@ export function actionId(action: KeyAction): string {
       return `layout:${action.name}`;
     case 'sessionAt':
       return `sessionAt:${action.index}`;
+    case 'detailTab':
+      return `detailTab:${action.tab}`;
     case 'project':
       return `project:${action.delta}`;
     case 'resizePane':

@@ -955,24 +955,32 @@ describe('SessionList project controls', () => {
     expect(fold.tabIndex).toBe(0);
   });
 
-  it('reveals the focused session project on p, and puts focus on its fold', () => {
-    const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
-    pressKey('p');
+  // `p` itself is no longer this component's key: it is `revealProject` in the
+  // chord table, resolved by the one window listener in Canvas.tsx, which is
+  // what gets it into the generated key sheet and under the overlay guard.
+  // What is left here is the effect the ask produces, and the two ways an ask
+  // can be empty. The keystroke end to end is in Canvas.tab-chord.test.tsx.
+  it('reveals the asked-for project, and puts focus on its fold', () => {
+    const { container } = mountWith(twoProjects(), {
+      focusedSessionId: 'b1',
+      revealRequest: { projectId: 'p2' },
+    });
     expect(heading(container, 'p2').getAttribute('data-project-revealed')).toBe('true');
     expect(heading(container, 'p1').getAttribute('data-project-revealed')).toBeNull();
     expect(document.activeElement).toBe(container.querySelector('[data-project-collapse="p2"]'));
   });
 
-  it('leaves p alone while text is being typed', () => {
-    const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1', filtering: true });
-    const input = container.querySelector('[aria-label="filter sessions"]') as HTMLInputElement;
-    pressKey('p', input);
-    expect(heading(container, 'p2').getAttribute('data-project-revealed')).toBeNull();
+  it('reveals nothing when no ask has been made, not even on a bare p', () => {
+    const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
+    pressKey('p');
+    expect(container.querySelector('[data-project-revealed]')).toBeNull();
   });
 
-  it('does nothing on p when no session is focused', () => {
-    const { container } = mountWith(twoProjects(), { focusedSessionId: null });
-    pressKey('p');
+  it('ignores an ask for a project it is not showing', () => {
+    const { container } = mountWith(twoProjects(), {
+      focusedSessionId: 'b1',
+      revealRequest: { projectId: 'gone' },
+    });
     expect(container.querySelector('[data-project-revealed]')).toBeNull();
   });
 
