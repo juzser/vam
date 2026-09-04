@@ -45,6 +45,14 @@ export type LiveAgent = {
   readonly kind: 'interactive' | 'background';
   /** Epoch ms the process started. Not last activity. */
   readonly startedAt: number | null;
+  /**
+   * The process id, kept rather than left inside `key`. It is what
+   * `~/.claude/sessions/<pid>.json` is named for, and that file is the only
+   * per-PROCESS timestamp there is -- re-splitting `key` at the point of use
+   * would make a row's identity string load-bearing for a file lookup.
+   * `null` when the CLI reported no pid, in which case there is no file.
+   */
+  readonly pid: number | null;
 };
 
 /** How long the CLI gets before `load()` gives up on it. */
@@ -128,6 +136,7 @@ export function parseAgentRows(stdout: string, nowMs: number = Date.now()): read
       status: statusOf(row),
       kind,
       startedAt,
+      pid,
     });
   }
   return rows;
