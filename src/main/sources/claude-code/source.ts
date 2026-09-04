@@ -46,6 +46,7 @@ import {
   readPullRequestsViaCli,
 } from './pull-requests.js';
 import { createBranchLookup } from './repo-branch.js';
+import { stopSession, stopSessionViaCli } from './stop.js';
 import { defaultSessionsRoot, readStatusUpdatedAt } from './session-status.js';
 import {
   compactAge,
@@ -301,7 +302,12 @@ const DESCRIPTOR: SourceDescriptor = {
     promptAttachments: false,
     slashCommands: false,
     renameSession: false,
-    closeSession: false,
+    // `claude stop <id>` is real. It stops BACKGROUND sessions only, and an
+    // interactive row is refused by name rather than silently ignored -- see
+    // `stop.ts`. A capability that is true for most rows and refuses the rest
+    // in the source's own words is exactly what `declines` cannot express, so
+    // the refusal travels as a `SourceError` at call time instead.
+    closeSession: true,
     createSession: false,
     governance: false,
     // `gh pr list --head <branch>`, run in the session's own working
@@ -323,7 +329,8 @@ const DESCRIPTOR: SourceDescriptor = {
     promptAttachments: NOT_YET_WRITTEN,
     slashCommands: NOT_YET_WRITTEN,
     renameSession: NO_SURFACE,
-    closeSession: NOT_YET_WRITTEN,
+    // No entry for closeSession: a decline is written only for a capability
+    // that is false, and this one is now true.
     createSession: NOT_YET_WRITTEN,
     governance: NOT_RECORDED,
     // No entry for pullRequests: a decline is written only for a capability
@@ -372,4 +379,12 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    */
   recordPrompt: async (sessionId, prompt) =>
     deliverToSession(await listLiveAgents(), sessionId, prompt, deliverPromptViaCli),
+  /**
+   * The live list is re-asked for the same reason `recordPrompt` re-asks it,
+   * plus one of its own: `kind` is what decides whether this session can be
+   * stopped at all, and a canvas drawn minutes ago is not evidence about a
+   * process now.
+   */
+  closeSession: async (sessionId) =>
+    stopSession(await listLiveAgents(), sessionId, (id) => stopSessionViaCli({ sessionId: id })),
 };

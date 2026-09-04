@@ -8,6 +8,10 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { CHANNELS } from '../../../src/main/ipc/channels.js';
+import { registerSourceIpc } from '../../../src/main/ipc/handlers.js';
+import { CLAUDE_CODE_SOURCE } from '../../../src/main/sources/claude-code/source.js';
+import type { MainSource } from '../../../src/main/sources/source.js';
 import {
   classifyStopFailure,
   stopArgv,
@@ -102,5 +106,81 @@ describe('classifyStopFailure', () => {
     expect(
       classifyStopFailure({ failure: { message: 'exit 1' }, stderr: '   ', sessionId: 's' }).message,
     ).toContain('exit 1');
+  });
+});
+
+describe('the close-session channel, once the source can actually stop one', () => {
+  const descriptor = {
+    id: 'test',
+    label: 'test',
+    capabilities: {
+      liveUpdates: false,
+      recordPrompt: false,
+      deliverPrompt: false,
+      promptAttachments: false,
+      slashCommands: false,
+      renameSession: false,
+      closeSession: true,
+      createSession: false,
+      governance: false,
+      pullRequests: false,
+      terminal: false,
+      agentRoster: false,
+    },
+    declines: {},
+    viewerScope: { kind: 'connection' as const, note: 'test' },
+  };
+
+  const wire = (source: MainSource) => {
+    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+    registerSourceIpc({ handle: (c, l) => void handlers.set(c, l) }, source);
+    return (...args: unknown[]) => handlers.get(CHANNELS.closeSession)?.({}, ...args);
+  };
+
+  it('reaches the source instead of answering not-implemented', async () => {
+    const seen: string[] = [];
+    const call = wire({
+      descriptor,
+      load: () => Promise.resolve([]),
+      closeSession: async (sessionId) => {
+        seen.push(sessionId);
+        return null;
+      },
+    });
+    expect(await call('sess#1')).toEqual({ ok: true, value: undefined });
+    expect(seen).toEqual(['sess#1']);
+  });
+
+  it("returns the source's refusal with its code and message intact", async () => {
+    const refusal = { kind: 'refused' as const, code: 'interactive-session', message: 'yours' };
+    const call = wire({
+      descriptor,
+      load: () => Promise.resolve([]),
+      closeSession: async () => refusal,
+    });
+    expect(await call('sess#1')).toEqual({ ok: false, error: refusal });
+  });
+
+  it('validates before it ever reaches the source', async () => {
+    let called = false;
+    const call = wire({
+      descriptor,
+      load: () => Promise.resolve([]),
+      closeSession: async () => {
+        called = true;
+        return null;
+      },
+    });
+    const result = (await call('')) as { ok: boolean; error: { code: string } };
+    expect(result.error.code).toBe('invalid-payload');
+    expect(called).toBe(false);
+  });
+});
+
+describe('the Claude Code source itself', () => {
+  it('advertises closeSession and carries a member for it', () => {
+    expect(CLAUDE_CODE_SOURCE.descriptor.capabilities.closeSession).toBe(true);
+    expect(CLAUDE_CODE_SOURCE.descriptor.declines.closeSession).toBeUndefined();
+    expect(typeof CLAUDE_CODE_SOURCE.closeSession).toBe('function');
   });
 });
