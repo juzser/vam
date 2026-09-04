@@ -345,6 +345,83 @@ describe('multi-select toggles exactly what was chosen, and reviews it before co
  * the cursor was ON at that moment, and the screen afterwards no longer holds
  * the picker.
  */
+/**
+ * The refusals that only a tmux failing MID-FLIGHT can reach. Every one of them
+ * leaves the answer uncommitted or says so, and none of them claims `sent`.
+ */
+describe('when the pane stops cooperating part way through', () => {
+  /** A runner whose Nth `send-keys` fails, everything before it succeeding. */
+  function flaky(captures: readonly string[], failAt: number) {
+    const queue = [...captures];
+    let sends = 0;
+    const keys: (string | undefined)[] = [];
+    const run: TmuxRun = async (argv) => {
+      if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t${NAME}\n`);
+      if (argv[0] === 'capture-pane') {
+        const next = queue.shift();
+        return next === undefined ? failed('cant find pane') : ok(next);
+      }
+      keys.push(argv[3]);
+      sends += 1;
+      return sends === failAt ? failed('cant find pane') : ok('');
+    };
+    return { run, keys: () => keys };
+  }
+
+  it('gives up on a cursor that never reaches a label the first read showed', async () => {
+    // The label WAS on the screen vam checked, and the cursor cycles without
+    // ever landing on it. One pass of the list and then a refusal, rather than
+    // arrows into a pane forever.
+    const stuck = [colours(0), colours(1), colours(0), colours(1), colours(0), colours(1)];
+    const { run, keys } = runner(stuck);
+    expect(await answerQuestion(run, ATLAS, single(['Emerald']))).toEqual({
+      kind: 'unmatched',
+      label: 'Emerald',
+    });
+    expect(keys()).not.toContain('Enter');
+  });
+
+  it('reports the commit tmux would not deliver, on the multi-select tail', async () => {
+    const screens = [
+      fruits(0, []),
+      fruits(1, []),
+      fruits(2, []),
+      fruits(0, []),
+      fruits(0, [0]),
+      REVIEW,
+    ];
+    // The sixth send-keys is the Return that commits the review.
+    const { run, keys } = flaky(screens, 6);
+    expect(await answerQuestion(run, ATLAS, { labels: ['Apple'], multiSelect: true })).toEqual({
+      kind: 'refused',
+    });
+    expect(keys().at(-1)).toBe('Enter');
+  });
+
+  it('will not call an unreadable screen a confirmation, either side of the commit', async () => {
+    // Before the Right: vam cannot see the review, so it does not commit.
+    const blind = [fruits(0, []), fruits(1, []), fruits(2, []), fruits(0, []), fruits(0, [0])];
+    const { run } = flaky(blind, 0);
+    expect(await answerQuestion(run, ATLAS, { labels: ['Apple'], multiSelect: true })).toEqual({
+      kind: 'unreadable',
+    });
+    // And after it: the keys went in and vam cannot say what happened, which is
+    // `unconfirmed` -- never `sent`.
+    const short = flaky([...blind, REVIEW], 0);
+    expect(
+      await answerQuestion(short.run, ATLAS, { labels: ['Apple'], multiSelect: true }),
+    ).toEqual({ kind: 'unconfirmed', label: 'Apple' });
+  });
+
+  it('will not call an unreadable screen a confirmation for a single answer either', async () => {
+    const { run } = flaky([colours(0), colours(1)], 0);
+    expect(await answerQuestion(run, ATLAS, single(['Cobalt']))).toEqual({
+      kind: 'unconfirmed',
+      label: 'Cobalt',
+    });
+  });
+});
+
 describe('against real capture-pane bytes', () => {
   const LIVE = [
     '❯ 1. Crimson\n  2. Cobalt\n  3. Emerald\nEnter to select · Up/Down to navigate\n' +
