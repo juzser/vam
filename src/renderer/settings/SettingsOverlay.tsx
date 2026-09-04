@@ -21,8 +21,7 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { describeAction } from '../keyboard/keysheet.js';
-import { buildKeySheet } from '../keyboard/keysheet.js';
+import { buildKeySheet, describeAction } from '../keyboard/keysheet.js';
 import { ALL_VISIBLE, LAYOUTS, type LayoutName } from '../prefs/panes.js';
 import {
   FOCUS_SHARE_MAX,

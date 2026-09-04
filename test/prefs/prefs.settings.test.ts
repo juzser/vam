@@ -18,9 +18,9 @@ import {
   FOCUS_SHARE_MAX,
   FOCUS_SHARE_MIN,
   readPrefs,
+  type StorageLike,
   setFocusShare,
   setTheme,
-  type StorageLike,
   writePrefs,
 } from '../../src/renderer/prefs/prefs.js';
 

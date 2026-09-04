@@ -1721,7 +1721,11 @@ function CanvasInner({
       {/* Same reason again: settings is a window overlay, so it sits with the
           palette and the sheet rather than inside the canvas column. */}
       {settingsOpen && (
-        <SettingsOverlay prefs={prefs} onChange={savePrefs} onClose={() => setSettingsOpen(false)} />
+        <SettingsOverlay
+          prefs={prefs}
+          onChange={savePrefs}
+          onClose={() => setSettingsOpen(false)}
+        />
       )}
 
       {paletteOpen && (
