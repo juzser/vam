@@ -25,6 +25,7 @@ import {
   ChevronRight,
   Filter,
   GitBranch,
+  LoaderCircle,
   Monitor,
   MoreHorizontal,
   Plus,
@@ -1108,6 +1109,13 @@ export function SessionList(props: SessionListProps) {
                     const { session } = entry;
                     const isFocused = session.id === focusedSessionId;
                     const needsYou = session.status === 'waiting';
+                    // The SAME notion the close button already wears, applied
+                    // to the whole row: closing can take the full stop timeout,
+                    // and for those fifteen seconds the row is not something
+                    // the operator can act on. `pendingAction` stays the one
+                    // source of truth -- there is no second pending state here.
+                    const closing = pendingAction === session.id;
+                    const closingLabel = `Stopping “${session.title}”…`;
 
                     return (
                       <div key={session.id}>
@@ -1141,6 +1149,12 @@ export function SessionList(props: SessionListProps) {
                             // anywhere in the sidebar revealed every row's close
                             // button at once, the exact opposite of what the class
                             // was there to do.
+                            // `data-row-pending` carries the dim (styles.css)
+                            // rather than an inline colour, so the row keeps
+                            // its own tokens and the treatment is one rule.
+                            {...(closing
+                              ? { 'data-row-pending': session.id, 'aria-busy': true }
+                              : {})}
                             className="group/row relative"
                           >
                             <button
@@ -1158,6 +1172,13 @@ export function SessionList(props: SessionListProps) {
                               }}
                               data-session-row={session.id}
                               onClick={() => onPick(session.id)}
+                              // Not actionable and not a tab stop -- but still
+                              // drawn, and still the row for THIS session: the
+                              // operator has to be able to see which one is
+                              // closing, which is the whole point of the state.
+                              disabled={closing}
+                              tabIndex={closing ? -1 : undefined}
+                              {...(closing ? { title: closingLabel } : {})}
                               className={[
                                 'relative flex w-full cursor-pointer flex-col gap-[7px] overflow-hidden rounded-[9px] px-2.5 py-2.5 text-left',
                                 isFocused
@@ -1259,6 +1280,27 @@ export function SessionList(props: SessionListProps) {
                             >
                               ×
                             </button>
+
+                            {/* The indicator, over the row rather than beside
+                                it. Three channels for one fact, because one of
+                                them is always missing for somebody: the turning
+                                mark, the word, and `aria-busy` on the row. With
+                                `prefers-reduced-motion` the mark parks upright
+                                (styles.css) and the word carries it alone --
+                                never "no indicator". `pointer-events-none` so
+                                it cannot become a second thing to click on a
+                                row that refuses clicks. */}
+                            {closing && (
+                              <span
+                                data-row-busy
+                                className="pointer-events-none absolute inset-0 flex items-center justify-center"
+                              >
+                                <span className="flex items-center gap-1.5 rounded-[7px] border border-line bg-panel px-2 py-1 text-[11px] text-ink-dim">
+                                  <LoaderCircle size={11} strokeWidth={1.8} className="vam-spin" />
+                                  {closingLabel}
+                                </span>
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>
