@@ -34,7 +34,15 @@ import {
   useStore,
 } from '@xyflow/react';
 import { Box, Factory, FlaskConical, type LucideIcon, Maximize, Terminal } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ComponentProps,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   describeUsage,
   POLL_INTERVAL_MS,
@@ -53,7 +61,7 @@ import { IconPicker } from '../panels/IconPicker.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
 import { SessionList } from '../panels/SessionList.js';
-import { DEFAULT_PANES, renderedWidth } from '../prefs/panes.js';
+import { ALL_VISIBLE, DEFAULT_PANES, layoutWidths } from '../prefs/panes.js';
 import {
   applyIcons,
   applyTheme,
@@ -61,6 +69,8 @@ import {
   type Prefs,
   readPrefs,
   setIcon,
+  setLayout,
+  setPaneVisibility,
   setPaneWidth,
   setProjectIcon,
   setSessionFilters,
@@ -246,6 +256,35 @@ function useUsageSnapshot(getUsage: (() => Promise<UsageSnapshot>) | undefined):
   return snapshot;
 }
 
+/**
+ * The three columns, mounted or not.
+ *
+ * Wrappers around the call sites rather than a guard inside SessionList and
+ * DetailPanel: both panels open with hooks, so an early `return null` inside
+ * them would be a conditional hook. A wrapper never creates the component at
+ * all, which is what "unmounted" has to mean — a display:none pane is still a
+ * pane, still measured, and still findable by every query that should now miss.
+ *
+ * A hidden `CanvasColumn`'s children are still BUILT (JSX is evaluated at the
+ * call site) — they are plain element objects, never rendered, so nothing in
+ * them mounts, subscribes or measures.
+ */
+function SidebarSlot({ show, ...props }: ComponentProps<typeof SessionList> & { show: boolean }) {
+  return show ? <SessionList {...props} /> : null;
+}
+
+function DetailSlot({ show, ...props }: ComponentProps<typeof DetailPanel> & { show: boolean }) {
+  return show ? <DetailPanel {...props} /> : null;
+}
+
+function CanvasColumn({ show, children }: { show: boolean; children: ReactNode }) {
+  return show ? (
+    <div data-canvas-pane className="relative flex min-w-0 flex-1 flex-col bg-canvas">
+      {children}
+    </div>
+  ) : null;
+}
+
 function CanvasInner({
   model: factoryModel,
   source,
@@ -296,8 +335,15 @@ function CanvasInner({
 
   const storedSidebar = liveWidths.sidebar ?? prefs.panes.sidebar;
   const storedDetail = liveWidths.detail ?? prefs.panes.detail;
-  const sidebarWidth = renderedWidth('sidebar', storedSidebar, storedDetail, viewportWidth);
-  const detailWidth = renderedWidth('detail', storedDetail, storedSidebar, viewportWidth);
+  // Visibility is read here and passed down, never asked of a child: which
+  // columns exist is a fact about the layout, and `layoutWidths` is the one
+  // place that knows an unmounted pane owes its sibling nothing.
+  const visible = prefs.paneVisibility;
+  const { sidebar: sidebarWidth, detail: detailWidth } = layoutWidths(
+    visible,
+    { sidebar: storedSidebar, detail: storedDetail },
+    viewportWidth,
+  );
 
   const onPaneChange = useCallback((pane: 'sidebar' | 'detail', width: number) => {
     setLiveWidths((prev) => ({ ...prev, [pane]: width }));
@@ -458,15 +504,15 @@ function CanvasInner({
    * filter nobody set.
    */
   const visibleModel = useMemo<CanvasModel>(() => {
-    const visible = new Set(entries.map((e) => e.session.id));
-    if (visible.size === allEntries.length) {
+    const kept = new Set(entries.map((e) => e.session.id));
+    if (kept.size === allEntries.length) {
       return model;
     }
     return {
       projects: model.projects
         .map((project) => ({
           ...project,
-          sessions: project.sessions.filter((s) => visible.has(s.id)),
+          sessions: project.sessions.filter((s) => kept.has(s.id)),
         }))
         .filter((project) => project.sessions.length > 0),
     };
@@ -1014,6 +1060,14 @@ function CanvasInner({
             setStatus('pick a session first');
             return;
           }
+          // The second half of the action-parity invariant: the cursor may
+          // only enter a pane that is DRAWN. Without this, `I` sets 'action' on an
+          // unmounted detail pane and every `j`/`k`/Enter after it walks and
+          // fires actions nothing is showing.
+          if (!visible.detail) {
+            setStatus('the detail pane is hidden — z0 brings it back');
+            return;
+          }
           setPane('action');
           setActionIndex(0);
           return;
@@ -1077,19 +1131,51 @@ function CanvasInner({
           // Which pane owns the keyboard right now decides which one moves —
           // the same `pane` state `I`/`H` already set, nothing new (epic.md §4.5).
           const target: 'sidebar' | 'detail' = pane === 'action' ? 'detail' : 'sidebar';
+          // A width you cannot see change is a keypress that did nothing and
+          // said nothing. The `I` guard above keeps the cursor off a hidden
+          // detail pane, but the sidebar can be hidden under a cursor that is
+          // legitimately on the list, so this one is not redundant.
+          if (!visible[target]) {
+            setStatus(`the ${target} pane is hidden — z0 brings it back`);
+            return;
+          }
           const step = action.delta * 24;
           savePrefs(setPaneWidth(prefs, target, prefs.panes[target] + step));
           return;
         }
         case 'resetPanes':
+          // `z0` restores VISIBILITY as well as the two widths. It is the only
+          // "put it back" key, and the person most likely to press it is the
+          // one who just hid the wrong pane and cannot see the chord table any
+          // more — so the narrow reading ("widths only") would answer that
+          // person with a layout that still has a column missing, and set both
+          // widths they cannot see while it did. Restoring the shipped layout
+          // is one idea, not two.
+          setPane('list');
           savePrefs(
-            setPaneWidth(
-              setPaneWidth(prefs, 'sidebar', DEFAULT_PANES.sidebar),
-              'detail',
-              DEFAULT_PANES.detail,
+            setPaneVisibility(
+              setPaneWidth(
+                setPaneWidth(prefs, 'sidebar', DEFAULT_PANES.sidebar),
+                'detail',
+                DEFAULT_PANES.detail,
+              ),
+              ALL_VISIBLE,
             ),
           );
           return;
+        case 'layout': {
+          const next = setLayout(prefs, action.name);
+          // Hiding the pane the keyboard is in would strand the cursor in a
+          // pane nothing draws — the same defect the `I` guard refuses, only
+          // arriving from the other side. 'list' is the fallback the composer
+          // and Escape already use.
+          if (!next.paneVisibility.detail) {
+            setPane('list');
+            setComposing(false);
+          }
+          savePrefs(next);
+          return;
+        }
         case 'prompt': {
           if (focusedEntry === null) {
             setStatus('pick a session first');
@@ -1191,6 +1277,7 @@ function CanvasInner({
     actions,
     prefs,
     savePrefs,
+    visible,
   ]);
 
   /**
@@ -1210,7 +1297,8 @@ function CanvasInner({
   return (
     <div className="relative flex h-full flex-col">
       <div className="flex min-h-0 flex-1">
-        <SessionList
+        <SidebarSlot
+          show={visible.sidebar}
           entries={entries}
           focusedSessionId={focusedEntry?.session.id ?? null}
           workspace="black-smith"
@@ -1311,7 +1399,7 @@ function CanvasInner({
           }
         />
 
-        <div className="relative flex min-w-0 flex-1 flex-col bg-canvas">
+        <CanvasColumn show={visible.canvas}>
           <div className="flex h-12 flex-none items-center gap-[9px] border-line border-b px-3.5">
             <span className="shrink-0 font-medium text-[13px] text-ink">Canvas</span>
             <span className="mx-1 h-3.5 w-px shrink-0 bg-line-strong" />
@@ -1468,9 +1556,10 @@ function CanvasInner({
 
             {keySheetOpen && <KeySheet onClose={() => setKeySheetOpen(false)} />}
           </div>
-        </div>
+        </CanvasColumn>
 
-        <DetailPanel
+        <DetailSlot
+          show={visible.detail}
           entry={focusedEntry}
           decision={focusedDecision}
           delivers={source.kind === 'session' && source.source.capabilities.deliverPrompt}

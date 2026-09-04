@@ -12,6 +12,7 @@
  * hook that owns the listener has no rules in it to drift from these.
  */
 
+import type { LayoutName } from '../prefs/panes.js';
 import type { Direction } from './spatial-nav.js';
 
 /** A `KeyboardEvent`, narrowed to what the grammar reads. */
@@ -108,8 +109,11 @@ export type KeyAction =
   | { readonly kind: 'help' }
   /** `<` / `>` — narrow or widen the focused side pane by one step. */
   | { readonly kind: 'resizePane'; readonly delta: -1 | 1 }
-  /** `z0` — set both side panes back to their shipped defaults. */
+  /** `z0` — the shipped layout back: both side panes at their default width
+      AND all three columns drawn again. */
   | { readonly kind: 'resetPanes' }
+  /** `zc` / `zC` — hide columns. See `AFTER_Z`. */
+  | { readonly kind: 'layout'; readonly name: LayoutName }
   /** `Mod-1` … `Mod-8` — jump straight to a session by its position in the
       sidebar, zero-based here because that is what an index into the list is.
       `Mod-9` is deliberately NOT in this family: it is `last` (below). */
@@ -199,9 +203,24 @@ const AFTER_Y: Readonly<Record<string, KeyAction>> = {
   y: { kind: 'copy' },
 };
 
-/** `z` is vim's "adjust the view" namespace; `z0` restores both side panes. */
+/**
+ * `z` is vim's "adjust the view" namespace — which is exactly what hiding a
+ * column is — so the layouts live here rather than taking three more of the
+ * dwindling single keys.
+ *
+ * `zc` is vim's "close a fold", and closing the canvas is the same gesture on
+ * the same key: the thing in front of you folds away and its neighbours take
+ * the room. `zC` is vim's "close them recursively", i.e. the same idea taken
+ * further — here, everything but the response. The pair reads as one binding
+ * with a stronger form, the way `gt`/`gT` and `n`/`N` already do in this table.
+ *
+ * `z0` is the undo for both, and restores visibility as well as width — see
+ * the `resetPanes` handler in Canvas.tsx for why that is one idea, not two.
+ */
 const AFTER_Z: Readonly<Record<string, KeyAction>> = {
   '0': { kind: 'resetPanes' },
+  c: { kind: 'layout', name: 'noCanvas' },
+  C: { kind: 'layout', name: 'responseOnly' },
 };
 
 function isPrefix(key: string): key is Prefix {
