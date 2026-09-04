@@ -171,11 +171,18 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
         <div className="h-0.5 overflow-hidden rounded-sm bg-line-strong">
           <div className={`h-full ${STATUS_FILL[session.status]}`} style={{ width: `${pct}%` }} />
         </div>
-        <div className="flex font-mono text-[9.5px] text-ink-faint">
-          <span>{session.decisions.length} steps</span>
+        <div className="flex min-w-0 gap-2 font-mono text-[9.5px] text-ink-faint">
+          <span className="flex-none">{session.decisions.length} steps</span>
           <span className="flex-1" />
-          {/* Tokens and spend per session are not in black-smith's overview. */}
-          <span data-session-spend className="text-ink-ghost">
+          {/* Tokens and spend per session are not in black-smith's overview, so
+              this cell carries `activity` -- the newest tool call, which is
+              text an agent wrote and therefore has no length vam controls. It
+              broke the node's width until it was made to give way: `min-w-0`
+              on the row is what lets a flex child shrink below its content at
+              all, and `truncate` is what makes it ellipsis instead of pushing.
+              The step count is `flex-none` because it is short, bounded, and
+              the half of this line worth keeping whole. */}
+          <span data-session-spend className="min-w-0 truncate text-ink-ghost">
             {session.activity ?? '—'}
           </span>
         </div>
