@@ -86,20 +86,28 @@ export function targetSession(
   panes: ReadonlyMap<string, string> | undefined,
 ): SessionMatch {
   const published = rowId === undefined ? undefined : panes?.get(sessionIdOf(rowId));
-  // BOTH CONDITIONS, and the second one was missing. Matching the name alone
-  // made this fast path strictly WEAKER than the fallback it exists to
-  // bypass, which has always filtered on the project: a row in one project
-  // whose published value is stale -- or simply wrong -- and happens to name
-  // a vam session belonging to ANOTHER project resolved here as a confident
-  // single match, and the caller typed into that project's running agent.
-  // An empty id is what an unset option reads back as, so it may not match at
-  // all; `matchVamSession` refuses it for the same reason.
-  if (
-    published !== undefined &&
-    projectId !== '' &&
-    sessions.some((session) => session.name === published && session.project === projectId)
-  ) {
-    return { kind: 'one', name: published };
+  if (published !== undefined) {
+    // THE PROJECT IS CHECKED, AND A DISAGREEMENT ENDS THE SEARCH. Matching
+    // the name alone made this fast path strictly WEAKER than the fallback it
+    // exists to bypass, which has always filtered on the project: a stale or
+    // crossed published value naming a vam session of ANOTHER project
+    // resolved here as a confident single match, and a keystroke went into
+    // that project's running agent.
+    //
+    // But refusing the value and then FALLING THROUGH is worse still, and it
+    // is why this is one branch rather than a condition. The tag path answers
+    // a different question and can resolve a perfectly healthy session that
+    // this row was never in -- so a row with a wrong pairing would have its
+    // keys typed into a session chosen by a rule that never looked at the
+    // row. No published value is "nobody said, so try the tag"; a published
+    // value that disagrees is "this row is wrong", and vam stops.
+    //
+    // An empty id is what an unset option reads back as, so it may not match
+    // anything; `matchVamSession` refuses it for the same reason.
+    return projectId !== '' &&
+      sessions.some((session) => session.name === published && session.project === projectId)
+      ? { kind: 'one', name: published }
+      : { kind: 'none' };
   }
   return matchVamSession(sessions, projectId);
 }

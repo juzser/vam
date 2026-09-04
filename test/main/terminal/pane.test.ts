@@ -291,9 +291,14 @@ describe('reading the pane a session published', () => {
     });
   });
 
-  it('ignores a published pane that is not a session vam started', async () => {
-    // The operator's own tmux sessions publish theirs too, and vam may not
-    // draw one: it never appears in vam's own listing, so the tag answers.
+  it('draws NOTHING for a row whose published pane is not a session vam started', async () => {
+    // CHANGED, DELIBERATELY, from falling back to the tag. The row says it is
+    // running in the operator's own `notes` pane, which vam did not start and
+    // cannot adopt. The tag path would then answer with vam's own session for
+    // this project -- a different agent's screen, drawn under this row's name
+    // and, through the same rule, typed into and killed. `not-vam` is the
+    // honest answer here in the plainest sense: vam did not start the pane
+    // this row is in.
     const { run } = runner({
       'list-sessions': ok(`${ATLAS}\tvam-atlas-aa11bb\n`),
       'capture-pane': ok('alpha screen'),
@@ -304,6 +309,6 @@ describe('reading the pane a session published', () => {
       'sess-alpha#7',
       new Map([['sess-alpha', 'notes']]),
     );
-    expect(view).toEqual({ kind: 'ok', name: 'vam-atlas-aa11bb', text: 'alpha screen' });
+    expect(view).toEqual({ kind: 'not-vam' });
   });
 });

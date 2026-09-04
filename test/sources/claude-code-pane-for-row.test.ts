@@ -67,11 +67,14 @@ describe('paneForRow with published panes', () => {
     expect(paneForRow([], [ALPHA], ALPHA, panes)).toBeNull();
   });
 
-  it('falls back to the tag when the published pane has ended', () => {
-    // Listed a moment ago, gone now: the tag still names a live session vam
-    // started for this project and there is exactly one row in it.
+  it('REFUSES rather than falling back when the published pane has ended', () => {
+    // CHANGED, DELIBERATELY, from falling back to the tag. A row that says it
+    // is in a pane which no longer exists is a row vam cannot place: the tag
+    // path answers a different question -- one agent here, one session tagged
+    // here -- and the session it names is a DIFFERENT, live one that this row
+    // was never in. Falling back meant replying into it, and killing it.
     const panes = new Map([['sess-alpha', 'vam-atlas-zz99zz']]);
-    expect(paneForRow(one, [ALPHA], ALPHA, panes)).toBe('vam-atlas-aa11bb');
+    expect(paneForRow(one, [ALPHA], ALPHA, panes)).toBeNull();
   });
 });
 
@@ -106,11 +109,30 @@ describe('a published pane is checked against the row’s OWN project', () => {
     expect(paneForRow(elsewhere, [ALPHA], ALPHA, panes)).toBeNull();
   });
 
-  it('still refuses when the right session is listed beside the wrong one', () => {
-    // The fallback cannot rescue this either, and must not: the row published
-    // a pane, and vam does not get to substitute a different one for it.
+  it('does NOT substitute the project’s own session for the one that disagrees', () => {
+    // THE TEST THIS REPLACES ASSERTED THE DEFECT. It read `toBe(...aa11bb)`:
+    // the published value was rejected for naming beacon's session, and then
+    // the tag path resolved alpha's own healthy session and it was used --
+    // typed into, and killed. Two independently correct fixes at two call
+    // sites combined into a worse third defect, and the fixture that caught
+    // it lives in remove-project's suite.
     const panes = new Map([['sess-alpha', 'vam-beacon-ee33ff']]);
-    expect(paneForRow([...one, ...elsewhere], [ALPHA], ALPHA, panes)).toBe('vam-atlas-aa11bb');
+    expect(paneForRow([...one, ...elsewhere], [ALPHA], ALPHA, panes)).toBeNull();
+  });
+
+  it('distinguishes all three cases, because only two of them are the same', () => {
+    // 1. NOBODY SAID: no published value, and the tag path is unambiguous.
+    //    That is the fallback's whole purpose and it still works.
+    expect(paneForRow(one, [ALPHA], ALPHA, new Map())).toBe('vam-atlas-aa11bb');
+    // 2. IT AGREES: the published value names a session tagged for this
+    //    project. Resolved, and it bypasses the counts by design.
+    const agrees = new Map([['sess-alpha', 'vam-atlas-aa11bb']]);
+    expect(paneForRow(one, [ALPHA], ALPHA, agrees)).toBe('vam-atlas-aa11bb');
+    // 3. IT DISAGREES: something about this row is wrong. Absence of evidence
+    //    is not the same as evidence of a corrupt pairing, and only the first
+    //    of the two may fall back.
+    const disagrees = new Map([['sess-alpha', 'vam-beacon-ee33ff']]);
+    expect(paneForRow([...one, ...elsewhere], [ALPHA], ALPHA, disagrees)).toBeNull();
   });
 
   it('never matches a session no one tagged, whose project reads back empty', () => {

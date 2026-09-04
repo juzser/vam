@@ -143,15 +143,48 @@ describe('typing into the session vam started for a project', () => {
     expect(verbs()).toEqual(['list-sessions']);
   });
 
-  it('falls back to the project’s own session when the published one is another’s', async () => {
-    const { run, argvs } = runner(
+  it('does NOT fall back to the project’s own session when the published one is another’s', async () => {
+    // THIS TEST ASSERTED THE DEFECT until the branches were gated against
+    // each other: it expected the keystroke to land in `vam-atlas-a1b2c3`.
+    // Rejecting the published value and then letting the tag path answer aims
+    // the key at a session chosen by a rule that never looked at this row --
+    // healthy, live, and not the one the operator is typing in.
+    const { run, verbs } = runner(
       listing(`${ATLAS}\tvam-atlas-a1b2c3\n${BEACON}\tvam-beacon-d4e5f6\n`),
     );
     const panes = new Map([[ATLAS, 'vam-beacon-d4e5f6']]);
     expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(
-      'sent',
+      'unaimed',
     );
-    expect(argvs[1]?.[2]).toBe('=vam-atlas-a1b2c3:');
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
+  it('types where the three cases say it may, and nowhere else', async () => {
+    const stdout = `${ATLAS}\tvam-atlas-a1b2c3\n${BEACON}\tvam-beacon-d4e5f6\n`;
+    // 1. NOBODY SAID: no published value, and the project names exactly one.
+    const nobody = runner(listing(stdout));
+    await sendSessionKey(nobody.run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, new Map());
+    expect(nobody.argvs[1]?.[2]).toBe('=vam-atlas-a1b2c3:');
+    // 2. IT AGREES: resolved, bypassing the counts by design.
+    const agrees = runner(listing(stdout));
+    await sendSessionKey(
+      agrees.run,
+      ATLAS,
+      { kind: 'text', text: 'h' },
+      ATLAS,
+      new Map([[ATLAS, 'vam-atlas-a1b2c3']]),
+    );
+    expect(agrees.argvs[1]?.[2]).toBe('=vam-atlas-a1b2c3:');
+    // 3. IT DISAGREES: nothing is sent at all, and no fallback is consulted.
+    const disagrees = runner(listing(stdout));
+    await sendSessionKey(
+      disagrees.run,
+      ATLAS,
+      { kind: 'text', text: 'h' },
+      ATLAS,
+      new Map([[ATLAS, 'vam-beacon-d4e5f6']]),
+    );
+    expect(disagrees.verbs()).toEqual(['list-sessions']);
   });
 
   it('ignores a published pane that is not in vam’s own listing', async () => {
