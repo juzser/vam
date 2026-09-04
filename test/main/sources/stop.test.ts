@@ -10,6 +10,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
 import { registerSourceIpc } from '../../../src/main/ipc/handlers.js';
+import { projectIdOf } from '../../../src/main/sources/claude-code/project-id.js';
 import { CLAUDE_CODE_SOURCE } from '../../../src/main/sources/claude-code/source.js';
 import {
   classifyStopFailure,
@@ -18,7 +19,6 @@ import {
   stopSession,
 } from '../../../src/main/sources/claude-code/stop.js';
 import type { MainSource } from '../../../src/main/sources/source.js';
-import { projectIdOf } from '../../../src/main/sources/claude-code/project-id.js';
 import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
 
 const background: StoppableAgent = {
@@ -212,7 +212,10 @@ describe('closing a session vam itself started', () => {
     stdout: `${line}\n`,
     stderr: '',
   });
-  const runner = (rest: TmuxRunResult = ok, listed = listing(`${projectIdOf('/w/alpha')}\t${OWNED}`)) => {
+  const runner = (
+    rest: TmuxRunResult = ok,
+    listed = listing(`${projectIdOf('/w/alpha')}\t${OWNED}`),
+  ) => {
     const calls: string[][] = [];
     const run: TmuxRun = async (argv) => {
       calls.push([...argv]);
@@ -246,7 +249,12 @@ describe('closing a session vam itself started', () => {
       stdout: '',
       stderr: "can't find session",
     });
-    const error = await stopSession([owned], 'sess-9#12', vi.fn(async () => null), run);
+    const error = await stopSession(
+      [owned],
+      'sess-9#12',
+      vi.fn(async () => null),
+      run,
+    );
     expect(error?.code).toBe('no-such-session');
   });
 
@@ -255,7 +263,12 @@ describe('closing a session vam itself started', () => {
     // a guess would kill the wrong session.
     const twin: StoppableAgent = { ...owned, key: 'sess-8#13', sessionId: 'sess-8' };
     const { calls, run } = runner();
-    const error = await stopSession([owned, twin], 'sess-9#12', vi.fn(async () => null), run);
+    const error = await stopSession(
+      [owned, twin],
+      'sess-9#12',
+      vi.fn(async () => null),
+      run,
+    );
     expect(error?.code).toBe('interactive-session');
     expect(calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
   });

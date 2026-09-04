@@ -17,11 +17,11 @@ import {
   listLiveAgents,
   parseAgentRows,
 } from '../../src/main/sources/claude-code/agents.js';
+import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
 import {
   CLAUDE_CODE_SOURCE,
   loadClaudeCodeProjects,
 } from '../../src/main/sources/claude-code/source.js';
-import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
 import { compactAge, summarizeTranscript } from '../../src/main/sources/claude-code/transcript.js';
 
 const NOW = Date.parse('2026-09-03T09:05:00.000Z');
@@ -251,14 +251,28 @@ describe('loadClaudeCodeProjects', () => {
     });
 
     it('is true for a session paired with a tmux session vam tagged', async () => {
-      const [project] = await loadClaudeCodeProjects(root, [only], NOW, undefined, sessionsRoot, null, [
-        { project: projectIdOf('/w/alpha'), name: 'vam-alpha-a1b2c3' },
-      ]);
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [only],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        [{ project: projectIdOf('/w/alpha'), name: 'vam-alpha-a1b2c3' }],
+      );
       expect(project?.sessions[0]?.vamControlled).toBe(true);
     });
 
     it('is false, not absent, for a session vam looked for and did not start', async () => {
-      const [project] = await loadClaudeCodeProjects(root, [only], NOW, undefined, sessionsRoot, null, []);
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [only],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        [],
+      );
       expect(project?.sessions[0]?.vamControlled).toBe(false);
     });
   });

@@ -404,6 +404,17 @@ body {
   animation: vam-breathe 1.8s ease-in-out infinite;
 }
 
+/* A control whose action is running. The SAME breathe the running dots use --
+   the idiom for "this has not finished happening" already exists here and a
+   second one would only be a second thing to learn. The rule is on the
+   attribute rather than a class so the control that wears it adds exactly one
+   thing (`SessionList.tsx`), and `cursor` and `opacity` are what carry it when
+   motion is off: see the reduced-motion block below. */
+[data-pending='true'] {
+  animation: vam-breathe 1.8s ease-in-out infinite;
+  cursor: progress;
+}
+
 /* The dots are three elements rather than one animated glyph so the wave can
    travel along them, and they carry no colour of their own: the ellipsis
    belongs to the word, and a word that dims should dim its dots too. The
@@ -529,6 +540,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .vam-spin,
   .vam-breathe,
+  [data-pending='true'],
   .vam-ellipsis > span,
   .vam-running-edge::after,
   .vam-focus-glow,
@@ -540,6 +552,12 @@ body {
      is what an unfinished sentence looks like anyway and still says the session
      is working. */
   .vam-ellipsis > span {
+    opacity: 1;
+  }
+  /* Stopped mid-breath a pending control could park at 35% opacity, which
+     reads as disabled rather than as working. Parked ON, it is a control that
+     cannot be pressed and says why in `aria-busy` and its own tooltip. */
+  [data-pending='true'] {
     opacity: 1;
   }
   /* The halo carried the signal; with motion off, a static ring has to — the

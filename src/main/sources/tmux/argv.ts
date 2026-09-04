@@ -226,7 +226,7 @@ export function tagSessionArgv(name: string, projectId: string): readonly string
 /**
  * End a session vam started.
  *
- * THIS BUILDER WAS HERE BEFORE AND WAS DELETED, in `#123`'s review fixes, as a
+ * THIS BUILDER WAS HERE BEFORE AND WAS DELETED, in PR 123's review fixes, as a
  * session-destroying argv with no caller on a branch whose scope excluded the
  * Terminal tab. That was right by the rule it applied, and it left an
  * asymmetry: the same branch shipped `o`, so vam started sessions it had no
