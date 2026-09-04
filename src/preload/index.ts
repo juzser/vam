@@ -14,6 +14,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   createClipboardApi,
+  createDialogApi,
   createPreloadApi,
   createStreamSubscribe,
   createTerminalApi,
@@ -26,4 +27,5 @@ contextBridge.exposeInMainWorld('api', {
   usage: createUsageApi(ipcRenderer),
   clipboard: createClipboardApi(ipcRenderer),
   terminal: createTerminalApi(ipcRenderer),
+  dialog: createDialogApi(ipcRenderer),
 });

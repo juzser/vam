@@ -74,12 +74,24 @@ const isPromptText = (value: unknown): boolean =>
 const isTextList = (value: unknown): boolean =>
   Array.isArray(value) && value.length <= MAX_LIST_LENGTH && value.every(isText);
 
+/**
+ * A directory to start a session in. ABSOLUTE, and with no NUL byte: the
+ * renderer chose this string, and it becomes a process's cwd. `..` is not
+ * rejected -- a path may legitimately contain one and main resolves nothing
+ * here -- but a relative path would be resolved against main's own cwd, which
+ * is a directory the operator never picked. Whether it exists is main's own
+ * question, asked where the session is actually started.
+ */
+const isDirectoryPath = (value: unknown): boolean =>
+  isText(value) && (value as string).startsWith('/') && !(value as string).includes('\0');
+
 /** What each argumentful channel accepts, positionally. Arity is part of it. */
 const ARGUMENTS: Record<string, readonly ((value: unknown) => boolean)[]> = {
   [CHANNELS.recordPrompt]: [isText, isPromptText],
   [CHANNELS.renameSession]: [isText, isText],
   [CHANNELS.closeSession]: [isText],
   [CHANNELS.createSession]: [isText, isText],
+  [CHANNELS.createSessionIn]: [isDirectoryPath, isText],
   [CHANNELS.applyWaivers]: [isText, isTextList],
   [CHANNELS.transitionLesson]: [isText, isText, isText],
 };
@@ -142,6 +154,7 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
     [CHANNELS.renameSession, 'renameSession'],
     [CHANNELS.closeSession, 'closeSession'],
     [CHANNELS.createSession, 'createSession'],
+    [CHANNELS.createSessionIn, 'createSession'],
     [CHANNELS.applyWaivers, 'governance'],
     [CHANNELS.transitionLesson, 'governance'],
   ];
@@ -179,6 +192,10 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
       }
       if (channel === CHANNELS.createSession && source.createSession !== undefined) {
         const failure = await source.createSession(args[0] as string, args[1] as string);
+        return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
+      }
+      if (channel === CHANNELS.createSessionIn && source.createSessionInDirectory !== undefined) {
+        const failure = await source.createSessionInDirectory(args[0] as string, args[1] as string);
         return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
       }
       // Advertised, but this source carries no member for it. Saying so beats

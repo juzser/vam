@@ -77,6 +77,7 @@ function makeApi(descriptor: SourceDescriptor): PreloadSourceApi {
     renameSession: vi.fn(async () => undefined),
     closeSession: vi.fn(async () => undefined),
     createSession: vi.fn(async () => undefined),
+    createSessionIn: vi.fn(async () => undefined),
     applyWaivers: vi.fn(async () => undefined),
     transitionLesson: vi.fn(async () => undefined),
   };
@@ -138,6 +139,9 @@ describe('createSourceFromPreload', () => {
     expect('renameSession' in source.write).toBe(true);
     expect('closeSession' in source.write).toBe(false);
     expect('createSession' in source.write).toBe(false);
+    // Same flag, so the same answer: a source that cannot create carries
+    // neither member, and the new-project path has nothing to call.
+    expect('createSessionIn' in source.write).toBe(false);
   });
 
   it('refuses a lifecycle capability that no member could ever reach', async () => {
@@ -184,10 +188,13 @@ describe('createSourceFromPreload', () => {
     await source.write.renameSession?.('s1', 'new title');
     await source.write.closeSession?.('s1');
     await source.write.createSession?.('p1', 'fresh');
+    await source.write.createSessionIn?.('/srv/work/orchard', 'orchard');
     expect(api.recordPrompt).toHaveBeenCalledWith('s1', 'hello');
     expect(api.renameSession).toHaveBeenCalledWith('s1', 'new title');
     expect(api.closeSession).toHaveBeenCalledWith('s1');
     expect(api.createSession).toHaveBeenCalledWith('p1', 'fresh');
+    // By value and in order: (cwd, name), never the reverse.
+    expect(api.createSessionIn).toHaveBeenCalledWith('/srv/work/orchard', 'orchard');
 
     if (!canGovernWith(source)) throw new Error('expected a governing source');
     await source.governance.applyWaivers('s1', ['f1']);

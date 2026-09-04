@@ -43,4 +43,11 @@ export type MainSource = {
    * instead of becoming `unreachable/source-failed`.
    */
   createSession?(projectId: string, title: string): Promise<SourceError | null>;
+  /**
+   * Start a session in a DIRECTORY the operator just chose, which no project
+   * id names yet -- the "new project" path. Advertised by the same
+   * `createSession` capability, and under the same resolve-never-throw
+   * contract, so "that directory is gone" keeps its own code.
+   */
+  createSessionInDirectory?(cwd: string, title: string): Promise<SourceError | null>;
 };

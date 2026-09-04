@@ -9,9 +9,10 @@
 
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, clipboard, ipcMain, session } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, session } from 'electron';
 import { registerClipboardIpc } from './clipboard/ipc.js';
 import { contentSecurityPolicy } from './csp.js';
+import { registerDialogIpc } from './dialog/ipc.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { releaseCloseAccelerator } from './menu.js';
 import { isSameOrigin } from './origin.js';
@@ -190,6 +191,13 @@ void app.whenReady().then(() => {
   // spawns nothing until the renderer asks -- and the renderer asks only while
   // the tab is open, so a closed tab costs a process nothing.
   registerTerminalIpc(ipcMain, createTmuxRunner());
+  // The directory picker behind "new project". Only main can open one, and
+  // only the operator's click gets a path out of it. See `./dialog/ipc.ts`.
+  // Wrapped rather than passed: electron's `showOpenDialog` is an overload
+  // set whose first signature takes a parent window, and only the one-argument
+  // call is what this channel means -- a modeless picker, not one owned by a
+  // window that may already be closing.
+  registerDialogIpc(ipcMain, { showOpenDialog: (options) => dialog.showOpenDialog(options) });
   createWindow();
 });
 

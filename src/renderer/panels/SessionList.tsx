@@ -112,6 +112,21 @@ export type SessionListProps = {
    * moment there is a route to create a session in one.
    */
   readonly onAddInProject: (project: Project) => void;
+  /**
+   * The `+` in the Projects header. A project here is a grouping of live
+   * sessions on their cwd, so there is nothing to "create" — the only thing
+   * this can mean is: choose a directory, start a session in it, and the
+   * project exists because something is running there. The caller owns both
+   * halves; this component owns the button.
+   */
+  readonly onNewProject: () => void;
+  /**
+   * Why a new session cannot be started, in the SOURCE's own words, or `null`
+   * when it can. Both `+` controls caption themselves from this: a control
+   * that claims it works when it does not is the defect this prop exists to
+   * make impossible, and the component cannot ask a source anything itself.
+   */
+  readonly newSessionDecline: string | null;
   /** Opens the icon picker for a project's heading — the mouse route; there
    * is no keyboard shortcut for it, unlike the session picker's `s`. */
   readonly onPickIcon: (project: Project) => void;
@@ -168,6 +183,8 @@ export function SessionList(props: SessionListProps) {
     onClose,
     onAdd,
     onAddInProject,
+    onNewProject,
+    newSessionDecline,
     onPickIcon,
     collapsedProjects,
     onToggleCollapse,
@@ -465,6 +482,22 @@ export function SessionList(props: SessionListProps) {
           Projects
         </span>
         <span className="flex-1" />
+        {/* Choose a directory, start a session in it. That is the ONLY thing
+            "new project" can mean here: a project is derived from the cwd of
+            a live session, so there is nothing to create and nothing to
+            store. Same 26px square as the filter control beside it — two
+            controls in one row that are the same kind of thing. No chord is
+            bound to it and none is captioned. */}
+        <button
+          type="button"
+          data-new-project
+          aria-label="new project"
+          onClick={onNewProject}
+          title={newSessionDecline ?? 'Choose a directory and start a session in it'}
+          className="flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border border-line bg-panel text-ink-faint hover:border-line-strong"
+        >
+          <Plus size={13} strokeWidth={1.6} />
+        </button>
         {/* Search answers "the one called permalink"; this answers "the ones
             that stopped" — two different questions, so two controls. */}
         <button
@@ -637,15 +670,16 @@ export function SessionList(props: SessionListProps) {
                 </span>
                 <span className="font-mono text-[9.5px] text-ink-faint">{group.items.length}</span>
                 <span className="flex-1" />
-                {/* black-smith makes sessions from the CLI, so this cannot yet
-                  create one. It is still a BUTTON, not an inert span: the
-                  full-width "New session" control below is in exactly the same
-                  position — it cannot create a session either — and it is
-                  clickable, takes a pointer, and answers on the status bar.
-                  Two controls that do the same thing should not look like
-                  different kinds of thing. Refusing on click and saying why is
-                  honest; refusing by being unclickable and unstyled just reads
-                  as broken. */}
+                {/* Real now: `createSession` starts a detached tmux session in
+                  the project's own directory, so the caption says that. It
+                  said "Sessions are created from the CLI" for a while after
+                  that stopped being true, and carried `data-placeholder` on a
+                  live control — a tooltip is a claim, and a wrong one costs
+                  more than none. When a source genuinely cannot create, the
+                  caption is that source's own refusal and the click still
+                  answers on the status bar: refusing on click and saying why
+                  is honest; refusing by being unclickable just reads as
+                  broken. */}
                 {/* Only for the project you are actually in. One per heading
                   meant a column of `+` boxes standing over the session names
                   at all times, for a control that can only mean the project
@@ -654,9 +688,9 @@ export function SessionList(props: SessionListProps) {
                 {group.items.some((entry) => entry.session.id === focusedSessionId) && (
                   <button
                     type="button"
-                    data-placeholder="new-session-in-project"
+                    data-new-session-in-project={group.project.id}
                     onClick={() => onAddInProject(group.project)}
-                    title={`Sessions are created from the CLI — see the todo`}
+                    title={newSessionDecline ?? `New session in ${group.project.name}`}
                     aria-label={`new session in ${group.project.name}`}
                     className="flex h-[19px] w-[19px] cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim"
                   >

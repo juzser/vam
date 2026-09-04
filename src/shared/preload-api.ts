@@ -74,6 +74,7 @@ export type PreloadSourceApi = {
   renameSession(sessionId: string, title: string): Promise<void>;
   closeSession(sessionId: string): Promise<void>;
   createSession(projectId: string, title: string): Promise<void>;
+  createSessionIn(cwd: string, title: string): Promise<void>;
   applyWaivers(sessionId: string, findingIds: readonly string[]): Promise<void>;
   transitionLesson(sessionId: string, lessonId: string, status: string): Promise<void>;
 };

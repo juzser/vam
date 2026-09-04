@@ -107,6 +107,8 @@ function baseProps(entries: readonly SessionEntry[]): SessionListProps {
     onClose: noop,
     onAdd: noop,
     onAddInProject: noop,
+    onNewProject: noop,
+    newSessionDecline: null,
     onPickIcon: noop,
     onSettings: noop,
     theme: 'dark',
@@ -126,7 +128,7 @@ function mountWith(entries: readonly SessionEntry[], over: Partial<SessionListPr
 }
 
 function addButtons(root: ParentNode) {
-  return [...root.querySelectorAll('[data-placeholder="new-session-in-project"]')];
+  return [...root.querySelectorAll('[data-new-session-in-project]')];
 }
 
 afterEach(() => {
@@ -431,6 +433,8 @@ describe('SessionList placeholder row', () => {
           onClose: noop,
           onAdd: noop,
           onAddInProject: (project: Project) => seen.push(project.name),
+          onNewProject: noop,
+          newSessionDecline: null,
           onPickIcon: noop,
           onSettings: noop,
           theme: 'dark',
@@ -440,9 +444,7 @@ describe('SessionList placeholder row', () => {
         } satisfies SessionListProps)}
       />,
     );
-    const adds = document.querySelectorAll<HTMLButtonElement>(
-      '[data-placeholder="new-session-in-project"]',
-    );
+    const adds = document.querySelectorAll<HTMLButtonElement>('[data-new-session-in-project]');
     adds[0]?.click();
     expect(seen).toEqual(['beta']);
   });
@@ -933,5 +935,60 @@ describe('SessionList project menu', () => {
     });
     expect(picked).toEqual(['p2']);
     expect(container.querySelector('[data-project-menu-panel]')).toBeNull();
+  });
+});
+
+/**
+ * The Projects header's `+`, and the per-project `+`'s caption.
+ *
+ * Both are about the same sentence: what does this control actually do. The
+ * per-project one shipped a title reading "Sessions are created from the CLI"
+ * long after `createSession` started really creating them, and a
+ * `data-placeholder` attribute on a control that was no longer a placeholder.
+ */
+describe('SessionList new-project control', () => {
+  it('renders a `+` in the Projects header, beside the filter control', () => {
+    const { container } = mount(twoProjects());
+    const header = container.querySelector('[data-projects-header]');
+    expect(header).not.toBeNull();
+    const add = header?.querySelector<HTMLButtonElement>('[data-new-project]');
+    expect(add).not.toBeNull();
+    expect(add?.getAttribute('aria-label')).toBe('new project');
+  });
+
+  it('calls onNewProject when the header `+` is clicked', () => {
+    let clicks = 0;
+    const { container } = mountWith(twoProjects(), {
+      onNewProject: () => {
+        clicks += 1;
+      },
+    });
+    container.querySelector<HTMLButtonElement>('[data-new-project]')?.click();
+    expect(clicks).toBe(1);
+  });
+
+  it('captions the header `+` with the refusal when the source cannot create', () => {
+    const { container } = mountWith(twoProjects(), {
+      newSessionDecline: 'black-smith has no new-session command',
+    });
+    const add = container.querySelector<HTMLButtonElement>('[data-new-project]');
+    expect(add?.getAttribute('title')).toBe('black-smith has no new-session command');
+  });
+
+  it('captions the per-project `+` with what it does, and no longer calls it a placeholder', () => {
+    const entries = twoProjects();
+    const { container } = mountWith(entries, { focusedSessionId: 'b1' });
+    expect(container.querySelector('[data-placeholder="new-session-in-project"]')).toBeNull();
+    const add = container.querySelector<HTMLButtonElement>('[data-new-session-in-project]');
+    expect(add?.getAttribute('title')).toBe('New session in beta');
+  });
+
+  it('captions the per-project `+` with the refusal when the source cannot create', () => {
+    const { container } = mountWith(twoProjects(), {
+      focusedSessionId: 'b1',
+      newSessionDecline: 'black-smith has no new-session command',
+    });
+    const add = container.querySelector<HTMLButtonElement>('[data-new-session-in-project]');
+    expect(add?.getAttribute('title')).toBe('black-smith has no new-session command');
   });
 });

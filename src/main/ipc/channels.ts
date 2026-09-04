@@ -19,6 +19,13 @@ export const CHANNELS = {
   renameSession: 'vam:source:rename-session',
   closeSession: 'vam:source:close-session',
   createSession: 'vam:source:create-session',
+  /**
+   * Start a session in a DIRECTORY rather than in a project vam already
+   * knows -- the "new project" path, whose directory has no project id yet.
+   * Gated by the same `createSession` capability: same affordance, asked a
+   * different way.
+   */
+  createSessionIn: 'vam:source:create-session-in',
   applyWaivers: 'vam:source:apply-waivers',
   transitionLesson: 'vam:source:transition-lesson',
   /**
@@ -54,6 +61,14 @@ export const CHANNELS = {
    * while the tab is open, which is why there is no push half to it.
    */
   terminalRead: 'vam:terminal:read',
+  /**
+   * The directory picker. Answers BARE -- a path or `null` -- never an
+   * `IpcResult`: "which directory" has exactly two answers and a cancelled
+   * dialog is one of them, not a failure to report in a source's words. There
+   * is no source behind this channel at all; it is Electron's own
+   * `showOpenDialog`, which is why it cannot exist in the browser build.
+   */
+  chooseDirectory: 'vam:dialog:choose-directory',
 } as const;
 
 /**

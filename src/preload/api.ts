@@ -63,9 +63,10 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
     closeSession: (sessionId) => unwrap<void>(ipc.invoke(CHANNELS.closeSession, sessionId)),
     createSession: (projectId, title) =>
       unwrap<void>(ipc.invoke(CHANNELS.createSession, projectId, title)),
+    createSessionIn: (cwd, title) => unwrap<void>(ipc.invoke(CHANNELS.createSessionIn, cwd, title)),
   } satisfies Pick<
     PreloadSourceApi,
-    'recordPrompt' | 'renameSession' | 'closeSession' | 'createSession'
+    'recordPrompt' | 'renameSession' | 'closeSession' | 'createSession' | 'createSessionIn'
   >;
 
   const governance = {
@@ -135,6 +136,24 @@ export type TerminalApi = {
 export function createTerminalApi(ipc: InvokerLike): TerminalApi {
   return {
     read: (projectId) => ipc.invoke(CHANNELS.terminalRead, projectId) as Promise<PaneView>,
+  };
+}
+
+/** The bridge's dialog member: one ask, answered by a path or by `null`. */
+export type DialogApi = {
+  chooseDirectory(): Promise<string | null>;
+};
+
+/**
+ * `dialog.chooseDirectory` forwards straight to `vam:dialog:choose-directory`
+ * -- no `unwrap`, because that channel answers bare (see
+ * `src/main/dialog/ipc.ts`). A cancelled dialog answers `null`: it is one of
+ * the two normal answers, not a refusal in some source's words -- there is no
+ * source behind this channel at all.
+ */
+export function createDialogApi(ipc: InvokerLike): DialogApi {
+  return {
+    chooseDirectory: () => ipc.invoke(CHANNELS.chooseDirectory) as Promise<string | null>,
   };
 }
 
