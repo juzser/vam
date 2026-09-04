@@ -519,6 +519,8 @@ function CanvasInner({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [keySheetOpen, setKeySheetOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** Any full-screen overlay on screen. See the keydown handler for the rule. */
+  const overlayOpen = paletteOpen || keySheetOpen || settingsOpen;
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState('');
   /**
@@ -1221,6 +1223,32 @@ function CanvasInner({
         return;
       }
 
+      /**
+       * One rule for every overlay, rather than one flag per overlay.
+       *
+       * While the palette, the key sheet or the settings overlay is on screen
+       * it owns the keyboard: the canvas hears Escape and nothing else. Only
+       * the palette used to be safe, and only by accident — it contains an
+       * input, and the check above steps aside for inputs. The sheet and the
+       * settings overlay contain none, so `j` moved a cursor nobody could see
+       * and `zc` closed the canvas under the sheet that was describing it. Any
+       * overlay added later inherits this by joining `overlayOpen`, which is
+       * the point of writing it as one condition.
+       *
+       * Escape is the exception because it is the way out: `cancel` below is
+       * what closes all three, and a full-screen overlay whose only exit was
+       * the mouse would be a trap on a keyboard-first tool.
+       *
+       * Deliberately, a chord that OPENS an overlay does nothing while another
+       * is open — `?` over settings leaves settings alone. Overlays are
+       * full-screen, so stacking them hides the one underneath and makes
+       * Escape ambiguous: you could no longer tell what one press would close.
+       * Esc peels one layer at a time, and one layer is all there is.
+       */
+      if (overlayOpen && key !== 'Escape') {
+        return;
+      }
+
       // Jump mode eats the very next key, so a label can safely reuse a letter
       // that means something else in normal mode.
       if (jumping && key !== 'Escape') {
@@ -1641,6 +1669,7 @@ function CanvasInner({
     prefs,
     savePrefs,
     visible,
+    overlayOpen,
   ]);
 
   /**
