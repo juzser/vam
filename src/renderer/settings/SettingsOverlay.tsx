@@ -52,7 +52,7 @@ import {
   type Theme,
 } from '../prefs/prefs.js';
 import { LayoutPicker } from './LayoutPicker.js';
-import { FULL, type LayoutChoice, SECTIONS, type SectionId } from './sections.js';
+import { FULL, type LayoutChoice, SECTIONS, type SectionId, shortcutSections } from './sections.js';
 
 export type SettingsOverlayProps = {
   readonly prefs: Prefs;
@@ -89,7 +89,16 @@ const THEMES: readonly Theme[] = ['dark', 'light', 'system'];
 
 /** Which slot is listening for a keystroke, spelled as one value so opening a
  *  second capture box closes the first by construction. */
-type Capturing = { readonly id: string; readonly slot: number } | null;
+/**
+ * `scope` is the section the armed box is IN, and it exists because one
+ * binding is now drawn in two places: a mode-dependent shortcut appears under
+ * Select and under Insert (`shortcutSections`). Without it, arming a box would
+ * arm both copies -- two inputs, each autofocusing, fighting for the next
+ * keystroke. The binding is still one binding: editing either copy rebinds it
+ * everywhere, which is the truth about a key that has two meanings and one
+ * chord.
+ */
+type Capturing = { readonly id: string; readonly slot: number; readonly scope: string } | null;
 
 /**
  * vam has no focus-ring idiom, and the one `focus-visible` in the renderer
@@ -484,16 +493,29 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
                   streams rather than a boundary; the cost is scroll length on a
                   panel that already scrolls, which is the cheaper thing. */}
               <div className="flex flex-col">
-                {buildBindingSheet(prefs.keyBindings).map((group) => (
-                  <section key={group.group} className="mt-7 first:mt-0">
+                {shortcutSections(buildBindingSheet(prefs.keyBindings)).map((section) => (
+                  <section
+                    key={section.id}
+                    data-shortcut-section={section.id}
+                    className="mt-7 first:mt-0"
+                  >
+                    {/* The SAME heading as a group's, for a mode as well: the
+                        refinement spec fixed one heading here (§4-5) and a mode
+                        is not a reason to invent a second. */}
                     <h4 className="mb-[10px] border-line-loud border-b pb-[6px] font-semibold text-[13px] text-ink">
-                      {group.title}
+                      {section.title}
                     </h4>
+                    {section.hint === null ? null : (
+                      <p className="mt-[-4px] mb-[10px] max-w-[52ch] text-[12px] text-ink-dim">
+                        {section.hint}
+                      </p>
+                    )}
                     <ul>
-                      {group.rows.map((row) => (
+                      {section.rows.map((row) => (
                         <BindingLine
-                          key={row.id}
+                          key={`${section.id}:${row.id}`}
                           row={row}
+                          scope={section.id}
                           capturing={capturing}
                           onCapture={setCapturing}
                           onKey={(slot, event) => capture(row, slot, event)}
@@ -725,19 +747,22 @@ const SLOT_BOX = 'h-[26px] w-[68px] rounded-[6px] border px-2 text-center font-m
 /** One action: its name, its slots, and a way back to the shipped keys. */
 function BindingLine({
   row,
+  scope,
   capturing,
   onCapture,
   onKey,
   onReset,
 }: {
   readonly row: BindingRow;
+  /** Which section this copy is drawn in; see `Capturing`. */
+  readonly scope: string;
   readonly capturing: Capturing;
   readonly onCapture: (next: Capturing) => void;
   readonly onKey: (slot: number, event: React.KeyboardEvent) => void;
   readonly onReset: () => void;
 }) {
   const slots = Array.from({ length: MAX_BINDINGS }, (_, slot) => slot);
-  const armed = capturing?.id === row.id;
+  const armed = capturing?.id === row.id && capturing.scope === scope;
   return (
     // Fixed key columns are what makes the list scan: every label starts at the
     // same x, so the eye reads a column of actions rather than a ragged edge.
@@ -784,7 +809,7 @@ function BindingLine({
             type="button"
             data-binding-slot={`${row.id}:${slot}`}
             aria-label={keys === undefined ? `add a key for ${row.label}` : `${keys}, ${row.label}`}
-            onClick={() => onCapture({ id: row.id, slot })}
+            onClick={() => onCapture({ id: row.id, slot, scope })}
             className={`${SLOT_BOX} cursor-pointer hover:border-ink hover:text-ink ${FOCUS_RING} ${
               keys === undefined
                 ? 'border-ink-faint border-dashed bg-transparent text-ink-dim'
