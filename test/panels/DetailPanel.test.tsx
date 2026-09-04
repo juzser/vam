@@ -18,7 +18,6 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
-import type { PaneView } from '../../src/shared/terminal.js';
 import {
   ATTACH_LIMIT_BYTES,
   type AttachedFile,
@@ -38,6 +37,7 @@ import {
   hasContentBelow,
   isAtBottom,
 } from '../../src/renderer/panels/stick-to-bottom.js';
+import type { PaneView } from '../../src/shared/terminal.js';
 
 /** `attachIntoDraft` for the cases a test knows will be accepted. */
 function attachOk(draft: string, file: AttachedFile): string {
@@ -925,7 +925,12 @@ describe('the Agents tab', () => {
     expect(agentsTab()?.tagName).toBe('BUTTON');
     // `PRs` and `Terminal` have since become controls of their own, so the bar
     // holds four buttons and no inert label.
-    expect(all('[role="tab"]').map((t) => t.tagName)).toEqual(['BUTTON', 'BUTTON', 'BUTTON', 'BUTTON']);
+    expect(all('[role="tab"]').map((t) => t.tagName)).toEqual([
+      'BUTTON',
+      'BUTTON',
+      'BUTTON',
+      'BUTTON',
+    ]);
   });
 
   it('starts on Response and moves the pane content when Agents is picked', () => {
@@ -1750,11 +1755,13 @@ describe('the Terminal tab costs nothing until it is opened', () => {
   });
 
   it('reads once the tab is opened, for the focused session, and stops when it is left', async () => {
-    const read = vi.fn(async (): Promise<PaneView> => ({
-      kind: 'ok',
-      name: 'vam-sprint-board-reorder-a1b2c3',
-      text: 'the pane',
-    }));
+    const read = vi.fn(
+      async (): Promise<PaneView> => ({
+        kind: 'ok',
+        name: 'vam-sprint-board-reorder-a1b2c3',
+        text: 'the pane',
+      }),
+    );
     withBridge(read);
     draw();
 

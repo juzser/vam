@@ -10,9 +10,9 @@
 
 import { describe, expect, it } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
+import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
 import { registerTerminalIpc } from '../../../src/main/terminal/ipc.js';
 import { matchVamSession, readSessionPane } from '../../../src/main/terminal/pane.js';
-import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
 
 const ok = (stdout: string): TmuxRunResult => ({ failure: null, stdout, stderr: '' });
 const failed = (stderr: string): TmuxRunResult => ({
@@ -91,7 +91,9 @@ describe('reading the pane', () => {
     // The mapping `spawn.ts` records as asserted-by-test-only. This is the
     // caller that finally runs it: no server means nothing was ever started,
     // which is an answer.
-    const { run } = runner({ 'list-sessions': failed('no server running on /tmp/tmux-501/default') });
+    const { run } = runner({
+      'list-sessions': failed('no server running on /tmp/tmux-501/default'),
+    });
     expect(await readSessionPane(run, 'atlas')).toEqual({ kind: 'not-vam' });
   });
 
@@ -123,7 +125,10 @@ describe('reading the pane', () => {
 describe('the terminal channel', () => {
   function harness(run: TmuxRun) {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
-    registerTerminalIpc({ handle: (channel, listener) => void handlers.set(channel, listener) }, run);
+    registerTerminalIpc(
+      { handle: (channel, listener) => void handlers.set(channel, listener) },
+      run,
+    );
     const handler = handlers.get(CHANNELS.terminalRead);
     if (handler === undefined) throw new Error('the terminal channel was never registered');
     return (...args: unknown[]) => handler({}, ...args) as Promise<unknown>;

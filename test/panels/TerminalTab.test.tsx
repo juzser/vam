@@ -13,8 +13,8 @@
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PaneView } from '../../src/shared/terminal.js';
 import { REFRESH_MS, TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
+import type { PaneView } from '../../src/shared/terminal.js';
 
 afterEach(cleanup);
 
@@ -72,7 +72,12 @@ describe('the Terminal tab shows the focused session pane', () => {
  */
 describe('the Terminal tab tells an absent session from an unreachable tmux', () => {
   it('says vam did not start a session for this one, and offers no adoption', async () => {
-    render(<TerminalTab title="atlas" read={vi.fn(async (): Promise<PaneView> => ({ kind: 'not-vam' }))} />);
+    render(
+      <TerminalTab
+        title="atlas"
+        read={vi.fn(async (): Promise<PaneView> => ({ kind: 'not-vam' }))}
+      />,
+    );
     await settle();
 
     const empty = q<HTMLElement>('[data-terminal-empty]');
@@ -84,7 +89,9 @@ describe('the Terminal tab tells an absent session from an unreachable tmux', ()
   });
 
   it('says the session has ended when the tmux session is gone', async () => {
-    render(<TerminalTab title="atlas" read={vi.fn(async (): Promise<PaneView> => ({ kind: 'gone' }))} />);
+    render(
+      <TerminalTab title="atlas" read={vi.fn(async (): Promise<PaneView> => ({ kind: 'gone' }))} />,
+    );
     await settle();
     expect(q<HTMLElement>('[data-terminal-empty]')?.textContent).toMatch(/ended/i);
   });
@@ -96,7 +103,10 @@ describe('the Terminal tab tells an absent session from an unreachable tmux', ()
       message: 'the `tmux` command was not found, so vam cannot manage sessions (listing sessions)',
     } as const;
     render(
-      <TerminalTab title="atlas" read={vi.fn(async (): Promise<PaneView> => ({ kind: 'unavailable', error }))} />,
+      <TerminalTab
+        title="atlas"
+        read={vi.fn(async (): Promise<PaneView> => ({ kind: 'unavailable', error }))}
+      />,
     );
     await settle();
 
@@ -107,7 +117,12 @@ describe('the Terminal tab tells an absent session from an unreachable tmux', ()
   });
 
   it('treats a rejected read as vam not having asked, never as no session', async () => {
-    render(<TerminalTab title="atlas" read={vi.fn(async () => Promise.reject(new Error('bridge gone')))} />);
+    render(
+      <TerminalTab
+        title="atlas"
+        read={vi.fn(async () => Promise.reject(new Error('bridge gone')))}
+      />,
+    );
     await settle();
     expect(q('[data-terminal-unavailable]')).not.toBeNull();
     expect(q('[data-terminal-empty]')).toBeNull();

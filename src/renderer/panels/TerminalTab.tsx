@@ -140,7 +140,7 @@ export function TerminalTab({
   if (view === null) {
     return (
       <p data-terminal data-terminal-pending className="text-[11px] text-ink-faint">
-        Reading the session's screen&#8230;
+        Reading the session’s screen…
       </p>
     );
   }
