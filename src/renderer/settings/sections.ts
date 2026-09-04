@@ -10,6 +10,13 @@
 
 import { Bot, Columns3, Keyboard, type LucideIcon, Palette } from 'lucide-react';
 import {
+  type BindingGroup,
+  type BindingRow,
+  CURSOR_MODES,
+  type CursorMode,
+  MODE_TITLES,
+} from '../keyboard/keysheet.js';
+import {
   ALL_VISIBLE,
   type ColumnId,
   canvasIsMain,
@@ -155,4 +162,70 @@ export function canvasDots(column: DiagramColumn): readonly { cx: number; cy: nu
     }
   }
   return dots;
+}
+
+/**
+ * The shortcut editor's own sections: the two cursor modes, then the groups.
+ *
+ * THE SPLIT IS THE OPERATOR'S POINT, and it is a point about interference.
+ * `hjkl` chooses a session in Select and walks an open question's options in
+ * Insert; `Mod+<digit>` picks a session in one and a tab in the other. The two
+ * sets do not collide, and a single undifferentiated list says the opposite --
+ * so each of those bindings appears in BOTH mode sections, wearing that mode's
+ * own caption. Which bindings those are is never written down here: it is
+ * `BindingRow.byMode`, the same field `buildKeySheet` splits the reference
+ * sheet on, so the two surfaces cannot come to disagree about what depends on
+ * the mode. (Re-deriving that list by hand is exactly what went stale three
+ * times in this codebase.)
+ *
+ * A BINDING THAT MEANS ONE THING IN BOTH MODES IS LISTED ONCE, in the group it
+ * always belonged to. `yy` copies in either mode; a row per mode would be the
+ * same row twice, and a list padded with identical pairs buries the two rows
+ * that really are different -- the opposite of what the split is for.
+ *
+ * The sections are a FLAT list on purpose. The mode is a level above the
+ * groups in meaning, but rendering it as a level above them on screen would
+ * need a third heading style over the two the refinement spec already fixed
+ * (§4-5: a group heading over a rule, one column of rows). Two mode sections
+ * at the front of the same list, in the same style, need no new style at all
+ * -- and put the keys whose meaning is contested where they are read first.
+ */
+export type ShortcutSection = {
+  /** A `CursorMode`, or the `ActionGroup` a group section came from. */
+  readonly id: string;
+  readonly title: string;
+  /** A line under the heading, where a mode needs one; groups carry none. */
+  readonly hint: string | null;
+  readonly rows: readonly BindingRow[];
+};
+
+const MODE_HINTS: Readonly<Record<CursorMode, string>> = {
+  select:
+    'the keyboard is on the session list. The same keys as Insert, doing different work — that is why they never clash.',
+  insert:
+    'the keyboard is in the response pane. These keys are the ones above, meaning something else while you are here.',
+};
+
+export function shortcutSections(groups: readonly BindingGroup[]): readonly ShortcutSection[] {
+  const rows = groups.flatMap((group) => group.rows);
+  const modeSections = CURSOR_MODES.map((mode) => ({
+    id: mode,
+    title: MODE_TITLES[mode],
+    hint: MODE_HINTS[mode],
+    // The caption for THIS mode replaces the row's own, so the editor's line
+    // says what the key does here rather than what it does somewhere.
+    rows: rows
+      .filter((row) => row.byMode !== null)
+      .map((row) => ({ ...row, label: row.byMode?.[mode] ?? row.label })),
+  }));
+  const groupSections = groups.map((group) => ({
+    id: group.group,
+    title: group.title,
+    hint: null,
+    rows: group.rows.filter((row) => row.byMode === null),
+  }));
+  // An operator who unbinds a whole group leaves it with no rows, and a titled
+  // empty section is a heading that advertises nothing -- the same rule
+  // `buildKeySheet` keeps.
+  return [...modeSections, ...groupSections].filter((section) => section.rows.length > 0);
 }
