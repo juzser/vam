@@ -1129,15 +1129,17 @@ describe('the composer says what the session’s source actually does', () => {
   });
 });
 
-describe('the pane’s minted surface is a token pair, not a dark-only hex', () => {
-  it('defines --vam-lifted in both themes', () => {
+describe('the pane’s minted surfaces are token pairs, not dark-only hexes', () => {
+  it('has no --vam-lifted left, the token no rule ever consumed', () => {
+    // `--vam-lifted` was minted for the option picker's unchosen cards. The
+    // picker is gone, and `--color-lifted` reached no rule, component or
+    // class anywhere under `src/` -- a three-line chain feeding nothing.
+    // Pinned as an absence so the dead pair is not reintroduced without the
+    // surface that would justify it.
     // `import.meta.url` is not a file URL under happy-dom, so the path is
     // resolved from the runner's own root instead.
     const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
-    const dark = css.slice(css.indexOf(':root {'), css.indexOf('html.light {'));
-    const light = css.slice(css.indexOf('html.light {'));
-    expect(dark).toContain('--vam-lifted:');
-    expect(light).toContain('--vam-lifted:');
+    expect(css).not.toContain('lifted');
   });
 
   it('pins the light line-loud to the value the light artboard actually draws', () => {

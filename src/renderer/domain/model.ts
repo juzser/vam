@@ -296,7 +296,7 @@ export type Project = {
    * SUPERSEDED AS A SESSION FACT, NOT REMOVABLE. A project mixes sessions
    * from several sources now, so this id no longer describes every session
    * under it; `Session.source` is the per-session truth and wins wherever
-   * both are present (the status glyph's arm order, pinned in
+   * both are present (the status glyph's arm order, asserted in
    * `Canvas.usage.test.tsx`). This field remains the FALLBACK for sessions
    * carrying no source of their own — the factory adapter stamps only this
    * one — so deleting it blanks the glyph for every such session.
