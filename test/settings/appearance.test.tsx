@@ -314,11 +314,14 @@ describe('the captured key is really in force', () => {
 });
 
 /**
- * Where an `out` text size belongs, by the argument the settings spec used to
- * keep focus zoom OUT of Appearance: focus zoom is how the canvas viewport
- * behaves, not how anything is painted. A text size is the other case — the
- * paint, alongside the theme and the palette — and it is not a canvas setting,
- * since two of the four layouts hide the canvas while still drawing `out`.
+ * Where an `out` text size belongs: with the paint, alongside the theme and the
+ * palette. It is not a canvas setting — `out` is the right pane, and layouts
+ * that hide the canvas still draw it.
+ *
+ * This used to be asserted twice, the second time as "not in the same section
+ * as focus zoom". Both that control and the Canvas section it lived in are
+ * gone, so the second assertion has no subject left and is deleted rather than
+ * pointed at a `querySelector` that now returns null and could not fail.
  */
 describe('the out text size is an appearance setting', () => {
   const control = () => screen.getByLabelText('out text size');
@@ -326,13 +329,6 @@ describe('the out text size is an appearance setting', () => {
   it('lives in Appearance, beside the theme and the colours', () => {
     open();
     expect(control().closest('section')?.querySelector('h2, h3')?.textContent).toBe('appearance');
-    // Not in Canvas: `out` is the right pane, and it is drawn by layouts that
-    // hide the canvas entirely. The other half of this assertion used to read
-    // the focus-zoom control's section; that control is gone with the automatic
-    // zoom it configured, so the section is named directly instead.
-    expect(document.querySelector('[data-settings-panel="canvas"]')).not.toBe(
-      control().closest('section'),
-    );
   });
 
   it('shows the size in force and writes the one you pick', () => {

@@ -375,13 +375,13 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
                 </div>
               </Block>
 
-              {/* Here rather than in Canvas, by Canvas's own argument: focus
-                  zoom went there because it is how the canvas VIEWPORT
-                  behaves. A text size is not behaviour, it is the paint — the
-                  family the theme and the palette above it are in. And `out`
-                  is the right pane, drawn by two layouts that hide the canvas
-                  entirely; a fifth section for one control is the padding the
-                  settings spec rules out. */}
+              {/* Here, and not in a section of its own: a text size is not
+                  behaviour, it is the paint — the family the theme and the
+                  palette above it are in. And `out` is the right pane, drawn by
+                  two layouts that hide the canvas entirely, so it was never a
+                  canvas setting. (This comment used to argue the point against
+                  a Canvas section, which has since been retired; its own count
+                  of the sections was stale before that.) */}
               <Block
                 label="out text"
                 hint="how large the agent's answer is drawn in the right pane"
@@ -414,19 +414,6 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
                   )
                 }
               />
-            </Panel>
-
-            <Panel
-              id="canvas"
-              active={section === 'canvas'}
-              hint="how the canvas itself behaves — not a colour, and not chrome"
-            >
-              {/* The focus zoom share used to live here. The automatic zoom
-                  onto a focused node is gone — it overrode a zoom the operator
-                  had set by hand — so the control configured nothing and went
-                  with it. `prefs.focusViewportShare` deliberately stays in the
-                  store: dropping a persisted field is a data migration, and
-                  prefs degrade per field, so an unread one is inert. */}
             </Panel>
 
             <Panel
@@ -618,11 +605,7 @@ function Panel({
   readonly id: SectionId;
   readonly active: boolean;
   readonly hint: string;
-  // Optional, because a section can be empty: Canvas is, since the automatic
-  // focus zoom it configured was removed. The heading and its hint still say
-  // what the section is for, which is the honest state to be in until either
-  // the next canvas setting lands or the section itself is retired.
-  readonly children?: React.ReactNode;
+  readonly children: React.ReactNode;
 }) {
   return (
     <section

@@ -1,6 +1,6 @@
 /**
- * What the settings overlay is made of: its four sections, and the geometry of
- * the little picture each layout choice draws.
+ * What the settings overlay is made of: its sections, and the geometry of the
+ * little picture each layout choice draws.
  *
  * One list, read by both the nav and the panels, so a section cannot exist in
  * one and not the other. The layout half lives here rather than in the picker
@@ -8,7 +8,7 @@
  * test can read is arithmetic that can be wrong loudly.
  */
 
-import { Columns3, Frame, Keyboard, type LucideIcon, Palette } from 'lucide-react';
+import { Columns3, Keyboard, type LucideIcon, Palette } from 'lucide-react';
 import {
   ALL_VISIBLE,
   type ColumnId,
@@ -19,7 +19,7 @@ import {
   type LayoutName,
 } from '../prefs/panes.js';
 
-export type SectionId = 'appearance' | 'layout' | 'canvas' | 'keyboard';
+export type SectionId = 'appearance' | 'layout' | 'keyboard';
 
 /**
  * The order is hard-coded and never sorted: a nav that reorders under the
@@ -34,7 +34,6 @@ export const SECTIONS: readonly {
 }[] = [
   { id: 'appearance', label: 'Appearance', Icon: Palette },
   { id: 'layout', label: 'Layout', Icon: Columns3 },
-  { id: 'canvas', label: 'Canvas', Icon: Frame },
   { id: 'keyboard', label: 'Keyboard', Icon: Keyboard },
 ];
 

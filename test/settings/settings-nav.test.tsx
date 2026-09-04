@@ -4,12 +4,12 @@
  * The settings overlay's left navigation.
  *
  * Two properties are load-bearing and neither is visible to a reader of the
- * markup alone. First, ALL four panels stay mounted — `Canvas.settings` queries
- * the theme buttons, the zoom slider and the layout options immediately after
- * `,` without navigating anywhere, and those assertions are asserting something
- * true. Second, focus follows the SELECTION and stays in the nav: with
- * automatic activation, a cursor that dived into each panel would leave the
- * operator four arrow presses from the list they were steering.
+ * markup alone. First, EVERY panel stays mounted — `Canvas.settings` queries
+ * the theme buttons and the layout options immediately after `,` without
+ * navigating anywhere, and those assertions are asserting something true.
+ * Second, focus follows the SELECTION and stays in the nav: with automatic
+ * activation, a cursor that dived into each panel would leave the operator a
+ * whole nav's worth of arrow presses from the list they were steering.
  */
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -36,7 +36,7 @@ const shown = () =>
     .filter((el) => !el.hasAttribute('hidden'))
     .map((el) => el.getAttribute('data-settings-panel'));
 
-describe('the nav is a tablist over four sections', () => {
+describe('the nav is a tablist over the declared sections', () => {
   it('names every section once, in a stable order', () => {
     open();
     const labels = [...document.querySelectorAll('[data-settings-nav-item]')].map(
@@ -157,17 +157,39 @@ describe('below md the same nav is a segmented strip', () => {
 describe('the overlay draws a focus indicator', () => {
   it('gives every nav item, tile and the close button a visible ring', () => {
     open();
-    const ringed = [
-      ...document.querySelectorAll('[data-settings-nav-item]'),
-      ...document.querySelectorAll('[data-layout-option]'),
-      screen.getByRole('button', { name: 'Esc' }),
-    ];
-    expect(ringed.length).toBeGreaterThan(8);
+    const nav = [...document.querySelectorAll('[data-settings-nav-item]')];
+    const tiles = [...document.querySelectorAll('[data-layout-option]')];
+    const ringed = [...nav, ...tiles, screen.getByRole('button', { name: 'Esc' })];
+    // Derived, not counted: this guard exists to prove it examined a real
+    // corpus, and a hard-coded floor turns into a false red the moment a
+    // section is added or retired — which is exactly what it just did.
+    expect(nav.length).toBe(SECTIONS.length);
+    expect(tiles.length).toBeGreaterThan(3);
     for (const el of ringed) {
       expect(el.className, `${el.textContent} has no focus ring`).toContain(
         'focus-visible:outline-ink',
       );
       expect(el.className).not.toContain('outline-none');
+    }
+  });
+
+  /** Three focusable controls shipped with NO visible ring at all — a 2.4.7
+   *  failure on the live surface, not a refinement. Asserted here because the
+   *  corpus above cannot reach them: two exist only while a binding is
+   *  overridden, and all three live in a panel the overlay does not open on. */
+  it('rings the three controls in the keyboard panel that had none', () => {
+    open({ ...EMPTY_PREFS, keyBindings: { rename: ['p'] } });
+    fireEvent.click(nav('keyboard'));
+    const ringed = [
+      screen.getByRole('button', { name: 'reset shortcuts' }),
+      document.querySelector('[data-binding-slot="rename:0"]') as HTMLElement,
+      document.querySelector('[data-binding-reset="rename"]') as HTMLElement,
+    ];
+    for (const el of ringed) {
+      expect(el, 'the control is not on the surface').not.toBeNull();
+      expect(el.className, `${el.getAttribute('aria-label')} has no focus ring`).toContain(
+        'focus-visible:outline-ink',
+      );
     }
   });
 });
