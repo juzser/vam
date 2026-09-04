@@ -837,14 +837,19 @@ function Fence({ code, lang }: { readonly code: string; readonly lang: Highlight
       at += tok.text.length;
     }
   }
+  // Wrapped in a `<code>`, unclassed: the untouched path keeps react-markdown's
+  // `<pre><code>`, so this one must too, or the fence's DOM shape would depend
+  // on its infostring and the `<pre>`'s own `[&_code]` rules would reach only
+  // half the fences. Unclassed because those rules are exactly what is left of
+  // the chip styling once the `<pre>` has reset it.
   return (
-    <>
+    <code>
       {parts.map((part) => (
         <span key={part.key} className={part.cls}>
           {part.text}
         </span>
       ))}
-    </>
+    </code>
   );
 }
 

@@ -86,6 +86,19 @@ describe('a code fence gets syntax colour, in the languages agents emit', () => 
       expect(coloured).toEqual([]);
     }
   });
+
+  it('keeps one fence DOM shape, whichever language the infostring names', () => {
+    // The `<pre>`'s own `[&_code]` rules only reach a fence that HAS a
+    // `<code>`, so a colouring path that dropped it would style half the
+    // fences and leave any future `pre code` selector covering half the cases.
+    for (const head of ['```ts', '```diff', '```rust', '```']) {
+      const root = out([head, 'let x = "1";', '```'].join('\n'));
+      const code = root.querySelector('pre > code');
+      expect(code, `no <code> under <pre> for ${head}`).not.toBeNull();
+      expect(code?.textContent).toContain('let x = "1";');
+      cleanup();
+    }
+  });
 });
 
 describe('colour did not make agent output executable', () => {
