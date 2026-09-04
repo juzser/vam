@@ -161,14 +161,21 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
           ),
         };
       }
-      // `recordPrompt` is the one write main can perform today, so it is the
-      // one channel with a surface behind it. Validation and the capability
-      // gate above both ran first: nothing reaches a source's write path
-      // unvalidated, and nothing reaches it that the source did not advertise.
+      // Two writes main can perform today, so two channels with a surface
+      // behind them. Validation and the capability gate above both ran first:
+      // nothing reaches a source's write path unvalidated, and nothing
+      // reaches it that the source did not advertise.
+      //
+      // The source's own error is forwarded whole in both cases. Re-wrapping
+      // it here would cost the `code` a consumer branches on and the message
+      // it renders -- for `closeSession` that message is the one telling the
+      // operator their interactive session is theirs to close.
       if (channel === CHANNELS.recordPrompt && source.recordPrompt !== undefined) {
         const failure = await source.recordPrompt(args[0] as string, args[1] as string);
-        // The source's own error, forwarded whole. Re-wrapping it here would
-        // cost the `code` a consumer branches on and the message it renders.
+        return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
+      }
+      if (channel === CHANNELS.closeSession && source.closeSession !== undefined) {
+        const failure = await source.closeSession(args[0] as string);
         return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
       }
       // Advertised, but this source carries no member for it. Saying so beats

@@ -29,4 +29,11 @@ export type MainSource = {
    * Returning the error keeps its `kind`, `code` and message intact.
    */
   recordPrompt?(sessionId: string, prompt: string): Promise<SourceError | null>;
+  /**
+   * Stop a session, present only on a source that really can. Same contract
+   * as `recordPrompt`: it RESOLVES to the `SourceError`, so a refusal --
+   * "this one is a terminal you are sitting in" -- keeps its code and its
+   * words instead of being flattened into `unreachable/source-failed`.
+   */
+  closeSession?(sessionId: string): Promise<SourceError | null>;
 };
