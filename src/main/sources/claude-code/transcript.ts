@@ -23,8 +23,9 @@
  * renderer's types, never load its code.
  */
 
-import type { Decision } from '../../../renderer/domain/model.js';
+import type { AgentQuestion, Decision } from '../../../renderer/domain/model.js';
 import { extractCommands } from './commands.js';
+import { collectQuestions } from './questions.js';
 
 /** The canvas shows three; carrying more costs parsing and buys nothing. */
 const MAX_DECISIONS = 3;
@@ -40,6 +41,11 @@ export type TranscriptFacts = {
   readonly activity: string | null;
   /** Newest first, at most `MAX_DECISIONS`. */
   readonly decisions: readonly Decision[];
+  /**
+   * Every `AskUserQuestion` in the window, oldest first, each open or
+   * answered by the rule in `questions.ts`. Empty is the common case.
+   */
+  readonly questions: readonly AgentQuestion[];
 };
 
 export const EMPTY_FACTS: TranscriptFacts = {
@@ -47,6 +53,7 @@ export const EMPTY_FACTS: TranscriptFacts = {
   branch: null,
   activity: null,
   decisions: [],
+  questions: [],
 };
 
 type Line = Record<string, unknown>;
@@ -170,5 +177,7 @@ export function summarizeTranscript(tail: string, decisionIdPrefix: string): Tra
       };
     });
 
-  return { aiTitle, branch, activity, decisions };
+  // Read off the SAME parsed lines: the questions are a second reading of one
+  // pass over the window, not a second read of the file.
+  return { aiTitle, branch, activity, decisions, questions: collectQuestions(lines) };
 }
