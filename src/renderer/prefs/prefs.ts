@@ -119,6 +119,29 @@ export function clampFocusShare(share: number): number {
   return Math.min(FOCUS_SHARE_MAX, Math.max(FOCUS_SHARE_MIN, share));
 }
 
+/** The root text size of the `out` pane, in px. 12 because `styles.css` says
+ *  `body { font-size: 12px }` and `out` inherited it: any other default would
+ *  resize the pane for everyone merely by shipping the setting. */
+export const DEFAULT_OUT_FONT_SIZE = 12;
+
+/** The range the picker offers and every read clamps into. `out`'s smallest
+ *  member — the `(href)` hint — is 0.875 of this root, so below 10 it drops
+ *  under 9px; above 20 the body stops fitting the 300px canvas strip without
+ *  breaking mid-word. Legibility bounds, enforced on READ as well as write: a
+ *  hand-edited payload never passed the picker and must not be able to make a
+ *  pane too small to read the setting back in. */
+export const OUT_FONT_SIZE_MIN = 10;
+export const OUT_FONT_SIZE_MAX = 20;
+
+/** Total, like `clampFocusShare`: a string an older vam wrote, a `NaN` from a
+ *  hand edit, an Infinity from devtools — none of them may reach the pane. */
+export function clampOutFontSize(size: number): number {
+  if (typeof size !== 'number' || Number.isNaN(size)) {
+    return DEFAULT_OUT_FONT_SIZE;
+  }
+  return Math.min(OUT_FONT_SIZE_MAX, Math.max(OUT_FONT_SIZE_MIN, size));
+}
+
 /** Session id → the emoji you gave it, for one source. */
 export type IconsBySession = Readonly<Record<string, IconChoice>>;
 
@@ -218,6 +241,10 @@ export type Prefs = {
    * source of the grammar, and this only says where the operator moved things.
    */
   readonly keyBindings: KeyBindings;
+  /** The root text size of the `out` pane, in px. One number rather than a
+   *  size per element: `out`'s sizes are a hierarchy expressed as `em` against
+   *  this root, so storing the root moves them all and cannot flatten them. */
+  readonly outFontSize: number;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -232,6 +259,7 @@ export const EMPTY_PREFS: Prefs = {
   renames: {},
   palette: {},
   keyBindings: {},
+  outFontSize: DEFAULT_OUT_FONT_SIZE,
 };
 
 /**
@@ -342,6 +370,9 @@ function parsePrefs(
     // neighbour.
     palette: readPalette((parsed as { palette?: unknown }).palette),
     keyBindings: readKeyBindings((parsed as { keyBindings?: unknown }).keyBindings),
+    // Per field like the focus share above it, and clamped here rather than
+    // only in the setter: this is the read a hand-edited file arrives by.
+    outFontSize: readOutFontSize((parsed as { outFontSize?: unknown }).outFontSize),
   };
 }
 
@@ -445,6 +476,12 @@ function readFocusShare(raw: unknown): number {
   return clampFocusShare(typeof raw === 'number' ? raw : Number.NaN);
 }
 
+/** Same shape as `readFocusShare`: a non-number falls through to `NaN` and
+ *  lands on the default, and a number out of range is pulled into it. */
+function readOutFontSize(raw: unknown): number {
+  return clampOutFontSize(typeof raw === 'number' ? raw : Number.NaN);
+}
+
 function readPanes(raw: unknown): Prefs['panes'] {
   if (typeof raw !== 'object' || raw === null) {
     return DEFAULT_PANES;
@@ -520,6 +557,12 @@ export function setTheme(prefs: Prefs, theme: Theme): Prefs {
 /** Clamped on the way in, so nothing downstream has to wonder. */
 export function setFocusShare(prefs: Prefs, share: number): Prefs {
   return { ...prefs, focusViewportShare: clampFocusShare(share) };
+}
+
+/** Clamped on the way in as well, for the same reason: the slider cannot
+ *  produce an out-of-range value, but a future caller could. */
+export function setOutFontSize(prefs: Prefs, size: number): Prefs {
+  return { ...prefs, outFontSize: clampOutFontSize(size) };
 }
 
 /**
@@ -1085,8 +1128,26 @@ export function applyPalette(
  * expressed as rendered output. Returning `prefs` unchanged keeps the call
  * sites one expression each.
  */
+/** The custom property `out`'s root size is read from. Named rather than
+ *  spelled twice: a typo in either half is a setting that silently does
+ *  nothing. */
+export const OUT_FONT_SIZE_VAR = '--vam-out-font-size';
+
+/** Put the chosen size on the document, as a custom property on the root —
+ *  the mechanism the colour overrides use, for the same reason: the pane that
+ *  consumes it is not re-rendered by a React value, and `:root` is in force
+ *  everywhere with no prop drilled through `DetailPanel`. Clamped here too,
+ *  this being the last gate before the DOM. */
+export function applyOutFontSize(
+  size: number,
+  root: HTMLElement | null = globalThis.document?.documentElement ?? null,
+): void {
+  root?.style.setProperty(OUT_FONT_SIZE_VAR, `${clampOutFontSize(size)}px`);
+}
+
 export function activatePrefs(prefs: Prefs): Prefs {
   applyPalette(prefs.palette);
+  applyOutFontSize(prefs.outFontSize);
   setActiveBindings(prefs.keyBindings);
   return prefs;
 }

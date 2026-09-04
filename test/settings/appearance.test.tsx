@@ -14,7 +14,13 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
-import { EMPTY_PREFS, PALETTE_TOKENS, type Prefs } from '../../src/renderer/prefs/prefs.js';
+import {
+  EMPTY_PREFS,
+  OUT_FONT_SIZE_MAX,
+  OUT_FONT_SIZE_MIN,
+  PALETTE_TOKENS,
+  type Prefs,
+} from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 
 function session(id: string): Session {
@@ -237,5 +243,36 @@ describe('the captured key is really in force', () => {
     ).toBeNull();
     press('p');
     expect(document.querySelector('[data-key-sheet]')).not.toBeNull();
+  });
+});
+
+/**
+ * Where an `out` text size belongs, by the argument the settings spec used to
+ * keep focus zoom OUT of Appearance: focus zoom is how the canvas viewport
+ * behaves, not how anything is painted. A text size is the other case — the
+ * paint, alongside the theme and the palette — and it is not a canvas setting,
+ * since two of the four layouts hide the canvas while still drawing `out`.
+ */
+describe('the out text size is an appearance setting', () => {
+  const control = () => screen.getByLabelText('out text size');
+
+  it('lives in Appearance, beside the theme and the colours', () => {
+    open();
+    expect(control().closest('section')?.querySelector('h2, h3')?.textContent).toBe('appearance');
+    // Not in Canvas: `out` is the right pane, and it is drawn by layouts that
+    // hide the canvas entirely.
+    expect(screen.getByText('focus zoom').closest('section')).not.toBe(
+      control().closest('section'),
+    );
+  });
+
+  it('shows the size in force and writes the one you pick', () => {
+    const { onChange } = open({ ...EMPTY_PREFS, outFontSize: 15 });
+    expect((control() as HTMLInputElement).value).toBe('15');
+    fireEvent.change(control(), { target: { value: '18' } });
+    expect(changed(onChange, 0).outFontSize).toBe(18);
+    // And offers only sizes inside the readable bounds.
+    expect(Number((control() as HTMLInputElement).min)).toBe(OUT_FONT_SIZE_MIN);
+    expect(Number((control() as HTMLInputElement).max)).toBe(OUT_FONT_SIZE_MAX);
   });
 });

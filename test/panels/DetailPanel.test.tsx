@@ -38,6 +38,7 @@ import {
   hasContentBelow,
   isAtBottom,
 } from '../../src/renderer/panels/stick-to-bottom.js';
+import { OUT_FONT_SIZE_VAR } from '../../src/renderer/prefs/prefs.js';
 import type { PaneView } from '../../src/shared/terminal.js';
 
 /** `attachIntoDraft` for the cases a test knows will be accepted. */
@@ -2238,5 +2239,20 @@ describe('the composer is hidden while the Terminal tab is open', () => {
     expect(q('[data-prompt-box]')).not.toBeNull();
     fireEvent.click(q<HTMLButtonElement>('[data-tab="agents"]') as HTMLButtonElement);
     expect(q('[data-prompt-box]')).not.toBeNull();
+  });
+});
+
+/** The `out` text size is a pref, put on the document root and consumed as
+ *  the ROOT of `out`'s `em` scale (`out-font-size.test.tsx` pins the scale).
+ *  What matters here is that exactly one element reads it: a second would make
+ *  part of `out` scale twice, and none would make the setting inert. */
+describe('the out text size roots on the out container and nowhere else', () => {
+  it('is worn by the out scroll container alone', () => {
+    draw();
+    const wearing = all('*').filter((el) => el.className.toString().includes(OUT_FONT_SIZE_VAR));
+    expect(wearing).toHaveLength(1);
+    expect(wearing[0]?.getAttribute('data-detail-scroll')).toBe('out');
+    // The pane above `out` keeps the sizes it was drawn with.
+    expect(q('[data-detail-block="in"]')?.className ?? '').not.toContain(OUT_FONT_SIZE_VAR);
   });
 });
