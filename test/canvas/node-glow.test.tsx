@@ -311,3 +311,57 @@ describe('StepNode wears the cursor glow and the running edge', () => {
     expect(card.querySelector('.vam-running-edge')?.getAttribute('aria-hidden')).toBe('true');
   });
 });
+
+/**
+ * The activity cell is the only unbounded text on the root node.
+ *
+ * `session.activity` is the newest tool call — words an agent wrote, of a
+ * length vam does not control — and it sits in a flex row beside the step
+ * count. Without `min-w-0` a flex child refuses to shrink below its content,
+ * so a long activity pushed the row wider than the card and broke the node's
+ * layout. `truncate` alone would not have fixed it; the pair is the fix, which
+ * is why both are asserted.
+ *
+ * The step count is asserted `flex-none` for the opposite reason: it is short,
+ * bounded, and the half of the line worth keeping whole.
+ */
+describe('the root node survives a long activity', () => {
+  function infoNode(over: Partial<Session> = {}): HTMLElement {
+    const { container } = render(
+      <ReactFlowProvider>
+        <SessionInfoNode
+          id="info"
+          data={{ entry: entryOf(over), focused: false, jumpLabel: null }}
+          {...FLOW_PROPS}
+        />
+      </ReactFlowProvider>,
+    );
+    return nodeRoot(container, '[data-session-card]');
+  }
+
+  it('lets the activity cell shrink and ellipsis instead of pushing the card', () => {
+    const card = infoNode({
+      activity: 'Reading a path long enough to have broken the layout before this test existed',
+    });
+    const spend = card.querySelector('[data-session-spend]');
+    expect(spend, 'no activity cell rendered; the assertion below would be vacuous').not.toBe(null);
+    // Both, not either: `truncate` cannot ellipsis a flex child that will not
+    // shrink, and `min-w-0` alone would let it shrink and then overflow.
+    expect(spend?.className).toContain('min-w-0');
+    expect(spend?.className).toContain('truncate');
+  });
+
+  it('keeps the step count whole', () => {
+    const card = infoNode({ activity: 'anything at all' });
+    const steps = [...card.querySelectorAll('span')].find((el) =>
+      /^\d+ steps$/.test(el.textContent ?? ''),
+    );
+    expect(steps, 'no step-count cell rendered').not.toBe(undefined);
+    expect(steps?.className).toContain('flex-none');
+  });
+
+  it('still renders the em dash when there is no activity', () => {
+    const card = infoNode({ activity: null });
+    expect(card.querySelector('[data-session-spend]')?.textContent).toBe('—');
+  });
+});
