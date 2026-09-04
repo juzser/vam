@@ -426,3 +426,74 @@ describe('the composer stands down while a question is open', () => {
     expect(all('[data-question-option][data-picked="true"]')).toHaveLength(1);
   });
 });
+
+/**
+ * The digits are bare, and "bare" has to mean it.
+ *
+ * The listener read `event.key` and nothing else, so it answered chords it
+ * has no business seeing: `Cmd+C` matched the `c` branch — killing the copy
+ * with `preventDefault` and opening the composer — and `Cmd+2` marked the
+ * second option AND, since the target is a BUTTON and the window listener
+ * steps aside only for INPUT and TEXTAREA, resolved as a chord as well. One
+ * keystroke, two effects.
+ *
+ * Scope was the argument for bare keys ("it can only fire while the keyboard
+ * is in the options list") and scope is still true — it is just not an
+ * argument about MODIFIERS. A chord is never text and never a pick: under
+ * Cmd, Ctrl or Alt this listener stands aside entirely and leaves the
+ * keystroke to the grammar, which is the same rule the prompt box follows.
+ *
+ * It matters more after the digit rework, not less: `Cmd+<digit>` is now the
+ * focus-sensitive family, so this is a live collision rather than a
+ * theoretical one.
+ */
+describe('a modifier means the keystroke is not ours', () => {
+  const list = () => q('[role="listbox"]') as HTMLElement;
+  const picked = () => all('[data-question-option][data-picked="true"]');
+
+  it('leaves Cmd+C alone — the copy lives, and no composer appears', () => {
+    draw([QUESTION]);
+    // `fireEvent` returns false when the handler called preventDefault.
+    const notCancelled = fireEvent.keyDown(list(), { key: 'c', metaKey: true, bubbles: true });
+    expect(notCancelled).toBe(true);
+    expect(q('[data-prompt-box]')).toBeNull();
+  });
+
+  it('leaves Ctrl+C alone as well, which is the same gesture off macOS', () => {
+    draw([QUESTION]);
+    expect(fireEvent.keyDown(list(), { key: 'c', ctrlKey: true, bubbles: true })).toBe(true);
+    expect(q('[data-prompt-box]')).toBeNull();
+  });
+
+  it('marks nothing for a modified digit, whichever modifier it is', () => {
+    draw([QUESTION]);
+    for (const modifier of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }]) {
+      const notCancelled = fireEvent.keyDown(list(), {
+        key: '2',
+        code: 'Digit2',
+        bubbles: true,
+        ...modifier,
+      });
+      expect(notCancelled, JSON.stringify(modifier)).toBe(true);
+      expect(picked(), JSON.stringify(modifier)).toHaveLength(0);
+    }
+  });
+
+  it('leaves a modified arrow to whatever else wants it', () => {
+    draw([QUESTION]);
+    const first = all('[data-question-option]')[0] as HTMLButtonElement;
+    first.focus();
+    expect(fireEvent.keyDown(list(), { key: 'ArrowDown', metaKey: true, bubbles: true })).toBe(
+      true,
+    );
+    expect(document.activeElement).toBe(first);
+  });
+
+  it('still answers the unmodified keys, which are the ones it is for', () => {
+    draw([QUESTION]);
+    expect(fireEvent.keyDown(list(), { key: '2', code: 'Digit2', bubbles: true })).toBe(false);
+    expect(picked()).toHaveLength(1);
+    expect(fireEvent.keyDown(list(), { key: 'c', bubbles: true })).toBe(false);
+    expect(q('[data-prompt-box]')).not.toBeNull();
+  });
+});

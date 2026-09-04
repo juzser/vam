@@ -215,10 +215,15 @@ The generated key sheet names both meanings in one row — `position 2 — sessi
 2 in the sidebar, tab 2 in the response pane` — because a sheet that said
 "session 2" would be wrong half the time.
 
-The option digits are BARE, and safe by scope rather than by luck: they are
-handled by the question listbox itself, so they can only fire while the
-keyboard is already in the options list (`i` puts it there). The canvas
-grammar binds no bare digit at all. Marking by number is still marking — vam
+The option digits are BARE, and safe by two rules rather than by luck. Scope:
+they are handled by the question listbox itself, so they can only fire while
+the keyboard is already in the options list (`i` puts it there), and the canvas
+grammar binds no bare digit at all. And modifiers: under Cmd, Ctrl or Alt that
+listener stands aside entirely, because a chord is neither text nor a pick and
+belongs to the grammar. Scope alone was not enough — reading `event.key` on its
+own made `Cmd+C` match the `c` binding and `Cmd+<digit>` mark an option on its
+way to the chord layer, which matters more now that `Cmd+<digit>` is the
+focus-sensitive family. Marking by number is still marking — vam
 has no channel that could deliver an answer, and the card says so.
 
 ### 4.1 What orca gives the keyboard layer (read on 2026-08-27)

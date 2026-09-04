@@ -1188,6 +1188,15 @@ function QuestionCard({
   // are letters. So a number here cannot be a keystroke meant for somewhere
   // else -- and with no question open there is no list to hold focus.
   const onKeys = (event: KeyboardEvent<HTMLDivElement>) => {
+    // A MODIFIED key is never one of ours. Scope is what makes the bare keys
+    // below safe -- this listener only hears anything while the keyboard is
+    // already in the options list -- but scope says nothing about modifiers,
+    // and reading `event.key` alone made `Cmd+C` match the `c` branch (killing
+    // the copy and opening the composer) and `Cmd+2` mark an option on its way
+    // to the chord layer. A chord is not text and not a pick, so it belongs to
+    // the grammar and this stands aside, which is the same rule the prompt box
+    // already follows.
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
     // `c` for chat, the way out of the picker and into prose. Scoped like the
     // digits: the listener is the listbox's, so it only hears a key while the
     // keyboard is already in the options list -- which is where `i` puts it.
