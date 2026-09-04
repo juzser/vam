@@ -1563,16 +1563,8 @@ function CanvasInner({
           draft={draft}
           onDraftChange={setDraft}
           onSubmit={sendPrompt}
-          onPickCommand={(commandId) => {
-            const command = focusedDecision?.commands.find((c) => c.id === commandId);
-            setStatus(
-              command === undefined
-                ? 'no such command'
-                : `vam does not run them — copied "${command.label}", run it yourself`,
-            );
-            copyCommand(commandId);
-          }}
           onCopyCommand={copyCommand}
+          onCopyAllCommands={copyAllCommands}
           active={pane === 'action'}
           actionIndex={actionIndex}
           review={{

@@ -515,8 +515,13 @@ export type DetailPanelProps = {
   readonly draft: string;
   readonly onDraftChange: (value: string) => void;
   readonly onSubmit: () => void;
-  readonly onPickCommand: (commandId: string) => void;
+  /** Copy ONE command -- what the per-row `copy` button does. */
   readonly onCopyCommand: (commandId: string) => void;
+  /**
+   * Copy every command, newline-joined -- what pressing `yy` does, and so the
+   * only behaviour allowed to wear the `yy` glyph.
+   */
+  readonly onCopyAllCommands: () => void;
   /** True while the prompt box owns the keyboard. */
   readonly composing: boolean;
   readonly onCompose: () => void;
@@ -734,6 +739,29 @@ export function splitAnswers(output: string): string[] {
 }
 
 /**
+ * The sentence that stands in for an answer there is none of.
+ *
+ * Two absences, and they are not the same absence. `''` is a turn that
+ * resolved to nothing (model.ts): it USED to fall through to `OutText`, where
+ * `splitAnswers('')` filters its one empty block away and leaves an `OUT` rule
+ * over blank space -- indistinguishable from a failed render.
+ *
+ * `null` is a turn that collected no answer event, and the adapter sets it
+ * whatever the session's status (`to-canvas.ts`) -- so "still running" was
+ * shown to `done` and `failed` sessions too, telling the operator to wait for
+ * something that will never arrive. Only a running session is still running.
+ * A `waiting` session gets neither sentence: its turn has not ended, and the
+ * prose about whose move it is was removed from this pane deliberately -- the
+ * breathing amber dot in the header says it.
+ */
+function noAnswerNote(output: string | null, status: SessionStatus | null): string {
+  if (output === '') return '\u2014 this turn resolved to nothing \u2014';
+  if (status === 'running') return '\u2014 the session is still running, no answer yet \u2014';
+  if (status === 'waiting' || status === null) return '\u2014 no answer for this turn yet \u2014';
+  return '\u2014 this turn ended without an answer \u2014';
+}
+
+/**
  * How each markdown element is dressed, in vam's own tokens.
  *
  * Every colour here is a token from `styles.css`, which carries a dark and a
@@ -882,8 +910,8 @@ export function DetailPanel(props: DetailPanelProps) {
     draft,
     onDraftChange,
     onSubmit,
-    onPickCommand,
     onCopyCommand,
+    onCopyAllCommands,
     composing,
     onCompose,
     onStopComposing,
@@ -1348,9 +1376,9 @@ export function DetailPanel(props: DetailPanelProps) {
                 }}
                 className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto"
               >
-                {decision.output === null ? (
-                  <p className="text-[11.5px] text-ink-faint">
-                    — the session is still running, no answer yet —
+                {decision.output === null || decision.output === '' ? (
+                  <p data-out-empty className="text-[11.5px] text-ink-faint">
+                    {noAnswerNote(decision.output, entry?.session.status ?? null)}
                   </p>
                 ) : (
                   <OutText output={decision.output} />
@@ -1358,8 +1386,22 @@ export function DetailPanel(props: DetailPanelProps) {
 
                 {commands.length > 0 && (
                   <div className="mt-1 flex flex-col gap-2">
-                    <div className="text-[10.5px] text-ink-faint">
-                      the agent proposed these — vam does not run them
+                    <div className="flex items-center gap-2 text-[10.5px] text-ink-faint">
+                      <span>the agent proposed these — vam does not run them</span>
+                      {/* The keystroke's glyph goes on the keystroke's
+                          behaviour: `yy` copies ALL of them, newline-joined
+                          (`chords.ts` -> `copyAllCommands`). It sat on the row
+                          button, which copies one, and with several commands
+                          the two diverged silently at the clipboard. */}
+                      <button
+                        type="button"
+                        data-commands-copy-all
+                        onClick={onCopyAllCommands}
+                        title={`copy all ${commands.length} commands`}
+                        className="ml-auto cursor-pointer rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-[10px] text-ink-faint hover:bg-raised hover:text-ink"
+                      >
+                        yy
+                      </button>
                     </div>
                     {commands.map((command, i) => (
                       <div
@@ -1372,19 +1414,19 @@ export function DetailPanel(props: DetailPanelProps) {
                         <div className="flex items-center gap-2 pb-1.5">
                           <span className="font-mono text-[10px] text-ink-ghost">{i + 1}</span>
                           <span className="truncate text-[11px] text-ink">{command.label}</span>
+                          {/* One copy affordance per row, saying what it
+                              does. The `run` button beside it also only
+                              copied -- contradicting the caption above it and
+                              the rule in model.ts, and the honest status only
+                              arrived after the click. */}
                           <button
                             type="button"
+                            data-command-copy
                             onClick={() => onCopyCommand(command.id)}
+                            title={`copy: ${command.label}`}
                             className="ml-auto cursor-pointer rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-[10px] text-ink-faint hover:bg-raised hover:text-ink"
                           >
-                            yy
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onPickCommand(command.id)}
-                            className="cursor-pointer rounded-[var(--radius-sm)] border border-line-strong px-1.5 py-0.5 text-[10px] text-ink-dim hover:text-ink"
-                          >
-                            run
+                            copy
                           </button>
                         </div>
                         {/* Wrapped, not scrolled. A command you cannot see the end
