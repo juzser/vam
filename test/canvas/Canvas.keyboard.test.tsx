@@ -1397,12 +1397,13 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
  * The review-queue keyboard tests stood here.
  *
  * black-smith's governance queue was removed from the detail pane at the
- * operator's request, so the `I` → `j`/`k` → Enter path they exercised no
- * longer exists in the UI and a test for it could only assert against a
- * component the pane does not render. `ReviewQueue` and `useReviewQueue` keep
- * their own tests (test/panels/ReviewQueue.test.tsx,
- * test/adapter/useReviewQueue.test.tsx), so the code itself stays covered and
- * restoring the row restores a tested component.
+ * operator's request. It was left in the action list, so `I` → `j`/`k` → Enter
+ * went on reaching rows nothing drew and POSTing waivers and lesson
+ * transitions to the factory unseen; `ReviewQueue`, `useReviewQueue` and their
+ * tests were kept "in case", which is what made the half-removal survive. The
+ * queue is now gone from `buildActions` and from the tree, and
+ * test/panels/action-parity.test.tsx asserts the invariant that was missing:
+ * the action list and the pane are the same list.
  */
 
 /**

@@ -41,7 +41,6 @@ import {
   type UsageSnapshot,
   type UsageWindow,
 } from '../../shared/usage.js';
-import { useReviewQueue } from '../adapter/useReviewQueue.js';
 import type { CanvasModel, Decision, Project, SessionStatus, SourceId } from '../domain/model.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
@@ -572,27 +571,9 @@ function CanvasInner({
   }, [focusedSpec, focusedEntry]);
 
   /**
-   * The focused session's review queue. Only the focused one: answering is a
-   * per-session act, and the waiver half costs a request per task.
-   */
-  const review = useReviewQueue(
-    source.kind === 'live' ? source.client : null,
-    focusedEntry?.session.id ?? null,
-  );
-  /** Which queue row is mid-write, so it can stop taking clicks. */
-  const [answering, setAnswering] = useState<string | null>(null);
-  /**
-   * The reason typed against each queue row, keyed by fingerprint or lesson id.
-   * Lifted out of the rows so `Enter` on a verdict can read it — see
-   * `ReviewQueue`'s `notes`.
-   */
-  const [notes, setNotes] = useState<Record<string, string>>({});
-  /** The row whose note box `i` has just asked for. */
-  const [noteFocus, setNoteFocus] = useState<string | null>(null);
-  /**
    * The command row whose copy control `i` has just asked for. Cleared by the
    * panel once the focus has landed, so pressing `i` twice on the same row
-   * asks twice — the same handshake `noteFocus`/`onNoteDone` already uses.
+   * asks twice, rather than the first press being the only one that lands.
    */
   const [commandFocus, setCommandFocus] = useState<string | null>(null);
 
@@ -603,10 +584,7 @@ function CanvasInner({
    * and `Enter` is handled by the window listener. A panel that owned its own
    * cursor would be a second source of truth about what is selected.
    */
-  const actions = useMemo(
-    () => buildActions(review.waivers, review.lessons, focusedDecision?.commands ?? []),
-    [review.waivers, review.lessons, focusedDecision],
-  );
+  const actions = useMemo(() => buildActions(focusedDecision?.commands ?? []), [focusedDecision]);
 
   const labels = useMemo(
     () => (jumping ? jumpLabels(nodeIds) : new Map<string, string>()),
@@ -817,92 +795,6 @@ function CanvasInner({
     }
   }, [focusedEntry, draft, source, writing]);
 
-  /**
-   * Answer one of the factory's questions.
-   *
-   * Both writes report the factory's own words on refusal and force a reload of
-   * BOTH the queue and the canvas on success — an answered row that stayed on
-   * screen is one you would answer twice.
-   */
-  const answer = useCallback(
-    async (id: string, write: () => Promise<unknown>, done: string) => {
-      if (source.kind === 'demo') {
-        setStatus(source.note);
-        return;
-      }
-      if (answering !== null) {
-        return;
-      }
-      setAnswering(id);
-      try {
-        await write();
-        setStatus(done);
-        // Back to the top of the list. The answered row vanishes, and leaving
-        // the cursor at the same index drops it onto whatever slid up into that
-        // slot — which after clearing a waiver was the NEXT row's "approve". A
-        // cursor that lands on a consequential button you did not aim at is the
-        // one way this pane could do real damage.
-        setActionIndex(0);
-        review.reload();
-        source.onWrote();
-      } catch (cause) {
-        setStatus(describeFailure(cause));
-      } finally {
-        setAnswering(null);
-      }
-    },
-    [source, answering, review],
-  );
-
-  /**
-   * Grant or deny one waiver. Reachable from the button and from `Enter`, so it
-   * lives here rather than in the panel's props — and so the reason, which the
-   * factory requires, is read from one place either way.
-   */
-  const answerWaiver = useCallback(
-    (fingerprint: string, decision: 'granted' | 'denied') => {
-      const session = focusedEntry?.session.id;
-      if (source.kind !== 'live' || session === undefined) {
-        setStatus(source.kind === 'demo' ? source.note : 'no session picked');
-        return;
-      }
-      const note = (notes[fingerprint] ?? '').trim();
-      if (note === '') {
-        // waivers.ts refuses this anyway. Saying so here means the refusal
-        // arrives before a round trip, and names the missing thing.
-        setStatus('a waiver needs a reason — press i to write one');
-        return;
-      }
-      void answer(
-        fingerprint,
-        () =>
-          source.client.applyWaivers({ sessionId: session }, [
-            { fingerprint, decision, operatorNote: note },
-          ]),
-        decision === 'granted'
-          ? `waived ${fingerprint} — the reason is in the log`
-          : `sent back for a fix: ${fingerprint}`,
-      );
-    },
-    [source, focusedEntry, notes, answer],
-  );
-
-  const answerLesson = useCallback(
-    (lessonId: string, to: 'approve' | 'reject') => {
-      if (source.kind !== 'live') {
-        setStatus(source.kind === 'demo' ? source.note : 'governance is not available here');
-        return;
-      }
-      const note = (notes[lessonId] ?? '').trim();
-      void answer(
-        lessonId,
-        () => source.client.transitionLesson(lessonId, to, note === '' ? {} : { note }),
-        to === 'approve' ? `approved ${lessonId}` : `rejected ${lessonId}`,
-      );
-    },
-    [source, notes, answer],
-  );
-
   const copyAllCommands = useCallback(async () => {
     const commands = focusedDecision?.commands ?? [];
     if (commands.length === 0) {
@@ -987,8 +879,7 @@ function CanvasInner({
         case 'move': {
           if (pane === 'action' && (action.direction === 'down' || action.direction === 'up')) {
             // In the action pane the vertical axis belongs to the actions —
-            // every verdict button in the review queue, every command, and the
-            // prompt last.
+            // every command the step proposed, and the prompt last.
             const delta = action.direction === 'down' ? 1 : -1;
             setActionIndex((current) => clampIndex(current + delta, actions.length));
             return;
@@ -1200,21 +1091,14 @@ function CanvasInner({
             return;
           }
           // `i` means "type something into the thing I am pointing at". In the
-          // action pane that is usually a queue row's reason box, and sending
-          // it to the prompt instead would put a waiver's justification into a
-          // message to the session.
-          // Every row but the prompt one IS a thing to act on, commands
-          // included: a command row has no reason box, so `i` puts the
-          // keyboard on its copy control instead — the row is then genuinely
-          // focused rather than the composer having stolen the keys.
+          // action pane that is a command row, whose copy control it puts
+          // the keyboard on — the row is then genuinely focused rather than
+          // the composer having stolen the keys. On the prompt row, which has
+          // no control of its own, `i` opens the composer.
           const selected =
             pane === 'action' ? actions[clampIndex(actionIndex, actions.length)] : undefined;
-          if (selected !== undefined && selected.rowId !== null) {
-            if (selected.kind === 'command') {
-              setCommandFocus(selected.rowId);
-            } else {
-              setNoteFocus(selected.rowId);
-            }
+          if (selected !== undefined && selected.kind === 'command') {
+            setCommandFocus(selected.rowId);
             return;
           }
           setComposing(true);
@@ -1230,12 +1114,6 @@ function CanvasInner({
             return;
           }
           switch (chosen.kind) {
-            case 'waiver':
-              answerWaiver(chosen.rowId, chosen.verdict);
-              return;
-            case 'lesson':
-              answerLesson(chosen.rowId, chosen.verdict);
-              return;
             case 'command': {
               const command = focusedDecision?.commands.find((c) => c.id === chosen.rowId);
               if (command === undefined) {
@@ -1270,7 +1148,6 @@ function CanvasInner({
           setComposing(false);
           setRenamingId(null);
           setPickingIconFor(null);
-          setNoteFocus(null);
           setPane('list');
           setStatus(null);
           return;
@@ -1306,8 +1183,6 @@ function CanvasInner({
     actionIndex,
     focusedDecision,
     actions,
-    answerWaiver,
-    answerLesson,
     prefs,
     savePrefs,
   ]);
@@ -1604,23 +1479,6 @@ function CanvasInner({
           onCommandFocused={() => setCommandFocus(null)}
           active={pane === 'action'}
           actionIndex={actionIndex}
-          review={{
-            waivers: review.waivers,
-            lessons: review.lessons,
-            error: review.error,
-            hidden: review.hidden,
-            busyId: answering,
-            notes,
-            onNoteChange: (rowId, note) => setNotes((all) => ({ ...all, [rowId]: note })),
-            onNoteDone: () => setNoteFocus(null),
-            selectedActionId:
-              pane === 'action'
-                ? (actions[clampIndex(actionIndex, actions.length)]?.id ?? null)
-                : null,
-            focusNoteFor: noteFocus,
-            onWaiver: (fingerprint, decision) => answerWaiver(fingerprint, decision),
-            onLesson: (lessonId, to) => answerLesson(lessonId, to),
-          }}
           composing={composing}
           onCompose={() => setComposing(true)}
           onStopComposing={() => {

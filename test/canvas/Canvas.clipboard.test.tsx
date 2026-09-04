@@ -289,45 +289,51 @@ describe('i acts on the row the cursor is on', () => {
 });
 
 /**
- * A queue row keeps today's behaviour: `i` asks for its reason box, and in
- * particular does NOT open the composer -- a waiver's justification must not
- * become a message to the session.
+ * A live source adds no stops of its own to the action pane.
+ *
+ * It used to. black-smith's governance queue was removed from the detail pane
+ * at the operator's request but left in `buildActions`, so a live source put
+ * four rows -- two verdicts per finding, two per lesson candidate -- ahead of
+ * the commands with nothing drawn for any of them. `I` then landed on an
+ * invisible "fix fp-1", `j` walked stops that were not on screen, and `Enter`
+ * POSTed a waiver or a lesson transition to the factory. The tests that stood
+ * here asserted that behaviour was correct, counting the four rows out by
+ * hand.
+ *
+ * What replaces them is the inverse: a client that WOULD serve a finding and a
+ * lesson changes neither the cursor nor the request log.
  */
-describe('i on a queue row does not open the composer', () => {
-  const finding = {
-    findingId: 'f1',
-    taskId: 't1',
-    fingerprint: 'fp-1',
-    severity: 'S3-minor',
-    findingStatus: 'raised',
-    summary: 'a defect',
-    foundBy: 'gate',
-    waiverId: null,
-  };
-  const lesson = {
-    lessonId: 'l1',
-    sessionId: 's1',
-    lessonType: 'process',
-    lessonScope: 'repo',
-    lessonStatus: 'candidate',
-    statement: 'a lesson',
-  };
+describe('a live source adds no stops of its own to the action pane', () => {
+  const calls: string[] = [];
 
-  /** A live source whose review queue holds one waiver and one lesson. */
+  /** A live client that would answer every review-queue read, if one came. */
   function liveSource(): CanvasSource {
     const client = {
-      taskIds: async () => ['t1'],
-      taskDetail: async () => ({ findings: [finding] }),
-      lessons: async () => ({ pending: [lesson], approved: [], closed: [] }),
-      overview: async () => ({ alerts: { pendingWaivers: 1 } }),
+      taskIds: async () => {
+        calls.push('taskIds');
+        return ['t1'];
+      },
+      taskDetail: async () => {
+        calls.push('taskDetail');
+        return { findings: [] };
+      },
+      lessons: async () => {
+        calls.push('lessons');
+        return { pending: [], approved: [], closed: [] };
+      },
+      overview: async () => {
+        calls.push('overview');
+        return { alerts: { pendingWaivers: 1 } };
+      },
     } as unknown as SmithClient;
     return { kind: 'live', client, status: 'live', error: null, onWrote: () => {} };
   }
 
   async function mountLive() {
+    calls.length = 0;
     installBridge();
     render(<Canvas model={MODEL} source={liveSource()} />);
-    // The queue loads asynchronously; the actions do not exist until it has.
+    // Three microtask turns: what the removed queue fetch needed to settle.
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -335,33 +341,24 @@ describe('i on a queue row does not open the composer', () => {
     });
   }
 
-  it('leaves the composer shut on a waiver row', async () => {
+  it('puts the cursor on the first command, not on a row nothing drew', async () => {
     await mountLive();
-    press('I'); // index 0 -- "fix fp-1"
-    press('i');
-    expect(promptInput()?.readOnly).toBe(true);
-    // Proof the queue really loaded, and that these four rows really sit
-    // above the commands: with an empty queue, four `j` would already be past
-    // them and `i` would focus nothing.
-    for (let i = 0; i < 4; i += 1) press('j');
+    press('I'); // index 0
     press('i');
     expect(document.activeElement).toBe(copyButtons()[0]);
   });
 
-  it('leaves the composer shut on a lesson row', async () => {
+  it('reaches the composer one row past the last command', async () => {
     await mountLive();
     press('I');
     press('j');
-    press('j'); // past both waiver verdicts, onto "reject l1"
-    press('i');
-    expect(promptInput()?.readOnly).toBe(true);
-  });
-
-  it('still opens the composer on the prompt row below them', async () => {
-    await mountLive();
-    press('I');
-    for (let i = 0; i < 6; i += 1) press('j'); // 2 waiver + 2 lesson + 2 command
+    press('j'); // two commands, then the prompt
     press('i');
     expect(promptInput()?.readOnly).toBe(false);
+  });
+
+  it('never asks the factory for a queue it cannot draw', async () => {
+    await mountLive();
+    expect(calls).toEqual([]);
   });
 });
