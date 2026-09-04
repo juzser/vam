@@ -78,10 +78,43 @@ export type RenameChoice = { readonly title: string; readonly at: string };
  * while everything around it is light. The toggle in the sidebar is the whole
  * interface, so the stored value is the only input.
  */
-export type Theme = 'dark' | 'light';
+export type Theme = 'dark' | 'light' | 'system';
 
 /** Dark is the default: it is the theme vam was designed in (artboard 1a). */
 export const DEFAULT_THEME: Theme = 'dark';
+
+/**
+ * How much of the canvas a focused session's row should take up.
+ *
+ * Lives here rather than in `Canvas.tsx` because it is now a stored value and
+ * the store is what owns a default; `FOCUS_VIEWPORT_SHARE` there is this
+ * constant, re-exported, so there is still exactly one 0.6 in the tree.
+ */
+export const DEFAULT_FOCUS_SHARE = 0.6;
+
+/**
+ * The range the picker offers and every read clamps into.
+ *
+ * Below 0.3 the row is a speck in the middle of an empty canvas; above 1 the
+ * derived padding goes negative and ReactFlow fits the row past the edges of
+ * the viewport, which is the one input that makes the canvas draw nothing at
+ * all. Both ends are therefore correctness bounds, not taste.
+ */
+export const FOCUS_SHARE_MIN = 0.3;
+export const FOCUS_SHARE_MAX = 1;
+
+/**
+ * Total, like `clampPaneWidth`: a stored share can be a string an older vam
+ * wrote, a `NaN` from a hand-edited payload, or an Infinity from devtools, and
+ * none of those may reach `focusPadding` — a `NaN` padding is a canvas that
+ * renders nothing and says nothing.
+ */
+export function clampFocusShare(share: number): number {
+  if (typeof share !== 'number' || Number.isNaN(share)) {
+    return DEFAULT_FOCUS_SHARE;
+  }
+  return Math.min(FOCUS_SHARE_MAX, Math.max(FOCUS_SHARE_MIN, share));
+}
 
 /** Session id → the emoji you gave it, for one source. */
 export type IconsBySession = Readonly<Record<string, IconChoice>>;
@@ -109,6 +142,12 @@ export type Prefs = {
    */
   readonly icons: Readonly<Record<string, IconsBySession>>;
   readonly theme: Theme;
+  /**
+   * The share of the viewport a focused row is framed to occupy. Same TTL
+   * exemption as `theme` and `panes`, for the same reason: it is a fact about
+   * how you like to read the canvas, not about a session.
+   */
+  readonly focusViewportShare: number;
   /**
    * The two dragged pane widths, always present — there are exactly two
    * panes and both are known at compile time, so this is not a keyed map.
@@ -166,6 +205,7 @@ export type Prefs = {
 export const EMPTY_PREFS: Prefs = {
   icons: {},
   theme: DEFAULT_THEME,
+  focusViewportShare: DEFAULT_FOCUS_SHARE,
   panes: DEFAULT_PANES,
   paneVisibility: ALL_VISIBLE,
   projectIcons: {},
@@ -232,6 +272,11 @@ export function readPrefs(
     // Not pruned by the TTL icons get. A theme is about the person, and one
     // who opens vam twice a year still wants the theme they chose.
     theme: readTheme((parsed as { theme?: unknown }).theme),
+    // Per field like every line around it: a payload from a vam that predates
+    // this setting has no key at all, and a garbage one costs only itself.
+    focusViewportShare: readFocusShare(
+      (parsed as { focusViewportShare?: unknown }).focusViewportShare,
+    ),
     // Same argument as theme: not pruned, and defensive against an absent
     // field (today's shipped payloads have none), a non-object, or garbage
     // numbers left by devtools or an older vam.
@@ -347,7 +392,13 @@ function readProjectIcons(raw: unknown): Prefs['projectIcons'] {
 }
 
 function readTheme(raw: unknown): Theme {
-  return raw === 'light' || raw === 'dark' ? raw : DEFAULT_THEME;
+  return raw === 'light' || raw === 'dark' || raw === 'system' ? raw : DEFAULT_THEME;
+}
+
+/** `clampFocusShare` is total, so a non-number falls through to `NaN` and
+ * lands on the default, exactly like a malformed pane width. */
+function readFocusShare(raw: unknown): number {
+  return clampFocusShare(typeof raw === 'number' ? raw : Number.NaN);
 }
 
 function readPanes(raw: unknown): Prefs['panes'] {
@@ -392,9 +443,14 @@ function readPaneWidth(pane: Pane, raw: unknown): number {
   return clampPaneWidth(pane, typeof raw === 'number' ? raw : Number.NaN);
 }
 
-/** Flip it. Written by the sidebar's one toggle. */
+/** Flip it. Written by the sidebar's one toggle and by the settings overlay. */
 export function setTheme(prefs: Prefs, theme: Theme): Prefs {
   return { ...prefs, theme };
+}
+
+/** Clamped on the way in, so nothing downstream has to wonder. */
+export function setFocusShare(prefs: Prefs, share: number): Prefs {
+  return { ...prefs, focusViewportShare: clampFocusShare(share) };
 }
 
 /**
@@ -409,8 +465,20 @@ export function setTheme(prefs: Prefs, theme: Theme): Prefs {
 export function applyTheme(
   theme: Theme,
   root: Element | null = globalThis.document?.documentElement ?? null,
+  prefersLight: () => boolean = osPrefersLight,
 ): void {
-  root?.classList.toggle('light', theme === 'light');
+  root?.classList.toggle('light', theme === 'system' ? prefersLight() : theme === 'light');
+}
+
+/**
+ * What the operating system asked for, injected so a test can state it.
+ *
+ * `matchMedia` is optional on purpose: a jsdom-ish environment and an Electron
+ * renderer disagree about whether it exists, and the safe direction to fail is
+ * the one `applyTheme` already documents — no class, therefore dark.
+ */
+function osPrefersLight(): boolean {
+  return globalThis.matchMedia?.('(prefers-color-scheme: light)').matches === true;
 }
 
 /**
