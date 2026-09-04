@@ -434,7 +434,14 @@ export function SessionList(props: SessionListProps) {
             <li key={group.project.id} className="flex flex-col gap-[5px]">
               {/* A caption, not a stop. A plain <div>, so nothing can focus it
                 and `j` never lands on a heading. */}
-              <div data-project-heading className="flex items-center gap-[7px] px-1 pb-0.5">
+              {/* `min-h` reserves the add button's own height. The heading is
+                  otherwise as tall as its tallest child, so the row -- and
+                  every row under it -- would jump a few pixels each time focus
+                  moved between projects and the add came or went. */}
+              <div
+                data-project-heading
+                className="flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5"
+              >
                 <button
                   type="button"
                   data-project-icon={group.project.id}
@@ -467,16 +474,23 @@ export function SessionList(props: SessionListProps) {
                   different kinds of thing. Refusing on click and saying why is
                   honest; refusing by being unclickable and unstyled just reads
                   as broken. */}
-                <button
-                  type="button"
-                  data-placeholder="new-session-in-project"
-                  onClick={() => onAddInProject(group.project)}
-                  title={`Sessions are created from the CLI — see the todo`}
-                  aria-label={`new session in ${group.project.name}`}
-                  className="flex h-[19px] w-[19px] cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim"
-                >
-                  <Plus size={13} strokeWidth={1.7} />
-                </button>
+                {/* Only for the project you are actually in. One per heading
+                  meant a column of `+` boxes standing over the session names
+                  at all times, for a control that can only mean the project
+                  holding focus. Removed from the DOM rather than hidden, so
+                  there is nothing invisible left to click or tab into. */}
+                {group.items.some((entry) => entry.session.id === focusedSessionId) && (
+                  <button
+                    type="button"
+                    data-placeholder="new-session-in-project"
+                    onClick={() => onAddInProject(group.project)}
+                    title={`Sessions are created from the CLI — see the todo`}
+                    aria-label={`new session in ${group.project.name}`}
+                    className="flex h-[19px] w-[19px] cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim"
+                  >
+                    <Plus size={13} strokeWidth={1.7} />
+                  </button>
+                )}
               </div>
 
               {group.items.map((entry) => {
@@ -633,13 +647,20 @@ export function SessionList(props: SessionListProps) {
           different questions ("what am I in", not "what do I do next") and
           the mockup keeps New session as its own full-width strip. */}
       <div className="border-line border-t px-[11px] py-2.5">
+        {/* Grey and small, at the operator's request. The fill and the medium
+            weight were doing as much of the shouting as the colour: an
+            ink-on-`line-strong` slab made the least urgent control in the
+            sidebar its loudest. It is an outline now, a step down the ink
+            ladder, and shorter and smaller in the same breath so the type
+            still fits the box. Hover restores full ink, so it still reads as
+            something you press. */}
         <button
           type="button"
           onClick={onAdd}
           aria-label="new session"
-          className="flex h-9 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[9px] border border-ink-ghost bg-line-strong font-medium text-[12.5px] text-ink hover:border-ink-faint"
+          className="flex h-7 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[8px] border border-ink-ghost text-[11.5px] text-ink-dim hover:border-ink-faint hover:text-ink"
         >
-          <Plus size={15} strokeWidth={1.7} />
+          <Plus size={13} strokeWidth={1.7} />
           New session
           <span className="ml-0.5 font-mono text-[10px] text-ink-faint">o</span>
         </button>
