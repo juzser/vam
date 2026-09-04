@@ -2,18 +2,33 @@
  * Pulling the commands out of one Claude Code answer, so `yy` has something to
  * copy.
  *
- * Claude Code hands commands back as prose inside an answer, never as
- * structured data, so this module has to guess -- and the only acceptable
- * guess is one that never puts words in the agent's mouth. The rule below was
- * developed against a corpus of 58 real transcripts (872 assistant messages,
- * 80 fenced blocks) and tuned until it accepted 40 of 320 logical lines with
- * no false positive. Every clause kills a specific thing that corpus contained.
+ * The rule is a convention, not a guess: a line the agent opens with `!` and a
+ * space is a command it is asking the operator to run. Nothing else is one.
  *
- * The load-bearing measurement: 74 of those 80 fences carry NO language tag.
- * A rule keyed on a ```bash tag would extract nothing from real data, so
- * untagged blocks must be read -- and untagged blocks are heterogeneous. They
- * held box-drawing diagrams, numbered prose in Vietnamese, git-log output and
- * aligned results tables alongside genuine commands. Hence the rejections.
+ * That distinction is the whole point. An earlier version inferred which lines
+ * *looked* runnable -- head-token shape, argument count, column alignment, sha
+ * detection -- and measured 100% precision on a 320-line corpus. It was still
+ * inference, and this strip sits directly above the prompt box: a line offered
+ * there is a line the operator may run without reading it twice. An explicit
+ * marker moves the decision to the only party that knows the answer. The agent
+ * says "run this"; vam does not decide what looked like it.
+ *
+ * Two findings of that older measurement still justify code here, so they
+ * survive:
+ *
+ * - 74 of 80 fenced blocks in the corpus carry NO language tag. A rule keyed
+ *   on a ```bash tag would extract nothing from real data, so untagged blocks
+ *   are read too, and only a non-shell tag excludes a block.
+ * - A real request was a ten-line `osascript -e 'tell application "Terminal"
+ *   ... end tell'`, useful only as ONE copyable unit. Hence the bounded
+ *   quote-joining below.
+ *
+ * Scope: marked lines are taken from fenced blocks only. Measured across every
+ * transcript on the operator's machine, both real `!` lines were inside
+ * fences and none appeared outside one, so accepting prose lines would widen
+ * the rule for no observed gain -- and prose is where a rhetorical `! ` is
+ * likeliest to be something other than a request. The fence is also the
+ * agent's own signal that the text is verbatim rather than discussed.
  *
  * Pure: a string in, data out. The type-only import of the renderer's model is
  * required -- main may name the renderer's types, never load its code.
@@ -23,9 +38,6 @@ import type { Command } from '../../../renderer/domain/model.js';
 
 /** The strip is a keyboard target, not a listing; more would not be readable. */
 const MAX_COMMANDS = 6;
-
-/** Past this, it is a pasted document rather than something to run. */
-const MAX_LENGTH = 400;
 
 /** A row header and a `copied: ...` line; longer is not readable in either. */
 const MAX_LABEL = 32;
@@ -40,10 +52,8 @@ const MAX_JOIN_LINES = 20;
 
 const FENCE = /```([A-Za-z0-9_+#.-]*)[ \t]*\n([\s\S]*?)```/g;
 const SHELL_TAG = /^(bash|sh|shell|zsh|console|shellsession)$/i;
-const PRINTABLE = /^[\x20-\x7e\n]*$/;
-const HEAD = /^(\.{0,2}\/)?[A-Za-z_][A-Za-z0-9_.-]*$/;
-/** A git-log line opens with an abbreviated sha, e.g. `f97b84b feat(ui): ...`. */
-const SHA = /^[0-9a-f]{7,40}$/;
+/** The agent's request marker: `!`, whitespace, then something to run. */
+const MARKER = /^!\s+(?=\S)/;
 
 /** Where the scan stands with respect to quoting, character by character. */
 type Quote = null | "'" | '"';
@@ -90,9 +100,7 @@ function stripComment(text: string): string {
 
 /**
  * The lines of a block, with a line whose quotes are unbalanced joined to the
- * ones after it. Required: one real command was a ten-line `osascript -e
- * 'tell application "Terminal" ... end tell'` that is only useful as ONE
- * copyable unit.
+ * ones after it. Required for the `osascript` request described above.
  *
  * An accumulation that never balances -- or that runs past `MAX_JOIN_LINES` --
  * is given back line by line rather than dropped, because the far likelier
@@ -121,42 +129,19 @@ function logicalLines(body: string): string[] {
   return out;
 }
 
-/** The runnable text of a logical line, or `null` if it is not one. */
+/**
+ * The runnable text of a marked logical line, or `null` if it carries no
+ * marker. The marker is an instruction to vam, not part of the command, so it
+ * and its whitespace are cut: the operator copies `gh pr merge 51`, not
+ * `! gh pr merge 51`.
+ *
+ * The whitespace is required. `!pnpm` glued to its text is shell history
+ * expansion or a negation, never a request written for a human to read.
+ */
 function toCommand(line: string): string | null {
   const stripped = stripComment(line.trim());
-  // A prompt marker is a transcript artefact, not part of what to run. `#` is
-  // deliberately NOT one of them -- see the leading-`#` rejection below.
-  const text = /^[!$] /.test(stripped) ? stripped.slice(2).trim() : stripped;
-
-  if (text === '') return null;
-  // Box-drawing rules, emoji and Vietnamese prose all die here -- and they can
-  // only die here once the comment is gone, since a comment may hold any of it.
-  if (!PRINTABLE.test(text)) return null;
-  if (text.length > MAX_LENGTH) return null;
-  if (text.startsWith('//')) return null;
-  // A whole-line comment, and the reason `#` is not a prompt marker. Comment
-  // cutting cannot reach this one: it needs whitespace before the `#`, so a
-  // comment that starts the line survives it and would read as a command.
-  // Treating `#` as a root prompt would recover `# apt install curl`, which is
-  // rare in agent output, at the cost of offering `# a note about the next
-  // line` -- which is everywhere inside a bash block -- to the operator as
-  // something to run. That is the worst failure this feature has, so the rule
-  // is precision-first: every leading `#` is a comment, spaced or not.
-  if (text.startsWith('#')) return null;
-
-  const tokens = text.split(/\s+/);
-  const head = tokens[0] as string;
-  if (!HEAD.test(head)) return null;
-  // An uppercase head is the first word of a sentence, not a program.
-  if (head !== head.toLowerCase()) return null;
-  if (SHA.test(head)) return null;
-  // A single bare word is a filename or a heading; a command has an argument.
-  if (tokens.length < 2) return null;
-  if (/[:{;]$/.test(text)) return null;
-  // Aligned columns are a results table: `yarn lint       clean  5.72s`.
-  if (/ {2,}/.test(text)) return null;
-
-  return text;
+  if (!MARKER.test(stripped)) return null;
+  return stripped.replace(MARKER, '');
 }
 
 /**
