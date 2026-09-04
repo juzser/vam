@@ -70,6 +70,14 @@ export const CHANNELS = {
    */
   terminalResize: 'vam:terminal:resize',
   /**
+   * ONE keystroke, into the pane the Terminal tab is showing. Answers a bare
+   * boolean: did vam type it into a session it could prove was its own. It is
+   * the only channel that writes into a RUNNING agent, so the false answer is
+   * drawn on the tab rather than dropped -- a surface that takes keys and
+   * silently discards them is worse than one that will not take focus.
+   */
+  terminalSend: 'vam:terminal:send',
+  /**
    * The directory picker. Answers BARE -- a path or `null` -- never an
    * `IpcResult`: "which directory" has exactly two answers and a cancelled
    * dialog is one of them, not a failure to report in a source's words. There

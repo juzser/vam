@@ -2127,6 +2127,40 @@ describe('the Terminal tab costs nothing until it is opened', () => {
     expect(q('[data-terminal]')).toBeNull();
     expect(read).toHaveBeenCalledTimes(whileOpen);
   });
+
+  it('hands the tab the SEND half of the bridge, not just the read half', async () => {
+    // The wiring, pinned where it is done. `send` is passed at this call site
+    // beside `read` and `resize` rather than reached for inside the tab, and
+    // an invisible prop is one a later edit drops in silence: without this
+    // test, deleting it would leave a pane that takes focus, accepts every
+    // keystroke and delivers none of them, with every other test still green.
+    const read = vi.fn(
+      async (): Promise<PaneView> => ({
+        kind: 'ok',
+        name: 'vam-sprint-board-reorder-a1b2c3',
+        text: 'the pane',
+      }),
+    );
+    const send = vi.fn(async () => 'sent' as const);
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { terminal: { read, send } },
+    });
+    draw();
+
+    await act(async () => {
+      fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
+      await Promise.resolve();
+    });
+    const pane = q<HTMLElement>('[data-terminal-pane]');
+    await act(async () => {
+      fireEvent.keyDown(pane as HTMLElement, { key: 'h' });
+      await Promise.resolve();
+    });
+    // The row travels with it, as it does for the read: the session typed
+    // into has to be the session whose screen is on the tab.
+    expect(send).toHaveBeenCalledWith(PROJECT.id, { kind: 'text', text: 'h' }, SESSION.id);
+  });
 });
 
 /**

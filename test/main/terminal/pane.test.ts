@@ -291,9 +291,18 @@ describe('reading the pane a session published', () => {
     });
   });
 
-  it('ignores a published pane that is not a session vam started', async () => {
-    // The operator's own tmux sessions publish theirs too, and vam may not
-    // draw one: it never appears in vam's own listing, so the tag answers.
+  it('says it cannot TELL, not that vam started nothing, for a published pane it must refuse', async () => {
+    // TWO CHANGES, ONE AFTER THE OTHER, and the second is about words. The
+    // row says it is running in the operator's own `notes` pane, which vam did
+    // not start and cannot adopt. Falling back to the tag would answer with
+    // vam's own session for this project -- a different agent's screen, drawn
+    // under this row's name and, by the same rule, typed into and killed.
+    //
+    // Refusing was right; reporting the refusal as `not-vam` was not. It says
+    // "vam did not start a tmux session for this one" while vam is holding a
+    // published pane name it has just rejected, and it sends the operator
+    // looking for a session that is running. `mispaired` carries the name the
+    // row published, which is the one fact that explains the refusal.
     const { run } = runner({
       'list-sessions': ok(`${ATLAS}\tvam-atlas-aa11bb\n`),
       'capture-pane': ok('alpha screen'),
@@ -304,6 +313,33 @@ describe('reading the pane a session published', () => {
       'sess-alpha#7',
       new Map([['sess-alpha', 'notes']]),
     );
-    expect(view).toEqual({ kind: 'ok', name: 'vam-atlas-aa11bb', text: 'alpha screen' });
+    expect(view).toEqual({ kind: 'mispaired', published: 'notes' });
+  });
+
+  it('reports the same when the published pane is one of vam’s that has ended', async () => {
+    // A vam pane that was listed a moment ago and is gone now. The tag path
+    // would answer with a DIFFERENT live session this row was never in, so
+    // the refusal stands -- and it says which pane it was asked to trust.
+    const { run } = runner({
+      'list-sessions': ok(`${ATLAS}\tvam-atlas-aa11bb\n`),
+      'capture-pane': ok('alpha screen'),
+    });
+    const view = await readSessionPane(
+      run,
+      ATLAS,
+      'sess-alpha#7',
+      new Map([['sess-alpha', 'vam-atlas-zz99zz']]),
+    );
+    expect(view).toEqual({ kind: 'mispaired', published: 'vam-atlas-zz99zz' });
+  });
+
+  it('still says not-vam when nobody published anything and vam has nothing here', async () => {
+    // The distinction the fourth answer exists for: NOBODY SAID is not the
+    // same as SAID SOMETHING VAM MUST REFUSE, and only the first is honestly
+    // reported as vam having started nothing.
+    const { run } = runner({ 'list-sessions': ok('') });
+    expect(await readSessionPane(run, ATLAS, 'sess-alpha#7', new Map())).toEqual({
+      kind: 'not-vam',
+    });
   });
 });

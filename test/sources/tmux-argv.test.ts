@@ -21,6 +21,7 @@ import {
   killSessionArgv,
   listSessionsArgv,
   newSessionArgv,
+  sendBackspaceArgv,
   sendEnterArgv,
   sendTextArgv,
   tagSessionArgv,
@@ -114,6 +115,12 @@ describe('tmux argv', () => {
       'hello',
     ]);
     expect(sendEnterArgv('vam-a1b2c3')).toEqual(['send-keys', '-t', '=vam-a1b2c3:', 'Enter']);
+    // The third INTERPRETED key, and the reason it cannot be the literal one:
+    // measured on tmux 3.7b over a private `-L` socket, `send-keys 'BSpace'`
+    // deleted the character before the cursor, while `send-keys -l -- 'BSpace'`
+    // typed the six letters into the line. Backspace is a key, not text.
+    expect(sendBackspaceArgv('vam-a1b2c3')).toEqual(['send-keys', '-t', '=vam-a1b2c3:', 'BSpace']);
+    expect(sendBackspaceArgv('vam-a1b2c3')).not.toContain('-l');
   });
 
   it('types text tmux would otherwise read as a key or as an option', () => {

@@ -26,8 +26,9 @@
  * nobody set reads back as the empty string, which is exactly that answer.
  */
 
-import type { PaneSize, PaneView } from '../../shared/terminal.js';
+import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
 import { sessionIdOf } from '../sources/claude-code/deliver.js';
+import { sendBackspaceArgv, sendEnterArgv, sendTextArgv } from '../sources/tmux/argv.js';
 import {
   listVamSessions,
   readPane,
@@ -48,7 +49,17 @@ import {
 export type SessionMatch =
   | { readonly kind: 'none' }
   | { readonly kind: 'one'; readonly name: string }
-  | { readonly kind: 'ambiguous'; readonly names: readonly string[] };
+  | { readonly kind: 'ambiguous'; readonly names: readonly string[] }
+  /**
+   * The row named its own pane and vam cannot use it. A FOURTH ANSWER rather
+   * than `none`, because the two are different facts: `none` is nobody having
+   * said anything and vam having nothing of its own here, while this is a row
+   * that said exactly where it is and pointed somewhere vam must not act on.
+   * Everything that WRITES treats them the same -- refuse -- but the tab has
+   * to say different words, and it was saying "vam did not start a session
+   * for this one" while holding a published name it had just rejected.
+   */
+  | { readonly kind: 'mispaired'; readonly published: string };
 
 export function matchVamSession(sessions: readonly TmuxSession[], projectId: string): SessionMatch {
   // An empty id is what an UNSET option reads back as, so an empty id asking
@@ -85,8 +96,28 @@ export function targetSession(
   panes: ReadonlyMap<string, string> | undefined,
 ): SessionMatch {
   const published = rowId === undefined ? undefined : panes?.get(sessionIdOf(rowId));
-  if (published !== undefined && sessions.some((session) => session.name === published)) {
-    return { kind: 'one', name: published };
+  if (published !== undefined) {
+    // THE PROJECT IS CHECKED, AND A DISAGREEMENT ENDS THE SEARCH. Matching
+    // the name alone made this fast path strictly WEAKER than the fallback it
+    // exists to bypass, which has always filtered on the project: a stale or
+    // crossed published value naming a vam session of ANOTHER project
+    // resolved here as a confident single match, and a keystroke went into
+    // that project's running agent.
+    //
+    // But refusing the value and then FALLING THROUGH is worse still, and it
+    // is why this is one branch rather than a condition. The tag path answers
+    // a different question and can resolve a perfectly healthy session that
+    // this row was never in -- so a row with a wrong pairing would have its
+    // keys typed into a session chosen by a rule that never looked at the
+    // row. No published value is "nobody said, so try the tag"; a published
+    // value that disagrees is "this row is wrong", and vam stops.
+    //
+    // An empty id is what an unset option reads back as, so it may not match
+    // anything; `matchVamSession` refuses it for the same reason.
+    return projectId !== '' &&
+      sessions.some((session) => session.name === published && session.project === projectId)
+      ? { kind: 'one', name: published }
+      : { kind: 'mispaired', published };
   }
   return matchVamSession(sessions, projectId);
 }
@@ -117,6 +148,11 @@ export async function readSessionPane(
   }
   if (match.kind === 'ambiguous') {
     return { kind: 'ambiguous', names: match.names };
+  }
+  // Carried through rather than flattened into `not-vam`: the row said where
+  // it is, and what the tab owes the operator is that fact, not a denial.
+  if (match.kind === 'mispaired') {
+    return { kind: 'mispaired', published: match.published };
   }
   const pane = await readPane(run, match.name);
   if (pane.kind === 'ok') {
@@ -164,4 +200,83 @@ export async function resizeSessionPane(
   const match = targetSession(listed.sessions, projectId, rowId, panes);
   if (match.kind !== 'one') return false;
   return (await resizeWindow(run, match.name, size)) === null;
+}
+
+/**
+ * Type ONE keystroke into the pane the tab is showing. `true` means tmux took
+ * it; every `false` means nothing was sent at all.
+ *
+ * THIS IS THE FIRST THING IN VAM THAT WRITES INTO A RUNNING AGENT. The resize
+ * above changes how someone's screen is drawn; this changes what they typed.
+ * So it is aimed by `targetSession` -- the SAME rule the read and the resize
+ * use, and deliberately not a second opinion about whose terminal this is --
+ * and it refuses outright on every answer but `one`. `none` is a session vam
+ * did not start (including the operator's own, which is listed with an empty
+ * project and is not vam's to type into), and `ambiguous` is two candidates,
+ * where guessing would land a keystroke in the wrong agent's prompt.
+ *
+ * The refusal is REPORTED rather than swallowed, and it says which refusal it
+ * was: `unaimed` when the pairing named no single session, `refused` when
+ * tmux would not deliver to the session vam did name. The tab draws a
+ * different sentence for each, because they send the operator to different
+ * places.
+ *
+ * THE RACE THIS DOES NOT CLOSE, stated plainly because it is real and because
+ * a comment that implied otherwise would be worse than none. Ownership is
+ * decided by `list-sessions` and the key is delivered by a SECOND tmux
+ * command. A session that exits between the two normally fails safe -- tmux
+ * answers `can't find pane` and this returns false -- but if its exact name
+ * is taken by a new session in that window, the keystroke lands there.
+ *
+ * WHY THAT IS IMPROBABLE AND NOT IMPOSSIBLE. A vam session name carries six
+ * base-36 characters of randomness (`vamSessionName`), about 2.2e9 values, so
+ * the collision is not something a fresh vam session stumbles into: it takes
+ * a process that creates a tmux session with that exact name inside a window
+ * a few milliseconds wide. Improbable is the honest word. Not impossible.
+ *
+ * HOW IT WOULD BE CLOSED, so the next reader does not have to rediscover it.
+ * tmux has no compare-and-send: no verb sends a key conditional on a session
+ * still being the one you looked at. But it has something that works better,
+ * and it is MEASURED on tmux 3.7b over a private `-L` socket rather than
+ * assumed: session IDS are not reused. Killing `$1` and immediately creating
+ * a session with the same NAME produced `$2`, `send-keys -t '$3'` delivers,
+ * and a dead id answers `can't find session: $3` and exits 1 instead of
+ * landing somewhere else. Carrying `#{session_id}` out of the SAME
+ * `list-sessions` that proved the project and sending to the id would make
+ * the reuse case impossible for the lifetime of the server -- leaving only a
+ * server restart between the two calls, which kills every vam session anyway.
+ *
+ * It is not done here because the id has to come from that one listing to be
+ * worth anything, which means changing the listing's wire format
+ * (`listSessionsArgv`), its parser and `TmuxSession` -- read by five call
+ * sites and stubbed by six test files, one directory of which is being
+ * edited by another task. That is its own change, with its own tests, and
+ * doing it inside this one would be the kind of drive-by that breaks a peer.
+ * Every write path here shares this window, not just the keystroke.
+ */
+export async function sendSessionKey(
+  run: TmuxRun,
+  projectId: string,
+  key: PaneKey,
+  rowId?: string,
+  panes?: ReadonlyMap<string, string>,
+): Promise<PaneSendResult> {
+  const listed = await listVamSessions(run);
+  // vam could not look, so it cannot claim a pairing problem either -- but it
+  // certainly did not deliver. `unaimed` is the honest half of that: nothing
+  // was aimed at anything.
+  if (listed.kind === 'unavailable') return 'unaimed';
+  const match = targetSession(listed.sessions, projectId, rowId, panes);
+  if (match.kind !== 'one') return 'unaimed';
+  // The three builders are kept apart in `tmux/argv.ts` for the one reason
+  // that matters here: `-l` types, and Return and Backspace have to be
+  // PRESSED. There is deliberately no builder that takes a key name, so
+  // nothing here can turn the operator's text into a keypress by accident.
+  const argv =
+    key.kind === 'enter'
+      ? sendEnterArgv(match.name)
+      : key.kind === 'backspace'
+        ? sendBackspaceArgv(match.name)
+        : sendTextArgv(match.name, key.text);
+  return (await run(argv)).failure === null ? 'sent' : 'refused';
 }

@@ -98,14 +98,31 @@ export function paneForRow(
   row: ReplyRow,
   panes?: ReadonlyMap<string, string>,
 ): string | null {
-  const published = panes?.get(row.sessionId);
-  if (published !== undefined && sessions.some((session) => session.name === published)) {
-    return published;
-  }
   const projectId = projectIdOf(row.cwd);
   // An unset option reads back as the empty string, so an empty id would
-  // sweep up every session vam did NOT start.
+  // sweep up every session vam did NOT start. Checked before the published
+  // path as well as the tag one: it disqualifies both.
   if (projectId === '') return null;
+  const published = panes?.get(row.sessionId);
+  if (published !== undefined) {
+    // A PUBLISHED VALUE THAT DISAGREES IS EVIDENCE OF A CORRUPT PAIRING, NOT
+    // THE ABSENCE OF EVIDENCE -- and that distinction is the whole of this
+    // branch. No published value means "nobody said", so the tag path below
+    // gets its chance. A published value naming a session that is not tagged
+    // for THIS row's project means something about this row is wrong: stale,
+    // crossed, or a session that has moved. The only safe answer is to stop.
+    //
+    // Falling through instead was a defect with a bigger blast radius than
+    // the one it replaced. The tag path asks a different question -- one
+    // agent in this project, one session tagged for it -- and in the fixture
+    // that found this, it answers with a DIFFERENT, healthy session: so a row
+    // whose published pairing was wrong got another project's session typed
+    // into before, and its own project's other session KILLED after. Both are
+    // the ambiguity the published field was added to resolve.
+    return sessions.some((session) => session.name === published && session.project === projectId)
+      ? published
+      : null;
+  }
   const here = agents.filter((agent) => projectIdOf(agent.cwd) === projectId);
   if (here.length !== 1) return null;
   const tagged = sessions.filter((session) => session.project === projectId);

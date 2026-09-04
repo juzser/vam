@@ -20,8 +20,8 @@
  * reach tmux" is the exact conflation the provider was built to prevent.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PaneSize, PaneView } from '../../shared/terminal.js';
+import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
+import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
 import { fitPane, sameSize } from './terminal-size.js';
 
 /**
@@ -67,6 +67,18 @@ export type ResizePane = (
   rows: number,
   rowId?: string,
 ) => Promise<boolean>;
+
+/**
+ * Typing into the pane: `window.api.terminal.send`, or nothing.
+ *
+ * ONE KEYSTROKE PER CALL, and it is the only thing vam does that writes into
+ * a session somebody's agent is RUNNING in. It is aimed by the same recorded
+ * pairing the read and the resize are (`main/terminal/pane.ts`), and main
+ * refuses rather than guessing when that pairing names no single session --
+ * a key sent to a wrongly-resolved pane is typed into someone else's work.
+ * The boolean is that refusal, and it is drawn rather than dropped.
+ */
+export type SendKey = (projectId: string, key: PaneKey, rowId?: string) => Promise<PaneSendResult>;
 
 /**
  * How long a wrapper has to stop moving before tmux is told about it.
@@ -139,6 +151,7 @@ export function TerminalTab({
   rowId,
   read,
   resize,
+  send,
 }: {
   readonly projectId: string | null;
   /**
@@ -150,6 +163,16 @@ export function TerminalTab({
   readonly rowId?: string | undefined;
   readonly read: ReadPane | undefined;
   readonly resize: ResizePane | undefined;
+  /**
+   * REQUIRED, exactly as `read` and `resize` are, and `undefined` only where
+   * they are: the browser build, which has no main process behind it. It
+   * briefly defaulted to reaching for `window.api` itself, which worked and
+   * was worse -- the wiring was then invisible at the call site, where the
+   * other two are plainly passed, and a member nobody can see being passed is
+   * a member a later edit drops with nothing to notice. As a required prop
+   * the compiler is what notices.
+   */
+  readonly send: SendKey | undefined;
 }) {
   /**
    * `null` is "has not answered yet", and it is a state rather than an
@@ -262,6 +285,177 @@ export function TerminalTab({
    */
   const showing = view !== null && view.kind === 'ok';
 
+  /** Why the last keystroke did NOT land, or `null`. Drawn, not swallowed. */
+  const [refused, setRefused] = useState<PaneSendResult | null>(null);
+
+  /**
+   * The refusal belongs to the session it was raised for. `sent.current` and
+   * `view` are already cleared when the tab changes what it is about, for the
+   * same reason this must be: a sentence saying vam could not type into
+   * session A, still on screen over session B's pane, is a claim about B that
+   * nothing ever made. The row is part of the identity because two sessions
+   * of one project are two different panes.
+   */
+  const shownAbout = `${projectId ?? ''}|${rowId ?? ''}`;
+  const refusalFor = useRef(shownAbout);
+  if (refusalFor.current !== shownAbout) {
+    refusalFor.current = shownAbout;
+    if (refused !== null) setRefused(null);
+  }
+
+  /**
+   * THE ORDER KEYS ARE TYPED IS THE ORDER THEY MUST ARRIVE, and nothing about
+   * two `execFile` spawns per keystroke guarantees that on its own. Each key
+   * costs a `list-sessions` and a `send-keys`, both unordered with respect to
+   * every other key's pair, so typing `n`, `o`, Return can finish in any
+   * order at all -- and the one that matters is Return overtaking, which
+   * SUBMITS a half-typed line to a live agent and leaves the rest of the
+   * word landing on the next prompt.
+   *
+   * Measured elsewhere in this project, scheduling starvation has stretched
+   * an 11ms operation past five seconds. Two spawns per keystroke is not a
+   * narrow window.
+   *
+   * So the sends are a chain: each key waits for the previous one to answer
+   * before it is sent. The cost is that fast typing is delivered at the rate
+   * tmux can take it, which is the correct trade -- an ordered line typed
+   * slightly late beats a scrambled one typed at once.
+   */
+  const chain = useRef<Promise<void>>(Promise.resolve());
+  /**
+   * Which run of the chain is still wanted. A send that fails abandons every
+   * key QUEUED BEHIND IT rather than sending them into the gap it just left:
+   * continuing would hand the agent a line with a hole in it, which is the
+   * same class of harm as typing into the wrong pane -- damage that looks
+   * like the operator's own text. Keys typed AFTER the refusal is on screen
+   * are a new decision by a person who can see it, so they start a new run.
+   */
+  const run = useRef(0);
+
+  /**
+   * FOCUS ON ARRIVAL, ONCE. This component is mounted by the tab switch and by
+   * nothing else, so the first pane it draws IS the operator arriving at the
+   * terminal, and the tab they opened to type in should be ready to type in.
+   *
+   * THE LATCH IS THE WHOLE POINT and it was missing. `showing` is not a mount
+   * signal: the `shownFor` block above sets `view` to `null` DURING RENDER
+   * whenever the project changes, so `showing` goes true, false, true again
+   * on every session switch -- and a bare `if (showing) focus()` therefore
+   * took focus back every time. Escape let go and the next read grabbed on,
+   * so `j` to move to the next session typed a `j` into that session's agent
+   * instead, forever. A transient `unavailable` read did the same thing.
+   * Latching means the way out stays out: once this component has given the
+   * pane focus, only the operator decides where focus goes next.
+   */
+  const grabbed = useRef(false);
+  useEffect(() => {
+    if (!showing || grabbed.current) return;
+    grabbed.current = true;
+    paneRef.current?.focus();
+  }, [showing]);
+
+  /**
+   * WHO OWNS A KEY WHILE THE PANE HAS FOCUS. Three answers, and the middle one
+   * is the one that was easy to get wrong.
+   *
+   * A Cmd/Ctrl/Alt chord is VAM'S, always. The shortcut that takes you
+   * elsewhere must work from wherever you are, which is why the canvas
+   * exempts chords from its own typing guard.
+   *
+   * ALT IS IN THAT LIST BECAUSE VAM BINDS IT: `normalizeKey` emits an `Alt-`
+   * token (`keyboard/chords.ts`). Alt was missing here and the test for
+   * "printable" was a one-character `event.key`, which `Alt+1` and `Alt+k`
+   * both satisfy -- so those were stopped and typed into the agent while vam
+   * never heard them.
+   *
+   * SHIFT IS DELIBERATELY NOT IN IT. Shift is how a capital and every symbol
+   * on the number row is produced, so exempting it would leave a pane that
+   * cannot type `K` or `!`. It is not a chord modifier; it is part of the
+   * character.
+   *
+   * Nothing is sent and nothing is stopped for a chord, so it reaches the
+   * window listener and does its one thing.
+   *
+   * WHICH MEANS CTRL+C DOES NOT INTERRUPT THE AGENT, and someone who can type
+   * into this pane will eventually try it. It is vam's chord here like every
+   * other, so it does whatever vam binds it to and never reaches tmux. That
+   * is deliberate and not an oversight to fix by narrowing the exemption:
+   * interrupting a running agent is a destructive action on someone's work,
+   * and it needs an affordance that says so -- a visible control, or a chord
+   * of its own that is captioned in the key sheet as interrupting THIS
+   * session -- plus a `send-keys 'C-c'` builder that, per `tmux/argv.ts`,
+   * must be its own named builder and never a key-name parameter. Widening
+   * this branch instead would hand every chord to the pane, and the first
+   * casualty would be the tab switch the operator uses to leave.
+   *
+   * A printable key, Return and Backspace are the PANE'S, and they are
+   * stopped here. The
+   * canvas reads a focused element as text entry only when it is an
+   * `INPUT` or a `TEXTAREA`, and this is a `section`: without stopping the
+   * event, typing `j` here would type a `j` into the agent AND move vam's
+   * cursor.
+   *
+   * Everything else is the BROWSER'S -- the arrows, the Page keys, Home/End,
+   * Tab. The first six are why this element takes focus at all (the pane is a
+   * scroll region with a hidden scrollbar), and Tab is the second way out.
+   * They are not forwarded to tmux, so scrolling the transcript is still
+   * scrolling and not a keypress inside the agent.
+   */
+  const onKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLElement>) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const surface = event.currentTarget;
+      if (event.key === 'Escape') {
+        // THE WAY OUT. A focus stop that consumes keys and cannot be left
+        // without a mouse is a keyboard trap, and this one consumes keys now.
+        event.preventDefault();
+        event.stopPropagation();
+        surface.blur();
+        return;
+      }
+      const stroke: PaneKey | null =
+        event.key === 'Enter'
+          ? { kind: 'enter' }
+          : // Correcting a typo is part of typing: a pane that takes
+            // characters and cannot take them back strands the operator on a
+            // wrong line with no way to fix it from vam. It is a KEY, not the
+            // word -- see `sendBackspaceArgv`.
+            event.key === 'Backspace'
+            ? { kind: 'backspace' }
+            : // One character is what a printable key produces, composed by
+              // the layout -- so an accented character arrives already
+              // composed and a named key (`ArrowUp`, `F5`) never matches.
+              event.key.length === 1
+              ? { kind: 'text', text: event.key }
+              : null;
+      if (stroke === null) return;
+      // THE GUARD COMES BEFORE THE CANCELLING, and it did not. A build with no
+      // bridge behind it -- the browser one -- consumed every printable key,
+      // Return and Backspace and delivered none of them, which left vam's own
+      // keyboard dead for anyone whose focus had landed here until they found
+      // Escape or Tab. A key vam cannot deliver is not vam's to eat: it goes
+      // back to the window listener, where the chords still work.
+      if (send === undefined || projectId === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      // Return is NOT sent behind the text: each keystroke is one call, so
+      // submitting is the operator pressing Return and never vam adding one.
+      // Queued behind the previous key rather than raced against it, and the
+      // run is captured now so a failure can abandon what is already waiting.
+      const mine = run.current;
+      chain.current = chain.current.then(async () => {
+        if (run.current !== mine) return;
+        const landed = await send(projectId, stroke, rowId).catch((): PaneSendResult => 'refused');
+        if (landed === 'sent') return;
+        // Everything still queued was typed before the operator could know
+        // this failed, so it is dropped rather than sent into the hole.
+        run.current += 1;
+        setRefused(landed);
+      });
+    },
+    [send, projectId, rowId],
+  );
+
   useEffect(() => {
     const pane = paneRef.current;
     const ruler = rulerRef.current;
@@ -329,6 +523,27 @@ export function TerminalTab({
       </p>
     );
   }
+  if (view.kind === 'mispaired') {
+    return (
+      <p
+        data-terminal
+        data-terminal-empty
+        data-terminal-mispaired
+        className="text-[11px] text-ink-faint"
+      >
+        {/* NOT "vam did not start a session for this one", which is what stood
+            here and was false in the way that costs an operator time: vam did
+            start sessions for this project, it just cannot prove that any of
+            them is THIS row's. The row published the pane it believes it is
+            in, and vam is refusing to substitute a different live session for
+            it -- so the name it published is the one useful thing to say. The
+            same refusal is why nothing is typed here: there is no pane
+            element on this branch at all, so the surface cannot take a key it
+            could not deliver. */}
+        {`vam cannot tell which screen is this session's: it reports that it is running in the tmux pane ${view.published}, which is not one vam started for this project. Rather than show another session's screen, it is showing none.`}
+      </p>
+    );
+  }
   if (view.kind !== 'ok') {
     return (
       <p data-terminal data-terminal-empty className="text-[11px] text-ink-faint">
@@ -352,28 +567,61 @@ export function TerminalTab({
             goes nowhere near vam's own output. */}
         {view.name}
       </p>
-      {/* A FOCUS STOP, because this is a scroll region and vam is driven from
-          the keyboard. `vam-no-scrollbar` hides the bar, so without a focus
-          stop there was no way at all -- mouse or key -- to read past the
-          first screenful. Tab reaches it and the arrow keys, Page keys and
-          Home/End scroll it, all of which the browser does for a focused
-          scrollable element; nothing is bound here, so nothing captions it as
-          bound and `buildKeySheet` has nothing to list. It is a named region
-          rather than a button: it activates nothing, and a focus stop that
-          activates nothing while looking activatable is its own trap. */}
-      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a SCROLLABLE region
-          is the one case where WCAG 2.1.1 requires exactly this. The rule
-          reads a focus stop on a non-interactive element as a keyboard trap
-          with nothing to activate, which is right almost everywhere and wrong
-          here: without the focus stop the content below the fold is reachable
-          by no key at all. It is a named <section> rather than a role, so the
-          region is the element's own semantics, and nothing is bound to it. */}
+      {/* WHERE THE KEYS GO, said on the surface. A box that takes focus and
+          swallows what is typed is worse than one that will not take focus,
+          and there are two ways for this one to swallow: a build with no
+          bridge behind it, and a keystroke main refused because it could no
+          longer name a single session for this project. Both are sentences
+          here rather than silence. */}
+      <p data-terminal-typing className="flex-none text-[10px] text-ink-faint">
+        {send === undefined
+          ? 'vam cannot type into this pane here — the desktop app can.'
+          : `keys go to ${view.name} — Escape leaves the pane.`}
+      </p>
+      {refused !== null && (
+        <p
+          data-terminal-refused
+          data-terminal-refusal={refused}
+          className="flex-none text-[10px] text-ink-faint"
+        >
+          {refused === 'unaimed'
+            ? // vam declined to guess: no session of its own answers for this
+              // project, or two do.
+              'vam did not type that: it can no longer name one session of its own for this project.'
+            : // tmux would not deliver to a session vam DID name -- almost
+              // always one that ended between the listing and the send, which
+              // the next read draws as `gone`. Sending the operator after a
+              // pairing problem here would send them after nothing.
+              'vam did not type that: tmux would not deliver it, so the session may have just ended.'}
+          {' Anything typed behind it was dropped rather than sent into the gap.'}
+        </p>
+      )}
+      {/* A FOCUS STOP, AND NOW A TYPING SURFACE -- and the second is why the
+          first can no longer be justified by the old reasoning. It began as a
+          scroll region: `vam-no-scrollbar` hides the bar, so without a focus
+          stop there was no way at all, mouse or key, to read past the first
+          screenful. That is still true, and the arrows, Page keys and
+          Home/End still scroll here because they are still not bound.
+          What changed is that printable keys and Return are bound, and are
+          typed into a running agent. So this is no longer "a focus stop that
+          activates nothing": it activates something on someone else's
+          machine. It is therefore focused deliberately on arrival, captioned
+          above with where the keys go, and left by Escape or by Tab -- a
+          surface that eats every key with no way out is the trap the sentence
+          that stood here promised this was not. */}
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region
+          is the one case where WCAG 2.1.1 requires exactly this, and this one
+          now also takes text. It is a named <section> and not a textbox role:
+          it is not an editable field -- nothing here holds a value, and the
+          characters live in the agent's own screen, which arrives back as the
+          next capture. */}
       <section
         ref={paneRef}
         data-terminal-pane
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: see above -- a scrollable region is the one case WCAG 2.1.1 requires this
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: see above -- a scrollable region that also takes keys
         tabIndex={0}
-        aria-label={`terminal output of ${view.name}`}
+        onKeyDown={onKeyDown}
+        aria-label={`terminal of ${view.name}: typing goes to this session, Escape leaves`}
         className="vam-no-scrollbar relative min-h-0 flex-1 overflow-auto rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-[10.5px] text-ink leading-[1.45] focus-visible:outline focus-visible:outline-2 focus-visible:outline-line-strong"
       >
         {/* The ruler. It is INSIDE the pane so that it inherits the exact font

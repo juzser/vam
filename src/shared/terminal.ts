@@ -6,7 +6,7 @@
  * produces this, the preload forwards it and the renderer draws it, so it
  * cannot live in any one of the three.
  *
- * FIVE ANSWERS, AND THE SPLIT IS THE POINT (`sources/tmux/spawn.ts`). `ok` is
+ * SIX ANSWERS, AND THE SPLIT IS THE POINT (`sources/tmux/spawn.ts`). `ok` is
  * a screen. `not-vam` is vam having looked and found no session of its own for
  * this one -- which includes tmux reporting no server running, since no server
  * means no sessions. `gone` is a session vam did start that has since ended.
@@ -16,6 +16,15 @@
  * having found out, and it carries the reason tmux gave. Collapsing the last
  * one into an empty pane would tell the operator there is nothing to look at
  * on the strength of never having looked.
+ *
+ * `mispaired` is the sixth and the newest, and it exists because `not-vam` was
+ * being told for it. The row PUBLISHED the pane it is running in
+ * (`sources/claude-code/session-pane.ts`) and that pane is not one vam can use
+ * for this project -- another project's, ended, or never vam's at all. "vam
+ * did not start a session for this one" is then false in the way that costs an
+ * operator time: vam did start one, it simply cannot prove that one is this
+ * row's, and the two facts send a person to different places. It carries the
+ * name the row published so the answer can say what it was asked to trust.
  */
 
 import type { SourceError } from '../renderer/sources/port.js';
@@ -25,6 +34,7 @@ export type PaneView =
   | { readonly kind: 'not-vam' }
   | { readonly kind: 'gone' }
   | { readonly kind: 'ambiguous'; readonly names: readonly string[] }
+  | { readonly kind: 'mispaired'; readonly published: string }
   | { readonly kind: 'unavailable'; readonly error: SourceError };
 
 /**
@@ -60,5 +70,63 @@ export function isPaneSize(size: PaneSize): boolean {
     size.columns <= MAX_COLUMNS &&
     size.rows >= MIN_ROWS &&
     size.rows <= MAX_ROWS
+  );
+}
+
+/**
+ * ONE KEYSTROKE, on its way to the pane -- and there are exactly two kinds
+ * because tmux has exactly two ways to deliver one (`sources/tmux/argv.ts`).
+ *
+ * `text` is typed LITERALLY (`send-keys -l --`), which is what stops a pane
+ * being sent `^[` because the operator typed the letters of `Escape`. `enter`
+ * and `backspace` are the two keys that have to be INTERPRETED, which `-l`
+ * forbids, so each is its own kind rather than a character inside the text --
+ * measured, `send-keys -l -- 'BSpace'` types the word into the line.
+ *
+ * THE LIST IS DELIBERATELY THIS SHORT. It is not a key-forwarding mechanism:
+ * these are the keys typing is made of -- characters, submit, correct -- and
+ * anything else that ever belongs here is a decision, not an addition.
+ *
+ * A discriminated pair rather than a string with a flag: the renderer is the
+ * least trusted process in the app, and "was this literal?" must not be a
+ * boolean that a missing field can make false.
+ */
+export type PaneKey =
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'enter' }
+  | { readonly kind: 'backspace' };
+
+/**
+ * The longest text one keystroke may carry. A `KeyboardEvent.key` for a
+ * printable key is one character, and a composed one (an IME, a dead key) is
+ * a very few. The bound is what keeps this channel from becoming an unbounded
+ * paste into a running agent by a renderer that is no longer vam's.
+ */
+export const MAX_KEY_TEXT = 16;
+
+/**
+ * What became of one keystroke. THREE ANSWERS, and the split exists because a
+ * boolean made the tab lie.
+ *
+ * `unaimed` is vam declining to guess: no session of its own answers for this
+ * project, or two do. `refused` is tmux having rejected the delivery to a
+ * session vam DID name -- overwhelmingly the session ending between the
+ * listing and the send, which the tab's own next read will show as `gone`.
+ * They are different sentences to a person: one sends them looking for a
+ * pairing problem, the other tells them their agent exited. A single `false`
+ * said the first for both.
+ */
+export type PaneSendResult = 'sent' | 'unaimed' | 'refused';
+
+/** Whether a value off the bridge is a keystroke vam will send. */
+export function isPaneKey(value: unknown): value is PaneKey {
+  if (typeof value !== 'object' || value === null) return false;
+  const key = value as { kind?: unknown; text?: unknown };
+  if (key.kind === 'enter' || key.kind === 'backspace') return true;
+  return (
+    key.kind === 'text' &&
+    typeof key.text === 'string' &&
+    key.text.length > 0 &&
+    key.text.length <= MAX_KEY_TEXT
   );
 }
