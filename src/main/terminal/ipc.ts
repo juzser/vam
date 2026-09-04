@@ -15,6 +15,8 @@
 import type { PaneView } from '../../shared/terminal.js';
 import { CHANNELS } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
+import { readPublishedPanes } from '../sources/claude-code/session-pane.js';
+import { defaultSessionsRoot } from '../sources/claude-code/session-status.js';
 import type { TmuxRun } from '../sources/tmux/spawn.js';
 import { readSessionPane } from './pane.js';
 
@@ -26,13 +28,29 @@ import { readSessionPane } from './pane.js';
  */
 export const MAX_PROJECT_ID_LENGTH = 500;
 
-export function registerTerminalIpc(ipcMain: IpcMainLike, run: TmuxRun): void {
+/**
+ * `readPanes` is injected for the reason every filesystem read in main is: the
+ * default enumerates the operator's own `~/.claude/sessions`, and a test must
+ * never do that. It is what makes the tab's answer per SESSION rather than per
+ * project -- see `terminal/pane.ts`.
+ */
+export function registerTerminalIpc(
+  ipcMain: IpcMainLike,
+  run: TmuxRun,
+  readPanes: () => Promise<ReadonlyMap<string, string>> = () =>
+    readPublishedPanes(defaultSessionsRoot()),
+): void {
   ipcMain.handle(CHANNELS.terminalRead, async (_event, ...args: unknown[]): Promise<PaneView> => {
-    const [projectId] = args;
+    const [projectId, rowId] = args;
+    // The row is OPTIONAL: a caller that names only a project still gets the
+    // project-wide answer. Both ids are bounded for the same reason -- they
+    // arrive from the least trusted process in the app.
     if (
-      args.length !== 1 ||
+      args.length < 1 ||
+      args.length > 2 ||
       typeof projectId !== 'string' ||
-      projectId.length > MAX_PROJECT_ID_LENGTH
+      projectId.length > MAX_PROJECT_ID_LENGTH ||
+      (rowId !== undefined && (typeof rowId !== 'string' || rowId.length > MAX_PROJECT_ID_LENGTH))
     ) {
       // A refusal is data here like everywhere else on this bridge, and it is
       // deliberately NOT an empty pane: vam did not look, so it may not say
@@ -46,6 +64,11 @@ export function registerTerminalIpc(ipcMain: IpcMainLike, run: TmuxRun): void {
         },
       };
     }
-    return readSessionPane(run, projectId);
+    return readSessionPane(
+      run,
+      projectId,
+      rowId,
+      rowId === undefined ? undefined : await readPanes(),
+    );
   });
 }

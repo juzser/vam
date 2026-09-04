@@ -199,11 +199,14 @@ describe('reading the pane', () => {
 });
 
 describe('the terminal channel', () => {
-  function harness(run: TmuxRun) {
+  function harness(run: TmuxRun, panes: ReadonlyMap<string, string> = new Map()) {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
     registerTerminalIpc(
       { handle: (channel, listener) => void handlers.set(channel, listener) },
       run,
+      // Injected, and never the default: the default enumerates the
+      // operator's own `~/.claude/sessions`, which no test may read.
+      async () => panes,
     );
     const handler = handlers.get(CHANNELS.terminalRead);
     if (handler === undefined) throw new Error('the terminal channel was never registered');
@@ -224,10 +227,83 @@ describe('the terminal channel', () => {
 
   it('refuses a malformed request without spawning tmux, and not as an empty pane', async () => {
     const { run, argvs } = runner({});
-    for (const bad of [[], [42], ['a', 'b'], ['x'.repeat(501)]]) {
+    // Two strings is now a legitimate request -- the project and the row --
+    // so what is malformed is a wrong count, a non-string, or an over-long id.
+    for (const bad of [
+      [],
+      [42],
+      ['a', 42],
+      ['a', 'b', 'c'],
+      ['x'.repeat(501)],
+      ['a', 'x'.repeat(501)],
+    ]) {
       const view = (await harness(run)(...bad)) as { kind: string };
       expect(view.kind, JSON.stringify(bad)).toBe('unavailable');
     }
     expect(argvs).toEqual([]);
+  });
+
+  it("passes the row through, so the tab gets this session's pane", async () => {
+    const { run } = runner({
+      'list-sessions': ok(`${ATLAS}\tvam-atlas-aa11bb\n${ATLAS}\tvam-atlas-cc22dd\n`),
+      'capture-pane': ok('beta screen'),
+    });
+    const panes = new Map([['sess-beta', 'vam-atlas-cc22dd']]);
+    expect(await harness(run, panes)(ATLAS, 'sess-beta#8')).toEqual({
+      kind: 'ok',
+      name: 'vam-atlas-cc22dd',
+      text: 'beta screen',
+    });
+  });
+});
+
+/**
+ * The pane a ROW is in, when its project holds more than one.
+ *
+ * `ambiguous` is the honest answer to "which of these two panes is this
+ * project", and it was the only answer the tab could give for a project with
+ * two sessions -- so the operator got no screen at all for either. It is not
+ * the answer to "which pane is this SESSION": the session publishes that
+ * itself, and `readSessionPane` is given the map (`session-pane.ts`).
+ */
+describe('reading the pane a session published', () => {
+  const listing = ok(`${ATLAS}\tvam-atlas-aa11bb\n${ATLAS}\tvam-atlas-cc22dd\n`);
+
+  it('captures the pane this row published, where the project alone is ambiguous', async () => {
+    const { run, argvs } = runner({ 'list-sessions': listing, 'capture-pane': ok('beta screen') });
+    const panes = new Map([
+      ['sess-alpha', 'vam-atlas-aa11bb'],
+      ['sess-beta', 'vam-atlas-cc22dd'],
+    ]);
+    await expect(readSessionPane(run, ATLAS, 'sess-beta#8', panes)).resolves.toEqual({
+      kind: 'ok',
+      name: 'vam-atlas-cc22dd',
+      text: 'beta screen',
+    });
+    expect(argvs).toContainEqual(['capture-pane', '-p', '-t', '=vam-atlas-cc22dd:']);
+  });
+
+  it('still says ambiguous for a row that published nothing', async () => {
+    const { run } = runner({ 'list-sessions': listing });
+    await expect(readSessionPane(run, ATLAS, 'sess-gamma#9', new Map())).resolves.toEqual({
+      kind: 'ambiguous',
+      names: ['vam-atlas-aa11bb', 'vam-atlas-cc22dd'],
+    });
+  });
+
+  it('ignores a published pane that is not a session vam started', async () => {
+    // The operator's own tmux sessions publish theirs too, and vam may not
+    // draw one: it never appears in vam's own listing, so the tag answers.
+    const { run } = runner({
+      'list-sessions': ok(`${ATLAS}\tvam-atlas-aa11bb\n`),
+      'capture-pane': ok('alpha screen'),
+    });
+    const view = await readSessionPane(
+      run,
+      ATLAS,
+      'sess-alpha#7',
+      new Map([['sess-alpha', 'notes']]),
+    );
+    expect(view).toEqual({ kind: 'ok', name: 'vam-atlas-aa11bb', text: 'alpha screen' });
   });
 });

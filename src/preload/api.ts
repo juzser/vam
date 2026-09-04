@@ -124,7 +124,12 @@ export function createClipboardApi(ipc: InvokerLike): ClipboardApi {
  * truncated on the way in and matched nothing that had ever been created.
  */
 export type TerminalApi = {
-  read(projectId: string): Promise<PaneView>;
+  /**
+   * `rowId` is optional and is what makes the answer per SESSION: a project
+   * vam started two sessions in has two panes, and only the session itself
+   * knows which one it is in (`main/sources/claude-code/session-pane.ts`).
+   */
+  read(projectId: string, rowId?: string): Promise<PaneView>;
 };
 
 /**
@@ -135,7 +140,10 @@ export type TerminalApi = {
  */
 export function createTerminalApi(ipc: InvokerLike): TerminalApi {
   return {
-    read: (projectId) => ipc.invoke(CHANNELS.terminalRead, projectId) as Promise<PaneView>,
+    read: (projectId, rowId) =>
+      (rowId === undefined
+        ? ipc.invoke(CHANNELS.terminalRead, projectId)
+        : ipc.invoke(CHANNELS.terminalRead, projectId, rowId)) as Promise<PaneView>,
   };
 }
 

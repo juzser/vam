@@ -44,7 +44,7 @@ export const REFRESH_MS = 1_000;
  * creation and read back (`main/terminal/pane.ts`); a title reached the name
  * once, was slugged and truncated on the way, and matched nothing.
  */
-export type ReadPane = (projectId: string) => Promise<PaneView>;
+export type ReadPane = (projectId: string, rowId?: string) => Promise<PaneView>;
 
 /**
  * What is shown when there is no bridge -- the browser build has no main
@@ -62,9 +62,17 @@ const NO_BRIDGE: PaneView = {
 
 export function TerminalTab({
   projectId,
+  rowId,
   read,
 }: {
   readonly projectId: string | null;
+  /**
+   * The ROW being shown, when there is one. It is what lets main answer with
+   * the pane this SESSION published rather than the project's -- a project vam
+   * started two sessions in has two panes, and the project alone can only say
+   * `ambiguous` (`main/terminal/pane.ts`).
+   */
+  readonly rowId?: string | undefined;
   readonly read: ReadPane | undefined;
 }) {
   /**
@@ -94,7 +102,7 @@ export function TerminalTab({
   const poll = useCallback(
     (mine: () => boolean) => {
       if (read === undefined || projectId === null) return;
-      read(projectId)
+      read(projectId, rowId)
         .then((next) => {
           if (mine()) setView(next);
         })
@@ -112,7 +120,7 @@ export function TerminalTab({
           });
         });
     },
-    [read, projectId],
+    [read, projectId, rowId],
   );
 
   useEffect(() => {

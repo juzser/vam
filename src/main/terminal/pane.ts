@@ -27,6 +27,7 @@
  */
 
 import type { PaneView } from '../../shared/terminal.js';
+import { sessionIdOf } from '../sources/claude-code/deliver.js';
 import {
   listVamSessions,
   readPane,
@@ -68,10 +69,31 @@ export function matchVamSession(sessions: readonly TmuxSession[], projectId: str
  * failure: the session was listed a moment ago and has ended since, which is
  * an answer about the session, not a loss of vam's ability to look.
  */
-export async function readSessionPane(run: TmuxRun, projectId: string): Promise<PaneView> {
+export async function readSessionPane(
+  run: TmuxRun,
+  projectId: string,
+  // The ROW the tab is showing, and what the sessions published about
+  // themselves. Both optional: a caller with neither gets the project-wide
+  // answer this module gave before, `ambiguous` and all.
+  rowId?: string,
+  panes?: ReadonlyMap<string, string>,
+): Promise<PaneView> {
   const listed = await listVamSessions(run);
   if (listed.kind === 'unavailable') {
     return { kind: 'unavailable', error: listed.error };
+  }
+  // THE PUBLISHED PANE FIRST, and it is what makes `ambiguous` rare instead of
+  // usual: a project with two sessions vam started has two panes, and only the
+  // session itself knows which one it is in (`sources/claude-code/
+  // session-pane.ts`). Checked against vam's own listing, so a pane the
+  // operator started -- published in the same directory -- is never drawn.
+  const published = rowId === undefined ? undefined : panes?.get(sessionIdOf(rowId));
+  if (published !== undefined && listed.sessions.some((s) => s.name === published)) {
+    const screen = await readPane(run, published);
+    if (screen.kind === 'ok') return { kind: 'ok', name: published, text: screen.text };
+    return screen.error.code === 'no-such-session'
+      ? { kind: 'gone' }
+      : { kind: 'unavailable', error: screen.error };
   }
   const match = matchVamSession(listed.sessions, projectId);
   if (match.kind === 'none') {
