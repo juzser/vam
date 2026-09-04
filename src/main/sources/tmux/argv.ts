@@ -184,6 +184,12 @@ export function capturePaneArgv(name: string): readonly string[] {
  * The numbers are formatted here and bounded by the caller
  * (`shared/terminal.ts`): they originate in the renderer, and a resize is the
  * first thing vam does that CHANGES a session on the operator's server.
+ *
+ * MEASURED, on a real tmux over a private `-L` socket, because none of it may
+ * be assumed: a detached session nobody sized reports `80x24` -- which is the
+ * premise of this whole file, since that is the width every captured line was
+ * already wrapped at -- and `resize-window -t '=name:' -x 137 -y 41` exits 0
+ * and moves the window to exactly that, with no client attached.
  */
 export function resizeWindowArgv(name: string, columns: number, rows: number): readonly string[] {
   return ['resize-window', '-t', paneTarget(name), '-x', String(columns), '-y', String(rows)];
