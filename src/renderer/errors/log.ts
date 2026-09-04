@@ -69,6 +69,20 @@ const DECLINED = 'declined';
 const events: LoggedEvent[] = [];
 const listeners = new Set<() => void>();
 let nextId = 1;
+/**
+ * The newest-first view, cached until something changes.
+ *
+ * Not an optimisation. `useSyncExternalStore` compares snapshots by identity
+ * and re-renders forever if a fresh array comes back on every read, so a
+ * stable reference is the difference between a panel that renders and one
+ * that spins the tab.
+ */
+let snapshot: readonly LoggedEvent[] | null = null;
+
+function changed(): void {
+  snapshot = null;
+  for (const listener of listeners) listener();
+}
 
 function push(event: Omit<LoggedEvent, 'id' | 'at'>): LoggedEvent {
   const recorded: LoggedEvent = { ...event, id: nextId, at: new Date().toISOString() };
@@ -77,7 +91,7 @@ function push(event: Omit<LoggedEvent, 'id' | 'at'>): LoggedEvent {
   // Oldest out, one at a time: a `while` rather than a splice so the bound
   // holds even if the capacity is ever lowered under a full buffer.
   while (events.length > EVENT_CAPACITY) events.shift();
-  for (const listener of listeners) listener();
+  changed();
   return recorded;
 }
 
@@ -119,7 +133,8 @@ export function noteFailure(action: string, reason: unknown): string {
 
 /** Everything recorded, newest first -- the order the panel reads. */
 export function loggedEvents(): readonly LoggedEvent[] {
-  return [...events].reverse();
+  snapshot ??= [...events].reverse();
+  return snapshot;
 }
 
 /** Only the things that are broken. The badge count and the report path. */
@@ -129,7 +144,7 @@ export function failureEvents(): readonly LoggedEvent[] {
 
 export function clearEvents(): void {
   events.length = 0;
-  for (const listener of listeners) listener();
+  changed();
 }
 
 export function subscribeEvents(listener: () => void): () => void {

@@ -124,3 +124,14 @@ describe('persistence', () => {
     expect(globalThis.localStorage).toBeUndefined();
   });
 });
+
+describe('loggedEvents', () => {
+  it('returns the same array until something changes', () => {
+    // `useSyncExternalStore` compares by identity: a fresh array per read
+    // re-renders the panel forever.
+    recordFailure('a', 'one');
+    expect(loggedEvents()).toBe(loggedEvents());
+    recordFailure('b', 'two');
+    expect(loggedEvents()).toHaveLength(2);
+  });
+});
