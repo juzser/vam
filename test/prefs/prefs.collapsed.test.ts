@@ -13,8 +13,8 @@ import {
   EMPTY_PREFS,
   isProjectCollapsed,
   readPrefs,
-  setProjectCollapsed,
   type StorageLike,
+  setProjectCollapsed,
   writePrefs,
 } from '../../src/renderer/prefs/prefs.js';
 

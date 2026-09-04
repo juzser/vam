@@ -25,8 +25,8 @@ import {
   ChevronRight,
   Filter,
   GitBranch,
-  MoreHorizontal,
   Monitor,
+  MoreHorizontal,
   Plus,
   Search,
   Settings,
@@ -593,6 +593,12 @@ export function SessionList(props: SessionListProps) {
                   otherwise as tall as its tallest child, so the row -- and
                   every row under it -- would jump a few pixels each time focus
                   moved between projects and the add came or went. */}
+              {/* biome-ignore lint/a11y/noStaticElementInteractions: the hover is
+                  a pure reveal, and the keyboard has its own path to the same
+                  controls -- `p`. The rule exists to catch mouse-ONLY
+                  interaction; giving this heading a role or a tabindex to
+                  satisfy it would put a stop in the list that `j` lands on,
+                  which is the thing the comment above deliberately avoids. */}
               <div
                 data-project-heading
                 data-project-id={group.project.id}
