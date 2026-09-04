@@ -40,14 +40,34 @@ function session(id: string, over: Partial<Session> = {}): Session {
   };
 }
 
-/** alpha holds one session vam started and one it did not; beta is untouched. */
+/**
+ * alpha holds one of each of the three states removal has to tell apart, and
+ * every one of them is load-bearing:
+ *
+ *   a1 -- vamControlled true: the only session that may be ended.
+ *   a2 -- ABSENT: vam could not ask. Widening the plan's `=== true` to
+ *         `!== false` sweeps this up, so it is what makes that mutation
+ *         visible here rather than only in the unit test.
+ *   a3 -- false, AND hidden by the default `hideAgentStarted` filter, so it
+ *         has no row on screen. It must still be counted and still not
+ *         ended: a plan computed over the filtered list would miss it.
+ *
+ * beta is untouched throughout.
+ */
 const MODEL: CanvasModel = {
   projects: [
     {
       id: 'p1',
       name: 'alpha',
       source: 'claude-code',
-      sessions: [session('a1', { vamControlled: true }), session('a2', { vamControlled: false })],
+      sessions: [
+        session('a1', { vamControlled: true }),
+        session('a2'),
+        session('a3', {
+          vamControlled: false,
+          origin: { startedBy: 'agent', promptCount: null },
+        }),
+      ],
     },
     { id: 'p2', name: 'beta', source: 'claude-code', sessions: [session('b1')] },
   ],
@@ -182,6 +202,64 @@ describe('removing a project, through Canvas', () => {
     expect(canvasText()).toContain('alpha');
     // And the store is back to a fresh install's shape, not an empty bucket.
     expect(JSON.parse(stored()).hiddenProjects).toEqual({});
+  });
+
+  /**
+   * THE WHOLE PROMISE, on the real path.
+   *
+   * This is the test the hand-wired seam test only looked like: it drives the
+   * menu, the confirm and the click the operator drives, through `Canvas`,
+   * into the port's `write.closeSession` -- the seam main's `stop.ts` sits
+   * behind. Nothing is composed by hand here, so forwarding the wrong set,
+   * dropping the guard in `removalPlan` or bypassing the plan entirely all
+   * redden it, and each of those is a change the earlier test could not see.
+   */
+  it('ends EXACTLY the sessions vam started, and no others, through the port', async () => {
+    const closes: string[] = [];
+    render(
+      <Canvas
+        model={MODEL}
+        source={sourceWith(async (id) => {
+          closes.push(id);
+        })}
+      />,
+    );
+    fireEvent.click(document.querySelector('[data-project-menu="p1"]') as HTMLElement);
+    fireEvent.click(document.querySelector('[data-project-menu-item="remove"]') as HTMLElement);
+    // The DISCLOSURE, on the real path and under the default filters: three
+    // sessions in the project, one row on screen. A plan read off the filtered
+    // list would say "0 will keep running" here.
+    expect(document.querySelector('[data-confirm-end-count]')?.textContent).toBe('1');
+    expect(document.querySelector('[data-confirm-hide-count]')?.textContent).toBe('2');
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-confirm-remove-go]') as HTMLElement);
+    });
+    // a2 is ABSENT and a3 is false -- neither is a session vam can prove it
+    // started, and a3 does not even have a row. Both keep running and are
+    // merely no longer drawn. Asserted by VALUE, because the failure this
+    // guards is not recoverable.
+    expect(closes).toEqual(['a1']);
+    expect(heading('p1')).toBeNull();
+  });
+
+  it('CANCELLING reaches no spawn route at all', async () => {
+    const closes: string[] = [];
+    render(
+      <Canvas
+        model={MODEL}
+        source={sourceWith(async (id) => {
+          closes.push(id);
+        })}
+      />,
+    );
+    fireEvent.click(document.querySelector('[data-project-menu="p1"]') as HTMLElement);
+    fireEvent.click(document.querySelector('[data-project-menu-item="remove"]') as HTMLElement);
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-confirm-cancel]') as HTMLElement);
+    });
+    expect(closes).toEqual([]);
+    expect(heading('p1')).not.toBeNull();
+    expect(stored()).not.toContain('p1');
   });
 
   it('REFUSES while another close is in flight, and removes nothing', async () => {

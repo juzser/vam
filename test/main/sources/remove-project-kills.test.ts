@@ -1,16 +1,20 @@
 /**
- * Removing a project ends EXACTLY the sessions vam started, by argv.
+ * Main's own guards on killing a pane, independent of anything the renderer
+ * planned.
  *
- * The two halves of removal are tested apart -- `removalPlan` decides, and
- * `stopSession` kills -- so this is the seam between them, and the seam is
- * where the unrecoverable mistake lives: an id that leaks from `hide` into
- * `end` becomes a `kill-session` aimed at a terminal the operator is sitting
- * in. So the assertion is the argv BY VALUE, both what it must contain and
- * what it must not, rather than a call count.
+ * THIS FILE USED TO WIRE `removalPlan` TO `stopSession` BY HAND and call that
+ * the seam. It exercised both, but no change to `Canvas` could redden it --
+ * not forwarding every session in the project, not dropping the plan's guard,
+ * not bypassing the plan altogether -- so it could not detect the very thing
+ * it looked like it was testing. That composition is now driven for real, from
+ * the menu click down to the port, in `test/canvas/Canvas.remove-project.test.tsx`,
+ * and it is mutation-proven there.
  *
- * Nothing real is touched: the runner is a fake that records argv and answers
- * the listing from a fixture. No tmux server is contacted, no session is
- * created, and the operator's own sessions are not named here.
+ * What is left here is what only main can be asked: given a row and a live
+ * tmux listing, which pane -- if any -- may be killed. Nothing real is
+ * touched; the runner is a fake that records argv and answers the listing from
+ * a fixture. No tmux server is contacted and the operator's own sessions are
+ * not named.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -67,41 +71,6 @@ const panes = new Map([
   ['mine', OWNED_PANE],
   ['theirs', OTHER_PANE],
 ]);
-
-describe('removing a project', () => {
-  it('kills the pane of the vam-controlled session and no other', async () => {
-    const { calls, run } = runner();
-    const plan = removalPlan(sessions);
-    for (const id of plan.end) {
-      await stopSession(
-        agents,
-        `${id}#1`,
-        vi.fn(async () => null),
-        run,
-        panes,
-      );
-    }
-    expect(calls).toContainEqual(['kill-session', '-t', `=${OWNED_PANE}`]);
-    expect(calls).not.toContainEqual(['kill-session', '-t', `=${OTHER_PANE}`]);
-    expect(calls.filter((argv) => argv[0] === 'kill-session')).toHaveLength(1);
-  });
-
-  it('SPAWNS NOTHING when the plan ends nothing', async () => {
-    const { calls, run } = runner();
-    const plan = removalPlan([session('theirs')]);
-    for (const id of plan.end) {
-      await stopSession(
-        agents,
-        `${id}#1`,
-        vi.fn(async () => null),
-        run,
-        panes,
-      );
-    }
-    expect(plan.end).toEqual([]);
-    expect(calls).toEqual([]);
-  });
-});
 
 /**
  * The second guard, in main, independent of the renderer's.
