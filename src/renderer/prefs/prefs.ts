@@ -311,6 +311,24 @@ export type Prefs = {
    * on screen, whether it went stale in a day or in a year.
    */
   readonly lastFocus: FocusChoice | null;
+  /**
+   * Which tab the detail pane was showing, as an OPAQUE STRING.
+   *
+   * Opaque on purpose, and it is the one design decision in this field. The
+   * list of tabs lives in `DetailPanel.tsx` next to the bar that draws it,
+   * because a second idea of how many tabs there are is a bug waiting for a
+   * fifth digit. Importing that list here to validate against would drag a
+   * React component into a module whose whole job is `localStorage`, so the
+   * dependency runs the other way: the store keeps whatever string it was
+   * given, and the pane -- which owns the list -- decides on read whether that
+   * string still names a tab and falls back to its default when it does not.
+   * A tab renamed or withdrawn between versions therefore costs one default
+   * tab, not a migration.
+   *
+   * Exempt from the icon TTL for the reason `theme` is: which tab you read
+   * first is a fact about you, not about a session.
+   */
+  readonly detailTab: string | null;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -329,6 +347,7 @@ export const EMPTY_PREFS: Prefs = {
   outFontSize: DEFAULT_OUT_FONT_SIZE,
   defaultProvider: DEFAULT_PROVIDER_ID,
   lastFocus: null,
+  detailTab: null,
 };
 
 /**
@@ -458,6 +477,10 @@ function parsePrefs(
     // migration. Not pruned; see the field's own note for why the TTL would
     // buy nothing here.
     lastFocus: readLastFocus((parsed as { lastFocus?: unknown }).lastFocus),
+    // Per field again, and deliberately NOT validated here -- see the field.
+    // Anything that is not a string is "no tab remembered", which is what a
+    // payload from a vam predating this field already says by having no key.
+    detailTab: readDetailTab((parsed as { detailTab?: unknown }).detailTab),
   };
 }
 
@@ -625,6 +648,18 @@ function readLastFocus(raw: unknown): FocusChoice | null {
     return null;
   }
   return { source, session };
+}
+
+/** A string or nothing. The only check the store is entitled to make: it does
+ *  not know what the tabs are called, so it cannot say more than "this is the
+ *  kind of thing a tab name is". */
+function readDetailTab(raw: unknown): string | null {
+  return typeof raw === 'string' ? raw : null;
+}
+
+/** Written when the operator changes tab; `null` forgets which. */
+export function setDetailTab(prefs: Prefs, detailTab: string | null): Prefs {
+  return { ...prefs, detailTab };
 }
 
 /** Written whenever focus lands somewhere; `null` forgets the pointer. */

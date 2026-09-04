@@ -384,6 +384,24 @@ export type DetailPanelProps = {
    * asking twice for the same tab an ask, which `Tab | null` could not say.
    */
   readonly tabRequest?: { readonly tab: Tab } | null;
+  /**
+   * The tab a previous run left showing, as an OPAQUE STRING, and the way to
+   * report a change back.
+   *
+   * A string rather than a `Tab` because the store it comes from must not know
+   * what the tabs are called: `TABS` lives here, beside the bar that draws it,
+   * and a `prefs.ts` that imported it would pull this whole component into a
+   * module whose job is `localStorage`. So the dependency runs the other way --
+   * the store keeps whatever it was handed, and the validating happens HERE,
+   * where the list is. Anything that is not a current tab name is the default,
+   * which makes renaming or withdrawing a tab cost one default tab rather than
+   * a migration.
+   *
+   * Both optional, and the pane works with neither: without them the tab is
+   * component state that starts at the default, exactly as it was.
+   */
+  readonly initialTab?: string | null;
+  readonly onTabChange?: (tab: string) => void;
   /** The current rendered width (task-1's `renderedWidth`), applied inline. */
   readonly width: number;
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
@@ -1391,12 +1409,30 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const [progressOpen, setProgressOpen] = useState(false);
   /**
-   * Which tab the pane is showing. Component state for the same reason
-   * `progressOpen` is: nothing outside this pane has an opinion about it, and
-   * it survives switching sessions on purpose — an operator who opened Agents
-   * is looking at agents, not at whichever tab the last session left behind.
+   * Which tab the pane is showing. Still component state, and still nobody
+   * else's opinion: it survives switching sessions on purpose -- an operator
+   * who opened Agents is looking at agents, not at whichever tab the last
+   * session left behind -- and it now survives a QUIT for the same reason,
+   * seeded from what the caller remembered rather than owned by it.
+   *
+   * The seed is validated against `TABS` here because this is where `TABS` is.
+   * A name that is not on the bar (an older vam's tab, a hand-edited store) is
+   * simply not a seed, so it costs the default tab and nothing else.
    */
-  const [tab, setTab] = useState<Tab>('Response');
+  const [tab, setTab] = useState<Tab>(() => {
+    const remembered = props.initialTab;
+    return TABS.find((name) => name === remembered) ?? 'Response';
+  });
+  const onTabChange = props.onTabChange;
+  /**
+   * Report the operator's CHOICE, never `current`. `current` falls back to
+   * Response while a source withdraws the Terminal tab, and persisting that
+   * would let walking past a session without a terminal erase a choice the
+   * operator never changed.
+   */
+  useEffect(() => {
+    onTabChange?.(tab);
+  }, [tab, onTabChange]);
   const tabRequest = props.tabRequest ?? null;
   // A withdrawn tab is not refused here: `current` below already falls back to
   // Response when the showing tab is not on offer, so asking for Terminal

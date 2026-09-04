@@ -1003,11 +1003,19 @@ describe('renaming, icons and closing', () => {
     );
     render(<Canvas model={MODEL} />);
     const before = statusBar();
+    // Both samples taken AFTER mounting, not against the seed. Landing focus on
+    // something real now records where it landed, so a launch writes once on
+    // its own -- and against a legacy flat `icons` payload like the one seeded
+    // above, that write is also what migrates it to the per-source shape.
+    // Neither is this chord's doing. What the test is about is that `g`
+    // followed by an unbound key changes NOTHING, so it brackets the two
+    // presses and compares the whole store: stricter than the seed comparison
+    // it replaces, which only ever looked at one key.
+    const storedBefore = localStorage.getItem('vam.prefs.v1');
     press('g');
     press('r');
     expect(statusBar()).toBe(before);
-    const stored = JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}');
-    expect(Object.keys(stored.icons)).toEqual(['a1']);
+    expect(localStorage.getItem('vam.prefs.v1')).toBe(storedBefore);
   });
 
   it('x names the session it did not close', () => {

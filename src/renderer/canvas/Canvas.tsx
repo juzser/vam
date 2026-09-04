@@ -68,6 +68,7 @@ import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { SessionList } from '../panels/SessionList.js';
+import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
 import {
   ALL_VISIBLE,
   CANVAS_STRIP,
@@ -88,7 +89,9 @@ import {
   isProjectHidden,
   type Prefs,
   readPrefs,
+  setDetailTab,
   setIcon,
+  setLastFocus,
   setLayout,
   setPaneVisibility,
   setPaneWidth,
@@ -831,6 +834,25 @@ function CanvasInner({
    */
   const nodeIds = useMemo(() => layout.nodes.map((n) => n.id), [layout]);
 
+  /**
+   * Every node focus could land on, paired with the SESSION it draws.
+   *
+   * The pairing is the point. A remembered focus stores a session id under its
+   * source, never a node id: node ids are derived from the layout, so they are
+   * rebuilt whenever the model, the filters or the fold state change and a
+   * stored one would go stale between launches without anything having ended.
+   * This is where the two vocabularies meet (`prefs/focus.ts`).
+   */
+  const focusCandidates: readonly FocusCandidate[] = useMemo(
+    () =>
+      layout.nodes.map((n) => ({
+        nodeId: n.id,
+        source: sourceKeyOf(n.entry),
+        session: n.entry.session.id,
+      })),
+    [layout],
+  );
+
   /** Which session the focused node belongs to — the id all three panes share. */
   const focusedSpec = useMemo(
     () => layout.nodes.find((n) => n.id === focusedId) ?? null,
@@ -1009,13 +1031,42 @@ function CanvasInner({
    * is pointing at, which makes the first keypress do nothing.
    */
   useEffect(() => {
-    if (nodeIds.length === 0) {
+    if (focusCandidates.length === 0) {
       return;
     }
     if (focusedId === null || !nodeIds.includes(focusedId)) {
-      setFocusedId(nodeIds[0] ?? null);
+      setFocusedId(resolveFocusNodeId(prefs.lastFocus, focusCandidates));
     }
-  }, [nodeIds, focusedId]);
+  }, [nodeIds, focusCandidates, focusedId, prefs.lastFocus]);
+
+  /**
+   * The other half: record where focus is, so the next launch can ask.
+   *
+   * ONE EFFECT RATHER THAN A WRITE AT EVERY `setFocusedId`. Focus is moved from
+   * eight places -- the chords, a click on a card, a click on a sidebar row,
+   * search landing and search escaping -- and a write bolted onto each is
+   * seven chances to add a ninth that forgets. Watching the resulting entry
+   * catches all of them, including the ones this file has not grown yet.
+   *
+   * The equality guard is what stops it looping: `savePrefs` replaces `prefs`,
+   * which re-runs this effect, which finds the stored pointer already says what
+   * it was about to write and returns. A focus that lands on nothing keeps the
+   * last pointer rather than clearing it -- an empty canvas is a filter or a
+   * still-loading model, not the operator telling us to forget where they were.
+   */
+  useEffect(() => {
+    if (focusedEntry === null) {
+      return;
+    }
+    const next = {
+      source: sourceKeyOf(focusedEntry),
+      session: focusedEntry.session.id,
+    };
+    if (prefs.lastFocus?.source === next.source && prefs.lastFocus?.session === next.session) {
+      return;
+    }
+    savePrefs(setLastFocus(prefs, next));
+  }, [focusedEntry, prefs, savePrefs]);
 
   // Focus, jump labels and the focused-cell opacity override are all
   // presentation, written onto the existing nodes rather than rebuilding
@@ -2226,6 +2277,14 @@ function CanvasInner({
           // looked like Enter doing nothing.
           sending={writing}
           tabRequest={tabRequest}
+          // Opaque both ways: the store never learns the tab names, and the
+          // guard keeps the pane's mount-time report from being a write.
+          initialTab={prefs.detailTab}
+          onTabChange={(next) => {
+            if (next !== prefs.detailTab) {
+              savePrefs(setDetailTab(prefs, next));
+            }
+          }}
           draft={draft}
           onDraftChange={setDraft}
           onSubmit={sendPrompt}
@@ -2513,6 +2572,18 @@ function UsageBar({
  * any more: it names a real product, and `PROVIDER_MARKS` carries its actual
  * mark, which says more at eleven pixels than a generic terminal glyph did.
  */
+/**
+ * Which source an entry belongs to, as a key a stored pointer can be matched
+ * on. The same `session.source ?? project.source` order the glyph reads, for
+ * its reason -- the two readers stamp different halves of the model -- and `''`
+ * for an entry that carries neither, which is a consistent key rather than a
+ * claim: it is written and matched by the same expression, so a sourceless
+ * model still remembers its focus and still cannot collide with a named source.
+ */
+function sourceKeyOf(entry: SessionEntry): string {
+  return entry.session.source ?? entry.project.source ?? '';
+}
+
 const SOURCE_ICON: Readonly<Record<string, LucideIcon>> = {
   'black-smith': Factory,
   'bundled-sample': FlaskConical,
