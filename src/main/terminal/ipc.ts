@@ -19,16 +19,21 @@ import type { TmuxRun } from '../sources/tmux/spawn.js';
 import { readSessionPane } from './pane.js';
 
 /**
- * A session title is a line, and it arrives from the least trusted process in
- * the app. The bound is far above any real title and keeps a compromised
- * renderer from handing tmux a megabyte to match against.
+ * A project id is a digest (`sources/claude-code/project-id.ts`), and it
+ * arrives from the least trusted process in the app. The bound is far above
+ * any real id and keeps a compromised renderer from handing tmux a megabyte to
+ * match against.
  */
-export const MAX_TITLE_LENGTH = 500;
+export const MAX_PROJECT_ID_LENGTH = 500;
 
 export function registerTerminalIpc(ipcMain: IpcMainLike, run: TmuxRun): void {
   ipcMain.handle(CHANNELS.terminalRead, async (_event, ...args: unknown[]): Promise<PaneView> => {
-    const [title] = args;
-    if (args.length !== 1 || typeof title !== 'string' || title.length > MAX_TITLE_LENGTH) {
+    const [projectId] = args;
+    if (
+      args.length !== 1 ||
+      typeof projectId !== 'string' ||
+      projectId.length > MAX_PROJECT_ID_LENGTH
+    ) {
       // A refusal is data here like everywhere else on this bridge, and it is
       // deliberately NOT an empty pane: vam did not look, so it may not say
       // there is nothing to see.
@@ -37,10 +42,10 @@ export function registerTerminalIpc(ipcMain: IpcMainLike, run: TmuxRun): void {
         error: {
           kind: 'refused',
           code: 'bad-request',
-          message: 'vam asked for a terminal pane without a usable session title',
+          message: 'vam asked for a terminal pane without a usable project id',
         },
       };
     }
-    return readSessionPane(run, title);
+    return readSessionPane(run, projectId);
   });
 }

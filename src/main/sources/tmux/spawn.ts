@@ -37,7 +37,13 @@
 
 import { execFile } from 'node:child_process';
 import type { SourceError } from '../../ipc/channels.js';
-import { capturePaneArgv, isVamSession, listSessionsArgv, newSessionArgv } from './argv.js';
+import {
+  capturePaneArgv,
+  isVamSession,
+  listSessionsArgv,
+  newSessionArgv,
+  tagSessionArgv,
+} from './argv.js';
 
 /** tmux answers in milliseconds; a slow one is a broken one. */
 const TMUX_TIMEOUT_MS = 10_000;
@@ -178,9 +184,18 @@ export function createTmuxRunner(binary = 'tmux'): TmuxRun {
     });
 }
 
+/**
+ * One session on the server, as vam sees it: the project id vam recorded on it
+ * (`''` when nothing did -- see `VAM_PROJECT_OPTION`) and the session name.
+ */
+export type TmuxSession = {
+  readonly project: string;
+  readonly name: string;
+};
+
 /** Either the thing, or why vam could not get it -- never one standing in for the other. */
-export type TmuxNames =
-  | { readonly kind: 'ok'; readonly names: readonly string[] }
+export type TmuxSessions =
+  | { readonly kind: 'ok'; readonly sessions: readonly TmuxSession[] }
   | { readonly kind: 'unavailable'; readonly error: SourceError };
 
 export type TmuxText =
@@ -197,19 +212,25 @@ export type TmuxText =
  * session is never presented as something vam started -- and never offered to
  * a caller that might kill it.
  */
-export async function listVamSessions(run: TmuxRun): Promise<TmuxNames> {
+export async function listVamSessions(run: TmuxRun): Promise<TmuxSessions> {
   const { failure, stdout, stderr } = await run(listSessionsArgv());
   if (failure !== null) {
     const error = classifyTmuxFailure({ failure, stderr, action: 'listing sessions' });
-    return error.code === 'no-server' ? { kind: 'ok', names: [] } : { kind: 'unavailable', error };
+    return error.code === 'no-server'
+      ? { kind: 'ok', sessions: [] }
+      : { kind: 'unavailable', error };
   }
-  return {
-    kind: 'ok',
-    names: stdout
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(isVamSession),
-  };
+  const sessions: TmuxSession[] = [];
+  for (const line of stdout.split('\n')) {
+    // Split ONCE. The name is whatever follows the first tab, so a value that
+    // somehow held one cannot shorten the name it is paired with.
+    const tab = line.indexOf('\t');
+    if (tab === -1) continue;
+    const name = line.slice(tab + 1).trim();
+    if (!isVamSession(name)) continue;
+    sessions.push({ project: line.slice(0, tab).trim(), name });
+  }
+  return { kind: 'ok', sessions };
 }
 
 /**
@@ -218,12 +239,30 @@ export async function listVamSessions(run: TmuxRun): Promise<TmuxNames> {
  */
 export async function createVamSession(
   run: TmuxRun,
-  input: { name: string; cwd: string; command: readonly string[] },
+  input: { name: string; cwd: string; command: readonly string[]; projectId: string },
 ): Promise<SourceError | null> {
   const { failure, stderr } = await run(newSessionArgv(input));
-  return failure === null
-    ? null
-    : classifyTmuxFailure({ failure, stderr, action: `creating session ${input.name}` });
+  if (failure !== null) {
+    return classifyTmuxFailure({ failure, stderr, action: `creating session ${input.name}` });
+  }
+  // THE PAIRING IS RECORDED HERE OR NOWHERE. tmux has no way to create a
+  // session and set an option on it in one command, so this is a second call
+  // and it can fail on its own.
+  const tagged = await run(tagSessionArgv(input.name, input.projectId));
+  if (tagged.failure === null) return null;
+  // The session IS running -- reporting a failure to start it would send the
+  // operator looking for something that is not wrong. What is wrong is that
+  // the Terminal tab will not find it, and that is what this says.
+  const error = classifyTmuxFailure({
+    failure: tagged.failure,
+    stderr: tagged.stderr,
+    action: `recording which project ${input.name} belongs to`,
+  });
+  return {
+    ...error,
+    code: 'session-untagged',
+    message: `the session started, but vam could not record which project it belongs to, so the Terminal tab will not find it: ${error.message}`,
+  };
 }
 
 /**

@@ -19,6 +19,8 @@ import {
   capturePaneArgv,
   hasSessionArgv,
   listSessionsArgv,
+  tagSessionArgv,
+  VAM_PROJECT_OPTION,
   newSessionArgv,
   sendKeysArgv,
   VAM_SESSION_PREFIX,
@@ -110,8 +112,28 @@ describe('tmux argv', () => {
     ]);
   });
 
-  it('lists sessions one name per line', () => {
-    expect(listSessionsArgv()).toEqual(['list-sessions', '-F', '#{session_name}']);
+  it('asks the listing for the recorded project id beside each name', () => {
+    // Without the option in the format there is nothing to pair on, and the
+    // matcher is back to guessing from a truncated slug.
+    expect(listSessionsArgv()).toEqual([
+      'list-sessions',
+      '-F',
+      `#{${VAM_PROJECT_OPTION}}\t#{session_name}`,
+    ]);
+  });
+
+  it('records the project on the session with a BARE target, not an =target', () => {
+    // Measured against a real tmux (3.7b, private `-L` socket): every other
+    // verb here takes `=name`, and `set-option -t '=name'` answers
+    // `no such session: =name` and exits 1. An `=` added for consistency would
+    // leave every session vam starts unpaired and every Terminal tab empty.
+    expect(tagSessionArgv('vam-a1b2c3', 'claude-code:demo-11111111')).toEqual([
+      'set-option',
+      '-t',
+      'vam-a1b2c3',
+      '@vam-project',
+      'claude-code:demo-11111111',
+    ]);
   });
 
   it('names a new session under vam’s own prefix', () => {

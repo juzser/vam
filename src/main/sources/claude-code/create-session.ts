@@ -59,5 +59,10 @@ export async function createSessionInProject(input: {
     name: input.name ?? vamSessionName(title),
     cwd: match.cwd,
     command: NEW_SESSION_COMMAND,
+    // WHAT THE TERMINAL TAB WILL LOOK THIS UP BY. The name is for a person
+    // reading `tmux ls`; the pairing is this id, recorded on the session
+    // itself. Nothing re-derives a name from `title` -- that is the bug this
+    // argument exists to end (`terminal/pane.ts`).
+    projectId,
   });
 }

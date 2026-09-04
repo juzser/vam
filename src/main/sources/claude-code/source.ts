@@ -307,7 +307,11 @@ const DESCRIPTOR: SourceDescriptor = {
     // `gh pr list --head <branch>`, run in the session's own working
     // directory. See `pull-requests.ts` for what happens when it cannot be.
     pullRequests: true,
-    terminal: false,
+    // `tmux capture-pane -p` on the session vam started for this project,
+    // paired by the id recorded on the tmux session at creation. The canvas
+    // reads this to decide whether to OFFER the Terminal tab at all, so a
+    // source without the surface no longer gets a tab that can only apologise.
+    terminal: true,
     // `<sessionId>/subagents/` is real and is now read: each agent's own
     // transcript for whether it is running, and the `meta.json` beside it for
     // what it is. See `agent-roster.ts`.

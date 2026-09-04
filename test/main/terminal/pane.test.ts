@@ -6,6 +6,15 @@
  * these would create and kill sessions on the operator's tmux server. Nothing
  * here spawns; the argv each call produced is asserted instead, which is the
  * part a wrong answer would come from.
+ *
+ * WHY EVERY FIXTURE BELOW SPELLS THE NAME AND THE PROJECT ID SEPARATELY, and
+ * it is the whole reason this file was rewritten. The matcher used to be fed
+ * the same literal that built the name it was asked to find, so the suite
+ * agreed with itself whatever the rule was: a wrong rule and a right one both
+ * passed. The pairing is now a RECORDED fact (`@vam-project`, set on the
+ * session at creation), so a fixture can hold a name that disagrees with it --
+ * a renamed session, two names that truncate to the same slug -- and those are
+ * exactly the cases a derived rule got wrong.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -21,6 +30,9 @@ const failed = (stderr: string): TmuxRunResult => ({
   stderr,
 });
 
+const ATLAS = 'claude-code:atlas-11111111';
+const BEACON = 'claude-code:beacon-22222222';
+
 /** Records every argv and answers each command from `answers`, by verb. */
 function runner(answers: Record<string, TmuxRunResult>) {
   const argvs: (readonly string[])[] = [];
@@ -32,49 +44,102 @@ function runner(answers: Record<string, TmuxRunResult>) {
   return { run, argvs, verbs: () => argvs.map((argv) => argv[0]) };
 }
 
-describe('matching a session to the tmux session vam started for it', () => {
-  it('finds the session created from the same title, whatever its random tail', () => {
-    expect(matchVamSession(['vam-atlas-a1b2c3'], 'atlas')).toBe('vam-atlas-a1b2c3');
+describe('matching a project to the tmux session vam started for it', () => {
+  it('finds the session vam recorded, whatever its name says', () => {
+    // The name is not consulted at all beyond being the answer. This one was
+    // built from a project NAME while the tab asks by project ID -- the exact
+    // mismatch that made every session read as "vam started nothing here".
+    const sessions = [{ project: ATLAS, name: 'vam-atlas-frontend-rewrite-a1b2c3' }];
+    expect(matchVamSession(sessions, ATLAS)).toEqual({
+      kind: 'one',
+      name: 'vam-atlas-frontend-rewrite-a1b2c3',
+    });
+  });
+
+  it('still finds it after the operator renamed the tmux session', () => {
+    // A recorded option survives `rename-session` -- measured against a real
+    // tmux on a private socket. A name-derived rule loses the session outright.
+    const sessions = [{ project: ATLAS, name: 'vam-something-else-entirely' }];
+    expect(matchVamSession(sessions, ATLAS)).toEqual({
+      kind: 'one',
+      name: 'vam-something-else-entirely',
+    });
   });
 
   it('never matches a session vam did not start', () => {
-    // The operator's own sessions cannot be adopted, so they must not even be
-    // offered: no process may take over another's controlling TTY.
-    expect(matchVamSession(['notes', 'irc', 'atlas'], 'atlas')).toBeNull();
+    // An option nobody set formats as the EMPTY STRING in `list-sessions -F`
+    // (measured). The operator's own sessions cannot be adopted -- no process
+    // may take over another's controlling TTY -- so they must not be offered.
+    const sessions = [
+      { project: '', name: 'notes' },
+      { project: '', name: 'vam-atlas-a1b2c3' },
+    ];
+    expect(matchVamSession(sessions, ATLAS)).toEqual({ kind: 'none' });
+    // And an empty project id must not sweep up every untagged session.
+    expect(matchVamSession(sessions, '')).toEqual({ kind: 'none' });
   });
 
-  it('does not let one title reach another title-s session', () => {
-    // A bare prefix match would let `atlas` reach `vam-atlas-two-...`, which is
-    // a different session with a different screen.
-    expect(matchVamSession(['vam-atlas-two-a1b2c3'], 'atlas')).toBeNull();
+  it('does not let one project reach another project-s session', () => {
+    const sessions = [{ project: BEACON, name: 'vam-atlas-a1b2c3' }];
+    expect(matchVamSession(sessions, ATLAS)).toEqual({ kind: 'none' });
   });
 
-  it('picks the same one every refresh when a title has two sessions', () => {
-    const names = ['vam-atlas-zz0000', 'vam-atlas-aa0000'];
-    expect(matchVamSession(names, 'atlas')).toBe('vam-atlas-zz0000');
-    expect(matchVamSession([...names].reverse(), 'atlas')).toBe('vam-atlas-zz0000');
+  it('keeps two sessions whose names collide apart, because the id decides', () => {
+    // `vamSessionName` slugs and truncates to 24 characters, so
+    // `atlas frontend rewrite phase two` and `atlas frontend rewrite plan`
+    // share the prefix `vam-atlas-frontend-rewrite-p-`. Under a prefix rule
+    // both matched and the tie-break picked by random suffix: stably, silently
+    // the wrong screen. The recorded id makes them two different sessions.
+    const sessions = [
+      { project: ATLAS, name: 'vam-atlas-frontend-rewrite-p-a1b2c3' },
+      { project: BEACON, name: 'vam-atlas-frontend-rewrite-p-z9y8x7' },
+    ];
+    expect(matchVamSession(sessions, ATLAS)).toEqual({
+      kind: 'one',
+      name: 'vam-atlas-frontend-rewrite-p-a1b2c3',
+    });
+    expect(matchVamSession(sessions, BEACON)).toEqual({
+      kind: 'one',
+      name: 'vam-atlas-frontend-rewrite-p-z9y8x7',
+    });
   });
 
-  it('normalises a title the way the creator did', () => {
-    // `vamSessionName` slugs the label; matching has to slug it identically or
-    // every session with a space in its title is invisible.
-    expect(matchVamSession(['vam-sprint-board-a1b2c3'], 'sprint board')).toBe(
-      'vam-sprint-board-a1b2c3',
-    );
+  it('refuses to choose when one project really has two sessions', () => {
+    // Two sessions vam started for one project are two screens, and nothing
+    // here can say which the operator means. The old rule sorted the names and
+    // took the last -- stable, and stably wrong half the time. Reporting the
+    // ambiguity is the only answer that is not a guess.
+    const sessions = [
+      { project: ATLAS, name: 'vam-atlas-zz0000' },
+      { project: ATLAS, name: 'vam-atlas-aa0000' },
+    ];
+    expect(matchVamSession(sessions, ATLAS)).toEqual({
+      kind: 'ambiguous',
+      names: ['vam-atlas-aa0000', 'vam-atlas-zz0000'],
+    });
+    // Order in, order out: the answer is about the set, not about the order
+    // tmux happened to print.
+    expect(matchVamSession([...sessions].reverse(), ATLAS)).toEqual({
+      kind: 'ambiguous',
+      names: ['vam-atlas-aa0000', 'vam-atlas-zz0000'],
+    });
   });
 });
 
 describe('reading the pane', () => {
   it('captures the matched session and returns its screen', async () => {
     const { run, argvs } = runner({
-      'list-sessions': ok('vam-atlas-a1b2c3\nnotes\n'),
+      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n\tnotes\n`),
       'capture-pane': ok('$ claude\n'),
     });
-    expect(await readSessionPane(run, 'atlas')).toEqual({
+    expect(await readSessionPane(run, ATLAS)).toEqual({
       kind: 'ok',
       name: 'vam-atlas-a1b2c3',
       text: '$ claude\n',
     });
+    // The listing has to ASK for the recorded id, or there is nothing to match
+    // on and the code falls back to guessing from a name.
+    expect(argvs[0]).toEqual(['list-sessions', '-F', '#{@vam-project}\t#{session_name}']);
     // Exact targeting: `-t vam-atlas-a1` would reach `vam-atlas-a1b2c3` by
     // tmux's own prefix resolution, and on send-keys that is someone else's
     // session.
@@ -82,8 +147,19 @@ describe('reading the pane', () => {
   });
 
   it('reports no session of vam-s, and captures nothing, when nothing matches', async () => {
-    const { run, verbs } = runner({ 'list-sessions': ok('notes\n') });
-    expect(await readSessionPane(run, 'atlas')).toEqual({ kind: 'not-vam' });
+    const { run, verbs } = runner({ 'list-sessions': ok('\tnotes\n') });
+    expect(await readSessionPane(run, ATLAS)).toEqual({ kind: 'not-vam' });
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
+  it('captures nothing when two sessions answer to one project', async () => {
+    const { run, verbs } = runner({
+      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-d4e5f6\n`),
+    });
+    expect(await readSessionPane(run, ATLAS)).toEqual({
+      kind: 'ambiguous',
+      names: ['vam-atlas-a1b2c3', 'vam-atlas-d4e5f6'],
+    });
     expect(verbs()).toEqual(['list-sessions']);
   });
 
@@ -94,12 +170,12 @@ describe('reading the pane', () => {
     const { run } = runner({
       'list-sessions': failed('no server running on /tmp/tmux-501/default'),
     });
-    expect(await readSessionPane(run, 'atlas')).toEqual({ kind: 'not-vam' });
+    expect(await readSessionPane(run, ATLAS)).toEqual({ kind: 'not-vam' });
   });
 
   it('says vam could not ask for every other listing failure', async () => {
     const { run } = runner({ 'list-sessions': failed('permission denied') });
-    const view = await readSessionPane(run, 'atlas');
+    const view = await readSessionPane(run, ATLAS);
     expect(view.kind).toBe('unavailable');
     if (view.kind !== 'unavailable') throw new Error('unreachable');
     expect(view.error.message).toContain('permission denied');
@@ -107,18 +183,18 @@ describe('reading the pane', () => {
 
   it('says the session ended when it disappears between the list and the capture', async () => {
     const { run } = runner({
-      'list-sessions': ok('vam-atlas-a1b2c3\n'),
+      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
       'capture-pane': failed("can't find session: vam-atlas-a1b2c3"),
     });
-    expect(await readSessionPane(run, 'atlas')).toEqual({ kind: 'gone' });
+    expect(await readSessionPane(run, ATLAS)).toEqual({ kind: 'gone' });
   });
 
   it('says vam could not ask when the capture fails for any other reason', async () => {
     const { run } = runner({
-      'list-sessions': ok('vam-atlas-a1b2c3\n'),
+      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
       'capture-pane': failed('server exited unexpectedly'),
     });
-    expect((await readSessionPane(run, 'atlas')).kind).toBe('unavailable');
+    expect((await readSessionPane(run, ATLAS)).kind).toBe('unavailable');
   });
 });
 
@@ -136,10 +212,10 @@ describe('the terminal channel', () => {
 
   it('answers a bare PaneView, with no IpcResult envelope around it', async () => {
     const { run } = runner({
-      'list-sessions': ok('vam-atlas-a1b2c3\n'),
+      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
       'capture-pane': ok('screen'),
     });
-    expect(await harness(run)('atlas')).toEqual({
+    expect(await harness(run)(ATLAS)).toEqual({
       kind: 'ok',
       name: 'vam-atlas-a1b2c3',
       text: 'screen',

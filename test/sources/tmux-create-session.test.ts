@@ -92,6 +92,10 @@ describe('o, on the Claude Code source', () => {
     expect(failure).toBeNull();
     expect(run.calls).toEqual([
       ['new-session', '-d', '-s', 'vam-new-work-a1b2c3', '-c', '/w/demo', 'claude'],
+      // The id the Terminal tab will ask by -- the SAME id `createSession` was
+      // called with, not a slug re-derived from the title. The title reaches
+      // the name and stops there.
+      ['set-option', '-t', 'vam-new-work-a1b2c3', '@vam-project', projectIdOf('/w/demo')],
     ]);
   });
 
