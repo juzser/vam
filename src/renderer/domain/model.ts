@@ -350,6 +350,7 @@ export type Session = {
    * one is not a licence to offer a control that will refuse.
    */
   readonly vamControlled?: boolean;
+  /**
    * The `AskUserQuestion` questions this session asked, oldest first, or
    * absent when the source has no such surface.
    *
