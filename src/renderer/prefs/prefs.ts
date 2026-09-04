@@ -427,27 +427,31 @@ function readPaneVisibility(raw: unknown): Layout {
     detail?: unknown;
     order?: unknown;
   };
+  const columns = readColumnOrder(order);
   return {
     sidebar: sidebar !== false,
     canvas: canvas !== false,
     detail: detail !== false,
-    order: readColumnOrder(order),
+    // Absent stays ABSENT rather than being materialised as the default: the
+    // field is optional in `Layout`, `columnOrder()` answers for it, and a
+    // payload that never named an order round-trips through here unchanged.
+    ...(columns === undefined ? {} : { order: columns }),
   };
 }
 
 /**
- * Total: anything that is not a permutation of the three column ids falls back
- * to the shipped sequence. A partial or repeated list is rejected whole rather
+ * Total: anything that is not a permutation of the three column ids reads as
+ * "no order stored", which `columnOrder()` answers with the shipped sequence. A partial or repeated list is rejected whole rather
  * than repaired, because half an order is a column that would not be drawn at
  * all — and a dropped column is exactly the failure `readPaneVisibility`
  * refuses one field above.
  */
-function readColumnOrder(raw: unknown): readonly ColumnId[] {
+function readColumnOrder(raw: unknown): readonly ColumnId[] | undefined {
   if (!Array.isArray(raw) || raw.length !== DEFAULT_ORDER.length) {
-    return DEFAULT_ORDER;
+    return undefined;
   }
   const named = new Set(raw.filter((id): id is ColumnId => DEFAULT_ORDER.includes(id as ColumnId)));
-  return named.size === DEFAULT_ORDER.length ? (raw as readonly ColumnId[]) : DEFAULT_ORDER;
+  return named.size === DEFAULT_ORDER.length ? (raw as readonly ColumnId[]) : undefined;
 }
 
 /** Written by the layout chords. */
