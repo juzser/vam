@@ -234,6 +234,19 @@ export type Prefs = {
    */
   readonly collapsedProjects: Readonly<Record<string, readonly string[]>>;
   /**
+   * Source id → the ids of that source's projects you REMOVED from vam.
+   *
+   * The same two-level shape and the same reasoning as `collapsedProjects`
+   * above, and it exists for a reason peculiar to this app: a project is
+   * derived from the cwd of live sessions, so removing one cannot be a
+   * deletion. vam ends the sessions it started and has no verb for the rest,
+   * and the project would return on the next refresh regardless. This list is
+   * what makes the removal stick — and, being the only stored half of it, the
+   * only half that can be undone. Exempt from the icon TTL: it records a
+   * decision the operator made, not a session that has stopped existing.
+   */
+  readonly hiddenProjects: Readonly<Record<string, readonly string[]>>;
+  /**
    * Source id → session id → the name you gave it. Same keying, storage and
    * TTL as `icons`, for the same reasons -- and the TTL applies for one more:
    * a name for a session that stopped existing months ago is not worth
@@ -270,6 +283,7 @@ export const EMPTY_PREFS: Prefs = {
   projectIcons: {},
   filters: DEFAULT_SESSION_FILTERS,
   collapsedProjects: {},
+  hiddenProjects: {},
   renames: {},
   palette: {},
   keyBindings: {},
@@ -344,6 +358,7 @@ function parsePrefs(
     projectIcons?: unknown;
     filters?: unknown;
     collapsedProjects?: unknown;
+    hiddenProjects?: unknown;
     renames?: unknown;
   };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -374,7 +389,10 @@ function parsePrefs(
     filters: readFilters(record.filters),
     // Not pruned either, and per-source defensive: one garbage bucket cannot
     // unfold the projects another source folded.
-    collapsedProjects: readCollapsed(record.collapsedProjects),
+    collapsedProjects: readIdsBySource(record.collapsedProjects),
+    // Per field and per source like the fold above it: a payload from a vam
+    // that predates removal has no key, and reads back as "nothing removed".
+    hiddenProjects: readIdsBySource(record.hiddenProjects),
     // Same TTL and same shape as the icons above; a payload written before
     // this field existed simply has none, and reads as `{}`.
     renames: pruneBuckets(readBuckets(record.renames, readRename), cutoff),
@@ -398,7 +416,7 @@ function parsePrefs(
  * non-array bucket is dropped whole; a non-string id inside an otherwise good
  * bucket is dropped alone, so one bad element cannot unfold the rest.
  */
-function readCollapsed(raw: unknown): Prefs['collapsedProjects'] {
+function readIdsBySource(raw: unknown): Readonly<Record<string, readonly string[]>> {
   if (typeof raw !== 'object' || raw === null) {
     return {};
   }
@@ -424,23 +442,65 @@ export function isProjectCollapsed(prefs: Prefs, source: string, projectId: stri
  * bucket: the stored shape then matches a fresh install exactly, which is
  * what makes "expand everything" leave no residue behind to read back.
  */
+/**
+ * Add or remove one id from one source's bucket.
+ *
+ * Removing the last id removes the SOURCE'S BUCKET, so the stored shape then
+ * matches a fresh install exactly: that is what makes "expand everything" —
+ * and "restore everything" — leave no residue behind to read back.
+ */
+function withIdBySource(
+  map: Readonly<Record<string, readonly string[]>>,
+  source: string,
+  id: string,
+  on: boolean,
+): Readonly<Record<string, readonly string[]>> {
+  const bucket = map[source] ?? [];
+  const next = on
+    ? bucket.includes(id)
+      ? bucket
+      : [...bucket, id]
+    : bucket.filter((each) => each !== id);
+  return next.length > 0
+    ? withEntry(map as Record<string, readonly string[]>, source, next)
+    : withoutEntry(map as Record<string, readonly string[]>, source);
+}
+
+/** Fold or unfold one project. */
 export function setProjectCollapsed(
   prefs: Prefs,
   source: string,
   projectId: string,
   collapsed: boolean,
 ): Prefs {
-  const bucket = prefs.collapsedProjects[source] ?? [];
-  const next = collapsed
-    ? bucket.includes(projectId)
-      ? bucket
-      : [...bucket, projectId]
-    : bucket.filter((id) => id !== projectId);
-  const collapsedProjects =
-    next.length > 0
-      ? withEntry(prefs.collapsedProjects as Record<string, readonly string[]>, source, next)
-      : withoutEntry(prefs.collapsedProjects as Record<string, readonly string[]>, source);
-  return { ...prefs, collapsedProjects };
+  return {
+    ...prefs,
+    collapsedProjects: withIdBySource(prefs.collapsedProjects, source, projectId, collapsed),
+  };
+}
+
+/** Has this source's project been removed from vam? */
+export function isProjectHidden(prefs: Prefs, source: string, projectId: string): boolean {
+  return prefs.hiddenProjects[source]?.includes(projectId) === true;
+}
+
+/**
+ * Remove one project from vam, or bring it back.
+ *
+ * Only ever the LIST: ending the project's sessions is the caller's other
+ * half, and it is deliberately not attempted here — this function is pure, and
+ * the half of removal it owns is the reversible one.
+ */
+export function setProjectHidden(
+  prefs: Prefs,
+  source: string,
+  projectId: string,
+  hidden: boolean,
+): Prefs {
+  return {
+    ...prefs,
+    hiddenProjects: withIdBySource(prefs.hiddenProjects, source, projectId, hidden),
+  };
 }
 
 /** Per FIELD, not per object: a payload from an older vam has neither key,
