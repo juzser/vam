@@ -879,14 +879,12 @@ describe('the mode pills select, and what they select gets recorded', () => {
 describe('the empty tabs carry no tooltip, and the other notes stay', () => {
   it('drops the tab note without touching the mode, attach or model notes', () => {
     draw();
-    // TWO placeholders now, not three: `Agents` has a real source behind it
-    // and is a control. `PRs` and `Terminal` have none and are unchanged.
+    // ONE placeholder now, not two: `Agents` has a roster behind it and `PRs`
+    // has `gh` behind it. `Terminal` has neither -- vam holds no PTY -- and is
+    // unchanged.
     const tabs = all('[data-placeholder^="tab-"]');
-    expect(tabs).toHaveLength(2);
-    expect(tabs.map((t) => t.getAttribute('data-placeholder'))).toEqual([
-      'tab-prs',
-      'tab-terminal',
-    ]);
+    expect(tabs).toHaveLength(1);
+    expect(tabs.map((t) => t.getAttribute('data-placeholder'))).toEqual(['tab-terminal']);
     for (const tab of tabs) {
       // No note, and therefore no reason to be a focus stop either: a button
       // that does nothing and explains nothing is a keyboard trap with a hover
@@ -923,16 +921,15 @@ describe('the Agents tab', () => {
     fireEvent.click(button);
   };
 
-  it('is a real control, unlike the two tabs with no data behind them', () => {
+  it('is a real control, unlike the one tab with no data behind it', () => {
     draw({ entry: withAgents([]) });
     expect(agentsTab()).not.toBeNull();
     expect(agentsTab()?.tagName).toBe('BUTTON');
-    // The two that stay inert: still labels, still marked as placeholders.
-    for (const placeholder of ['tab-prs', 'tab-terminal']) {
-      const tab = q<HTMLElement>(`[data-placeholder="${placeholder}"]`);
-      expect(tab).not.toBeNull();
-      expect(tab?.closest('button')).toBeNull();
-    }
+    // `PRs` has since become a control of its own; `Terminal` is the one that
+    // stays inert -- still a label, still marked as a placeholder.
+    const tab = q<HTMLElement>('[data-placeholder="tab-terminal"]');
+    expect(tab).not.toBeNull();
+    expect(tab?.closest('button')).toBeNull();
   });
 
   it('starts on Response and moves the pane content when Agents is picked', () => {
@@ -1357,5 +1354,152 @@ describe('the out region shows live work while the session is running', () => {
     const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
     expect(reduced).toContain('.vam-term-cursor');
     expect(css).toContain('@keyframes vam-term-cursor');
+  });
+});
+
+/**
+ * The PRs tab: vam's first surface for something it went to the network to
+ * find out, on the operator's behalf and with the operator's credentials.
+ *
+ * What is pinned here is mostly the same thing the module underneath pins:
+ * "this branch has no pull request" and "vam could not ask" must not look
+ * alike. A pane that renders a failure as an empty list would be telling the
+ * operator there is nothing to see, on the strength of never having found
+ * out. Every fixture below is invented.
+ */
+describe('the PRs tab', () => {
+  const withPrs = (pullRequests: Session['pullRequests']): SessionEntry => ({
+    project: PROJECT,
+    session: { ...SESSION, ...(pullRequests === undefined ? {} : { pullRequests }) },
+  });
+
+  const prsTab = () => q<HTMLButtonElement>('[data-tab="prs"]');
+  const openPrs = () => {
+    const button = prsTab();
+    if (button === null) throw new Error('no PRs tab to click');
+    fireEvent.click(button);
+  };
+  const body = () => q<HTMLElement>('[data-prs]')?.textContent ?? '';
+
+  const POPULATED: Session['pullRequests'] = {
+    kind: 'ok',
+    prs: [
+      {
+        number: 128,
+        title:
+          'Rework the detail pane so a narrow column stays readable end to end, however long the branch name grows',
+        state: 'open',
+        checks: 'failing',
+      },
+      { number: 121, title: 'Spike the roster reader', state: 'draft', checks: 'pending' },
+      { number: 97, title: 'Carry the branch to the sidebar', state: 'merged', checks: 'passing' },
+    ],
+  };
+
+  it('is a real control now, and leaves Terminal exactly as it was', () => {
+    draw({ entry: withPrs({ kind: 'ok', prs: [] }) });
+    expect(prsTab()).not.toBeNull();
+    expect(prsTab()?.tagName).toBe('BUTTON');
+    // ONE placeholder left. Terminal has no PTY behind it and is untouched by
+    // this work: still a label, still marked, still not a focus stop.
+    const placeholders = all('[data-placeholder^="tab-"]');
+    expect(placeholders.map((t) => t.getAttribute('data-placeholder'))).toEqual(['tab-terminal']);
+    expect(placeholders[0]?.closest('button')).toBeNull();
+  });
+
+  it('moves the pane content when picked, and gives it back to Response', () => {
+    draw({ entry: withPrs({ kind: 'ok', prs: [] }) });
+    expect(q('[data-prs]')).toBeNull();
+    expect(prsTab()?.getAttribute('aria-selected')).toBe('false');
+
+    openPrs();
+
+    expect(q('[data-prs]')).not.toBeNull();
+    expect(q('[data-detail-block="out"]')).toBeNull();
+    expect(q('[data-agents]')).toBeNull();
+    expect(prsTab()?.getAttribute('aria-selected')).toBe('true');
+
+    fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
+    expect(q('[data-prs]')).toBeNull();
+    expect(q('[data-detail-block="out"]')).not.toBeNull();
+  });
+
+  it('says the branch has none only when vam actually asked and GitHub said none', () => {
+    draw({ entry: withPrs({ kind: 'ok', prs: [] }) });
+    openPrs();
+
+    expect(all('[data-pr-row]')).toHaveLength(0);
+    expect(q('[data-prs-empty]')).not.toBeNull();
+    expect(q('[data-prs-unavailable]')).toBeNull();
+    expect(body()).toContain('no pull request');
+  });
+
+  it('says vam could not ask, in gh’s own terms, and never calls that "none"', () => {
+    for (const [code, message] of [
+      ['cli-missing', 'the `gh` command was not found'],
+      ['not-authenticated', '`gh` is installed but not authenticated'],
+      ['not-a-repo', 'not a git repository'],
+      ['no-github-remote', 'no GitHub remote'],
+      ['timed-out', 'GitHub did not answer'],
+      ['bad-response', 'gh answered with something that was not JSON'],
+      ['branch-unknown', 'could not tell which branch'],
+    ] as const) {
+      cleanup();
+      draw({ entry: withPrs({ kind: 'unavailable', code, message }) });
+      openPrs();
+
+      expect(all('[data-pr-row]'), code).toHaveLength(0);
+      expect(q('[data-prs-empty]'), code).toBeNull();
+      // The reason travels verbatim: the operator can only fix `gh auth login`
+      // if the pane says that is what is wrong.
+      expect(body(), code).toContain(message);
+      expect(q('[data-prs-unavailable]')?.getAttribute('data-prs-code'), code).toBe(code);
+      expect(body(), code).not.toContain('no pull request');
+    }
+  });
+
+  it('distinguishes a source that cannot ask at all from one that asked and found none', () => {
+    draw({ entry: withPrs(undefined) });
+    openPrs();
+
+    expect(all('[data-pr-row]')).toHaveLength(0);
+    expect(q('[data-prs-absent]')).not.toBeNull();
+    expect(body()).not.toContain('no pull request');
+    expect(body()).toContain('does not report');
+  });
+
+  it('lists each pull request with its number, title, state and checks', () => {
+    draw({ entry: withPrs(POPULATED) });
+    openPrs();
+
+    const rows = all('[data-pr-row]');
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => r.getAttribute('data-pr-state'))).toEqual(['open', 'draft', 'merged']);
+    expect(rows.map((r) => r.getAttribute('data-pr-checks'))).toEqual([
+      'failing',
+      'pending',
+      'passing',
+    ]);
+    expect(rows[0]?.querySelector('[data-pr-number]')?.textContent).toContain('128');
+    expect(rows[2]?.querySelector('[data-pr-title]')?.textContent).toBe(
+      'Carry the branch to the sidebar',
+    );
+    // Each check verdict is drawn with its own token, so failing and passing
+    // can never arrive at the operator as the same colour.
+    const checkClass = (i: number) =>
+      rows[i]?.querySelector('[data-pr-checks-mark]')?.getAttribute('class') ?? '';
+    expect(checkClass(0)).toContain('failed');
+    expect(checkClass(2)).toContain('running');
+    expect(checkClass(0)).not.toBe(checkClass(1));
+  });
+
+  it('truncates a long title rather than widening the pane', () => {
+    draw({ entry: withPrs(POPULATED) });
+    openPrs();
+    const title = all('[data-pr-row]')[0]?.querySelector('[data-pr-title]');
+    expect(title?.getAttribute('class')).toContain('truncate');
+    // Truncation is visual, so the full title stays in the DOM for anything
+    // that reads rather than looks.
+    expect(title?.textContent).toBe(POPULATED?.kind === 'ok' ? POPULATED.prs[0]?.title : '');
   });
 });

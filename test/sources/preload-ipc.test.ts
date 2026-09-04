@@ -100,6 +100,39 @@ const AGENT_SHAPE: Shape = {
   description: nullable(isString),
   running: (v) => typeof v === 'boolean',
 };
+/**
+ * `Session.pullRequests`, which crosses as plain data. Declared as OPTIONAL
+ * below rather than required: absent is a meaningful value here (a source with
+ * no pull-request surface), so a source that omits it is correct, while a
+ * source that sends it must send this exact shape.
+ */
+const PR_SHAPE: Shape = {
+  number: (v) => typeof v === 'number' && Number.isInteger(v),
+  title: isString,
+  state: oneOf('open', 'draft', 'merged', 'closed'),
+  checks: oneOf('passing', 'failing', 'pending', 'none'),
+};
+const isPullRequestList = (v: unknown): boolean => {
+  if (v === null || typeof v !== 'object') return false;
+  const list = v as Record<string, unknown>;
+  if (list['kind'] === 'ok') {
+    return (
+      Object.keys(list).length === 2 &&
+      Array.isArray(list['prs']) &&
+      list['prs'].every((pr) => matches(pr, PR_SHAPE).length === 0)
+    );
+  }
+  return (
+    list['kind'] === 'unavailable' &&
+    Object.keys(list).length === 3 &&
+    isString(list['code']) &&
+    isString(list['message'])
+  );
+};
+
+/** Present-or-absent, and checked when present. */
+const SESSION_OPTIONAL: Shape = { pullRequests: isPullRequestList };
+
 const SESSION_SHAPE: Shape = {
   id: isString,
   title: isString,
@@ -122,7 +155,9 @@ const PROJECT_SHAPE: Shape = {
   // is `string` (task-2, PR #42) -- oneOf(...) was already stale for that,
   // this task only surfaced it. isString matches the declared type exactly.
   source: isString,
-  sessions: (v) => Array.isArray(v) && v.every((s) => matches(s, SESSION_SHAPE).length === 0),
+  sessions: (v) =>
+    Array.isArray(v) &&
+    v.every((s) => matches(s, SESSION_SHAPE, '', SESSION_OPTIONAL).length === 0),
 };
 
 /**
@@ -131,7 +166,7 @@ const PROJECT_SHAPE: Shape = {
  * and is caught by the per-field type check, and anything main invented on the
  * way out is caught by the key set.
  */
-function matches(value: unknown, shape: Shape, path = ''): string[] {
+function matches(value: unknown, shape: Shape, path = '', optional: Shape = {}): string[] {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return [`${path || 'value'}: expected a plain object, got ${describeValue(value)}`];
   }
@@ -144,8 +179,13 @@ function matches(value: unknown, shape: Shape, path = ''): string[] {
       problems.push(`${path}${key}: wrong type -- ${describeValue(record[key])}`);
     }
   }
+  for (const [key, check] of Object.entries(optional)) {
+    if (key in record && !check(record[key])) {
+      problems.push(`${path}${key}: wrong type -- ${describeValue(record[key])}`);
+    }
+  }
   for (const key of Object.keys(record)) {
-    if (!(key in shape)) {
+    if (!(key in shape) && !(key in optional)) {
       problems.push(`${path}${key}: not declared in model.ts`);
     }
   }
@@ -384,3 +424,63 @@ function isRefusal(result: unknown): boolean {
     typeof envelope.error?.message === 'string'
   );
 }
+
+/**
+ * The pull-request list is the newest thing to cross the bridge, and it is the
+ * one field whose whole point is that two of its values must not be confused.
+ * It is checked HERE, on the far side of a structured clone, because that is
+ * where a discriminated union would quietly become a plain object.
+ */
+describe('Session.pullRequests survives the boundary as itself', () => {
+  const sessionWith = (pullRequests: Session['pullRequests']): Project => ({
+    id: 'p-prs',
+    name: 'atlas',
+    source: 'claude-code',
+    sessions: [
+      {
+        id: 's-prs',
+        title: 'branch work',
+        icon: null,
+        epic: null,
+        branch: 'topic/rework',
+        status: 'running',
+        runningAgents: 0,
+        activity: null,
+        age: null,
+        decisions: [],
+        agents: [],
+        ...(pullRequests === undefined ? {} : { pullRequests }),
+      },
+    ],
+  });
+
+  const cross = async (project: Project) => {
+    const { api } = wire({ ...FIXTURE_SOURCE, load: async () => [project] });
+    const source = await createSourceFromPreload(asFactoryApi(api));
+    return source.load();
+  };
+
+  it('carries a populated list, an empty list and a reason, each still itself', async () => {
+    for (const value of [
+      { kind: 'ok', prs: [{ number: 128, title: 'a title', state: 'open', checks: 'passing' }] },
+      { kind: 'ok', prs: [] },
+      { kind: 'unavailable', code: 'cli-missing', message: 'no gh on this machine' },
+      undefined,
+    ] as const) {
+      const projects = await cross(sessionWith(value));
+      expect(shapeProblems(projects), JSON.stringify(value)).toEqual([]);
+      expect(projects[0]?.sessions[0]?.pullRequests).toEqual(value);
+    }
+  });
+
+  it('fails a list shaped in a way model.ts does not declare', async () => {
+    // The failure mode a new field has: main starts sending something this
+    // file has never been told about, and nothing notices.
+    const projects = await cross(
+      sessionWith({ kind: 'ok', prs: [{ number: 1, title: 't', state: 'OPEN' }] } as never),
+    );
+    // Reported against the session, since a nested mismatch collapses into
+    // the field that holds it -- what matters is that it is not silent.
+    expect(shapeProblems(projects)).not.toEqual([]);
+  });
+});

@@ -279,6 +279,10 @@ function toSession(
     // and an empty roster beside a non-zero count would read as "this session
     // spawned none" -- a claim this adapter cannot make. Absent is model.ts's
     // "the source cannot answer", and the pane says exactly that.
+    // `Session.pullRequests` is ABSENT here for the same reason and with the
+    // same force: black-smith's API has no branch, no remote and no notion of
+    // a pull request, so vam has nothing to ask on this session's behalf. An
+    // empty list would read as "asked, and there are none".
     runningAgents: api.liveAgentCount,
     activity: activityOf(api),
     age: ageOf(api, now),

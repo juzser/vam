@@ -560,4 +560,66 @@ describe('loadClaudeCodeProjects', () => {
     }
     expect(viewerScope.kind).toBe('connection');
   });
+
+  /**
+   * The `gh` reader, joined to the model. THE SPAWN NEVER HAPPENS IN A TEST:
+   * the reader is a parameter, its default asks nothing, and every case below
+   * injects an invented answer. A test that reached GitHub would do so with
+   * whatever credentials the machine running it holds.
+   */
+  describe('pull requests on the session branch', () => {
+    it("asks about each session branch, in that session's own directory", async () => {
+      const asked: { cwd: string; branch: string | null }[] = [];
+      await loadClaudeCodeProjects(
+        root,
+        [agent({ key: 'a#1', sessionId: 'a', cwd: '/w/atlas' })],
+        NOW,
+        async () => 'topic/rework',
+        sessionsRoot,
+        async (input) => {
+          asked.push(input);
+          return { kind: 'ok', prs: [] };
+        },
+      );
+      expect(asked).toEqual([{ cwd: '/w/atlas', branch: 'topic/rework' }]);
+    });
+
+    it('carries the answer onto the session, empty list and all', async () => {
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent()],
+        NOW,
+        async () => 'topic/rework',
+        sessionsRoot,
+        async () => ({ kind: 'ok', prs: [] }),
+      );
+      expect(project?.sessions[0]?.pullRequests).toEqual({ kind: 'ok', prs: [] });
+    });
+
+    it('carries a failure through as a failure, never as an empty list', async () => {
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent()],
+        NOW,
+        async () => 'topic/rework',
+        sessionsRoot,
+        async () => ({ kind: 'unavailable', code: 'cli-missing', message: 'no gh here' }),
+      );
+      expect(project?.sessions[0]?.pullRequests).toEqual({
+        kind: 'unavailable',
+        code: 'cli-missing',
+        message: 'no gh here',
+      });
+    });
+
+    it('leaves the field absent, and spawns nothing, when no reader is given', async () => {
+      const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+      expect(project?.sessions[0]?.pullRequests).toBeUndefined();
+      expect('pullRequests' in (project?.sessions[0] ?? {})).toBe(false);
+    });
+
+    it('claims the capability it now really has', () => {
+      expect(CLAUDE_CODE_SOURCE.descriptor.capabilities.pullRequests).toBe(true);
+    });
+  });
 });

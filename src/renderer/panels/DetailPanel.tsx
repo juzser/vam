@@ -56,7 +56,13 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Decision, SessionAgent, SessionStatus } from '../domain/model.js';
+import type {
+  Decision,
+  PullRequest,
+  PullRequestList,
+  SessionAgent,
+  SessionStatus,
+} from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { Note } from './Note.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
@@ -286,16 +292,17 @@ export type DetailPanelProps = {
  * The tab bar's four entries, and which of them have anything behind them.
  *
  * `Agents` joined `Response` when a source that actually reports a roster
- * arrived (`Session.agents`). `PRs` and `Terminal` still have no data source
- * at all in any source vam speaks to, so they stay exactly what they were:
- * labels marked `data-placeholder`, taking neither focus nor hover.
+ * arrived (`Session.agents`), and `PRs` joined them when one learned to ask
+ * `gh` (`Session.pullRequests`). `Terminal` still has no data source at all --
+ * vam holds no PTY -- so it stays exactly what it was: a label marked
+ * `data-placeholder`, taking neither focus nor hover.
  */
 const TABS = ['Response', 'PRs', 'Terminal', 'Agents'] as const;
 
 type Tab = (typeof TABS)[number];
 
 /** The tabs that select something. Everything else in `TABS` is a label. */
-const LIVE_TABS: readonly Tab[] = ['Response', 'Agents'];
+const LIVE_TABS: readonly Tab[] = ['Response', 'PRs', 'Agents'];
 
 /**
  * The mockup's mode segments, and which one it draws as current. Presentation
@@ -309,8 +316,10 @@ const MODES = ['Auto', 'Manual', 'Plan'] as const;
  * underlined labels.
  *
  * The Agents badge has a real source (`runningAgents`) and is omitted at
- * zero. PRs has none in black-smith's domain model, so it ships with no
- * badge rather than a fabricated or hardcoded count.
+ * zero. PRs still ships with NO badge, even now that it has data: a count
+ * there would have to read as zero both for a branch with no pull request and
+ * for a session vam could not ask about, which is the one conflation this
+ * pane exists to avoid.
  *
  * TWO KINDS OF PILL, and the difference is whether the tab selects anything.
  * A live tab is a real <button> — Tab reaches it, Enter and Space activate it,
@@ -319,7 +328,7 @@ const MODES = ['Auto', 'Manual', 'Plan'] as const;
  * reason they became labels: they were buttons wrapping a note explaining why
  * they were empty, the operator asked for the note to go, and a focus stop
  * that activates nothing and explains nothing is a keyboard trap with a hover
- * state. `data-placeholder` still says in the markup which ones are unbacked.
+ * state. `data-placeholder` still says in the markup which one is unbacked.
  */
 function TabBar({
   runningAgents,
@@ -376,6 +385,110 @@ function TabBar({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * How a pull request's checks are drawn: one token per verdict, and `none`
+ * deliberately quiet.
+ *
+ * `none` uses the same dim ink as unknown text rather than a colour, because
+ * a repository with no checks configured has nothing to report -- painting it
+ * green would be the pane inventing a passing build.
+ */
+const CHECK_MARK: Record<PullRequest['checks'], { readonly dot: string; readonly label: string }> =
+  {
+    passing: { dot: 'bg-running', label: 'checks pass' },
+    failing: { dot: 'bg-failed', label: 'checks fail' },
+    pending: { dot: 'bg-waiting', label: 'checks running' },
+    none: { dot: 'bg-line-strong', label: 'no checks' },
+  };
+
+/** The one word each state gets. `draft` is not a kind of `open`. */
+const PR_STATE_INK: Record<PullRequest['state'], string> = {
+  open: 'text-running',
+  draft: 'text-ink-faint',
+  merged: 'text-done',
+  closed: 'text-ink-dim',
+};
+
+/**
+ * The PRs tab's content: what GitHub said about this session's branch, or why
+ * vam could not ask.
+ *
+ * THREE STATES, AND THE TWO EMPTY ONES ARE THE WHOLE POINT (model.ts). Absent
+ * is a source with no pull-request surface at all. `ok` with an empty list is
+ * vam having asked GitHub and been told none -- the ONE true empty case.
+ * `unavailable` is vam not having found out, and it renders the reason `gh`
+ * gave, verbatim, because "run `gh auth login`" is only actionable if the
+ * operator can see that authentication is what is wrong.
+ *
+ * An empty list drawn for a failure would tell the operator there is nothing
+ * to look at, on the strength of never having looked. That is the failure
+ * this component is shaped to make impossible.
+ */
+function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestList | undefined }) {
+  if (pullRequests === undefined) {
+    return (
+      <p data-prs data-prs-absent className="text-[11px] text-ink-faint">
+        This source does not report pull requests for a session.
+      </p>
+    );
+  }
+  if (pullRequests.kind === 'unavailable') {
+    return (
+      <p
+        data-prs
+        data-prs-unavailable
+        data-prs-code={pullRequests.code}
+        className="text-[11px] text-ink-faint"
+      >
+        {/* vam could not ask. Not "there are none". */}
+        {pullRequests.message}
+      </p>
+    );
+  }
+  if (pullRequests.prs.length === 0) {
+    return (
+      <p data-prs data-prs-empty className="text-[11px] text-ink-faint">
+        This branch has no pull request on GitHub.
+      </p>
+    );
+  }
+  return (
+    <ul data-prs className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
+      {pullRequests.prs.map((pr) => (
+        <li
+          key={pr.number}
+          data-pr-row
+          data-pr-state={pr.state}
+          data-pr-checks={pr.checks}
+          className="flex items-center gap-2 rounded-[9px] border border-line bg-panel px-3 py-2"
+        >
+          <span
+            data-pr-checks-mark
+            title={CHECK_MARK[pr.checks].label}
+            className={`h-1.5 w-1.5 flex-none rounded-full ${CHECK_MARK[pr.checks].dot}`}
+          />
+          <span className="min-w-0 flex-1">
+            {/* Truncated, not shortened: the pane is a narrow column, and the
+                whole title stays in the DOM for anything that reads it. */}
+            <span data-pr-title className="block truncate text-[11.5px] text-ink">
+              {pr.title}
+            </span>
+            <span className="mt-0.5 flex items-center gap-1.5 text-[10.5px]">
+              <span data-pr-number className="font-mono text-ink-faint">
+                {`#${pr.number}`}
+              </span>
+              <span data-pr-state-label className={PR_STATE_INK[pr.state]}>
+                {pr.state}
+              </span>
+              <span className="truncate text-ink-faint">{CHECK_MARK[pr.checks].label}</span>
+            </span>
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -1036,6 +1149,8 @@ export function DetailPanel(props: DetailPanelProps) {
         )}
         {tab === 'Agents' ? (
           <AgentsTab agents={entry?.session.agents} />
+        ) : tab === 'PRs' ? (
+          <PullRequestsTab pullRequests={entry?.session.pullRequests} />
         ) : decision === null ? (
           <p className="text-[11px] text-ink-faint">
             {/* Two different absences. "This session has no steps yet" named a
