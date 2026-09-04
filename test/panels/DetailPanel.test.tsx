@@ -2157,3 +2157,86 @@ describe('the Terminal tab is offered only by a source that has one', () => {
     expect(q<HTMLElement>('[data-tab="response"]')?.getAttribute('aria-selected')).toBe('true');
   });
 });
+
+/**
+ * The composer belongs to the Response tab, and to no other.
+ *
+ * A terminal pane is not something you answer through the prompt box: the box
+ * DELIVERS now -- Enter on it sends a real reply into the session -- so leaving
+ * it under a screenful of tmux output invites sending a prompt to the place it
+ * was not meant for, with nothing on screen to say so. The whole footer goes,
+ * not only the textarea: the mode row and the `!` typeahead write into that
+ * same draft, and a mode pill above a terminal is a control with nothing to
+ * act on.
+ */
+describe('the composer is hidden while the Terminal tab is open', () => {
+  const withBridge = () => {
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: {
+        terminal: {
+          read: async (): Promise<PaneView> => ({ kind: 'not-vam' }),
+          resize: async () => false,
+        },
+      },
+    });
+  };
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'api');
+  });
+
+  const openTerminal = () =>
+    fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
+
+  it('draws the prompt box, the mode row and the attach button on Response', () => {
+    withBridge();
+    draw();
+    expect(q('[data-prompt-box]')).not.toBeNull();
+    expect(q('[data-mode-row]')).not.toBeNull();
+    expect(q('[data-attach]')).not.toBeNull();
+    expect(q('[data-model-request]')).not.toBeNull();
+  });
+
+  it('removes every one of them on Terminal, rather than hiding them with a style', async () => {
+    // REMOVED, not `display:none`. A composer that is still in the document is
+    // still reachable by Tab and still submits on Enter, which is the exact
+    // accident this prevents.
+    withBridge();
+    draw();
+    await act(async () => {
+      openTerminal();
+      await Promise.resolve();
+    });
+    expect(q('[data-terminal]')).not.toBeNull();
+    expect(q('[data-prompt-box]')).toBeNull();
+    expect(q('[data-mode-row]')).toBeNull();
+    expect(q('[data-attach]')).toBeNull();
+    expect(q('[data-model-request]')).toBeNull();
+    expect(q('textarea')).toBeNull();
+  });
+
+  it('brings it back on the way out, with the draft untouched', async () => {
+    withBridge();
+    draw({ draft: 'half a sentence' });
+    await act(async () => {
+      openTerminal();
+      await Promise.resolve();
+    });
+    fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
+    // The draft lives above this pane, so leaving the tab cannot have eaten
+    // it: hiding the box may not cost the operator what they had typed.
+    expect(q<HTMLTextAreaElement>('textarea')?.value).toBe('half a sentence');
+  });
+
+  it('keeps the composer on the other tabs, which are still about the answer', () => {
+    // Only Terminal. PRs and Agents are read alongside a reply being written,
+    // and nothing about them makes the prompt box the wrong place to type.
+    withBridge();
+    draw();
+    fireEvent.click(q<HTMLButtonElement>('[data-tab="prs"]') as HTMLButtonElement);
+    expect(q('[data-prompt-box]')).not.toBeNull();
+    fireEvent.click(q<HTMLButtonElement>('[data-tab="agents"]') as HTMLButtonElement);
+    expect(q('[data-prompt-box]')).not.toBeNull();
+  });
+});
