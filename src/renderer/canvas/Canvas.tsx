@@ -70,6 +70,7 @@ import {
   canvasIsMain,
   columnOrder,
   DEFAULT_PANES,
+  layoutForViewport,
   layoutWidths,
 } from '../prefs/panes.js';
 import {
@@ -396,7 +397,11 @@ function CanvasInner({
   // Visibility is read here and passed down, never asked of a child: which
   // columns exist is a fact about the layout, and `layoutWidths` is the one
   // place that knows an unmounted pane owes its sibling nothing.
-  const visible = prefs.paneVisibility;
+  // And read through `layoutForViewport`, so that "which columns exist" also
+  // answers the window too narrow to hold them: with the canvas demoted none of
+  // the three columns flexes, and the strip is what gives. Render-time only —
+  // `prefs.paneVisibility` is untouched, so widening the window restores it.
+  const visible = layoutForViewport(prefs.paneVisibility, viewportWidth);
   const order = columnOrder(visible);
   // The canvas is a strip exactly when it is drawn but is not the main column.
   const canvasStrip = visible.canvas && !canvasIsMain(visible);

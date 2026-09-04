@@ -21,8 +21,10 @@ import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
 import {
   ALL_VISIBLE,
+  CANVAS_STRIP,
   DEFAULT_ORDER,
   DEFAULT_PANES,
+  FOCUS_MIN_VIEWPORT,
   LAYOUTS,
   columnOrder as layoutColumnOrder,
   layoutWidths,
@@ -313,5 +315,59 @@ describe('the detail pane has a handle only where one would move it', () => {
     seed({ paneVisibility: LAYOUTS.responseOnly });
     render(<Canvas model={MODEL} />);
     expect(detailHandle()).toBeNull();
+  });
+});
+
+/**
+ * What a window too narrow for three fixed columns does.
+ *
+ * With the canvas demoted, none of the three columns flexes: the two panes have
+ * floors and the strip is a constant, so below their sum (`FOCUS_MIN_VIEWPORT`,
+ * 820) the layout cannot be drawn as asked. The decision, taken here rather
+ * than left to whatever flexbox produces, is to DROP the strip — the column
+ * already demoted to a glance — and render the layout as `noCanvas` until the
+ * window is wide enough again. It is a render-time choice, so nothing is
+ * stored and widening the window brings the strip back.
+ */
+describe('below the width three fixed columns need', () => {
+  const realInnerWidth = window.innerWidth;
+  afterEach(() => {
+    window.innerWidth = realInnerWidth;
+  });
+
+  const paneWidth = (selector: string) =>
+    Number.parseFloat(
+      (document.querySelector(selector) as HTMLElement | null)?.style.width ?? 'NaN',
+    );
+
+  it('drops the strip and gives the two panes the whole window', () => {
+    window.innerWidth = 800;
+    seed({ paneVisibility: LAYOUTS.focusResponse });
+    render(<Canvas model={MODEL} />);
+    expect(columnOrder()).toEqual(['sidebar', 'detail']);
+    expect(paneWidth('[data-sidebar-pane]') + paneWidth('[data-action-pane]')).toBe(800);
+  });
+
+  it('keeps the strip at exactly the width it needs', () => {
+    window.innerWidth = FOCUS_MIN_VIEWPORT;
+    seed({ paneVisibility: LAYOUTS.focusResponse });
+    render(<Canvas model={MODEL} />);
+    expect(columnOrder()).toEqual(['sidebar', 'detail', 'canvas']);
+    expect(paneWidth('[data-sidebar-pane]') + paneWidth('[data-action-pane]')).toBe(
+      FOCUS_MIN_VIEWPORT - CANVAS_STRIP,
+    );
+  });
+
+  it('brings the strip back when the window widens again, without having stored anything', () => {
+    window.innerWidth = 800;
+    seed({ paneVisibility: LAYOUTS.focusResponse });
+    render(<Canvas model={MODEL} />);
+    expect(columnOrder()).toEqual(['sidebar', 'detail']);
+    act(() => {
+      window.innerWidth = 1200;
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(columnOrder()).toEqual(['sidebar', 'detail', 'canvas']);
+    expect(stored().paneVisibility.canvas).toBe(true);
   });
 });
