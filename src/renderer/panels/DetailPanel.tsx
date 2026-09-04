@@ -20,16 +20,18 @@
  * second presentation of that list, never a second rule -- and `bangQuery`
  * below carries the reasoning for the keys.
  *
- * There is no option chooser above the composer, and there should not be one.
- * A picker stood here briefly, drawn from the mockup and fed by a placeholder
- * declared in this file: a header reading "the agent is asking" and three
- * cards whose every word was a constant. Nothing vam reads records what a
- * session is asking or what its options are -- a census of the transcripts,
- * the CLI and `~/.claude/` found no such field -- and `statusOf`
+ * The option chooser above the composer is REAL NOW, and the distinction that
+ * makes it legitimate is worth keeping. A picker stood here briefly, drawn
+ * from the mockup and fed by a placeholder declared in this file: a header
+ * reading "the agent is asking" and three cards whose every word was a
+ * constant, shown to any merely idle session because `statusOf`
  * (`main/sources/claude-code/agents.ts`) calls every non-busy session
- * `waiting`, so the cards were shown to merely idle sessions as well. What a
- * waiting session actually has is its last turn, and `out` below already
- * renders it. So the pane shows that and invents nothing above it.
+ * `waiting`. It was removed on the finding that nothing vam reads records
+ * what a session is asking -- which is true of a question written in PROSE,
+ * and false of one asked through the `AskUserQuestion` tool, whose text,
+ * header, `multiSelect` flag and options are all in the transcript. So
+ * `QuestionCard` below draws that record or nothing, per session rather than
+ * per status, and picking an option still answers nothing: see its comment.
  *
  * What the composer's button claims is now the SOURCE's to say. PR #70 gave
  * the Claude Code source a real channel into a running session, so for that
@@ -68,10 +70,19 @@ import {
   User,
   X,
 } from 'lucide-react';
-import { isValidElement, type ReactNode, useEffect, useRef, useState } from 'react';
+import {
+  isValidElement,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type {
+  AgentQuestion,
   Command,
   Decision,
   PullRequest,
@@ -1075,6 +1086,131 @@ function OutText({ output }: { readonly output: string }) {
   );
 }
 
+/**
+ * The question a session is asking, when it asked one through the
+ * `AskUserQuestion` tool -- and the one thing this card must never do.
+ *
+ * A picker stood here once whose every word was a constant, shown to any idle
+ * session because `statusOf` calls everything non-busy `waiting`. This one is
+ * drawn from the transcript or not at all: the text, the header, `multiSelect`
+ * and the options are the tool's own record (`sources/claude-code/questions.ts`),
+ * and a session that asked nothing gets no box rather than an empty one.
+ *
+ * PICKING ANSWERS NOTHING, and the card says so in words rather than by
+ * omission. Vam's only write channel is the prompt box of a session it started;
+ * there is no path that could deliver a chosen option back to the tool call
+ * waiting on it. So a click MARKS the option -- the operator's own note of
+ * where they landed, which they can then type into the box below -- and no
+ * control here is labelled send, submit or answer.
+ *
+ * `multiSelect` decides the shape, so the roles are `checkbox` or `radio`
+ * accordingly and a single-select card cannot hold two marks. Arrow keys walk
+ * the list, because `i` lands here whenever a question is open.
+ */
+function QuestionCard({
+  question,
+  firstOptionRef,
+}: {
+  readonly question: AgentQuestion;
+  readonly firstOptionRef: RefObject<HTMLButtonElement | null>;
+}) {
+  const [picked, setPicked] = useState<readonly string[]>([]);
+  const open = question.answer === null;
+
+  const toggle = (label: string) =>
+    setPicked((current) =>
+      question.multiSelect
+        ? current.includes(label)
+          ? current.filter((one) => one !== label)
+          : [...current, label]
+        : current.includes(label)
+          ? []
+          : [label],
+    );
+
+  // The list walks with the arrows; every option is a real button, so Enter and
+  // Space already mark one and Tab already leaves.
+  const walk = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const buttons = [
+      ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-question-option]'),
+    ];
+    const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (at === -1 || buttons.length === 0) return;
+    event.preventDefault();
+    const step = event.key === 'ArrowDown' ? 1 : -1;
+    buttons[(at + step + buttons.length) % buttons.length]?.focus();
+  };
+
+  return (
+    <div
+      data-question
+      data-question-open={open ? 'true' : undefined}
+      data-question-select={question.multiSelect ? 'multi' : 'single'}
+      className="flex flex-col gap-1.5 rounded-[10px] border border-line-strong bg-panel px-2.5 py-2"
+    >
+      <div className="flex min-w-0 flex-col gap-0.5">
+        {question.header !== null && (
+          <span data-question-header className="text-[10px] text-ink-faint uppercase tracking-wide">
+            {question.header}
+          </span>
+        )}
+        <span data-question-text className="text-[11.5px] text-ink">
+          {question.question}
+        </span>
+      </div>
+      {open ? (
+        <>
+          {/* A listbox, not a form control: nothing here is submitted, and
+              `aria-multiselectable` is the one honest way to say that several
+              may be marked. */}
+          <div
+            role="listbox"
+            aria-multiselectable={question.multiSelect}
+            aria-label="the options this question offers"
+            onKeyDown={walk}
+            className="flex flex-col gap-1"
+          >
+            {question.options.map((option, index) => (
+              <button
+                key={option.label}
+                ref={index === 0 ? firstOptionRef : undefined}
+                type="button"
+                role="option"
+                aria-selected={picked.includes(option.label)}
+                data-question-option
+                data-picked={picked.includes(option.label) ? 'true' : undefined}
+                onClick={() => toggle(option.label)}
+                className={[
+                  'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                  picked.includes(option.label)
+                    ? 'border-running bg-raised'
+                    : 'border-line hover:bg-raised',
+                ].join(' ')}
+              >
+                <span className="max-w-full text-[11px] text-ink">{option.label}</span>
+                {option.description !== null && (
+                  <span data-question-description className="max-w-full text-[10.5px] text-ink-dim">
+                    {option.description}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          <p data-question-note className="text-[10px] text-ink-faint">
+            vam cannot answer this for you — a pick is only a mark, and nothing goes back to the
+            session; type your choice in the box below.
+          </p>
+        </>
+      ) : (
+        <span data-question-answer className="text-[10.5px] text-ink-dim">
+          resolved — {question.answer}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function DetailPanel(props: DetailPanelProps) {
   const {
     entry,
@@ -1095,6 +1231,8 @@ export function DetailPanel(props: DetailPanelProps) {
   } = props;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  /** The first option of the open question, when one is being asked. */
+  const firstOptionRef = useRef<HTMLButtonElement>(null);
   /**
    * `progress` is context, not the thing you read, so it opens showing no turn
    * at all — the newest five are one keystroke away.
@@ -1118,10 +1256,17 @@ export function DetailPanel(props: DetailPanelProps) {
   const current = tabs.includes(tab) ? tab : 'Response';
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
+  /**
+   * Where `i` lands. The prompt box, unless the session is asking something --
+   * a question with options is the thing the operator came to act on, and
+   * walking to it with the mouse in a keyboard-first app is the gap this
+   * closes. Tab or Esc still reaches the box from there, and a card that
+   * answers nothing cannot swallow a prompt: nothing is submitted from it.
+   */
   useEffect(() => {
-    if (composing) {
-      inputRef.current?.focus();
-    }
+    if (!composing) return;
+    if (firstOptionRef.current !== null) firstOptionRef.current.focus();
+    else inputRef.current?.focus();
   }, [composing]);
 
   /**
@@ -1265,6 +1410,15 @@ export function DetailPanel(props: DetailPanelProps) {
   /** The words themselves — `null` when there is no live turn, or when the
    * source cannot say what it is doing. */
   const liveActivity = outIsLive ? entry.session.activity : null;
+  /**
+   * The question the card draws: the newest OPEN one, and only if there is
+   * none, the newest answered one -- what is still being asked outranks what
+   * was already settled, and an absent list (a source with no such surface)
+   * reads exactly like an empty one, which is no card at all.
+   */
+  const questions = entry?.session.questions ?? [];
+  const newestQuestion =
+    [...questions].reverse().find((one) => one.answer === null) ?? questions.at(-1) ?? null;
   /**
    * The one detail clause vam can source for the running caption.
    *
@@ -1651,8 +1805,10 @@ export function DetailPanel(props: DetailPanelProps) {
                          from assistive tech, which should read the activity and
                          not a star and three dots. */
                       <span data-out-running className="text-running">
-                        <span aria-hidden="true">{'\u2733'}</span>{' '}
-                        <span data-out-running-word>
+                        <span aria-hidden="true" data-out-running-star className="vam-running-star">
+                          {'\u2733'}
+                        </span>{' '}
+                        <span data-out-running-word className="vam-running-word">
                           {liveActivity ??
                             noAnswerNote(decision.output, entry?.session.status ?? null)}
                         </span>
@@ -1691,6 +1847,18 @@ export function DetailPanel(props: DetailPanelProps) {
             that mentioned one; this draws the same list, from the same
             extraction, at the moment the operator types the glyph it belongs
             to. */}
+        {/* The question the session is asking, where the placeholder picker
+            used to stand -- the newest one, because a card per question would
+            turn a pane into a queue. It answers nothing; see `QuestionCard`.
+            A session that asked none, or asked outside the tail vam reads
+            (`TAIL_BYTES`), draws nothing here rather than an empty box. */}
+        {newestQuestion !== null && (
+          <QuestionCard
+            key={newestQuestion.id}
+            question={newestQuestion}
+            firstOptionRef={firstOptionRef}
+          />
+        )}
         {suggesting && (
           <div
             data-bang-suggest

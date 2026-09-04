@@ -1003,6 +1003,35 @@ describe('SessionList project controls', () => {
     });
     expect(container.querySelector('[data-session-row="a1"]')).not.toBeNull();
   });
+
+  it('puts the `+` after the fold and the menu in document order', () => {
+    // Document order IS tab order, and the operator wants `+` last: the two
+    // controls that belong to the heading come first, then the one that adds
+    // to it. Asserted by comparing positions, not by presence -- all three
+    // were present before the move too, so a presence check would have passed
+    // against the old order and proved nothing.
+    const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
+    const row = heading(container, 'p2');
+    const controls = [...row.querySelectorAll('button')].map((node) =>
+      node.getAttribute('data-project-collapse') !== null
+        ? 'fold'
+        : node.getAttribute('data-project-menu') !== null
+          ? 'menu'
+          : node.getAttribute('data-new-session-in-project') !== null
+            ? 'add'
+            : 'other',
+    );
+    expect(controls.indexOf('add')).toBeGreaterThan(controls.indexOf('fold'));
+    expect(controls.indexOf('add')).toBeGreaterThan(controls.indexOf('menu'));
+    expect(controls.indexOf('fold')).toBeGreaterThan(-1);
+    expect(controls.indexOf('menu')).toBeGreaterThan(-1);
+  });
+
+  it('still omits the `+` entirely for a project that does not hold focus', () => {
+    const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
+    expect(heading(container, 'p1').querySelector('[data-new-session-in-project]')).toBeNull();
+    expect(heading(container, 'p2').querySelector('[data-new-session-in-project]')).not.toBeNull();
+  });
 });
 
 describe('SessionList project menu', () => {

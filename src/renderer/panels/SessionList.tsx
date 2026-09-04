@@ -749,34 +749,6 @@ export function SessionList(props: SessionListProps) {
                 </span>
                 <span className="font-mono text-[9.5px] text-ink-faint">{group.items.length}</span>
                 <span className="flex-1" />
-                {/* Real now: `createSession` starts a detached tmux session in
-                  the project's own directory, so the caption says that. It
-                  said "Sessions are created from the CLI" for a while after
-                  that stopped being true, and carried `data-placeholder` on a
-                  live control — a tooltip is a claim, and a wrong one costs
-                  more than none. When a source genuinely cannot create, the
-                  caption is that source's own refusal and the click still
-                  answers on the status bar: refusing on click and saying why
-                  is honest; refusing by being unclickable just reads as
-                  broken. */}
-                {/* Only for the project you are actually in. One per heading
-                  meant a column of `+` boxes standing over the session names
-                  at all times, for a control that can only mean the project
-                  holding focus. Removed from the DOM rather than hidden, so
-                  there is nothing invisible left to click or tab into. */}
-                {group.items.some((entry) => entry.session.id === focusedSessionId) && (
-                  <button
-                    type="button"
-                    data-new-session-in-project={group.project.id}
-                    onClick={() => onAddInProject(group.project)}
-                    title={newSessionDecline ?? `New session in ${group.project.name}`}
-                    aria-label={`new session in ${group.project.name}`}
-                    className="flex h-[19px] w-[19px] cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim"
-                    {...pending(group.project.id, `Starting a session in ${group.project.name}…`)}
-                  >
-                    <Plus size={13} strokeWidth={1.7} />
-                  </button>
-                )}
 
                 {/* Revealed, never conditional. The row's close button is
                     removed from the DOM until hover, and that is right for a
@@ -835,6 +807,45 @@ export function SessionList(props: SessionListProps) {
                 >
                   <MoreHorizontal size={12} strokeWidth={1.8} />
                 </button>
+
+                {/* Real now: `createSession` starts a detached tmux session in
+                  the project's own directory, so the caption says that. It
+                  said "Sessions are created from the CLI" for a while after
+                  that stopped being true, and carried `data-placeholder` on a
+                  live control — a tooltip is a claim, and a wrong one costs
+                  more than none. When a source genuinely cannot create, the
+                  caption is that source's own refusal and the click still
+                  answers on the status bar: refusing on click and saying why
+                  is honest; refusing by being unclickable just reads as
+                  broken. */}
+                {/* Only for the project you are actually in. One per heading
+                  meant a column of `+` boxes standing over the session names
+                  at all times, for a control that can only mean the project
+                  holding focus. Removed from the DOM rather than hidden, so
+                  there is nothing invisible left to click or tab into -- which
+                  is a different strategy from the fold and the menu above, and
+                  deliberately so: those two are always present and merely
+                  transparent, because they have no keyboard twin. */}
+                {/* Last in the row, and last in tab order with it. The two
+                  controls that act on the heading itself come first; the one
+                  that adds something to the project comes after them. DOM
+                  order is the only thing setting tab order here -- there is no
+                  tabindex anywhere in this row -- so moving the markup moved
+                  the keyboard path, and that is the intent, not a side
+                  effect. */}
+                {group.items.some((entry) => entry.session.id === focusedSessionId) && (
+                  <button
+                    type="button"
+                    data-new-session-in-project={group.project.id}
+                    onClick={() => onAddInProject(group.project)}
+                    title={newSessionDecline ?? `New session in ${group.project.name}`}
+                    aria-label={`new session in ${group.project.name}`}
+                    className="flex h-[19px] w-[19px] cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim"
+                    {...pending(group.project.id, `Starting a session in ${group.project.name}…`)}
+                  >
+                    <Plus size={13} strokeWidth={1.7} />
+                  </button>
+                )}
 
                 {/* Two items, and both of them do something. There is no
                     "Project settings" because vam has no per-project setting

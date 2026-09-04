@@ -1,0 +1,52 @@
+{
+  "_": [
+    "Shape only. Every value here is invented: no real socket path, pid, session",
+    "name or token appears in this file. `message` was captured off the wire from",
+    "a throwaway session (Claude Code 2.1.260) and its FIELD NAMES are real; the",
+    "`status` frames were never observed -- see the header of",
+    "src/main/sources/claude-code/peer-frame.ts -- and carry the names the task",
+    "brief states, so the parser has something to check before the real thing is seen."
+  ],
+  "message": {
+    "msgV": 1,
+    "msg_id": "00000000-0000-4000-8000-000000000001",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "<cross-session-message from=\"uds:/sock/sender.sock\" from-name=\"sender-name\" from-mode=\"prompting\">\nhello there\n</cross-session-message>"
+    },
+    "priority": "next",
+    "from": "uds:/sock/sender.sock"
+  },
+  "status": {
+    "delivered": {
+      "msgV": 1,
+      "msg_id": "00000000-0000-4000-8000-000000000001",
+      "type": "peer_message_status",
+      "dropped": false,
+      "wereHeld": false
+    },
+    "dropped": {
+      "msgV": 1,
+      "msg_id": "00000000-0000-4000-8000-000000000002",
+      "type": "peer_message_status",
+      "dropped": true,
+      "drop_reason": "inbox closed",
+      "wereHeld": false
+    },
+    "held": {
+      "msgV": 1,
+      "msg_id": "00000000-0000-4000-8000-000000000003",
+      "type": "peer_message_status",
+      "dropped": false,
+      "wereHeld": true
+    },
+    "missingDropped": {
+      "msgV": 1,
+      "msg_id": "00000000-0000-4000-8000-000000000004",
+      "type": "peer_message_status",
+      "wereHeld": false
+    }
+  },
+  "malformed": "peer_message_status but not JSON"
+}

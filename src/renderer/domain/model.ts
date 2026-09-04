@@ -183,6 +183,50 @@ export type PullRequestList =
   | { readonly kind: 'ok'; readonly prs: readonly PullRequest[] }
   | { readonly kind: 'unavailable'; readonly code: string; readonly message: string };
 
+/**
+ * One option a session offered when it asked a question.
+ *
+ * `description` is `null` when the record carried none -- the tool makes it
+ * optional -- and it is not a placeholder for the label. Both are drawn: the
+ * label is what the option IS, the description is why you would pick it, and a
+ * list of labels alone is a list of words the operator has to guess between.
+ */
+export type QuestionOption = {
+  readonly label: string;
+  readonly description: string | null;
+};
+
+/**
+ * A question a session asked its operator through the `AskUserQuestion` tool.
+ *
+ * NOT every question a session asks. One written in prose inside an answer has
+ * no structure to read and never becomes one of these -- the pane's `out`
+ * region already shows that text. This type covers only the questions recorded
+ * as a tool call, which is exactly the case where vam knows the options.
+ *
+ * `answer` IS THE OPEN/CLOSED FLAG, and it is derived from the transcript
+ * rather than from status: `null` means the question's `tool_use` has no
+ * matching `tool_result` yet, so the session is still waiting on a person; a
+ * string is what was answered. Anything drawn from an answered question must
+ * not look like it is still waiting.
+ *
+ * VAM CANNOT ANSWER ONE. Picking an option here delivers nothing -- the only
+ * write channel vam has is the prompt box of a session it started -- so the UI
+ * that renders this must never imply an answer was submitted.
+ */
+export type AgentQuestion = {
+  /** The `tool_use` id plus the question's position within that call. */
+  readonly id: string;
+  /** The tool's own short label for the question, or `null` when absent. */
+  readonly header: string | null;
+  readonly question: string;
+  /** Whether several options may be picked, as the record states it. */
+  readonly multiSelect: boolean;
+  readonly options: readonly QuestionOption[];
+  /** `null` while the question is still open; otherwise what was answered. */
+  readonly answer: string | null;
+};
+
 export type Session = {
   readonly id: string;
   /** Short name on the node header — an epic id, a task id, a run name. */
@@ -306,6 +350,22 @@ export type Session = {
    * one is not a licence to offer a control that will refuse.
    */
   readonly vamControlled?: boolean;
+   * The `AskUserQuestion` questions this session asked, oldest first, or
+   * absent when the source has no such surface.
+   *
+   * The same three-state shape `agents` established. ABSENT is a source that
+   * cannot say -- black-smith's HTTP model records no tool calls. EMPTY is a
+   * source that looked and found none, which is the COMMON case: most
+   * sessions never ask through the tool. Neither is a reason to draw an empty
+   * box where a question would go.
+   *
+   * A question older than the transcript tail vam reads (`TAIL_BYTES` in
+   * `sources/claude-code/source.ts`) has scrolled out of the window and is
+   * absent here -- which is why a pane may show none while a session is in
+   * fact blocked on one, and why nothing in this app treats an empty list as
+   * "this session is not waiting on you".
+   */
+  readonly questions?: readonly AgentQuestion[];
 };
 
 export type Project = {
