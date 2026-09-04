@@ -108,7 +108,20 @@ describe('the status bar after the trim', () => {
     const spacer = children.findIndex((el) => el.className.split(/\s+/).includes('flex-1'));
     expect(spacer).toBeGreaterThanOrEqual(0);
     const right = children.slice(spacer + 1);
-    expect(right.map((el) => el.textContent)).toEqual(['?']);
+    expect(right.map((el) => el.textContent)).toEqual(['?Keyboard shortcut']);
+  });
+
+  it('draws `?` as a tag and names what it opens', () => {
+    render(<Canvas model={MODEL} />);
+    const hint = statusBar()?.querySelector('[data-keysheet-hint]');
+    // The key is a tag, not loose text: it has to read as a key you press,
+    // which is what a bordered cap does and a bare glyph does not.
+    expect(hint).not.toBeNull();
+    expect(hint?.textContent).toBe('?');
+    expect(hint?.className).toMatch(/border/);
+    // And the label beside it says what pressing it does -- a lone `?` in a
+    // corner is discoverable only to someone who already knows.
+    expect(statusText()).toContain('Keyboard shortcut');
   });
 
   it('still prints the key the keysheet is actually bound to', () => {
