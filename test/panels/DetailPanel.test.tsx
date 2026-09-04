@@ -1358,6 +1358,115 @@ describe('the out region shows live work while the session is running', () => {
 });
 
 /**
+ * The live line is about the session's state; the answer is about what it has
+ * said. They are not alternatives, and the pane used to treat them as one: the
+ * activity line lived in the `else` of `output === null || output === ''`, so
+ * it could only ever be seen by a turn with no answer. `transcript.ts` writes
+ * `turns[last].output` on every assistant text, so a running session has a
+ * non-empty answer within seconds and the live line was gone for the rest of
+ * the run -- the operator's report was that it never appeared at all.
+ *
+ * So the line is rendered whenever the turn is live, under the answer: what it
+ * has said, then what it is doing now. Every guard from the original work
+ * holds -- newest turn AND `running`, a null `activity` invents no words, a
+ * stopped session gets no motion -- and the empty-answer case must still print
+ * exactly one line, not the sentence twice.
+ */
+describe('the live line stands beside the answer, not instead of it', () => {
+  const ANSWER = 'The migration ran clean; nothing is left to approve.';
+  const turn = (output: string | null): Decision => ({
+    id: 'd5',
+    label: 'sign-off',
+    input: 'ship it',
+    output,
+    commands: [],
+  });
+  // `decision` is the newest turn (`d5`), so the pane's live test can pass.
+  const show = (
+    output: string | null,
+    activity: string | null = 'editing transcript.ts',
+    status: Session['status'] = 'running',
+  ) =>
+    draw({
+      entry: { project: PROJECT, session: { ...SESSION, status, activity } },
+      decision: turn(output),
+    });
+  const liveLine = () => q<HTMLElement>('[data-out-live]');
+  const cursor = () => q<HTMLElement>('[data-out-live] [data-out-cursor]');
+
+  it('shows the answer AND the live line while a running turn has output', () => {
+    show(ANSWER);
+    const out = q<HTMLElement>('[data-detail-scroll="out"]')?.textContent ?? '';
+    expect(out).toContain(ANSWER);
+    expect(liveLine()?.textContent ?? '').toContain('editing transcript.ts');
+    expect(cursor()).not.toBeNull();
+    expect(cursor()?.getAttribute('aria-hidden')).toBe('true');
+    expect(cursor()?.getAttribute('class') ?? '').toContain('vam-term-cursor');
+  });
+
+  it('puts the live line after the answer, not above it', () => {
+    show(ANSWER);
+    const scroll = q<HTMLElement>('[data-detail-scroll="out"]') as HTMLElement;
+    const line = liveLine() as HTMLElement;
+    const answer = all('[data-out-line]')[0] as Element;
+    expect(scroll.contains(line)).toBe(true);
+    // `DOCUMENT_POSITION_FOLLOWING` (4): the line comes after the answer.
+    expect(answer.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(4);
+  });
+
+  it('still shows the live line when the answer is empty, and shows it once', () => {
+    for (const empty of [null, ''] as const) {
+      cleanup();
+      show(empty);
+      expect(all('[data-out-live]'), `output ${JSON.stringify(empty)}`).toHaveLength(1);
+      expect(liveLine()?.textContent ?? '', `output ${JSON.stringify(empty)}`).toContain(
+        'editing transcript.ts',
+      );
+      // The sentence must not print alongside the words that replaced it.
+      expect(all('[data-out-cursor]'), `output ${JSON.stringify(empty)}`).toHaveLength(1);
+    }
+  });
+
+  it('says the session is running, and no more, when the source cannot say', () => {
+    show(ANSWER, null);
+    const text = liveLine()?.textContent ?? '';
+    expect(text).toContain('still running');
+    // There IS an answer on screen, so the empty-turn wording would be a lie.
+    expect(text).not.toContain('no answer');
+    expect(text.trim()).not.toBe('');
+    expect(cursor()).not.toBeNull();
+  });
+
+  it('leaves no live line on a session that has stopped', () => {
+    for (const s of ['done', 'failed', 'waiting'] as const) {
+      cleanup();
+      show(ANSWER, 'editing transcript.ts', s);
+      expect(all('[data-out-live]'), `status ${s}`).toHaveLength(0);
+      expect(all('[data-out-cursor]'), `status ${s}`).toHaveLength(0);
+      // Scoped to the body: the `out` rule's meta carries the session's
+      // current activity on the newest turn whatever its status, and that
+      // caption is not what this test is about.
+      const body = q<HTMLElement>('[data-detail-scroll="out"]')?.textContent ?? '';
+      expect(body, `status ${s}`).not.toContain('editing transcript.ts');
+      expect(body, `status ${s}`).toContain('The migration ran clean');
+    }
+  });
+
+  it('leaves no live line on an older turn of a running session', () => {
+    draw({
+      entry: {
+        project: PROJECT,
+        session: { ...SESSION, status: 'running', activity: 'editing transcript.ts' },
+      },
+      decision: DECISIONS[2] as Decision,
+    });
+    expect(all('[data-out-live]')).toHaveLength(0);
+    expect(all('[data-out-cursor]')).toHaveLength(0);
+    expect(document.body.textContent ?? '').not.toContain('editing transcript.ts');
+  });
+});
+
+/**
  * The PRs tab: vam's first surface for something it went to the network to
  * find out, on the operator's behalf and with the operator's credentials.
  *
