@@ -334,11 +334,10 @@ const DESCRIPTOR: SourceDescriptor = {
     governance: NOT_RECORDED,
     // No entry for pullRequests: a decline is written only for a capability
     // that is false, and this one is now true.
-    // Still false, and precisely: vam can now START a pty via tmux, but it
-    // has no terminal renderer to draw one, and `capture-pane` gives a
-    // snapshot rather than the live stream a terminal tab would need.
-    terminal:
-      'vam can start a tmux session but has no terminal renderer to draw one; only a plain-text snapshot of the screen is available',
+    // No entry for terminal: a decline is written only for a capability that
+    // is false, and this one is now true. What the surface IS -- a plain-text
+    // `capture-pane` snapshot, not a rendered live stream -- is said by the
+    // tab itself, which is where a person can read it.
     // No entry for agentRoster: a decline is written only for a capability
     // that is false, and this one is now true.
   },

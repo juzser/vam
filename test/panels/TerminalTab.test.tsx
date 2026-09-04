@@ -20,7 +20,10 @@ afterEach(cleanup);
 
 const q = <T extends Element>(selector: string) => document.querySelector<T>(selector);
 
-const ok = (text: string): PaneView => ({ kind: 'ok', name: 'vam-atlas-a1b2c3', text });
+const ATLAS = 'claude-code:atlas-11111111';
+const BEACON = 'claude-code:beacon-22222222';
+
+const ok = (text: string, name = 'vam-atlas-a1b2c3'): PaneView => ({ kind: 'ok', name, text });
 
 /** Lets the mounted effect's first read resolve before anything is asserted. */
 const settle = async () => {
@@ -33,10 +36,10 @@ const settle = async () => {
 describe('the Terminal tab shows the focused session pane', () => {
   it('renders the captured screen as text, in a monospace block', async () => {
     const read = vi.fn(async () => ok('$ claude\nthinking about the branch'));
-    render(<TerminalTab title="atlas" read={read} />);
+    render(<TerminalTab projectId={ATLAS} read={read} />);
     await settle();
 
-    expect(read).toHaveBeenCalledWith('atlas');
+    expect(read).toHaveBeenCalledWith(ATLAS);
     const pane = q<HTMLElement>('[data-terminal-pane]');
     expect(pane?.textContent).toContain('thinking about the branch');
     // The already-composed screen, drawn as plain text -- vam has no terminal
@@ -51,14 +54,14 @@ describe('the Terminal tab shows the focused session pane', () => {
     // The empty states are claims about the operator's tmux. Drawing one
     // before an answer arrives would say vam started no session for a session
     // that has one.
-    render(<TerminalTab title="atlas" read={vi.fn(async () => ok('hi'))} />);
+    render(<TerminalTab projectId={ATLAS} read={vi.fn(async () => ok('hi'))} />);
     expect(q('[data-terminal-pending]')).not.toBeNull();
     expect(q('[data-terminal-empty]')).toBeNull();
     expect(q('[data-terminal-unavailable]')).toBeNull();
   });
 
   it('names the session it is showing, so the text is not attributed to vam', async () => {
-    render(<TerminalTab title="atlas" read={vi.fn(async () => ok('hi'))} />);
+    render(<TerminalTab projectId={ATLAS} read={vi.fn(async () => ok('hi'))} />);
     await settle();
     expect(q<HTMLElement>('[data-terminal-name]')?.textContent).toContain('vam-atlas-a1b2c3');
   });
@@ -74,7 +77,7 @@ describe('the Terminal tab tells an absent session from an unreachable tmux', ()
   it('says vam did not start a session for this one, and offers no adoption', async () => {
     render(
       <TerminalTab
-        title="atlas"
+        projectId={ATLAS}
         read={vi.fn(async (): Promise<PaneView> => ({ kind: 'not-vam' }))}
       />,
     );
@@ -90,7 +93,7 @@ describe('the Terminal tab tells an absent session from an unreachable tmux', ()
 
   it('says the session has ended when the tmux session is gone', async () => {
     render(
-      <TerminalTab title="atlas" read={vi.fn(async (): Promise<PaneView> => ({ kind: 'gone' }))} />,
+      <TerminalTab projectId={ATLAS} read={vi.fn(async (): Promise<PaneView> => ({ kind: 'gone' }))} />,
     );
     await settle();
     expect(q<HTMLElement>('[data-terminal-empty]')?.textContent).toMatch(/ended/i);
@@ -104,7 +107,7 @@ describe('the Terminal tab tells an absent session from an unreachable tmux', ()
     } as const;
     render(
       <TerminalTab
-        title="atlas"
+        projectId={ATLAS}
         read={vi.fn(async (): Promise<PaneView> => ({ kind: 'unavailable', error }))}
       />,
     );
@@ -119,7 +122,7 @@ describe('the Terminal tab tells an absent session from an unreachable tmux', ()
   it('treats a rejected read as vam not having asked, never as no session', async () => {
     render(
       <TerminalTab
-        title="atlas"
+        projectId={ATLAS}
         read={vi.fn(async () => Promise.reject(new Error('bridge gone')))}
       />,
     );
@@ -134,7 +137,7 @@ describe('the Terminal tab refreshes while it is open and stops when it is not',
     vi.useFakeTimers();
     try {
       const read = vi.fn(async () => ok('one'));
-      render(<TerminalTab title="atlas" read={read} />);
+      render(<TerminalTab projectId={ATLAS} read={read} />);
       expect(read).toHaveBeenCalledTimes(1);
       await act(async () => {
         vi.advanceTimersByTime(REFRESH_MS * 2);
@@ -149,7 +152,7 @@ describe('the Terminal tab refreshes while it is open and stops when it is not',
     vi.useFakeTimers();
     try {
       const read = vi.fn(async () => ok('one'));
-      const view = render(<TerminalTab title="atlas" read={read} />);
+      const view = render(<TerminalTab projectId={ATLAS} read={read} />);
       view.unmount();
       const before = read.mock.calls.length;
       await act(async () => {
@@ -166,7 +169,7 @@ describe('the Terminal tab refreshes while it is open and stops when it is not',
     const visibility = vi.spyOn(document, 'visibilityState', 'get');
     try {
       const read = vi.fn(async () => ok('one'));
-      render(<TerminalTab title="atlas" read={read} />);
+      render(<TerminalTab projectId={ATLAS} read={read} />);
       const before = read.mock.calls.length;
 
       visibility.mockReturnValue('hidden');
@@ -188,8 +191,103 @@ describe('the Terminal tab refreshes while it is open and stops when it is not',
   });
 
   it('makes no request at all when the bridge is absent, as in the browser build', async () => {
-    render(<TerminalTab title="atlas" read={undefined} />);
+    render(<TerminalTab projectId={ATLAS} read={undefined} />);
     await settle();
     expect(q('[data-terminal-unavailable]')).not.toBeNull();
+  });
+});
+
+/**
+ * Everything that is about WHICH session is on screen. The tab is handed a
+ * project id, and the id changing is a different session -- a state carried
+ * across it is the previous session's screen wearing this one's tab.
+ */
+describe('the Terminal tab draws the session it was last asked about', () => {
+  it('stops drawing the previous session the moment the project changes', async () => {
+    // Up to the 10s tmux timeout, not the 1s refresh: the stale pane is drawn
+    // until a read for the NEW project comes back, and the name beside it
+    // attributes it to the wrong session the whole time.
+    const read = vi.fn(async (id: string) =>
+      id === ATLAS ? ok('atlas screen', 'vam-atlas-a1b2c3') : ok('beacon screen', 'vam-beacon-d4'),
+    );
+    const view = render(<TerminalTab projectId={ATLAS} read={read} />);
+    await settle();
+    expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).toContain('atlas screen');
+
+    let resolve: ((v: PaneView) => void) | undefined;
+    read.mockImplementationOnce(
+      () =>
+        new Promise<PaneView>((r) => {
+          resolve = r;
+        }),
+    );
+    view.rerender(<TerminalTab projectId={BEACON} read={read} />);
+    // The claim about atlas is gone BEFORE the answer about beacon arrives.
+    expect(q('[data-terminal-pane]')).toBeNull();
+    expect(q('[data-terminal-name]')).toBeNull();
+    expect(q('[data-terminal-pending]')).not.toBeNull();
+
+    await act(async () => {
+      resolve?.(ok('beacon screen', 'vam-beacon-d4'));
+      await Promise.resolve();
+    });
+    expect(q<HTMLElement>('[data-terminal-name]')?.textContent).toContain('vam-beacon-d4');
+  });
+
+  it('says nothing is selected rather than reading a session forever', async () => {
+    // With no session focused there is no project to ask about, so the effect
+    // returns early -- and the pending state, which means "vam is looking",
+    // stayed on screen for the rest of the session. vam was claiming to be
+    // reading something it had never asked for.
+    const read = vi.fn(async () => ok('screen'));
+    render(<TerminalTab projectId={null} read={read} />);
+    await settle();
+    expect(read).not.toHaveBeenCalled();
+    expect(q('[data-terminal-pending]')).toBeNull();
+    expect(q<HTMLElement>('[data-terminal-empty]')?.textContent).toMatch(/no session/i);
+  });
+
+  it('shows no screen at all when two sessions answer to one project', async () => {
+    // Either screen would be a coin toss the operator cannot see. Both names
+    // are said instead, so the ambiguity is something they can act on.
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(
+          async (): Promise<PaneView> => ({
+            kind: 'ambiguous',
+            names: ['vam-atlas-a1b2c3', 'vam-atlas-d4e5f6'],
+          }),
+        )}
+      />,
+    );
+    await settle();
+    expect(q('[data-terminal-pane]')).toBeNull();
+    const empty = q<HTMLElement>('[data-terminal-empty]');
+    expect(empty?.textContent).toContain('vam-atlas-a1b2c3');
+    expect(empty?.textContent).toContain('vam-atlas-d4e5f6');
+  });
+});
+
+/**
+ * vam is a keyboard-first app, so a scroll region no key can reach is not a
+ * WCAG footnote here -- it is a pane of output the operator cannot read past
+ * the first screenful. The scrollbar is hidden by `vam-no-scrollbar`, which
+ * removes the mouse affordance too.
+ */
+describe('the pane can be reached and scrolled from the keyboard', () => {
+  it('is a focus stop with an accessible name, and takes focus', async () => {
+    render(<TerminalTab projectId={ATLAS} read={vi.fn(async () => ok('$ claude'))} />);
+    await settle();
+    const pane = q<HTMLElement>('[data-terminal-pane]');
+    if (pane === null) throw new Error('no pane');
+    expect(pane.getAttribute('tabindex')).toBe('0');
+    // A focus stop that says nothing is a trap with a focus ring. It is a
+    // named region, not a button: nothing is bound to Enter, and nothing
+    // captions it as bound.
+    expect(pane.getAttribute('role')).toBe('region');
+    expect(pane.getAttribute('aria-label')).toBeTruthy();
+    pane.focus();
+    expect(document.activeElement).toBe(pane);
   });
 });

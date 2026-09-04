@@ -20,7 +20,7 @@
  * reach tmux" is the exact conflation the provider was built to prevent.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PaneView } from '../../shared/terminal.js';
 
 /**
@@ -36,8 +36,15 @@ import type { PaneView } from '../../shared/terminal.js';
  */
 export const REFRESH_MS = 1_000;
 
-/** The reader the tab is given: `window.api.terminal.read`, or nothing. */
-export type ReadPane = (title: string) => Promise<PaneView>;
+/**
+ * The reader the tab is given: `window.api.terminal.read`, or nothing.
+ *
+ * It is asked by PROJECT ID, not by title. The pairing between a session and
+ * the tmux session vam started for it is recorded on the tmux session at
+ * creation and read back (`main/terminal/pane.ts`); a title reached the name
+ * once, was slugged and truncated on the way, and matched nothing.
+ */
+export type ReadPane = (projectId: string) => Promise<PaneView>;
 
 /**
  * What is shown when there is no bridge -- the browser build has no main
@@ -54,10 +61,10 @@ const NO_BRIDGE: PaneView = {
 };
 
 export function TerminalTab({
-  title,
+  projectId,
   read,
 }: {
-  readonly title: string | null;
+  readonly projectId: string | null;
   readonly read: ReadPane | undefined;
 }) {
   /**
@@ -68,10 +75,26 @@ export function TerminalTab({
    */
   const [view, setView] = useState<PaneView | null>(read === undefined ? NO_BRIDGE : null);
 
+  /**
+   * WHICH PROJECT THE VALUE ABOVE IS ABOUT, and the reason it is a ref checked
+   * during render rather than an effect. A `view` held across a change of
+   * `projectId` is the PREVIOUS session's screen, drawn under this session's
+   * tab and named as this session's -- and it survived until the next read
+   * returned, which is bounded by tmux's 10s timeout, not by the 1s refresh.
+   * Clearing it in an effect would still paint the stale frame once. This is
+   * the exact case the `null` initial state exists for; it just was not being
+   * applied when the prop changed.
+   */
+  const shownFor = useRef(projectId);
+  if (shownFor.current !== projectId) {
+    shownFor.current = projectId;
+    if (view !== null && read !== undefined) setView(null);
+  }
+
   const poll = useCallback(
     (mine: () => boolean) => {
-      if (read === undefined || title === null) return;
-      read(title)
+      if (read === undefined || projectId === null) return;
+      read(projectId)
         .then((next) => {
           if (mine()) setView(next);
         })
@@ -89,11 +112,11 @@ export function TerminalTab({
           });
         });
     },
-    [read, title],
+    [read, projectId],
   );
 
   useEffect(() => {
-    if (read === undefined || title === null) return;
+    if (read === undefined || projectId === null) return;
     let cancelled = false;
     /**
      * Which request's answer is still wanted. `cancelled` alone covers only
@@ -135,8 +158,19 @@ export function TerminalTab({
       stop();
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [poll, read, title]);
+  }, [poll, read, projectId]);
 
+  // Nothing is focused, so there is no project to ask about and the effect
+  // above never asks. Saying "reading the session's screen" here -- which is
+  // what the pending state below says -- would be vam claiming to be looking
+  // at something it had not asked a single question about, forever.
+  if (projectId === null) {
+    return (
+      <p data-terminal data-terminal-empty className="text-[11px] text-ink-faint">
+        No session selected — pick one in the sidebar.
+      </p>
+    );
+  }
   if (view === null) {
     return (
       <p data-terminal data-terminal-pending className="text-[11px] text-ink-faint">
@@ -162,10 +196,14 @@ export function TerminalTab({
       <p data-terminal data-terminal-empty className="text-[11px] text-ink-faint">
         {view.kind === 'gone'
           ? 'The tmux session vam started for this one has ended.'
-          : // No offer to connect to anything: vam can show the sessions it
-            // started and no others, because no process can take over
-            // another's controlling TTY.
-            'vam did not start a tmux session for this one, so there is no screen to show.'}
+          : view.kind === 'ambiguous'
+            ? // Neither screen, and both names. Drawing one of them would be a
+              // coin toss the operator has no way of seeing was tossed.
+              `vam started more than one tmux session for this project, so it will not guess which screen you meant: ${view.names.join(', ')}.`
+            : // No offer to connect to anything: vam can show the sessions it
+              // started and no others, because no process can take over
+              // another's controlling TTY.
+              'vam did not start a tmux session for this one, so there is no screen to show.'}
       </p>
     );
   }
@@ -176,9 +214,21 @@ export function TerminalTab({
             goes nowhere near vam's own output. */}
         {view.name}
       </p>
+      {/* A FOCUS STOP, because this is a scroll region and vam is driven from
+          the keyboard. `vam-no-scrollbar` hides the bar, so without a focus
+          stop there was no way at all -- mouse or key -- to read past the
+          first screenful. Tab reaches it and the arrow keys, Page keys and
+          Home/End scroll it, all of which the browser does for a focused
+          scrollable element; nothing is bound here, so nothing captions it as
+          bound and `buildKeySheet` has nothing to list. It is a named region
+          rather than a button: it activates nothing, and a focus stop that
+          activates nothing while looking activatable is its own trap. */}
       <pre
         data-terminal-pane
-        className="vam-no-scrollbar min-h-0 flex-1 overflow-auto whitespace-pre rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-[10.5px] text-ink leading-[1.45]"
+        tabIndex={0}
+        role="region"
+        aria-label={`terminal output of ${view.name}`}
+        className="vam-no-scrollbar min-h-0 flex-1 overflow-auto whitespace-pre rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-[10.5px] text-ink leading-[1.45] focus-visible:outline focus-visible:outline-2 focus-visible:outline-line-strong"
       >
         {view.text}
       </pre>

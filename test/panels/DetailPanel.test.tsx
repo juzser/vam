@@ -309,6 +309,33 @@ function draw(over: Partial<DetailPanelProps> = {}) {
   render(<DetailPanel {...props} />);
 }
 
+/** `draw`, but able to re-render with new props -- for a capability that changes. */
+function drawFor(over: Partial<DetailPanelProps> = {}) {
+  const build = (extra: Partial<DetailPanelProps>): DetailPanelProps => ({
+    entry: ENTRY,
+    decision: DECISIONS[0] as Decision,
+    draft: '',
+    onDraftChange: () => {},
+    onSubmit: () => {},
+    onCopyCommand: () => {},
+    onCopyAllCommands: () => {},
+    composing: false,
+    onCompose: () => {},
+    onStopComposing: () => {},
+    active: false,
+    actionIndex: 0,
+    width: 408,
+    resizeHandle: null,
+    ...over,
+    ...extra,
+  });
+  const view = render(<DetailPanel {...build({})} />);
+  return {
+    rerender: (extra: Partial<DetailPanelProps>) =>
+      view.rerender(<DetailPanel {...build(extra)} />),
+  };
+}
+
 const q = <T extends Element>(selector: string) => document.querySelector<T>(selector);
 const all = (selector: string) => [...document.querySelectorAll(selector)];
 const progress = () => q<HTMLElement>('[data-detail-block="progress"]');
@@ -1769,7 +1796,10 @@ describe('the Terminal tab costs nothing until it is opened', () => {
       fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
       await Promise.resolve();
     });
-    expect(read).toHaveBeenCalledWith('Sprint board reorder');
+    // BY PROJECT ID, not by the session title. The tmux pairing is recorded on
+    // the tmux session at creation and read back; a title was slugged and
+    // truncated on the way in and matched nothing that was ever created.
+    expect(read).toHaveBeenCalledWith(PROJECT.id);
     expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).toContain('the pane');
 
     const whileOpen = read.mock.calls.length;
@@ -1781,5 +1811,35 @@ describe('the Terminal tab costs nothing until it is opened', () => {
     // spawning, exactly as closing it never started any.
     expect(q('[data-terminal]')).toBeNull();
     expect(read).toHaveBeenCalledTimes(whileOpen);
+  });
+});
+
+/**
+ * `capabilities.terminal` was declared and then read by nothing, while the tab
+ * was mounted unconditionally -- a flag that could be flipped either way with
+ * no visible effect, which is worse than no flag.
+ */
+describe('the Terminal tab is offered only by a source that has one', () => {
+  it('drops the tab entirely for a source that says it has no terminal', () => {
+    draw({ terminal: false });
+    expect(q('[data-tab="terminal"]')).toBeNull();
+    expect(all('[role="tab"]').map((t) => t.getAttribute('data-tab'))).not.toContain('terminal');
+  });
+
+  it('keeps it for a source that has one', () => {
+    draw({ terminal: true });
+    expect(q('[data-tab="terminal"]')).not.toBeNull();
+  });
+
+  it('falls back to Response when the showing tab is withdrawn', () => {
+    // Reachable: the operator opens Terminal, then focus moves to a session
+    // from a source without one. A tab bar with nothing selected and a pane
+    // drawing a withdrawn tab is the state this prevents.
+    const { rerender } = drawFor({ terminal: true });
+    fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
+    expect(q('[data-terminal]')).not.toBeNull();
+    rerender({ terminal: false });
+    expect(q('[data-terminal]')).toBeNull();
+    expect(q<HTMLElement>('[data-tab="response"]')?.getAttribute('aria-selected')).toBe('true');
   });
 });

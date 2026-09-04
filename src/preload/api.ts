@@ -114,9 +114,16 @@ export function createClipboardApi(ipc: InvokerLike): ClipboardApi {
   };
 }
 
-/** The bridge's terminal member: one read, answered by a bare `PaneView`. */
+/**
+ * The bridge's terminal member: one read, answered by a bare `PaneView`.
+ *
+ * Asked by PROJECT ID. The pairing between a session and the tmux session vam
+ * started for it is recorded on that tmux session at creation and read back
+ * (`main/terminal/pane.ts`); the title this once carried was slugged and
+ * truncated on the way in and matched nothing that had ever been created.
+ */
 export type TerminalApi = {
-  read(title: string): Promise<PaneView>;
+  read(projectId: string): Promise<PaneView>;
 };
 
 /**
@@ -127,7 +134,7 @@ export type TerminalApi = {
  */
 export function createTerminalApi(ipc: InvokerLike): TerminalApi {
   return {
-    read: (title) => ipc.invoke(CHANNELS.terminalRead, title) as Promise<PaneView>,
+    read: (projectId) => ipc.invoke(CHANNELS.terminalRead, projectId) as Promise<PaneView>,
   };
 }
 

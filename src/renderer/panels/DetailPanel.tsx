@@ -280,6 +280,18 @@ export type DetailPanelProps = {
    */
   readonly delivers?: boolean;
   /**
+   * Whether the focused session's source has a terminal surface --
+   * `capabilities.terminal`, passed down exactly as `delivers` is.
+   *
+   * `false` WITHDRAWS THE TAB. It was declared by the source and read by
+   * nothing while the tab mounted unconditionally, so the flag could be
+   * flipped either way with no visible effect -- a capability nobody reads is
+   * worse than none, because the next person trusts it. Absent means the
+   * caller said nothing and the tab stays, which is the same reading `delivers`
+   * gives its own absence.
+   */
+  readonly terminal?: boolean;
+  /**
    * True while a write is in flight.
    *
    * `claude --resume` is a subprocess with a 120-second timeout
@@ -335,10 +347,13 @@ const MODES = ['Auto', 'Manual', 'Plan'] as const;
  * with a hover state.
  */
 function TabBar({
+  tabs,
   runningAgents,
   current,
   onSelect,
 }: {
+  /** The tabs this source offers -- `TABS` minus the ones it has said it lacks. */
+  readonly tabs: readonly Tab[];
   readonly runningAgents: number;
   readonly current: Tab;
   readonly onSelect: (tab: Tab) => void;
@@ -348,7 +363,7 @@ function TabBar({
       role="tablist"
       className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px]"
     >
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const selected = tab === current;
         const badge = tab === 'Agents' && runningAgents > 0 ? runningAgents : null;
         const shape = [
@@ -989,6 +1004,7 @@ export function DetailPanel(props: DetailPanelProps) {
     active,
     actionIndex,
     delivers,
+    terminal,
     sending = false,
     width,
     resizeHandle,
@@ -1021,6 +1037,12 @@ export function DetailPanel(props: DetailPanelProps) {
    * is looking at agents, not at whichever tab the last session left behind.
    */
   const [tab, setTab] = useState<Tab>('Response');
+  // Which tabs this source actually has. A withdrawn tab cannot stay SHOWING:
+  // the operator can be on Terminal when focus moves to a session from a
+  // source without one, and a tab bar with nothing selected over a pane
+  // drawing a tab that is no longer offered is the state this collapses.
+  const tabs = TABS.filter((name) => name !== 'Terminal' || terminal !== false);
+  const current = tabs.includes(tab) ? tab : 'Response';
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
   useEffect(() => {
@@ -1254,7 +1276,12 @@ export function DetailPanel(props: DetailPanelProps) {
             the `progress` section's own counter, and the age is on the session
             card in the sidebar and on the canvas. */}
 
-        <TabBar runningAgents={entry?.session.runningAgents ?? 0} current={tab} onSelect={setTab} />
+        <TabBar
+          tabs={tabs}
+          runningAgents={entry?.session.runningAgents ?? 0}
+          current={current}
+          onSelect={setTab}
+        />
       </div>
 
       {/*
@@ -1275,7 +1302,7 @@ export function DetailPanel(props: DetailPanelProps) {
             reports `working` for a session the CLI calls failed, so it is not
             a second opinion worth showing. Naming the gap is the whole of
             what can honestly be said. */}
-        {tab === 'Response' && entry?.session.status === 'failed' && (
+        {current === 'Response' && entry?.session.status === 'failed' && (
           <p
             data-session-failed
             className="flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-panel px-3 py-2 text-[11px] text-failed leading-[1.45]"
@@ -1291,19 +1318,19 @@ export function DetailPanel(props: DetailPanelProps) {
             </Note>
           </p>
         )}
-        {tab === 'Terminal' ? (
+        {current === 'Terminal' ? (
           /* Mounted by this branch and by nothing else, which is the whole of
              the tab's laziness: while another tab is showing, the component
              does not exist, so no timer runs and no `capture-pane` is spawned.
              `window.api` exists only in the Electron shell (App.tsx); in the
              browser build the tab says so instead of asking. */
           <TerminalTab
-            title={entry?.session.title ?? null}
+            projectId={entry?.project.id ?? null}
             read={globalThis.window?.api?.terminal?.read}
           />
-        ) : tab === 'Agents' ? (
+        ) : current === 'Agents' ? (
           <AgentsTab agents={entry?.session.agents} />
-        ) : tab === 'PRs' ? (
+        ) : current === 'PRs' ? (
           <PullRequestsTab pullRequests={entry?.session.pullRequests} />
         ) : decision === null ? (
           <p className="text-[11px] text-ink-faint">
