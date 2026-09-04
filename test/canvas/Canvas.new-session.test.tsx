@@ -9,7 +9,7 @@
  * create must call nothing at all, not call and then apologise.
  */
 
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasSource } from '../../src/renderer/canvas/source.js';
@@ -34,6 +34,12 @@ const MODEL: CanvasModel = {
 };
 
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
+
+async function clickAsync(label: string) {
+  await act(async () => {
+    screen.getByLabelText(label).click();
+  });
+}
 
 async function pressAsync(key: string) {
   await act(async () => {
@@ -125,6 +131,37 @@ describe('creating a session with `o`', () => {
     expect(created).toEqual([['p1', 'alpha']]);
     expect(statusBar()).toContain('alpha');
     expect(wrote.count).toBe(1);
+  });
+
+  /**
+   * The two mouse paths, against a source that CAN create -- which is the
+   * whole point of asserting them. Clicked against a source that cannot, both
+   * buttons return at the `createSession` guard before either argument is
+   * read, so a swapped `(name, id)` would sail through: main answers
+   * `unknown-project` for every add and no test moves.
+   *
+   * So the assertion is by VALUE and in ORDER: the project id first, the
+   * display name second.
+   */
+  it('the per-project add button passes (id, name), in that order', async () => {
+    const created: [string, string][] = [];
+    const { source, wrote } = sourceWith(async (projectId, title) => {
+      created.push([projectId, title]);
+    });
+    render(<Canvas model={MODEL} source={source} />);
+    await clickAsync('new session in alpha');
+    expect(created).toEqual([['p1', 'alpha']]);
+    expect(wrote.count).toBe(1);
+  });
+
+  it('the footer add button passes (id, name), in that order', async () => {
+    const created: [string, string][] = [];
+    const { source } = sourceWith(async (projectId, title) => {
+      created.push([projectId, title]);
+    });
+    render(<Canvas model={MODEL} source={source} />);
+    await clickAsync('new session');
+    expect(created).toEqual([['p1', 'alpha']]);
   });
 
   it('refuses in the source’s own words, and CALLS NOTHING, when it cannot', async () => {
