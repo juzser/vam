@@ -171,7 +171,7 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
       return;
     }
     if (isReserved(key)) {
-      setMessage(`"${key}" is reserved — Escape cancels and closes, g/y/z open chords`);
+      setMessage(`"${key}" is reserved — Escape cancels this capture, g/y/z open chords`);
       return;
     }
     const clash = bindingConflict(prefs.keyBindings, row.id, key);
@@ -232,8 +232,23 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
       aria-modal="true"
       className="absolute inset-0 z-50 flex items-start justify-center pt-16"
       onKeyDown={(event) => {
+        // Two Escapes, in the order the operator meets them: the first cancels
+        // an armed capture, the second closes the dialog.
+        //
+        // This branch is the DURABLE half of the fix, not the load-bearing
+        // one — `autoFocus` on the capture box is what actually made Escape
+        // reach React at all, and with focus in the box the box's own
+        // `stopPropagation` gets here first, so this line rarely runs today. It
+        // stays because it is what makes the surface survive the NEXT focus
+        // bug, which is precisely the bug that shipped. Deleting it as dead
+        // code would be right about the code and wrong about the reason.
         if (event.key === 'Escape') {
           event.preventDefault();
+          if (capturing !== null) {
+            setCapturing(null);
+            setMessage('');
+            return;
+          }
           onClose();
           return;
         }
@@ -682,6 +697,16 @@ function BindingLine({
               key={slot}
               data-binding-capture
               aria-label={`press a key for ${row.label}`}
+              // The box has to HOLD the keyboard, or neither arbitration runs:
+              // `capture`'s `stopPropagation` and `Canvas.tsx`'s `typing` guard
+              // are both keyed to an INPUT having focus, and without this focus
+              // fell to <body> — outside React's root — where the window
+              // listener swallowed every key but Escape and Escape closed the
+              // whole overlay. `autoFocus` rather than a ref-and-effect is
+              // `CommandPalette`'s idiom, and it scrolls the box into view in a
+              // panel that scrolls.
+              // biome-ignore lint/a11y/noAutofocus: the box exists only to take the next keystroke -- arming it without the keyboard is what the bug WAS
+              autoFocus
               readOnly
               value=""
               // Self-describing, because while this box is armed it swallows
