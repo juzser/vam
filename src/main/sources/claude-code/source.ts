@@ -49,6 +49,7 @@ import {
 } from './pull-requests.js';
 import { paneForRow, replyToSession } from './reply.js';
 import { createBranchLookup } from './repo-branch.js';
+import { readPublishedPanes } from './session-pane.js';
 import { defaultSessionsRoot, readStatusUpdatedAt } from './session-status.js';
 import { stopSession, stopSessionViaCli } from './stop.js';
 import {
@@ -185,6 +186,11 @@ export async function loadClaudeCodeProjects(
   tmuxSessions: readonly TmuxSession[] | null = null,
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
+  // What the sessions publish about themselves: `sessionId` -> tmux session,
+  // out of the same `~/.claude/sessions` files the per-row status read already
+  // opens. One `readdir` per load. This is what makes `vamControlled` a fact
+  // about a SESSION rather than about a project (`session-pane.ts`).
+  const panes = await readPublishedPanes(sessionsRoot);
 
   // Read each transcript once, however many processes resumed it.
   const reads = new Map<string, TranscriptRead>();
@@ -280,7 +286,7 @@ export async function loadClaudeCodeProjects(
       // would act on the wrong one.
       ...(tmuxSessions === null
         ? {}
-        : { vamControlled: paneForRow(tmuxSessions, agents, agent) !== null }),
+        : { vamControlled: paneForRow(tmuxSessions, agents, agent, panes) !== null }),
     };
     const group = grouped.get(agent.cwd) ?? { cwd: agent.cwd, sessions: [] };
     group.sessions.push(session);
@@ -423,6 +429,9 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       prompt,
       run: createTmuxRunner(),
       deliver: deliverPromptViaCli,
+      // Read fresh, for the same reason the agent list is: a canvas drawn
+      // minutes ago is not evidence about which pane a session is in now.
+      panes: await readPublishedPanes(defaultSessionsRoot()),
     }),
   /**
    * The live list is re-asked for the same reason `recordPrompt` re-asks it,
@@ -438,6 +447,9 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       // With a runner in hand, a session vam started is killed rather than
       // refused -- see `stop.ts`. Without one it would still be refused.
       createTmuxRunner(),
+      // The published pairing, without which a project holding more than one
+      // live session can prove nothing and close refuses every row in it.
+      await readPublishedPanes(defaultSessionsRoot()),
     ),
   /**
    * The live list is re-asked here too, and for a third reason of its own: it

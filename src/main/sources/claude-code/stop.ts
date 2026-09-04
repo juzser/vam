@@ -146,6 +146,8 @@ export async function stopSession(
   rowId: string,
   stop: StopFn,
   run?: TmuxRun,
+  /** What the sessions published about themselves; see `paneForRow`. */
+  panes?: ReadonlyMap<string, string>,
 ): Promise<SourceError | null> {
   const sessionId = sessionIdOf(rowId);
   const row = agents.find((a) => a.key === rowId) ?? agents.find((a) => a.sessionId === sessionId);
@@ -163,7 +165,7 @@ export async function stopSession(
     // fits it, and it is the pane's neighbour, not the pane.
     if (run !== undefined) {
       const listed = await listVamSessions(run);
-      const pane = listed.kind === 'ok' ? paneForRow(listed.sessions, agents, row) : null;
+      const pane = listed.kind === 'ok' ? paneForRow(listed.sessions, agents, row, panes) : null;
       if (pane !== null) {
         const { failure, stderr } = await run(killSessionArgv(pane));
         return failure === null

@@ -190,3 +190,30 @@ describe('replyToSession', () => {
     expect(calledCli).toBe(true);
   });
 });
+
+describe('replyToSession with published panes', () => {
+  const alpha = { key: 'sess-alpha#7', sessionId: 'sess-alpha', cwd: CWD };
+  const beta = { key: 'sess-beta#8', sessionId: 'sess-beta', cwd: CWD };
+
+  it('types into the pane the row published, with a second session in the project', async () => {
+    const project = projectIdOf(CWD);
+    const tmux = fakeTmux(`${project}\tvam-atlas-aa11bb\n${project}\tvam-atlas-cc22dd\n`);
+    const error = await replyToSession({
+      agents: [alpha, beta],
+      rowId: 'sess-beta#8',
+      prompt: 'ship it',
+      run: tmux.run,
+      deliver: noDeliver,
+      panes: new Map([
+        ['sess-alpha', 'vam-atlas-aa11bb'],
+        ['sess-beta', 'vam-atlas-cc22dd'],
+      ]),
+    });
+
+    expect(error).toBeNull();
+    expect(tmux.sent()).toEqual([
+      ['send-keys', '-t', '=vam-atlas-cc22dd:', '-l', '--', 'ship it'],
+      ['send-keys', '-t', '=vam-atlas-cc22dd:', 'Enter'],
+    ]);
+  });
+});
