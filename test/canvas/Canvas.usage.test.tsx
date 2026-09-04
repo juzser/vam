@@ -311,6 +311,30 @@ describe("the status bar's source glyph", () => {
     expect(sourceGlyph()?.getAttribute('data-status-source')).toBe('black-smith');
   });
 
+  it("prefers the session's own source over the project's when a project mixes both", async () => {
+    // The ORDER of the two arms, which no other test pins: a project that
+    // mixes sources still stamps its own legacy `source`, and the session's
+    // is the more specific fact. Swapping the two reads `black-smith` here
+    // while every other glyph test stays green -- that silence is why this
+    // case is written down, and it is the same mixing that made
+    // `Project.source` deprecated in the first place.
+    const model: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'black-smith',
+          sessions: [fixtureSession('a1', 'claude-code')],
+        },
+      ],
+    };
+
+    render(<Canvas model={model} />);
+    await act(async () => {});
+
+    expect(sourceGlyph()?.getAttribute('data-status-source')).toBe('claude-code');
+  });
+
   it('draws nothing at all when no source is named, rather than a decorative constant', async () => {
     const model: CanvasModel = {
       projects: [{ id: 'p1', name: 'alpha', sessions: [fixtureSession('a1')] }],

@@ -40,7 +40,6 @@
  */
 
 import {
-  ArrowBigUp,
   ArrowUp,
   Bot,
   ChevronDown,
@@ -1627,23 +1626,6 @@ export function DetailPanel(props: DetailPanelProps) {
               );
             })}
           </div>
-          <span className="flex-1" />
-          {/* The mockup's `Tab · cycle mode` tag, at the right-hand end of the
-              same row, carrying the chord the operator asked for. */}
-          <span
-            data-mode-cycle
-            className="flex flex-none items-center gap-1.5 font-mono text-[9.5px] text-ink-faint"
-          >
-            <span className="flex items-center gap-1 rounded-[4px] border border-line-strong px-1.5 py-0.5">
-              {/* `role="img"` is what makes the label announced at all: on a
-                  bare <span> aria-label is dropped in silence. */}
-              <span role="img" aria-label="shift">
-                <ArrowBigUp size={11} strokeWidth={1.7} />
-              </span>
-              Tab
-            </span>
-            cycle mode
-          </span>
         </div>
       </div>
     </aside>

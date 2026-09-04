@@ -291,10 +291,23 @@ export type Project = {
   readonly id: string;
   readonly name: string;
   /**
-   * @deprecated A project mixes sessions from several sources now (this
-   * task's point), so one id on the project no longer means anything;
-   * `Session.source` is the field that carries it. Kept optional, not
-   * removed, so fixtures across ten files stay legal — removal is task-9b's.
+   * Which system this project's sessions came from, where they share one.
+   *
+   * SUPERSEDED AS A SESSION FACT, NOT REMOVABLE. A project mixes sessions
+   * from several sources now, so this id no longer describes every session
+   * under it; `Session.source` is the per-session truth and wins wherever
+   * both are present (the status glyph's arm order, asserted in
+   * `Canvas.usage.test.tsx`). This field remains the FALLBACK for sessions
+   * carrying no source of their own — the factory adapter stamps only this
+   * one — so deleting it blanks the glyph for every such session.
+   *
+   * DELETING IT IS A PERSISTED-DATA MIGRATION, NOT A DELETE. Three prefs
+   * buckets are keyed on this value at the top level of stored JSON:
+   * `renames`, `icons` and `projectIcons` (`prefs.ts`, `applyRenames` and
+   * `applyIcons`). Dropping the field orphans every rename and every icon
+   * an operator has saved, silently, on their next launch. Whoever removes
+   * it re-keys those three buckets and ships a migration for existing
+   * stores FIRST; until then the ten call sites that read it are correct.
    */
   readonly source?: SourceId;
   readonly sessions: readonly Session[];

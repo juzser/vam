@@ -451,7 +451,7 @@ describe('the composer is multiline, and honest about what its button does', () 
 });
 
 describe('the row under the composer is the mockup’s mode row', () => {
-  it('replaces the slash tags with mode pills and a shift+Tab tag', () => {
+  it('replaces the slash tags with mode pills', () => {
     draw();
     const row = q<HTMLElement>('[data-mode-row]');
     expect(row).not.toBeNull();
@@ -459,16 +459,18 @@ describe('the row under the composer is the mockup’s mode row', () => {
     // The slash tags this row replaced.
     expect(row?.textContent).not.toContain('/diff');
     expect(document.querySelector('[data-placeholder="slash-diff"]')).toBeNull();
+  });
 
-    // At the right-hand end of the same row, per the operator's request; the
-    // mockup carries a `Tab / cycle mode` tag in the same slot.
-    const tag = q<HTMLElement>('[data-mode-cycle]');
-    expect(tag).not.toBeNull();
-    expect(row?.contains(tag as Node)).toBe(true);
-    expect(tag?.textContent).toContain('Tab');
-    // A shift glyph is an image, and an aria-label on a bare <span> is dropped
-    // in silence — `role="img"` is what makes it announced at all.
-    expect(tag?.querySelector('[role="img"]')?.getAttribute('aria-label')).toContain('shift');
+  it('advertises no chord in the row, because none is bound', () => {
+    draw();
+    // The `⇧Tab · cycle mode` tag that sat at the right-hand end named a
+    // chord no table ever answered to -- the same hand-written caption
+    // `keysheet.ts` cites as the reason the key sheet is DERIVED from the
+    // chord tables. Pinned as an absence so a re-add fails here rather than
+    // quietly promising the key again. A real binding may bring it back;
+    // the caption alone may not.
+    expect(q<HTMLElement>('[data-mode-cycle]')).toBeNull();
+    expect(q<HTMLElement>('[data-mode-row]')?.textContent).not.toContain('cycle mode');
   });
 });
 
@@ -1127,15 +1129,17 @@ describe('the composer says what the session’s source actually does', () => {
   });
 });
 
-describe('the pane’s minted surface is a token pair, not a dark-only hex', () => {
-  it('defines --vam-lifted in both themes', () => {
+describe('the pane’s minted surfaces are token pairs, not dark-only hexes', () => {
+  it('has no --vam-lifted left, the token no rule ever consumed', () => {
+    // `--vam-lifted` was minted for the option picker's unchosen cards. The
+    // picker is gone, and `--color-lifted` reached no rule, component or
+    // class anywhere under `src/` -- a three-line chain feeding nothing.
+    // Pinned as an absence so the dead pair is not reintroduced without the
+    // surface that would justify it.
     // `import.meta.url` is not a file URL under happy-dom, so the path is
     // resolved from the runner's own root instead.
     const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
-    const dark = css.slice(css.indexOf(':root {'), css.indexOf('html.light {'));
-    const light = css.slice(css.indexOf('html.light {'));
-    expect(dark).toContain('--vam-lifted:');
-    expect(light).toContain('--vam-lifted:');
+    expect(css).not.toContain('lifted');
   });
 
   it('pins the light line-loud to the value the light artboard actually draws', () => {
