@@ -28,9 +28,16 @@ export type OpenDialogResult = {
   readonly filePaths: readonly string[];
 };
 
-/** The slice of electron's `dialog` used here, so this is testable without it. */
+/**
+ * The slice of electron's `dialog` used here, so this is testable without it.
+ *
+ * `properties` is a mutable array of the one literal this module ever asks
+ * for, because that is what electron's own signature accepts -- a
+ * `readonly string[]` does not assign to it, and widening the literal would
+ * let a future edit slip `openFile` past the type system.
+ */
 export type DialogLike = {
-  showOpenDialog(options: { properties: readonly string[] }): Promise<OpenDialogResult>;
+  showOpenDialog(options: { properties: 'openDirectory'[] }): Promise<OpenDialogResult>;
 };
 
 export function registerDialogIpc(ipcMain: IpcMainLike, dialog: DialogLike): void {

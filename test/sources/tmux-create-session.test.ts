@@ -11,7 +11,10 @@
 import { describe, expect, it } from 'vitest';
 import { CHANNELS } from '../../src/main/ipc/channels.js';
 import { registerSourceIpc } from '../../src/main/ipc/handlers.js';
-import { createSessionInProject } from '../../src/main/sources/claude-code/create-session.js';
+import {
+  createSessionInDirectory,
+  createSessionInProject,
+} from '../../src/main/sources/claude-code/create-session.js';
 import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
 import { FIXTURE_SOURCE } from '../../src/main/sources/fixture-source.js';
 import type { MainSource } from '../../src/main/sources/source.js';
@@ -123,5 +126,59 @@ describe('o, on the Claude Code source', () => {
       name: 'vam-new-work-a1b2c3',
     });
     expect(failure?.code).toBe('session-exists');
+  });
+});
+
+/**
+ * The "new project" half: a directory the operator picked in Electron's own
+ * dialog, which no project id names yet.
+ */
+describe('a new session in a chosen directory', () => {
+  it('starts claude there, and records the id the next load() will report', async () => {
+    const run = recordingTmux();
+    const failure = await createSessionInDirectory({
+      cwd: '/srv/work/orchard',
+      title: 'orchard',
+      run,
+      name: 'vam-orchard-a1b2c3',
+    });
+
+    expect(failure).toBeNull();
+    expect(run.calls).toEqual([
+      ['new-session', '-d', '-s', 'vam-orchard-a1b2c3', '-c', '/srv/work/orchard', 'claude'],
+      // The SAME digest every other project id comes from. Anything else and
+      // the Terminal tab would find nothing for a session vam itself started.
+      ['set-option', '-t', 'vam-orchard-a1b2c3', '@vam-project', projectIdOf('/srv/work/orchard')],
+    ]);
+  });
+
+  it('forwards tmux’s own failure rather than reporting a session it did not start', async () => {
+    const run = recordingTmux("can't create session: /srv/work/gone: No such file or directory");
+    const failure = await createSessionInDirectory({
+      cwd: '/srv/work/gone',
+      title: 'gone',
+      run,
+      name: 'vam-gone-a1b2c3',
+    });
+    expect(failure?.kind).toBe('refused');
+  });
+
+  it('is gated by createSession, and SPAWNS NOTHING when that is false', async () => {
+    const spawned: string[] = [];
+    const cannot: MainSource = {
+      descriptor: FIXTURE_SOURCE.descriptor,
+      load: FIXTURE_SOURCE.load,
+      createSessionInDirectory: async (cwd) => {
+        spawned.push(cwd);
+        return null;
+      },
+    };
+    const invoke = await handlerFor(cannot);
+    const result = await invoke(CHANNELS.createSessionIn, '/srv/work/orchard', 'orchard');
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.code).toBe('unsupported:createSession');
+    // The gate came first: the recorder is empty, not merely apologised to.
+    expect(spawned).toEqual([]);
   });
 });

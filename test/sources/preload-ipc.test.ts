@@ -312,6 +312,7 @@ describe('main validates every IPC payload (AC-16b)', () => {
     { channel: CHANNELS.renameSession, wrong: [{ sessionId: 's' }, null] },
     { channel: CHANNELS.closeSession, wrong: [{}] },
     { channel: CHANNELS.createSession, wrong: [[], 7] },
+    { channel: CHANNELS.createSessionIn, wrong: [[], 7] },
     { channel: CHANNELS.applyWaivers, wrong: ['s', 'not-an-array'] },
     { channel: CHANNELS.transitionLesson, wrong: ['s', 'l', 9] },
   ];
@@ -331,6 +332,29 @@ describe('main validates every IPC payload (AC-16b)', () => {
 
       const result = await ipcRenderer.invoke(channel, ...wrong);
       expect(isRefusal(result), `${channel} answered ${JSON.stringify(result)}`).toBe(true);
+      expect(rejections).toEqual([]);
+    },
+  );
+
+  /**
+   * `createSessionIn`'s first argument becomes a process's CWD, chosen by the
+   * least trusted process in the app. A relative path would be resolved
+   * against main's own working directory -- a directory the operator never
+   * picked -- and a NUL byte is the classic way to make a path mean one thing
+   * to a validator and another to the syscall.
+   */
+  it.each([['work/orchard'], ['./orchard'], ['/srv/work\u0000/orchard'], ['']])(
+    'refuses createSessionIn for the directory %j',
+    async (cwd) => {
+      const { ipcRenderer, rejections } = wire(FIXTURE_SOURCE);
+
+      const result = await ipcRenderer.invoke(CHANNELS.createSessionIn, cwd, 'orchard');
+      expect(isRefusal(result), `answered ${JSON.stringify(result)}`).toBe(true);
+      // The CODE, not merely "a refusal". This fixture source declines
+      // `createSession` anyway, so every one of these would be refused as
+      // `unsupported:createSession` with the path check deleted -- a test
+      // that only asked "was it refused" would pass against no check at all.
+      expect((result as { error: { code: string } }).error.code).toBe('invalid-payload');
       expect(rejections).toEqual([]);
     },
   );

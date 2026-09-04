@@ -63,8 +63,7 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
     closeSession: (sessionId) => unwrap<void>(ipc.invoke(CHANNELS.closeSession, sessionId)),
     createSession: (projectId, title) =>
       unwrap<void>(ipc.invoke(CHANNELS.createSession, projectId, title)),
-    createSessionIn: (cwd, title) =>
-      unwrap<void>(ipc.invoke(CHANNELS.createSessionIn, cwd, title)),
+    createSessionIn: (cwd, title) => unwrap<void>(ipc.invoke(CHANNELS.createSessionIn, cwd, title)),
   } satisfies Pick<
     PreloadSourceApi,
     'recordPrompt' | 'renameSession' | 'closeSession' | 'createSession' | 'createSessionIn'
@@ -154,8 +153,7 @@ export type DialogApi = {
  */
 export function createDialogApi(ipc: InvokerLike): DialogApi {
   return {
-    chooseDirectory: () =>
-      ipc.invoke(CHANNELS.chooseDirectory) as Promise<string | null>,
+    chooseDirectory: () => ipc.invoke(CHANNELS.chooseDirectory) as Promise<string | null>,
   };
 }
 

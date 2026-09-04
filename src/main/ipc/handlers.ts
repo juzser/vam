@@ -194,8 +194,8 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
         const failure = await source.createSession(args[0] as string, args[1] as string);
         return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
       }
-      if (channel === CHANNELS.createSessionIn && source.createSessionIn !== undefined) {
-        const failure = await source.createSessionIn(args[0] as string, args[1] as string);
+      if (channel === CHANNELS.createSessionIn && source.createSessionInDirectory !== undefined) {
+        const failure = await source.createSessionInDirectory(args[0] as string, args[1] as string);
         return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
       }
       // Advertised, but this source carries no member for it. Saying so beats

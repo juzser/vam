@@ -8,14 +8,17 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { registerDialogIpc } from '../../../src/main/dialog/ipc.js';
+import { type DialogLike, registerDialogIpc } from '../../../src/main/dialog/ipc.js';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 
-function harness(dialog: { showOpenDialog(options: unknown): Promise<unknown> }) {
+function harness(dialog: DialogLike) {
   const handlers = new Map<string, Handler>();
-  registerDialogIpc({ handle: (channel, listener) => void handlers.set(channel, listener) }, dialog);
+  registerDialogIpc(
+    { handle: (channel, listener) => void handlers.set(channel, listener) },
+    dialog,
+  );
   const handler = handlers.get(CHANNELS.chooseDirectory);
   if (handler === undefined) throw new Error('chooseDirectory was never registered');
   return handler;
