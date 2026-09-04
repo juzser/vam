@@ -11,7 +11,7 @@
  * first place a person ever sees the difference.
  */
 
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { REFRESH_MS, TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
 import type { PaneView } from '../../src/shared/terminal.js';
@@ -39,7 +39,9 @@ describe('the Terminal tab shows the focused session pane', () => {
     render(<TerminalTab projectId={ATLAS} read={read} />);
     await settle();
 
-    expect(read).toHaveBeenCalledWith(ATLAS);
+    // No row given here, so the project alone is asked -- the older answer,
+    // still available and still correct for a project with one pane.
+    expect(read).toHaveBeenCalledWith(ATLAS, undefined);
     const pane = q<HTMLElement>('[data-terminal-pane]');
     expect(pane?.textContent).toContain('thinking about the branch');
     // The already-composed screen, drawn as plain text -- vam has no terminal
@@ -293,5 +295,15 @@ describe('the pane can be reached and scrolled from the keyboard', () => {
     expect(pane.getAttribute('aria-label')).toBeTruthy();
     pane.focus();
     expect(document.activeElement).toBe(pane);
+  });
+});
+
+describe('the row it asks about', () => {
+  it('names the session as well as the project, so a project with two panes resolves', async () => {
+    // The project alone answers `ambiguous` when vam started two sessions in
+    // it. The row is what main pairs against the pane the session published.
+    const read = vi.fn(async () => ok('beta screen'));
+    render(<TerminalTab projectId={ATLAS} rowId="sess-beta#8" read={read} />);
+    await waitFor(() => expect(read).toHaveBeenCalledWith(ATLAS, 'sess-beta#8'));
   });
 });

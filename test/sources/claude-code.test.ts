@@ -275,6 +275,39 @@ describe('loadClaudeCodeProjects', () => {
       );
       expect(project?.sessions[0]?.vamControlled).toBe(false);
     });
+
+    it('is true for EACH of two sessions vam started in one project', async () => {
+      // The defect the operator hit: the project tag pairs a project, not a
+      // session, so a second session made both rows unprovable and close
+      // refused on both. Each session publishes its own pane in its own status
+      // file, and that is what is read here.
+      const project = projectIdOf('/w/alpha');
+      for (const [pid, sessionId, pane] of [
+        [4242, 'sess-alpha', 'vam-alpha-aa11bb'],
+        [4243, 'sess-beta', 'vam-alpha-cc22dd'],
+      ] as const) {
+        writeFileSync(
+          join(sessionsRoot, `${pid}.json`),
+          JSON.stringify({ pid, sessionId, status: 'idle', tmux: `${pane}:@0.%0` }),
+        );
+      }
+      const [loaded] = await loadClaudeCodeProjects(
+        root,
+        [
+          agent({ key: 'sess-alpha#4242', sessionId: 'sess-alpha', pid: 4242, cwd: '/w/alpha' }),
+          agent({ key: 'sess-beta#4243', sessionId: 'sess-beta', pid: 4243, cwd: '/w/alpha' }),
+        ],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        [
+          { project, name: 'vam-alpha-aa11bb' },
+          { project, name: 'vam-alpha-cc22dd' },
+        ],
+      );
+      expect(loaded?.sessions.map((s) => s.vamControlled)).toEqual([true, true]);
+    });
   });
 
   it('takes the session list from the live agents, not from the transcript directory', async () => {

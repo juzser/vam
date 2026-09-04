@@ -280,3 +280,56 @@ describe('closing a session vam itself started', () => {
     expect(stop).toHaveBeenCalledWith('sess-1');
   });
 });
+
+/**
+ * Closing one of two sessions vam started in ONE project.
+ *
+ * The refusal above -- two live rows, no provable pairing -- is correct only
+ * while the project tag is all vam has. When the sessions publish their own
+ * panes each row is provable, and refusing to close it is the defect the
+ * operator hit today. Nothing real is killed here: the runner is a fake.
+ */
+describe('stopSession with published panes', () => {
+  const alpha: StoppableAgent = {
+    key: 'sess-alpha#12',
+    sessionId: 'sess-alpha',
+    kind: 'interactive',
+    name: 'alpha',
+    cwd: '/w/alpha',
+  };
+  const beta: StoppableAgent = { ...alpha, key: 'sess-beta#13', sessionId: 'sess-beta' };
+  const project = projectIdOf('/w/alpha');
+  const listed: TmuxRunResult = {
+    failure: null,
+    stdout: `${project}\tvam-alpha-aa11bb\n${project}\tvam-alpha-cc22dd\n`,
+    stderr: '',
+  };
+
+  const runner = () => {
+    const calls: string[][] = [];
+    const run: TmuxRun = async (argv) => {
+      calls.push([...argv]);
+      return argv[0] === 'list-sessions' ? listed : { failure: null, stdout: '', stderr: '' };
+    };
+    return { calls, run };
+  };
+
+  it('kills the pane the row itself published, not the other one', async () => {
+    const { calls, run } = runner();
+    const panes = new Map([
+      ['sess-alpha', 'vam-alpha-aa11bb'],
+      ['sess-beta', 'vam-alpha-cc22dd'],
+    ]);
+    await expect(
+      stopSession(
+        [alpha, beta],
+        'sess-beta#13',
+        vi.fn(async () => null),
+        run,
+        panes,
+      ),
+    ).resolves.toBeNull();
+    expect(calls).toContainEqual(['kill-session', '-t', '=vam-alpha-cc22dd']);
+    expect(calls).not.toContainEqual(['kill-session', '-t', '=vam-alpha-aa11bb']);
+  });
+});

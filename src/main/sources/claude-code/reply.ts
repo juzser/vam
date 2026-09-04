@@ -60,24 +60,57 @@ export type ReplyRow = {
 /**
  * The pane this row can be PROVEN to be running in, or `null`.
  *
- * Exported for the test that pins the two conditions: they are the whole of
- * the safety argument, and a routing rule that is only tested through the
- * spawn is a rule nobody can see.
+ * TWO PROOFS, AND THE PUBLISHED ONE WINS. `panes` is what the sessions
+ * themselves report -- Claude Code writes its own tmux pane into
+ * `~/.claude/sessions/<pid>.json` beside its session id, so the pairing is per
+ * SESSION and comes from the process that is in the pane (`session-pane.ts`).
+ * It is preferred because the project tag below cannot answer the case the
+ * operator actually hits: two sessions vam started in one project fail both of
+ * its conditions, so neither row can be replied to, closed, or drawn.
+ *
+ * The published name is still checked against `sessions`, which is vam's own
+ * prefix filtered (`listVamSessions`). So a session the operator started in
+ * their own tmux publishes a pane here and is still never acted on, and a pane
+ * that has ended since falls through to the tag rather than being typed into.
+ *
+ * THE PUBLISHED PANE BYPASSES THE COUNTS, it does not merely outrank them.
+ * The fallback demands exactly one live row in the project, and measured on a
+ * real machine that is UNSATISFIABLE for an operator who runs several sessions
+ * per project: three live sessions share one cwd against one vam pane, so the
+ * count vetoes every row and close refuses all three. Consulting it after a
+ * pairing has been proven would keep that veto.
+ *
+ * THE TAG REMAINS, unchanged, for a session whose file carries no `tmux` field
+ * -- one not under tmux, or an older Claude Code that did not publish it. Its
+ * two conditions are the whole of the safety argument in that case: exactly
+ * one tagged tmux session for this project, and exactly one live row in it --
+ * and, per the paragraph above, it answers `null` for every row in a cwd that
+ * holds more than one live session. That is correct (nothing in the project
+ * scheme says which row is in the pane) and it is why this defect stayed
+ * invisible: the pairing was not wrong, it was unanswerable.
+ *
+ * Exported for the test that pins both: a routing rule that is only tested
+ * through the spawn is a rule nobody can see.
  */
 export function paneForRow(
   sessions: readonly TmuxSession[],
   agents: readonly ReplyRow[],
   row: ReplyRow,
+  panes?: ReadonlyMap<string, string>,
 ): string | null {
+  const published = panes?.get(row.sessionId);
+  if (published !== undefined && sessions.some((session) => session.name === published)) {
+    return published;
+  }
   const projectId = projectIdOf(row.cwd);
   // An unset option reads back as the empty string, so an empty id would
   // sweep up every session vam did NOT start.
   if (projectId === '') return null;
   const here = agents.filter((agent) => projectIdOf(agent.cwd) === projectId);
   if (here.length !== 1) return null;
-  const panes = sessions.filter((session) => session.project === projectId);
-  const [only] = panes;
-  return panes.length === 1 && only !== undefined ? only.name : null;
+  const tagged = sessions.filter((session) => session.project === projectId);
+  const [only] = tagged;
+  return tagged.length === 1 && only !== undefined ? only.name : null;
 }
 
 /**
@@ -132,6 +165,8 @@ export async function replyToSession(input: {
   prompt: string;
   run: TmuxRun;
   deliver: DeliverFn;
+  /** What the sessions published about themselves; see `paneForRow`. */
+  panes?: ReadonlyMap<string, string>;
 }): Promise<SourceError | null> {
   const { agents, rowId, prompt, run, deliver } = input;
   const sessionId = sessionIdOf(rowId);
@@ -149,7 +184,7 @@ export async function replyToSession(input: {
   const listed = await listVamSessions(run);
   // A tmux vam could not ask is not a reason to stop: the CLI path is still
   // there and is the only one that was ever available before.
-  const pane = listed.kind === 'ok' ? paneForRow(listed.sessions, agents, row) : null;
+  const pane = listed.kind === 'ok' ? paneForRow(listed.sessions, agents, row, input.panes) : null;
   if (pane !== null) {
     return typeIntoPane(run, pane, prompt);
   }

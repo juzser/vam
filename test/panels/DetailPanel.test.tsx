@@ -2108,10 +2108,12 @@ describe('the Terminal tab costs nothing until it is opened', () => {
       fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
       await Promise.resolve();
     });
-    // BY PROJECT ID, not by the session title. The tmux pairing is recorded on
-    // the tmux session at creation and read back; a title was slugged and
-    // truncated on the way in and matched nothing that was ever created.
-    expect(read).toHaveBeenCalledWith(PROJECT.id);
+    // BY PROJECT ID AND ROW, never by the session title. The project alone
+    // cannot answer for a project vam started two sessions in -- both panes
+    // are its own -- so the row travels with it and main pairs against the
+    // pane that session published. A title was slugged and truncated on the
+    // way in and matched nothing that was ever created.
+    expect(read).toHaveBeenCalledWith(PROJECT.id, SESSION.id);
     expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).toContain('the pane');
 
     const whileOpen = read.mock.calls.length;

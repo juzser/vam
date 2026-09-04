@@ -1600,6 +1600,7 @@ export function DetailPanel(props: DetailPanelProps) {
              browser build the tab says so instead of asking. */
           <TerminalTab
             projectId={entry?.project.id ?? null}
+            rowId={entry?.session.id}
             read={globalThis.window?.api?.terminal?.read}
           />
         ) : current === 'Agents' ? (
