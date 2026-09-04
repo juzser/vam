@@ -15,14 +15,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import {
-  fitPane,
-  MAX_COLUMNS,
-  MAX_ROWS,
-  MIN_COLUMNS,
-  MIN_ROWS,
-  sameSize,
-} from '../../src/renderer/panels/terminal-size.js';
+import { fitPane, sameSize } from '../../src/renderer/panels/terminal-size.js';
+import { MAX_COLUMNS, MAX_ROWS, MIN_COLUMNS, MIN_ROWS } from '../../src/shared/terminal.js';
 
 const cell = { width: 8, height: 16 };
 

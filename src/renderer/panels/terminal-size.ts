@@ -23,27 +23,16 @@
  * to be checkable without one.
  */
 
+import {
+  MAX_COLUMNS,
+  MAX_ROWS,
+  MIN_COLUMNS,
+  MIN_ROWS,
+  type PaneSize,
+} from '../../shared/terminal.js';
+
 /** A rectangle in CSS pixels -- the wrapper's content box, or one character. */
 export type Box = { readonly width: number; readonly height: number };
-
-/** A size in tmux's own units. */
-export type PaneSize = { readonly columns: number; readonly rows: number };
-
-/**
- * The clamps, and they are not decoration.
- *
- * tmux accepts a resize to one column and then has nowhere to draw; a pane
- * dragged almost shut would otherwise reflow a working agent's screen into a
- * ribbon it could not recover from when the pane came back. The floors are the
- * smallest sizes at which a terminal is still a terminal. The ceilings are
- * there because the numbers travel over the IPC bridge from the renderer,
- * which is the least trusted process in the app: a compromised one may not ask
- * tmux to allocate an arbitrarily large screen.
- */
-export const MIN_COLUMNS = 20;
-export const MAX_COLUMNS = 500;
-export const MIN_ROWS = 5;
-export const MAX_ROWS = 300;
 
 const clamp = (value: number, low: number, high: number): number =>
   Math.min(Math.max(value, low), high);
