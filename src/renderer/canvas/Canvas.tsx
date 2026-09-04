@@ -33,7 +33,7 @@ import {
   useReactFlow,
   useStore,
 } from '@xyflow/react';
-import { Box, Factory, FlaskConical, type LucideIcon, Maximize, Terminal } from 'lucide-react';
+import { Box, Factory, FlaskConical, type LucideIcon, Maximize } from 'lucide-react';
 import {
   Children,
   type ComponentProps,
@@ -106,6 +106,7 @@ import { copyText } from './clipboard.js';
 import { KeySheet } from './KeySheet.js';
 import { infoNodeId, layoutCanvas, orderedSessions } from './layout.js';
 import { type FlowNodeLike, toNavNodes } from './nav-nodes.js';
+import { PROVIDER_MARKS } from './provider-marks.js';
 import { SessionFanNode } from './SessionFanNode.js';
 import { SessionInfoNode } from './SessionInfoNode.js';
 import { StepNode } from './StepNode.js';
@@ -2242,8 +2243,14 @@ function UsageBar({
  * not), so an id nobody here has drawn an icon for still gets one — the
  * generic box — and its name in words either way.
  */
+/**
+ * The vam-native sources. These are concepts rather than companies -- the
+ * factory, the sample fixture -- so they are drawn in the app's own visual
+ * language rather than with a borrowed brand mark. `claude-code` is NOT here
+ * any more: it names a real product, and `PROVIDER_MARKS` carries its actual
+ * mark, which says more at eleven pixels than a generic terminal glyph did.
+ */
 const SOURCE_ICON: Readonly<Record<string, LucideIcon>> = {
-  'claude-code': Terminal,
   'black-smith': Factory,
   'bundled-sample': FlaskConical,
 };
@@ -2252,18 +2259,32 @@ function SourceGlyph({ source }: { readonly source: SourceId | null }) {
   if (source === null || source === undefined || source === '') {
     return null;
   }
-  const Icon = SOURCE_ICON[source] ?? Box;
+  // Three registers, in order, and the order is the point: a real provider's
+  // own mark; else vam's own glyph for one of vam's own sources; else the
+  // neutral box. The last is the honest answer to a source nobody has drawn --
+  // a shape that claims nothing, never another provider's logo and never a
+  // blank. `data-source-mark` records WHICH register answered, so the fallback
+  // is an assertable outcome rather than an invisible default.
+  const mark = PROVIDER_MARKS[source];
+  const Native = SOURCE_ICON[source];
+  const register = mark !== undefined ? 'brand' : Native !== undefined ? 'native' : 'neutral';
+  const Icon = Native ?? Box;
   return (
     <Note text={`this session comes from ${source}`}>
       {/* `role="img"` is load-bearing: `aria-label` on a roleless span is
           ignored, and the icon itself is hidden. */}
       <span
         data-status-source={source}
+        data-source-mark={register}
         role="img"
         aria-label={`source: ${source}`}
         className="flex items-center text-ink-dim"
       >
-        <Icon size={11} strokeWidth={1.6} aria-hidden="true" />
+        {mark === undefined ? (
+          <Icon size={11} strokeWidth={1.6} aria-hidden="true" />
+        ) : (
+          <mark.Glyph size={11} />
+        )}
       </span>
     </Note>
   );
