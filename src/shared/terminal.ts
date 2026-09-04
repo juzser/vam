@@ -6,7 +6,7 @@
  * produces this, the preload forwards it and the renderer draws it, so it
  * cannot live in any one of the three.
  *
- * FIVE ANSWERS, AND THE SPLIT IS THE POINT (`sources/tmux/spawn.ts`). `ok` is
+ * SIX ANSWERS, AND THE SPLIT IS THE POINT (`sources/tmux/spawn.ts`). `ok` is
  * a screen. `not-vam` is vam having looked and found no session of its own for
  * this one -- which includes tmux reporting no server running, since no server
  * means no sessions. `gone` is a session vam did start that has since ended.
@@ -16,6 +16,15 @@
  * having found out, and it carries the reason tmux gave. Collapsing the last
  * one into an empty pane would tell the operator there is nothing to look at
  * on the strength of never having looked.
+ *
+ * `mispaired` is the sixth and the newest, and it exists because `not-vam` was
+ * being told for it. The row PUBLISHED the pane it is running in
+ * (`sources/claude-code/session-pane.ts`) and that pane is not one vam can use
+ * for this project -- another project's, ended, or never vam's at all. "vam
+ * did not start a session for this one" is then false in the way that costs an
+ * operator time: vam did start one, it simply cannot prove that one is this
+ * row's, and the two facts send a person to different places. It carries the
+ * name the row published so the answer can say what it was asked to trust.
  */
 
 import type { SourceError } from '../renderer/sources/port.js';
@@ -25,6 +34,7 @@ export type PaneView =
   | { readonly kind: 'not-vam' }
   | { readonly kind: 'gone' }
   | { readonly kind: 'ambiguous'; readonly names: readonly string[] }
+  | { readonly kind: 'mispaired'; readonly published: string }
   | { readonly kind: 'unavailable'; readonly error: SourceError };
 
 /**

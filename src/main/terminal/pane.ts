@@ -49,7 +49,17 @@ import {
 export type SessionMatch =
   | { readonly kind: 'none' }
   | { readonly kind: 'one'; readonly name: string }
-  | { readonly kind: 'ambiguous'; readonly names: readonly string[] };
+  | { readonly kind: 'ambiguous'; readonly names: readonly string[] }
+  /**
+   * The row named its own pane and vam cannot use it. A FOURTH ANSWER rather
+   * than `none`, because the two are different facts: `none` is nobody having
+   * said anything and vam having nothing of its own here, while this is a row
+   * that said exactly where it is and pointed somewhere vam must not act on.
+   * Everything that WRITES treats them the same -- refuse -- but the tab has
+   * to say different words, and it was saying "vam did not start a session
+   * for this one" while holding a published name it had just rejected.
+   */
+  | { readonly kind: 'mispaired'; readonly published: string };
 
 export function matchVamSession(sessions: readonly TmuxSession[], projectId: string): SessionMatch {
   // An empty id is what an UNSET option reads back as, so an empty id asking
@@ -107,7 +117,7 @@ export function targetSession(
     return projectId !== '' &&
       sessions.some((session) => session.name === published && session.project === projectId)
       ? { kind: 'one', name: published }
-      : { kind: 'none' };
+      : { kind: 'mispaired', published };
   }
   return matchVamSession(sessions, projectId);
 }
@@ -138,6 +148,11 @@ export async function readSessionPane(
   }
   if (match.kind === 'ambiguous') {
     return { kind: 'ambiguous', names: match.names };
+  }
+  // Carried through rather than flattened into `not-vam`: the row said where
+  // it is, and what the tab owes the operator is that fact, not a denial.
+  if (match.kind === 'mispaired') {
+    return { kind: 'mispaired', published: match.published };
   }
   const pane = await readPane(run, match.name);
   if (pane.kind === 'ok') {

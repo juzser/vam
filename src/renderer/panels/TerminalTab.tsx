@@ -523,6 +523,27 @@ export function TerminalTab({
       </p>
     );
   }
+  if (view.kind === 'mispaired') {
+    return (
+      <p
+        data-terminal
+        data-terminal-empty
+        data-terminal-mispaired
+        className="text-[11px] text-ink-faint"
+      >
+        {/* NOT "vam did not start a session for this one", which is what stood
+            here and was false in the way that costs an operator time: vam did
+            start sessions for this project, it just cannot prove that any of
+            them is THIS row's. The row published the pane it believes it is
+            in, and vam is refusing to substitute a different live session for
+            it -- so the name it published is the one useful thing to say. The
+            same refusal is why nothing is typed here: there is no pane
+            element on this branch at all, so the surface cannot take a key it
+            could not deliver. */}
+        {`vam cannot tell which screen is this session's: it reports that it is running in the tmux pane ${view.published}, which is not one vam started for this project. Rather than show another session's screen, it is showing none.`}
+      </p>
+    );
+  }
   if (view.kind !== 'ok') {
     return (
       <p data-terminal data-terminal-empty className="text-[11px] text-ink-faint">

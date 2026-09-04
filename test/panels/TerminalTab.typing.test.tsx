@@ -396,6 +396,31 @@ describe('the way out stays out', () => {
   });
 });
 
+describe('a pairing vam cannot use is said as that, not as an absence', () => {
+  const MISPAIRED: PaneView = { kind: 'mispaired', published: 'vam-beacon-ee33ff' };
+
+  it('names the pane the row published, and does not claim vam started nothing', async () => {
+    await open(MISPAIRED);
+    const said = q('[data-terminal-mispaired]')?.textContent ?? '';
+    // The one fact that explains the refusal is the name the row published.
+    expect(said).toContain('vam-beacon-ee33ff');
+    expect(said).toContain('cannot tell');
+    // The sentence this replaced. It sent the operator looking for a session
+    // that is running, while vam held the published name it had rejected.
+    expect(said).not.toContain('vam did not start a tmux session for this one');
+  });
+
+  it('offers no surface to type into, so nothing can be swallowed', async () => {
+    const send = await open(MISPAIRED);
+    // No pane element at all on this branch: there is nothing to focus and
+    // nothing to press a key against, which is the correct shape for a state
+    // in which vam must not deliver.
+    expect(pane()).toBeNull();
+    expect(document.activeElement).toBe(document.body);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 describe('the pane says whether what is typed is going anywhere', () => {
   it('says where the keys go while it can send them', async () => {
     await open();
