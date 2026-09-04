@@ -1737,7 +1737,19 @@ function CanvasInner({
             thoi". The budget cell that used to sit here went with the rest;
             `?` is the `help` chord in BINDING_TABLES, so the one key still
             printed is a key the grammar answers to. */}
-        <span>?</span>
+        <span className="flex items-center gap-1.5">
+          {/* A tag rather than loose text: `?` has to read as a key you press.
+              A bare glyph in a corner reads as punctuation, and the label
+              beside it is what makes the sheet discoverable to someone who
+              does not already know it is there. */}
+          <span
+            data-keysheet-hint
+            className="rounded-[4px] border border-line-strong px-1.5 py-px text-ink-dim"
+          >
+            ?
+          </span>
+          Keyboard shortcut
+        </span>
       </footer>
     </div>
   );
