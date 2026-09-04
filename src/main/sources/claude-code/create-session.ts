@@ -55,14 +55,38 @@ export async function createSessionInProject(input: {
       message: `vam cannot tell which directory project ${projectId} is, so it will not start a session in a guessed one`,
     };
   }
+  return createSessionInDirectory({ cwd: match.cwd, title, run, name: input.name });
+}
+
+/**
+ * The same creation, for a directory named directly rather than resolved from
+ * a project id -- the "new project" path, where the operator has just chosen
+ * the directory in Electron's own dialog and no project id exists for it yet.
+ *
+ * `projectId` is still recorded on the tmux session, re-derived from the cwd
+ * by the SAME digest every other project id comes from: the project this
+ * creates is the one the next `load()` will report, so the two must agree or
+ * the Terminal tab would find nothing for a session vam itself started.
+ *
+ * Whether the directory exists is tmux's question, not this module's -- `-c`
+ * on a missing directory fails the spawn and `createVamSession` classifies
+ * it, which keeps one answer for "that path is gone" instead of two.
+ */
+export async function createSessionInDirectory(input: {
+  cwd: string;
+  title: string;
+  run: TmuxRun;
+  name?: string;
+}): Promise<SourceError | null> {
+  const { cwd, title, run } = input;
   return createVamSession(run, {
     name: input.name ?? vamSessionName(title),
-    cwd: match.cwd,
+    cwd,
     command: NEW_SESSION_COMMAND,
     // WHAT THE TERMINAL TAB WILL LOOK THIS UP BY. The name is for a person
     // reading `tmux ls`; the pairing is this id, recorded on the session
     // itself. Nothing re-derives a name from `title` -- that is the bug this
     // argument exists to end (`terminal/pane.ts`).
-    projectId,
+    projectId: projectIdOf(cwd),
   });
 }

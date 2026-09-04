@@ -32,6 +32,9 @@ function buildWrites(api: PreloadSourceApi, descriptor: SourceDescriptor): Sourc
   }
   if (capabilities.createSession) {
     writes.createSession = (projectId, title) => api.createSession(projectId, title);
+    // The same capability carries both: a new session in a project vam knows,
+    // and one in a directory that is about to become a project.
+    writes.createSessionIn = (cwd, title) => api.createSessionIn(cwd, title);
   }
   return writes;
 }

@@ -39,7 +39,7 @@ import type { MainSource } from '../source.js';
 import { createTmuxRunner } from '../tmux/spawn.js';
 import { type AgentRoster, readAgentRoster } from './agent-roster.js';
 import { type LiveAgent, listLiveAgents } from './agents.js';
-import { createSessionInProject } from './create-session.js';
+import { createSessionInDirectory, createSessionInProject } from './create-session.js';
 import { deliverPromptViaCli, deliverToSession } from './deliver.js';
 import { projectIdOf } from './project-id.js';
 import {
@@ -402,4 +402,7 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       title,
       run: createTmuxRunner(),
     }),
+  /** No agent list to consult: the operator named the directory themselves. */
+  createSessionInDirectory: async (cwd, title) =>
+    createSessionInDirectory({ cwd, title, run: createTmuxRunner() }),
 };

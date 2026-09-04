@@ -84,6 +84,14 @@ export type SourceWrites = {
   renameSession?(sessionId: string, title: string): Promise<void>;
   closeSession?(sessionId: string): Promise<void>;
   createSession?(projectId: string, title: string): Promise<void>;
+  /**
+   * Start a session in a DIRECTORY rather than in a project vam already
+   * knows. Gated by the same `createSession` capability -- deliberately not a
+   * thirteenth boolean: it is the same affordance, asked a different way,
+   * because a "new project" has no project id yet (a project is derived from
+   * the cwd of a live session, so it begins existing only once this returns).
+   */
+  createSessionIn?(cwd: string, title: string): Promise<void>;
 };
 
 /** The waiver ledger and lesson pipeline, present only when `governance` is true. */

@@ -15,7 +15,13 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import type { ClipboardApi, DesktopSourceApi, TerminalApi, UsageApi } from '../preload/api.js';
+import type {
+  ClipboardApi,
+  DesktopSourceApi,
+  DialogApi,
+  TerminalApi,
+  UsageApi,
+} from '../preload/api.js';
 import type { PreloadSourceApi } from '../shared/preload-api.js';
 import { SmithClient } from './adapter/client.js';
 import { useCanvas } from './adapter/useCanvas.js';
@@ -38,6 +44,8 @@ declare global {
       readonly usage: UsageApi;
       readonly clipboard: ClipboardApi;
       readonly terminal: TerminalApi;
+      /** Electron's `showOpenDialog`; the browser build has no picker at all. */
+      readonly dialog: DialogApi;
     };
   }
 }

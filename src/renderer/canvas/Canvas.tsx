@@ -94,7 +94,12 @@ import {
   writePrefs,
 } from '../prefs/prefs.js';
 import { SettingsOverlay } from '../settings/SettingsOverlay.js';
-import { canWriteTo, describeFailure } from '../sources/port.js';
+import {
+  canWriteTo,
+  describeFailure,
+  type SessionSource,
+  type SourceWrites,
+} from '../sources/port.js';
 import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
 import { copyText } from './clipboard.js';
@@ -228,6 +233,48 @@ type ProjectIconTarget = {
   readonly projectId: string;
   readonly name: string;
 };
+
+/**
+ * Whether a new session can be started at all, and through what.
+ *
+ * One function because there are three askers and they must never disagree:
+ * `o`/the two `+` buttons that start one, the Projects header's `+` that
+ * picks a directory first, and the TOOLTIPS on both buttons. A caption saying
+ * a control works while the click path refuses is the exact defect the
+ * per-project `+` shipped with for weeks, so the caption is computed from the
+ * same answer the click reads rather than from a second opinion.
+ */
+type NewSessionRoute =
+  | { readonly ok: true; readonly write: SourceWrites; readonly label: string }
+  | { readonly ok: false; readonly decline: string };
+
+function newSessionRoute(source: CanvasSource): NewSessionRoute {
+  if (source.kind !== 'session') {
+    return { ok: false, decline: 'black-smith has no new-session command' };
+  }
+  const sessionSource: SessionSource = source.source;
+  if (!canWriteTo(sessionSource) || sessionSource.write.createSession === undefined) {
+    return {
+      ok: false,
+      decline: `${sessionSource.label} cannot start a session — ${
+        sessionSource.declines.createSession ?? 'it advertises no way to'
+      }`,
+    };
+  }
+  return { ok: true, write: sessionSource.write, label: sessionSource.label };
+}
+
+/**
+ * The last segment of a path, as the new session's name. Not `node:path`:
+ * this file is renderer code and the web build has no node builtins. A
+ * trailing separator is dropped rather than yielding an empty name, and a
+ * path that is nothing but separators keeps its own text -- an unnamed
+ * session is worse than an odd one.
+ */
+function directoryName(cwd: string): string {
+  const segments = cwd.split(/[/\\]/).filter((part) => part !== '');
+  return segments[segments.length - 1] ?? cwd;
+}
 
 /** Neither `window.api` nor its `usage` member exists in the browser build. */
 const UNKNOWN_SNAPSHOT: UsageSnapshot = { kind: 'unknown', reason: 'unavailable' };
@@ -1020,21 +1067,13 @@ function CanvasInner({
    */
   const createSession = useCallback(
     async (projectId: string, projectName: string) => {
-      if (source.kind !== 'session') {
-        setStatus('black-smith has no new-session command');
-        return;
-      }
-      const sessionSource = source.source;
-      if (!canWriteTo(sessionSource) || sessionSource.write.createSession === undefined) {
-        setStatus(
-          `${sessionSource.label} cannot start a session — ${
-            sessionSource.declines.createSession ?? 'it advertises no way to'
-          }`,
-        );
+      const route = newSessionRoute(source);
+      if (!route.ok) {
+        setStatus(route.decline);
         return;
       }
       try {
-        await sessionSource.write.createSession(projectId, projectName);
+        await route.write.createSession?.(projectId, projectName);
         // The write resolves when the SESSION exists, not when the agent
         // inside it has registered where vam can see it -- `tmux new-session
         // -d` returns immediately. So the reload below very often comes back
@@ -1044,13 +1083,66 @@ function CanvasInner({
         // agent's own, on its own schedule), so the honest sentence is the fix
         // rather than a poll.
         setStatus(`started a new session in ${projectName} — it may take a moment to appear`);
-        source.onWrote();
+        if (source.kind === 'session') source.onWrote();
       } catch (cause) {
         setStatus(describeFailure(cause));
       }
     },
     [source],
   );
+
+  /**
+   * New PROJECT: choose a directory, then start a session in it.
+   *
+   * vam has no stored project — a project is a grouping of live sessions on
+   * their cwd — so "create a project" can only mean this, and the project
+   * exists afterwards because something is running there. Anything else would
+   * be a control reporting it did something while nothing changed.
+   *
+   * Three refusals, in this order, and each returns before doing anything:
+   * the source cannot create (so the picker never opens — an operator should
+   * not choose a directory only to be told afterwards), there is no picker
+   * (the browser build at 127.0.0.1:5275 has no Electron and therefore no
+   * `showOpenDialog`), and nothing was chosen (cancel is an answer, not a
+   * failure). Only past all three does anything spawn.
+   */
+  const newProject = useCallback(async () => {
+    const route = newSessionRoute(source);
+    if (!route.ok) {
+      setStatus(route.decline);
+      return;
+    }
+    const choose = window.api?.dialog?.chooseDirectory;
+    if (choose === undefined || route.write.createSessionIn === undefined) {
+      setStatus('choosing a directory needs the desktop app — the browser build has no picker');
+      return;
+    }
+    let cwd: string | null;
+    try {
+      cwd = await choose();
+    } catch (cause) {
+      setStatus(describeFailure(cause));
+      return;
+    }
+    if (cwd === null) {
+      setStatus('no directory chosen — nothing started');
+      return;
+    }
+    const name = directoryName(cwd);
+    try {
+      await route.write.createSessionIn(cwd, name);
+      setStatus(`started a new session in ${name} — it may take a moment to appear`);
+      if (source.kind === 'session') source.onWrote();
+    } catch (cause) {
+      setStatus(describeFailure(cause));
+    }
+  }, [source]);
+
+  /** The caption both `+` controls wear: the refusal, or nothing to say. */
+  const newSessionDecline = useMemo(() => {
+    const route = newSessionRoute(source);
+    return route.ok ? null : route.decline;
+  }, [source]);
 
   /**
    * Keep the name the operator just typed. Local by design: `claude agents`
@@ -1640,6 +1732,8 @@ function CanvasInner({
             void createSession(focusedEntry.project.id, focusedEntry.project.name);
           }}
           onAddInProject={(project) => void createSession(project.id, project.name)}
+          onNewProject={() => void newProject()}
+          newSessionDecline={newSessionDecline}
           onPickIcon={(project: Project) => {
             // Same refusal as the session picker (§ above): a project with no
             // source has no bucket to store under, and guessing one would
