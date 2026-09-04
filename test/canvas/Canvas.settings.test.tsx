@@ -229,6 +229,11 @@ describe('the keyboard reference is the generated sheet', () => {
     for (const row of rows) {
       expect(printed, `"${row.keys}" is bound but the reference omits it`).toContain(row.keys);
     }
-    expect(printed.length).toBe(rows.length);
+    // The DISTINCT keys, not the row count: the sheet lists a mode-dependent
+    // binding once per cursor mode while this reference still prints one row
+    // per binding. Grouping it by mode is a following task; what this asserts
+    // is the property it always did — the reference shows every bound key and
+    // no unbound one.
+    expect(new Set(printed)).toEqual(new Set(rows.map((row) => row.keys)));
   });
 });

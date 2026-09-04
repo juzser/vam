@@ -1221,11 +1221,47 @@ function QuestionCard({
       buttons[at]?.focus();
       return;
     }
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if (at === -1 || buttons.length === 0) return;
+    /**
+     * ENTER SELECTS THE OPTION UNDER THE CURSOR, and it is handled here rather
+     * than left to the button's native activation for a reason worth stating:
+     * Enter also means something in this pane. The canvas grammar's `open`
+     * fires on Enter while the keyboard is in the right pane and raises the
+     * composer, and the pull request numbered one hundred and eleven is the
+     * record of what happens when a cursor and an
+     * Enter disagree about what they are pointing at. Handling it here and
+     * calling `preventDefault` gives Enter ONE meaning while the keyboard is
+     * in the list — mark this option — because the canvas listener stands
+     * aside for a key that has already been answered.
+     */
+    if (event.key === 'Enter' || event.key === ' ') {
+      const option = question.options[at];
+      if (option === undefined) return;
+      event.preventDefault();
+      toggle(option.label);
+      return;
+    }
+    /**
+     * `j`/`k` walk the list and `h`/`l` are SWALLOWED — the Insert half of the
+     * operator's table, where `hjkl` chooses an option rather than a session.
+     *
+     * The horizontal pair does nothing rather than being left alone, and that
+     * is the point: unhandled, they fall through to the canvas grammar and
+     * walk the node graph under a pane the operator is reading, which is the
+     * same "the keys work, they just do the wrong thing" failure the mode
+     * naming exists to end. `H` — capital, a different key — is still the way
+     * back to Select, and Escape still leaves.
+     */
+    if (event.key === 'h' || event.key === 'l') {
+      event.preventDefault();
+      return;
+    }
+    const down = event.key === 'ArrowDown' || event.key === 'j';
+    const up = event.key === 'ArrowUp' || event.key === 'k';
+    if (!down && !up) return;
     event.preventDefault();
-    const step = event.key === 'ArrowDown' ? 1 : -1;
+    const step = down ? 1 : -1;
     buttons[(at + step + buttons.length) % buttons.length]?.focus();
   };
 
@@ -1390,6 +1426,42 @@ export function DetailPanel(props: DetailPanelProps) {
     if (firstOptionRef.current !== null) firstOptionRef.current.focus();
     else inputRef.current?.focus();
   }, [composing]);
+
+  /**
+   * ENTERING INSERT PUTS THE KEYBOARD ON THE FIRST OPTION, AND LEAVING TAKES
+   * IT BACK — the wiring that makes "`hjkl` chooses an option in Insert" true.
+   *
+   * The option cursor is DOM focus, not a second index: the options are real
+   * buttons, so focus is already the thing the browser, the screen reader and
+   * the focus ring all agree on, and a parallel index in the canvas would be a
+   * second notion of where the cursor is — the exact duplication the mode
+   * naming exists to remove.
+   *
+   * Both directions are necessary. Without the first, `I` sets Insert while
+   * focus is still on the body, so `j` reaches the canvas grammar and walks
+   * the session list — the operator's original complaint. Without the second,
+   * `H` returns to Select while focus is still inside the listbox, so the list
+   * goes on eating `j` in a mode where it belongs to the sidebar. That is the
+   * same defect mirrored, and it is the one a reader will not think of.
+   */
+  const wasActive = useRef(false);
+  useEffect(() => {
+    const leaving = wasActive.current && !active;
+    wasActive.current = active;
+    if (active) {
+      firstOptionRef.current?.focus();
+      return;
+    }
+    // ONLY ON THE WAY OUT, never on a first render. `i` focuses an option from
+    // the effect above while `active` is still false — the composer path, which
+    // does not touch the mode — so a blur that fired whenever `active` was
+    // false would undo it on mount and leave the keyboard nowhere.
+    if (!leaving) return;
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused.hasAttribute('data-question-option')) {
+      focused.blur();
+    }
+  }, [active]);
 
   /**
    * The `out` region rides its own bottom: the newest output is the thing a
