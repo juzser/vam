@@ -107,9 +107,7 @@ describe('typing into the session vam started for a project', () => {
       listing(`${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-g7h8i9\n`),
     );
     const panes = new Map([[ATLAS, 'vam-atlas-g7h8i9']]);
-    expect(
-      await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes),
-    ).toBe(true);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(true);
     expect(argvs[1]?.[2]).toBe('=vam-atlas-g7h8i9:');
   });
 
@@ -118,9 +116,7 @@ describe('typing into the session vam started for a project', () => {
     // never acted on: the fallback is the project tag, which does not name it.
     const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
     const panes = new Map([[ATLAS, 'their-own-session']]);
-    expect(
-      await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes),
-    ).toBe(false);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(false);
     expect(verbs()).toEqual(['list-sessions']);
   });
 });

@@ -196,6 +196,7 @@ export async function sendSessionKey(
   if (match.kind !== 'one') return false;
   // The two builders are kept apart in `tmux/argv.ts` for the one reason that
   // matters here: `-l` types, and Return has to be pressed.
-  const argv = key.kind === 'enter' ? sendEnterArgv(match.name) : sendTextArgv(match.name, key.text);
+  const argv =
+    key.kind === 'enter' ? sendEnterArgv(match.name) : sendTextArgv(match.name, key.text);
   return (await run(argv)).failure === null;
 }
