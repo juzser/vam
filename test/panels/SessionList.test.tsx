@@ -120,6 +120,15 @@ function mount(entries: readonly SessionEntry[]) {
   return render(<SessionList {...baseProps(entries)} />);
 }
 
+/** Same defaults, with a few props overridden -- focus, mostly. */
+function mountWith(entries: readonly SessionEntry[], over: Partial<SessionListProps>) {
+  return render(<SessionList {...baseProps(entries)} {...over} />);
+}
+
+function addButtons(root: ParentNode) {
+  return [...root.querySelectorAll('[data-placeholder="new-session-in-project"]')];
+}
+
 afterEach(() => {
   cleanup();
 });
@@ -376,19 +385,26 @@ describe('SessionList placeholder row', () => {
    * the same way.
    */
   it('makes the per-project add a real button that names its own project', () => {
-    const { container } = mount(twoProjects());
-    const adds = container.querySelectorAll('[data-placeholder="new-session-in-project"]');
-    expect(adds).toHaveLength(2);
-    for (const add of adds) {
-      expect(add.tagName).toBe('BUTTON');
+    // The button only exists for the project holding focus, so this walks the
+    // two projects one focused session at a time rather than expecting both
+    // buttons at once.
+    for (const [sessionId, name] of [
+      ['a1', 'alpha'],
+      ['b1', 'beta'],
+    ] as const) {
+      const { container } = mountWith(twoProjects(), { focusedSessionId: sessionId });
+      const adds = addButtons(container);
+      expect(adds).toHaveLength(1);
+      const add = adds[0];
+      expect(add?.tagName).toBe('BUTTON');
       // Unclickable to assistive tech is what `aria-hidden` meant; it is a
       // control now, so it must be reachable and it must say which project.
-      expect(add.getAttribute('aria-hidden')).toBeNull();
-      expect(add.className).toContain('cursor-pointer');
-      expect(add.className).toMatch(/hover:/);
+      expect(add?.getAttribute('aria-hidden')).toBeNull();
+      expect(add?.className).toContain('cursor-pointer');
+      expect(add?.className).toMatch(/hover:/);
+      expect(add?.getAttribute('aria-label')).toBe(`new session in ${name}`);
+      cleanup();
     }
-    expect(adds[0]?.getAttribute('aria-label')).toBe('new session in alpha');
-    expect(adds[1]?.getAttribute('aria-label')).toBe('new session in beta');
   });
 
   it('reports which project the add was for', () => {
@@ -398,6 +414,8 @@ describe('SessionList placeholder row', () => {
       <SessionList
         {...({
           ...baseProps(entries),
+          // Beta holds focus, so beta is the only project showing an add.
+          focusedSessionId: 'b1',
           filter: '',
           filtering: false,
           onFilterChange: noop,
@@ -425,7 +443,7 @@ describe('SessionList placeholder row', () => {
     const adds = document.querySelectorAll<HTMLButtonElement>(
       '[data-placeholder="new-session-in-project"]',
     );
-    adds[1]?.click();
+    adds[0]?.click();
     expect(seen).toEqual(['beta']);
   });
 
@@ -550,7 +568,7 @@ describe('the close button reveals with its own row, not with the whole list', (
  */
 describe('the new-session button is dim until hovered', () => {
   it('has no visible border at rest and gains one on hover', () => {
-    const { container } = mount(twoProjects());
+    const { container } = mountWith(twoProjects(), { focusedSessionId: 'a1' });
     const buttons = [...container.querySelectorAll('[aria-label^="new session in "]')];
     expect(buttons.length, 'no new-session buttons rendered').toBeGreaterThan(0);
     for (const el of buttons) {
@@ -559,5 +577,75 @@ describe('the new-session button is dim until hovered', () => {
       // Still bordered-box sized, so hover does not move the heading.
       expect(el.className).toMatch(/(^|\s)border(\s|$)/);
     }
+  });
+});
+
+/**
+ * The per-project add follows focus.
+ *
+ * Four projects meant four `+` boxes standing over the session names at all
+ * times, for a control you can only mean for the project you are working in.
+ * It now renders for exactly the project whose session is focused, and is
+ * absent -- not merely invisible -- everywhere else, so nothing off-screen can
+ * be clicked or tabbed into.
+ */
+describe('the per-project add appears only for the focused project', () => {
+  it('shows no add at all while nothing is focused', () => {
+    const { container } = mountWith(twoProjects(), { focusedSessionId: null });
+    expect(addButtons(container)).toHaveLength(0);
+  });
+
+  it("shows exactly one add, on the focused session's own project", () => {
+    const { container } = mountWith(twoProjects(), { focusedSessionId: 'a2' });
+    const adds = addButtons(container);
+    expect(adds).toHaveLength(1);
+    expect(adds[0]?.getAttribute('aria-label')).toBe('new session in alpha');
+    // And it is inside alpha's heading, not merely somewhere in the list.
+    expect(adds[0]?.closest('[data-project-heading]')?.textContent).toContain('alpha');
+  });
+
+  it('moves the add when focus moves to a session in another project', () => {
+    const { container, rerender } = mountWith(twoProjects(), { focusedSessionId: 'a1' });
+    expect(addButtons(container)[0]?.getAttribute('aria-label')).toBe('new session in alpha');
+
+    rerender(<SessionList {...baseProps(twoProjects())} focusedSessionId="b1" />);
+    const adds = addButtons(container);
+    expect(adds).toHaveLength(1);
+    expect(adds[0]?.getAttribute('aria-label')).toBe('new session in beta');
+  });
+
+  /**
+   * happy-dom does no layout, so "the sidebar must not twitch" is checked the
+   * only way it can be: the heading reserves the button's height itself, and
+   * everything left of the `flex-1` spacer renders identically either way.
+   */
+  it('keeps the heading the same height and shape whether or not the add is there', () => {
+    const shapes: string[][] = [];
+    const heights: (string | undefined)[] = [];
+
+    for (const focused of [null, 'a1'] as const) {
+      const { container } = mountWith(twoProjects(), { focusedSessionId: focused });
+      const heading = container.querySelector('[data-project-heading]');
+      expect(heading, 'no project heading').not.toBeNull();
+      heights.push(heading?.className.match(/min-h-\[[^\]]+\]/)?.[0]);
+      // Everything up to and including the spacer -- the part the button must
+      // not be able to push around.
+      const before: string[] = [];
+      for (const child of [...(heading?.children ?? [])]) {
+        if (child.className.includes('flex-1')) {
+          before.push('spacer');
+          break;
+        }
+        before.push(child.textContent ?? '');
+      }
+      shapes.push(before);
+      cleanup();
+    }
+
+    expect(shapes[0]).toEqual(shapes[1]);
+    // A reserved height, identical in both states -- otherwise the heading is
+    // as tall as its tallest child and shrinks the moment the add leaves.
+    expect(heights[0], 'heading reserves no height').toBeDefined();
+    expect(heights[0]).toBe(heights[1]);
   });
 });
