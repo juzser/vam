@@ -465,6 +465,80 @@ describe('the composer is multiline, and honest about what its button does', () 
     expect(submitted).toBe(1);
   });
 
+  it('shortens a pasted image to `[image #N]` and says the image is not sent', () => {
+    // The terminal does this, and the operator asked for the same: a
+    // screenshot must not unfold into whatever text flavour the clipboard had.
+    let draft = 'look at ';
+    const view = drawFor({
+      composing: true,
+      draft,
+      onDraftChange: (next: string) => {
+        draft = next;
+      },
+    });
+    const box = q<HTMLTextAreaElement>(
+      'textarea[aria-label="prompt to session"]',
+    ) as HTMLTextAreaElement;
+    box.selectionStart = draft.length;
+    box.selectionEnd = draft.length;
+
+    const paste = (name: string) =>
+      act(() => {
+        fireEvent.paste(box, {
+          clipboardData: {
+            items: [
+              { kind: 'file', type: 'image/png', getAsFile: () => ({ name }) as unknown as File },
+            ],
+          },
+        });
+      });
+
+    paste('one.png');
+    expect(draft).toBe('look at [image #1]');
+    view.rerender({ draft });
+
+    // The second image in the SAME composition is #2, not #1 again. Nothing
+    // is inserted around it: a separate paste goes exactly where the cursor
+    // is, and the spacing between two of them is the operator's to type.
+    box.selectionStart = draft.length;
+    box.selectionEnd = draft.length;
+    paste('two.png');
+    expect(draft).toBe('look at [image #1][image #2]');
+    view.rerender({ draft });
+
+    // Both images are still held, and the box does not let the placeholder
+    // imply they travel.
+    const held = q('[data-pasted-images]')?.textContent ?? '';
+    expect(held).toContain('2 images');
+    expect(held).toMatch(/not sent|only the/i);
+  });
+
+  it('leaves a paste carrying no image to the browser', () => {
+    let draft = 'typed';
+    let changes = 0;
+    draw({
+      composing: true,
+      draft,
+      onDraftChange: (next: string) => {
+        draft = next;
+        changes += 1;
+      },
+    });
+    const box = q<HTMLTextAreaElement>(
+      'textarea[aria-label="prompt to session"]',
+    ) as HTMLTextAreaElement;
+
+    act(() => {
+      fireEvent.paste(box, {
+        clipboardData: { items: [{ kind: 'string', type: 'text/plain', getAsFile: () => null }] },
+      });
+    });
+
+    expect(changes).toBe(0);
+    expect(draft).toBe('typed');
+    expect(q('[data-pasted-images]')).toBeNull();
+  });
+
   it('clicking record files the draft', () => {
     let submitted = 0;
     draw({

@@ -73,6 +73,7 @@ import type {
   SessionStatus,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import {
   type DiffKind,
   diffLineKind,
@@ -1091,6 +1092,18 @@ export function DetailPanel(props: DetailPanelProps) {
     syncJumps(box);
   };
 
+  /**
+   * Images pasted into THIS composition. They are held, not sent: vam's write
+   * is text, so only the `[image #N]` placeholder travels (`composer-paste.ts`).
+   * The list is dropped when the draft empties, which is what a sent or
+   * cleared prompt looks like from here -- the numbering starts over with the
+   * composition it counts.
+   */
+  const [images, setImages] = useState<readonly ComposerImage[]>([]);
+  useEffect(() => {
+    if (draft === '') setImages([]);
+  }, [draft]);
+
   /** The file waiting in the draft, and the last refusal, if there was one. */
   const fileRef = useRef<HTMLInputElement>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -1671,6 +1684,21 @@ export function DetailPanel(props: DetailPanelProps) {
               readOnly={!composing}
               onFocus={onCompose}
               onChange={(event) => onDraftChange(event.target.value)}
+              onPaste={(event) => {
+                // A paste event carries its own `DataTransfer`, so this needs
+                // no permission and no trip through main -- unlike
+                // `navigator.clipboard`, which Electron's deny-all policy
+                // breaks (`src/main/clipboard/ipc.ts` exists for that).
+                const data = event.clipboardData;
+                const outcome = readPastedImages(data, images.length + 1);
+                if (outcome.kind === 'text') return;
+                event.preventDefault();
+                const box = event.currentTarget;
+                onDraftChange(
+                  spliceDraft(draft, box.selectionStart, box.selectionEnd, outcome.text),
+                );
+                setImages([...images, ...outcome.images]);
+              }}
               onKeyDown={(event) => {
                 // The window listener ignores keys typed in a textarea, so this
                 // box binds the ones it needs itself. Shift+Enter is left alone
@@ -1700,6 +1728,14 @@ export function DetailPanel(props: DetailPanelProps) {
               aria-label="prompt to session"
             />
           </div>
+
+          {images.length > 0 && (
+            <p data-pasted-images className="text-[10.5px] text-ink-dim leading-[1.45]">
+              {images.length === 1 ? '1 image' : `${images.length} images`} pasted and kept here —
+              vam writes text to a session, so only the {'`[image #N]`'} placeholder is sent, not
+              the image.
+            </p>
+          )}
 
           {attachError !== null && (
             <p data-attach-error className="text-[10.5px] text-waiting leading-[1.45]">
