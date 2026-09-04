@@ -85,13 +85,24 @@ const isTextList = (value: unknown): boolean =>
 const isDirectoryPath = (value: unknown): boolean =>
   isText(value) && (value as string).startsWith('/') && !(value as string).includes('\0');
 
+/**
+ * The provider a new session should run, which the renderer may omit -- a
+ * renderer that predates the setting, or one whose store could not be read,
+ * sends nothing and main starts its default provider. Accepting `undefined` is
+ * also what MARKS an argument optional below: a validator that admits
+ * `undefined` cannot be a required argument, so the arity check reads the
+ * minimum off the validators themselves rather than off a second list that
+ * could disagree with them.
+ */
+const isOptionalText = (value: unknown): boolean => value === undefined || isText(value);
+
 /** What each argumentful channel accepts, positionally. Arity is part of it. */
 const ARGUMENTS: Record<string, readonly ((value: unknown) => boolean)[]> = {
   [CHANNELS.recordPrompt]: [isText, isPromptText],
   [CHANNELS.renameSession]: [isText, isText],
   [CHANNELS.closeSession]: [isText],
-  [CHANNELS.createSession]: [isText, isText],
-  [CHANNELS.createSessionIn]: [isDirectoryPath, isText],
+  [CHANNELS.createSession]: [isText, isText, isOptionalText],
+  [CHANNELS.createSessionIn]: [isDirectoryPath, isText, isOptionalText],
   [CHANNELS.applyWaivers]: [isText, isTextList],
   [CHANNELS.transitionLesson]: [isText, isText, isText],
 };
@@ -101,10 +112,11 @@ function validate(channel: string, args: readonly unknown[]): SourceError | null
   if (expected === undefined) {
     return refused('unknown-channel', `no such channel: ${channel}`);
   }
-  if (args.length !== expected.length) {
+  const required = expected.filter((check) => !check(undefined)).length;
+  if (args.length < required || args.length > expected.length) {
     return refused(
       'invalid-payload',
-      `${channel} takes ${expected.length} argument(s), received ${args.length}`,
+      `${channel} takes ${required}..${expected.length} argument(s), received ${args.length}`,
     );
   }
   const bad = expected.map((check, i) => (check(args[i]) ? null : i)).filter((i) => i !== null);
@@ -191,11 +203,19 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
         return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
       }
       if (channel === CHANNELS.createSession && source.createSession !== undefined) {
-        const failure = await source.createSession(args[0] as string, args[1] as string);
+        const failure = await source.createSession(
+          args[0] as string,
+          args[1] as string,
+          args[2] as string | undefined,
+        );
         return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
       }
       if (channel === CHANNELS.createSessionIn && source.createSessionInDirectory !== undefined) {
-        const failure = await source.createSessionInDirectory(args[0] as string, args[1] as string);
+        const failure = await source.createSessionInDirectory(
+          args[0] as string,
+          args[1] as string,
+          args[2] as string | undefined,
+        );
         return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
       }
       // Advertised, but this source carries no member for it. Saying so beats

@@ -433,6 +433,18 @@ body {
   cursor: progress;
 }
 
+/* A sidebar row whose session is being closed.
+   Dimmed, not hidden: the operator has to keep seeing WHICH session is on its
+   way out, and a row that vanished for fifteen seconds would read as one that
+   had already gone. The dim is opacity rather than a colour so the row keeps
+   its own tokens -- and deliberately not one of the four status tokens, which
+   mean session state: a closing row wearing one would read as a status it does
+   not have. It does not breathe, either; the indicator over it carries the
+   motion, and a whole row pulsing under a pill is two signals for one fact. */
+[data-row-pending] {
+  opacity: 0.55;
+}
+
 /* The dots are three elements rather than one animated glyph so the wave can
    travel along them, and they carry no colour of their own: the ellipsis
    belongs to the word, and a word that dims should dim its dots too. The

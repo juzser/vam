@@ -17,6 +17,7 @@
  * is worse than no session.
  */
 
+import { resolveProvider } from '../../../shared/providers.js';
 import type { SourceError } from '../../ipc/channels.js';
 import { vamSessionName } from '../tmux/argv.js';
 import { createVamSession, type TmuxRun } from '../tmux/spawn.js';
@@ -24,12 +25,14 @@ import type { LiveAgent } from './agents.js';
 import { projectIdOf } from './project-id.js';
 
 /**
- * What a new session runs. Bare `claude` -- an interactive session, not a
- * query. An ARRAY of words, not a string: tmux runs a one-argument
- * `shell-command` through `sh -c` and only a multi-argument one directly, so
- * the split is what keeps a shell out of the path (`tmux/argv.ts`).
+ * WHAT A NEW SESSION RUNS COMES FROM THE PROVIDER TABLE, not from a literal
+ * here. `shared/providers.ts` carries the words for each provider vam can
+ * start -- bare `claude` for Claude Code, an interactive session rather than a
+ * query -- and `resolveProvider` is total, so an id from a store main never
+ * wrote and does not recognise starts the default provider instead of nothing.
+ * Main normalises for itself: the renderer already did, and a renderer's
+ * normalisation is not something main may take on trust.
  */
-const NEW_SESSION_COMMAND = ['claude'] as const;
 
 /**
  * Resolves to `null` when the session started, and to the `SourceError`
@@ -45,6 +48,7 @@ export async function createSessionInProject(input: {
   title: string;
   run: TmuxRun;
   name?: string;
+  provider?: string;
 }): Promise<SourceError | null> {
   const { agents, projectId, title, run } = input;
   const match = agents.find((candidate) => projectIdOf(candidate.cwd) === projectId);
@@ -55,7 +59,13 @@ export async function createSessionInProject(input: {
       message: `vam cannot tell which directory project ${projectId} is, so it will not start a session in a guessed one`,
     };
   }
-  return createSessionInDirectory({ cwd: match.cwd, title, run, name: input.name });
+  return createSessionInDirectory({
+    cwd: match.cwd,
+    title,
+    run,
+    name: input.name,
+    provider: input.provider,
+  });
 }
 
 /**
@@ -77,12 +87,13 @@ export async function createSessionInDirectory(input: {
   title: string;
   run: TmuxRun;
   name?: string;
+  provider?: string;
 }): Promise<SourceError | null> {
   const { cwd, title, run } = input;
   return createVamSession(run, {
     name: input.name ?? vamSessionName(title),
     cwd,
-    command: NEW_SESSION_COMMAND,
+    command: resolveProvider(input.provider).command,
     // WHAT THE TERMINAL TAB WILL LOOK THIS UP BY. The name is for a person
     // reading `tmux ls`; the pairing is this id, recorded on the session
     // itself. Nothing re-derives a name from `title` -- that is the bug this

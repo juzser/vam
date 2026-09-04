@@ -457,14 +457,15 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    * canvas drawn minutes ago may name a project whose last session has since
    * exited.
    */
-  createSession: async (projectId, title) =>
+  createSession: async (projectId, title, provider) =>
     createSessionInProject({
+      provider,
       agents: await listLiveAgents(),
       projectId,
       title,
       run: createTmuxRunner(),
     }),
   /** No agent list to consult: the operator named the directory themselves. */
-  createSessionInDirectory: async (cwd, title) =>
-    createSessionInDirectory({ cwd, title, run: createTmuxRunner() }),
+  createSessionInDirectory: async (cwd, title, provider) =>
+    createSessionInDirectory({ cwd, title, provider, run: createTmuxRunner() }),
 };

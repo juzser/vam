@@ -16,6 +16,7 @@
 
 import type { PreloadSourceApi, SourceDescriptor } from '../../shared/preload-api.js';
 import type { SessionSource, SourceGovernance, SourceWrites } from './port.js';
+import { activeProviderId } from './provider.js';
 
 function buildWrites(api: PreloadSourceApi, descriptor: SourceDescriptor): SourceWrites {
   const { capabilities } = descriptor;
@@ -31,10 +32,17 @@ function buildWrites(api: PreloadSourceApi, descriptor: SourceDescriptor): Sourc
     writes.closeSession = (sessionId) => api.closeSession(sessionId);
   }
   if (capabilities.createSession) {
-    writes.createSession = (projectId, title) => api.createSession(projectId, title);
+    // WHICH AGENT A NEW SESSION RUNS IS ANSWERED HERE, not at the call site.
+    // The choice is a stored preference and the port's write surface is built
+    // once, outside React, so reading it at call time is what keeps every
+    // caller -- the canvas, the sidebar, a future one -- saying "start a
+    // session" and nothing about providers. Read per call, not captured: the
+    // operator may change it in settings while this source is alive.
+    writes.createSession = (projectId, title) =>
+      api.createSession(projectId, title, activeProviderId());
     // The same capability carries both: a new session in a project vam knows,
     // and one in a directory that is about to become a project.
-    writes.createSessionIn = (cwd, title) => api.createSessionIn(cwd, title);
+    writes.createSessionIn = (cwd, title) => api.createSessionIn(cwd, title, activeProviderId());
   }
   return writes;
 }

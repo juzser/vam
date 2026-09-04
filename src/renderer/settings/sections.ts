@@ -8,7 +8,7 @@
  * test can read is arithmetic that can be wrong loudly.
  */
 
-import { Columns3, Keyboard, type LucideIcon, Palette } from 'lucide-react';
+import { Bot, Columns3, Keyboard, type LucideIcon, Palette } from 'lucide-react';
 import {
   ALL_VISIBLE,
   type ColumnId,
@@ -19,7 +19,7 @@ import {
   type LayoutName,
 } from '../prefs/panes.js';
 
-export type SectionId = 'appearance' | 'layout' | 'keyboard';
+export type SectionId = 'appearance' | 'layout' | 'sessions' | 'keyboard';
 
 /**
  * The order is hard-coded and never sorted: a nav that reorders under the
@@ -34,6 +34,10 @@ export const SECTIONS: readonly {
 }[] = [
   { id: 'appearance', label: 'Appearance', Icon: Palette },
   { id: 'layout', label: 'Layout', Icon: Columns3 },
+  // Before Keyboard rather than after it: Keyboard is the reference section
+  // and the longest, and a list that ends in a reference reads as a list that
+  // ended. Nothing else depends on the position.
+  { id: 'sessions', label: 'Sessions', Icon: Bot },
   { id: 'keyboard', label: 'Keyboard', Icon: Keyboard },
 ];
 

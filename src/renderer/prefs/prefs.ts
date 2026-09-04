@@ -21,9 +21,11 @@
  * worth a screen. Every path here ends in "then draw the default layout".
  */
 
+import { DEFAULT_PROVIDER_ID, type ProviderId, readProviderId } from '../../shared/providers.js';
 import type { CanvasModel, SourceId } from '../domain/model.js';
 import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
 import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/chords.js';
+import { setActiveProvider } from '../sources/provider.js';
 import {
   ALL_VISIBLE,
   type ColumnId,
@@ -272,6 +274,16 @@ export type Prefs = {
    *  size per element: `out`'s sizes are a hierarchy expressed as `em` against
    *  this root, so storing the root moves them all and cannot flatten them. */
   readonly outFontSize: number;
+  /**
+   * The provider a new session is started with, chosen in settings.
+   *
+   * Stored as an id rather than a command: the command belongs to the provider
+   * table (`shared/providers.ts`), and a stored command would be a stored
+   * decision about how to run somebody else's CLI that no later vam could
+   * correct. Exempt from the icon TTL like `theme` and `panes`, for the same
+   * reason -- it describes the person, not a session that stopped existing.
+   */
+  readonly defaultProvider: ProviderId;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -288,6 +300,7 @@ export const EMPTY_PREFS: Prefs = {
   palette: {},
   keyBindings: {},
   outFontSize: DEFAULT_OUT_FONT_SIZE,
+  defaultProvider: DEFAULT_PROVIDER_ID,
 };
 
 /**
@@ -405,6 +418,12 @@ function parsePrefs(
     // Per field like the focus share above it, and clamped here rather than
     // only in the setter: this is the read a hand-edited file arrives by.
     outFontSize: readOutFontSize((parsed as { outFontSize?: unknown }).outFontSize),
+    // Per field like everything above it, and normalised rather than merely
+    // defaulted: an id an older vam stored for a provider that no longer
+    // exists, or a hand-edited one, must read back as the working default. A
+    // stored provider vam cannot start would otherwise be an app that cannot
+    // start a session at all.
+    defaultProvider: readProviderId((parsed as { defaultProvider?: unknown }).defaultProvider),
   };
 }
 
@@ -637,6 +656,12 @@ export function setFocusShare(prefs: Prefs, share: number): Prefs {
  *  produce an out-of-range value, but a future caller could. */
 export function setOutFontSize(prefs: Prefs, size: number): Prefs {
   return { ...prefs, outFontSize: clampOutFontSize(size) };
+}
+
+/** Normalised on the way in as well as on the way out, so no caller can store
+ *  a provider vam has no command for. */
+export function setDefaultProvider(prefs: Prefs, id: unknown): Prefs {
+  return { ...prefs, defaultProvider: readProviderId(id) };
 }
 
 /**
@@ -1223,6 +1248,7 @@ export function activatePrefs(prefs: Prefs): Prefs {
   applyPalette(prefs.palette);
   applyOutFontSize(prefs.outFontSize);
   setActiveBindings(prefs.keyBindings);
+  setActiveProvider(prefs.defaultProvider);
   return prefs;
 }
 
