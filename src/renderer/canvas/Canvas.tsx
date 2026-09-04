@@ -1756,6 +1756,9 @@ function CanvasInner({
         case 'palette':
           setPaletteOpen(true);
           return;
+        case 'errorLog':
+          setErrorLogOpen(true);
+          return;
         case 'filterMenu':
           setFilterMenuOpen((open) => !open);
           return;
