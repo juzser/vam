@@ -258,3 +258,28 @@ describe('Mod-digit jumps to a session in the sidebar', () => {
     expect(normalizeKey({ key: '1', ctrlKey: true })).toBe('Mod-1');
   });
 });
+
+describe('? opens the shortcut sheet', () => {
+  it('resolves the string a real Shift+/ keydown normalizes to', () => {
+    // Verified rather than assumed: on most layouts `?` arrives as Shift+`/`,
+    // and the binding is only reachable if `normalizeKey` yields the same
+    // string the table is written in.
+    const key = normalizeKey({ key: '?', shiftKey: true });
+    expect(key).toBe('?');
+    expect(type([key as string]).actions).toEqual([{ kind: 'help' }]);
+  });
+
+  it('leaves the chord prefixes working — ? is not a prefix and eats nothing', () => {
+    expect(type(['g', 'g']).actions).toEqual([{ kind: 'first' }]);
+    expect(type(['?', 'g', 't']).actions).toEqual([
+      { kind: 'help' },
+      { kind: 'project', delta: 1 },
+    ]);
+    expect(type(['y', 'y']).actions).toEqual([{ kind: 'copy' }]);
+    expect(type(['z', '0']).actions).toEqual([{ kind: 'resetPanes' }]);
+  });
+
+  it('does not steal the plain / search binding', () => {
+    expect(type(['/']).actions).toEqual([{ kind: 'search' }]);
+  });
+});

@@ -71,6 +71,7 @@ import { canWriteTo, describeFailure } from '../sources/port.js';
 import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
 import { copyText } from './clipboard.js';
+import { KeySheet } from './KeySheet.js';
 import { infoNodeId, layoutCanvas, orderedSessions } from './layout.js';
 import { type FlowNodeLike, toNavNodes } from './nav-nodes.js';
 import { SessionFanNode } from './SessionFanNode.js';
@@ -345,6 +346,7 @@ function CanvasInner({
   const [status, setStatus] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [keySheetOpen, setKeySheetOpen] = useState(false);
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState('');
   /**
@@ -998,6 +1000,9 @@ function CanvasInner({
           }
           return;
         }
+        case 'help':
+          setKeySheetOpen(true);
+          return;
         case 'palette':
           setPaletteOpen(true);
           return;
@@ -1143,6 +1148,7 @@ function CanvasInner({
           // there is never a state you cannot press Esc out of.
           setJumping(false);
           setPaletteOpen(false);
+          setKeySheetOpen(false);
           setFilterMenuOpen(false);
           setFiltering(false);
           setComposing(false);
@@ -1459,6 +1465,8 @@ function CanvasInner({
                 onClose={() => setPaletteOpen(false)}
               />
             )}
+
+            {keySheetOpen && <KeySheet onClose={() => setKeySheetOpen(false)} />}
           </div>
         </div>
 
@@ -1643,7 +1651,7 @@ function CanvasInner({
           </span>
         )}
         <span className="h-3 w-px bg-line" />
-        <span>hjkl f / gt i yy ^K ^1-9</span>
+        <span>hjkl f / gt i yy ^K ^1-9 ?</span>
       </footer>
     </div>
   );
