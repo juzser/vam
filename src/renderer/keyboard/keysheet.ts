@@ -15,7 +15,13 @@
  */
 
 import type { LayoutName } from '../prefs/panes.js';
-import { BINDING_TABLES, type KeyAction } from './chords.js';
+import {
+  activeBindings,
+  chordText,
+  effectiveBindings,
+  type KeyAction,
+  type KeyBindings,
+} from './chords.js';
 
 /**
  * Five groups, argued rather than assumed.
@@ -142,19 +148,61 @@ export function describeAction(action: KeyAction): { group: ActionGroup; label: 
   return { group: meta.group, label };
 }
 
-/** The sheet: every binding, grouped, in the declared group order. */
-export function buildKeySheet(): SheetGroup[] {
-  const byGroup = new Map<ActionGroup, SheetRow[]>();
-  for (const { prefix, table } of BINDING_TABLES) {
-    for (const [key, action] of Object.entries(table)) {
-      const { group, label } = describeAction(action);
-      const rows = byGroup.get(group) ?? [];
-      rows.push({ keys: `${prefix}${key}`, label });
-      byGroup.set(group, rows);
-    }
+/** One editable action: what it is called, and the keys it holds right now. */
+export type BindingRow = {
+  readonly id: string;
+  readonly label: string;
+  /** Up to `MAX_BINDINGS` chords, as they are written down. */
+  readonly keys: readonly string[];
+  /** True when the operator moved it off the shipped keys. */
+  readonly overridden: boolean;
+};
+
+export type BindingGroup = {
+  readonly group: ActionGroup;
+  readonly title: string;
+  readonly rows: readonly BindingRow[];
+};
+
+/**
+ * The editor's model: one row per ACTION, grouped like the sheet.
+ *
+ * Derived from `effectiveBindings`, which is the same source `resolveChord`
+ * answers from — so a slot cannot show a key that would not fire, which is the
+ * generated sheet's original property carried into the editable one.
+ */
+export function buildBindingSheet(
+  overrides: KeyBindings = activeBindings(),
+): readonly BindingGroup[] {
+  const byGroup = new Map<ActionGroup, BindingRow[]>();
+  for (const binding of effectiveBindings(overrides)) {
+    const { group, label } = describeAction(binding.action);
+    const rows = byGroup.get(group) ?? [];
+    rows.push({
+      id: binding.id,
+      label,
+      keys: binding.chords.map(chordText),
+      overridden: overrides[binding.id] !== undefined,
+    });
+    byGroup.set(group, rows);
   }
   return GROUP_ORDER.flatMap((group) => {
     const rows = byGroup.get(group);
     return rows === undefined ? [] : [{ group, title: GROUP_TITLES[group], rows }];
   });
+}
+
+/** The sheet: every binding, grouped, in the declared group order. */
+export function buildKeySheet(overrides: KeyBindings = activeBindings()): SheetGroup[] {
+  return (
+    buildBindingSheet(overrides)
+      .map(({ group, title, rows }) => ({
+        group,
+        title,
+        rows: rows.flatMap((row) => row.keys.map((keys) => ({ keys, label: row.label }))),
+      }))
+      // An operator who unbinds every action in a group leaves it with no rows,
+      // and a titled empty group is a heading that advertises nothing.
+      .filter((group) => group.rows.length > 0)
+  );
 }

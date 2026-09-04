@@ -252,14 +252,18 @@ function isPrefix(key: string): key is Prefix {
  * was wasted; `gj` moving down is the cursor going somewhere nobody asked for,
  * and on a canvas you navigate by muscle that is the more expensive mistake.
  */
-export function resolveChord(state: ChordState, key: string): ChordStep {
+export function resolveChord(
+  state: ChordState,
+  key: string,
+  overrides: KeyBindings = activeBindings(),
+): ChordStep {
   if (key === 'Escape') {
     return { state: EMPTY_CHORD, action: { kind: 'cancel' } };
   }
+  const tables = tablesFor(overrides);
 
   if (state.pending !== null) {
-    const table = state.pending === 'g' ? AFTER_G : state.pending === 'y' ? AFTER_Y : AFTER_Z;
-    const action = table[key];
+    const action = tables.chords[state.pending]?.[key];
     // A completed chord clears the memory, so `ggg` is `gg` then a fresh `g`
     // rather than two jumps to the top.
     return { state: EMPTY_CHORD, action: action ?? null };
@@ -269,7 +273,7 @@ export function resolveChord(state: ChordState, key: string): ChordStep {
     return { state: { pending: key }, action: null };
   }
 
-  return { state: EMPTY_CHORD, action: MOVES[key] ?? SINGLE[key] ?? null };
+  return { state: EMPTY_CHORD, action: tables.top[key] ?? null };
 }
 
 /**
@@ -291,3 +295,244 @@ export const BINDING_TABLES: readonly {
   { prefix: 'y', table: AFTER_Y },
   { prefix: 'z', table: AFTER_Z },
 ];
+
+/* ---------------------------------------------------------------------------
+ * Operator overrides.
+ *
+ * The tables above are the SHIPPED grammar; what is actually in force is the
+ * shipped grammar with the operator's overrides laid over it. Everything below
+ * derives that, and both readers of the grammar — `resolveChord` and the
+ * shortcut sheet — go through it, so the sheet keeps the one property it was
+ * written for: it can only name a key that is really bound.
+ * ------------------------------------------------------------------------ */
+
+/** How many keys one action may hold. Two: the shipped table already binds
+ *  `close` twice (`x`, `Mod-w`), and a third is a keymap, not a preference. */
+export const MAX_BINDINGS = 2;
+
+/**
+ * The keys nothing may be bound to, named HERE and nowhere else.
+ *
+ * `Escape` because it is how a capture box is cancelled and how every overlay
+ * closes (an open overlay owns the keyboard entirely), so a binding on it
+ * would be unreachable at best and a trap at worst. `g`, `y` and `z` because
+ * they are not keys, they are the doors to the chord tables: bound alone, they
+ * would shadow every chord behind them.
+ */
+export const RESERVED_KEYS: readonly string[] = ['Escape', ...PREFIXES];
+
+export function isReserved(key: string): boolean {
+  return RESERVED_KEYS.includes(key);
+}
+
+/**
+ * A stable, storable name for one action.
+ *
+ * Parameterised actions carry their parameter, or every `move` would share one
+ * id and rebinding `h` would rebind all four.
+ */
+export function actionId(action: KeyAction): string {
+  switch (action.kind) {
+    case 'move':
+      return `move:${action.direction}`;
+    case 'layout':
+      return `layout:${action.name}`;
+    case 'sessionAt':
+      return `sessionAt:${action.index}`;
+    case 'project':
+      return `project:${action.delta}`;
+    case 'resizePane':
+      return `resizePane:${action.delta}`;
+    default:
+      return action.kind;
+  }
+}
+
+/** One keystroke: a top-level key, or a chord's second key behind its prefix. */
+export type Chord = { readonly prefix: string; readonly key: string };
+
+/** What the operator stored: action id → the keys it holds. An ABSENT id means
+ *  "the shipped bindings"; a present one replaces them, including an empty
+ *  array, which is the honest spelling of "I unbound this". */
+export type KeyBindings = Readonly<Record<string, readonly string[]>>;
+
+export const NO_BINDINGS: KeyBindings = {};
+
+export type Binding = {
+  readonly id: string;
+  readonly action: KeyAction;
+  readonly chords: readonly Chord[];
+};
+
+/** How a chord is written down — in the sheet, in a slot, and in storage. */
+export function chordText(chord: Chord): string {
+  return `${chord.prefix}${chord.key}`;
+}
+
+/** The inverse. Only a two-character string opening with a prefix is a chord:
+ *  a captured keystroke is a single character or a named key (`Enter`,
+ *  `Mod-k`), never `gt`, so nothing an operator can press parses as one. */
+export function parseChord(text: string): Chord {
+  const head = text[0] ?? '';
+  return text.length === 2 && isPrefix(head)
+    ? { prefix: head, key: text.slice(1) }
+    : { prefix: '', key: text };
+}
+
+/** The shipped grammar as one entry per action, in table order. */
+export function defaultBindings(): readonly Binding[] {
+  const out: Binding[] = [];
+  const at = new Map<string, number>();
+  for (const { prefix, table } of BINDING_TABLES) {
+    for (const [key, action] of Object.entries(table)) {
+      const id = actionId(action);
+      const seen = at.get(id);
+      const previous = seen === undefined ? undefined : out[seen];
+      if (seen === undefined || previous === undefined) {
+        at.set(id, out.length);
+        out.push({ id, action, chords: [{ prefix, key }] });
+      } else {
+        out[seen] = { ...previous, chords: [...previous.chords, { prefix, key }] };
+      }
+    }
+  }
+  return out;
+}
+
+const DEFAULTS = defaultBindings();
+
+/** The shipped grammar with the overrides laid over it: what is in force. */
+export function effectiveBindings(overrides: KeyBindings = activeBindings()): readonly Binding[] {
+  return DEFAULTS.map((binding) => {
+    const chosen = overrides[binding.id];
+    return chosen === undefined ? binding : { ...binding, chords: chosen.map(parseChord) };
+  });
+}
+
+/** The chords one action holds right now, as the operator's slots show them. */
+export function bindingChords(overrides: KeyBindings, id: string): readonly string[] {
+  return (
+    effectiveBindings(overrides)
+      .find((binding) => binding.id === id)
+      ?.chords.map(chordText) ?? []
+  );
+}
+
+/**
+ * The action `key` already belongs to, or null when it is free.
+ *
+ * Read off what is IN FORCE, not off the shipped tables: a key the operator
+ * freed a moment ago by moving its action elsewhere is free, and a key they
+ * just took is taken.
+ */
+export function bindingConflict(overrides: KeyBindings, id: string, key: string): string | null {
+  for (const binding of effectiveBindings(overrides)) {
+    if (binding.id === id) continue;
+    if (binding.chords.some((chord) => chord.prefix === '' && chord.key === key)) {
+      return binding.id;
+    }
+  }
+  return null;
+}
+
+/**
+ * Put `key` in one of an action's slots.
+ *
+ * Seeded from what the action holds now, so editing the second slot of an
+ * action whose first is a chord (`gg`, `yy`) does not silently unbind the
+ * chord — it cannot be retyped into a capture box, so dropping it would be a
+ * one-way door.
+ */
+export function bindKey(
+  overrides: KeyBindings,
+  id: string,
+  slot: number,
+  key: string,
+): KeyBindings {
+  const next = [...bindingChords(overrides, id)];
+  const index = Math.min(Math.max(slot, 0), Math.min(next.length, MAX_BINDINGS - 1));
+  next[index] = key;
+  return { ...overrides, [id]: next.slice(0, MAX_BINDINGS) };
+}
+
+/** Empty one slot. The action may end up with no binding at all, which is a
+ *  state the operator asked for and not the same as "back to shipped". */
+export function unbindSlot(overrides: KeyBindings, id: string, slot: number): KeyBindings {
+  const next = bindingChords(overrides, id).filter((_, index) => index !== slot);
+  return { ...overrides, [id]: next };
+}
+
+/** Back to the shipped bindings for one action — by REMOVING the override,
+ *  never by storing today's keys, which would freeze them forever. */
+export function clearBindings(overrides: KeyBindings, id: string): KeyBindings {
+  const next: Record<string, readonly string[]> = {};
+  for (const key of Object.keys(overrides)) {
+    if (key !== id) {
+      next[key] = overrides[key] as readonly string[];
+    }
+  }
+  return next;
+}
+
+type Tables = {
+  readonly top: Record<string, KeyAction>;
+  readonly chords: Record<string, Record<string, KeyAction>>;
+};
+
+function buildTables(overrides: KeyBindings): Tables {
+  const top: Record<string, KeyAction> = {};
+  const chords: Record<string, Record<string, KeyAction>> = {};
+  for (const prefix of PREFIXES) {
+    chords[prefix] = {};
+  }
+  const bindings = effectiveBindings(overrides);
+  const put = (binding: Binding) => {
+    for (const chord of binding.chords) {
+      const table = chord.prefix === '' ? top : chords[chord.prefix];
+      if (table !== undefined) {
+        table[chord.key] = binding.action;
+      }
+    }
+  };
+  // Shipped bindings first, overrides second: if the operator took a key that
+  // something else still holds by default, the operator wins — deterministically
+  // rather than by table order. The UI refuses that bind before it gets here;
+  // this is what happens when a hand-edited payload does it anyway.
+  for (const binding of bindings) {
+    if (overrides[binding.id] === undefined) put(binding);
+  }
+  for (const binding of bindings) {
+    if (overrides[binding.id] !== undefined) put(binding);
+  }
+  return { top, chords };
+}
+
+let active: KeyBindings = NO_BINDINGS;
+let cachedFor: KeyBindings | null = null;
+let cached: Tables = buildTables(NO_BINDINGS);
+
+function tablesFor(overrides: KeyBindings): Tables {
+  if (cachedFor !== overrides) {
+    cached = buildTables(overrides);
+    cachedFor = overrides;
+  }
+  return cached;
+}
+
+/**
+ * Hand the grammar the operator's overrides.
+ *
+ * A module-level singleton on purpose: `resolveChord` is called from a window
+ * listener and `buildKeySheet` from two overlays, none of which is the owner of
+ * the preferences, and threading a binding map through all three would be a
+ * change to files this feature has no business editing. `prefs.ts` calls this
+ * on every read and every write, so "what is stored" and "what is in force"
+ * cannot drift.
+ */
+export function setActiveBindings(overrides: KeyBindings): void {
+  active = overrides;
+}
+
+export function activeBindings(): KeyBindings {
+  return active;
+}
