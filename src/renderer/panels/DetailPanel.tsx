@@ -1983,8 +1983,15 @@ export function DetailPanel(props: DetailPanelProps) {
         )}
       </div>
 
-      {current !== 'Terminal' && (
-        <div className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3">
+      {/* The question's own block, drawn only when there IS one: it was split
+        off the composer's so the composer could stand down while a question is
+        open, and a block that outlived its contents would be a doubled seam
+        and 25px of dead height in the pane's most common state. */}
+      {current !== 'Terminal' && newestQuestion !== null && (
+        <div
+          data-question-bar
+          className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3"
+        >
           {/* black-smith's governance queue — findings awaiting a waiver, and
             lesson candidates — used to stand here. The operator asked for it
             to go, and it is gone from `buildActions` too: it went on
@@ -2017,6 +2024,7 @@ export function DetailPanel(props: DetailPanelProps) {
         drawn first. */}
       {current !== 'Terminal' && !composerHidden && (
         <div
+          data-composer-bar
           className={[
             'flex flex-none flex-col gap-2.5 bg-header px-3.5 py-3',
             newestQuestion === null ? 'border-line border-t' : '',

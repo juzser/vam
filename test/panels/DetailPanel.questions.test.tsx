@@ -320,6 +320,10 @@ describe('a digit picks the option beside it', () => {
   it('claims nothing was sent, on the keyboard path too', () => {
     draw([THREE]);
     pressDigit('2');
+    // The mark FIRST, the way the click twin does it. Without this the test
+    // passes when the digit branch is deleted outright — a pane that marked
+    // nothing also claims nothing, which is the wrong reason to be green.
+    expect(all('[data-question-option][data-picked="true"]')).toHaveLength(1);
     const pane = text();
     for (const claim of ['sent', 'submitted', 'answered', 'delivered', 'replied']) {
       expect(pane.toLowerCase(), claim).not.toContain(claim);
@@ -495,5 +499,44 @@ describe('a modifier means the keystroke is not ours', () => {
     expect(picked()).toHaveLength(1);
     expect(fireEvent.keyDown(list(), { key: 'c', bubbles: true })).toBe(false);
     expect(q('[data-prompt-box]')).not.toBeNull();
+  });
+});
+
+/**
+ * The question card got its own block so the composer could stand down
+ * without it. A block that draws when there is no question is the cost of
+ * that, and it is not free: `border-t … px-3.5 py-3` with no children is a
+ * doubled seam and ~25px of dead height taken from the transcript, in the
+ * default state of almost every session. On `main` these were one block.
+ *
+ * So the block follows its contents, and the seam belongs to whichever block
+ * is drawn first — asserted here because "one border" is the whole reason the
+ * split was allowed.
+ */
+describe('the question block draws only when there is a question', () => {
+  const bar = () => q('[data-question-bar]');
+  const composerBar = () => q('[data-composer-bar]');
+
+  it('renders no empty bar when nothing is being asked', () => {
+    draw([]);
+    expect(bar()).toBeNull();
+    // And the composer keeps the seam, exactly as it did before the split.
+    expect(composerBar()?.className).toContain('border-t');
+  });
+
+  it('renders the bar, and takes the seam, when a question is open', () => {
+    draw([QUESTION]);
+    expect(bar()).not.toBeNull();
+    expect(bar()?.className).toContain('border-t');
+    // The composer is not drawn at all here, so there is nothing to double.
+    expect(composerBar()).toBeNull();
+  });
+
+  it('draws exactly one seam when a resolved card and the composer share the pane', () => {
+    draw([{ ...QUESTION, answer: 'Codex CLI' }]);
+    expect(bar()).not.toBeNull();
+    expect(composerBar()).not.toBeNull();
+    expect(bar()?.className).toContain('border-t');
+    expect(composerBar()?.className).not.toContain('border-t');
   });
 });
