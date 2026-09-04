@@ -285,6 +285,27 @@ export type Session = {
    * `unknown`, which is the visible-by-default case.
    */
   readonly origin?: SessionOrigin;
+  /**
+   * Whether vam can ACT on this session directly -- close it, and in time
+   * reach it -- because vam started it and can still prove which pane it is.
+   *
+   * NAMED FOR WHAT IT MEANS, NOT FOR HOW IT IS OBTAINED. Today the fact comes
+   * from the `@vam-project` option tmux records on a session vam created, and
+   * from the two-condition pairing `reply.ts` documents; if the pairing ever
+   * changes, the question this answers does not.
+   *
+   * NOT `origin`. `origin.startedBy` records WHO began a session -- a person,
+   * an agent, or nobody who can say -- which is orthogonal: a session a human
+   * started through vam is `human` AND controlled.
+   *
+   * THREE STATES, the shape `agents` and `pullRequests` established. `true` is
+   * a proven pairing. `false` is vam having ASKED and found none. ABSENT is
+   * vam not being able to ask at all -- no tmux, no server, a source with no
+   * such surface, a fixture -- and it must not collapse into `false`: "vam did
+   * not start this" and "vam has no idea" lead to different UI, and the second
+   * one is not a licence to offer a control that will refuse.
+   */
+  readonly vamControlled?: boolean;
 };
 
 export type Project = {
