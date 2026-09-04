@@ -62,3 +62,39 @@ export function isPaneSize(size: PaneSize): boolean {
     size.rows <= MAX_ROWS
   );
 }
+
+/**
+ * ONE KEYSTROKE, on its way to the pane -- and there are exactly two kinds
+ * because tmux has exactly two ways to deliver one (`sources/tmux/argv.ts`).
+ *
+ * `text` is typed LITERALLY (`send-keys -l --`), which is what stops a pane
+ * being sent `^[` because the operator typed the letters of `Escape`. `enter`
+ * is the one key that has to be INTERPRETED, which `-l` forbids, so it is its
+ * own kind rather than a newline inside the text.
+ *
+ * A discriminated pair rather than a string with a flag: the renderer is the
+ * least trusted process in the app, and "was this literal?" must not be a
+ * boolean that a missing field can make false.
+ */
+export type PaneKey = { readonly kind: 'text'; readonly text: string } | { readonly kind: 'enter' };
+
+/**
+ * The longest text one keystroke may carry. A `KeyboardEvent.key` for a
+ * printable key is one character, and a composed one (an IME, a dead key) is
+ * a very few. The bound is what keeps this channel from becoming an unbounded
+ * paste into a running agent by a renderer that is no longer vam's.
+ */
+export const MAX_KEY_TEXT = 16;
+
+/** Whether a value off the bridge is a keystroke vam will send. */
+export function isPaneKey(value: unknown): value is PaneKey {
+  if (typeof value !== 'object' || value === null) return false;
+  const key = value as { kind?: unknown; text?: unknown };
+  if (key.kind === 'enter') return true;
+  return (
+    key.kind === 'text' &&
+    typeof key.text === 'string' &&
+    key.text.length > 0 &&
+    key.text.length <= MAX_KEY_TEXT
+  );
+}

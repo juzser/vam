@@ -1,0 +1,164 @@
+/**
+ * Typing INTO the pane -- the second thing in vam that changes a tmux session
+ * on the operator's server, and the one that lands inside a running agent.
+ *
+ * A resize aimed at the wrong session reflows someone else's screen. A
+ * keystroke aimed at the wrong session is typed into someone else's work, and
+ * a Return behind it submits it. So every test here is about the guard, not
+ * about the keys: vam sends to a session it can PROVE it started for this
+ * project by the recorded pairing, and to no other session ever.
+ *
+ * Nothing spawns -- the runner is a fake and the argv is asserted BY VALUE,
+ * because the machine this runs on has live agents in real panes.
+ */
+
+import { describe, expect, it } from 'vitest';
+import { CHANNELS } from '../../../src/main/ipc/channels.js';
+import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
+import { registerTerminalIpc } from '../../../src/main/terminal/ipc.js';
+import { sendSessionKey } from '../../../src/main/terminal/pane.js';
+
+const ok = (stdout: string): TmuxRunResult => ({ failure: null, stdout, stderr: '' });
+const failed = (stderr: string): TmuxRunResult => ({
+  failure: { message: 'tmux failed' },
+  stdout: '',
+  stderr,
+});
+
+const ATLAS = 'claude-code:atlas-11111111';
+const BEACON = 'claude-code:beacon-22222222';
+
+function runner(answers: Record<string, TmuxRunResult>) {
+  const argvs: (readonly string[])[] = [];
+  const run: TmuxRun = async (argv) => {
+    argvs.push(argv);
+    return answers[argv[0] ?? ''] ?? failed(`no stub for ${argv[0] ?? ''}`);
+  };
+  return { run, argvs, verbs: () => argvs.map((argv) => argv[0]) };
+}
+
+const listing = (rows: string) => ({ 'list-sessions': ok(rows), 'send-keys': ok('') });
+
+describe('typing into the session vam started for a project', () => {
+  it('sends one literal send-keys for a character, and no Return', async () => {
+    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe(true);
+    // `-l` is the whole correctness: without it tmux looks the argument up as
+    // a KEY NAME, so a pane would be sent `^[` for the letters of `Escape`.
+    expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', '-l', '--', 'h']);
+    // Exactly one. A Return the operator did not press submits whatever is
+    // sitting in the pane.
+    expect(argvs).toHaveLength(2);
+  });
+
+  it('sends the interpreted Return for Enter, and nothing literal', async () => {
+    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'enter' })).toBe(true);
+    expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'Enter']);
+    expect(argvs[1]).not.toContain('-l');
+  });
+
+  it('sends text that reads as a key name as the characters it is', async () => {
+    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    await sendSessionKey(run, ATLAS, { kind: 'text', text: 'Escape' });
+    expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', '-l', '--', 'Escape']);
+  });
+
+  it('sends NOTHING when no session vam started carries this project', async () => {
+    const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe(false);
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
+  it('sends NOTHING to a session vam does not control', async () => {
+    // An unset `@vam-project` reads back as the empty string: the operator's
+    // own session, listed beside vam's. It is not vam's to type into.
+    const { run, verbs } = runner(listing('\tsome-session\n'));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe(false);
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
+  it('sends NOTHING when two sessions answer to one project', async () => {
+    // The tab draws no screen for `ambiguous`, and picking one of the two
+    // would be a coin toss landing in a real agent's terminal.
+    const { run, verbs } = runner(
+      listing(`${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-g7h8i9\n`),
+    );
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe(false);
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
+  it('sends NOTHING when vam could not reach tmux at all', async () => {
+    const { run, verbs } = runner({ 'list-sessions': failed('no server running') });
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe(false);
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
+  it('reports false when tmux refused the keystroke', async () => {
+    const { run } = runner({
+      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'send-keys': failed("can't find pane"),
+    });
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe(false);
+  });
+
+  it('aims at the pane the session published, not at the project', async () => {
+    const { run, argvs } = runner(
+      listing(`${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-g7h8i9\n`),
+    );
+    const panes = new Map([[ATLAS, 'vam-atlas-g7h8i9']]);
+    expect(
+      await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes),
+    ).toBe(true);
+    expect(argvs[1]?.[2]).toBe('=vam-atlas-g7h8i9:');
+  });
+
+  it('ignores a published pane that is not in vam’s own listing', async () => {
+    // A pane the OPERATOR started publishes into the same directory. It is
+    // never acted on: the fallback is the project tag, which does not name it.
+    const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
+    const panes = new Map([[ATLAS, 'their-own-session']]);
+    expect(
+      await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes),
+    ).toBe(false);
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+});
+
+describe('the send channel refuses what the renderer may not ask', () => {
+  function handler() {
+    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    registerTerminalIpc(
+      { handle: (channel, listener) => void handlers.set(channel, listener) },
+      run,
+      async () => new Map(),
+    );
+    const send = handlers.get(CHANNELS.terminalSend);
+    if (send === undefined) throw new Error('the send channel was never registered');
+    return { send, argvs };
+  }
+
+  it('answers a plain boolean, and true only when the key landed', async () => {
+    const { send, argvs } = handler();
+    expect(await send({}, ATLAS, { kind: 'text', text: 'h' })).toBe(true);
+    expect(argvs[1]).toContain('-l');
+  });
+
+  it.each([
+    ['no arguments at all', [] as unknown[]],
+    ['a project id that is not a string', [42, { kind: 'text', text: 'h' }]],
+    ['an oversized project id', ['x'.repeat(501), { kind: 'text', text: 'h' }]],
+    ['a key that is not one of the two', [ATLAS, { kind: 'kill' }]],
+    ['a key that is not an object', [ATLAS, 'h']],
+    ['text that is not a string', [ATLAS, { kind: 'text', text: 7 }]],
+    ['a paste wearing a keystroke’s clothes', [ATLAS, { kind: 'text', text: 'x'.repeat(64) }]],
+    ['an empty keystroke', [ATLAS, { kind: 'text', text: '' }]],
+    ['a row id that is not a string', [ATLAS, { kind: 'enter' }, 42]],
+    ['one argument too many', [ATLAS, { kind: 'enter' }, ATLAS, 'extra']],
+  ])('refuses %s without running tmux', async (_why, args) => {
+    const { send, argvs } = handler();
+    expect(await send({}, ...args)).toBe(false);
+    expect(argvs).toHaveLength(0);
+  });
+});

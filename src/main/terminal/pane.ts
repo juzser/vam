@@ -26,8 +26,9 @@
  * nobody set reads back as the empty string, which is exactly that answer.
  */
 
-import type { PaneSize, PaneView } from '../../shared/terminal.js';
+import type { PaneKey, PaneSize, PaneView } from '../../shared/terminal.js';
 import { sessionIdOf } from '../sources/claude-code/deliver.js';
+import { sendEnterArgv, sendTextArgv } from '../sources/tmux/argv.js';
 import {
   listVamSessions,
   readPane,
@@ -164,4 +165,37 @@ export async function resizeSessionPane(
   const match = targetSession(listed.sessions, projectId, rowId, panes);
   if (match.kind !== 'one') return false;
   return (await resizeWindow(run, match.name, size)) === null;
+}
+
+/**
+ * Type ONE keystroke into the pane the tab is showing. `true` means tmux took
+ * it; every `false` means nothing was sent at all.
+ *
+ * THIS IS THE FIRST THING IN VAM THAT WRITES INTO A RUNNING AGENT. The resize
+ * above changes how someone's screen is drawn; this changes what they typed.
+ * So it is aimed by `targetSession` -- the SAME rule the read and the resize
+ * use, and deliberately not a second opinion about whose terminal this is --
+ * and it refuses outright on every answer but `one`. `none` is a session vam
+ * did not start (including the operator's own, which is listed with an empty
+ * project and is not vam's to type into), and `ambiguous` is two candidates,
+ * where guessing would land a keystroke in the wrong agent's prompt.
+ *
+ * The refusal is a bare `false` because the tab has somewhere to put it: the
+ * pane says so on the surface rather than swallowing what was typed.
+ */
+export async function sendSessionKey(
+  run: TmuxRun,
+  projectId: string,
+  key: PaneKey,
+  rowId?: string,
+  panes?: ReadonlyMap<string, string>,
+): Promise<boolean> {
+  const listed = await listVamSessions(run);
+  if (listed.kind === 'unavailable') return false;
+  const match = targetSession(listed.sessions, projectId, rowId, panes);
+  if (match.kind !== 'one') return false;
+  // The two builders are kept apart in `tmux/argv.ts` for the one reason that
+  // matters here: `-l` types, and Return has to be pressed.
+  const argv = key.kind === 'enter' ? sendEnterArgv(match.name) : sendTextArgv(match.name, key.text);
+  return (await run(argv)).failure === null;
 }
