@@ -149,12 +149,17 @@ describe("the detail pane's ceiling is the layout's, not one constant", () => {
 
   it('reserves the canvas its own floor where the canvas is the main column', () => {
     expect(canvasIsMain(ALL_VISIBLE)).toBe(true);
-    const { detail } = layoutWidths(ALL_VISIBLE, STORED, VIEWPORT);
-    // The pane takes everything the window has left once the sidebar's own
-    // stored width and the canvas's floor are paid for — no flat cap in
-    // between. `DETAIL_MAX` is the ceiling on a STORED width, and at this
-    // viewport it is not what binds; the canvas's floor is.
-    expect(detail).toBe(VIEWPORT - STORED.sidebar - CANVAS_MIN);
+    const { sidebar, detail } = layoutWidths(ALL_VISIBLE, STORED, VIEWPORT);
+    // The pane takes everything the window has left once the sidebar and the
+    // canvas's floor are paid for — no flat cap in between. `DETAIL_MAX` is
+    // the ceiling on a STORED width, and at this viewport it is not what
+    // binds; the canvas's floor is.
+    //
+    // Written against the RENDERED sidebar, not the stored one. They are equal
+    // here, and asserting the stored value was how this read as sound while
+    // the sidebar rendered 64px narrower than the number in the expectation.
+    expect(sidebar).toBe(STORED.sidebar);
+    expect(detail).toBe(VIEWPORT - sidebar - CANVAS_MIN);
     expect(detail).toBeLessThanOrEqual(DETAIL_MAX);
   });
 
@@ -263,9 +268,15 @@ describe('the detail pane drags wider than 640 without swallowing the canvas', (
 
   it('still leaves the canvas a canvas, at every width and every window', () => {
     for (const viewport of [900, 1200, 1400, 1800, 2600]) {
-      const stored = { sidebar: SIDEBAR_MIN, detail: 4000 };
+      // The stored sidebar is ABOVE its floor on purpose. At `SIDEBAR_MIN`
+      // this assertion cannot fail: a sidebar already at its floor has nothing
+      // left to lose, so a bug that collapses it to the floor is invisible —
+      // which is how the first version of this guard read as sound while the
+      // sidebar was silently being crushed.
+      const stored = { sidebar: DEFAULT_PANES.sidebar, detail: 4000 };
       const { sidebar, detail } = layoutWidths(ALL_VISIBLE, stored, viewport);
-      expect(viewport - sidebar - detail).toBeGreaterThanOrEqual(CANVAS_MIN);
+      expect(viewport - sidebar - detail, `${viewport}`).toBeGreaterThanOrEqual(CANVAS_MIN);
+      expect(sidebar, `${viewport}`).toBeGreaterThan(SIDEBAR_MIN);
     }
   });
 
@@ -278,5 +289,86 @@ describe('the detail pane drags wider than 640 without swallowing the canvas', (
   it('caps a stored width at the narrowest three-column window', () => {
     expect(DETAIL_MAX).toBe(SIDEBAR_MIN + DETAIL_MIN + CANVAS_MIN);
     expect(clampPaneWidth('detail', 4000)).toBe(DETAIL_MAX);
+  });
+});
+
+/**
+ * The three columns must add up to the window, and the sidebar must survive
+ * the detail pane being stored wide.
+ *
+ * The 640 cap hid this: `layoutWidths` prices the sidebar against the detail
+ * pane's STORED width, so raising the cap to 880 let the detail pane reserve
+ * room it does not occupy. At 1400 it renders 776 while 880 is subtracted
+ * from the sidebar's ceiling — 104px charged to a column that is not there —
+ * which pushed the sidebar to its floor and made `dragCeiling` return that
+ * same floor. A ceiling equal to a floor is a resizer that cannot move, and
+ * because `PaneResizer` commits whatever `layoutWidths` returns, the first
+ * drag would have written 200 over the operator's stored 264.
+ *
+ * It is exactly the hazard `dragCeiling`'s own doc names: "a ceiling that
+ * reserves 360 for a column rendering at 300 is a sidebar that snaps back on
+ * its first drag."
+ *
+ * So the assertions are about ARITHMETIC that closes, not about constants:
+ * the columns sum to the viewport, and a stored width above a floor is the
+ * width that gets drawn.
+ */
+describe('the columns add up, with the detail pane stored at its new ceiling', () => {
+  const STORED = { sidebar: 264, detail: DETAIL_MAX };
+  // Every viewport wide enough for all three at once; the narrow case where
+  // the reserve yields has its own tests above.
+  const LAPTOPS = [1280, 1366, 1400, 1440, 1512, 1728, 2560];
+
+  it('draws the sidebar at the width it was stored at, not at its floor', () => {
+    for (const viewport of LAPTOPS) {
+      expect(layoutWidths(ALL_VISIBLE, STORED, viewport).sidebar, `${viewport}`).toBe(
+        STORED.sidebar,
+      );
+    }
+  });
+
+  it('gives the canvas exactly what is left, and never less than its floor', () => {
+    for (const viewport of LAPTOPS) {
+      const { sidebar, detail } = layoutWidths(ALL_VISIBLE, STORED, viewport);
+      const canvas = viewport - sidebar - detail;
+      expect(canvas, `${viewport}`).toBeGreaterThanOrEqual(CANVAS_MIN);
+      // Nothing is reserved against a column that is not there: the three
+      // rendered widths are the whole window.
+      expect(sidebar + detail + canvas, `${viewport}`).toBe(viewport);
+    }
+  });
+
+  /**
+   * The resizer's own path. `PaneResizer.proposedWidth` runs the proposal
+   * through `layoutWidths` and commits the result, so "can it move" and "does
+   * it keep what I dragged" are one question asked of this function.
+   */
+  it('leaves the sidebar draggable — the ceiling is above the floor', () => {
+    for (const viewport of LAPTOPS) {
+      const ceiling = dragCeiling(
+        'sidebar',
+        layoutWidths(ALL_VISIBLE, STORED, viewport).detail,
+        viewport,
+        CANVAS_MIN,
+      );
+      expect(ceiling, `${viewport}`).toBeGreaterThan(SIDEBAR_MIN);
+    }
+  });
+
+  it('commits the width the drag proposed, rather than snapping back', () => {
+    for (const proposed of [220, 264, 300, 360]) {
+      const drawn = layoutWidths(ALL_VISIBLE, { ...STORED, sidebar: proposed }, 1400).sidebar;
+      expect(drawn, `${proposed}`).toBe(proposed);
+    }
+  });
+
+  /**
+   * The other direction of the same defect: a hand-edited sidebar past its own
+   * MAX must not price the detail pane against a width no sidebar can occupy.
+   */
+  it('prices the detail pane against a sidebar that could actually be drawn', () => {
+    const { sidebar, detail } = layoutWidths(ALL_VISIBLE, { sidebar: 4000, detail: 4000 }, 1400);
+    expect(sidebar).toBe(SIDEBAR_MAX);
+    expect(1400 - sidebar - detail).toBe(CANVAS_MIN);
   });
 });
