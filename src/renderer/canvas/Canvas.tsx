@@ -1073,6 +1073,25 @@ function CanvasInner({
           }
           return;
         }
+        case 'sessionAt': {
+          // `entries` is what the sidebar prints — filter, status pills and
+          // all — so the digits count the rows the operator can see. Counting
+          // the whole model would land the cursor somewhere nobody is looking.
+          const target = entries[action.index];
+          if (target === undefined) {
+            // Refused out loud, and not clamped to the last row: a jump that
+            // silently lands one short is worse than one that does not happen,
+            // because you only find out by reading where you ended up.
+            setStatus(
+              entries.length === 0
+                ? 'no session matches'
+                : `only ${entries.length} session${entries.length === 1 ? '' : 's'} in view`,
+            );
+            return;
+          }
+          focusSession(target.session.id);
+          return;
+        }
         case 'project':
           stepSession(action.delta);
           return;
@@ -1782,7 +1801,7 @@ function CanvasInner({
           </span>
         )}
         <span className="h-3 w-px bg-line" />
-        <span>hjkl f / gt i yy ^K</span>
+        <span>hjkl f / gt i yy ^K ^1-9</span>
       </footer>
     </div>
   );

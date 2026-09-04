@@ -106,6 +106,10 @@ export type KeyAction =
   | { readonly kind: 'resizePane'; readonly delta: -1 | 1 }
   /** `z0` — set both side panes back to their shipped defaults. */
   | { readonly kind: 'resetPanes' }
+  /** `Mod-1` … `Mod-8` — jump straight to a session by its position in the
+      sidebar, zero-based here because that is what an index into the list is.
+      `Mod-9` is deliberately NOT in this family: it is `last` (below). */
+  | { readonly kind: 'sessionAt'; readonly index: number }
   | { readonly kind: 'cancel' };
 
 export type ChordStep = {
@@ -151,6 +155,20 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   N: { kind: 'searchPrev' },
   Enter: { kind: 'open' },
   'Mod-k': { kind: 'palette' },
+  // Cmd/Ctrl + a digit, the one shortcut every browser and terminal already
+  // taught: 1..8 are positions, and 9 is the LAST one whatever the count —
+  // far more use than a ninth position once the list outgrows nine. Written
+  // out rather than generated so the table stays the one place every binding
+  // can be read off. `Mod-0` is left unbound: `z0` already owns the zero.
+  'Mod-1': { kind: 'sessionAt', index: 0 },
+  'Mod-2': { kind: 'sessionAt', index: 1 },
+  'Mod-3': { kind: 'sessionAt', index: 2 },
+  'Mod-4': { kind: 'sessionAt', index: 3 },
+  'Mod-5': { kind: 'sessionAt', index: 4 },
+  'Mod-6': { kind: 'sessionAt', index: 5 },
+  'Mod-7': { kind: 'sessionAt', index: 6 },
+  'Mod-8': { kind: 'sessionAt', index: 7 },
+  'Mod-9': { kind: 'last' },
   // Vim's own "shift this leftwards / rightwards" — literally what moving a
   // side pane's boundary is. A real Shift+, / Shift+. keydown normalizes to
   // the browser-applied `<` / `>` here, distinct from the plain `,` above
