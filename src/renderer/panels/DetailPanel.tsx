@@ -680,6 +680,11 @@ export function splitAnswers(output: string): string[] {
  * breathing amber dot in the header says it.
  */
 function noAnswerNote(output: string | null, status: SessionStatus | null): string {
+  // A live turn that HAS an answer still gets a line, and the absence wordings
+  // would all be lies about it: it is not empty, and it is not answerless. All
+  // this line asserts there is what the caret asserts -- the session is
+  // running -- and it is reached only when the source could not say more.
+  if (output !== null && output !== '') return '\u2014 the session is still running \u2014';
   if (output === '') return '\u2014 this turn resolved to nothing \u2014';
   if (status === 'running') return '\u2014 the session is still running, no answer yet \u2014';
   if (status === 'waiting' || status === null) return '\u2014 no answer for this turn yet \u2014';
@@ -1302,8 +1307,23 @@ export function DetailPanel(props: DetailPanelProps) {
                 }}
                 className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto"
               >
-                {decision.output === null || decision.output === '' ? (
-                  /* While the session is working, this line is the only thing
+                {decision.output !== null && decision.output !== '' && (
+                  <OutText output={decision.output} />
+                )}
+                {(decision.output === null || decision.output === '' || outIsLive) && (
+                  /* The live line and the answer are not alternatives, and
+                     treating them as one is what made this line unreachable in
+                     practice: it used to render only when `output` was empty,
+                     but `transcript.ts` writes `turns[last].output` on every
+                     assistant text, so a running session has an answer within
+                     seconds and the operator never saw the line again. It is
+                     rendered whenever the turn is live, and BELOW the answer:
+                     here is what the session has said, here is what it is
+                     doing now. When there is no answer it is the only thing in
+                     the region, so the empty-turn sentence prints once, in
+                     this same element, rather than in a second one.
+
+                     While the session is working, this line is the only thing
                      in the pane that changes -- so it carries the work rather
                      than a sentence that reads the same on a session that has
                      quietly died. The idiom is a terminal's: a blinking block
@@ -1319,7 +1339,9 @@ export function DetailPanel(props: DetailPanelProps) {
                      still honest, because it asserts only that the session is
                      running, which it is. */
                   <p
-                    data-out-empty
+                    data-out-empty={
+                      decision.output === null || decision.output === '' ? true : undefined
+                    }
                     data-out-live={outIsLive ? 'true' : undefined}
                     className="text-[11.5px] text-ink-faint"
                   >
@@ -1330,8 +1352,6 @@ export function DetailPanel(props: DetailPanelProps) {
                       <span aria-hidden="true" data-out-cursor className="vam-term-cursor" />
                     )}
                   </p>
-                ) : (
-                  <OutText output={decision.output} />
                 )}
 
                 {commands.length > 0 && (
