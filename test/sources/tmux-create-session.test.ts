@@ -13,9 +13,9 @@ import { CHANNELS } from '../../src/main/ipc/channels.js';
 import { registerSourceIpc } from '../../src/main/ipc/handlers.js';
 import { createSessionInProject } from '../../src/main/sources/claude-code/create-session.js';
 import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
-import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
-import type { MainSource } from '../../src/main/sources/source.js';
 import { FIXTURE_SOURCE } from '../../src/main/sources/fixture-source.js';
+import type { MainSource } from '../../src/main/sources/source.js';
+import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
 
 function recordingTmux(stderr = ''): TmuxRun & { calls: (readonly string[])[] } {
   const calls: (readonly string[])[] = [];
@@ -32,9 +32,10 @@ const agent = (cwd: string) => ({
   sessionId: 's1',
   name: null,
   cwd,
-  status: 'idle' as const,
+  status: 'waiting' as const,
   kind: 'interactive' as const,
   pid: 101,
+  startedAt: null,
 });
 
 function handlerFor(source: MainSource) {
