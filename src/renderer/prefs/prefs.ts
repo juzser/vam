@@ -23,6 +23,7 @@
 
 import type { CanvasModel, SourceId } from '../domain/model.js';
 import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
+import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/chords.js';
 import {
   ALL_VISIBLE,
   type ColumnId,
@@ -202,6 +203,21 @@ export type Prefs = {
    * keeping either.
    */
   readonly renames: Readonly<Record<string, Readonly<Record<string, RenameChoice>>>>;
+  /**
+   * Token → the colour the operator chose for it, for the few tokens vam
+   * offers. An OVERRIDE LAYER, not a palette: an absent token is not a stored
+   * default, it is "whatever styles.css says for the theme you are in", so the
+   * light/dark pair keeps working under a partial override and a reset is a
+   * deletion rather than a write. Exempt from the icon TTL for the reason
+   * `theme` is: it describes the person.
+   */
+  readonly palette: PaletteOverrides;
+  /**
+   * Action id → the keys the operator gave it. Same "absent means shipped"
+   * shape and the same reasoning as `palette`: the chord tables stay the
+   * source of the grammar, and this only says where the operator moved things.
+   */
+  readonly keyBindings: KeyBindings;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -214,6 +230,8 @@ export const EMPTY_PREFS: Prefs = {
   filters: DEFAULT_SESSION_FILTERS,
   collapsedProjects: {},
   renames: {},
+  palette: {},
+  keyBindings: {},
 };
 
 /**
@@ -231,7 +249,25 @@ export function browserStorage(): StorageLike | null {
   }
 }
 
+/**
+ * Read the store, and put what it says into force.
+ *
+ * The activation is here rather than in the canvas because the two things this
+ * epic added — a colour override layer and a key binding layer — are consumed
+ * by a stylesheet and by a module-level chord reducer, neither of which is a
+ * React value anything re-renders on. One call on the read path and one on the
+ * write path is the whole wiring, and it makes "what is stored" and "what is in
+ * force" the same sentence.
+ */
 export function readPrefs(
+  storage: StorageLike | null,
+  now: Date = new Date(),
+  migrateSource: SourceId = 'black-smith',
+): Prefs {
+  return activatePrefs(parsePrefs(storage, now, migrateSource));
+}
+
+function parsePrefs(
   storage: StorageLike | null,
   now: Date = new Date(),
   migrateSource: SourceId = 'black-smith',
@@ -300,6 +336,12 @@ export function readPrefs(
     // Same TTL and same shape as the icons above; a payload written before
     // this field existed simply has none, and reads as `{}`.
     renames: pruneBuckets(readBuckets(record.renames, readRename), cutoff),
+    // Per field like everything above it: a payload from a vam that predates
+    // either of these has no key at all, and reads back as "no overrides" —
+    // the shipped palette and the shipped chords — without touching a
+    // neighbour.
+    palette: readPalette((parsed as { palette?: unknown }).palette),
+    keyBindings: readKeyBindings((parsed as { keyBindings?: unknown }).keyBindings),
   };
 }
 
@@ -558,6 +600,7 @@ export function setPaneWidth(prefs: Prefs, pane: Pane, width: number): Prefs {
 }
 
 export function writePrefs(storage: StorageLike | null, prefs: Prefs): void {
+  activatePrefs(prefs);
   if (storage === null) {
     return;
   }
@@ -893,4 +936,157 @@ function fresh<T extends { at: string }>(
     }
   }
   return out;
+}
+
+/* ---------------------------------------------------------------------------
+ * The appearance override layer.
+ * ------------------------------------------------------------------------ */
+
+export type PaletteOverrides = Readonly<Record<string, string>>;
+
+/**
+ * The colours the operator may adjust — TEN of about thirty, chosen rather
+ * than enumerated.
+ *
+ * Two families, because they are the two that change the app's character: the
+ * surfaces you look at all day (canvas, panel, sidebar, raised) with the ink
+ * that has to stay readable on them, and the status family (running, waiting,
+ * done, failed) plus the cursor ring, which is what a glance at the canvas is
+ * actually reading.
+ *
+ * The rest are deliberately NOT here, and the reason is the same for all of
+ * them: they are measured against these. The tints and washes
+ * (`--vam-waiting-tint`, `--vam-done-tint`), the four line weights, the dimmer
+ * inks, and the diff and syntax colours are each chosen for contrast against a
+ * surface — styles.css says so at the point it defines them — so a picker that
+ * moved one alone would produce an unreadable pair with no way to see it
+ * coming. `--vam-shadow-node` is not a colour at all, it is a shadow.
+ *
+ * No default value is stored here, and that is the design rather than an
+ * omission: an unset token falls through to whichever half of the stylesheet's
+ * light/dark pair is in force, so one override does not freeze the other theme.
+ */
+export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: string }[] = [
+  { token: '--vam-canvas', label: 'canvas' },
+  { token: '--vam-panel', label: 'panel' },
+  { token: '--vam-sidebar', label: 'sidebar' },
+  { token: '--vam-raised', label: 'raised' },
+  { token: '--vam-ink', label: 'text' },
+  { token: '--vam-running', label: 'running' },
+  { token: '--vam-waiting', label: 'waiting' },
+  { token: '--vam-cursor-ring', label: 'cursor ring' },
+  { token: '--vam-done', label: 'done' },
+  { token: '--vam-failed', label: 'failed' },
+];
+
+const PALETTE_KEYS = new Set(PALETTE_TOKENS.map((entry) => entry.token));
+
+/**
+ * What may be written into a custom property.
+ *
+ * Six digits and nothing else — which is exactly what an `<input type="color">`
+ * produces, so the narrow rule costs the operator nothing. It is not decoration:
+ * a custom property is injected into the page's own styles, and a value like
+ * `red; --something: else` would be a stylesheet the operator did not write.
+ */
+const COLOUR = /^#[0-9a-f]{6}$/i;
+
+function readPalette(raw: unknown): PaletteOverrides {
+  if (typeof raw !== 'object' || raw === null) {
+    return {};
+  }
+  const out = emptyMap<string>();
+  for (const [token, value] of Object.entries(raw as Record<string, unknown>)) {
+    // Per entry, like every other reader here: one hand-edited colour cannot
+    // drag the others back to the stylesheet with it.
+    if (PALETTE_KEYS.has(token) && typeof value === 'string' && COLOUR.test(value)) {
+      out[token] = value;
+    }
+  }
+  return out;
+}
+
+function readKeyBindings(raw: unknown): KeyBindings {
+  if (typeof raw !== 'object' || raw === null) {
+    return {};
+  }
+  const out = emptyMap<readonly string[]>();
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(value)) {
+      continue;
+    }
+    const keys = value.filter((key): key is string => typeof key === 'string' && key !== '');
+    // A payload claiming three keys for one action is trimmed rather than
+    // dropped: the operator's first two choices are still their choices.
+    out[id] = keys.slice(0, MAX_BINDINGS);
+  }
+  return out;
+}
+
+/** One colour chosen. A token vam does not offer, or a value that is not a
+ *  colour, changes nothing — the picker cannot produce either, and a caller
+ *  that does has a bug rather than a preference. */
+export function setPaletteColor(prefs: Prefs, token: string, value: string): Prefs {
+  if (!PALETTE_KEYS.has(token) || !COLOUR.test(value)) {
+    return prefs;
+  }
+  return { ...prefs, palette: withEntry({ ...prefs.palette }, token, value) };
+}
+
+/** Back to the stylesheet for one token — by DELETING the override. Writing
+ *  today's value back would look identical on screen and pin the colour
+ *  against the other theme forever. */
+export function clearPaletteColor(prefs: Prefs, token: string): Prefs {
+  return { ...prefs, palette: withoutEntry({ ...prefs.palette }, token) };
+}
+
+/** Back to the stylesheet for all of them. */
+export function clearPalette(prefs: Prefs): Prefs {
+  return { ...prefs, palette: {} };
+}
+
+/** Written by the shortcut editor; validated on the way back in by
+ *  `readKeyBindings`, the same as every other stored field. */
+export function setKeyBindings(prefs: Prefs, keyBindings: KeyBindings): Prefs {
+  return { ...prefs, keyBindings };
+}
+
+/**
+ * Put the overrides on the document, as custom properties on the root.
+ *
+ * Every offered token is visited, not only the overridden ones, because the
+ * unset ones are what a reset produces: the property is REMOVED, and the
+ * cascade falls back to the `:root` / `html.light` pair in styles.css. Setting
+ * a token to its current value instead would be indistinguishable on screen
+ * and would quietly survive a theme change.
+ */
+export function applyPalette(
+  overrides: PaletteOverrides,
+  root: HTMLElement | null = globalThis.document?.documentElement ?? null,
+): void {
+  if (root === null) {
+    return;
+  }
+  for (const { token } of PALETTE_TOKENS) {
+    const value = overrides[token];
+    if (value === undefined) {
+      root.style.removeProperty(token);
+    } else {
+      root.style.setProperty(token, value);
+    }
+  }
+}
+
+/**
+ * The seam between "stored" and "in force", called on every read and write.
+ *
+ * Both halves are side effects on things React does not own — the document's
+ * root element and the chord reducer's module state — so they cannot be
+ * expressed as rendered output. Returning `prefs` unchanged keeps the call
+ * sites one expression each.
+ */
+export function activatePrefs(prefs: Prefs): Prefs {
+  applyPalette(prefs.palette);
+  setActiveBindings(prefs.keyBindings);
+  return prefs;
 }
