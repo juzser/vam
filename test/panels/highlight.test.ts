@@ -59,7 +59,8 @@ describe('shell', () => {
   });
 
   it('does not see a comment in a mid-word #', () => {
-    expect(kindsOf('git show HEAD#1', 'shell')).toEqual([]);
+    // A number after it is fine; a COMMENT is the mistake being pinned.
+    expect(kindsOf('git show HEAD#1', 'shell').filter((k) => k.startsWith('comment'))).toEqual([]);
   });
 
   it('keeps an unterminated string a string, to the end of the input', () => {
