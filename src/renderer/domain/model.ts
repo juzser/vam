@@ -118,6 +118,32 @@ export type SessionOrigin = {
   readonly promptCount: number | null;
 };
 
+/**
+ * One subagent a session spawned, as `Session.agents` lists it.
+ *
+ * A subagent is still NOT a row on the canvas -- see `runningAgents` below,
+ * which is unchanged. This is the roster BEHIND a session, read only when the
+ * operator opens the pane's Agents tab, and it answers the question the `●N`
+ * badge cannot: which agents, doing what.
+ *
+ * `type` and `description` are `null` when the source has the agent but not
+ * its labels -- Claude Code writes them to a file beside the agent transcript,
+ * and that file can be absent, truncated, or written by a newer version with
+ * different keys. The agent is still listed: its id and whether it is running
+ * are facts either way, and dropping a running agent because a label was
+ * unreadable is the failure mode worth avoiding.
+ */
+export type SessionAgent = {
+  /** The agent transcript's own name (`agent-<id>`). Opaque; never parsed. */
+  readonly id: string;
+  /** What kind of agent it is (`coder`, `uiux`), or `null` when unknown. */
+  readonly type: string | null;
+  /** What it was asked to do, in the spawner's words, or `null` when unknown. */
+  readonly description: string | null;
+  /** Whether it is working right now, by the same window `runningAgents` counts. */
+  readonly running: boolean;
+};
+
 export type Session = {
   readonly id: string;
   /** Short name on the node header — an epic id, a task id, a run name. */
@@ -179,6 +205,24 @@ export type Session = {
    * existing fixture to name one at once.
    */
   readonly source?: SourceId;
+  /**
+   * The subagents this session spawned, newest first, or absent when the
+   * source has no such surface.
+   *
+   * ABSENT AND EMPTY MEAN DIFFERENT THINGS, and the pane says so. Absent is a
+   * source that cannot answer -- black-smith's HTTP model has no agent
+   * surface, so `to-canvas.ts` leaves it out. Empty is a source that looked
+   * and found none, which is the COMMON case: most sessions never spawn a
+   * subagent. Neither is a reason to draw a spinner or invent a row.
+   *
+   * Populated today by the `claude-code` source alone, off
+   * `<sessionId>/subagents/`. Optional for the same reason `origin` is: a
+   * dozen fixture files build `Session` literals by hand.
+   *
+   * This is CAPPED at the source (see `agent-roster.ts`), so its length is not
+   * a count -- `runningAgents` remains the only number the badge trusts.
+   */
+  readonly agents?: readonly SessionAgent[];
   /**
    * How this session came to exist. Optional because ten fixture files build
    * `Session` literals by hand, and because a model assembled without a

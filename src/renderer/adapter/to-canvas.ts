@@ -274,6 +274,11 @@ function toSession(
     // than as an empty string pretending to be a branch name.
     branch: null,
     status: statusOf(api, decisions),
+    // `Session.agents` is deliberately ABSENT here, not `[]`. black-smith's
+    // API reports how many agents are live and nothing about which they are,
+    // and an empty roster beside a non-zero count would read as "this session
+    // spawned none" -- a claim this adapter cannot make. Absent is model.ts's
+    // "the source cannot answer", and the pane says exactly that.
     runningAgents: api.liveAgentCount,
     activity: activityOf(api),
     age: ageOf(api, now),

@@ -879,8 +879,14 @@ describe('the mode pills select, and what they select gets recorded', () => {
 describe('the empty tabs carry no tooltip, and the other notes stay', () => {
   it('drops the tab note without touching the mode, attach or model notes', () => {
     draw();
+    // TWO placeholders now, not three: `Agents` has a real source behind it
+    // and is a control. `PRs` and `Terminal` have none and are unchanged.
     const tabs = all('[data-placeholder^="tab-"]');
-    expect(tabs).toHaveLength(3);
+    expect(tabs).toHaveLength(2);
+    expect(tabs.map((t) => t.getAttribute('data-placeholder'))).toEqual([
+      'tab-prs',
+      'tab-terminal',
+    ]);
     for (const tab of tabs) {
       // No note, and therefore no reason to be a focus stop either: a button
       // that does nothing and explains nothing is a keyboard trap with a hover
@@ -892,6 +898,124 @@ describe('the empty tabs carry no tooltip, and the other notes stay', () => {
     expect(q<HTMLElement>('[data-attach]')?.getAttribute('data-note')).not.toBeNull();
     expect(q<HTMLElement>('[data-model-request]')?.getAttribute('data-note')).not.toBeNull();
     expect(q<HTMLElement>('[data-mode-row] [data-note]')).not.toBeNull();
+  });
+});
+
+/**
+ * The Agents tab: the first tab besides `Response` with anything behind it.
+ *
+ * What is being pinned is mostly what it must NOT do. The pane has just had
+ * several rounds of invented content removed from it, so a session with no
+ * subagents gets one plain sentence -- no spinner, no fabricated row -- and an
+ * agent whose meta file could not be read is still listed, saying what is
+ * unknown, rather than dropped.
+ */
+describe('the Agents tab', () => {
+  const withAgents = (agents: Session['agents']): SessionEntry => ({
+    project: PROJECT,
+    session: { ...SESSION, agents },
+  });
+
+  const agentsTab = () => q<HTMLButtonElement>('[data-tab="agents"]');
+  const openAgents = () => {
+    const button = agentsTab();
+    if (button === null) throw new Error('no Agents tab to click');
+    fireEvent.click(button);
+  };
+
+  it('is a real control, unlike the two tabs with no data behind them', () => {
+    draw({ entry: withAgents([]) });
+    expect(agentsTab()).not.toBeNull();
+    expect(agentsTab()?.tagName).toBe('BUTTON');
+    // The two that stay inert: still labels, still marked as placeholders.
+    for (const placeholder of ['tab-prs', 'tab-terminal']) {
+      const tab = q<HTMLElement>(`[data-placeholder="${placeholder}"]`);
+      expect(tab).not.toBeNull();
+      expect(tab?.closest('button')).toBeNull();
+    }
+  });
+
+  it('starts on Response and moves the pane content when Agents is picked', () => {
+    draw({ entry: withAgents([]) });
+    expect(q('[data-detail-block="out"]')).not.toBeNull();
+    expect(q('[data-agents]')).toBeNull();
+    expect(agentsTab()?.getAttribute('aria-selected')).toBe('false');
+
+    openAgents();
+
+    expect(q('[data-agents]')).not.toBeNull();
+    expect(q('[data-detail-block="out"]')).toBeNull();
+    expect(q('[data-detail-block="in"]')).toBeNull();
+    expect(agentsTab()?.getAttribute('aria-selected')).toBe('true');
+
+    fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
+    expect(q('[data-detail-block="out"]')).not.toBeNull();
+    expect(q('[data-agents]')).toBeNull();
+  });
+
+  it('says a session spawned none, with no row and nothing spinning', () => {
+    draw({ entry: withAgents([]) });
+    openAgents();
+
+    expect(all('[data-agent-row]')).toHaveLength(0);
+    expect(q<HTMLElement>('[data-agents-empty]')?.textContent).toContain('spawned no agents');
+    expect(q('[data-agents] .vam-breathe')).toBeNull();
+    expect(q('[data-agents] [data-out-cursor]')).toBeNull();
+  });
+
+  it('distinguishes a source that has no roster at all from a session with none', () => {
+    // `agents` absent, per model.ts: black-smith reports a live count and
+    // nothing about which agents they are, so "spawned none" would be a claim
+    // vam cannot make.
+    draw({ entry: withAgents(undefined) });
+    openAgents();
+
+    expect(all('[data-agent-row]')).toHaveLength(0);
+    expect(q<HTMLElement>('[data-agents-empty]')?.textContent).not.toContain('spawned no agents');
+    expect(q<HTMLElement>('[data-agents-empty]')?.textContent).toContain('does not report');
+  });
+
+  it('lists each agent with its type, its description and whether it is running', () => {
+    draw({
+      entry: withAgents([
+        { id: 'agent-one', type: 'coder', description: 'write the parser', running: true },
+        { id: 'agent-two', type: 'uiux', description: 'review the pane', running: false },
+      ]),
+    });
+    openAgents();
+
+    const rows = all('[data-agent-row]');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.textContent).toContain('coder');
+    expect(rows[0]?.textContent).toContain('write the parser');
+    expect(rows[0]?.getAttribute('data-agent-running')).toBe('true');
+    expect(rows[1]?.getAttribute('data-agent-running')).toBe('false');
+  });
+
+  it('keeps an agent whose meta could not be read, naming what is unknown', () => {
+    draw({
+      entry: withAgents([{ id: 'agent-three', type: null, description: null, running: true }]),
+    });
+    openAgents();
+
+    const row = all('[data-agent-row]')[0];
+    expect(row).not.toBeUndefined();
+    // The id and the running state are the two facts that survive an
+    // unreadable meta file, and both are on screen.
+    expect(row?.textContent).toContain('agent-three');
+    expect(row?.textContent).toContain('unknown');
+    expect(row?.getAttribute('data-agent-running')).toBe('true');
+  });
+
+  it('truncates a long description rather than widening the pane', () => {
+    draw({
+      entry: withAgents([
+        { id: 'agent-four', type: 'coder', description: 'x'.repeat(400), running: false },
+      ]),
+    });
+    openAgents();
+
+    expect(q<HTMLElement>('[data-agent-description]')?.className).toContain('truncate');
   });
 });
 

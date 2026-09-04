@@ -395,6 +395,43 @@ describe('loadClaudeCodeProjects', () => {
     expect(project?.sessions[0]?.runningAgents).toBe(1);
   });
 
+  it('carries the roster the count was already walking, badge and rows agreeing', async () => {
+    writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
+    const subs = join(root, 'slug-a', 'sess-1', 'subagents');
+    mkdirSync(subs, { recursive: true });
+    for (const [name, ageMs] of [
+      ['agent-live', 0],
+      ['agent-old', 86_400_000],
+    ] as const) {
+      const f = join(subs, `${name}.jsonl`);
+      writeFileSync(f, jsonl(reply('sub')));
+      utimesSync(f, (NOW - ageMs) / 1000, (NOW - ageMs) / 1000);
+      writeFileSync(
+        join(subs, `${name}.meta.json`),
+        JSON.stringify({ agentType: 'coder', description: `do ${name}` }),
+      );
+    }
+
+    const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+    const session = project?.sessions[0];
+
+    expect(session?.agents).toEqual([
+      { id: 'agent-live', type: 'coder', description: 'do agent-live', running: true },
+      { id: 'agent-old', type: 'coder', description: 'do agent-old', running: false },
+    ]);
+    // The badge is still the number of transcripts inside the window, and the
+    // roster still agrees with it.
+    expect(session?.runningAgents).toBe(1);
+    expect(session?.agents?.filter((a) => a.running)).toHaveLength(session?.runningAgents ?? -1);
+  });
+
+  it('gives a session that never spawned an agent an empty roster, not an absent one', async () => {
+    writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
+    const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+    expect(project?.sessions[0]?.agents).toEqual([]);
+    expect(project?.sessions[0]?.runningAgents).toBe(0);
+  });
+
   it('ages from the transcript when there is one, and from the start time when there is not', async () => {
     writeTranscript('slug-a', 'sess-1', jsonl(reply('x')), 2 * 3_600_000);
     const [withFile] = await loadClaudeCodeProjects(root, [agent()], NOW);

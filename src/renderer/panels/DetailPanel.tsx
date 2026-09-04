@@ -56,7 +56,7 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Decision, SessionStatus } from '../domain/model.js';
+import type { Decision, SessionAgent, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { Note } from './Note.js';
 import type { ReviewQueueProps } from './ReviewQueue.js';
@@ -290,11 +290,19 @@ export type DetailPanelProps = {
 };
 
 /**
- * The tab bar's four entries. Presentation only — the labels, order and which
- * tabs actually hold content are unchanged; this restyles a segmented control,
- * it does not decide information architecture.
+ * The tab bar's four entries, and which of them have anything behind them.
+ *
+ * `Agents` joined `Response` when a source that actually reports a roster
+ * arrived (`Session.agents`). `PRs` and `Terminal` still have no data source
+ * at all in any source vam speaks to, so they stay exactly what they were:
+ * labels marked `data-placeholder`, taking neither focus nor hover.
  */
 const TABS = ['Response', 'PRs', 'Terminal', 'Agents'] as const;
+
+type Tab = (typeof TABS)[number];
+
+/** The tabs that select something. Everything else in `TABS` is a label. */
+const LIVE_TABS: readonly Tab[] = ['Response', 'Agents'];
 
 /**
  * The mockup's mode segments, and which one it draws as current. Presentation
@@ -305,53 +313,146 @@ const MODES = ['Auto', 'Manual', 'Plan'] as const;
 
 /**
  * The mockup's segmented control: one filled pill on a sunken well, not
- * underlined labels. `Response` is the only tab with real content — see the
- * module doc — so it is also the only one that is ever "current" here.
+ * underlined labels.
  *
  * The Agents badge has a real source (`runningAgents`) and is omitted at
  * zero. PRs has none in black-smith's domain model, so it ships with no
  * badge rather than a fabricated or hardcoded count.
  *
- * The three empty tabs are labels, not controls: nothing behind them can be
- * activated, so nothing here takes focus or hover.
+ * TWO KINDS OF PILL, and the difference is whether the tab selects anything.
+ * A live tab is a real <button> — Tab reaches it, Enter and Space activate it,
+ * `role="tab"` and `aria-selected` say which one is showing — because it now
+ * moves what the pane renders. The empty two are still plain labels, for the
+ * reason they became labels: they were buttons wrapping a note explaining why
+ * they were empty, the operator asked for the note to go, and a focus stop
+ * that activates nothing and explains nothing is a keyboard trap with a hover
+ * state. `data-placeholder` still says in the markup which ones are unbacked.
  */
-function TabBar({ runningAgents }: { readonly runningAgents: number }) {
+function TabBar({
+  runningAgents,
+  current,
+  onSelect,
+}: {
+  readonly runningAgents: number;
+  readonly current: Tab;
+  readonly onSelect: (tab: Tab) => void;
+}) {
   return (
-    <div className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px]">
+    <div
+      role="tablist"
+      className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px]"
+    >
       {TABS.map((tab) => {
-        const current = tab === 'Response';
+        const selected = tab === current;
         const badge = tab === 'Agents' && runningAgents > 0 ? runningAgents : null;
-        const pill = (
-          <span
-            key={tab}
-            data-placeholder={current ? undefined : `tab-${tab.toLowerCase()}`}
-            className={[
-              'flex h-[26px] flex-1 items-center justify-center gap-[5px] rounded-[7px] text-[12px]',
-              current ? 'bg-line-strong font-medium text-ink' : 'text-ink-dim',
-            ].join(' ')}
-          >
+        const shape = [
+          'flex h-[26px] flex-1 items-center justify-center gap-[5px] rounded-[7px] text-[12px]',
+          selected ? 'bg-line-strong font-medium text-ink' : 'text-ink-dim',
+        ].join(' ');
+        const label = (
+          <>
             {tab}
             {badge !== null && (
               <span
                 className={[
                   'font-mono text-[9.5px]',
-                  current ? 'text-ink-dim' : 'text-ink-faint',
+                  selected ? 'text-ink-dim' : 'text-ink-faint',
                 ].join(' ')}
               >
                 {badge}
               </span>
             )}
+          </>
+        );
+        return LIVE_TABS.includes(tab) ? (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            data-tab={tab.toLowerCase()}
+            aria-selected={selected}
+            onClick={() => onSelect(tab)}
+            className={`${shape} cursor-pointer ${selected ? '' : 'hover:bg-raised hover:text-ink'}`}
+          >
+            {label}
+          </button>
+        ) : (
+          <span key={tab} data-placeholder={`tab-${tab.toLowerCase()}`} className={shape}>
+            {label}
           </span>
         );
-        // The three empty tabs were buttons wrapping a note that said why they
-        // were empty. The operator asked for the tab notes to go, and with the
-        // note gone the button had nothing left to be: it activated nothing and
-        // existed only to be a focus stop for an explanation that no longer
-        // opens. So they are plain labels now, and `data-placeholder` still
-        // says in the markup which ones are unbacked.
-        return pill;
       })}
     </div>
+  );
+}
+
+/**
+ * The Agents tab's content: which subagents this session spawned.
+ *
+ * THREE STATES, AND TWO OF THEM ARE ABSENCES THAT MEAN DIFFERENT THINGS
+ * (model.ts). Absent is a source with no agent surface at all — black-smith
+ * reports a live count and nothing about which agents they are — and empty is
+ * a source that looked and found none, which is the common case, since most
+ * sessions never spawn a subagent. Each gets one plain sentence. Neither gets
+ * a spinner or a placeholder row: this pane has spent several rounds having
+ * invented content removed from it.
+ *
+ * A row survives an unreadable meta file. The agent's id and whether it is
+ * running come from its own transcript, so they are facts whatever the meta
+ * file says; the labels are what goes `unknown`, and the row still says who is
+ * working. The roster is capped at the source (`agent-roster.ts`), so this
+ * renders everything it is given and counts nothing.
+ */
+function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | undefined }) {
+  if (agents === undefined || agents.length === 0) {
+    return (
+      <p data-agents data-agents-empty className="text-[11px] text-ink-faint">
+        {agents === undefined
+          ? 'This source does not report which agents a session is running.'
+          : 'This session has spawned no agents.'}
+      </p>
+    );
+  }
+  return (
+    <ul
+      data-agents
+      className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto"
+    >
+      {agents.map((agent) => (
+        <li
+          key={agent.id}
+          data-agent-row
+          data-agent-running={agent.running ? 'true' : 'false'}
+          className="flex items-center gap-2 rounded-[9px] border border-line bg-panel px-3 py-2"
+        >
+          {/* The same dot the pane header uses for a session, meaning the same
+              thing: filled and breathing while it works, quiet when it is
+              done. `running` here is "wrote to its transcript in the last few
+              minutes", which is all the source can see. */}
+          <span
+            className={[
+              'h-1.5 w-1.5 flex-none rounded-full',
+              agent.running ? 'bg-running vam-breathe' : 'bg-line-strong',
+            ].join(' ')}
+          />
+          <span className="min-w-0 flex-1">
+            <span data-agent-type className="block truncate text-[11.5px] text-ink">
+              {/* No type means no readable meta file beside the transcript, so
+                  the id is the only name this agent has. */}
+              {agent.type ?? `${agent.id} (type unknown)`}
+            </span>
+            <span
+              data-agent-description
+              className="mt-0.5 block truncate text-[10.5px] text-ink-faint"
+            >
+              {/* Truncated, not wrapped: the pane is 408px and a spawn
+                  description is a sentence. The whole roster stays scannable. */}
+              {agent.description ?? 'no description recorded'}
+            </span>
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -664,6 +765,13 @@ export function DetailPanel(props: DetailPanelProps) {
    * presentation toggle in the model every other pane has to carry.
    */
   const [progressOpen, setProgressOpen] = useState(false);
+  /**
+   * Which tab the pane is showing. Component state for the same reason
+   * `progressOpen` is: nothing outside this pane has an opinion about it, and
+   * it survives switching sessions on purpose — an operator who opened Agents
+   * is looking at agents, not at whichever tab the last session left behind.
+   */
+  const [tab, setTab] = useState<Tab>('Response');
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
   useEffect(() => {
@@ -897,7 +1005,7 @@ export function DetailPanel(props: DetailPanelProps) {
             the `progress` section's own counter, and the age is on the session
             card in the sidebar and on the canvas. */}
 
-        <TabBar runningAgents={entry?.session.runningAgents ?? 0} />
+        <TabBar runningAgents={entry?.session.runningAgents ?? 0} current={tab} onSelect={setTab} />
       </div>
 
       {/*
@@ -918,7 +1026,7 @@ export function DetailPanel(props: DetailPanelProps) {
             reports `working` for a session the CLI calls failed, so it is not
             a second opinion worth showing. Naming the gap is the whole of
             what can honestly be said. */}
-        {entry?.session.status === 'failed' && (
+        {tab === 'Response' && entry?.session.status === 'failed' && (
           <p
             data-session-failed
             className="flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-panel px-3 py-2 text-[11px] text-failed leading-[1.45]"
@@ -934,7 +1042,9 @@ export function DetailPanel(props: DetailPanelProps) {
             </Note>
           </p>
         )}
-        {decision === null ? (
+        {tab === 'Agents' ? (
+          <AgentsTab agents={entry?.session.agents} />
+        ) : decision === null ? (
           <p className="text-[11px] text-ink-faint">
             {/* Two different absences. "This session has no steps yet" named a
                 session that did not exist whenever nothing was focused. */}
