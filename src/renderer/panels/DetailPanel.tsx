@@ -795,7 +795,9 @@ const DIFF_CLASS: Record<DiffKind, string> = {
  * string a fence produces — a fence whose content is anything else is rendered
  * exactly as it was.
  */
-function readFence(children: ReactNode): { readonly code: string; readonly lang: string | null } | null {
+function readFence(
+  children: ReactNode,
+): { readonly code: string; readonly lang: string | null } | null {
   const only = Array.isArray(children) && children.length === 1 ? children[0] : children;
   if (!isValidElement<{ className?: string; children?: ReactNode }>(only)) return null;
   const inner = only.props.children;
@@ -818,24 +820,28 @@ function readFence(children: ReactNode): { readonly code: string; readonly lang:
  * colour at all.
  */
 function Fence({ code, lang }: { readonly code: string; readonly lang: HighlightLang }) {
+  // Keyed by BYTE OFFSET, not by list index: offsets are unique even when the
+  // same line or the same token repeats, which in a patch they constantly do.
+  let at = 0;
+  const parts: { readonly key: string; readonly text: string; readonly cls: string }[] = [];
   if (lang === 'diff') {
     const lines = code.split('\n');
-    return (
-      <>
-        {lines.map((line, i) => (
-          // A patch has repeated lines, so the index is part of the identity.
-          <span key={`${i}:${line}`} className={DIFF_CLASS[diffLineKind(line)]}>
-            {i === lines.length - 1 ? line : `${line}\n`}
-          </span>
-        ))}
-      </>
-    );
+    for (const [i, line] of lines.entries()) {
+      const text = i === lines.length - 1 ? line : `${line}\n`;
+      parts.push({ key: `${at}`, text, cls: DIFF_CLASS[diffLineKind(line)] });
+      at += text.length;
+    }
+  } else {
+    for (const tok of tokenizeCode(code, lang)) {
+      parts.push({ key: `${at}`, text: tok.text, cls: SYNTAX_CLASS[tok.kind] });
+      at += tok.text.length;
+    }
   }
   return (
     <>
-      {tokenizeCode(code, lang).map((tok, i) => (
-        <span key={`${i}:${tok.text}`} className={SYNTAX_CLASS[tok.kind]}>
-          {tok.text}
+      {parts.map((part) => (
+        <span key={part.key} className={part.cls}>
+          {part.text}
         </span>
       ))}
     </>

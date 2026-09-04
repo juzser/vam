@@ -8,11 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import {
-  diffLineKind,
-  resolveLang,
-  tokenizeCode,
-} from '../../src/renderer/panels/highlight.js';
+import { diffLineKind, resolveLang, tokenizeCode } from '../../src/renderer/panels/highlight.js';
 
 /** Every tokenizer must be lossless: colour may not eat a character. */
 function joined(code: string, lang: 'shell' | 'ts' | 'json'): string {
@@ -69,11 +65,7 @@ describe('shell', () => {
   });
 
   it('colours control-flow keywords and numbers', () => {
-    expect(kindsOf('if 42; then', 'shell')).toEqual([
-      'keyword:if',
-      'number:42',
-      'keyword:then',
-    ]);
+    expect(kindsOf('if 42; then', 'shell')).toEqual(['keyword:if', 'number:42', 'keyword:then']);
   });
 });
 

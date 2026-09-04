@@ -45,17 +45,77 @@ type Grammar = {
 };
 
 const SHELL_KEYWORDS = [
-  'if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'until', 'do', 'done',
-  'case', 'esac', 'in', 'function', 'return', 'export', 'local', 'set', 'source',
+  'if',
+  'then',
+  'else',
+  'elif',
+  'fi',
+  'for',
+  'while',
+  'until',
+  'do',
+  'done',
+  'case',
+  'esac',
+  'in',
+  'function',
+  'return',
+  'export',
+  'local',
+  'set',
+  'source',
 ];
 
 const TS_KEYWORDS = [
-  'const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while',
-  'do', 'switch', 'case', 'default', 'break', 'continue', 'new', 'class',
-  'extends', 'import', 'export', 'from', 'as', 'async', 'await', 'try', 'catch',
-  'finally', 'throw', 'typeof', 'instanceof', 'interface', 'type', 'enum',
-  'implements', 'readonly', 'public', 'private', 'protected', 'static', 'this',
-  'null', 'undefined', 'true', 'false', 'void', 'yield', 'delete', 'in', 'of',
+  'const',
+  'let',
+  'var',
+  'function',
+  'return',
+  'if',
+  'else',
+  'for',
+  'while',
+  'do',
+  'switch',
+  'case',
+  'default',
+  'break',
+  'continue',
+  'new',
+  'class',
+  'extends',
+  'import',
+  'export',
+  'from',
+  'as',
+  'async',
+  'await',
+  'try',
+  'catch',
+  'finally',
+  'throw',
+  'typeof',
+  'instanceof',
+  'interface',
+  'type',
+  'enum',
+  'implements',
+  'readonly',
+  'public',
+  'private',
+  'protected',
+  'static',
+  'this',
+  'null',
+  'undefined',
+  'true',
+  'false',
+  'void',
+  'yield',
+  'delete',
+  'in',
+  'of',
 ];
 
 const GRAMMARS: Record<Exclude<HighlightLang, 'diff'>, Grammar> = {
@@ -85,7 +145,11 @@ const GRAMMARS: Record<Exclude<HighlightLang, 'diff'>, Grammar> = {
 /** The fence infostring an agent wrote, mapped to a tokenizer, or null. */
 export function resolveLang(info: string | null): HighlightLang | null {
   if (info === null) return null;
-  const lang = info.trim().toLowerCase().split(/[\s:,]/)[0] ?? '';
+  const lang =
+    info
+      .trim()
+      .toLowerCase()
+      .split(/[\s:,]/)[0] ?? '';
   switch (lang) {
     case 'sh':
     case 'bash':

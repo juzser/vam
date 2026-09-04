@@ -33,7 +33,16 @@ function lineClass(root: HTMLElement, prefix: string): string {
   return span.className;
 }
 
-const DIFF = ['```diff', '--- a/x.ts', '+++ b/x.ts', '@@ -1,2 +1,2 @@', '-old', '+new', ' same', '```'].join('\n');
+const DIFF = [
+  '```diff',
+  '--- a/x.ts',
+  '+++ b/x.ts',
+  '@@ -1,2 +1,2 @@',
+  '-old',
+  '+new',
+  ' same',
+  '```',
+].join('\n');
 
 describe('a fenced diff is four colours, not one grey', () => {
   it('paints +, - and @@ distinctly', () => {
@@ -53,7 +62,9 @@ describe('a fenced diff is four colours, not one grey', () => {
   });
 
   it('loses no character of the patch', () => {
-    expect(out(DIFF).querySelector('pre')?.textContent).toContain('@@ -1,2 +1,2 @@\n-old\n+new\n same');
+    expect(out(DIFF).querySelector('pre')?.textContent).toContain(
+      '@@ -1,2 +1,2 @@\n-old\n+new\n same',
+    );
   });
 });
 
@@ -86,7 +97,9 @@ describe('colour did not make agent output executable', () => {
 
   it('renders markup inside a fence as text, in every language', () => {
     for (const head of ['```ts', '```json', '```bash', '```diff', '```rust']) {
-      const root = out([head, '<img src=x onerror="alert(1)"><script>alert(2)</script>', '```'].join('\n'));
+      const root = out(
+        [head, '<img src=x onerror="alert(1)"><script>alert(2)</script>', '```'].join('\n'),
+      );
       expect(root.querySelector('img')).toBeNull();
       expect(root.querySelector('script')).toBeNull();
       expect(root.querySelector('pre')?.textContent).toContain('<img src=x onerror="alert(1)">');
