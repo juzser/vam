@@ -13,46 +13,30 @@
  *
  * `test/panels/action-parity.test.tsx` holds the two lists to each other:
  * every entry here has an element on screen, in this order.
+ *
+ * It holds ONE entry today. The proposed commands used to contribute a stop
+ * each, drawn as a strip above the composer; the operator asked for the strip
+ * to go and for the same commands to be offered by the `!` typeahead inside
+ * the prompt box instead. A suggestion list that exists only while it is being
+ * typed into is not somewhere a pane cursor can rest, so the stops went with
+ * the rows -- rather than being left behind, which is precisely how the
+ * governance queue became an invisible button.
  */
 
-import type { Command } from '../domain/model.js';
-
-export type CanvasAction =
-  | {
-      readonly kind: 'command';
-      readonly id: string;
-      /** The row this entry belongs to — what `i` puts the keyboard on. */
-      readonly rowId: string;
-      readonly label: string;
-    }
-  | {
-      readonly kind: 'prompt';
-      readonly id: 'prompt';
-      readonly rowId: null;
-      readonly label: string;
-    };
+export type CanvasAction = {
+  readonly kind: 'prompt';
+  readonly id: 'prompt';
+  readonly label: string;
+};
 
 /**
  * The pane's actions, top to bottom.
  *
- * The prompt is always last and always present — it is the one action that does
- * not depend on the step having proposed anything, so a pane with no commands
- * still has somewhere for `I` to land.
+ * The prompt does not depend on the step having proposed anything, so `I`
+ * always has somewhere to land and something to look at when it lands.
  */
-export function buildActions(commands: readonly Command[]): CanvasAction[] {
-  const actions: CanvasAction[] = [];
-
-  for (const command of commands) {
-    actions.push({
-      kind: 'command',
-      id: `command:${command.id}`,
-      rowId: command.id,
-      label: command.label,
-    });
-  }
-
-  actions.push({ kind: 'prompt', id: 'prompt', rowId: null, label: 'write a prompt' });
-  return actions;
+export function buildActions(): CanvasAction[] {
+  return [{ kind: 'prompt', id: 'prompt', label: 'write a prompt' }];
 }
 
 /**

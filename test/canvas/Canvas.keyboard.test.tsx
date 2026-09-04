@@ -565,16 +565,23 @@ describe('the detail panel', () => {
     expect(promptTarget()).toBe('b1');
   });
 
-  it('lists the bash commands the agent proposed, with their text', () => {
+  it('offers the agent’s commands when a ! is typed, and not before', () => {
+    // The strip that used to draw them on every turn is gone at the operator's
+    // request. The extraction behind them is untouched -- this is the same
+    // list, asked for.
     render(<Canvas model={MODEL} />);
     press('G'); // beta/b1 carries a command
-    expect(screen.getByText('sign')).toBeTruthy();
+    expect(screen.queryByText('smith plan sign plan-v2.json')).toBeNull();
+    press('i');
+    typeInto(promptInput() as HTMLTextAreaElement, '!');
     expect(screen.getByText('smith plan sign plan-v2.json')).toBeTruthy();
   });
 
   it('says it will not run a command itself', () => {
     render(<Canvas model={MODEL} />);
     press('G');
+    press('i');
+    typeInto(promptInput() as HTMLTextAreaElement, '!');
     expect(screen.getByText(/vam does not run them/)).toBeTruthy();
   });
 
@@ -1050,13 +1057,14 @@ describe('handing the keyboard to the right pane', () => {
     expect(mode()).toBe('PROMPT');
   });
 
-  it('Enter on a command copies it rather than running it', async () => {
-    stubClipboard();
+  it('Enter in the action pane opens the composer, the only stop left in it', async () => {
+    // The command rows were the pane's other stops, and Enter on one copied
+    // it. They went with the strip; the prompt is what remains.
     render(<Canvas model={MODEL} />);
     press('G');
     press('I');
     await pressAsync('Enter');
-    expect(screen.getByText(/copied "sign"/)).toBeTruthy();
+    expect(mode()).toBe('PROMPT');
   });
 
   it('h leaves the pane the same way H does', () => {
@@ -1341,6 +1349,9 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
     await submit(source, 'hello');
     expect(calls).toEqual([{ sessionId: 'a1', prompt: 'hello' }]);
     expect(statusBar()).toContain('recorded, not sent to the agent');
+    // Both directions, so the two outcomes cannot collapse into one wording
+    // that happens to contain the word the assertion looked for.
+    expect(statusBar()).not.toContain('sent into the running session');
     expect(statusBar()).not.toContain('sent into the running session');
     expect(wrote.count).toBe(1);
   });

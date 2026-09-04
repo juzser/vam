@@ -11,8 +11,14 @@
  * because a stray drag selecting half the canvas is noise; here the text is the
  * point and copying part of an output is a reasonable thing to want.
  *
- * The composer at the bottom is a prompt box, plus whatever bash commands the
- * session handed back for you to run by hand.
+ * The composer at the bottom is a prompt box. The bash commands a turn
+ * proposed used to be drawn in a strip above it, on every turn that mentioned
+ * one; the operator asked for the strip to go and for the same commands to be
+ * offered on demand instead, so typing `!` in the box opens them as a
+ * suggestion list and picking one writes it into the prompt. The extraction is
+ * unchanged and unwidened (`main/sources/claude-code/commands.ts`) -- this is a
+ * second presentation of that list, never a second rule -- and `bangQuery`
+ * below carries the reasoning for the keys.
  *
  * There is no option chooser above the composer, and there should not be one.
  * A picker stood here briefly, drawn from the mockup and fed by a placeholder
@@ -66,6 +72,7 @@ import { isValidElement, type ReactNode, useEffect, useRef, useState } from 'rea
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type {
+  Command,
   Decision,
   PullRequest,
   PullRequestList,
@@ -242,6 +249,63 @@ const PANE_STATUS_BREATHES: Readonly<Record<SessionStatus, boolean>> = {
   failed: false,
 };
 
+/**
+ * What the operator is typing after a `!` that begins a line, or `null` when
+ * no suggestion list should be open.
+ *
+ * LINE START ONLY, and that is the whole rule. `commands.ts` recognises a
+ * proposed command only when `!` begins a LINE -- a deliberately narrow rule,
+ * with every inference clause removed at the operator's request -- so a `!`
+ * inside a sentence is not a command anywhere else in vam. Completing one
+ * there would invent a second, wider rule for the same glyph, in the one place
+ * where the text is about to be sent to an agent.
+ *
+ * The query stops at the first whitespace for the same reason: a command is
+ * one line and a list that kept matching while the operator wrote prose would
+ * hang over text nobody is choosing from.
+ */
+export function bangQuery(text: string, caret: number): string | null {
+  const before = text.slice(0, Math.max(0, caret));
+  const typed = before.slice(before.lastIndexOf('\n') + 1);
+  if (!typed.startsWith('!')) return null;
+  const query = typed.slice(1);
+  return /\s/.test(query) ? null : query;
+}
+
+/**
+ * The proposed commands a query matches, on either half a person might
+ * remember: the label the agent gave it, or the command itself.
+ *
+ * An empty query matches everything -- typing `!` alone is the operator asking
+ * what there is, not asking for nothing.
+ */
+export function matchCommands(commands: readonly Command[], query: string): readonly Command[] {
+  const needle = query.toLowerCase();
+  return commands.filter(
+    (command) =>
+      command.label.toLowerCase().includes(needle) ||
+      command.command.toLowerCase().includes(needle),
+  );
+}
+
+/**
+ * Replace the `!`-token the caret sits in with the chosen command, keeping the
+ * `!` (the operator typed it, and the agent's own line carries it) and keeping
+ * whatever follows the caret on that line.
+ */
+export function applyBang(
+  text: string,
+  caret: number,
+  command: string,
+): { readonly text: string; readonly caret: number } {
+  const start = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+  const inserted = `!${command}`;
+  return {
+    text: text.slice(0, start) + inserted + text.slice(caret),
+    caret: start + inserted.length,
+  };
+}
+
 export type DetailPanelProps = {
   readonly entry: SessionEntry | null;
   /** The step the canvas has focused — the newest one unless `h`/`l` moved. */
@@ -249,20 +313,6 @@ export type DetailPanelProps = {
   readonly draft: string;
   readonly onDraftChange: (value: string) => void;
   readonly onSubmit: () => void;
-  /** Copy ONE command -- what the per-row `copy` button does. */
-  readonly onCopyCommand: (commandId: string) => void;
-  /**
-   * Copy every command, newline-joined -- what pressing `yy` does, and so the
-   * only behaviour allowed to wear the `yy` glyph.
-   */
-  readonly onCopyAllCommands: () => void;
-  /**
-   * The command row whose `copy` control should take the keyboard -- what `i`
-   * asks for when the cursor is on a command row.
-   */
-  readonly focusCommandId?: string | null;
-  /** Cleared once the focus has landed, so a second `i` on the same row asks again. */
-  readonly onCommandFocused?: () => void;
   /** True while the prompt box owns the keyboard. */
   readonly composing: boolean;
   readonly onCompose: () => void;
@@ -1005,10 +1055,6 @@ export function DetailPanel(props: DetailPanelProps) {
     draft,
     onDraftChange,
     onSubmit,
-    onCopyCommand,
-    onCopyAllCommands,
-    focusCommandId = null,
-    onCommandFocused,
     composing,
     onCompose,
     onStopComposing,
@@ -1022,17 +1068,6 @@ export function DetailPanel(props: DetailPanelProps) {
   } = props;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  /**
-   * The `copy` button of each command row, by command id, so `i` can hand one
-   * of them the keyboard. A ref map rather than state: which element is which
-   * is not something a render depends on.
-   */
-  const copyRefs = useRef(new Map<string, HTMLButtonElement>());
-  useEffect(() => {
-    if (focusCommandId === null) return;
-    copyRefs.current.get(focusCommandId)?.focus();
-    onCommandFocused?.();
-  }, [focusCommandId, onCommandFocused]);
   /**
    * `progress` is context, not the thing you read, so it opens showing no turn
    * at all — the newest five are one keystroke away.
@@ -1164,6 +1199,29 @@ export function DetailPanel(props: DetailPanelProps) {
   }, [focusKey, output]);
 
   const commands = decision?.commands ?? [];
+  /**
+   * The `!` typeahead's three pieces of state. `caret` is read off the box on
+   * every change rather than mirrored from the draft: which token is being
+   * typed is a property of where the caret is, and a draft alone cannot say.
+   * `dismissed` is what Escape sets, and any further typing clears -- Escape
+   * puts the list away without touching the text, so the operator can go on
+   * writing their own command.
+   */
+  const [caret, setCaret] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
+  const [pick, setPick] = useState(0);
+  const query = composing ? bangQuery(draft, caret) : null;
+  const matches = query === null ? [] : matchCommands(commands, query);
+  // Closed when nothing matches. A list that stayed to say "no matches" is a
+  // stale box over the composer; its absence already says it.
+  const suggesting = !dismissed && matches.length > 0;
+  const picked = Math.min(pick, matches.length - 1);
+  const acceptSuggestion = (command: Command) => {
+    const next = applyBang(draft, caret, command.command);
+    onDraftChange(next.text);
+    setCaret(next.caret);
+    setDismissed(true);
+  };
   /**
    * Whether the decision on screen is the one the session is working on.
    * `decisions` is newest first (model.ts), so the newest is the live turn --
@@ -1587,72 +1645,6 @@ export function DetailPanel(props: DetailPanelProps) {
                     )}
                   </p>
                 )}
-
-                {commands.length > 0 && (
-                  <div className="mt-1 flex flex-col gap-2">
-                    <div className="flex items-center gap-2 text-[10.5px] text-ink-faint">
-                      <span>the agent proposed these — vam does not run them</span>
-                      {/* The keystroke's glyph goes on the keystroke's
-                          behaviour: `yy` copies ALL of them, newline-joined
-                          (`chords.ts` -> `copyAllCommands`). It sat on the row
-                          button, which copies one, and with several commands
-                          the two diverged silently at the clipboard. */}
-                      <button
-                        type="button"
-                        data-commands-copy-all
-                        onClick={onCopyAllCommands}
-                        title={`copy all ${commands.length} commands`}
-                        className="ml-auto cursor-pointer rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-[10px] text-ink-faint hover:bg-raised hover:text-ink"
-                      >
-                        yy
-                      </button>
-                    </div>
-                    {commands.map((command, i) => (
-                      <div
-                        key={command.id}
-                        // The id `buildActions` gives this row. It is what lets
-                        // a test hold the walkable list and the drawn one to
-                        // each other -- see test/panels/action-parity.test.tsx.
-                        data-action-id={`command:${command.id}`}
-                        className={[
-                          'rounded-[9px] border bg-canvas px-3 py-2.5',
-                          active && actionIndex === i ? 'border-waiting' : 'border-line',
-                        ].join(' ')}
-                      >
-                        <div className="flex items-center gap-2 pb-1.5">
-                          <span className="font-mono text-[10px] text-ink-ghost">{i + 1}</span>
-                          <span className="truncate text-[11px] text-ink">{command.label}</span>
-                          {/* One copy affordance per row, saying what it
-                              does. The `run` button beside it also only
-                              copied -- contradicting the caption above it and
-                              the rule in model.ts, and the honest status only
-                              arrived after the click. */}
-                          <button
-                            type="button"
-                            data-command-copy
-                            ref={(element) => {
-                              if (element === null) {
-                                copyRefs.current.delete(command.id);
-                              } else {
-                                copyRefs.current.set(command.id, element);
-                              }
-                            }}
-                            onClick={() => onCopyCommand(command.id)}
-                            title={`copy: ${command.label}`}
-                            className="ml-auto cursor-pointer rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-[10px] text-ink-faint hover:bg-raised hover:text-ink"
-                          >
-                            copy
-                          </button>
-                        </div>
-                        {/* Wrapped, not scrolled. A command you cannot see the end
-                          of is one you cannot check before running. */}
-                        <pre className="select-text whitespace-pre-wrap break-all font-mono text-[10.5px] text-ink-dim leading-[1.6]">
-                          {command.command}
-                        </pre>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </section>
           </>
@@ -1665,12 +1657,50 @@ export function DetailPanel(props: DetailPanelProps) {
             to go, and it is gone from `buildActions` too: it went on
             contributing keyboard stops and a live `Enter` to this pane long
             after the rows themselves stopped being drawn. */}
+        {/* The `!` typeahead, above the box it completes into -- where the
+            standing command strip used to be, and only while it is being
+            asked for. The strip drew every proposed command on every turn
+            that mentioned one; this draws the same list, from the same
+            extraction, at the moment the operator types the glyph it belongs
+            to. */}
+        {suggesting && (
+          <div
+            data-bang-suggest
+            className="flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-panel px-1.5 py-1.5"
+          >
+            <p className="px-1.5 pb-0.5 text-[10px] text-ink-faint">
+              the agent proposed these — vam does not run them; Enter picks one, Esc keeps what you
+              typed
+            </p>
+            {matches.map((command, index) => (
+              <button
+                key={command.id}
+                type="button"
+                data-bang-suggestion
+                data-selected={index === picked ? 'true' : undefined}
+                onClick={() => acceptSuggestion(command)}
+                className={[
+                  'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
+                  index === picked ? 'bg-raised' : 'hover:bg-raised',
+                ].join(' ')}
+              >
+                <span className="max-w-full truncate text-[11px] text-ink">{command.label}</span>
+                <span
+                  data-bang-command
+                  className="max-w-full truncate font-mono text-[10.5px] text-ink-dim"
+                >
+                  {command.command}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         <div
           data-prompt-box
           data-action-id="prompt"
           className={[
             'flex flex-col gap-2.5 rounded-[10px] border bg-panel px-3 py-2.5',
-            active && actionIndex === commands.length ? 'border-waiting' : 'border-line-loud',
+            active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
           ].join(' ')}
         >
           {/* Multiline, because a prompt is prose and a one-line slot hides
@@ -1683,7 +1713,14 @@ export function DetailPanel(props: DetailPanelProps) {
               value={draft}
               readOnly={!composing}
               onFocus={onCompose}
-              onChange={(event) => onDraftChange(event.target.value)}
+              onChange={(event) => {
+                setCaret(event.target.selectionStart ?? event.target.value.length);
+                // Typing is how a dismissed list comes back, and how the
+                // highlight returns to the top of a freshly filtered one.
+                setDismissed(false);
+                setPick(0);
+                onDraftChange(event.target.value);
+              }}
               onPaste={(event) => {
                 // A paste event carries its own `DataTransfer`, so this needs
                 // no permission and no trip through main -- unlike
@@ -1700,6 +1737,36 @@ export function DetailPanel(props: DetailPanelProps) {
                 setImages([...images, ...outcome.images]);
               }}
               onKeyDown={(event) => {
+                // THE ENTER COLLISION, decided here. With the suggestion list
+                // open Enter ACCEPTS and sends nothing; only a closed list
+                // lets Enter through to `onSubmit`. Since the reply PR a send
+                // really delivers — into a tmux pane for a session vam
+                // started, with a CLI fallback — so an Enter that completed
+                // the word and shipped it as well would put a half-typed
+                // command into a running agent. Escape closes the list and NOT the composer,
+                // and leaves the typed `!` where it is: the operator may be
+                // writing a command of their own, and a second Escape still
+                // hands the keyboard back to the sidebar.
+                const suggestion = suggesting ? matches[picked] : undefined;
+                if (suggestion !== undefined) {
+                  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    const delta = event.key === 'ArrowDown' ? 1 : -1;
+                    // Clamped, not wrapped, like every other cursor in this app.
+                    setPick(Math.min(Math.max(0, picked + delta), matches.length - 1));
+                    return;
+                  }
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    acceptSuggestion(suggestion);
+                    return;
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setDismissed(true);
+                    return;
+                  }
+                }
                 // The window listener ignores keys typed in a textarea, so this
                 // box binds the ones it needs itself. Shift+Enter is left alone
                 // — it is the newline the box became multiline to allow.

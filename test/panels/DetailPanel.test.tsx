@@ -15,6 +15,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
@@ -295,8 +296,6 @@ function draw(over: Partial<DetailPanelProps> = {}) {
     draft: '',
     onDraftChange: () => {},
     onSubmit: () => {},
-    onCopyCommand: () => {},
-    onCopyAllCommands: () => {},
     composing: false,
     onCompose: () => {},
     onStopComposing: () => {},
@@ -317,8 +316,6 @@ function drawFor(over: Partial<DetailPanelProps> = {}) {
     draft: '',
     onDraftChange: () => {},
     onSubmit: () => {},
-    onCopyCommand: () => {},
-    onCopyAllCommands: () => {},
     composing: false,
     onCompose: () => {},
     onStopComposing: () => {},
@@ -1368,13 +1365,29 @@ describe('the pane’s minted surfaces are token pairs, not dark-only hexes', ()
  */
 
 /**
- * The command strip, and the two sentences that stand in for a missing answer.
+ * The `!` typeahead, in place of the command strip that used to stand above
+ * the composer.
  *
- * `Decision.commands` was hardcoded empty until the adapter learned to carry
- * one, so every branch below shipped without ever having rendered against real
- * data. Four defects a UI review found, each pinned here.
+ * WHAT CHANGED AND WHY. The pane used to draw every `!` command the agent's
+ * turn proposed, always, in a strip above the prompt box -- rows the operator
+ * had not asked for, occupying the composer's space on every turn that
+ * mentioned a command. The operator asked for the strip to go and for the same
+ * commands to arrive on demand instead: typing `!` in the prompt box opens the
+ * list, and picking one writes it into the prompt.
+ *
+ * The extraction behind it is unchanged and unwidened
+ * (`main/sources/claude-code/commands.ts`): a line beginning `!` followed by
+ * whitespace and a non-space character, and nothing inferred. This is a second
+ * PRESENTATION of that list, never a second rule.
+ *
+ * THE ENTER COLLISION IS THE LOAD-BEARING PART. Enter sends, and since the reply PR it
+ * really delivers -- into a tmux pane for sessions vam started, with a CLI
+ * fallback. So with the list open Enter must ACCEPT, and send nothing: an
+ * Enter that both completed the word and shipped it would put a half-typed
+ * command into a live session. The two outcomes are asserted as two outcomes,
+ * not as two status strings.
  */
-describe('the command strip promises only what it does', () => {
+describe('the ! typeahead replaces the standing command strip', () => {
   const COMMANDS = [
     { id: 'c1', label: 'push the branch', command: 'git push -u origin work' },
     { id: 'c2', label: 'open the PR', command: 'gh pr create --fill' },
@@ -1388,53 +1401,160 @@ describe('the command strip promises only what it does', () => {
     commands: COMMANDS,
   };
 
-  /** What `Canvas.copyCommand` puts on the clipboard, for one id. */
-  const copyOne = (id: string) => COMMANDS.find((c) => c.id === id)?.command ?? '';
-  /** What `Canvas.copyAllCommands` puts on the clipboard. */
-  const copyAll = () => COMMANDS.map((c) => c.command).join('\n');
+  /** The suggestion rows on screen, by the command text each one offers. */
+  const suggested = () =>
+    all('[data-bang-suggestion]').map((row) =>
+      (row.querySelector('[data-bang-command]')?.textContent ?? '').trim(),
+    );
+  const selected = () =>
+    all('[data-bang-suggestion]')
+      .filter((row) => row.getAttribute('data-selected') === 'true')
+      .map((row) => (row.querySelector('[data-bang-command]')?.textContent ?? '').trim());
+  const box = () =>
+    q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]') as HTMLTextAreaElement;
 
-  const rowCopies = () => all('[data-command-copy]') as HTMLButtonElement[];
-  const copyAllButton = () => q<HTMLButtonElement>('[data-commands-copy-all]');
+  /**
+   * The composer with its draft held in real state, because a typeahead is a
+   * conversation between what is typed and what is offered: a fixed `draft`
+   * prop can only ever show one frame of it.
+   */
+  function Composer(props: { readonly onSubmit: () => void }) {
+    const [draft, setDraft] = useState('');
+    return (
+      <DetailPanel
+        entry={ENTRY}
+        decision={WITH_COMMANDS}
+        draft={draft}
+        onDraftChange={setDraft}
+        onSubmit={props.onSubmit}
+        composing={true}
+        onCompose={() => {}}
+        onStopComposing={() => {}}
+        active={false}
+        actionIndex={0}
+        width={408}
+        resizeHandle={null}
+      />
+    );
+  }
 
-  it('labels the per-row button `copy`, and gives `yy` to the copy-all it names', () => {
-    // The defect: the row button printed `yy` and copied ONE command, while
-    // pressing `yy` copies ALL of them. With several commands the two diverge
-    // silently, at the clipboard, long after the operator has moved on. A
-    // control printing `yy` must do what pressing `yy` does.
-    let clipboard = '';
-    draw({
-      decision: WITH_COMMANDS,
-      onCopyCommand: (id) => {
-        clipboard = copyOne(id);
-      },
-      onCopyAllCommands: () => {
-        clipboard = copyAll();
-      },
-    });
+  /** Type `text` into the prompt box, caret at its end. */
+  function type(text: string) {
+    fireEvent.change(box(), { target: { value: text } });
+  }
 
-    expect(rowCopies()).toHaveLength(3);
-    for (const button of rowCopies()) expect(button.textContent).toBe('copy');
-    // No row control claims the keystroke's glyph.
-    for (const button of rowCopies()) expect(button.textContent).not.toContain('yy');
+  function composer() {
+    const sent: string[] = [];
+    render(<Composer onSubmit={() => sent.push('sent')} />);
+    return sent;
+  }
 
-    fireEvent.click(rowCopies()[1] as HTMLButtonElement);
-    expect(clipboard).toBe('gh pr create --fill');
-
-    const yy = copyAllButton();
-    expect(yy?.textContent).toContain('yy');
-    fireEvent.click(yy as HTMLButtonElement);
-    expect(clipboard).toBe('git push -u origin work\ngh pr create --fill\ngh run watch');
+  it('draws no command strip, and nothing to copy from one', () => {
+    // The strip's own hooks, gone: a box the operator asked to remove that is
+    // merely hidden behind a class is still there for every keyboard and
+    // every screen reader that walks the DOM.
+    draw({ decision: WITH_COMMANDS });
+    expect(all('[data-command-copy]')).toHaveLength(0);
+    expect(q('[data-commands-copy-all]')).toBeNull();
+    expect(q('[data-bang-suggest]')).toBeNull();
+    expect(document.body.textContent ?? '').not.toContain('gh pr create --fill');
   });
 
-  it('draws no button labelled `run`, because vam does not run them', () => {
-    // The caption 30px above it says vam does not run them, and the status
-    // after the click said so too. Only the label disagreed, and the label is
-    // the part read BEFORE the click.
-    draw({ decision: WITH_COMMANDS });
-    const labels = all('button').map((b) => (b.textContent ?? '').trim());
-    expect(labels).not.toContain('run');
-    // One copy affordance per row, not two buttons that both copy.
-    expect(rowCopies()).toHaveLength(3);
+  it('offers nothing until a ! begins a line, and everything once it does', () => {
+    composer();
+    type('ship it');
+    expect(q('[data-bang-suggest]')).toBeNull();
+    type('!');
+    expect(suggested()).toEqual(['git push -u origin work', 'gh pr create --fill', 'gh run watch']);
+  });
+
+  it('stays shut for a ! in the middle of a line, and opens for one starting the next', () => {
+    // The extractor reads a command as a whole LINE. A `!` inside a sentence
+    // is not a command anywhere else in vam, so completing one there would
+    // invent a wider rule for the same glyph.
+    composer();
+    type('run this !');
+    expect(q('[data-bang-suggest]')).toBeNull();
+    type('run this\n!');
+    expect(suggested()).toHaveLength(3);
+  });
+
+  it('narrows on what is typed after the !, matching label or command', () => {
+    composer();
+    type('!pr');
+    expect(suggested()).toEqual(['gh pr create --fill']);
+    type('!push');
+    expect(suggested()).toEqual(['git push -u origin work']);
+  });
+
+  it('disappears when nothing matches rather than sitting there stale', () => {
+    composer();
+    type('!gh');
+    expect(suggested()).toHaveLength(2);
+    type('!ghzz');
+    expect(q('[data-bang-suggest]')).toBeNull();
+  });
+
+  it('writes the picked command into the prompt, keeping the rest of the line', () => {
+    composer();
+    type('!pr');
+    fireEvent.click(all('[data-bang-suggestion]')[0] as HTMLElement);
+    expect(box().value).toBe('!gh pr create --fill');
+    expect(q('[data-bang-suggest]')).toBeNull();
+  });
+
+  it('walks the list with the arrow keys, clamped at both ends', () => {
+    composer();
+    type('!gh');
+    expect(selected()).toEqual(['gh pr create --fill']);
+    fireEvent.keyDown(box(), { key: 'ArrowDown' });
+    expect(selected()).toEqual(['gh run watch']);
+    fireEvent.keyDown(box(), { key: 'ArrowDown' });
+    expect(selected()).toEqual(['gh run watch']);
+    fireEvent.keyDown(box(), { key: 'ArrowUp' });
+    fireEvent.keyDown(box(), { key: 'ArrowUp' });
+    expect(selected()).toEqual(['gh pr create --fill']);
+  });
+
+  it('accepts on Enter and sends nothing', () => {
+    // The negative is the point. A test that only read the status line would
+    // pass while the prompt went to a live session as well.
+    const sent = composer();
+    type('!pr');
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(sent).toEqual([]);
+    expect(box().value).toBe('!gh pr create --fill');
+  });
+
+  it('sends on Enter once the list is closed', () => {
+    const sent = composer();
+    type('ship it');
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(sent).toEqual(['sent']);
+  });
+
+  it('sends on Enter after Escape dismissed the list, leaving the typed ! alone', () => {
+    // Escape puts the list away and NOT the text: the operator may be typing a
+    // command of their own, and deleting it would be the app overruling them.
+    const sent = composer();
+    type('!pr');
+    fireEvent.keyDown(box(), { key: 'Escape' });
+    expect(q('[data-bang-suggest]')).toBeNull();
+    expect(box().value).toBe('!pr');
+    expect(sent).toEqual([]);
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(sent).toEqual(['sent']);
+  });
+
+  it('keeps the composer open when Escape only dismissed the list', () => {
+    // The second Escape is the one that hands the keyboard back to the
+    // sidebar; the first must not, or dismissing a suggestion would cost the
+    // operator their place in the prompt.
+    const sent = composer();
+    type('!pr');
+    fireEvent.keyDown(box(), { key: 'Escape' });
+    expect(box().readOnly).toBe(false);
+    expect(sent).toEqual([]);
   });
 });
 

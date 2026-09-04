@@ -1,39 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { buildActions, clampIndex } from '../../src/renderer/canvas/actions.js';
-import type { Command } from '../../src/renderer/domain/model.js';
-
-const command = (id: string): Command => ({ id, label: id, command: `run ${id}` });
 
 describe('buildActions', () => {
-  it('always ends with the prompt, even with nothing else to do', () => {
+  it('is the prompt, and only the prompt', () => {
     // The one action that does not depend on the step having proposed
     // anything, so `I` always has somewhere to land.
-    expect(buildActions([]).map((a) => a.kind)).toEqual(['prompt']);
+    expect(buildActions().map((a) => a.kind)).toEqual(['prompt']);
   });
 
   it('holds nothing the pane does not draw', () => {
     // It used to hold two stops per waivable finding and two per lesson
     // candidate, from a governance queue the pane had stopped rendering. The
     // cursor walked them invisibly and `Enter` filed a real decision with the
-    // factory. Only commands and the prompt are drawn, so only those are here;
-    // test/panels/action-parity.test.tsx checks that against the DOM.
-    const kinds = new Set(buildActions([command('c-1'), command('c-2')]).map((a) => a.kind));
-    expect([...kinds].sort()).toEqual(['command', 'prompt']);
+    // factory. It then held one per proposed command, until the operator asked
+    // for the command strip to go: those commands are now offered by the `!`
+    // typeahead inside the prompt box, which exists only while it is being
+    // typed into and so is nowhere a pane cursor can rest. The rule is the
+    // same one either way -- an action nothing draws is an invisible button --
+    // and test/panels/action-parity.test.tsx checks it against the DOM.
+    expect(buildActions().map((a) => a.id)).toEqual(['prompt']);
   });
 
-  it('keeps one stop per command, in the order they were proposed', () => {
-    // A command has one thing to do, and the order matches the DOM so `j`
-    // moves down the screen rather than around it.
-    const actions = buildActions([command('c-1'), command('c-2')]);
-    expect(actions.map((a) => a.id)).toEqual(['command:c-1', 'command:c-2', 'prompt']);
-  });
-
-  it('gives every action a distinct id, and names the row it belongs to', () => {
-    // `i` puts the keyboard on rowId's own control.
-    const actions = buildActions([command('c-1'), command('c-2')]);
+  it('gives every action a distinct id', () => {
+    const actions = buildActions();
     expect(new Set(actions.map((a) => a.id)).size).toBe(actions.length);
-    expect(actions[0]?.rowId).toBe('c-1');
-    expect(actions[2]?.rowId).toBeNull();
   });
 });
 

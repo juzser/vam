@@ -240,8 +240,6 @@ describe('DetailPanel active-pane signal survives with the handle mounted (AC-6 
       draft: '',
       onDraftChange: noop,
       onSubmit: noop,
-      onCopyCommand: noop,
-      onCopyAllCommands: noop,
       composing: false,
       onCompose: noop,
       onStopComposing: noop,

@@ -55,8 +55,6 @@ const MODEL: CanvasModel = {
 };
 
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
-const copyButtons = () => [...document.querySelectorAll<HTMLButtonElement>('[data-command-copy]')];
-const copyAllButton = () => document.querySelector<HTMLButtonElement>('[data-commands-copy-all]');
 const promptInput = () =>
   document.querySelector<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
 
@@ -69,12 +67,6 @@ function press(key: string) {
 async function pressAsync(key: string) {
   await act(async () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-  });
-}
-
-async function click(element: Element) {
-  await act(async () => {
-    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
 }
 
@@ -150,55 +142,17 @@ afterEach(() => {
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
 });
 
-describe('copying a command actually copies it', () => {
-  it('sends the row’s command over the Electron bridge and says so', async () => {
-    const bridge = installBridge();
-    render(<Canvas model={MODEL} />);
-    await click(copyButtons()[0] as Element);
-    expect(bridge.written).toEqual(['smith plan sign plan-v2.json']);
-    expect(statusBar()).toContain('copied');
-  });
-
-  it('does not claim a copy the bridge refused', async () => {
-    installBridge(false);
-    render(<Canvas model={MODEL} />);
-    await click(copyButtons()[0] as Element);
-    expect(statusBar()).not.toContain('copied');
-    expect(statusBar()).toContain('sign');
-  });
-
-  it('does not claim a copy the bridge threw on', async () => {
-    installBridge(new Error('ipc is gone'));
-    render(<Canvas model={MODEL} />);
-    await click(copyButtons()[0] as Element);
-    expect(statusBar()).not.toContain('copied');
-  });
-
-  it('falls back to navigator.clipboard in the browser build', async () => {
-    const web = installWebClipboard('ok');
-    render(<Canvas model={MODEL} />);
-    await click(copyButtons()[1] as Element);
-    expect(web.written).toEqual(['smith gate run']);
-    expect(statusBar()).toContain('copied');
-  });
-
-  it('does not claim a copy navigator.clipboard rejected', async () => {
-    installWebClipboard('reject');
-    render(<Canvas model={MODEL} />);
-    await click(copyButtons()[0] as Element);
-    expect(statusBar()).not.toContain('copied');
-  });
-
-  it('does not claim a copy when there is no clipboard at all', async () => {
-    installWebClipboard('absent');
-    render(<Canvas model={MODEL} />);
-    await click(copyButtons()[0] as Element);
-    expect(statusBar()).not.toContain('copied');
-  });
-});
-
+/**
+ * `yy` is the whole copy surface now.
+ *
+ * The per-row `copy` buttons went with the command strip the operator asked to
+ * remove; the commands themselves are offered by the `!` typeahead inside the
+ * composer, which writes one into the prompt rather than onto the clipboard.
+ * The chord survives it: copying every proposed command is a keyboard action,
+ * not a thing that needed a button on screen.
+ */
 describe('yy copies every command', () => {
-  it('writes them newline-joined and says how many', async () => {
+  it('writes them newline-joined over the Electron bridge and says how many', async () => {
     const bridge = installBridge();
     render(<Canvas model={MODEL} />);
     await pressAsync('y');
@@ -207,7 +161,7 @@ describe('yy copies every command', () => {
     expect(statusBar()).toContain('copied 2 commands');
   });
 
-  it('does not claim it when the write failed', async () => {
+  it('does not claim it when the bridge refused', async () => {
     installBridge(false);
     render(<Canvas model={MODEL} />);
     await pressAsync('y');
@@ -215,72 +169,65 @@ describe('yy copies every command', () => {
     expect(statusBar()).not.toContain('copied');
   });
 
-  it('copies all of them from the header button too', async () => {
-    const bridge = installBridge();
+  it('does not claim it when the bridge threw', async () => {
+    installBridge(new Error('ipc is gone'));
     render(<Canvas model={MODEL} />);
-    await click(copyAllButton() as Element);
-    expect(bridge.written).toEqual(['smith plan sign plan-v2.json\nsmith gate run']);
+    await pressAsync('y');
+    await pressAsync('y');
+    expect(statusBar()).not.toContain('copied');
   });
-});
 
-describe('Enter on a command row in the action pane', () => {
-  it('copies that row’s command', async () => {
-    const bridge = installBridge();
+  it('falls back to navigator.clipboard in the browser build', async () => {
+    const web = installWebClipboard('ok');
     render(<Canvas model={MODEL} />);
-    press('I');
-    await pressAsync('Enter');
-    expect(bridge.written).toEqual(['smith plan sign plan-v2.json']);
+    await pressAsync('y');
+    await pressAsync('y');
+    expect(web.written).toEqual(['smith plan sign plan-v2.json\nsmith gate run']);
     expect(statusBar()).toContain('copied');
   });
 
-  it('does not claim a copy that failed', async () => {
-    installBridge(false);
+  it('does not claim a copy navigator.clipboard rejected', async () => {
+    installWebClipboard('reject');
     render(<Canvas model={MODEL} />);
-    press('I');
-    await pressAsync('Enter');
+    await pressAsync('y');
+    await pressAsync('y');
     expect(statusBar()).not.toContain('copied');
+  });
+
+  it('does not claim a copy when there is no clipboard at all', async () => {
+    installWebClipboard('absent');
+    render(<Canvas model={MODEL} />);
+    await pressAsync('y');
+    await pressAsync('y');
+    expect(statusBar()).not.toContain('copied');
+  });
+
+  it('draws no copy control of its own, in the pane or above it', () => {
+    installBridge();
+    render(<Canvas model={MODEL} />);
+    expect(document.querySelector('[data-command-copy]')).toBeNull();
+    expect(document.querySelector('[data-commands-copy-all]')).toBeNull();
   });
 });
 
 /**
- * `i` means "type into the thing I am pointing at". The composer is what it
- * opens ONLY on the prompt row -- every other row in the pane is a thing, and
- * `i` acts on that thing instead.
+ * `i` means "type into the thing I am pointing at". The composer is the only
+ * thing left to point at in this pane -- the command rows it used to land on
+ * went with the strip -- so `i` opens it from wherever the cursor is.
  */
-describe('i acts on the row the cursor is on', () => {
+describe('i opens the composer', () => {
   /** The prompt box is `readOnly` until the composer really opens. */
   const composing = () => promptInput()?.readOnly === false;
 
-  it('focuses a command row’s copy control rather than opening the composer', () => {
+  it('opens it from the first stop in the action pane', () => {
     installBridge();
     render(<Canvas model={MODEL} />);
     press('I');
-    press('i');
-    expect(document.activeElement).toBe(copyButtons()[0]);
-    expect(composing()).toBe(false);
-  });
-
-  it('follows the cursor to the second command row', () => {
-    installBridge();
-    render(<Canvas model={MODEL} />);
-    press('I');
-    press('j');
-    press('i');
-    expect(document.activeElement).toBe(copyButtons()[1]);
-    expect(composing()).toBe(false);
-  });
-
-  it('opens the composer on the prompt row', () => {
-    installBridge();
-    render(<Canvas model={MODEL} />);
-    press('I');
-    press('j');
-    press('j'); // past both commands, onto the prompt
     press('i');
     expect(composing()).toBe(true);
   });
 
-  it('opens the composer when the action pane is not the active pane', () => {
+  it('opens it when the action pane is not the active pane', () => {
     installBridge();
     render(<Canvas model={MODEL} />);
     press('i');
@@ -341,18 +288,9 @@ describe('a live source adds no stops of its own to the action pane', () => {
     });
   }
 
-  it('puts the cursor on the first command, not on a row nothing drew', async () => {
+  it('puts the cursor on the prompt, not on a row nothing drew', async () => {
     await mountLive();
-    press('I'); // index 0
-    press('i');
-    expect(document.activeElement).toBe(copyButtons()[0]);
-  });
-
-  it('reaches the composer one row past the last command', async () => {
-    await mountLive();
-    press('I');
-    press('j');
-    press('j'); // two commands, then the prompt
+    press('I'); // index 0, and the only index there is
     press('i');
     expect(promptInput()?.readOnly).toBe(false);
   });
