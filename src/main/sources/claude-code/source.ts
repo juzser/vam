@@ -40,6 +40,11 @@ import type { MainSource } from '../source.js';
 import { type AgentRoster, readAgentRoster } from './agent-roster.js';
 import { type LiveAgent, listLiveAgents } from './agents.js';
 import { deliverPromptViaCli, deliverToSession } from './deliver.js';
+import {
+  createPullRequestReader,
+  type ReadPullRequests,
+  readPullRequestsViaCli,
+} from './pull-requests.js';
 import { createBranchLookup } from './repo-branch.js';
 import { defaultSessionsRoot, readStatusUpdatedAt } from './session-status.js';
 import {
@@ -174,6 +179,12 @@ export async function loadClaudeCodeProjects(
   // Injectable for the same reason as `branchOf`: tests read invented pids
   // under a temp directory, never the operator's own `~/.claude/sessions`.
   sessionsRoot: string = defaultSessionsRoot(),
+  // NULL BY DEFAULT, AND THAT IS THE POINT: asking about pull requests means
+  // spawning `gh` and reaching GitHub with the operator's credentials, so a
+  // caller that has not asked for it gets a model with `pullRequests` absent
+  // rather than a surprise network call. `CLAUDE_CODE_SOURCE` injects the
+  // throttled reader; tests inject invented answers.
+  readPrs: ReadPullRequests | null = null,
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
 
@@ -193,6 +204,15 @@ export async function loadClaudeCodeProjects(
     // Per row, because a row is a process. See the age comment below.
     const statusUpdatedAt =
       agent.pid === null ? null : await readStatusUpdatedAt(sessionsRoot, agent.pid);
+    // TRANSCRIPT FIRST, `.git/HEAD` AS FALLBACK. `read.facts.branch` is
+    // `gitBranch` as Claude Code itself recorded it per turn -- the branch the
+    // session actually ran on, and it costs nothing extra since the transcript
+    // is already read. `.git/HEAD` only stands in when there is no transcript
+    // yet, or an older one that never wrote `gitBranch`.
+    const branch = read.facts.branch ?? (await branchOf(agent.cwd));
+    // One question per session, asked in the session's own directory, and
+    // throttled by the reader rather than by this loop.
+    const prs = readPrs === null ? null : await readPrs({ cwd: agent.cwd, branch });
     const session: Session = {
       id: agent.key,
       // The CLI's name is the operator's own; the generated title is only a
@@ -217,12 +237,11 @@ export async function loadClaudeCodeProjects(
       // while it is answering right now, so it stands last, because a row
       // with neither a status file nor a transcript has nothing better.
       age: compactAge(nowMs - (statusUpdatedAt ?? read.mtimeMs ?? agent.startedAt ?? nowMs)),
-      // TRANSCRIPT FIRST, `.git/HEAD` AS FALLBACK. `read.facts.branch` is
-      // `gitBranch` as Claude Code itself recorded it per turn -- the branch
-      // the session actually ran on, and it costs nothing extra since the
-      // transcript is already read. `.git/HEAD` only stands in when there is
-      // no transcript yet, or an older one that never wrote `gitBranch`.
-      branch: read.facts.branch ?? (await branchOf(agent.cwd)),
+      branch,
+      // Absent, not empty, when nobody injected a reader: an empty list is
+      // "vam asked GitHub and this branch has none", which a load that never
+      // asked has no business claiming (model.ts).
+      ...(prs === null ? {} : { pullRequests: prs }),
       decisions: read.facts.decisions,
       source: 'claude-code',
       // An INTERACTIVE row is a terminal a person is sitting in front of, so
@@ -285,7 +304,9 @@ const DESCRIPTOR: SourceDescriptor = {
     closeSession: false,
     createSession: false,
     governance: false,
-    pullRequests: false,
+    // `gh pr list --head <branch>`, run in the session's own working
+    // directory. See `pull-requests.ts` for what happens when it cannot be.
+    pullRequests: true,
     terminal: false,
     // `<sessionId>/subagents/` is real and is now read: each agent's own
     // transcript for whether it is running, and the `meta.json` beside it for
@@ -305,7 +326,8 @@ const DESCRIPTOR: SourceDescriptor = {
     closeSession: NOT_YET_WRITTEN,
     createSession: NOT_YET_WRITTEN,
     governance: NOT_RECORDED,
-    pullRequests: NOT_RECORDED,
+    // No entry for pullRequests: a decline is written only for a capability
+    // that is false, and this one is now true.
     terminal: 'vam holds no PTY, and attaching to a session needs one',
     // No entry for agentRoster: a decline is written only for a capability
     // that is false, and this one is now true.
@@ -323,9 +345,24 @@ const DESCRIPTOR: SourceDescriptor = {
   },
 };
 
+/** The process-wide throttled reader. See the note in `load` below. */
+const PR_READER = createPullRequestReader(readPullRequestsViaCli());
+
 export const CLAUDE_CODE_SOURCE: MainSource = {
   descriptor: DESCRIPTOR,
-  load: async () => loadClaudeCodeProjects(defaultTranscriptRoot(), await listLiveAgents()),
+  load: async () =>
+    loadClaudeCodeProjects(
+      defaultTranscriptRoot(),
+      await listLiveAgents(),
+      Date.now(),
+      createBranchLookup(),
+      defaultSessionsRoot(),
+      // ONE reader for the life of the process, because the throttle lives in
+      // it: a reader created per `load()` would remember nothing and spawn
+      // `gh` on every ten-second poll, which is the cost this feature must
+      // not have.
+      PR_READER,
+    ),
   /**
    * The live list is re-asked here rather than cached from `load()`: it is
    * where the session's working directory comes from, and a canvas drawn

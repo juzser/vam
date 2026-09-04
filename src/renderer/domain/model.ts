@@ -144,6 +144,45 @@ export type SessionAgent = {
   readonly running: boolean;
 };
 
+/**
+ * How a pull request's checks stand, flattened to the four words a narrow
+ * pane can draw.
+ *
+ * `none` is NOT `passing`. A branch whose PR has no checks configured at all
+ * and a branch whose checks all went green are different facts, and merging
+ * them is how a pane starts telling the operator a green story about a
+ * repository nobody is testing.
+ */
+export type PullRequestChecks = 'passing' | 'failing' | 'pending' | 'none';
+
+/** One pull request, narrowed to what the pane draws and nothing else. */
+export type PullRequest = {
+  readonly number: number;
+  readonly title: string;
+  /** `draft` is its own state, not a flavour of `open`. */
+  readonly state: 'open' | 'draft' | 'merged' | 'closed';
+  readonly checks: PullRequestChecks;
+};
+
+/**
+ * What vam knows about a session branch's pull requests.
+ *
+ * TWO OUTCOMES, AND THE POINT OF THE TYPE IS THAT THEY CANNOT BE CONFUSED.
+ * `ok` with an empty list means vam ASKED and the branch genuinely has no
+ * pull request. `unavailable` means vam could not ask, or did not understand
+ * the answer -- gh missing, gh unauthenticated, no repository, no GitHub
+ * remote, a timeout, unreadable output. Rendering the second as an empty list
+ * would tell the operator "there is no PR" on the strength of never having
+ * found out, which is the one thing this feature must never do.
+ *
+ * `code` and `message` are deliberately the same pair `SourceError` carries,
+ * without being one: there is no source refusing anything here, only a CLI
+ * that could not be asked.
+ */
+export type PullRequestList =
+  | { readonly kind: 'ok'; readonly prs: readonly PullRequest[] }
+  | { readonly kind: 'unavailable'; readonly code: string; readonly message: string };
+
 export type Session = {
   readonly id: string;
   /** Short name on the node header — an epic id, a task id, a run name. */
@@ -223,6 +262,22 @@ export type Session = {
    * a count -- `runningAgents` remains the only number the badge trusts.
    */
   readonly agents?: readonly SessionAgent[];
+  /**
+   * The pull requests open on this session's branch, or vam's reason for not
+   * knowing.
+   *
+   * THREE STATES, the same shape `agents` established. ABSENT is a source
+   * with no pull-request surface at all -- black-smith's HTTP model has none,
+   * so `to-canvas.ts` leaves it out. `{ kind: 'ok', prs: [] }` is a source
+   * that ASKED GitHub and found none. `{ kind: 'unavailable' }` is a source
+   * that has the surface and could not use it, and it says why.
+   *
+   * Populated by the `claude-code` source alone, which shells out to `gh` in
+   * the session's own working directory (`pull-requests.ts`). Optional for
+   * the same reason `agents` is: a dozen fixture files build `Session`
+   * literals by hand.
+   */
+  readonly pullRequests?: PullRequestList;
   /**
    * How this session came to exist. Optional because ten fixture files build
    * `Session` literals by hand, and because a model assembled without a

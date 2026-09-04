@@ -184,6 +184,16 @@ describe('toCanvasModel', () => {
     expect(model.projects[0]?.sessions[0]?.runningAgents).toBe(3);
   });
 
+  it('leaves pull requests absent, because this source cannot ask about any', () => {
+    // ABSENT, not an empty list. black-smith's API knows nothing about
+    // branches or GitHub, and an empty list would say "vam asked and there
+    // are none" -- a claim this adapter has no way to make (model.ts).
+    const model = toCanvasModel(overview([apiSession('a')]), new Map(), 'black-smith');
+    const session = model.projects[0]?.sessions[0];
+    expect(session?.pullRequests).toBeUndefined();
+    expect('pullRequests' in (session ?? {})).toBe(false);
+  });
+
   it('calls a session with live agents running', () => {
     const model = toCanvasModel(
       overview([apiSession('a', { liveAgentCount: 2 })]),
