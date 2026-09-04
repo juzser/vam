@@ -101,6 +101,14 @@ describe('a keystroke in the pane reaches tmux, exactly once', () => {
     expect(keys(send)).toEqual([{ kind: 'enter' }]);
   });
 
+  it('sends Backspace as a key, because a terminal you cannot correct is not usable', async () => {
+    const send = await open();
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'Backspace' });
+    await settle();
+    // Never `{ kind: 'text', text: 'Backspace' }`: that types the word.
+    expect(keys(send)).toEqual([{ kind: 'backspace' }]);
+  });
+
   it('does not also fire vam’s own keyboard, so `j` is a letter here', async () => {
     const heard: string[] = [];
     const onKey = (event: KeyboardEvent) => heard.push(event.key);

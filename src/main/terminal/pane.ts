@@ -28,7 +28,7 @@
 
 import type { PaneKey, PaneSize, PaneView } from '../../shared/terminal.js';
 import { sessionIdOf } from '../sources/claude-code/deliver.js';
-import { sendEnterArgv, sendTextArgv } from '../sources/tmux/argv.js';
+import { sendBackspaceArgv, sendEnterArgv, sendTextArgv } from '../sources/tmux/argv.js';
 import {
   listVamSessions,
   readPane,
@@ -194,9 +194,15 @@ export async function sendSessionKey(
   if (listed.kind === 'unavailable') return false;
   const match = targetSession(listed.sessions, projectId, rowId, panes);
   if (match.kind !== 'one') return false;
-  // The two builders are kept apart in `tmux/argv.ts` for the one reason that
-  // matters here: `-l` types, and Return has to be pressed.
+  // The three builders are kept apart in `tmux/argv.ts` for the one reason
+  // that matters here: `-l` types, and Return and Backspace have to be
+  // PRESSED. There is deliberately no builder that takes a key name, so
+  // nothing here can turn the operator's text into a keypress by accident.
   const argv =
-    key.kind === 'enter' ? sendEnterArgv(match.name) : sendTextArgv(match.name, key.text);
+    key.kind === 'enter'
+      ? sendEnterArgv(match.name)
+      : key.kind === 'backspace'
+        ? sendBackspaceArgv(match.name)
+        : sendTextArgv(match.name, key.text);
   return (await run(argv)).failure === null;
 }

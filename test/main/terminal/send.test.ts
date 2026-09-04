@@ -58,6 +58,19 @@ describe('typing into the session vam started for a project', () => {
     expect(argvs[1]).not.toContain('-l');
   });
 
+  it('sends Backspace as the interpreted key, so a typo can be corrected', async () => {
+    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'backspace' })).toBe(true);
+    expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'BSpace']);
+    expect(argvs[1]).not.toContain('-l');
+  });
+
+  it('refuses a Backspace it cannot aim, exactly like every other key', async () => {
+    const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'backspace' })).toBe(false);
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
   it('sends text that reads as a key name as the characters it is', async () => {
     const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
     await sendSessionKey(run, ATLAS, { kind: 'text', text: 'Escape' });
@@ -135,6 +148,12 @@ describe('the send channel refuses what the renderer may not ask', () => {
     return { send, argvs };
   }
 
+  it('carries a Backspace across the bridge like the other two keys', async () => {
+    const { send, argvs } = handler();
+    expect(await send({}, ATLAS, { kind: 'backspace' })).toBe(true);
+    expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'BSpace']);
+  });
+
   it('answers a plain boolean, and true only when the key landed', async () => {
     const { send, argvs } = handler();
     expect(await send({}, ATLAS, { kind: 'text', text: 'h' })).toBe(true);
@@ -145,7 +164,7 @@ describe('the send channel refuses what the renderer may not ask', () => {
     ['no arguments at all', [] as unknown[]],
     ['a project id that is not a string', [42, { kind: 'text', text: 'h' }]],
     ['an oversized project id', ['x'.repeat(501), { kind: 'text', text: 'h' }]],
-    ['a key that is not one of the two', [ATLAS, { kind: 'kill' }]],
+    ['a key that is not one of the three', [ATLAS, { kind: 'kill' }]],
     ['a key that is not an object', [ATLAS, 'h']],
     ['text that is not a string', [ATLAS, { kind: 'text', text: 7 }]],
     ['a paste wearing a keystroke’s clothes', [ATLAS, { kind: 'text', text: 'x'.repeat(64) }]],

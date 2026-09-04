@@ -316,7 +316,20 @@ export function TerminalTab({
    * are. Nothing is sent and nothing is stopped, so it reaches the window
    * listener and does its one thing.
    *
-   * A printable key and Return are the PANE'S, and they are stopped here. The
+   * WHICH MEANS CTRL+C DOES NOT INTERRUPT THE AGENT, and someone who can type
+   * into this pane will eventually try it. It is vam's chord here like every
+   * other, so it does whatever vam binds it to and never reaches tmux. That
+   * is deliberate and not an oversight to fix by narrowing the exemption:
+   * interrupting a running agent is a destructive action on someone's work,
+   * and it needs an affordance that says so -- a visible control, or a chord
+   * of its own that is captioned in the key sheet as interrupting THIS
+   * session -- plus a `send-keys 'C-c'` builder that, per `tmux/argv.ts`,
+   * must be its own named builder and never a key-name parameter. Widening
+   * this branch instead would hand every chord to the pane, and the first
+   * casualty would be the tab switch the operator uses to leave.
+   *
+   * A printable key, Return and Backspace are the PANE'S, and they are
+   * stopped here. The
    * canvas reads a focused element as text entry only when it is an
    * `INPUT` or a `TEXTAREA`, and this is a `section`: without stopping the
    * event, typing `j` here would type a `j` into the agent AND move vam's
@@ -343,12 +356,18 @@ export function TerminalTab({
       const stroke: PaneKey | null =
         event.key === 'Enter'
           ? { kind: 'enter' }
-          : // One character is what a printable key produces, composed by the
-            // layout -- so an accented character arrives already composed and
-            // a named key (`ArrowUp`, `F5`) never matches.
-            event.key.length === 1
-            ? { kind: 'text', text: event.key }
-            : null;
+          : // Correcting a typo is part of typing: a pane that takes
+            // characters and cannot take them back strands the operator on a
+            // wrong line with no way to fix it from vam. It is a KEY, not the
+            // word -- see `sendBackspaceArgv`.
+            event.key === 'Backspace'
+            ? { kind: 'backspace' }
+            : // One character is what a printable key produces, composed by
+              // the layout -- so an accented character arrives already
+              // composed and a named key (`ArrowUp`, `F5`) never matches.
+              event.key.length === 1
+              ? { kind: 'text', text: event.key }
+              : null;
       if (stroke === null) return;
       event.preventDefault();
       event.stopPropagation();

@@ -224,6 +224,36 @@ export function sendEnterArgv(name: string): readonly string[] {
 }
 
 /**
+ * Press Backspace -- the SECOND key that is pressed rather than typed, and it
+ * is a builder of its own rather than an argument to one.
+ *
+ * WHY NOT A GENERAL `sendKeyArgv(name, keyName)`. Because the whole safety
+ * property of this file is that literal text and interpreted key names can
+ * never meet on one code path: a builder taking a key NAME would take the
+ * operator's text just as happily, and the day something passed a reply
+ * through it, a message reading `C-c` would interrupt the agent instead of
+ * being typed to it. One named builder per key that vam actually presses
+ * keeps that impossible, and there are now exactly two of them.
+ *
+ * MEASURED, on tmux 3.7b over a private `-L` socket, because the choice
+ * between the key name and a literal `0x7f` may not be guessed: typing `abX`,
+ * then `send-keys 'BSpace'`, then `c` left the pane reading `abc`, and the
+ * same sequence with `send-keys -l -- 'BSpace'` left it reading `abBSpace`.
+ * The literal DEL byte happened to work too, through the shell's own line
+ * discipline -- which is exactly why it is not used: it relies on whatever is
+ * reading the line, where the key name goes through tmux's own key
+ * translation and is what a real keypress produces for any program in the
+ * pane, TUI or shell.
+ *
+ * WHY IT EXISTS AT ALL: a terminal that can be typed into but not corrected
+ * strands the operator on their first typo, with a wrong line and no way to
+ * fix it from vam.
+ */
+export function sendBackspaceArgv(name: string): readonly string[] {
+  return ['send-keys', '-t', paneTarget(name), 'BSpace'];
+}
+
+/**
  * Every session on the server: the project vam recorded on it, a TAB, and the
  * session name. The filtering to vam's own happens after the read, in
  * `spawn.ts`: tmux's `-f` filter language is another string to get wrong, and

@@ -69,14 +69,22 @@ export function isPaneSize(size: PaneSize): boolean {
  *
  * `text` is typed LITERALLY (`send-keys -l --`), which is what stops a pane
  * being sent `^[` because the operator typed the letters of `Escape`. `enter`
- * is the one key that has to be INTERPRETED, which `-l` forbids, so it is its
- * own kind rather than a newline inside the text.
+ * and `backspace` are the two keys that have to be INTERPRETED, which `-l`
+ * forbids, so each is its own kind rather than a character inside the text --
+ * measured, `send-keys -l -- 'BSpace'` types the word into the line.
+ *
+ * THE LIST IS DELIBERATELY THIS SHORT. It is not a key-forwarding mechanism:
+ * these are the keys typing is made of -- characters, submit, correct -- and
+ * anything else that ever belongs here is a decision, not an addition.
  *
  * A discriminated pair rather than a string with a flag: the renderer is the
  * least trusted process in the app, and "was this literal?" must not be a
  * boolean that a missing field can make false.
  */
-export type PaneKey = { readonly kind: 'text'; readonly text: string } | { readonly kind: 'enter' };
+export type PaneKey =
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'enter' }
+  | { readonly kind: 'backspace' };
 
 /**
  * The longest text one keystroke may carry. A `KeyboardEvent.key` for a
@@ -90,7 +98,7 @@ export const MAX_KEY_TEXT = 16;
 export function isPaneKey(value: unknown): value is PaneKey {
   if (typeof value !== 'object' || value === null) return false;
   const key = value as { kind?: unknown; text?: unknown };
-  if (key.kind === 'enter') return true;
+  if (key.kind === 'enter' || key.kind === 'backspace') return true;
   return (
     key.kind === 'text' &&
     typeof key.text === 'string' &&
