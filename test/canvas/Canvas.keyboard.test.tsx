@@ -808,12 +808,14 @@ describe('the sidebar', () => {
     expect(screen.getByText(/smith event append session-start/)).toBeTruthy();
   });
 
-  it('pins settings at the bottom, and admits it is not built', () => {
+  it('pins settings at the bottom, and it opens the overlay', () => {
+    // It used to answer "settings not built yet". The refusal is gone from the
+    // tree; the gear and `,` reach one overlay (test/canvas/Canvas.settings).
     render(<Canvas model={MODEL} />);
     act(() => {
       screen.getByLabelText('settings').click();
     });
-    expect(screen.getByText('settings not built yet')).toBeTruthy();
+    expect(document.querySelector('[data-settings-overlay]')).toBeTruthy();
   });
 });
 

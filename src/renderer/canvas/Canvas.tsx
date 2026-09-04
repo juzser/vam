@@ -67,6 +67,8 @@ import {
   applyRenames,
   applyTheme,
   browserStorage,
+  DEFAULT_FOCUS_SHARE,
+  type EffectiveTheme,
   type Prefs,
   readPrefs,
   setIcon,
@@ -77,8 +79,10 @@ import {
   setRename,
   setSessionFilters,
   setTheme,
+  watchOsTheme,
   writePrefs,
 } from '../prefs/prefs.js';
+import { SettingsOverlay } from '../settings/SettingsOverlay.js';
 import { canWriteTo, describeFailure } from '../sources/port.js';
 import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
@@ -156,7 +160,10 @@ export function compactTokens(n: number): string {
   return String(n);
 }
 
-export const FOCUS_VIEWPORT_SHARE = 0.6;
+/** Now the DEFAULT of a stored preference rather than the value itself: the
+ *  settings overlay writes `prefs.focusViewportShare`, and this is what a
+ *  browser with nothing stored falls back to. Still 0.6, still one literal. */
+export const FOCUS_VIEWPORT_SHARE = DEFAULT_FOCUS_SHARE;
 
 /**
  * ReactFlow's `fitView` padding for a target share of the viewport.
@@ -368,8 +375,16 @@ function CanvasInner({
   // source for it — so this effect, not the toggle's click handler, is what
   // moves the document. A handler that also wrote the class would be a second
   // writer, and the two disagree the first time prefs is restored from storage.
+  // `system` is a subscription, not a sample: without the listener the OS
+  // flipping at sunset leaves a dashboard on the appearance it had at mount,
+  // which is not what the overlay's own hint promises. Keeping the resolved
+  // value in state is what lets the sidebar's label and its click describe the
+  // screen rather than the store.
+  const [effective, setEffective] = useState<EffectiveTheme>('dark');
   useEffect(() => {
-    applyTheme(prefs.theme);
+    setEffective(applyTheme(prefs.theme));
+    if (prefs.theme !== 'system') return;
+    return watchOsTheme(() => setEffective(applyTheme('system')));
   }, [prefs.theme]);
 
   const model = useMemo(
@@ -399,6 +414,7 @@ function CanvasInner({
   const [query, setQuery] = useState('');
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [keySheetOpen, setKeySheetOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState('');
   /**
@@ -616,11 +632,11 @@ function CanvasInner({
     // silently produce.
     void fitView({
       nodes: focusRowNodeIds,
-      padding: focusPadding(FOCUS_VIEWPORT_SHARE),
+      padding: focusPadding(prefs.focusViewportShare),
       maxZoom: 1.6,
       duration: 220,
     });
-  }, [focusRowNodeIds, fitView]);
+  }, [focusRowNodeIds, fitView, prefs.focusViewportShare]);
 
   /**
    * What the detail panel expands: the focused step if a step is focused, else
@@ -1222,7 +1238,7 @@ function CanvasInner({
           setStatus('sessions are created from the CLI — smith event append session-start');
           return;
         case 'settings':
-          setStatus('settings not built yet');
+          setSettingsOpen(true);
           return;
         case 'resizePane': {
           // Which pane owns the keyboard right now decides which one moves —
@@ -1342,6 +1358,7 @@ function CanvasInner({
           setJumping(false);
           setPaletteOpen(false);
           setKeySheetOpen(false);
+          setSettingsOpen(false);
           setFilterMenuOpen(false);
           setFiltering(false);
           setComposing(false);
@@ -1410,10 +1427,8 @@ function CanvasInner({
           entries={entries}
           focusedSessionId={focusedEntry?.session.id ?? null}
           workspace="black-smith"
-          theme={prefs.theme}
-          onToggleTheme={() =>
-            savePrefs(setTheme(prefs, prefs.theme === 'dark' ? 'light' : 'dark'))
-          }
+          theme={effective}
+          onToggleTheme={() => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark'))}
           onOpenFilter={() => {
             searchOrigin.current = focusedId;
             setFiltering(true);
@@ -1493,7 +1508,7 @@ function CanvasInner({
                 : { source: projectSource, projectId: project.id, name: project.name },
             );
           }}
-          onSettings={() => setStatus('settings not built yet')}
+          onSettings={() => setSettingsOpen(true)}
           width={sidebarWidth}
           resizeHandle={
             <PaneResizer
@@ -1710,6 +1725,16 @@ function CanvasInner({
       {/* Same reason as the palette above: `?` in a layout that hides the
           canvas would otherwise open a sheet nothing could draw. */}
       {keySheetOpen && <KeySheet onClose={() => setKeySheetOpen(false)} />}
+
+      {/* Same reason again: settings is a window overlay, so it sits with the
+          palette and the sheet rather than inside the canvas column. */}
+      {settingsOpen && (
+        <SettingsOverlay
+          prefs={prefs}
+          onChange={savePrefs}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
 
       {paletteOpen && (
         <CommandPalette
