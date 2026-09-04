@@ -35,6 +35,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { resolveSessionIcon } from '../canvas/session-icon.js';
 import type { Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
@@ -1113,7 +1114,7 @@ export function SessionList(props: SessionListProps) {
                         {renamingId === session.id ? (
                           <div className="flex items-center gap-1.5 rounded-[9px] border border-line-loud bg-raised px-2.5 py-2.5">
                             <span className="text-[11px] text-ink-faint">
-                              {session.icon ?? '·'}
+                              {resolveSessionIcon(entry)}
                             </span>
                             <input
                               ref={renameRef}
@@ -1178,9 +1179,18 @@ export function SessionList(props: SessionListProps) {
                                     needsYou || session.status === 'running' ? 'vam-breathe' : '',
                                   ].join(' ')}
                                 />
-                                {session.icon !== null && (
-                                  <span className="text-[11px] leading-none">{session.icon}</span>
-                                )}
+                                {/* Always drawn, never conditional, and never
+                                    its own opinion: `resolveSessionIcon` states
+                                    the chain -- session glyph, else project
+                                    glyph, else the neutral mark -- and the
+                                    canvas root node reads the same function, so
+                                    the two surfaces cannot answer differently. */}
+                                <span
+                                  data-row-icon={session.id}
+                                  className="text-[11px] leading-none"
+                                >
+                                  {resolveSessionIcon(entry)}
+                                </span>
                                 <span
                                   className={`truncate text-[13px] ${isFocused ? 'font-medium text-ink' : 'text-ink-dim'}`}
                                 >
