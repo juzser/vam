@@ -35,7 +35,9 @@ import {
 } from '@xyflow/react';
 import { Box, Factory, FlaskConical, type LucideIcon, Maximize, Terminal } from 'lucide-react';
 import {
+  Children,
   type ComponentProps,
+  isValidElement,
   type ReactNode,
   useCallback,
   useEffect,
@@ -61,7 +63,16 @@ import { IconPicker } from '../panels/IconPicker.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
 import { SessionList } from '../panels/SessionList.js';
-import { ALL_VISIBLE, DEFAULT_PANES, layoutWidths } from '../prefs/panes.js';
+import {
+  ALL_VISIBLE,
+  CANVAS_STRIP,
+  type ColumnId,
+  canvasIsMain,
+  columnOrder,
+  DEFAULT_PANES,
+  layoutForViewport,
+  layoutWidths,
+} from '../prefs/panes.js';
 import {
   applyIcons,
   applyRenames,
@@ -286,12 +297,51 @@ function DetailSlot({ show, ...props }: ComponentProps<typeof DetailPanel> & { s
   return show ? <DetailPanel {...props} /> : null;
 }
 
-function CanvasColumn({ show, children }: { show: boolean; children: ReactNode }) {
+/**
+ * The canvas column, in one of its two jobs.
+ *
+ * As the main column it flexes: it is what the window is about, and it takes
+ * whatever the two fixed panes leave. As a strip it is a fixed `CANVAS_STRIP`
+ * wide and flexes not at all, because in that layout the RESPONSE is what takes
+ * the leftover room. Which of the two it is comes from the layout's order —
+ * `canvasIsMain` — never from a width someone dragged.
+ */
+function CanvasColumn({
+  show,
+  strip,
+  children,
+}: {
+  show: boolean;
+  strip: boolean;
+  children: ReactNode;
+}) {
   return show ? (
-    <div data-canvas-pane className="relative flex min-w-0 flex-1 flex-col bg-canvas">
+    <div
+      data-canvas-pane
+      className={`relative flex min-w-0 flex-col bg-canvas ${strip ? 'flex-none border-line border-l' : 'flex-1'}`}
+      style={strip ? { width: CANVAS_STRIP } : undefined}
+    >
       {children}
     </div>
   ) : null;
+}
+
+/**
+ * The three columns, drawn in the layout's order.
+ *
+ * The children are written in `Canvas.tsx` in reading order and matched to the
+ * order by their KEY, so the sequence lives in one place — the layout
+ * descriptor — instead of in this file's JSX, which is exactly the thing
+ * `panes.ts` said could not be expressed while the order was hard-coded here.
+ */
+function Columns({ order, children }: { order: readonly ColumnId[]; children: ReactNode }) {
+  const byId = new Map(
+    Children.toArray(children).map((child) => [
+      isValidElement(child) ? String(child.key).replace(/^\.\$/, '') : '',
+      child,
+    ]),
+  );
+  return <div className="flex min-h-0 flex-1">{order.map((id) => byId.get(id))}</div>;
 }
 
 function CanvasInner({
@@ -347,7 +397,14 @@ function CanvasInner({
   // Visibility is read here and passed down, never asked of a child: which
   // columns exist is a fact about the layout, and `layoutWidths` is the one
   // place that knows an unmounted pane owes its sibling nothing.
-  const visible = prefs.paneVisibility;
+  // And read through `layoutForViewport`, so that "which columns exist" also
+  // answers the window too narrow to hold them: with the canvas demoted none of
+  // the three columns flexes, and the strip is what gives. Render-time only —
+  // `prefs.paneVisibility` is untouched, so widening the window restores it.
+  const visible = layoutForViewport(prefs.paneVisibility, viewportWidth);
+  const order = columnOrder(visible);
+  // The canvas is a strip exactly when it is drawn but is not the main column.
+  const canvasStrip = visible.canvas && !canvasIsMain(visible);
   const { sidebar: sidebarWidth, detail: detailWidth } = layoutWidths(
     visible,
     { sidebar: storedSidebar, detail: storedDetail },
@@ -731,6 +788,24 @@ function CanvasInner({
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+
+  /**
+   * What the canvas column actually draws.
+   *
+   * The full canvas draws every session, which is what makes it a canvas. The
+   * strip draws the focused session and nothing else — that is the "less
+   * detail" half of demoting it, and it is a RENDERING decision, not a width
+   * one: a 300px column showing every fan would be a canvas you cannot read,
+   * whereas one row of cards at 300px is exactly the amount of graph a person
+   * glances at while reading the response beside it. Filtered here rather than
+   * in `initialNodes` so `nodeIds` — the set the cursor may land on — stays the
+   * whole model in every layout: the strip narrows what is DRAWN, never what
+   * `j`/`k` can reach, and the sidebar still lists them all.
+   */
+  const drawnNodes = useMemo(
+    () => (canvasStrip ? nodes.filter((node) => node.data.sessionId === focusedSessionId) : nodes),
+    [canvasStrip, nodes, focusedSessionId],
+  );
 
   /**
    * Keep the drawn nodes in step with the model.
@@ -1135,8 +1210,22 @@ function CanvasInner({
             focusSession(next.session.id);
             return;
           }
-          // Live geometry, read now — not a list captured at render time.
-          const live = toNavNodes(getNodes() as unknown as FlowNodeLike[], nodeIds);
+          // Live geometry, read now — not a list captured at render time —
+          // over the WHOLE laid-out set, not only what the canvas draws.
+          // `getNodes` returns what ReactFlow was given, which in the strip is
+          // the focused session alone; navigating that would make `l` answer
+          // "nothing lies right" at the edge of a cell while the sidebar still
+          // lists the session sitting beside it. The strip narrows what is
+          // drawn, never what the model holds, so the undrawn nodes fall back
+          // to their laid-out rectangles — the same ones `layoutCanvas`
+          // computed for them — and every other consumer's rule holds here too.
+          const drawn = new Map(
+            (getNodes() as unknown as FlowNodeLike[]).map((node) => [node.id, node]),
+          );
+          const live = toNavNodes(
+            (initialNodes as unknown as FlowNodeLike[]).map((node) => drawn.get(node.id) ?? node),
+            nodeIds,
+          );
           const landed = nextNode(live, focusedId, action.direction);
           if (landed === null) {
             setStatus(`nothing lies ${action.direction}`);
@@ -1441,6 +1530,7 @@ function CanvasInner({
     focusedEntry,
     focusedSessionId,
     nodeIds,
+    initialNodes,
     entries,
     getNodes,
     jumping,
@@ -1477,8 +1567,9 @@ function CanvasInner({
 
   return (
     <div className="relative flex h-full flex-col">
-      <div className="flex min-h-0 flex-1">
+      <Columns order={order}>
         <SidebarSlot
+          key="sidebar"
           show={visible.sidebar}
           entries={entries}
           focusedSessionId={focusedEntry?.session.id ?? null}
@@ -1572,8 +1663,8 @@ function CanvasInner({
             <PaneResizer
               pane="sidebar"
               ariaLabel="resize sessions panel"
-              width={sidebarWidth}
-              otherRendered={detailWidth}
+              layout={visible}
+              stored={{ sidebar: storedSidebar, detail: storedDetail }}
               viewportWidth={viewportWidth}
               onChange={onPaneChange}
               onCommit={onPaneCommit}
@@ -1581,8 +1672,16 @@ function CanvasInner({
           }
         />
 
-        <CanvasColumn show={visible.canvas}>
-          <div className="flex h-12 flex-none items-center gap-[9px] border-line border-b px-3.5">
+        <CanvasColumn key="canvas" show={visible.canvas} strip={canvasStrip}>
+          {/* The toolbar is chrome inside a column, not a column: hidden rather
+              than unmounted in the strip, where 300px has no room for a source
+              readout and four filters. The unmount rule this file argues for
+              elsewhere is about PANES — things that are measured, focused and
+              queried — and keeping the source line mounted keeps its polling
+              exactly as it was in every other layout. */}
+          <div
+            className={`flex h-12 flex-none items-center gap-[9px] border-line border-b px-3.5 ${canvasStrip ? 'hidden' : ''}`}
+          >
             <span className="shrink-0 font-medium text-[13px] text-ink">Canvas</span>
             <span className="mx-1 h-3.5 w-px shrink-0 bg-line-strong" />
 
@@ -1649,7 +1748,7 @@ function CanvasInner({
 
           <div className="relative min-h-0 flex-1">
             <ReactFlow
-              nodes={nodes}
+              nodes={drawnNodes}
               edges={NO_EDGES}
               onNodesChange={onNodesChange}
               nodesDraggable={false}
@@ -1720,7 +1819,7 @@ function CanvasInner({
                 // being glanceable, not by being legible on its own, and the
                 // width it gives up is width the canvas gets back.
                 style={{ width: 132, height: 56 }}
-                className="!bottom-3 !right-3 !m-0 !rounded-[8px] !border !border-line !bg-sunken"
+                className={`!bottom-3 !right-3 !m-0 !rounded-[8px] !border !border-line !bg-sunken ${canvasStrip ? 'hidden' : ''}`}
                 nodeColor={minimapChipColor}
               />
             </ReactFlow>
@@ -1728,6 +1827,7 @@ function CanvasInner({
         </CanvasColumn>
 
         <DetailSlot
+          key="detail"
           show={visible.detail}
           entry={focusedEntry}
           decision={focusedDecision}
@@ -1764,19 +1864,28 @@ function CanvasInner({
             setPane('list');
           }}
           width={detailWidth}
+          /* Only where it would move something. The detail pane is a fixed
+             column with the leftover room beside it exactly while the canvas
+             is the main column; everywhere else its width is derived from the
+             sidebar and the canvas's reserve, so its own edge has nothing to
+             drag and the seam that does move is the sidebar's. A handle that
+             moves nothing is worse than no handle: it advertises a gesture the
+             layout cannot honour. */
           resizeHandle={
-            <PaneResizer
-              pane="detail"
-              ariaLabel="resize detail panel"
-              width={detailWidth}
-              otherRendered={sidebarWidth}
-              viewportWidth={viewportWidth}
-              onChange={onPaneChange}
-              onCommit={onPaneCommit}
-            />
+            canvasIsMain(visible) ? (
+              <PaneResizer
+                pane="detail"
+                ariaLabel="resize detail panel"
+                layout={visible}
+                stored={{ sidebar: storedSidebar, detail: storedDetail }}
+                viewportWidth={viewportWidth}
+                onChange={onPaneChange}
+                onCommit={onPaneCommit}
+              />
+            ) : null
           }
         />
-      </div>
+      </Columns>
 
       {/* Moved out of the canvas column when the canvas became hideable: the
           palette is a window overlay, not part of the graph, and left inside

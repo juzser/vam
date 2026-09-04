@@ -112,7 +112,7 @@ export type KeyAction =
   /** `z0` — the shipped layout back: both side panes at their default width
       AND all three columns drawn again. */
   | { readonly kind: 'resetPanes' }
-  /** `zc` / `zC` — hide columns. See `AFTER_Z`. */
+  /** `zc` / `zC` hide columns, `zf` reorders them. See `AFTER_Z`. */
   | { readonly kind: 'layout'; readonly name: LayoutName }
   /** `Mod-1` … `Mod-8` — jump straight to a session by its position in the
       sidebar, zero-based here because that is what an index into the list is.
@@ -231,6 +231,10 @@ const AFTER_Z: Readonly<Record<string, KeyAction>> = {
   '0': { kind: 'resetPanes' },
   c: { kind: 'layout', name: 'noCanvas' },
   C: { kind: 'layout', name: 'responseOnly' },
+  // `f` for focus, and the odd one out of this table: it hides nothing. It
+  // moves the response into the middle and the canvas out to a strip, which is
+  // still "adjust the view" and so still belongs under `z`.
+  f: { kind: 'layout', name: 'focusResponse' },
 };
 
 function isPrefix(key: string): key is Prefix {

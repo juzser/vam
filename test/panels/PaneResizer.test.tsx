@@ -16,7 +16,15 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
 import { PaneResizer } from '../../src/renderer/panels/PaneResizer.js';
-import { DETAIL_MIN, renderedWidth, SIDEBAR_MAX } from '../../src/renderer/prefs/panes.js';
+import {
+  ALL_VISIBLE,
+  DETAIL_MIN,
+  LAYOUTS,
+  type Layout,
+  layoutWidths,
+  renderedWidth,
+  SIDEBAR_MAX,
+} from '../../src/renderer/prefs/panes.js';
 import {
   EMPTY_PREFS,
   readPrefs,
@@ -37,8 +45,8 @@ describe('PaneResizer', () => {
       <PaneResizer
         pane="sidebar"
         ariaLabel="resize sessions panel"
-        width={264}
-        otherRendered={408}
+        layout={ALL_VISIBLE}
+        stored={{ sidebar: 264, detail: 408 }}
         viewportWidth={1400}
         onChange={noop}
         onCommit={noop}
@@ -48,8 +56,8 @@ describe('PaneResizer', () => {
       <PaneResizer
         pane="detail"
         ariaLabel="resize detail panel"
-        width={408}
-        otherRendered={264}
+        layout={ALL_VISIBLE}
+        stored={{ sidebar: 264, detail: 408 }}
         viewportWidth={1400}
         onChange={noop}
         onCommit={noop}
@@ -75,8 +83,8 @@ describe('PaneResizer', () => {
       <PaneResizer
         pane="sidebar"
         ariaLabel="resize sessions panel"
-        width={264}
-        otherRendered={408}
+        layout={ALL_VISIBLE}
+        stored={{ sidebar: 264, detail: 408 }}
         viewportWidth={1400}
         onChange={(_, w) => changes.push(w)}
         onCommit={(_, w) => commits.push(w)}
@@ -105,8 +113,8 @@ describe('PaneResizer', () => {
       <PaneResizer
         pane="detail"
         ariaLabel="resize detail panel"
-        width={408}
-        otherRendered={264}
+        layout={ALL_VISIBLE}
+        stored={{ sidebar: 264, detail: 408 }}
         viewportWidth={1400}
         onChange={(_, w) => changes.push(w)}
         onCommit={noop}
@@ -128,8 +136,8 @@ describe('PaneResizer', () => {
       <PaneResizer
         pane="sidebar"
         ariaLabel="resize sessions panel"
-        width={264}
-        otherRendered={408}
+        layout={ALL_VISIBLE}
+        stored={{ sidebar: 264, detail: 408 }}
         viewportWidth={1400}
         onChange={noop}
         onCommit={noop}
@@ -244,8 +252,8 @@ describe('DetailPanel active-pane signal survives with the handle mounted (AC-6 
         <PaneResizer
           pane="detail"
           ariaLabel="resize detail panel"
-          width={408}
-          otherRendered={264}
+          layout={ALL_VISIBLE}
+          stored={{ sidebar: 264, detail: 408 }}
           viewportWidth={1400}
           onChange={noop}
           onCommit={noop}
@@ -279,8 +287,8 @@ describe('PaneResizer defensive guards (branch coverage)', () => {
       <PaneResizer
         pane="sidebar"
         ariaLabel="resize sessions panel"
-        width={264}
-        otherRendered={408}
+        layout={ALL_VISIBLE}
+        stored={{ sidebar: 264, detail: 408 }}
         viewportWidth={1400}
         onChange={(_, w) => changes.push(w)}
         onCommit={(_, w) => commits.push(w)}
@@ -296,5 +304,57 @@ describe('PaneResizer defensive guards (branch coverage)', () => {
 
     expect(changes).toEqual([]);
     expect(commits).toEqual([]);
+  });
+});
+
+/**
+ * The seam between the resizer and the layout arithmetic.
+ *
+ * The ceiling a drag may reach has to reserve what the CURRENT layout reserves
+ * for the canvas — `CANVAS_MIN` while the canvas is the main column, one strip
+ * while it is demoted, nothing at all while it is hidden. A resizer that holds
+ * its own opinion about that number over-constrains the sidebar and snaps it on
+ * the first drag, which is what these assert did not happen.
+ */
+describe('a drag obeys the layout it is dragging in', () => {
+  const STORED = { sidebar: 264, detail: 408 };
+
+  function dragSidebar(layout: Layout, viewportWidth: number, by: number): number[] {
+    cleanup();
+    const changes: number[] = [];
+    render(
+      <PaneResizer
+        pane="sidebar"
+        ariaLabel="resize sessions panel"
+        layout={layout}
+        stored={STORED}
+        viewportWidth={viewportWidth}
+        onChange={(_, w) => changes.push(w)}
+        onCommit={noop}
+      />,
+    );
+    const handle = screen.getByRole('separator', { name: 'resize sessions panel' });
+    Object.assign(handle, { setPointerCapture: noop, releasePointerCapture: noop });
+    fireEvent.pointerDown(handle, { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 100 + by, pointerId: 1 });
+    return changes;
+  }
+
+  it('lets the sidebar grow in the focus layout instead of snapping it back', () => {
+    // 1400 - DETAIL_MIN - CANVAS_STRIP = 780 is the real ceiling here, so a
+    // 40px drag is nowhere near it and must simply arrive.
+    expect(dragSidebar(LAYOUTS.focusResponse, 1400, 40)).toEqual([304]);
+    // And all the way to SIDEBAR_MAX, which the strip's reserve still clears.
+    expect(dragSidebar(LAYOUTS.focusResponse, 1400, 400)).toEqual([SIDEBAR_MAX]);
+  });
+
+  it('lets the sidebar grow with the canvas hidden, where nothing is reserved', () => {
+    expect(dragSidebar(LAYOUTS.noCanvas, 1400, 40)).toEqual([304]);
+  });
+
+  it('still reserves the main canvas in the shipped layout', () => {
+    expect(dragSidebar(ALL_VISIBLE, 1400, 40)).toEqual([
+      layoutWidths(ALL_VISIBLE, { ...STORED, sidebar: 304 }, 1400).sidebar,
+    ]);
   });
 });

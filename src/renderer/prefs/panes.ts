@@ -91,12 +91,24 @@ export function clampPaneWidth(pane: Pane, width: number): number {
  * own floor, whichever is smaller — floored at this pane's MIN.
  *
  * Below `SIDEBAR_MIN + DETAIL_MIN + CANVAS_MIN = 880`, the absolute minimums
- * win and `CANVAS_MIN` yields: you can always drag a pane down to its
+ * win and the reserve yields: you can always drag a pane down to its
  * minimum, never below it (epic.md §4.2 point 4).
+ *
+ * `reserved` is what the canvas costs IN THIS LAYOUT, and it is not optional
+ * information — a ceiling that reserves 360 for a column rendering at 300 is
+ * a sidebar that snaps back on its first drag. It defaults to `CANVAS_MIN`
+ * because that is what the shipped layout reserves; every other layout has
+ * `canvasReserved` tell it, and `layoutWidths` below is the only caller that
+ * needs to.
  */
-export function dragCeiling(pane: Pane, otherRendered: number, viewportWidth: number): number {
+export function dragCeiling(
+  pane: Pane,
+  otherRendered: number,
+  viewportWidth: number,
+  reserved: number = CANVAS_MIN,
+): number {
   const { min, max } = bounds(pane);
-  const ceiling = Math.min(max, viewportWidth - otherRendered - CANVAS_MIN);
+  const ceiling = Math.min(max, viewportWidth - otherRendered - reserved);
   return Math.max(min, ceiling);
 }
 
@@ -111,8 +123,9 @@ export function renderedWidth(
   storedWidth: number,
   otherStored: number,
   viewportWidth: number,
+  reserved: number = CANVAS_MIN,
 ): number {
-  const ceiling = dragCeiling(pane, otherStored, viewportWidth);
+  const ceiling = dragCeiling(pane, otherStored, viewportWidth, reserved);
   return Math.min(ceiling, clampPaneWidth(pane, storedWidth));
 }
 
@@ -126,8 +139,8 @@ export function renderedWidth(
  * arithmetic and its stored payloads stay exactly as they were.
  *
  * The canvas is in here even though it has no stored width: it is the third
- * column, it is the thing the two layouts below hide, and a visibility record
- * that could not name it would push that knowledge into the render tree.
+ * column, it is the thing the subtractive layouts below hide, and a visibility
+ * record that could not name it would push that knowledge into the render tree.
  * Three named fields rather than a keyed map, for the reason `Prefs.panes`
  * already gives: the columns are known at compile time.
  */
@@ -141,29 +154,145 @@ export type PaneVisibility = {
 export const ALL_VISIBLE: PaneVisibility = { sidebar: true, canvas: true, detail: true };
 
 /**
+ * A column id. The three columns are still known at compile time — what stopped
+ * being known when the focus layout arrived is their SEQUENCE, which is why
+ * this type exists next to `PaneVisibility` rather than replacing it.
+ */
+export type ColumnId = 'sidebar' | 'canvas' | 'detail';
+
+/** The sequence the app has always drawn: the canvas in the middle. */
+export const DEFAULT_ORDER = ['sidebar', 'canvas', 'detail'] as const satisfies readonly ColumnId[];
+
+/**
+ * A layout: which columns are drawn, and in what order.
+ *
+ * The order is OPTIONAL and absent means `DEFAULT_ORDER`, per field, the same
+ * defence `prefs.ts` uses everywhere else — a payload written before this field
+ * existed reads back as the shipped sequence rather than as an empty row of
+ * columns.
+ */
+export type Layout = PaneVisibility & { readonly order?: readonly ColumnId[] };
+
+/** Total: a layout's sequence, whether or not it named one. */
+export function columnOrder(layout: Layout): readonly ColumnId[] {
+  return layout.order ?? DEFAULT_ORDER;
+}
+
+/**
+ * Is the canvas the column the layout is built around?
+ *
+ * The canvas is the main column exactly while it is drawn and is not the
+ * TRAILING one: in the shipped sequence it sits in the middle with a fixed
+ * pane on either side, so it takes whatever room is left. Demote it to the
+ * right-hand end and the response inherits that job, which is the whole of
+ * what "canvas is secondary" means for the width arithmetic. Derived from the
+ * order rather than carried as a third field, so a layout cannot declare a
+ * main column its own sequence contradicts.
+ */
+export function canvasIsMain(layout: Layout): boolean {
+  const order = columnOrder(layout);
+  return layout.canvas && order[order.length - 1] !== 'canvas';
+}
+
+/**
+ * The demoted canvas's width — its own floor, not `CANVAS_MIN`'s.
+ *
+ * `CANVAS_MIN` is 360 because below that "the grid still renders but is no
+ * longer a canvas", and that judgement was made about a canvas that is the
+ * primary surface, showing every session's fan. The strip is a different
+ * object with a different job: it draws ONLY the focused session's chain (see
+ * `Canvas.tsx`), so what it has to keep legible is one row of cards, not a
+ * whole workspace. 300 is the width at which that row still reads at the
+ * default zoom, and it is deliberately BELOW `CANVAS_MIN` — a strip that had
+ * to clear the primary canvas's floor would not be a demotion, it would be the
+ * same canvas with less room to say the same thing. This is the answer to
+ * "is a narrow canvas still a canvas": not the same one, so not the same floor.
+ */
+export const CANVAS_STRIP = 300;
+
+/**
  * The named layouts, keyboard-reachable (`chords.ts`).
  *
- * Two, not a general mechanism: both are subtractive — they hide columns and
- * change nothing else. A layout that REORDERED the columns (a canvas demoted
- * to a narrow right-hand strip, say) cannot be expressed here at all, because
- * the order lives in Canvas.tsx's JSX and the `Pane` type has no word for a
- * third resizable column. That needs a layout descriptor, and a separate
- * decision about whether a 360px canvas is still a canvas.
+ * Two of the three are subtractive — they hide columns and change nothing else
+ * — and stay exactly as they shipped, order and all. The third is the reason
+ * `Layout` carries an order at all: it reorders rather than subtracts.
  */
 export const LAYOUTS = {
   /** The response, alone: the detail pane is the whole window. */
   responseOnly: { sidebar: false, canvas: false, detail: true },
   /** List plus response, for reading and answering without the graph. */
   noCanvas: { sidebar: true, canvas: false, detail: true },
-} as const satisfies Readonly<Record<string, PaneVisibility>>;
+  /**
+   * The response in the middle and the canvas demoted to a right-hand strip
+   * showing the focused session alone: everything is still on screen, but the
+   * response is what the window is about.
+   */
+  focusResponse: {
+    sidebar: true,
+    canvas: true,
+    detail: true,
+    order: ['sidebar', 'detail', 'canvas'],
+  },
+} as const satisfies Readonly<Record<string, Layout>>;
 
 export type LayoutName = keyof typeof LAYOUTS;
 
 /**
- * The two rendered widths, for a given visibility.
+ * What the canvas costs the other two columns, in this layout.
  *
- * Three rules, and the last two are why this exists rather than two bare
- * `renderedWidth` calls:
+ * The one place that answers it. Three cases, and they are the three the
+ * layouts can be in: the main column keeps `CANVAS_MIN`, a demoted canvas keeps
+ * one `CANVAS_STRIP`, and a hidden canvas keeps nothing. Both the rendered
+ * widths and the live drag ceiling read it here, because the alternative —
+ * `layoutWidths` handing the resizer a 716px detail pane while `dragCeiling`
+ * privately reserved 360 for a column drawn at 300 — is a sidebar that snaps
+ * back the moment you drag it.
+ */
+export function canvasReserved(layout: Layout): number {
+  if (!layout.canvas) {
+    return 0;
+  }
+  return canvasIsMain(layout) ? CANVAS_MIN : CANVAS_STRIP;
+}
+
+/**
+ * The narrowest window the demoted canvas fits in: the two fixed columns at
+ * their floors, plus the strip.
+ */
+export const FOCUS_MIN_VIEWPORT = SIDEBAR_MIN + DETAIL_MIN + CANVAS_STRIP;
+
+/**
+ * The layout as this window can actually draw it.
+ *
+ * With the canvas demoted, all three columns are fixed — the strip does not
+ * flex and neither pane may go under its floor — so below `FOCUS_MIN_VIEWPORT`
+ * their sum exceeds the window and something has to give. Of the three ways to
+ * give (overflow, shrink a column past its floor, scroll) this takes a fourth
+ * and says so out loud: DROP the strip, which turns the focus layout into
+ * `noCanvas` until the window is wide enough again. The strip is the column
+ * that was already demoted to a glance, and a glance is the first thing worth
+ * losing; shrinking it instead would keep a canvas nobody can read at the cost
+ * of the response the layout exists to show, and a horizontal scrollbar in a
+ * three-column app hides a whole column behind a gesture nobody makes.
+ *
+ * Pure, and render-time only — like every clamp in this file it changes what is
+ * DRAWN, never what is stored, so widening the window back past 820 restores
+ * the strip with the order and the widths untouched.
+ */
+export function layoutForViewport(layout: Layout, viewportWidth: number): Layout {
+  if (!layout.canvas || canvasIsMain(layout) || viewportWidth >= FOCUS_MIN_VIEWPORT) {
+    return layout;
+  }
+  return { ...layout, canvas: false };
+}
+
+/**
+ * The two rendered widths, for a given layout.
+ *
+ * Derived from the layout's ORDER, not from a `visible.canvas` test: the
+ * question the arithmetic actually asks is which column takes the leftover
+ * room, and that is `canvasIsMain`. Four rules, and the last three are why
+ * this exists rather than two bare `renderedWidth` calls:
  *
  * 1. A hidden pane renders at 0 — it is not drawn, so it has no width. This
  *    is the one place a 0 is legal, and it never reaches storage.
@@ -176,40 +305,50 @@ export type LayoutName = keyof typeof LAYOUTS;
  *    detail pane takes what is left over — deliberately past `DETAIL_MAX`,
  *    because that bound exists to stop the detail pane overshadowing the
  *    canvas, and there is no canvas.
+ * 4. With the canvas demoted, the same thing happens with one difference: the
+ *    strip is reserved out of the viewport first. `DETAIL_MAX` is passed here
+ *    too, and for the same reason — a layout whose point is that the response
+ *    is the main column cannot then cap the response at 640.
  */
 export function layoutWidths(
-  visible: PaneVisibility,
+  layout: Layout,
   stored: { readonly sidebar: number; readonly detail: number },
   viewportWidth: number,
 ): { readonly sidebar: number; readonly detail: number } {
-  if (visible.canvas) {
+  const reserved = canvasReserved(layout);
+  if (canvasIsMain(layout)) {
     return {
-      sidebar: visible.sidebar
+      sidebar: layout.sidebar
         ? renderedWidth(
             'sidebar',
             stored.sidebar,
-            visible.detail ? stored.detail : 0,
+            layout.detail ? stored.detail : 0,
             viewportWidth,
+            reserved,
           )
         : 0,
-      detail: visible.detail
+      detail: layout.detail
         ? renderedWidth(
             'detail',
             stored.detail,
-            visible.sidebar ? stored.sidebar : 0,
+            layout.sidebar ? stored.sidebar : 0,
             viewportWidth,
+            reserved,
           )
         : 0,
     };
   }
-  if (!visible.detail) {
-    return { sidebar: visible.sidebar ? Math.max(SIDEBAR_MIN, viewportWidth) : 0, detail: 0 };
+  if (!layout.detail) {
+    return {
+      sidebar: layout.sidebar ? Math.max(SIDEBAR_MIN, viewportWidth - reserved) : 0,
+      detail: 0,
+    };
   }
-  const sidebar = visible.sidebar
+  const sidebar = layout.sidebar
     ? Math.min(
         clampPaneWidth('sidebar', stored.sidebar),
-        Math.max(SIDEBAR_MIN, viewportWidth - DETAIL_MIN),
+        Math.max(SIDEBAR_MIN, viewportWidth - DETAIL_MIN - reserved),
       )
     : 0;
-  return { sidebar, detail: Math.max(DETAIL_MIN, viewportWidth - sidebar) };
+  return { sidebar, detail: Math.max(DETAIL_MIN, viewportWidth - sidebar - reserved) };
 }

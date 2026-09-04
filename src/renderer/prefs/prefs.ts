@@ -25,12 +25,14 @@ import type { CanvasModel, SourceId } from '../domain/model.js';
 import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
 import {
   ALL_VISIBLE,
+  type ColumnId,
   clampPaneWidth,
+  DEFAULT_ORDER,
   DEFAULT_PANES,
   LAYOUTS,
+  type Layout,
   type LayoutName,
   type Pane,
-  type PaneVisibility,
 } from './panes.js';
 
 const KEY = 'vam.prefs.v1';
@@ -163,7 +165,7 @@ export type Prefs = {
    * garbage width from rendering as a pane that has vanished. Same TTL
    * exemption as `panes` and `theme`, for the same reason.
    */
-  readonly paneVisibility: PaneVisibility;
+  readonly paneVisibility: Layout;
   /**
    * Source id → project id → the emoji you gave that project's heading.
    *
@@ -413,22 +415,47 @@ function readPanes(raw: unknown): Prefs['panes'] {
 }
 
 /** A missing or garbage field means "drawn", per field: the safe direction to
- * fail is showing a pane you wanted hidden, never hiding one you did not. */
-function readPaneVisibility(raw: unknown): PaneVisibility {
-  const { sidebar, canvas, detail } = (typeof raw === 'object' && raw !== null ? raw : {}) as {
+ * fail is showing a pane you wanted hidden, never hiding one you did not. The
+ * order gets the same treatment one field along — every payload already in a
+ * browser predates it, and each of those reads back as the shipped sequence. */
+function readPaneVisibility(raw: unknown): Layout {
+  const { sidebar, canvas, detail, order } = (
+    typeof raw === 'object' && raw !== null ? raw : {}
+  ) as {
     sidebar?: unknown;
     canvas?: unknown;
     detail?: unknown;
+    order?: unknown;
   };
+  const columns = readColumnOrder(order);
   return {
     sidebar: sidebar !== false,
     canvas: canvas !== false,
     detail: detail !== false,
+    // Absent stays ABSENT rather than being materialised as the default: the
+    // field is optional in `Layout`, `columnOrder()` answers for it, and a
+    // payload that never named an order round-trips through here unchanged.
+    ...(columns === undefined ? {} : { order: columns }),
   };
 }
 
+/**
+ * Total: anything that is not a permutation of the three column ids reads as
+ * "no order stored", which `columnOrder()` answers with the shipped sequence. A partial or repeated list is rejected whole rather
+ * than repaired, because half an order is a column that would not be drawn at
+ * all — and a dropped column is exactly the failure `readPaneVisibility`
+ * refuses one field above.
+ */
+function readColumnOrder(raw: unknown): readonly ColumnId[] | undefined {
+  if (!Array.isArray(raw) || raw.length !== DEFAULT_ORDER.length) {
+    return undefined;
+  }
+  const named = new Set(raw.filter((id): id is ColumnId => DEFAULT_ORDER.includes(id as ColumnId)));
+  return named.size === DEFAULT_ORDER.length ? (raw as readonly ColumnId[]) : undefined;
+}
+
 /** Written by the layout chords. */
-export function setPaneVisibility(prefs: Prefs, paneVisibility: PaneVisibility): Prefs {
+export function setPaneVisibility(prefs: Prefs, paneVisibility: Layout): Prefs {
   return { ...prefs, paneVisibility };
 }
 
