@@ -66,10 +66,21 @@ DRAWN and says it has nothing — `—`, or a `data-placeholder` element with a
 
 ## Not started
 
-1. **`ReviewQueue` restyle.** It works and sits where the mockup's amber
-   `APPROVAL REQUIRED` box sits, but it still wears the old visual language.
+Nothing on this document's original list remains; see the corrections below for
+the two items that were answered by removal rather than by work.
 
 ## Corrections to this document's own predictions
+
+- **The `ReviewQueue` restyle is not pending, it is moot.** This document
+  listed it under "Not started", describing a component that "works and sits
+  where the mockup's amber `APPROVAL REQUIRED` box sits". It had already
+  stopped sitting anywhere: the governance queue was removed from the detail
+  pane at the operator's request, and nothing rendered `ReviewQueue` in either
+  build. What survived was worse than dead code — the action list still held
+  two keyboard stops per finding and two per lesson, so `j`/`k` walked rows
+  with nothing on screen and `Enter` POSTed a waiver or a lesson transition the
+  operator could not see himself making. The component, its hook, its queue
+  selectors and those actions are gone.
 
 - **The demo fixture is no longer Vietnamese.** This document listed it under
   "Not started"; it was translated along with the last user-visible strings

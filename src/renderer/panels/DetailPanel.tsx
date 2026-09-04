@@ -59,7 +59,6 @@ import remarkGfm from 'remark-gfm';
 import type { Decision, SessionAgent, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { Note } from './Note.js';
-import type { ReviewQueueProps } from './ReviewQueue.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 
 /** The three things this pane needs to know about a file it was handed. */
@@ -234,8 +233,7 @@ export type DetailPanelProps = {
   readonly onCopyAllCommands: () => void;
   /**
    * The command row whose `copy` control should take the keyboard -- what `i`
-   * asks for when the cursor is on a command row. A command row has no reason
-   * box, so this is its equivalent of `ReviewQueueProps.focusNoteFor`.
+   * asks for when the cursor is on a command row.
    */
   readonly focusCommandId?: string | null;
   /** Cleared once the focus has landed, so a second `i` on the same row asks again. */
@@ -251,11 +249,6 @@ export type DetailPanelProps = {
   readonly active: boolean;
   /** Which action `j`/`k` has landed on while `active`. */
   readonly actionIndex: number;
-  /**
-   * What the factory is waiting on you to rule on. Absent when there is no live
-   * source — a queue you cannot answer should not be drawn.
-   */
-  readonly review?: ReviewQueueProps;
   /**
    * Whether this session's source DELIVERS a prompt into a running agent
    * rather than only filing it in a log — `SourceCapabilities.deliverPrompt`
@@ -738,7 +731,6 @@ export function DetailPanel(props: DetailPanelProps) {
     onStopComposing,
     active,
     actionIndex,
-    review,
     delivers,
     sending = false,
     width,
@@ -1249,6 +1241,10 @@ export function DetailPanel(props: DetailPanelProps) {
                     {commands.map((command, i) => (
                       <div
                         key={command.id}
+                        // The id `buildActions` gives this row. It is what lets
+                        // a test hold the walkable list and the drawn one to
+                        // each other -- see test/panels/action-parity.test.tsx.
+                        data-action-id={`command:${command.id}`}
                         className={[
                           'rounded-[9px] border bg-canvas px-3 py-2.5',
                           active && actionIndex === i ? 'border-waiting' : 'border-line',
@@ -1297,12 +1293,12 @@ export function DetailPanel(props: DetailPanelProps) {
       <div className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3">
         {/* black-smith's governance queue — findings awaiting a waiver, and
             lesson candidates — used to stand here. The operator asked for it
-            to go. `ReviewQueue` and its tests are left in the tree rather than
-            deleted: it is working code for a real black-smith surface, and no
-            other source has governance to show anyway, so restoring it is one
-            line here plus the prop. */}
+            to go, and it is gone from `buildActions` too: it went on
+            contributing keyboard stops and a live `Enter` to this pane long
+            after the rows themselves stopped being drawn. */}
         <div
           data-prompt-box
+          data-action-id="prompt"
           className={[
             'flex flex-col gap-2.5 rounded-[10px] border bg-panel px-3 py-2.5',
             active && actionIndex === commands.length ? 'border-waiting' : 'border-line-loud',

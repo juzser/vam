@@ -2,44 +2,26 @@
  * Everything `j`/`k` can land on inside the action pane, in the order it is
  * drawn.
  *
- * The list is flat and one entry per BUTTON, not per row. That is the whole
- * decision here, and it was made against two alternatives:
+ * The list holds one entry per thing the pane DRAWS, and that is the whole
+ * decision here. It used to hold more: two stops per waivable finding and two
+ * per lesson candidate, from black-smith's governance queue. The queue was
+ * taken out of the pane at the operator's request and this list was not, so
+ * the cursor kept walking stops with nothing on screen and `Enter` on one of
+ * them filed a real governance decision the operator could not see himself
+ * making. An action the pane does not render is not a quieter feature, it is
+ * an invisible button.
  *
- *  - one entry per row plus a key for each verdict (`y` grants, `n` denies).
- *    Both letters already mean something in the grammar (`yy` copies, `n` walks
- *    matches), and a modal meaning is exactly what §4 says this tool does not
- *    have.
- *  - one entry per row with `Enter` as the primary verdict. That requires the
- *    reader to know which verdict is "primary" for a decision that accepts a
- *    defect onto the permanent record. Nothing on screen could say it.
- *
- * One stop per button costs a keypress and buys an interface where the ring
- * around the thing you are about to press IS the answer to what will happen.
- * The order matches the DOM so `j` moves down the screen, never around it.
+ * `test/panels/action-parity.test.tsx` holds the two lists to each other:
+ * every entry here has an element on screen, in this order.
  */
 
-import type { ApiFinding, ApiLesson } from '../adapter/api.js';
 import type { Command } from '../domain/model.js';
 
 export type CanvasAction =
   | {
-      readonly kind: 'waiver';
-      readonly id: string;
-      /** The row this button belongs to — what `i` opens the note box on. */
-      readonly rowId: string;
-      readonly verdict: 'granted' | 'denied';
-      readonly label: string;
-    }
-  | {
-      readonly kind: 'lesson';
-      readonly id: string;
-      readonly rowId: string;
-      readonly verdict: 'approve' | 'reject';
-      readonly label: string;
-    }
-  | {
       readonly kind: 'command';
       readonly id: string;
+      /** The row this entry belongs to — what `i` puts the keyboard on. */
       readonly rowId: string;
       readonly label: string;
     }
@@ -54,54 +36,11 @@ export type CanvasAction =
  * The pane's actions, top to bottom.
  *
  * The prompt is always last and always present — it is the one action that does
- * not depend on the factory having asked anything, so a pane with an empty
- * queue and no commands still has somewhere for `I` to land.
- *
- * Within a row the conservative verdict comes first: "fix" before "waive",
- * "reject" before "approve". `j` from the row above therefore stops on the answer
- * that changes nothing, and reaching the one that accepts a defect takes one
- * more deliberate press.
+ * not depend on the step having proposed anything, so a pane with no commands
+ * still has somewhere for `I` to land.
  */
-export function buildActions(
-  waivers: readonly ApiFinding[],
-  lessons: readonly ApiLesson[],
-  commands: readonly Command[],
-): CanvasAction[] {
+export function buildActions(commands: readonly Command[]): CanvasAction[] {
   const actions: CanvasAction[] = [];
-
-  for (const finding of waivers) {
-    actions.push({
-      kind: 'waiver',
-      id: `waiver:${finding.fingerprint}:denied`,
-      rowId: finding.fingerprint,
-      verdict: 'denied',
-      label: `fix ${finding.fingerprint}`,
-    });
-    actions.push({
-      kind: 'waiver',
-      id: `waiver:${finding.fingerprint}:granted`,
-      rowId: finding.fingerprint,
-      verdict: 'granted',
-      label: `waive ${finding.fingerprint}`,
-    });
-  }
-
-  for (const lesson of lessons) {
-    actions.push({
-      kind: 'lesson',
-      id: `lesson:${lesson.lessonId}:reject`,
-      rowId: lesson.lessonId,
-      verdict: 'reject',
-      label: `reject ${lesson.lessonId}`,
-    });
-    actions.push({
-      kind: 'lesson',
-      id: `lesson:${lesson.lessonId}:approve`,
-      rowId: lesson.lessonId,
-      verdict: 'approve',
-      label: `approve ${lesson.lessonId}`,
-    });
-  }
 
   for (const command of commands) {
     actions.push({
@@ -119,11 +58,11 @@ export function buildActions(
 /**
  * Keep a cursor pointing at something after the list under it changed.
  *
- * Answering a queue row removes it, and an index left dangling past the end
- * silently becomes "nothing selected" — so `Enter` would do nothing and the
- * pane would look broken rather than answered. Clamping to the last entry keeps
- * the cursor on the nearest surviving thing, which after answering the last
- * waiver is the prompt.
+ * Moving to a step with fewer commands shortens the list, and an index left
+ * dangling past the end silently becomes "nothing selected" — so `Enter` would
+ * do nothing and the pane would look broken rather than empty. Clamping to the
+ * last entry keeps the cursor on the nearest surviving thing, which is at worst
+ * the prompt.
  */
 export function clampIndex(index: number, length: number): number {
   if (length === 0) {
