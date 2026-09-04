@@ -328,3 +328,53 @@ describe('multi-select toggles exactly what was chosen, and reviews it before co
     expect(keys().filter((key) => key === 'Enter')).toHaveLength(2);
   });
 });
+
+/**
+ * The same flow against REAL `capture-pane` output, byte for byte.
+ *
+ * Every fixture above is written by hand, and a parser tested only against
+ * screens its author invented is a parser tested against its own assumptions.
+ * So these three screens were captured from a live tmux -- a throwaway session
+ * on a private socket, running a three-row picker, killed and verified gone in
+ * the same task -- and pasted in unaltered. `capture-pane -p` strips trailing
+ * spaces and pads the screen with empty lines, which is the detail a hand
+ * fixture would not have thought to include.
+ *
+ * What the capture proves about tmux itself, and it is why the route is this
+ * one: `send-keys Down` moved the rendered cursor, Return committed the row
+ * the cursor was ON at that moment, and the screen afterwards no longer holds
+ * the picker.
+ */
+describe('against real capture-pane bytes', () => {
+  const LIVE = [
+    '❯ 1. Crimson\n  2. Cobalt\n  3. Emerald\nEnter to select · Up/Down to navigate\n' +
+      '\n'.repeat(20),
+    '  1. Crimson\n❯ 2. Cobalt\n  3. Emerald\nEnter to select · Up/Down to navigate\n' +
+      '\n'.repeat(20),
+    '  1. Crimson\n  2. Cobalt\n❯ 3. Emerald\nEnter to select · Up/Down to navigate\n' +
+      '\n'.repeat(20),
+    'Your questions have been answered: "colour"="Emerald".\n>\n' + '\n'.repeat(28),
+  ];
+
+  it('reads the cursor and the rows off a screen tmux actually rendered', () => {
+    expect(readPicker(LIVE[0] ?? '')?.cursor).toBe(0);
+    expect(readPicker(LIVE[2] ?? '')?.cursor).toBe(2);
+    expect(readPicker(LIVE[2] ?? '')?.rows.map((row) => row.label)).toEqual([
+      'Crimson',
+      'Cobalt',
+      'Emerald',
+    ]);
+    // The screen after the commit holds no picker, which is what the read-back
+    // reads as confirmation.
+    expect(readPicker(LIVE[3] ?? '')).toBeNull();
+  });
+
+  it('answers Emerald across those four screens, in two arrows and one Return', async () => {
+    const { run, keys } = runner(LIVE);
+    expect(await answerQuestion(run, ATLAS, single(['Emerald']))).toEqual({
+      kind: 'sent',
+      answer: 'Emerald',
+    });
+    expect(keys()).toEqual(['Down', 'Down', 'Enter']);
+  });
+});
