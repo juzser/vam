@@ -242,8 +242,8 @@ describe('the verified route, step by step', () => {
    */
   it('matches the LABEL, not the position, when the list reflows under the walk', async () => {
     const before = colours(0, ['Crimson', 'Cobalt', 'Emerald']);
-    const after = (row: number) => colours(row, ['Emerald', 'Crimson', 'Cobalt']);
-    const { run, keys } = runner([before, after(1), after(2), after(0), RESOLVED]);
+    const reflowed = (row: number) => colours(row, ['Emerald', 'Crimson', 'Cobalt']);
+    const { run, keys } = runner([before, reflowed(1), reflowed(2), reflowed(0), RESOLVED]);
     expect(await answerQuestion(run, ATLAS, single(['Emerald']))).toEqual({
       kind: 'sent',
       answer: 'Emerald',

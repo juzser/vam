@@ -21,7 +21,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentQuestion, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
-import type { AnswerResult } from '../../src/shared/answer.js';
+import type { AnswerRequest, AnswerResult } from '../../src/shared/answer.js';
 
 const QUESTION: AgentQuestion = {
   id: 'toolu_1:0',
@@ -76,7 +76,9 @@ const q = (selector: string) => document.querySelector<HTMLElement>(selector);
 const all = (selector: string) => [...document.querySelectorAll<HTMLElement>(selector)];
 const text = () => document.body.textContent ?? '';
 const submit = () => q('[data-question-submit]') as HTMLButtonElement | null;
-const answering = (result: AnswerResult) => vi.fn(async () => result);
+/** A fake bridge, typed as the real member is so the calls can be read back. */
+const answering = (result: AnswerResult) =>
+  vi.fn((_projectId: string, _request: AnswerRequest, _rowId?: string) => Promise.resolve(result));
 
 afterEach(cleanup);
 
@@ -131,11 +133,7 @@ describe('what Submit sends, and what it says afterwards', () => {
     // By value: the project, the labels the operator marked, and the session
     // id -- which is what makes the pairing per session rather than per
     // project on the other side.
-    expect(answer.mock.calls[0]).toEqual([
-      'p1',
-      { labels: ['Cobalt'], multiSelect: false },
-      's1',
-    ]);
+    expect(answer.mock.calls[0]).toEqual(['p1', { labels: ['Cobalt'], multiSelect: false }, 's1']);
   });
 
   it('carries every mark of a multi-select question, in the order they are drawn', async () => {

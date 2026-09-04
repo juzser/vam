@@ -81,6 +81,7 @@ import {
 } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { AnswerRequest, AnswerResult } from '../../shared/answer.js';
 import type {
   AgentQuestion,
   Command,
@@ -90,7 +91,6 @@ import type {
   SessionAgent,
   SessionStatus,
 } from '../domain/model.js';
-import type { AnswerRequest, AnswerResult } from '../../shared/answer.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import {

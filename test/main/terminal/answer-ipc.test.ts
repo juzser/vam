@@ -10,11 +10,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { isAnswerRequest, MAX_ANSWER_LABELS } from '../../../src/shared/answer.js';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
+import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
 import { registerTerminalIpc } from '../../../src/main/terminal/ipc.js';
 import { createTerminalApi } from '../../../src/preload/api.js';
-import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
+import { isAnswerRequest, MAX_ANSWER_LABELS } from '../../../src/shared/answer.js';
 
 const ok = (stdout: string): TmuxRunResult => ({ failure: null, stdout, stderr: '' });
 const ATLAS = 'claude-code:atlas-11111111';

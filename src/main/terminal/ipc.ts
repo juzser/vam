@@ -12,6 +12,7 @@
  * requirement for this tab, and the reason main holds no timer of its own.
  */
 
+import { type AnswerResult, isAnswerRequest } from '../../shared/answer.js';
 import {
   isPaneKey,
   isPaneSize,
@@ -20,7 +21,6 @@ import {
 } from '../../shared/terminal.js';
 import { CHANNELS } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
-import { type AnswerResult, isAnswerRequest } from '../../shared/answer.js';
 import { readPublishedPanes } from '../sources/claude-code/session-pane.js';
 import { defaultSessionsRoot } from '../sources/claude-code/session-status.js';
 import type { TmuxRun } from '../sources/tmux/spawn.js';
