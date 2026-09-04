@@ -1094,17 +1094,21 @@ describe('waiting on you', () => {
     render(<Canvas model={WAITING} />);
     press('k', { ctrlKey: true });
     // Scoped to the palette's own group headings: "needs you" also appears in
-    // the sidebar row and the status-bar count, and a bare text query would
-    // pass on either of those while the grouping was missing.
+    // the sidebar row, and a bare text query would pass on that while the
+    // grouping was missing.
     const headings = [...document.querySelectorAll('[cmdk-group-heading]')].map(
       (el) => el.textContent,
     );
     expect(headings).toContain('needs you');
   });
 
-  it('counts it in the status bar', () => {
+  it('no longer counts it in the status bar', () => {
     render(<Canvas model={WAITING} />);
-    expect(screen.getByText(/1 need you/)).toBeTruthy();
+    // The tally cells are gone at the operator's request; this assertion is
+    // kept as an absence rather than deleted, so a re-add fails here.
+    // `test/canvas/Canvas.statusbar.test.tsx` owns the whole trimmed bar.
+    expect(screen.queryByText(/1 need you/)).toBeNull();
+    expect(document.querySelector('[data-status-bar]')?.textContent).not.toMatch(/need you/);
   });
 });
 
@@ -1884,10 +1888,18 @@ describe('Cmd-number jumps to a session in the sidebar', () => {
 });
 
 describe('the grammar hint in the footer', () => {
-  it('names the digit jump, which is otherwise invisible', () => {
+  it('no longer spells out the grammar: the sheet behind `?` does', () => {
     render(<Canvas model={MODEL} />);
-    // `^` is how the bar already spells a Mod key (`^K` is the palette), so
-    // the range reads in the same alphabet rather than introducing ⌘ next to it.
-    expect(screen.getByText(/\^K \^1-9/)).toBeTruthy();
+    // The operator asked for one cell at the right end. The digit jump did
+    // not become invisible with it: the `?` sheet is generated from
+    // BINDING_TABLES, so `Mod-1..9` is named there, and the bar now points
+    // at the sheet instead of paraphrasing it.
+    const bar = document.querySelector('[data-status-bar]')?.textContent ?? '';
+    expect(bar).not.toMatch(/\^1-9/);
+    expect(bar).toMatch(/\?/);
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true }));
+    });
+    expect(document.querySelector('[data-key-sheet]')?.textContent).toMatch(/1/);
   });
 });

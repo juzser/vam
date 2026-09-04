@@ -1722,42 +1722,22 @@ function CanvasInner({
           </span>
         )}
 
-        <span className="h-3 w-px bg-line" />
-        <span>
-          <span className="text-ink-dim">{tally.all}</span> sessions
-        </span>
-        {tally.running > 0 && <span className="text-running">{tally.running} running</span>}
-        {tally.waiting > 0 && <span className="text-waiting">{tally.waiting} need you</span>}
-        {tally.done > 0 && <span className="text-done">{tally.done} done</span>}
-        {tally.failed > 0 && <span className="text-failed">{tally.failed} failed</span>}
-        <span className="h-3 w-px bg-line" />
-        <span>{model.projects.length} projects</span>
+        {/* The session tallies and the project count are gone at the
+            operator's request: "statusbar khong can list so session va
+            session status". Every one of those numbers is already on screen
+            as the thing it counts -- the sidebar's filter counts, the cards
+            on the canvas -- so the bar was restating a view of itself.
+            `tally` itself stays: the sidebar's filter counts read it. */}
 
         {status !== null && <span className="truncate text-ink-dim">{status}</span>}
 
         <span className="flex-1" />
-        {/* The mockup spends its right end on token spend against budget.
-            It says `today`, and this does not: `/api/overview` carries a
-            cumulative `tokensByEpic` and no daily bucket, so a cell labelled
-            "today" would be a caption the number cannot support.
-            A source with no budget at all renders the em-dashes rather than
-            zeros — a factory that has spent nothing must stay distinguishable
-            from a source that has no such concept. */}
-        {model.budget === null || model.budget === undefined ? (
-          <span data-budget className="text-ink-ghost">
-            — / — cap
-          </span>
-        ) : (
-          <span
-            data-budget
-            className={model.budget.usedPct > 100 ? 'text-waiting' : 'text-ink-ghost'}
-          >
-            {compactTokens(model.budget.tokensSpent)} / {compactTokens(model.budget.tokensBudget)}{' '}
-            cap · {Math.round(model.budget.usedPct)}%
-          </span>
-        )}
-        <span className="h-3 w-px bg-line" />
-        <span>hjkl f / gt i yy ^K ^1-9 ?</span>
+        {/* The right-hand end is one cell wide, again at the operator's
+            request: "Phan ben phai status bar, chi de `?` keyboard shortcut
+            thoi". The budget cell that used to sit here went with the rest;
+            `?` is the `help` chord in BINDING_TABLES, so the one key still
+            printed is a key the grammar answers to. */}
+        <span>?</span>
       </footer>
     </div>
   );
