@@ -3,20 +3,18 @@
 /**
  * The sidebar row and the canvas node answer the icon question the same way.
  *
- * `resolveSessionIcon` states the chain -- session glyph, else project glyph,
- * else the neutral mark -- in one place precisely so two surfaces cannot
+ * `resolveSessionGlyph` states the chain -- session glyph, else project glyph,
+ * else nothing anyone picked -- in one place precisely so two surfaces cannot
  * disagree, and the sidebar inlined its own half of it. The test that matters
  * is therefore not "the row draws an icon" but "the row draws what the shared
  * resolver says", asserted against the resolver rather than against a repeated
- * literal.
+ * literal. The empty end of the chain is a drawn placeholder, and it has its
+ * own test beside the canvas node it must match.
  */
 
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  NEUTRAL_SESSION_ICON,
-  resolveSessionIcon,
-} from '../../src/renderer/canvas/session-icon.js';
+import { resolveSessionGlyph } from '../../src/renderer/canvas/session-icon.js';
 import type { Project, Session, SourceId } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { SessionList } from '../../src/renderer/panels/SessionList.js';
@@ -56,7 +54,7 @@ describe('the sidebar row reads the shared icon chain', () => {
     const entry: SessionEntry = { project: project({ icon: '📦' }), session: session() };
     mount([entry]);
     expect(rowIcon('s1')).toBe('📦');
-    expect(rowIcon('s1')).toBe(resolveSessionIcon(entry));
+    expect(rowIcon('s1')).toBe(resolveSessionGlyph(entry));
   });
 
   it('prefers the session’s own glyph, and never leaves the slot empty', () => {
@@ -67,9 +65,11 @@ describe('the sidebar row reads the shared icon chain', () => {
     const bare: SessionEntry = { project: project(), session: session({ id: 'bare' }) };
     mount([owned, bare]);
     expect(rowIcon('own')).toBe('🦀');
-    expect(rowIcon('bare')).toBe(NEUTRAL_SESSION_ICON);
+    // Nobody picked one, so the chain draws its placeholder and the slot holds
+    // no text at all -- the visible-mark half is pinned in the placeholder test.
+    expect(rowIcon('bare')).toBe('');
+    expect(resolveSessionGlyph(bare)).toBe(null);
     // Both surfaces, one answer -- which is the disagreement this adoption ends.
-    expect(rowIcon('own')).toBe(resolveSessionIcon(owned));
-    expect(rowIcon('bare')).toBe(resolveSessionIcon(bare));
+    expect(rowIcon('own')).toBe(resolveSessionGlyph(owned));
   });
 });

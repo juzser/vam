@@ -24,7 +24,7 @@ import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { GitBranch } from 'lucide-react';
 import type { Session, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
-import { resolveSessionIcon } from './session-icon.js';
+import { SessionIcon } from './session-icon.js';
 
 const STATUS_INK: Readonly<Record<SessionStatus, string>> = {
   running: 'text-running',
@@ -159,9 +159,10 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
             the `s` chord opens, so there is one chooser and one write path.
             `nodrag` keeps ReactFlow's pointer handling off the button.
 
-            Always drawn, never conditional: `resolveSessionIcon` answers for
-            every session, and a control that appears only once you have used
-            it is a control nobody finds. */}
+            Always drawn, never conditional: `SessionIcon` answers for every
+            session -- with a drawn placeholder when the chain is empty -- and
+            a control that appears only once you have used it is a control
+            nobody finds. */}
         <button
           type="button"
           data-session-icon={session.id}
@@ -173,7 +174,7 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
           }}
           className="nodrag flex-none rounded-[var(--radius-sm)] text-[13px] leading-tight hover:bg-line-strong"
         >
-          {resolveSessionIcon(entry)}
+          <SessionIcon entry={entry} size={13} />
         </button>
         <span className="vam-clamp-2 font-medium text-[13.5px] text-ink leading-[1.32]">
           {session.title}
