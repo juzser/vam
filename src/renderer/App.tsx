@@ -21,7 +21,7 @@ import { SmithClient } from './adapter/client.js';
 import { useCanvas } from './adapter/useCanvas.js';
 import { Canvas } from './canvas/Canvas.js';
 import { DEMO_MODEL } from './fixtures/demo.js';
-import type { SessionSource } from './sources/port.js';
+import { describeFailure, type SessionSource } from './sources/port.js';
 import { createSourceFromPreload } from './sources/preload-factory.js';
 import { useSourceModel } from './sources/useSourceModel.js';
 
@@ -121,14 +121,6 @@ function DesktopCanvas({ api }: { readonly api: DesktopSourceApi }) {
       />
     </>
   );
-}
-
-/** A `SourceError` reads as `code: message`; anything else falls back to its text. */
-function describeFailure(reason: unknown): string {
-  if (typeof reason === 'object' && reason !== null && 'code' in reason && 'message' in reason) {
-    return `${String(reason.code)}: ${String(reason.message)}`;
-  }
-  return reason instanceof Error ? reason.message : String(reason);
 }
 
 function DemoCanvas() {

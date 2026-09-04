@@ -41,7 +41,6 @@ import {
   type UsageSnapshot,
   type UsageWindow,
 } from '../../shared/usage.js';
-import { SmithApiError } from '../adapter/client.js';
 import { useReviewQueue } from '../adapter/useReviewQueue.js';
 import type { CanvasModel, Decision, Project, SessionStatus, SourceId } from '../domain/model.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
@@ -69,7 +68,7 @@ import {
   setTheme,
   writePrefs,
 } from '../prefs/prefs.js';
-import { canWriteTo } from '../sources/port.js';
+import { canWriteTo, describeFailure } from '../sources/port.js';
 import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
 import { copyText } from './clipboard.js';
@@ -812,13 +811,7 @@ function CanvasInner({
         source.onWrote();
       }
     } catch (cause) {
-      setStatus(
-        cause instanceof SmithApiError
-          ? `${cause.code}: ${cause.message}`
-          : cause instanceof Error
-            ? cause.message
-            : String(cause),
-      );
+      setStatus(describeFailure(cause));
     } finally {
       setWriting(false);
     }
@@ -853,13 +846,7 @@ function CanvasInner({
         review.reload();
         source.onWrote();
       } catch (cause) {
-        setStatus(
-          cause instanceof SmithApiError
-            ? `${cause.code}: ${cause.message}`
-            : cause instanceof Error
-              ? cause.message
-              : String(cause),
-        );
+        setStatus(describeFailure(cause));
       } finally {
         setAnswering(null);
       }

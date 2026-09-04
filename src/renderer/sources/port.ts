@@ -131,3 +131,26 @@ export function canGovernWith(
 ): source is SessionSource & { readonly governance: SourceGovernance } {
   return source.capabilities.governance && source.governance !== undefined;
 }
+
+/**
+ * The one way a rejected source call becomes a sentence on screen.
+ *
+ * The shape test comes FIRST, and deliberately, because the thing this
+ * function most often receives is not an `Error` at all. `src/preload/api.ts`
+ * rethrows the main process's `SourceError` verbatim (`throw result.error`) so
+ * that the `code` and the CLI's own remedy survive the bridge -- and a
+ * structured-cloned plain object is what lands in the `catch`. Reaching
+ * `String(cause)` with one of those prints `[object Object]`, which is the
+ * exact opposite of the point: a refused send is the COMMON case, and
+ * "session-running" and "cli-missing" have to be told apart.
+ *
+ * `SmithApiError` is caught by the same branch rather than a separate one: it
+ * is an `Error` subclass carrying an own `code`, so `code: message` is what it
+ * rendered before and what it renders now.
+ */
+export function describeFailure(reason: unknown): string {
+  if (typeof reason === 'object' && reason !== null && 'code' in reason && 'message' in reason) {
+    return `${String(reason.code)}: ${String(reason.message)}`;
+  }
+  return reason instanceof Error ? reason.message : String(reason);
+}

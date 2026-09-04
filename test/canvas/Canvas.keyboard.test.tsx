@@ -1339,14 +1339,40 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
     expect(promptInput()?.value).toBe('hello');
   });
 
-  it('leaves the draft intact and reports the message when the write rejects', async () => {
-    const { source, wrote } = fakeSessionSource({ deliverPrompt: false }, async () => {
+  it('leaves the draft intact and reports the refusal the preload actually throws', async () => {
+    // The preload rethrows the main process's `SourceError` verbatim -- a plain
+    // object, never an `Error` (`src/preload/api.ts`, `throw result.error`).
+    // A test that rejected with `new Error(...)` exercised a branch the real
+    // desktop path never reaches, and left `[object Object]` on screen.
+    const { source, wrote } = fakeSessionSource({ deliverPrompt: true }, async () => {
+      throw {
+        kind: 'refused',
+        code: 'session-running',
+        message:
+          'session a1 is running, so Claude Code will not resume it here. Run `claude attach` to type into it.',
+      };
+    });
+    await submit(source, 'hello');
+    expect(statusBar()).toContain('session-running: session a1 is running');
+    expect(statusBar()).toContain('claude attach');
+    expect(statusBar()).not.toContain('[object Object]');
+    expect(wrote.count).toBe(0);
+    expect(promptInput()?.value).toBe('hello');
+  });
+
+  it('still reports a real `Error`’s message, and something that is neither', async () => {
+    const { source } = fakeSessionSource({ deliverPrompt: false }, async () => {
       throw new Error('resume failed: no such session');
     });
     await submit(source, 'hello');
     expect(statusBar()).toContain('resume failed: no such session');
-    expect(wrote.count).toBe(0);
-    expect(promptInput()?.value).toBe('hello');
+    cleanup();
+
+    const { source: odd } = fakeSessionSource({ deliverPrompt: false }, async () => {
+      throw 'the preload vanished';
+    });
+    await submit(odd, 'hello');
+    expect(statusBar()).toContain('the preload vanished');
   });
 
   it('threads `deliverPrompt` into the detail panel’s composer wording', async () => {

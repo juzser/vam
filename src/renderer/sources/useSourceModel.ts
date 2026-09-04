@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CanvasModel } from '../domain/model.js';
-import type { SessionSource } from './port.js';
+import { describeFailure, type SessionSource } from './port.js';
 
 /**
  * How often to re-read the source.
@@ -39,14 +39,6 @@ import type { SessionSource } from './port.js';
  * back to vam is both when its numbers matter most and when they are stalest.
  */
 export const SOURCE_POLL_INTERVAL_MS = 10_000;
-
-/** A `SourceError` reads as `code: message`; anything else falls back to its text. */
-function describeFailure(reason: unknown): string {
-  if (typeof reason === 'object' && reason !== null && 'code' in reason && 'message' in reason) {
-    return `${String(reason.code)}: ${String(reason.message)}`;
-  }
-  return reason instanceof Error ? reason.message : String(reason);
-}
 
 const EMPTY: CanvasModel = { projects: [] };
 
