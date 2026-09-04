@@ -24,6 +24,7 @@ import {
   DEFAULT_ORDER,
   DEFAULT_PANES,
   LAYOUTS,
+  columnOrder as layoutColumnOrder,
   layoutWidths,
 } from '../../src/renderer/prefs/panes.js';
 
@@ -220,7 +221,9 @@ describe('z0 undoes it', () => {
 describe('the layouts that shipped are unchanged', () => {
   it('keeps both subtractive layouts in the shipped order', () => {
     for (const name of ['noCanvas', 'responseOnly'] as const) {
-      expect(LAYOUTS[name].order ?? DEFAULT_ORDER).toEqual([...DEFAULT_ORDER]);
+      // Through the same accessor the app uses, so "no order named" and "the
+      // shipped order" are pinned as the one thing they have to be.
+      expect(layoutColumnOrder(LAYOUTS[name])).toEqual([...DEFAULT_ORDER]);
     }
   });
 
@@ -265,9 +268,7 @@ describe('the settings picker offers it', () => {
     fireEvent.click(option as HTMLElement);
     expect(columnOrder()).toEqual(['sidebar', 'detail', 'canvas']);
     expect(
-      document
-        .querySelector('[data-layout-option="focusResponse"]')
-        ?.getAttribute('aria-pressed'),
+      document.querySelector('[data-layout-option="focusResponse"]')?.getAttribute('aria-pressed'),
     ).toBe('true');
   });
 });

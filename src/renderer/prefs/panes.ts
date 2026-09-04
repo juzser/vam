@@ -148,11 +148,7 @@ export const ALL_VISIBLE: PaneVisibility = { sidebar: true, canvas: true, detail
 export type ColumnId = 'sidebar' | 'canvas' | 'detail';
 
 /** The sequence the app has always drawn: the canvas in the middle. */
-export const DEFAULT_ORDER = [
-  'sidebar',
-  'canvas',
-  'detail',
-] as const satisfies readonly ColumnId[];
+export const DEFAULT_ORDER = ['sidebar', 'canvas', 'detail'] as const satisfies readonly ColumnId[];
 
 /**
  * A layout: which columns are drawn, and in what order.

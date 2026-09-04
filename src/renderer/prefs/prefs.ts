@@ -25,12 +25,12 @@ import type { CanvasModel, SourceId } from '../domain/model.js';
 import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
 import {
   ALL_VISIBLE,
-  clampPaneWidth,
   type ColumnId,
+  clampPaneWidth,
   DEFAULT_ORDER,
   DEFAULT_PANES,
-  type Layout,
   LAYOUTS,
+  type Layout,
   type LayoutName,
   type Pane,
 } from './panes.js';
@@ -419,9 +419,9 @@ function readPanes(raw: unknown): Prefs['panes'] {
  * order gets the same treatment one field along — every payload already in a
  * browser predates it, and each of those reads back as the shipped sequence. */
 function readPaneVisibility(raw: unknown): Layout {
-  const { sidebar, canvas, detail, order } = (typeof raw === 'object' && raw !== null
-    ? raw
-    : {}) as {
+  const { sidebar, canvas, detail, order } = (
+    typeof raw === 'object' && raw !== null ? raw : {}
+  ) as {
     sidebar?: unknown;
     canvas?: unknown;
     detail?: unknown;

@@ -66,8 +66,8 @@ import { SessionList } from '../panels/SessionList.js';
 import {
   ALL_VISIBLE,
   CANVAS_STRIP,
-  canvasIsMain,
   type ColumnId,
+  canvasIsMain,
   columnOrder,
   DEFAULT_PANES,
   layoutWidths,
@@ -798,10 +798,7 @@ function CanvasInner({
    * `j`/`k` can reach, and the sidebar still lists them all.
    */
   const drawnNodes = useMemo(
-    () =>
-      canvasStrip
-        ? nodes.filter((node) => node.data.sessionId === focusedSessionId)
-        : nodes,
+    () => (canvasStrip ? nodes.filter((node) => node.data.sessionId === focusedSessionId) : nodes),
     [canvasStrip, nodes, focusedSessionId],
   );
 
