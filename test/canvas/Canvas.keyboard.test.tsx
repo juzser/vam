@@ -1839,12 +1839,23 @@ const MANY: CanvasModel = {
   ],
 };
 
-describe('Cmd-number jumps to a session in the sidebar', () => {
-  it('Mod-1 lands on the first row from wherever the cursor was', () => {
+/**
+ * `Cmd+<n>` — the sidebar's positions, while the sidebar has the keyboard.
+ *
+ * The pane fork itself lives in `Canvas.tab-chord.test.tsx`; what these pin is
+ * the sidebar half, which is the half that counts rows. Pressed with a
+ * `code`, because that is what a real keydown carries and what
+ * `normalizeKey` reads.
+ */
+const sessionAt = (n: number, extra: KeyboardEventInit = {}) =>
+  press(String(n), { metaKey: true, code: `Digit${n}`, ...extra });
+
+describe('Cmd-number jumps to a session while the sidebar has the keyboard', () => {
+  it('lands on the first row from wherever the cursor was', () => {
     render(<Canvas model={MODEL} />);
     press('j');
     expect(focused()).toBe('alpha/a2');
-    press('1', { metaKey: true });
+    sessionAt(1);
     expect(focused()).toBe('alpha/a1');
   });
 
@@ -1852,24 +1863,24 @@ describe('Cmd-number jumps to a session in the sidebar', () => {
     render(<Canvas model={MODEL} />);
     // a1, a2 sit under alpha and b1 under beta; the third digit is the third
     // SESSION, not the third row of a list that counted its own headings.
-    press('3', { ctrlKey: true });
+    press('3', { ctrlKey: true, code: 'Digit3' });
     expect(focused()).toBe('beta/b1');
   });
 
-  it('Mod-9 is the last session, past nine and short of it alike', () => {
+  it('the ninth is the last session, past nine and short of it alike', () => {
     const { unmount } = render(<Canvas model={MANY} />);
-    press('9', { metaKey: true });
+    sessionAt(9);
     expect(focused()).toBe('gamma/s10'); // the LAST, not the ninth
     unmount();
 
     render(<Canvas model={MODEL} />);
-    press('9', { metaKey: true });
+    sessionAt(9);
     expect(focused()).toBe('beta/b1'); // three sessions, and it still lands
   });
 
   it('an out-of-range digit says so instead of clamping to the last row', () => {
     render(<Canvas model={MODEL} />);
-    press('7', { metaKey: true });
+    sessionAt(7);
     expect(focused()).toBe('alpha/a1'); // unmoved
     expect(statusBar()).toContain('only 3 sessions');
   });
@@ -1881,11 +1892,11 @@ describe('Cmd-number jumps to a session in the sidebar', () => {
     keyOn(filterInput() as HTMLInputElement, 'Enter');
     expect(rows().map((el) => el.getAttribute('data-session-row'))).toEqual(['a1', 'a2']);
 
-    press('2', { metaKey: true });
+    sessionAt(2);
     expect(focused()).toBe('alpha/a2');
     // b1 is still in the model and still the third session there. Counting it
     // would land the cursor on a row the operator cannot see.
-    press('3', { metaKey: true });
+    sessionAt(3);
     expect(focused()).toBe('alpha/a2');
     expect(statusBar()).toContain('only 2 sessions');
   });
@@ -1894,10 +1905,11 @@ describe('Cmd-number jumps to a session in the sidebar', () => {
     // REVERSED, deliberately. The window listener used to step aside for every
     // keystroke aimed at an INPUT or a TEXTAREA, which killed Cmd-chords
     // exactly where an operator's hands are. A Cmd/Ctrl chord is not text
-    // entry on any layout, so the box has no claim on it — the rule that lets
-    // `Mod-Shift-<digit>` reach the tab bar from the prompt box is the same
-    // rule here, and one rule is what keeps it predictable. What the box does
+    // entry on any layout, so the box has no claim on it. What the box does
     // keep is everything unmodified, including the draft already typed.
+    //
+    // `i` composes without moving the KEYBOARD out of the list — `I` is what
+    // does that — so the digit is still counting sessions here.
     render(<Canvas model={MODEL} />);
     press('j');
     press('i'); // the composer, aimed at alpha/a2
@@ -1912,6 +1924,7 @@ describe('Cmd-number jumps to a session in the sidebar', () => {
     render(<Canvas model={MODEL} />);
     const event = new KeyboardEvent('keydown', {
       key: '2',
+      code: 'Digit2',
       metaKey: true,
       bubbles: true,
       cancelable: true,

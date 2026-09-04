@@ -232,15 +232,47 @@ describe('the new resize chords (AC-5c continued)', () => {
   });
 });
 
-describe('Mod-digit jumps to a session in the sidebar', () => {
-  it('Mod-1 … Mod-8 name the 1st … 8th row, zero-based in the action', () => {
-    expect(type(['Mod-1']).actions).toEqual([{ kind: 'sessionAt', index: 0 }]);
-    expect(type(['Mod-4']).actions).toEqual([{ kind: 'sessionAt', index: 3 }]);
-    expect(type(['Mod-8']).actions).toEqual([{ kind: 'sessionAt', index: 7 }]);
+/**
+ * ONE digit family, whose meaning follows the keyboard.
+ *
+ * Three arrangements in three changes, so this one is written as a RULE
+ * rather than as a table: `Mod-<digit>` is a POSITION, in whatever the
+ * keyboard is pointed at. The sidebar has the keyboard, it is a session; the
+ * response pane has it, it is a tab. The grammar therefore reports the
+ * position and nothing else — which pane is looking is not something a pure
+ * reducer over a one-key memory can know, and `Canvas` already owns that
+ * state as `pane`.
+ *
+ * What killed the previous arrangement is not taste: `Cmd+Shift+3`, `4` and
+ * `5` are macOS screenshot hotkeys, matched by the OS before any Electron
+ * window sees the keydown (verified on this machine in
+ * `com.apple.symbolichotkeys`, entries 28-31 and 184, all enabled, with
+ * modifier mask 0x120000 = shift|command over keycodes for 3, 4 and 5). Any
+ * binding placed there is unreachable, whichever family holds it.
+ */
+describe('Mod-digit is a position, and the pane decides what it is a position in', () => {
+  it('reports the position, 1-based, for every digit the row offers', () => {
+    expect(type(['Mod-1']).actions).toEqual([{ kind: 'position', digit: 1 }]);
+    expect(type(['Mod-4']).actions).toEqual([{ kind: 'position', digit: 4 }]);
+    expect(type(['Mod-9']).actions).toEqual([{ kind: 'position', digit: 9 }]);
   });
 
-  it('Mod-9 is the LAST row, not the ninth — the browser-tab convention', () => {
-    expect(type(['Mod-9']).actions).toEqual([{ kind: 'last' }]);
+  it('carries no pane of its own — the grammar stays a pure reducer', () => {
+    // The same keystroke yields the same action whatever is on screen; the
+    // fork lives in `Canvas`, which is the one place that knows `pane`.
+    expect(type(['Mod-2']).actions).toEqual(type(['Mod-2']).actions);
+    expect(Object.keys(type(['Mod-2']).actions[0] as object).sort()).toEqual(['digit', 'kind']);
+  });
+
+  it('binds no Mod-Shift digit at all — the OS owns three of them', () => {
+    for (const digit of ['1', '2', '3', '4', '5', '6', '7', '8', '9']) {
+      expect(type([`Mod-Shift-${digit}`]).actions, digit).toEqual([]);
+    }
+  });
+
+  it('leaves Mod-0 unbound — z0 already owns the zero', () => {
+    expect(type(['Mod-0']).actions).toEqual([]);
+    expect(type(['z', '0']).actions).toEqual([{ kind: 'resetPanes' }]);
   });
 
   it('a bare digit stays unbound, so a stray 7 does not move the cursor', () => {
@@ -248,14 +280,19 @@ describe('Mod-digit jumps to a session in the sidebar', () => {
     expect(type(['9']).actions).toEqual([]);
   });
 
-  it('Mod-0 stays unbound — z0 already owns the zero', () => {
-    expect(type(['Mod-0']).actions).toEqual([]);
-    expect(type(['z', '0']).actions).toEqual([{ kind: 'resetPanes' }]);
-  });
-
-  it('a real Cmd-1 keydown normalizes to the string the table is written in', () => {
-    expect(normalizeKey({ key: '1', metaKey: true })).toBe('Mod-1');
-    expect(normalizeKey({ key: '1', ctrlKey: true })).toBe('Mod-1');
+  /**
+   * The assertion that catches a later "simplification" of `normalizeKey` back
+   * to `event.key`. Dropping the Shift family does not drop this need: on
+   * AZERTY the unshifted key at `Digit1` reports `&`, and only the POSITION
+   * spells it `Mod-1`. Run end to end through the grammar, so it fails at the
+   * binding rather than at a string comparison.
+   */
+  it('resolves from a real keydown, spelled by position rather than by character', () => {
+    const azerty = normalizeKey({ key: '&', code: 'Digit1', metaKey: true });
+    expect(azerty).toBe('Mod-1');
+    expect(type([azerty as string]).actions).toEqual([{ kind: 'position', digit: 1 }]);
+    const us = normalizeKey({ key: '1', code: 'Digit1', ctrlKey: true });
+    expect(type([us as string]).actions).toEqual([{ kind: 'position', digit: 1 }]);
   });
 });
 
@@ -293,8 +330,14 @@ describe('? opens the shortcut sheet', () => {
  * reason a `Tab` entry would also answer a plain Tab. A digit is the other
  * case: Shift DOES alter it, so `Cmd+Shift+1` arrives as `!`, which is
  * distinct from `Mod-1` but is not the position the binding is about — and on
- * a layout whose digit row is shifted (AZERTY) plain `Cmd+1` arrives as `&`
- * and the shipped `sessionAt` bindings are simply dead.
+ * a layout whose digit row is shifted (AZERTY) plain `Cmd+1` arrives as `&`,
+ * which is how the digit bindings came to be simply dead there.
+ *
+ * Nothing is bound under Shift any more (macOS owns `Cmd+Shift+3/4/5`), so
+ * the Shift half of `normalizeKey` guards a spelling no table uses today. It
+ * stays: it is what stops a shifted digit from arriving as `Mod-!` and
+ * silently matching the unshifted binding, which is the bug the token exists
+ * to prevent, not a feature of whichever family happened to use it.
  *
  * `event.code` is the fix for both: it names the physical digit, which is
  * exactly what "1..8 are positions" already claimed to mean.

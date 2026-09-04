@@ -44,16 +44,39 @@ export const SIDEBAR_MAX = 480;
 export const DETAIL_MIN = 320;
 
 /**
- * Symmetric to the sidebar: past this, the canvas becomes subordinate to a
- * detail pane rather than the other way around (epic.md §4.2).
- */
-export const DETAIL_MAX = 640;
-
-/**
  * The canvas must keep a session's fan legible; below ~360px the grid still
  * renders but is no longer a canvas (epic.md §4.2).
  */
 export const CANVAS_MIN = 360;
+
+/**
+ * How wide a detail pane may be STORED at.
+ *
+ * It used to be a flat 640, "symmetric to the sidebar: past this, the canvas
+ * becomes subordinate to a detail pane rather than the other way around"
+ * (epic.md §4.2). That concern is real and is now enforced where it actually
+ * lives — `dragCeiling` reserves `canvasReserved(layout)` out of the viewport
+ * on every drag and every render, so in every window wide enough to hold all
+ * three columns the canvas keeps its floor whatever this constant says. The
+ * exception is stated rather than papered over: below `DETAIL_MAX` px of
+ * window the absolute minimums win and the reserve yields (see `dragCeiling`
+ * point 4), so at 700px the canvas gets 180 — the floors of the two fixed
+ * columns are all there is room for, and that is true of any value this
+ * constant could take.
+ *
+ * With that guarantee in place a flat 640 was doing a second, different job
+ * badly: on a 1600px window it stopped the pane at 640 while 976 could have
+ * been given away without the canvas losing a pixel, and the operator asked
+ * twice for that room.
+ *
+ * So the ceiling is raised to the only bound left that is about the pane
+ * rather than about the window: the narrowest window in which all three
+ * columns fit at their floors. A pane stored wider than an entire
+ * three-column app is not a wide pane, it is a stored width no layout could
+ * ever honour. Derived from the three floors rather than picked, so it moves
+ * when they do.
+ */
+export const DETAIL_MAX = SIDEBAR_MIN + DETAIL_MIN + CANVAS_MIN;
 
 /**
  * Today's hardcoded values (`SessionList.tsx:154` and `DetailPanel.tsx:146`),
@@ -308,7 +331,8 @@ export function layoutForViewport(layout: Layout, viewportWidth: number): Layout
  * 4. With the canvas demoted, the same thing happens with one difference: the
  *    strip is reserved out of the viewport first. `DETAIL_MAX` is passed here
  *    too, and for the same reason — a layout whose point is that the response
- *    is the main column cannot then cap the response at 640.
+ *    is the main column cannot then cap the response at that constant,
+ *    whatever it currently is.
  */
 export function layoutWidths(
   layout: Layout,
@@ -317,25 +341,41 @@ export function layoutWidths(
 ): { readonly sidebar: number; readonly detail: number } {
   const reserved = canvasReserved(layout);
   if (canvasIsMain(layout)) {
+    // ORDER MATTERS, and this is rule 5. Each pane's ceiling subtracts what
+    // the OTHER one costs, so "what the other one costs" must be a width that
+    // column can actually occupy — otherwise a pane charges its neighbour for
+    // room it is not using, and the neighbour pays in the only currency it
+    // has: its floor.
+    //
+    // A stored width is not that number. The detail pane stored at its
+    // ceiling renders 776 in a 1400px window, so subtracting the stored 880
+    // from the sidebar's ceiling charged it 104px of nothing — enough to push
+    // the sidebar to 200 and, because a ceiling that equals a floor is a
+    // resizer that cannot move, to make the handle inert and overwrite the
+    // operator's stored width on the first drag. `dragCeiling`'s own doc names
+    // this hazard; the 640 cap was only ever hiding it.
+    //
+    // So the detail pane is resolved first, against the widest sidebar that
+    // could be drawn (its stored width clamped to its own bounds — a
+    // hand-edited 4000 must not squeeze the response pane either), and the
+    // sidebar is then priced against the width the detail pane really got.
+    // The detail pane goes first because it is the flexible one: it is what
+    // the operator drags against the canvas, and the sidebar's bounds are
+    // narrow enough that clamping them is a complete answer.
+    const detail = layout.detail
+      ? renderedWidth(
+          'detail',
+          stored.detail,
+          layout.sidebar ? clampPaneWidth('sidebar', stored.sidebar) : 0,
+          viewportWidth,
+          reserved,
+        )
+      : 0;
     return {
       sidebar: layout.sidebar
-        ? renderedWidth(
-            'sidebar',
-            stored.sidebar,
-            layout.detail ? stored.detail : 0,
-            viewportWidth,
-            reserved,
-          )
+        ? renderedWidth('sidebar', stored.sidebar, detail, viewportWidth, reserved)
         : 0,
-      detail: layout.detail
-        ? renderedWidth(
-            'detail',
-            stored.detail,
-            layout.sidebar ? stored.sidebar : 0,
-            viewportWidth,
-            reserved,
-          )
-        : 0,
+      detail,
     };
   }
   if (!layout.detail) {

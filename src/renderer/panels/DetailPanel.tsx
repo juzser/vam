@@ -375,7 +375,7 @@ export type DetailPanelProps = {
    */
   readonly sending?: boolean;
   /**
-   * The tab `Mod-Shift-<digit>` has just asked for, or null when nothing has
+   * The tab `Mod-<digit>` has just asked for, or null when nothing has
    * been asked.
    *
    * A REQUEST, not the selection: the tab stays this pane's own state, so the
@@ -400,7 +400,10 @@ export type DetailPanelProps = {
  * label any more, so the `data-placeholder` branch that drew the inert ones is
  * gone with it.
  */
-const TABS = ['Response', 'PRs', 'Terminal', 'Agents'] as const;
+/** The tab bar, in order. Exported because `Mod-<digit>` counts POSITIONS in
+ *  it and the count has to come from the bar itself: a handler with its own
+ *  idea of how many tabs there are is a fifth digit that opens nothing. */
+export const TABS = ['Response', 'PRs', 'Terminal', 'Agents'] as const;
 
 /** Exported for the chord table alone, which names the tab its digit opens.
  *  A type-only import there, so nothing of this file reaches the grammar. */
@@ -1132,14 +1135,34 @@ function OutText({ output }: { readonly output: string }) {
  *
  * `multiSelect` decides the shape, so the roles are `checkbox` or `radio`
  * accordingly and a single-select card cannot hold two marks. Arrow keys walk
- * the list, because `i` lands here whenever a question is open.
+ * the list and the digits jump straight to an option, because `i` lands here
+ * whenever a question is open -- and picking the third option should not cost
+ * three arrow presses. Marking by number is still marking: nothing about the
+ * paragraph above changes because the keystroke got shorter.
  */
+/**
+ * The number an option is picked by, or `undefined` past the ninth.
+ *
+ * Nine, because that is how many digits there are once `0` is left out -- and
+ * `0` is left out for the reason `Mod-0` is unbound in the chord table: a
+ * zeroth option is not a position anyone counts. An option past the ninth is
+ * still there, still clickable and still reachable with the arrows; it simply
+ * has no number, which is honest, where numbering it `0` or `10` would be a
+ * badge for a key that does nothing.
+ */
+const NUMBERED_OPTIONS: readonly (string | undefined)[] = Array.from({ length: 9 }, (_, index) =>
+  String(index + 1),
+);
+
 function QuestionCard({
   question,
   firstOptionRef,
+  onChat,
 }: {
   readonly question: AgentQuestion;
   readonly firstOptionRef: RefObject<HTMLButtonElement | null>;
+  /** "Chat about this" — the one entry that does something rather than mark. */
+  readonly onChat: () => void;
 }) {
   const [picked, setPicked] = useState<readonly string[]>([]);
   const open = question.answer === null;
@@ -1155,13 +1178,50 @@ function QuestionCard({
           : [label],
     );
 
-  // The list walks with the arrows; every option is a real button, so Enter and
-  // Space already mark one and Tab already leaves.
-  const walk = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+  // The list walks with the arrows, and jumps with the numbers; every option is
+  // a real button, so Enter and Space already mark one and Tab already leaves.
+  //
+  // The digits are BARE, and safely so because this listener is the listbox's:
+  // it can only fire while the keyboard is already inside the options list,
+  // which is where `i` puts it. The canvas grammar binds no bare digit at all,
+  // and the bare letters that do mean something there (`j`, `k`, and the rest)
+  // are letters. So a number here cannot be a keystroke meant for somewhere
+  // else -- and with no question open there is no list to hold focus.
+  const onKeys = (event: KeyboardEvent<HTMLDivElement>) => {
+    // A MODIFIED key is never one of ours. Scope is what makes the bare keys
+    // below safe -- this listener only hears anything while the keyboard is
+    // already in the options list -- but scope says nothing about modifiers,
+    // and reading `event.key` alone made `Cmd+C` match the `c` branch (killing
+    // the copy and opening the composer) and `Cmd+2` mark an option on its way
+    // to the chord layer. A chord is not text and not a pick, so it belongs to
+    // the grammar and this stands aside, which is the same rule the prompt box
+    // already follows.
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    // `c` for chat, the way out of the picker and into prose. Scoped like the
+    // digits: the listener is the listbox's, so it only hears a key while the
+    // keyboard is already in the options list -- which is where `i` puts it.
+    // The entry itself is a button outside the list, reached by Tab or mouse
+    // and activated by Enter, Space or a click, like any other.
+    if (event.key === 'c') {
+      event.preventDefault();
+      onChat();
+      return;
+    }
     const buttons = [
       ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-question-option]'),
     ];
+    if (/^[1-9]$/.test(event.key)) {
+      const at = Number(event.key) - 1;
+      const option = question.options[at];
+      if (option === undefined) return;
+      event.preventDefault();
+      toggle(option.label);
+      // The keyboard follows the mark, so the arrows walk on from where you
+      // landed rather than from wherever you were.
+      buttons[at]?.focus();
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if (at === -1 || buttons.length === 0) return;
     event.preventDefault();
@@ -1195,7 +1255,7 @@ function QuestionCard({
             role="listbox"
             aria-multiselectable={question.multiSelect}
             aria-label="the options this question offers"
-            onKeyDown={walk}
+            onKeyDown={onKeys}
             className="flex flex-col gap-1"
           >
             {question.options.map((option, index) => (
@@ -1206,6 +1266,7 @@ function QuestionCard({
                 role="option"
                 aria-selected={picked.includes(option.label)}
                 data-question-option
+                data-question-number={NUMBERED_OPTIONS[index]}
                 data-picked={picked.includes(option.label) ? 'true' : undefined}
                 onClick={() => toggle(option.label)}
                 className={[
@@ -1215,7 +1276,14 @@ function QuestionCard({
                     : 'border-line hover:bg-raised',
                 ].join(' ')}
               >
-                <span className="max-w-full text-[11px] text-ink">{option.label}</span>
+                <span className="flex max-w-full items-baseline gap-1.5 text-[11px] text-ink">
+                  {NUMBERED_OPTIONS[index] !== undefined && (
+                    <span className="text-[10px] text-ink-faint tabular-nums">
+                      {NUMBERED_OPTIONS[index]}
+                    </span>
+                  )}
+                  <span className="min-w-0">{option.label}</span>
+                </span>
                 {option.description !== null && (
                   <span data-question-description className="max-w-full text-[10.5px] text-ink-dim">
                     {option.description}
@@ -1224,6 +1292,24 @@ function QuestionCard({
               </button>
             ))}
           </div>
+          {/* Not in the transcript: `AskUserQuestion`'s tool_use records the
+              model's own options and nothing else, and the free-text row is
+              the CLI's own UI. So vam appends it and SAYS it appended it —
+              outside the listbox, because it is neither something the agent
+              offered nor something a mark applies to. */}
+          <button
+            type="button"
+            data-question-chat
+            data-question-synthetic="true"
+            onClick={onChat}
+            className="flex cursor-pointer items-baseline gap-1.5 rounded-[6px] border border-line border-dashed px-1.5 py-1 text-left hover:bg-raised"
+          >
+            <span className="text-[10px] text-ink-faint tabular-nums">c</span>
+            <span className="min-w-0 text-[11px] text-ink">Chat about this</span>
+            <span className="min-w-0 text-[10.5px] text-ink-faint">
+              — vam adds this one; it opens the box below
+            </span>
+          </button>
           <p data-question-note className="text-[10px] text-ink-faint">
             vam cannot answer this for you — a pick is only a mark, and nothing goes back to the
             session; type your choice in the box below.
@@ -1455,6 +1541,27 @@ export function DetailPanel(props: DetailPanelProps) {
   const questions = entry?.session.questions ?? [];
   const newestQuestion =
     [...questions].reverse().find((one) => one.answer === null) ?? questions.at(-1) ?? null;
+  /**
+   * While a question is open the options are the interaction, so the composer
+   * stands down: an operator was reading a list of choices above a box that
+   * cannot answer them. "Chat about this" is the way back, per question — the
+   * id is the reset, so the next question opens as a picker again rather than
+   * inheriting the last one's answer.
+   *
+   * Nothing is stranded by the absence. `i` already prefers the first option
+   * over the box when a question is open, `I` + Enter sets `composing`, which
+   * lands in the same place, and Esc still does the one thing it did.
+   */
+  const openQuestion = newestQuestion !== null && newestQuestion.answer === null;
+  const [chattingAbout, setChattingAbout] = useState<string | null>(null);
+  const composerHidden = openQuestion && chattingAbout !== newestQuestion?.id;
+  const startChat = () => {
+    if (newestQuestion !== null) setChattingAbout(newestQuestion.id);
+    onCompose();
+  };
+  useEffect(() => {
+    if (chattingAbout !== null) inputRef.current?.focus();
+  }, [chattingAbout]);
   /**
    * The one detail clause vam can source for the running caption.
    *
@@ -1876,8 +1983,15 @@ export function DetailPanel(props: DetailPanelProps) {
         )}
       </div>
 
-      {current !== 'Terminal' && (
-        <div className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3">
+      {/* The question's own block, drawn only when there IS one: it was split
+        off the composer's so the composer could stand down while a question is
+        open, and a block that outlived its contents would be a doubled seam
+        and 25px of dead height in the pane's most common state. */}
+      {current !== 'Terminal' && newestQuestion !== null && (
+        <div
+          data-question-bar
+          className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3"
+        >
           {/* black-smith's governance queue — findings awaiting a waiver, and
             lesson candidates — used to stand here. The operator asked for it
             to go, and it is gone from `buildActions` too: it went on
@@ -1899,8 +2013,23 @@ export function DetailPanel(props: DetailPanelProps) {
               key={newestQuestion.id}
               question={newestQuestion}
               firstOptionRef={firstOptionRef}
+              onChat={startChat}
             />
           )}
+        </div>
+      )}
+      {/* The composer, in its own block so that it can stand down while a
+        question is open without the card standing down with it. Its top border
+        is the seam between the two, and belongs to whichever of them is
+        drawn first. */}
+      {current !== 'Terminal' && !composerHidden && (
+        <div
+          data-composer-bar
+          className={[
+            'flex flex-none flex-col gap-2.5 bg-header px-3.5 py-3',
+            newestQuestion === null ? 'border-line border-t' : '',
+          ].join(' ')}
+        >
           {suggesting && (
             <div
               data-bang-suggest

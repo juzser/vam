@@ -12,7 +12,6 @@
  * hook that owns the listener has no rules in it to drift from these.
  */
 
-import type { Tab as DetailTab } from '../panels/DetailPanel.js';
 import type { LayoutName } from '../prefs/panes.js';
 import type { Direction } from './spatial-nav.js';
 
@@ -65,13 +64,21 @@ function digitPosition(event: KeyEventLike): string | null {
  * same keystroke two spellings, and only one of them would ever match.
  *
  * THE DIGIT ROW UNDER A MODIFIER IS THE EXCEPTION, and it is an exception
- * because those bindings are about a POSITION rather than a character: the
- * table's own comment says "1..8 are positions". A character-based spelling
- * cannot keep that promise, and failed it twice. Shift alters a digit, so
- * `Cmd+Shift+1` arrives as `!` and would have to be written `Mod-!` — a
- * spelling no key sheet can render as a position. And on any layout whose
- * digit row is shifted (AZERTY), plain `Cmd+1` arrives as `&`, so the shipped
- * `sessionAt` bindings were simply DEAD there.
+ * because those bindings are about a POSITION rather than a character. A
+ * character-based spelling cannot keep that promise, and failed it twice.
+ *
+ * On any layout whose digit row is shifted (AZERTY) a plain `Cmd+1` arrives as
+ * `&`, which is how the digit bindings of the day came to be simply DEAD
+ * there. And Shift alters a digit, so `Cmd+Shift+1` arrives as `!` and would
+ * have to be written `Mod-!` — a spelling no key sheet can render as a
+ * position, and one that would silently answer the unshifted binding.
+ *
+ * Both halves are about the ROW, not about whichever family is sitting on it:
+ * the table has been rearranged three times and this reasoning has outlived
+ * every arrangement. Nothing is bound under Shift today — macOS captures
+ * `Cmd+Shift+3/4/5` for screenshots, so nothing can be — and the Shift token
+ * still earns its place by keeping a shifted digit from matching an unshifted
+ * binding.
  *
  * `event.code` answers both: `Digit1` is the position, whatever the layout put
  * on it, so the digit row keeps one spelling everywhere and Shift can carry a
@@ -134,10 +141,8 @@ export type KeyAction =
   | { readonly kind: 'icon' }
   /** `x` — close the focused session. */
   | { readonly kind: 'close' }
-  /** `o` — start a new session, the way `o` opens a new line. Bound plain
-      because vam is browser-tested for now; once it runs in an Electron
-      shell (like orca) the intended chord is `Mod-t`, which a desktop
-      window can capture and a browser tab cannot. */
+  /** `o` / `Mod-n` — start a new session. `o` the way `o` opens a new line,
+      and `Mod-n` because that is what "new" is bound to everywhere else. */
   | { readonly kind: 'newSession' }
   /** `F` — open or close the sidebar's filter popover. Shift-f, because
       plain `f` is already the jump-label move and this is its stronger,
@@ -156,16 +161,14 @@ export type KeyAction =
   | { readonly kind: 'resetPanes' }
   /** `zc` / `zC` hide columns, `zf` reorders them. See `AFTER_Z`. */
   | { readonly kind: 'layout'; readonly name: LayoutName }
-  /** `Mod-1` … `Mod-8` — jump straight to a session by its position in the
-      sidebar, zero-based here because that is what an index into the list is.
-      `Mod-9` is deliberately NOT in this family: it is `last` (below). */
-  | { readonly kind: 'sessionAt'; readonly index: number }
-  /** `Mod-Shift-1` … `Mod-Shift-4` — show one of the detail pane's tabs. Named
-      rather than numbered because a position is what the KEY means, not what
-      the action does: reorder the bar and the binding follows the name, and
-      the sheet keeps saying which tab it opens. Type-only import, so the
-      grammar still pulls no component in at runtime. */
-  | { readonly kind: 'detailTab'; readonly tab: DetailTab }
+  /** `Mod-1` … `Mod-9` — a POSITION, 1-based, in whatever the keyboard is
+      pointed at: a session in the sidebar, a tab in the response pane.
+      The action carries the digit and NOTHING ELSE. Which pane is looking is
+      not something a reducer over a one-key memory can know — `Canvas` owns
+      that as `pane`, and it is the same state the status bar's mode cell
+      reads — so resolving it here would mean either threading React state
+      into the grammar or keeping a second copy of it. See `SINGLE`. */
+  | { readonly kind: 'position'; readonly digit: number }
   /** `p` — reveal the focused session's project in the sidebar and put the
       keyboard on its fold. */
   | { readonly kind: 'revealProject' }
@@ -222,30 +225,36 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   N: { kind: 'searchPrev' },
   Enter: { kind: 'open' },
   'Mod-k': { kind: 'palette' },
-  // Cmd/Ctrl + a digit, the one shortcut every browser and terminal already
-  // taught: 1..8 are positions, and 9 is the LAST one whatever the count —
-  // far more use than a ninth position once the list outgrows nine. Written
-  // out rather than generated so the table stays the one place every binding
-  // can be read off. `Mod-0` is left unbound: `z0` already owns the zero.
-  'Mod-1': { kind: 'sessionAt', index: 0 },
-  'Mod-2': { kind: 'sessionAt', index: 1 },
-  'Mod-3': { kind: 'sessionAt', index: 2 },
-  'Mod-4': { kind: 'sessionAt', index: 3 },
-  'Mod-5': { kind: 'sessionAt', index: 4 },
-  'Mod-6': { kind: 'sessionAt', index: 5 },
-  'Mod-7': { kind: 'sessionAt', index: 6 },
-  'Mod-8': { kind: 'sessionAt', index: 7 },
-  'Mod-9': { kind: 'last' },
-  // The same digit row, one row up: Shift makes it a POSITION IN THE TAB BAR
-  // rather than in the sidebar. A letter would have fought the prompt box,
-  // which is where an operator's hands are when they want another tab, and
-  // `Mod-1`..`Mod-9` were already taken. Spelled by position (`normalizeKey`
-  // reads `event.code` for the digit row), so `Cmd+Shift+1` is this binding
-  // and not the `!` the browser would otherwise have handed us.
-  'Mod-Shift-1': { kind: 'detailTab', tab: 'Response' },
-  'Mod-Shift-2': { kind: 'detailTab', tab: 'PRs' },
-  'Mod-Shift-3': { kind: 'detailTab', tab: 'Terminal' },
-  'Mod-Shift-4': { kind: 'detailTab', tab: 'Agents' },
+  // Cmd/Ctrl + a digit is a POSITION, and the pane it counts in is whichever
+  // one has the keyboard: the sidebar's sessions, or the response pane's tabs.
+  //
+  // Written as a rule rather than as a table of meanings because the table is
+  // what kept going stale — this is the third arrangement in three changes.
+  // The first gave the bare row to sessions and pushed the tabs onto
+  // `Mod-Shift-<digit>`; the second swapped them, because Cmd+number is the
+  // TAB gesture everywhere else. Both were wrong in the same way: they made a
+  // digit mean one fixed thing, so whichever pane the operator was actually
+  // looking at, half their presses went to the other one.
+  //
+  // AND THE SHIFT ROW WAS NEVER REACHABLE. macOS binds `Cmd+Shift+3`, `4` and
+  // `5` to its screenshot commands and matches them before any Electron window
+  // sees the keydown (`com.apple.symbolichotkeys` entries 28-31 and 184). So
+  // `Mod-Shift-3` and `Mod-Shift-4` were dead bindings in both previous
+  // arrangements — first two session positions, then Terminal and Agents —
+  // and no test could have caught it, because the OS never delivers the event
+  // a test synthesises. Nothing is bound under Shift now.
+  //
+  // The digit is 1-BASED here, because a position is what the KEY means; the
+  // handler converts to an index. `Mod-0` stays unbound — `z0` owns the zero.
+  'Mod-1': { kind: 'position', digit: 1 },
+  'Mod-2': { kind: 'position', digit: 2 },
+  'Mod-3': { kind: 'position', digit: 3 },
+  'Mod-4': { kind: 'position', digit: 4 },
+  'Mod-5': { kind: 'position', digit: 5 },
+  'Mod-6': { kind: 'position', digit: 6 },
+  'Mod-7': { kind: 'position', digit: 7 },
+  'Mod-8': { kind: 'position', digit: 8 },
+  'Mod-9': { kind: 'position', digit: 9 },
   // `p` for project. It shipped hand-wired to its own window listener in
   // SessionList.tsx, which cost it both properties this table exists to give:
   // it appeared in no key sheet, and it fired straight through an open
@@ -261,6 +270,17 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // `src/main/menu.ts` releases that one item at startup; without it this
   // binding would be dead in the packaged app while passing every test here.
   'Mod-w': { kind: 'close' },
+  // And the same shape for creating one: `o` is the vim gesture, `Mod-n` is
+  // the chord every application on the machine already spells "new". Both, not
+  // one — an operator whose hands are on the prompt box reaches for Cmd-N, and
+  // an operator navigating the canvas reaches for `o`.
+  //
+  // Free: plain `n` is `searchNext` and stays that way, since `normalizeKey`
+  // gives a modified letter its own `Mod-` spelling. Deliberately reachable
+  // from inside the prompt box — the tab chords let modifier keystrokes past
+  // the INPUT|TEXTAREA guard, and a Cmd chord produces no character on any layout,
+  // so it cannot be a keystroke the operator meant for the text.
+  'Mod-n': { kind: 'newSession' },
   // Vim's own "shift this leftwards / rightwards" — literally what moving a
   // side pane's boundary is. A real Shift+, / Shift+. keydown normalizes to
   // the browser-applied `<` / `>` here, distinct from the plain `,` above
@@ -403,10 +423,8 @@ export function actionId(action: KeyAction): string {
       return `move:${action.direction}`;
     case 'layout':
       return `layout:${action.name}`;
-    case 'sessionAt':
-      return `sessionAt:${action.index}`;
-    case 'detailTab':
-      return `detailTab:${action.tab}`;
+    case 'position':
+      return `position:${action.digit}`;
     case 'project':
       return `project:${action.delta}`;
     case 'resizePane':

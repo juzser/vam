@@ -231,3 +231,312 @@ describe('the running caption is unmistakably running', () => {
     expect(q('[data-out-running-star]')?.className).toContain('vam-running-star');
   });
 });
+
+/**
+ * Picking by number — the fast path.
+ *
+ * `i` already lands on the first option and the arrows walk from there, which
+ * makes the third option three keystrokes. Numbering them is the idiom every
+ * terminal picker uses and the one this app already uses twice (`Mod-<digit>`
+ * for a session, `Mod-Shift-<digit>` for a tab), so the third option is `i`
+ * then `3`.
+ *
+ * A BARE digit, and the safety argument is scope rather than luck: this
+ * listener is on the listbox, so it can only fire while the keyboard is
+ * already inside the options list. `j`, `k` and the other bare letters that
+ * mean something on the canvas are untouched — they are letters — and a digit
+ * pressed anywhere else in the app reaches the canvas grammar, which binds no
+ * bare digit at all. With no question open there is no listbox to hold focus,
+ * so there is nothing to fire.
+ *
+ * And it changes nothing about what a pick IS: a mark. The honesty assertions
+ * below are the click test's, repeated for the keyboard, because a second way
+ * in is a second way to imply an answer was sent.
+ */
+describe('a digit picks the option beside it', () => {
+  const THREE: AgentQuestion = {
+    ...QUESTION,
+    multiSelect: false,
+    options: [
+      { label: 'first', description: null },
+      { label: 'second', description: null },
+      { label: 'third', description: null },
+    ],
+  };
+
+  const pressDigit = (digit: string) =>
+    fireEvent.keyDown(q('[role="listbox"]') as HTMLElement, { key: digit, bubbles: true });
+
+  it('shows the number beside every option, in order', () => {
+    draw([THREE]);
+    expect(
+      all('[data-question-option]').map((o) => o.getAttribute('data-question-number')),
+    ).toEqual(['1', '2', '3']);
+  });
+
+  it('marks the third option on `3`, without three arrow presses', () => {
+    draw([THREE]);
+    pressDigit('3');
+    const picked = all('[data-question-option][data-picked="true"]');
+    expect(picked).toHaveLength(1);
+    expect(picked[0]?.textContent).toContain('third');
+    // And the keyboard follows the mark, so the arrows walk on from there.
+    expect(document.activeElement).toBe(picked[0]);
+  });
+
+  it('does nothing for a digit with no option under it', () => {
+    draw([THREE]);
+    pressDigit('7');
+    pressDigit('0');
+    expect(all('[data-question-option][data-picked="true"]')).toHaveLength(0);
+  });
+
+  it('numbers only the first nine, because there is no tenth digit', () => {
+    const many = Array.from({ length: 11 }, (_, index) => ({
+      label: `option ${index + 1}`,
+      description: null,
+    }));
+    draw([{ ...THREE, options: many }]);
+    const numbers = all('[data-question-option]').map((o) =>
+      o.getAttribute('data-question-number'),
+    );
+    expect(numbers.slice(0, 9)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+    expect(numbers.slice(9)).toEqual([null, null]);
+  });
+
+  it('obeys multiSelect, exactly as a click does', () => {
+    draw([THREE]);
+    pressDigit('1');
+    pressDigit('2');
+    // Single-select: the second mark replaces the first rather than joining it.
+    expect(all('[data-question-option][data-picked="true"]')).toHaveLength(1);
+    cleanup();
+    draw([{ ...THREE, multiSelect: true }]);
+    pressDigit('1');
+    pressDigit('2');
+    expect(all('[data-question-option][data-picked="true"]')).toHaveLength(2);
+  });
+
+  it('claims nothing was sent, on the keyboard path too', () => {
+    draw([THREE]);
+    pressDigit('2');
+    // The mark FIRST, the way the click twin does it. Without this the test
+    // passes when the digit branch is deleted outright — a pane that marked
+    // nothing also claims nothing, which is the wrong reason to be green.
+    expect(all('[data-question-option][data-picked="true"]')).toHaveLength(1);
+    const pane = text();
+    for (const claim of ['sent', 'submitted', 'answered', 'delivered', 'replied']) {
+      expect(pane.toLowerCase(), claim).not.toContain(claim);
+    }
+    expect(pane).toContain('cannot answer');
+  });
+
+  it('has nothing to fire on when no question is open', () => {
+    draw([]);
+    expect(q('[role="listbox"]')).toBeNull();
+    fireEvent.keyDown(document.body, { key: '1', bubbles: true });
+    expect(all('[data-question-option]')).toHaveLength(0);
+    cleanup();
+    // A resolved question draws its card but no list: same absence, on purpose.
+    draw([{ ...THREE, answer: 'first' }]);
+    expect(q('[role="listbox"]')).toBeNull();
+    fireEvent.keyDown(document.body, { key: '1', bubbles: true });
+    expect(all('[data-question-option][data-picked="true"]')).toHaveLength(0);
+  });
+});
+
+/**
+ * While a question is open, the options ARE the interaction.
+ *
+ * Claude Code's own picker owns the screen and offers a free-text entry as the
+ * last choice; vam drew both at once, so the operator was reading a list of
+ * options above a box that could not answer them. So the composer stands down
+ * while an open question is drawn, and "Chat about this" is what brings it
+ * back — the one entry whose behaviour differs from a mark.
+ *
+ * The entry is SYNTHESIZED. `AskUserQuestion`'s `tool_use` records only the
+ * model's own `options[]`; the free-text row is the CLI's own UI. So it is
+ * drawn outside the listbox, marked as vam's, and is not a `role="option"`:
+ * it is not something the agent offered and not something a pick can mark.
+ *
+ * The scope line is unchanged and deliberate: nothing here delivers an answer.
+ * Vam cannot see a TUI picker's cursor, so answering one blind would risk
+ * submitting the wrong choice to a running agent. "Chat about this" opens the
+ * composer, which is the path that already delivers where it can.
+ */
+describe('the composer stands down while a question is open', () => {
+  const composer = () => q('[data-prompt-box]');
+  const chat = () => q('[data-question-chat]');
+
+  it('draws no composer while an open question is on screen', () => {
+    draw([QUESTION]);
+    expect(q('[data-question-open="true"]')).not.toBeNull();
+    expect(composer()).toBeNull();
+  });
+
+  it('draws the composer exactly as before when nothing is being asked', () => {
+    draw([]);
+    expect(composer()).not.toBeNull();
+    expect(chat()).toBeNull();
+  });
+
+  it('draws the composer again once the question is resolved', () => {
+    draw([{ ...QUESTION, answer: 'Codex CLI' }]);
+    expect(composer()).not.toBeNull();
+    // A resolved question is not a picker: no options, and no synthetic entry.
+    expect(chat()).toBeNull();
+  });
+
+  it('reveals the composer when "Chat about this" is picked, and focuses it', () => {
+    draw([QUESTION]);
+    expect(chat()?.textContent).toContain('Chat about this');
+    fireEvent.click(chat() as HTMLElement);
+    const box = composer()?.querySelector('textarea') ?? null;
+    expect(box).not.toBeNull();
+    expect(document.activeElement).toBe(box);
+  });
+
+  it('reveals it from the keyboard too, on `c`', () => {
+    draw([QUESTION]);
+    fireEvent.keyDown(q('[role="listbox"]') as HTMLElement, { key: 'c', bubbles: true });
+    expect(composer()).not.toBeNull();
+  });
+
+  it('is the LAST entry, and is not one of the recorded options', () => {
+    draw([QUESTION]);
+    const marked = all('[data-question-option]');
+    expect(marked).toHaveLength(2); // the two the transcript recorded
+    expect(chat()?.getAttribute('data-question-synthetic')).toBe('true');
+    expect(chat()?.getAttribute('role')).not.toBe('option');
+    // Last in the card, after every option the agent actually offered.
+    const card = q('[data-question]') as HTMLElement;
+    const entries = [...card.querySelectorAll('[data-question-option],[data-question-chat]')];
+    expect(entries.at(-1)).toBe(chat());
+  });
+
+  it('says the entry is vam’s, not the agent’s', () => {
+    draw([QUESTION]);
+    expect(text()).toContain('vam adds this one');
+  });
+
+  it('still claims nothing was sent, once the composer is open', () => {
+    draw([QUESTION]);
+    fireEvent.click(all('[data-question-option]')[0] as HTMLElement);
+    fireEvent.click(chat() as HTMLElement);
+    const pane = text();
+    for (const claim of ['sent', 'submitted', 'answered', 'delivered', 'replied']) {
+      expect(pane.toLowerCase(), claim).not.toContain(claim);
+    }
+    expect(all('[data-question-option][data-picked="true"]')).toHaveLength(1);
+  });
+});
+
+/**
+ * The digits are bare, and "bare" has to mean it.
+ *
+ * The listener read `event.key` and nothing else, so it answered chords it
+ * has no business seeing: `Cmd+C` matched the `c` branch — killing the copy
+ * with `preventDefault` and opening the composer — and `Cmd+2` marked the
+ * second option AND, since the target is a BUTTON and the window listener
+ * steps aside only for INPUT and TEXTAREA, resolved as a chord as well. One
+ * keystroke, two effects.
+ *
+ * Scope was the argument for bare keys ("it can only fire while the keyboard
+ * is in the options list") and scope is still true — it is just not an
+ * argument about MODIFIERS. A chord is never text and never a pick: under
+ * Cmd, Ctrl or Alt this listener stands aside entirely and leaves the
+ * keystroke to the grammar, which is the same rule the prompt box follows.
+ *
+ * It matters more after the digit rework, not less: `Cmd+<digit>` is now the
+ * focus-sensitive family, so this is a live collision rather than a
+ * theoretical one.
+ */
+describe('a modifier means the keystroke is not ours', () => {
+  const list = () => q('[role="listbox"]') as HTMLElement;
+  const picked = () => all('[data-question-option][data-picked="true"]');
+
+  it('leaves Cmd+C alone — the copy lives, and no composer appears', () => {
+    draw([QUESTION]);
+    // `fireEvent` returns false when the handler called preventDefault.
+    const notCancelled = fireEvent.keyDown(list(), { key: 'c', metaKey: true, bubbles: true });
+    expect(notCancelled).toBe(true);
+    expect(q('[data-prompt-box]')).toBeNull();
+  });
+
+  it('leaves Ctrl+C alone as well, which is the same gesture off macOS', () => {
+    draw([QUESTION]);
+    expect(fireEvent.keyDown(list(), { key: 'c', ctrlKey: true, bubbles: true })).toBe(true);
+    expect(q('[data-prompt-box]')).toBeNull();
+  });
+
+  it('marks nothing for a modified digit, whichever modifier it is', () => {
+    draw([QUESTION]);
+    for (const modifier of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }]) {
+      const notCancelled = fireEvent.keyDown(list(), {
+        key: '2',
+        code: 'Digit2',
+        bubbles: true,
+        ...modifier,
+      });
+      expect(notCancelled, JSON.stringify(modifier)).toBe(true);
+      expect(picked(), JSON.stringify(modifier)).toHaveLength(0);
+    }
+  });
+
+  it('leaves a modified arrow to whatever else wants it', () => {
+    draw([QUESTION]);
+    const first = all('[data-question-option]')[0] as HTMLButtonElement;
+    first.focus();
+    expect(fireEvent.keyDown(list(), { key: 'ArrowDown', metaKey: true, bubbles: true })).toBe(
+      true,
+    );
+    expect(document.activeElement).toBe(first);
+  });
+
+  it('still answers the unmodified keys, which are the ones it is for', () => {
+    draw([QUESTION]);
+    expect(fireEvent.keyDown(list(), { key: '2', code: 'Digit2', bubbles: true })).toBe(false);
+    expect(picked()).toHaveLength(1);
+    expect(fireEvent.keyDown(list(), { key: 'c', bubbles: true })).toBe(false);
+    expect(q('[data-prompt-box]')).not.toBeNull();
+  });
+});
+
+/**
+ * The question card got its own block so the composer could stand down
+ * without it. A block that draws when there is no question is the cost of
+ * that, and it is not free: `border-t … px-3.5 py-3` with no children is a
+ * doubled seam and ~25px of dead height taken from the transcript, in the
+ * default state of almost every session. On `main` these were one block.
+ *
+ * So the block follows its contents, and the seam belongs to whichever block
+ * is drawn first — asserted here because "one border" is the whole reason the
+ * split was allowed.
+ */
+describe('the question block draws only when there is a question', () => {
+  const bar = () => q('[data-question-bar]');
+  const composerBar = () => q('[data-composer-bar]');
+
+  it('renders no empty bar when nothing is being asked', () => {
+    draw([]);
+    expect(bar()).toBeNull();
+    // And the composer keeps the seam, exactly as it did before the split.
+    expect(composerBar()?.className).toContain('border-t');
+  });
+
+  it('renders the bar, and takes the seam, when a question is open', () => {
+    draw([QUESTION]);
+    expect(bar()).not.toBeNull();
+    expect(bar()?.className).toContain('border-t');
+    // The composer is not drawn at all here, so there is nothing to double.
+    expect(composerBar()).toBeNull();
+  });
+
+  it('draws exactly one seam when a resolved card and the composer share the pane', () => {
+    draw([{ ...QUESTION, answer: 'Codex CLI' }]);
+    expect(bar()).not.toBeNull();
+    expect(composerBar()).not.toBeNull();
+    expect(bar()?.className).toContain('border-t');
+    expect(composerBar()?.className).not.toContain('border-t');
+  });
+});

@@ -90,11 +90,20 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
     label: (a) => (a.delta === 1 ? 'next project' : 'previous project'),
   },
   jump: { group: 'navigation', label: () => 'jump to a labelled node' },
-  sessionAt: { group: 'navigation', label: (a) => `session ${a.index + 1} in the sidebar` },
-  // Named from the action's own tab, so the sheet cannot drift from the bar:
-  // renaming a tab renames its row, and a tab this table cannot spell fails
-  // to compile rather than shipping a caption for a tab nobody has.
-  detailTab: { group: 'panes', label: (a) => `the ${a.tab.toLowerCase()} tab` },
+  // The one row family whose meaning depends on where the keyboard is, and the
+  // caption says so rather than picking a side. A sheet reading "Cmd+1 —
+  // session 1" would be wrong every time the operator is in the response pane,
+  // which is exactly the defect the previous two arrangements shipped.
+  //
+  // Still generated: the label is a function of the action's own digit, so the
+  // sheet lists precisely the digits the table binds and no others.
+  position: {
+    group: 'navigation',
+    label: (a) =>
+      a.digit === 9
+        ? 'position 9 — the LAST session in the sidebar, whatever the count'
+        : `position ${a.digit} — session ${a.digit} in the sidebar, tab ${a.digit} in the response pane`,
+  },
   revealProject: { group: 'navigation', label: () => 'reveal this session’s project' },
   search: { group: 'navigation', label: () => 'search sessions' },
   searchNext: { group: 'navigation', label: () => 'next match' },
