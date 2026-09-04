@@ -158,4 +158,22 @@ describe('diffLineKind', () => {
     // `---` is a `-` line by prefix and a file header by meaning.
     expect(diffLineKind('--- a/x')).not.toBe(diffLineKind('-a/x'));
   });
+
+  it('still reads the file headers a real patch opens with', () => {
+    expect(diffLineKind('--- a/src/x.ts')).toBe('file');
+    expect(diffLineKind('+++ b/src/x.ts')).toBe('file');
+    expect(diffLineKind('--- /dev/null')).toBe('file');
+    expect(diffLineKind('+++ /dev/null')).toBe('file');
+    expect(diffLineKind('--- x.ts\t2026-01-01 00:00:00')).toBe('file');
+  });
+
+  it('reads a removed line that itself begins with `--` as a removal', () => {
+    // The mirror of the header mistake: `-- a SQL comment` is a `-` line by
+    // prefix AND by meaning, and a header only by accident of the first three
+    // characters. `--- ` is a header when a path follows it, not otherwise.
+    expect(diffLineKind('--- old comment')).toBe('del');
+    expect(diffLineKind('+++ new comment')).toBe('add');
+    expect(diffLineKind('---')).toBe('del');
+    expect(diffLineKind('+++')).toBe('add');
+  });
 });

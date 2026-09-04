@@ -265,13 +265,23 @@ export function tokenizeCode(code: string, lang: Exclude<HighlightLang, 'diff'>)
 export type DiffKind = 'add' | 'del' | 'hunk' | 'file' | 'plain';
 
 /**
- * `---`/`+++` are tested BEFORE `-`/`+`: a file header is a `-` line by prefix
- * and a header by meaning, and painting it as a removal is the mistake that
- * makes every patch open with a phantom deleted line.
+ * A file header is `---`/`+++` followed by a SPACE and a path — not the bare
+ * prefix. Both halves of that gate earn their keep, in opposite directions:
+ * tested before `-`/`+`, because a header is a `-` line by prefix and a header
+ * by meaning, and painting it as a removal is the mistake that makes every
+ * patch open with a phantom deleted line; and tested for the path, because
+ * `--- old comment` — a deleted SQL comment, a deleted markdown rule — is a `-`
+ * line by prefix AND by meaning, and a header only by accident of its first
+ * three characters.
+ *
+ * "Path" is read loosely: the first field after the space, containing a `/` or
+ * a `.`, which covers `a/x.ts`, `/dev/null` and `diff -u`'s `x.ts\t<date>`.
  */
+const DIFF_FILE_HEADER = /^(?:---|\+\+\+) \S*[./]\S*(?:\s|$)/;
+
 export function diffLineKind(line: string): DiffKind {
   if (line.startsWith('@@')) return 'hunk';
-  if (line.startsWith('---') || line.startsWith('+++')) return 'file';
+  if (DIFF_FILE_HEADER.test(line)) return 'file';
   if (line.startsWith('diff ') || line.startsWith('index ')) return 'file';
   if (line.startsWith('+')) return 'add';
   if (line.startsWith('-')) return 'del';
