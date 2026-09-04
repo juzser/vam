@@ -826,7 +826,7 @@ function CanvasInner({
         data: {
           ...(spec.kind === 'info'
             ? { entry: spec.entry }
-            : { entry: spec.entry, decision: spec.decision }),
+            : { entry: spec.entry, decision: spec.decision, recall: spec.recall }),
           focused: false,
           jumpLabel: null,
           sessionId: spec.entry.session.id,

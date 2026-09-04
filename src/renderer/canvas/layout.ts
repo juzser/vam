@@ -53,6 +53,13 @@ export type StepNodeSpec = {
   readonly decision: Decision;
   /** 1-based, top to bottom — 3 is the newest. */
   readonly ordinal: number;
+  /**
+   * One of the two steps immediately before the current one, which the card
+   * draws with more `IN` and less `OUT` (see StepNode). Computed here because
+   * this is the module that knows the chain: a node component is handed its
+   * own decision and cannot see what came after it.
+   */
+  readonly recall: boolean;
   readonly position: Position;
   readonly size: Size;
   /** Status-derived; see `STATUS_OPACITY`. */
@@ -249,6 +256,19 @@ export function layoutCanvas(model: CanvasModel): CanvasLayout {
     };
     nodes.push(info);
 
+    /**
+     * The two steps just before the current one — the ones whose `IN` is worth
+     * more than their `OUT` when you scan back over a chain.
+     *
+     * `steps` is newest-last, so the current step is the last drawn (the same
+     * rule `activeSlot` uses below, and for the same reason: an older turn with
+     * no output is common in a live log, so "first unanswered" would pick the
+     * wrong one). Everything before those two, and the current step itself, is
+     * untouched. A chain of one or none simply marks nothing.
+     */
+    const recallFrom = steps.length - 3;
+    const recallTo = steps.length - 1;
+
     steps.forEach((decision, slot) => {
       const offset = stepSlotOffset(slot);
       nodes.push({
@@ -257,6 +277,7 @@ export function layoutCanvas(model: CanvasModel): CanvasLayout {
         entry,
         decision,
         ordinal: slot + 1,
+        recall: slot >= recallFrom && slot < recallTo,
         position: { x: origin.x + offset.x, y: origin.y + offset.y },
         size: STEP_SIZE,
         opacity,

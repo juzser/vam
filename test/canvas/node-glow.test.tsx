@@ -267,7 +267,7 @@ describe('StepNode wears the cursor glow and the running edge', () => {
       <ReactFlowProvider>
         <StepNode
           id="step"
-          data={{ entry, decision: target as Decision, focused, jumpLabel: null }}
+          data={{ entry, decision: target as Decision, focused, jumpLabel: null, recall: false }}
           {...FLOW_PROPS}
         />
       </ReactFlowProvider>,
