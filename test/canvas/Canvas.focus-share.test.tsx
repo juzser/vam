@@ -14,7 +14,10 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-const fitView = vi.fn(() => Promise.resolve(true));
+/** Typed with the two fields the assertions read, so `mock.calls` is not an
+ *  empty tuple the compiler refuses to index. */
+type FitViewOptions = { readonly nodes?: readonly string[]; readonly padding?: number };
+const fitView = vi.fn((_options?: FitViewOptions) => Promise.resolve(true));
 
 vi.mock('@xyflow/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@xyflow/react')>();
@@ -83,10 +86,9 @@ afterEach(() => {
 });
 
 function paddingOfFocusFit(): number | undefined {
-  const call = fitView.mock.calls.find(
-    (args) => (args[0] as { nodes?: unknown } | undefined)?.nodes !== undefined,
-  );
-  return (call?.[0] as { padding?: number } | undefined)?.padding;
+  // The row fit is the call that names nodes; the toolbar's bare `fitView()` is
+  // not it, and asserting on the wrong one would read the default padding.
+  return fitView.mock.calls.find((args) => args[0]?.nodes !== undefined)?.[0]?.padding;
 }
 
 describe('the focus zoom share reaches fitView', () => {
