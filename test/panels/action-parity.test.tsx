@@ -15,6 +15,13 @@
  * the cursor can reach has an element on screen, in the same order, and the
  * focus ring lands on the element the cursor is actually on. An action added
  * with nothing rendered for it fails here.
+ *
+ * It renders the pane directly, so it cannot see the other way the invariant
+ * can break now that the pane can be HIDDEN: a cursor left in a pane that was
+ * unmounted rings an action nothing draws, without any action list changing.
+ * That half is asserted under every layout in
+ * `test/canvas/Canvas.pane-visibility.test.tsx`, against these same
+ * `data-action-id` hooks.
  */
 
 import { cleanup, render } from '@testing-library/react';

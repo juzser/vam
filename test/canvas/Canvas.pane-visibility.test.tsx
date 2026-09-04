@@ -73,10 +73,31 @@ const actionPane = () => detailPane()?.getAttribute('data-action-pane') ?? '';
 const width = (el: Element | null) =>
   Number.parseFloat((el as HTMLElement | null)?.style.width ?? 'NaN');
 
-function press(key: string) {
+function press(key: string, modifiers: KeyboardEventInit = {}) {
   act(() => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...modifiers }));
   });
+}
+
+/** A chord, typed. `z` is the prefix; the second key is the layout. */
+function chord(second: string) {
+  press('z');
+  press(second);
+}
+
+/** Every action-bearing element on screen, the parity guard's own hook. */
+const drawnActions = () => [...document.querySelectorAll('[data-action-id]')];
+/** The action the cursor is on, if anything is drawing one. */
+const ringed = () =>
+  drawnActions()
+    .filter((el) => el.classList.contains('border-waiting'))
+    .map((el) => el.getAttribute('data-action-id'));
+
+function storedPrefs(): {
+  panes: { sidebar: number; detail: number };
+  paneVisibility: PaneVisibility;
+} {
+  return JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}');
 }
 
 beforeAll(() => {
@@ -174,5 +195,113 @@ describe('the handlers that assumed both panes were on screen', () => {
     render(<Canvas model={MODEL} />);
     // 900 - 0 - CANVAS_MIN(360) = 540, not 900 - 264 - 360 = 276.
     expect(width(detailPane())).toBe(540);
+  });
+});
+
+describe('the two layouts', () => {
+  it('`zc` closes the canvas, keeping the list and the response', () => {
+    render(<Canvas model={MODEL} />);
+    chord('c');
+    expect(canvasPane()).toBeNull();
+    expect(sidebarPane()).not.toBeNull();
+    expect(detailPane()).not.toBeNull();
+    // And it is remembered: a layout you have to re-choose every reload is a
+    // gesture, not a preference.
+    expect(storedPrefs().paneVisibility).toEqual({ sidebar: true, canvas: false, detail: true });
+  });
+
+  it('`zC` leaves the response alone on screen, full width', () => {
+    window.innerWidth = 900;
+    render(<Canvas model={MODEL} />);
+    chord('C');
+    expect(sidebarPane()).toBeNull();
+    expect(canvasPane()).toBeNull();
+    expect(detailPane()).not.toBeNull();
+    // Past DETAIL_MAX on purpose: that bound stops the detail pane
+    // overshadowing the canvas, and there is no canvas.
+    expect(width(detailPane())).toBe(900);
+  });
+
+  it('moves the keyboard into the only pane left, rather than leaving it on a list nothing draws', () => {
+    render(<Canvas model={MODEL} />);
+    expect(actionPane()).toBe('idle');
+    chord('C');
+    expect(actionPane()).toBe('active');
+  });
+
+  it('keeps the action-parity invariant under every layout', () => {
+    render(<Canvas model={MODEL} />);
+    for (const layout of [null, 'c', 'C'] as const) {
+      if (layout !== null) {
+        chord(layout);
+      }
+      // The invariant the #111 fix installed, restated for a hideable pane:
+      // the cursor is only ever on something that is on screen. Ringing an id
+      // no element carries — or ringing one while the pane is unmounted — is
+      // the defect.
+      const ring = ringed();
+      const drawnIds = drawnActions().map((el) => el.getAttribute('data-action-id'));
+      for (const id of ring) {
+        expect(drawnIds).toContain(id);
+      }
+      if (detailPane() === null) {
+        expect(ring).toEqual([]);
+      }
+      // And when the keyboard says it is in the action pane, the action pane
+      // exists.
+      if (actionPane() === 'active') {
+        expect(detailPane()).not.toBeNull();
+      }
+    }
+  });
+
+  it('leaves the command palette reachable with the canvas gone', () => {
+    // It used to be rendered INSIDE the canvas column, so this key opened a
+    // palette nothing could draw.
+    render(<Canvas model={MODEL} />);
+    chord('c');
+    press('k', { metaKey: true });
+    expect(document.querySelector('button[aria-label="close palette"]')).not.toBeNull();
+  });
+});
+
+describe('`z0` is the way back', () => {
+  it('restores the hidden panes as well as the two widths', () => {
+    render(<Canvas model={MODEL} />);
+    press('>'); // a width away from the default
+    chord('C'); // and two panes gone
+    expect(sidebarPane()).toBeNull();
+
+    chord('0');
+
+    // Widths only would answer the person who just hid the wrong pane with a
+    // layout that still has a column missing — and set two widths they cannot
+    // see while it did.
+    expect(sidebarPane()).not.toBeNull();
+    expect(canvasPane()).not.toBeNull();
+    expect(detailPane()).not.toBeNull();
+    expect(storedPrefs().panes).toEqual({ ...DEFAULT_PANES });
+    expect(storedPrefs().paneVisibility).toEqual({ sidebar: true, canvas: true, detail: true });
+  });
+
+  it('brings the keyboard back to the list', () => {
+    render(<Canvas model={MODEL} />);
+    chord('C');
+    expect(actionPane()).toBe('active');
+    chord('0');
+    expect(actionPane()).toBe('idle');
+  });
+});
+
+describe('a layout survives a reload', () => {
+  it('renders what the last session chose, and nothing it did not choose', () => {
+    const first = render(<Canvas model={MODEL} />);
+    chord('c');
+    first.unmount();
+
+    render(<Canvas model={MODEL} />);
+    expect(canvasPane()).toBeNull();
+    expect(sidebarPane()).not.toBeNull();
+    expect(detailPane()).not.toBeNull();
   });
 });
