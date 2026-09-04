@@ -2239,6 +2239,9 @@ describe('the composer is hidden while the Terminal tab is open', () => {
     expect(q('[data-prompt-box]')).not.toBeNull();
     fireEvent.click(q<HTMLButtonElement>('[data-tab="agents"]') as HTMLButtonElement);
     expect(q('[data-prompt-box]')).not.toBeNull();
+  });
+});
+
 /** The `out` text size is a pref, put on the document root and consumed as
  *  the ROOT of `out`'s `em` scale (`out-font-size.test.tsx` pins the scale).
  *  What matters here is that exactly one element reads it: a second would make
