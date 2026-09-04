@@ -297,8 +297,8 @@ function draw(over: Partial<DetailPanelProps> = {}) {
     draft: '',
     onDraftChange: () => {},
     onSubmit: () => {},
-    onPickCommand: () => {},
     onCopyCommand: () => {},
+    onCopyAllCommands: () => {},
     composing: false,
     onCompose: () => {},
     onStopComposing: () => {},
@@ -1154,3 +1154,118 @@ describe('the surface the picker sits on is a token pair, not a dark-only hex', 
  * assert against, so the tests go with the row rather than being rewritten
  * into assertions about its absence.
  */
+
+/**
+ * The command strip, and the two sentences that stand in for a missing answer.
+ *
+ * `Decision.commands` was hardcoded empty until the adapter learned to carry
+ * one, so every branch below shipped without ever having rendered against real
+ * data. Four defects a UI review found, each pinned here.
+ */
+describe('the command strip promises only what it does', () => {
+  const COMMANDS = [
+    { id: 'c1', label: 'push the branch', command: 'git push -u origin work' },
+    { id: 'c2', label: 'open the PR', command: 'gh pr create --fill' },
+    { id: 'c3', label: 'watch CI', command: 'gh run watch' },
+  ];
+  const WITH_COMMANDS: Decision = {
+    id: 'd9',
+    label: 'sign-off',
+    input: 'ship it',
+    output: 'here is what to run',
+    commands: COMMANDS,
+  };
+
+  /** What `Canvas.copyCommand` puts on the clipboard, for one id. */
+  const copyOne = (id: string) => COMMANDS.find((c) => c.id === id)?.command ?? '';
+  /** What `Canvas.copyAllCommands` puts on the clipboard. */
+  const copyAll = () => COMMANDS.map((c) => c.command).join('\n');
+
+  const rowCopies = () => all('[data-command-copy]') as HTMLButtonElement[];
+  const copyAllButton = () => q<HTMLButtonElement>('[data-commands-copy-all]');
+
+  it('labels the per-row button `copy`, and gives `yy` to the copy-all it names', () => {
+    // The defect: the row button printed `yy` and copied ONE command, while
+    // pressing `yy` copies ALL of them. With several commands the two diverge
+    // silently, at the clipboard, long after the operator has moved on. A
+    // control printing `yy` must do what pressing `yy` does.
+    let clipboard = '';
+    draw({
+      decision: WITH_COMMANDS,
+      onCopyCommand: (id) => {
+        clipboard = copyOne(id);
+      },
+      onCopyAllCommands: () => {
+        clipboard = copyAll();
+      },
+    });
+
+    expect(rowCopies()).toHaveLength(3);
+    for (const button of rowCopies()) expect(button.textContent).toBe('copy');
+    // No row control claims the keystroke's glyph.
+    for (const button of rowCopies()) expect(button.textContent).not.toContain('yy');
+
+    fireEvent.click(rowCopies()[1] as HTMLButtonElement);
+    expect(clipboard).toBe('gh pr create --fill');
+
+    const yy = copyAllButton();
+    expect(yy?.textContent).toContain('yy');
+    fireEvent.click(yy as HTMLButtonElement);
+    expect(clipboard).toBe('git push -u origin work\ngh pr create --fill\ngh run watch');
+  });
+
+  it('draws no button labelled `run`, because vam does not run them', () => {
+    // The caption 30px above it says vam does not run them, and the status
+    // after the click said so too. Only the label disagreed, and the label is
+    // the part read BEFORE the click.
+    draw({ decision: WITH_COMMANDS });
+    const labels = all('button').map((b) => (b.textContent ?? '').trim());
+    expect(labels).not.toContain('run');
+    // One copy affordance per row, not two buttons that both copy.
+    expect(rowCopies()).toHaveLength(3);
+  });
+});
+
+describe('a turn with no answer says which kind of nothing it is', () => {
+  const withOutput = (output: string | null): Decision => ({
+    id: 'd9',
+    label: 'sign-off',
+    input: 'ship it',
+    output,
+    commands: [],
+  });
+  const status = (s: Session['status']) => ({
+    project: PROJECT,
+    session: { ...SESSION, status: s },
+  });
+
+  it('renders an explicit line for an empty answer rather than blank space', () => {
+    // `''` is a distinct state: a turn that resolved to nothing. But `'' !==
+    // null`, so `OutText` ran, `splitAnswers('')` filtered every block out as
+    // empty, and the operator got an `OUT` rule over blank space --
+    // indistinguishable from a failed render.
+    expect(splitAnswers('')).toEqual([]);
+    draw({ decision: withOutput('') });
+    expect(all('[data-out-line]')).toHaveLength(0);
+    const note = q<HTMLElement>('[data-out-empty]');
+    expect(note?.textContent ?? '').toContain('nothing');
+  });
+
+  it('says "still running" only for a session that is running', () => {
+    draw({ decision: withOutput(null), entry: status('running') });
+    expect(q<HTMLElement>('[data-out-empty]')?.textContent ?? '').toContain('still running');
+  });
+
+  it('tells a done or failed session the turn ended without an answer', () => {
+    // `to-canvas.ts` sets `null` whenever a turn collected zero answer events,
+    // whatever the status -- so a finished session was told to keep waiting
+    // for something that will never arrive.
+    for (const s of ['done', 'failed'] as const) {
+      cleanup();
+      draw({ decision: withOutput(null), entry: status(s) });
+      const text = q<HTMLElement>('[data-out-empty]')?.textContent ?? '';
+      expect(text, `status ${s}`).toContain('ended without an answer');
+      expect(text, `status ${s}`).not.toContain('still running');
+    }
+  });
+});
