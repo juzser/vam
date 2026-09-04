@@ -1391,23 +1391,29 @@ export function DetailPanel(props: DetailPanelProps) {
                   /* While the session is working, this line is the only thing
                      in the pane that changes -- so it carries the work rather
                      than a sentence that reads the same on a session that has
-                     quietly died. `vam-breathe` is the header dot's own idiom
-                     (and stops under `prefers-reduced-motion`, styles.css), and
-                     it is withheld from every stopped status for the reason
-                     recorded at PANE_STATUS_BREATHES. A null `activity` is a
-                     source that cannot say (model.ts): the sentence stays,
-                     because motion is honest here only about the fact that the
-                     session is running, which it still is. */
+                     quietly died. The idiom is a terminal's: a blinking block
+                     caret trailing the words, because that is what a line still
+                     being written looks like. It REPLACES the `vam-breathe`
+                     pulse this line shipped with -- one motion story, not an
+                     opacity ramp and a blink arguing -- and it stops under
+                     `prefers-reduced-motion` (styles.css), where it parks on as
+                     a solid block. It is withheld from every stopped status for
+                     the reason recorded at PANE_STATUS_BREATHES. A null
+                     `activity` is a source that cannot say (model.ts): the
+                     sentence stays and no words are invented, and the caret is
+                     still honest, because it asserts only that the session is
+                     running, which it is. */
                   <p
                     data-out-empty
                     data-out-live={outIsLive ? 'true' : undefined}
-                    className={[
-                      'text-[11.5px] text-ink-faint',
-                      outIsLive ? 'vam-breathe' : '',
-                    ].join(' ')}
+                    className="text-[11.5px] text-ink-faint"
                   >
-                    {liveActivity ??
-                      noAnswerNote(decision.output, entry?.session.status ?? null)}
+                    {liveActivity ?? noAnswerNote(decision.output, entry?.session.status ?? null)}
+                    {/* Decorative: a screen reader should read the activity,
+                        not a block character. */}
+                    {outIsLive && (
+                      <span aria-hidden="true" data-out-cursor className="vam-term-cursor" />
+                    )}
                   </p>
                 ) : (
                   <OutText output={decision.output} />

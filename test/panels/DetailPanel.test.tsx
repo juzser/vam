@@ -1274,10 +1274,13 @@ describe('a turn with no answer says which kind of nothing it is', () => {
  * A running session's `out` used to read exactly like a dead one's: one static
  * sentence, identical whether the agent was mid-tool-call or had quietly
  * stopped. `Session.activity` already carries what it is doing right now
- * (model.ts), so the empty `out` says that instead, and breathes while it is
- * true -- the same `vam-breathe` idiom the header dot uses, and the same
- * reason it is withheld from `done` and `failed`: a pulse on a stopped session
- * reads as activity that is not there.
+ * (model.ts), so the empty `out` says that instead, and wears a blinking block
+ * cursor while it is true -- a terminal's own idiom for "this line is still
+ * being written", withheld from `done` and `failed` for the same reason the
+ * breathing was: a live cursor on a stopped session reads as activity that is
+ * not there. The cursor REPLACED the `vam-breathe` pulse this line shipped
+ * with, so the assertions below check both halves: the terminal marker is
+ * there and the old opacity pulse is gone, or neither is.
  *
  * `null` activity is a source that cannot say, and model.ts is explicit that
  * it must render as no line rather than as an empty spinner pretending to be
@@ -1290,10 +1293,21 @@ describe('the out region shows live work while the session is running', () => {
     session: { ...SESSION, status: 'running' as const, activity },
   });
 
-  it('renders the activity line, breathing, on the turn being worked', () => {
+  const cursor = () => q<HTMLElement>('[data-out-empty] [data-out-cursor]');
+
+  it('renders the activity line with a terminal cursor on the turn being worked', () => {
     draw({ entry: running('editing transcript.ts') });
     expect(live()?.textContent ?? '').toContain('editing transcript.ts');
-    expect(live()?.getAttribute('class') ?? '').toContain('vam-breathe');
+    expect(cursor()).not.toBeNull();
+    expect(cursor()?.getAttribute('class') ?? '').toContain('vam-term-cursor');
+    // One motion story, not two: the pulse this line shipped with is gone.
+    expect(live()?.getAttribute('class') ?? '').not.toContain('vam-breathe');
+  });
+
+  it('hides the cursor glyph from assistive tech', () => {
+    draw({ entry: running('editing transcript.ts') });
+    // A screen reader should read the activity, not a block character.
+    expect(cursor()?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('keeps the sentence and invents no words when the source cannot say', () => {
@@ -1301,7 +1315,10 @@ describe('the out region shows live work while the session is running', () => {
     const text = live()?.textContent ?? '';
     expect(text).toContain('still running');
     expect(text.trim()).not.toBe('');
-    expect(live()?.getAttribute('class') ?? '').toContain('vam-breathe');
+    // The cursor asserts only "running", which is still true with no activity.
+    expect(cursor()).not.toBeNull();
+    // Nothing invented in place of the words the source could not give.
+    expect(live()?.getAttribute('class') ?? '').not.toContain('vam-breathe');
   });
 
   it('does not animate a session that has stopped', () => {
@@ -1310,6 +1327,7 @@ describe('the out region shows live work while the session is running', () => {
       draw({ entry: { project: PROJECT, session: { ...SESSION, status: s } } });
       const node = live();
       expect(node?.getAttribute('class') ?? '', `status ${s}`).not.toContain('vam-breathe');
+      expect(cursor(), `status ${s}`).toBeNull();
       expect(node?.textContent ?? '', `status ${s}`).not.toContain('just now');
     }
   });
@@ -1319,6 +1337,16 @@ describe('the out region shows live work while the session is running', () => {
     // would be describing the present while the operator reads the past.
     draw({ entry: running('editing transcript.ts'), decision: DECISIONS[2] as Decision });
     expect(all('[data-out-empty]')).toHaveLength(0);
+    expect(cursor()).toBeNull();
     expect(document.body.textContent ?? '').not.toContain('editing transcript.ts');
+  });
+
+  it('leaves the cursor readable and still blinking-free under reduced motion', () => {
+    // The frozen state has to remain a cursor: visible, full opacity, no
+    // animation -- not a glyph stuck mid-blink at some arbitrary opacity.
+    const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
+    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(reduced).toContain('.vam-term-cursor');
+    expect(css).toContain('@keyframes vam-term-cursor');
   });
 });
