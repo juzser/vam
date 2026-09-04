@@ -798,14 +798,18 @@ describe('the sidebar', () => {
     expect(focused()).toBe('alpha/a2');
   });
 
-  it('offers adding a session, and names the CLI that actually creates one', () => {
-    // black-smith has no route for this. Saying "not wired yet" would suggest
-    // one is coming; naming the command tells you what to go and do.
+  it('offers adding a session, and says plainly that THIS source cannot', () => {
+    // Creating one is real now -- a detached tmux session, see
+    // `src/main/sources/tmux/` -- but only where a session source can do it.
+    // This canvas is rendered on black-smith, which has no such route, so the
+    // honest answer is that black-smith has no command rather than a promise
+    // that one is coming. `Canvas.new-session.test.tsx` covers the source
+    // that can.
     render(<Canvas model={MODEL} />);
     act(() => {
       screen.getByLabelText('new session').click();
     });
-    expect(screen.getByText(/smith event append session-start/)).toBeTruthy();
+    expect(screen.getByText(/black-smith has no new-session command/)).toBeTruthy();
   });
 
   it('pins settings at the bottom, and it opens the overlay', () => {
