@@ -1,8 +1,8 @@
 /**
- * The command extractor: which fenced blocks in a Claude Code answer hold
- * something the operator could paste into a shell, and which only look like it.
+ * The command extractor: a line the agent marked with a leading `!` is a
+ * command it is asking the operator to run, and nothing else is.
  *
- * Every fixture here is invented. The rule was developed against a real
+ * Every fixture here is invented. The convention was measured against a real
  * transcript corpus, but nothing measured from the operator's machine -- no
  * home path, no host name, no project name -- is reproduced in this file.
  */
@@ -22,64 +22,54 @@ describe('extractCommands', () => {
     expect(extractCommands('run pnpm install and then git status --short', 'd:0')).toEqual([]);
   });
 
-  it('takes commands out of an untagged fence', () => {
-    expect(texts(block('', 'pnpm install', 'git status --short'))).toEqual([
+  it('takes a marked line out of an untagged fence, without the marker', () => {
+    expect(texts(block('', '! pnpm install', '! git status --short'))).toEqual([
       'pnpm install',
       'git status --short',
     ]);
   });
 
-  it('takes commands out of a bash-tagged fence', () => {
-    expect(texts(block('bash', 'pnpm run build'))).toEqual(['pnpm run build']);
+  it('takes a marked line out of a bash-tagged fence', () => {
+    expect(texts(block('bash', '! pnpm run build'))).toEqual(['pnpm run build']);
+  });
+
+  it('accepts a marker indented inside the block', () => {
+    expect(texts(block('bash', '    !   pnpm run build'))).toEqual(['pnpm run build']);
   });
 
   it.each(['ts', 'toml', 'json', 'swift'])('ignores a %s-tagged fence', (tag) => {
-    expect(texts(block(tag, 'pnpm install', 'git status --short'))).toEqual([]);
+    expect(texts(block(tag, '! pnpm install'))).toEqual([]);
   });
 
-  it('ignores an ASCII box-drawing diagram', () => {
+  // The headline behaviour change: what a line looks like no longer matters.
+  it('does NOT extract an unmarked command line', () => {
     expect(
-      texts(block('', 'src/', '├── main/ sources here', '│   └── renderer/ and here')),
+      texts(block('bash', 'pnpm install', 'git status --short', './build.sh --check')),
     ).toEqual([]);
   });
 
-  it('ignores a numbered prose list', () => {
-    expect(texts(block('', '1. Chạy lệnh cài đặt', '2. Then open the app'))).toEqual([]);
+  it('does not treat a shell prompt marker as a request', () => {
+    expect(texts(block('', '$ pnpm run dev', '# apt install curl'))).toEqual([]);
   });
 
-  it('ignores a git-log block', () => {
-    expect(
-      texts(block('', 'f97b84b feat(ui): rebuild the canvas', 'a1b2c3d fix(main): drop the guess')),
-    ).toEqual([]);
+  it('rejects a bare marker with nothing after it', () => {
+    expect(texts(block('', '!', '!   '))).toEqual([]);
   });
 
-  it('ignores a results table aligned with columns', () => {
-    expect(
-      texts(block('', 'yarn lint       clean  5.72s', 'yarn test       ok     11.03s')),
-    ).toEqual([]);
+  it('rejects a marker glued to its text, which is history expansion or negation', () => {
+    expect(texts(block('', '!pnpm install', '!!'))).toEqual([]);
   });
 
-  it('ignores a bare word, which is a filename and not a command', () => {
-    expect(texts(block('', 'package.json'))).toEqual([]);
-  });
-
-  it('ignores a line that opens a block or ends a statement', () => {
-    expect(texts(block('', 'steps to run:', 'export const x = {', 'echo done;'))).toEqual([]);
-  });
-
-  it('ignores a commented-out C-style line', () => {
-    expect(texts(block('', '// pnpm install first'))).toEqual([]);
-  });
-
-  it('ignores a line whose head is not lowercase', () => {
-    expect(texts(block('', 'Run the installer'))).toEqual([]);
+  // Fence-scoped by decision, and the test that pins it.
+  it('ignores a marked line outside any fence', () => {
+    expect(texts('Then run this:\n! pnpm install\nand you are done')).toEqual([]);
   });
 
   it('joins a multi-line quoted command into one copyable unit', () => {
     const commands = extractCommands(
       block(
         '',
-        `osascript -e 'tell application "Terminal"`,
+        `! osascript -e 'tell application "Terminal"`,
         'do script "pnpm run dev"',
         `end tell'`,
       ),
@@ -92,7 +82,7 @@ describe('extractCommands', () => {
   });
 
   it('does not let an unterminated quote swallow the rest of the block', () => {
-    expect(texts(block('', `echo 'oops`, 'pnpm install', 'git status --short'))).toEqual([
+    expect(texts(block('', `! echo 'oops`, '! pnpm install', '! git status --short'))).toEqual([
       `echo 'oops`,
       'pnpm install',
       'git status --short',
@@ -100,56 +90,32 @@ describe('extractCommands', () => {
   });
 
   it('strips a trailing comment, including a non-ASCII one', () => {
-    expect(texts(block('', 'make dev.up        # build dev image → fast'))).toEqual([
+    expect(texts(block('', '! make dev.up        # build dev image → fast'))).toEqual([
       'make dev.up',
     ]);
   });
 
   it('keeps a # that is not a comment', () => {
-    expect(texts(block('', `echo 'tag #1 shipped'`, 'curl http://x#y --silent'))).toEqual([
+    expect(texts(block('', `! echo 'tag #1 shipped'`, '! curl http://x#y --silent'))).toEqual([
       `echo 'tag #1 shipped'`,
       'curl http://x#y --silent',
     ]);
   });
 
-  it('strips prompt markers', () => {
-    expect(texts(block('', '$ pnpm run dev', '! ls -la'))).toEqual(['pnpm run dev', 'ls -la']);
-  });
-
-  // `#` is NOT a prompt marker. A root-shell `# apt install curl` is rare in
-  // agent output; `# a note about the next line` is everywhere inside a bash
-  // block, and offering a comment to the operator as something to run is the
-  // worst thing this feature can do. Precision wins, and the root prompt loses.
-  it('rejects a whole-line comment, spaced or not', () => {
-    expect(
-      texts(block('bash', '# just a note about the build', '#31 A merge lands where it must')),
-    ).toEqual([]);
-  });
-
-  it('lets a comment line above a real command through untouched', () => {
-    expect(
-      texts(block('bash', '# install first', 'pnpm install', '  # then build', 'pnpm run build')),
-    ).toEqual(['pnpm install', 'pnpm run build']);
-  });
-
-  it('rejects a line longer than 400 characters', () => {
-    expect(texts(block('', `echo ${'x'.repeat(400)}`))).toEqual([]);
-  });
-
   it('dedupes by exact command text, keeping first-seen order', () => {
-    expect(texts(block('', 'pnpm install', 'git status --short', 'pnpm install'))).toEqual([
+    expect(texts(block('', '! pnpm install', '! git status --short', '! pnpm install'))).toEqual([
       'pnpm install',
       'git status --short',
     ]);
   });
 
   it('caps a decision at six commands', () => {
-    const lines = Array.from({ length: 9 }, (_, i) => `pnpm run task-${i}`);
+    const lines = Array.from({ length: 9 }, (_, i) => `! pnpm run task-${i}`);
     expect(texts(block('', ...lines))).toHaveLength(6);
   });
 
   it('collects across several eligible blocks', () => {
-    const text = `${block('', 'pnpm install')}\nprose\n${block('sh', 'git push --dry-run')}`;
+    const text = `${block('', '! pnpm install')}\nprose\n${block('sh', '! git push --dry-run')}`;
     expect(texts(text)).toEqual(['pnpm install', 'git push --dry-run']);
   });
 
@@ -160,10 +126,7 @@ describe('extractCommands', () => {
     ['cd /tmp/x && git merge', 'cd'],
     ['./build.sh --check', './build.sh'],
     ['cat ~/notes.txt', 'cat'],
-    ['cat ./notes.txt', 'cat'],
     ['flutter create myapp', 'flutter create'],
-    ['wrangler secret put TOKEN', 'wrangler secret'],
-    ['git worktree add ../wt', 'git worktree'],
     ['curl -sS https://example.test/x', 'curl'],
     [`osascript -e 'tell app "x" to quit'`, 'osascript'],
     // A quoted argument is an argument, not part of the name. Without this the
@@ -171,7 +134,7 @@ describe('extractCommands', () => {
     ['open "/tmp/x/Dracula Theme.terminal"', 'open'],
     [`open '/tmp/x/notes.txt'`, 'open'],
   ])('labels %s as %s', (command, label) => {
-    expect(extractCommands(block('', command), 'd:0')[0]?.label).toBe(label);
+    expect(extractCommands(block('', `! ${command}`), 'd:0')[0]?.label).toBe(label);
   });
 
   // The exclusion list is a guess about token shapes; the cap is a guarantee.
@@ -179,29 +142,27 @@ describe('extractCommands', () => {
   // is the whole command.
   it('caps a runaway label with an ellipsis', () => {
     const head = `./${'a'.repeat(60)}.sh`;
-    const label = extractCommands(block('', `${head} --check`), 'd:0')[0]?.label;
+    const label = extractCommands(block('', `! ${head} --check`), 'd:0')[0]?.label;
     expect(label).toHaveLength(32);
     expect(label?.endsWith('…')).toBe(true);
     expect(label?.startsWith('./aaa')).toBe(true);
   });
 
-  // Not hex: a 32-character run of hex letters is a sha to the rule above, and
-  // would be rejected as a git-log line before it ever reached the label.
   it('leaves a label that fits exactly as it is', () => {
     const command = `${'z'.repeat(32)} --check`;
-    expect(extractCommands(block('', command), 'd:0')[0]?.label).toBe('z'.repeat(32));
+    expect(extractCommands(block('', `! ${command}`), 'd:0')[0]?.label).toBe('z'.repeat(32));
   });
 
   it('gives every command an id under the prefix it was handed', () => {
     expect(
-      extractCommands(block('', 'pnpm install', 'ls -la'), 'sess-1:2').map((c) => c.id),
+      extractCommands(block('', '! pnpm install', '! ls -la'), 'sess-1:2').map((c) => c.id),
     ).toEqual(['sess-1:2:cmd:0', 'sess-1:2:cmd:1']);
   });
 });
 
 describe('summarizeTranscript commands', () => {
   it('carries the commands of a decision, with ids unique across decisions', () => {
-    const answer = ['Run these:', block('', 'pnpm install', 'pnpm run build')].join('\n\n');
+    const answer = ['Run these:', block('', '! pnpm install', '! pnpm run build')].join('\n\n');
     const tail = [
       { type: 'last-prompt', lastPrompt: 'first' },
       {
