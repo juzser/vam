@@ -152,11 +152,12 @@ const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 0.8 } as const;
 /**
  * How much of the canvas the focused session's row should occupy.
  *
- * The operator has asked for this twice with different numbers (70%, now 60%),
- * and has said it will become a setting. So it is a named target rather than a
- * padding value: `focusPadding` derives what ReactFlow actually wants, and a
- * settings pane will one day write to this constant's runtime equivalent
- * without anyone having to re-derive the formula.
+ * The operator asked for this twice with different numbers (70%, then 60%), and
+ * said it would become a setting. It now is one: this constant is the DEFAULT,
+ * the stored `focusViewportShare` overrides it, and `focusPadding` derives what
+ * ReactFlow actually wants from whichever is in force. Keeping the target named
+ * rather than folding it into a padding value is what let the settings pane
+ * write to it without anyone re-deriving the formula.
  */
 /**
  * Token counts at a glance: `578k`, `4.2M`.

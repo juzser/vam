@@ -33,10 +33,20 @@
  *
  * ## The mockup's four tabs
  *
- * ADE puts Response / PRs / Terminal / Agents across the top. Only Response has
- * anything behind it: black-smith has no terminal to attach to, no PR index per
- * session, and its agent roster is a factory-wide count rather than a per-
- * session list. The other three are drawn as inert labels — see the todo.
+ * ADE puts Response / PRs / Terminal / Agents across the top, and all four now
+ * have something behind them — which was not true when this comment was first
+ * written, and the sentence it replaces claimed the opposite long after it
+ * stopped being so.
+ *
+ * What each one needs, and why they arrived separately: PRs asks `gh` per
+ * branch; Agents reads the roster beside a session's transcript; Terminal
+ * reads a tmux pane, and only for sessions vam itself started, because no
+ * process can take over another's controlling TTY.
+ *
+ * The `LIVE_TABS` list below is the honest part: a tab is live for a SOURCE
+ * that reports the thing it draws, and black-smith still reports none of the
+ * three. So the tabs are real and their emptiness is source-specific, rather
+ * than the tabs being labels.
  */
 
 import {
