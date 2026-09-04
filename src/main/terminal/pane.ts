@@ -36,7 +36,17 @@ import { listVamSessions, readPane, type TmuxRun } from '../sources/tmux/spawn.j
  */
 export function matchVamSession(names: readonly string[], title: string): string | null {
   const prefix = vamSessionName(title, '');
-  const mine = names.filter((name) => name.startsWith(prefix)).sort();
+  const mine = names
+    .filter((name) => {
+      // The tail must be the RANDOM SUFFIX and nothing else. A bare
+      // `startsWith` would let the title `atlas` match `vam-atlas-two-a1b2c3`
+      // -- a different session, with a different screen, whose title merely
+      // begins with this one's. `randomSuffix` is base36 digits, so a `-` in
+      // what is left over means the slug did not end where this title's does.
+      const tail = name.slice(prefix.length);
+      return name.startsWith(prefix) && !tail.includes('-');
+    })
+    .sort();
   return mine.at(-1) ?? null;
 }
 
