@@ -13,10 +13,10 @@ import type { CanvasModel } from '../../src/renderer/domain/model.js';
 import {
   applyRenames,
   EMPTY_PREFS,
-  readPrefs,
   type Prefs,
-  writePrefs,
+  readPrefs,
   setRename,
+  writePrefs,
 } from '../../src/renderer/prefs/prefs.js';
 
 const NOW = new Date('2026-09-01T00:00:00.000Z');

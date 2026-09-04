@@ -64,6 +64,7 @@ import { SessionList } from '../panels/SessionList.js';
 import { ALL_VISIBLE, DEFAULT_PANES, layoutWidths } from '../prefs/panes.js';
 import {
   applyIcons,
+  applyRenames,
   applyTheme,
   browserStorage,
   type Prefs,
@@ -73,6 +74,7 @@ import {
   setPaneVisibility,
   setPaneWidth,
   setProjectIcon,
+  setRename,
   setSessionFilters,
   setTheme,
   writePrefs,
@@ -371,8 +373,12 @@ function CanvasInner({
   }, [prefs.theme]);
 
   const model = useMemo(
-    () => applyIcons(factoryModel, prefs.icons, prefs.projectIcons),
-    [factoryModel, prefs.icons, prefs.projectIcons],
+    // Renames after icons, and in the same one place, for the same reason:
+    // the sidebar, the node and the detail panel all render `session.title`,
+    // and none of them should know a title can be vam's own rather than the
+    // source's.
+    () => applyRenames(applyIcons(factoryModel, prefs.icons, prefs.projectIcons), prefs.renames),
+    [factoryModel, prefs.icons, prefs.projectIcons, prefs.renames],
   );
 
   const allEntries = useMemo(() => orderedSessions(model), [model]);
@@ -404,6 +410,14 @@ function CanvasInner({
   const [pane, setPane] = useState<'list' | 'action'>('list');
   const [actionIndex, setActionIndex] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  /**
+   * WHICH source's session is being renamed, captured when the editor opens
+   * rather than re-derived when it commits -- the same argument `IconTarget`
+   * makes above, and the same bug avoided: a lookup by session id across
+   * every source returns whichever sorts first, and the name would land in
+   * the wrong source's bucket.
+   */
+  const [renameTarget, setRenameTarget] = useState<IconTarget | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [pickingIconFor, setPickingIconFor] = useState<IconTarget | null>(null);
   const [pickingProjectIconFor, setPickingProjectIconFor] = useState<ProjectIconTarget | null>(
@@ -424,6 +438,8 @@ function CanvasInner({
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   /** True while a write is in flight — Enter must not fire twice. */
   const [writing, setWriting] = useState(false);
+  /** The same guard for `x`: one keypress must not become two stop attempts. */
+  const [closing, setClosing] = useState(false);
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
   const { getNodes, zoomIn, zoomOut, fitView } = useReactFlow();
@@ -843,6 +859,80 @@ function CanvasInner({
     }
   }, [focusedEntry, draft, source, writing]);
 
+  /**
+   * Stop the focused session — really, when the source can.
+   *
+   * NO CONFIRM STEP, and that is a decision rather than an omission. `claude
+   * stop` keeps the conversation and `claude attach <id>` brings it back, so
+   * this is not a delete; the status line names the session it acted on and
+   * says the conversation is kept, which is what a confirm dialog would have
+   * been for. A modal in front of a resumable, named, undoable action is a
+   * keystroke tax on the common case.
+   *
+   * WHAT IT WILL NOT DO is decide for itself which sessions are stoppable.
+   * `claude stop` stops BACKGROUND sessions only; an interactive one is a
+   * terminal the operator is sitting in, and main refuses it by name with the
+   * remedy that is actually theirs (`src/main/sources/claude-code/stop.ts`).
+   * That refusal arrives here as a `SourceError` and is rendered verbatim —
+   * the renderer never guesses at the distinction, and never reports a stop
+   * it did not perform.
+   */
+  const closeSession = useCallback(
+    async (sessionId: string, title: string) => {
+      if (closing) {
+        return;
+      }
+      if (source.kind !== 'session') {
+        setStatus(`black-smith has no close-session command — "${title}" is still here`);
+        return;
+      }
+      const sessionSource = source.source;
+      if (!canWriteTo(sessionSource) || sessionSource.write.closeSession === undefined) {
+        setStatus(
+          `${sessionSource.label} cannot close a session — ${
+            sessionSource.declines.closeSession ?? 'it advertises no way to'
+          }; "${title}" is still here`,
+        );
+        return;
+      }
+      setClosing(true);
+      try {
+        await sessionSource.write.closeSession(sessionId);
+        setStatus(
+          `stopped "${title}" — the conversation is kept; resume it with \`claude attach\``,
+        );
+        source.onWrote();
+      } catch (cause) {
+        setStatus(describeFailure(cause));
+      } finally {
+        setClosing(false);
+      }
+    },
+    [source, closing],
+  );
+
+  /**
+   * Keep the name the operator just typed. Local by design: `claude agents`
+   * has no rename subcommand, so there is nothing upstream to call, and vam
+   * does not write into the operator's own Claude Code state — see
+   * `RenameChoice` in `prefs.ts`. An empty name clears the override and the
+   * source's own title comes back, which is the undo.
+   */
+  const commitRename = useCallback(() => {
+    const target = renameTarget;
+    setRenamingId(null);
+    setRenameTarget(null);
+    if (target === null) {
+      return;
+    }
+    savePrefs(setRename(prefs, target.source, target.sessionId, renameDraft, new Date()));
+    setStatus(
+      renameDraft.trim() === ''
+        ? `"${target.title}" goes back to the name its source gives it`
+        : `renamed to "${renameDraft.trim()}" — vam's own name for it, kept on this machine`,
+    );
+  }, [renameTarget, renameDraft, prefs, savePrefs]);
+
   const copyAllCommands = useCallback(async () => {
     const commands = focusedDecision?.commands ?? [];
     if (commands.length === 0) {
@@ -1080,7 +1170,16 @@ function CanvasInner({
             setStatus('pick a session first');
             return;
           }
+          if (focusedEntry.project.source === undefined) {
+            setStatus('this project has no source — rename unavailable');
+            return;
+          }
           setRenameDraft(focusedEntry.session.title);
+          setRenameTarget({
+            source: focusedEntry.project.source,
+            sessionId: focusedEntry.session.id,
+            title: focusedEntry.session.title,
+          });
           setRenamingId(focusedEntry.session.id);
           return;
         case 'icon': {
@@ -1114,9 +1213,7 @@ function CanvasInner({
             setStatus('pick a session first');
             return;
           }
-          setStatus(
-            `black-smith has no close-session command — "${focusedEntry.session.title}" is still here`,
-          );
+          void closeSession(focusedEntry.session.id, focusedEntry.session.title);
           return;
         case 'newSession':
           // A session is created by a person running `smith event append`
@@ -1279,6 +1376,7 @@ function CanvasInner({
     matches,
     query,
     copyAllCommands,
+    closeSession,
     stepSession,
     focusSession,
     pane,
@@ -1355,20 +1453,21 @@ function CanvasInner({
           renamingId={renamingId}
           renameDraft={renameDraft}
           onRenameChange={setRenameDraft}
-          onRenameCommit={() => {
-            // A session's id IS its name in black-smith, and ids are what the
-            // whole event log chains on. Renaming one is not a UI feature.
-            setStatus(`black-smith cannot rename a session — "${renameDraft}" was not saved`);
+          onRenameCommit={commitRename}
+          onRenameCancel={() => {
             setRenamingId(null);
+            setRenameTarget(null);
           }}
-          onRenameCancel={() => setRenamingId(null)}
           onPick={(sessionId) => {
             focusSession(sessionId);
             setPane('list');
           }}
-          onClose={(sessionId) =>
-            setStatus(`black-smith has no close-session command — "${sessionId}" is still here`)
-          }
+          onClose={(sessionId) => {
+            // The row's title, not the id: the same sentence the keyboard
+            // path writes, about the same session.
+            const entry = allEntries.find((e) => e.session.id === sessionId);
+            void closeSession(sessionId, entry?.session.title ?? sessionId);
+          }}
           onAdd={() =>
             setStatus('sessions are created from the CLI — smith event append session-start')
           }

@@ -185,6 +185,16 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   'Mod-7': { kind: 'sessionAt', index: 6 },
   'Mod-8': { kind: 'sessionAt', index: 7 },
   'Mod-9': { kind: 'last' },
+  // The same action as `x`, under the chord a person coming from a browser or
+  // a terminal already has in their fingers. It is `Mod-w` rather than a
+  // second letter because "close this thing" IS Cmd-W everywhere else.
+  //
+  // IT COLLIDES WITH THE WINDOW, and the collision is resolved in main:
+  // Electron's default macOS menu binds Cmd-W to Close Window, and a native
+  // menu key equivalent is matched before the page ever sees the keydown. So
+  // `src/main/menu.ts` releases that one item at startup; without it this
+  // binding would be dead in the packaged app while passing every test here.
+  'Mod-w': { kind: 'close' },
   // Vim's own "shift this leftwards / rightwards" — literally what moving a
   // side pane's boundary is. A real Shift+, / Shift+. keydown normalizes to
   // the browser-applied `<` / `>` here, distinct from the plain `,` above

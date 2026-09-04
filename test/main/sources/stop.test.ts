@@ -11,13 +11,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
 import { registerSourceIpc } from '../../../src/main/ipc/handlers.js';
 import { CLAUDE_CODE_SOURCE } from '../../../src/main/sources/claude-code/source.js';
-import type { MainSource } from '../../../src/main/sources/source.js';
 import {
   classifyStopFailure,
+  type StoppableAgent,
   stopArgv,
   stopSession,
-  type StoppableAgent,
 } from '../../../src/main/sources/claude-code/stop.js';
+import type { MainSource } from '../../../src/main/sources/source.js';
 
 const background: StoppableAgent = {
   key: 'sess-1#4242',
@@ -104,7 +104,8 @@ describe('classifyStopFailure', () => {
 
   it('falls back to the spawn message when the CLI said nothing', () => {
     expect(
-      classifyStopFailure({ failure: { message: 'exit 1' }, stderr: '   ', sessionId: 's' }).message,
+      classifyStopFailure({ failure: { message: 'exit 1' }, stderr: '   ', sessionId: 's' })
+        .message,
     ).toContain('exit 1');
   });
 });

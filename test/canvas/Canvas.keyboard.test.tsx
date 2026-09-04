@@ -825,13 +825,17 @@ describe('renaming, icons and closing', () => {
     expect(renameInput()?.value).toBe('a2');
   });
 
-  it('rename does not claim to have saved — a session id is what the log chains on', () => {
+  it('rename KEEPS the name — locally, and it wins over the row’s own title', () => {
+    // This used to assert the opposite ("cannot rename a session"), which was
+    // true of black-smith's event log and false of what the operator had just
+    // typed: the editor took the name and threw it away. The override is
+    // vam's own and deliberately local (`RenameChoice` in prefs.ts).
     render(<Canvas model={MODEL} />);
     press('r');
     typeInto(renameInput() as HTMLInputElement, 'new name');
     keyOn(renameInput() as HTMLInputElement, 'Enter');
-    expect(screen.getByText(/cannot rename a session/)).toBeTruthy();
     expect(renameInput()).toBeNull();
+    expect(rowText('a1')).toContain('new name');
   });
 
   it('Escape abandons the rename without touching the row', () => {

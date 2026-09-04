@@ -46,8 +46,8 @@ import {
   readPullRequestsViaCli,
 } from './pull-requests.js';
 import { createBranchLookup } from './repo-branch.js';
-import { stopSession, stopSessionViaCli } from './stop.js';
 import { defaultSessionsRoot, readStatusUpdatedAt } from './session-status.js';
+import { stopSession, stopSessionViaCli } from './stop.js';
 import {
   compactAge,
   EMPTY_FACTS,
