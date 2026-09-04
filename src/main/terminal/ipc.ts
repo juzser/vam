@@ -12,6 +12,7 @@
  * requirement for this tab, and the reason main holds no timer of its own.
  */
 
+import { type AnswerResult, isAnswerRequest } from '../../shared/answer.js';
 import {
   isPaneKey,
   isPaneSize,
@@ -23,6 +24,7 @@ import type { IpcMainLike } from '../ipc/handlers.js';
 import { readPublishedPanes } from '../sources/claude-code/session-pane.js';
 import { defaultSessionsRoot } from '../sources/claude-code/session-status.js';
 import type { TmuxRun } from '../sources/tmux/spawn.js';
+import { answerQuestion } from './answer.js';
 import { readSessionPane, resizeSessionPane, sendSessionKey } from './pane.js';
 
 /**
@@ -150,6 +152,42 @@ export function registerTerminalIpc(
         run,
         projectId,
         key,
+        rowId,
+        rowId === undefined ? undefined : await readPanes(),
+      );
+    },
+  );
+
+  /**
+   * The answer. It ENDS a tool call in a running agent, which is one step
+   * beyond typing into one, so the ask is validated by shape here and not
+   * because the preload built it -- and `unaimed` is every refusal this
+   * handler makes itself: nothing was read, nothing was aimed, nothing sent.
+   *
+   * Everything below it is passed through unchanged, because the card draws a
+   * different sentence for each: a picker that is not there, one that did not
+   * respond to the probe arrow, an option that is nowhere on screen, and a
+   * read-back that disagreed are four different things to a person, and only
+   * the last means keys went in.
+   */
+  ipcMain.handle(
+    CHANNELS.terminalAnswer,
+    async (_event, ...args: unknown[]): Promise<AnswerResult> => {
+      const [projectId, request, rowId] = args;
+      if (
+        args.length < 2 ||
+        args.length > 3 ||
+        typeof projectId !== 'string' ||
+        projectId.length > MAX_PROJECT_ID_LENGTH ||
+        !isAnswerRequest(request) ||
+        (rowId !== undefined && (typeof rowId !== 'string' || rowId.length > MAX_PROJECT_ID_LENGTH))
+      ) {
+        return { kind: 'unaimed' };
+      }
+      return answerQuestion(
+        run,
+        projectId,
+        request,
         rowId,
         rowId === undefined ? undefined : await readPanes(),
       );

@@ -78,6 +78,19 @@ export const CHANNELS = {
    */
   terminalSend: 'vam:terminal:send',
   /**
+   * The operator's ANSWER to the question a session is asking -- the option
+   * labels, and whether the tool said multi-select.
+   *
+   * A separate channel from `terminalSend` because it is a separate act. That
+   * one delivers one keystroke and says whether tmux took it. This one reads
+   * the picker on screen, walks its cursor onto the chosen LABEL, presses
+   * Return and reads back -- and answers with which of those steps it got to
+   * (`shared/answer.ts`). The route it does NOT take, delivering the option's
+   * text, was measured against a live picker and committed a different option
+   * than the one typed.
+   */
+  terminalAnswer: 'vam:terminal:answer',
+  /**
    * The directory picker. Answers BARE -- a path or `null` -- never an
    * `IpcResult`: "which directory" has exactly two answers and a cancelled
    * dialog is one of them, not a failure to report in a source's words. There

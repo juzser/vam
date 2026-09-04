@@ -233,7 +233,7 @@ export function sendEnterArgv(name: string): readonly string[] {
  * operator's text just as happily, and the day something passed a reply
  * through it, a message reading `C-c` would interrupt the agent instead of
  * being typed to it. One named builder per key that vam actually presses
- * keeps that impossible, and there are now exactly two of them.
+ * keeps that impossible, and there are now exactly four of them.
  *
  * MEASURED, on tmux 3.7b over a private `-L` socket, because the choice
  * between the key name and a literal `0x7f` may not be guessed: typing `abX`,
@@ -251,6 +251,37 @@ export function sendEnterArgv(name: string): readonly string[] {
  */
 export function sendBackspaceArgv(name: string): readonly string[] {
   return ['send-keys', '-t', paneTarget(name), 'BSpace'];
+}
+
+/**
+ * Move the picker's cursor down one row -- the THIRD named key, and the one
+ * that makes answering a question possible at all.
+ *
+ * It is a cursor move and nothing else, which is why it is safe to press
+ * before anything has been verified: it commits nothing. The caller
+ * (`main/terminal/answer.ts`) re-reads the screen after every one of these
+ * and asserts the cursor went where it was sent, because a burst of arrows
+ * pressed blind is indistinguishable, from vam's side, from a picker that
+ * stopped listening.
+ *
+ * Down only, and no `sendUpArgv` beside it: a list wraps, so every row is
+ * reachable by stepping down, and one direction is one thing to get wrong.
+ */
+export function sendDownArgv(name: string): readonly string[] {
+  return ['send-keys', '-t', paneTarget(name), 'Down'];
+}
+
+/**
+ * Move to the picker's next PANEL -- the fourth, and it exists for exactly one
+ * step of the multi-select flow.
+ *
+ * A multi-select picker ticks its rows with Return and then needs Right to
+ * reach the CLI's own review screen, which names the whole answer in prose
+ * before anything is committed. That screen is a verification surface vam gets
+ * for free, and this is the key that reaches it.
+ */
+export function sendRightArgv(name: string): readonly string[] {
+  return ['send-keys', '-t', paneTarget(name), 'Right'];
 }
 
 /**

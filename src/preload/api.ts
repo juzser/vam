@@ -20,6 +20,7 @@
 
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
 import type { Project } from '../renderer/domain/model.js';
+import type { AnswerRequest, AnswerResult } from '../shared/answer.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
 import type { PaneKey, PaneSendResult, PaneView } from '../shared/terminal.js';
 import type { UsageSnapshot } from '../shared/usage.js';
@@ -162,6 +163,16 @@ export type TerminalApi = {
    * named -- because those are different sentences to the person typing.
    */
   send(projectId: string, key: PaneKey, rowId?: string): Promise<PaneSendResult>;
+  /**
+   * The operator's answer to the question a session is asking.
+   *
+   * Beside `send` rather than built out of it, because it is not typing: main
+   * reads the picker, walks its cursor onto the chosen LABEL, presses Return
+   * and reads back. Typing the option's text instead was measured against a
+   * live picker and committed a DIFFERENT option -- so there is deliberately
+   * no way to express an answer as a keystroke on this bridge.
+   */
+  answer(projectId: string, request: AnswerRequest, rowId?: string): Promise<AnswerResult>;
 };
 
 /**
@@ -184,6 +195,10 @@ export function createTerminalApi(ipc: InvokerLike): TerminalApi {
       (rowId === undefined
         ? ipc.invoke(CHANNELS.terminalSend, projectId, key)
         : ipc.invoke(CHANNELS.terminalSend, projectId, key, rowId)) as Promise<PaneSendResult>,
+    answer: (projectId, request, rowId) =>
+      (rowId === undefined
+        ? ipc.invoke(CHANNELS.terminalAnswer, projectId, request)
+        : ipc.invoke(CHANNELS.terminalAnswer, projectId, request, rowId)) as Promise<AnswerResult>,
   };
 }
 

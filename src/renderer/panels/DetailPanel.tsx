@@ -81,6 +81,7 @@ import {
 } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { AnswerRequest, AnswerResult } from '../../shared/answer.js';
 import type {
   AgentQuestion,
   Command,
@@ -351,6 +352,22 @@ export type DetailPanelProps = {
    * `port.ts` exists to stop.
    */
   readonly delivers?: boolean;
+  /**
+   * The bridge that ANSWERS the open question, when the shell has one.
+   *
+   * Injected here rather than reached for inside the card, the way the
+   * Terminal tab's three members are passed at their call site: a member
+   * wired invisibly is one refactor away from being dropped with nothing to
+   * notice, and a test that cannot hand this a fake would have to fake a
+   * global to say anything at all. `undefined` in the browser build, where
+   * there is no main process to read a pane -- and the card then draws no
+   * Submit rather than one that cannot send.
+   */
+  readonly answer?: (
+    projectId: string,
+    request: AnswerRequest,
+    rowId?: string,
+  ) => Promise<AnswerResult>;
   /**
    * Whether the focused session's source has a terminal surface --
    * `capabilities.terminal`, passed down exactly as `delivers` is.
@@ -1172,18 +1189,79 @@ const NUMBERED_OPTIONS: readonly (string | undefined)[] = Array.from({ length: 9
   String(index + 1),
 );
 
+/**
+ * What Submit is allowed to claim, in the operator's words.
+ *
+ * ONE SENTENCE PER OUTCOME, and they are not interchangeable: a pairing vam
+ * could not make, a picker that is not on screen, a picker that did not
+ * respond to the probe arrow and a read-back that disagreed send a person to
+ * four different places. A single "could not send" for all of them is the
+ * failure the answer channel's own outcomes exist to prevent
+ * (`shared/answer.ts`).
+ *
+ * `sent` NAMES WHAT THE PICKER READ BACK rather than what was asked for. That
+ * is the whole difference between this and the route that was measured and
+ * rejected: a Submit that typed the option's text reported success while the
+ * agent recorded a different option, and the read-back is the only reason the
+ * word is honest here.
+ */
+function outcomeWording(result: AnswerResult): string {
+  switch (result.kind) {
+    case 'sent':
+      return `sent — the picker now reads ${result.answer}`;
+    case 'unaimed':
+      return 'not sent — vam could not name one session of its own for this project';
+    case 'refused':
+      return 'not sent — tmux would not deliver to that session';
+    case 'unreadable':
+      return 'not sent — vam could not read the screen';
+    case 'no-picker':
+      return 'not sent — that picker is not on the screen';
+    case 'not-live':
+      return 'not sent — the picker did not answer the probe arrow';
+    case 'unmatched':
+      return `not sent — ${result.label} is not on the screen`;
+    default:
+      return `unconfirmed — the keys went in and the screen does not agree about ${result.label}`;
+  }
+}
+
 function QuestionCard({
   question,
   firstOptionRef,
   onChat,
+  onAnswer,
 }: {
   readonly question: AgentQuestion;
   readonly firstOptionRef: RefObject<HTMLButtonElement | null>;
   /** "Chat about this" — the one entry that does something rather than mark. */
   readonly onChat: () => void;
+  /**
+   * Deliver the marks to the session's own picker, or `null` where there is no
+   * delivery to offer. `null` DRAWS NO BUTTON: a Submit over a source vam
+   * cannot write to is a control that lies about what it will do.
+   */
+  readonly onAnswer: ((request: AnswerRequest) => Promise<AnswerResult>) | null;
 }) {
   const [picked, setPicked] = useState<readonly string[]>([]);
+  /** What the last Submit came back with, and whether one is in flight. */
+  const [outcome, setOutcome] = useState<AnswerResult | null>(null);
+  const [sending, setSending] = useState(false);
   const open = question.answer === null;
+
+  const send = async () => {
+    // The marks IN THE ORDER THEY ARE DRAWN, not the order they were clicked:
+    // the review screen on the other side names them in the picker's own
+    // order, and an answer that reads back in a different one would look like
+    // a disagreement.
+    const labels = question.options
+      .map((option) => option.label)
+      .filter((label) => picked.includes(label));
+    if (onAnswer === null || labels.length === 0 || sending) return;
+    setSending(true);
+    setOutcome(await onAnswer({ labels, multiSelect: question.multiSelect }));
+    setSending(false);
+  };
 
   const toggle = (label: string) =>
     setPicked((current) =>
@@ -1364,9 +1442,41 @@ function QuestionCard({
               — vam adds this one; it opens the box below
             </span>
           </button>
+          {onAnswer !== null && (
+            <button
+              type="button"
+              data-question-submit
+              disabled={picked.length === 0 || sending}
+              onClick={() => void send()}
+              className={[
+                'rounded-[6px] border px-1.5 py-1 text-[11px]',
+                picked.length === 0 || sending
+                  ? 'cursor-default border-line text-ink-faint'
+                  : 'cursor-pointer border-running text-ink hover:bg-raised',
+              ].join(' ')}
+            >
+              {sending ? 'Submitting…' : 'Submit'}
+            </button>
+          )}
+          {outcome !== null && (
+            <p
+              data-question-outcome
+              data-outcome={outcome.kind}
+              className="text-[10px] text-ink-dim"
+            >
+              {outcomeWording(outcome)}
+            </p>
+          )}
           <p data-question-note className="text-[10px] text-ink-faint">
-            vam cannot answer this for you — a pick is only a mark, and nothing goes back to the
-            session; type your choice in the box below.
+            {onAnswer === null
+              ? // Still exactly true where there is no delivery: nothing here
+                // can reach the tool call, and a control that implied
+                // otherwise would be the lie this sentence was written against.
+                'vam cannot answer this for you — a pick is only a mark, and nothing goes back to the session; type your choice in the box below.'
+              : // And still true where there is: picking sends nothing. Submit
+                // is the thing that sends, and it says so rather than leaving
+                // the operator to guess when the answer left.
+                'a pick is only a mark until you press Submit — Submit walks the session own picker onto what you marked, and says what it read back.'}
           </p>
         </>
       ) : (
@@ -1391,6 +1501,7 @@ export function DetailPanel(props: DetailPanelProps) {
     active,
     actionIndex,
     delivers,
+    answer,
     terminal,
     sending = false,
     width,
@@ -2129,6 +2240,16 @@ export function DetailPanel(props: DetailPanelProps) {
               question={newestQuestion}
               firstOptionRef={firstOptionRef}
               onChat={startChat}
+              /* THREE THINGS HAVE TO BE TRUE before a Submit is drawn: the
+                 source really delivers prompts, the shell really has the
+                 bridge (there is none in the browser build), and there is a
+                 row to aim at. Any of them missing draws no button rather
+                 than one that would refuse -- see `QuestionCard`. */
+              onAnswer={
+                delivers === true && answer !== undefined && entry !== null
+                  ? (request) => answer(entry.project.id, request, entry.session.id)
+                  : null
+              }
             />
           )}
         </div>

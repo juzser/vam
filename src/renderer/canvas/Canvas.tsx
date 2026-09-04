@@ -2269,6 +2269,12 @@ function CanvasInner({
           entry={focusedEntry}
           decision={focusedDecision}
           delivers={source.kind === 'session' && source.source.capabilities.deliverPrompt}
+          // The bridge the question card answers through. Passed beside
+          // `delivers` because the two are read together: a source that
+          // declares delivery and a shell that has no main process behind it
+          // are both reasons to draw no Submit at all. `undefined` in the
+          // browser build.
+          answer={globalThis.window?.api?.terminal?.answer}
           // The flag the source declares, finally read. `false` withdraws the
           // tab rather than mounting one that can only apologise.
           terminal={source.kind === 'session' && source.source.capabilities.terminal}
