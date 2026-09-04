@@ -13,6 +13,7 @@ import { app, BrowserWindow, clipboard, ipcMain, session } from 'electron';
 import { registerClipboardIpc } from './clipboard/ipc.js';
 import { contentSecurityPolicy } from './csp.js';
 import { registerSourceIpc } from './ipc/handlers.js';
+import { releaseCloseAccelerator } from './menu.js';
 import { isSameOrigin } from './origin.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
 import { createNodeEventSource } from './stream/event-source.js';
@@ -166,6 +167,11 @@ function createWindow(): void {
 void app.whenReady().then(() => {
   registerPermissionPolicy();
   registerContentSecurityPolicy();
+  // Cmd+W belongs to the canvas here: it closes the focused SESSION, not the
+  // window. Electron's default macOS menu claims that key for `role: 'close'`
+  // and a native menu is matched before the page sees the keydown, so the
+  // renderer's binding is only real once this runs. See `./menu.js`.
+  releaseCloseAccelerator();
   // Registered before the window is created, so the renderer's first call can
   // never race an unregistered channel.
   registerSourceIpc(ipcMain, DESKTOP_SOURCE);
