@@ -93,6 +93,7 @@ import type {
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
+import { FocusEdge } from './FocusEdge.js';
 import {
   type DiffKind,
   diffLineKind,
@@ -1846,9 +1847,17 @@ export function DetailPanel(props: DetailPanelProps) {
         // The pane says out loud when it holds the keyboard. Without it, `I` and
         // `H` become a mode you have to remember being in, which is the failure
         // every modal interface is judged on.
-        active ? 'border-l-2 border-waiting' : 'border-line',
+        //
+        // In `focus-edge` and no longer in `waiting`: the amber shipped here
+        // means "a session is waiting on your answer" everywhere else in the
+        // app, so wearing it for "the keyboard is here" was the one hue that
+        // means something spent on a second thing. Both panes now wear one
+        // focus colour, and the border-WIDTH change carries this for a reader
+        // who cannot see either of them.
+        active ? 'border-l-2 border-focus-edge' : 'border-line',
       ].join(' ')}
     >
+      {active && <FocusEdge />}
       {resizeHandle}
       <div className="flex flex-col gap-2.5 border-line border-b px-3.5 pt-3">
         <div className="flex items-start gap-2">

@@ -86,6 +86,15 @@
      the one hue that means "a session needs you" on a decoration. */
   --color-filter-badge: var(--vam-filter-badge);
 
+  /* WHERE THE KEYBOARD IS, which is not a session state either -- the same
+     argument `filter-badge` and `danger` already make, and the sharpest case
+     of it: the response pane used to say it held the keyboard in
+     `--color-waiting`, the one hue reserved for "a session is waiting on your
+     answer", so the amber meant two things at once. Indigo, under its own
+     name, appears nowhere else in the palette, and no other token ever draws a
+     horizontal line at a column's top edge. */
+  --color-focus-edge: var(--vam-focus-edge);
+
   /* A destructive ACTION, which is not a session state. `--vam-failed` means
      a session failed; a menu item painted with it would read as a status
      report on the project it sits above rather than as a control that ends
@@ -189,6 +198,11 @@
      the row beside it. */
   --vam-danger: #fb7185;
 
+  /* Indigo. 6.01 on `sidebar` and 6.64 on `canvas` in this theme -- the only
+     candidate measured that stays balanced against its light counterpart
+     rather than being dramatic here and thin there. */
+  --vam-focus-edge: #818cf8;
+
   --vam-waiting-tint: #3f2f12;
   --vam-waiting-wash: #161208;
 
@@ -270,6 +284,10 @@ html.light {
   /* Darker than the dark theme's for contrast on a light panel, and still a
      step off `--vam-failed` here -- see the note there. */
   --vam-danger: #be123c;
+
+  /* The light theme's indigo: 6.82 on `sidebar`, 7.90 on `canvas`, so the
+     indicator is the same amount of PRESENT in both themes. */
+  --vam-focus-edge: #4338ca;
 
   --vam-waiting-tint: #f6dcae;
   --vam-waiting-wash: #fdf6e8;
@@ -534,6 +552,36 @@ body {
 }
 
 /*
+ * The line along the top of whichever column holds the keyboard.
+ *
+ * Two layers, and the split is the whole design. The RESTING line is the
+ * element's own background at 55% -- always there, full bleed, corner to
+ * corner of the column, because "the keyboard is here" is a state and a static
+ * line states it perfectly well. The SWEEP is the `::after` child, at full
+ * strength, and it runs ONCE: "the keyboard just arrived here" is an event,
+ * and an event that keeps announcing itself is peripheral motion in a window
+ * that stays open all day. `.vam-running-edge` runs forever for the opposite
+ * reason -- a running session is transient and the motion IS the report.
+ *
+ * 2px rather than the running edge's 1px: that one is measured off a card a
+ * few hundred pixels wide, this spans a whole column and is answering "where
+ * is my cursor" from the corner of the eye. 3px starts reading as a container
+ * border instead.
+ */
+.vam-focus-edge {
+  background: color-mix(in srgb, var(--color-focus-edge) 55%, transparent);
+}
+
+.vam-focus-edge::after {
+  content: '';
+  display: block;
+  width: 34%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--color-focus-edge), transparent);
+  animation: vam-sweep 1.4s ease-out 1;
+}
+
+/*
  * "This session is waiting on YOU."
  *
  * Given its own treatment rather than another status colour because it is the
@@ -617,6 +665,11 @@ body {
   [data-pending='true'],
   .vam-ellipsis > span,
   .vam-running-edge::after,
+  /* Only the travelling half. The resting 55% line is the element's own
+     background and survives, so reduced motion loses the arrival and keeps the
+     indicator -- which is what makes "once, then rest" honest here rather than
+     a treatment that has to invent a second appearance for this case. */
+  .vam-focus-edge::after,
   .vam-focus-glow,
   .vam-cursor-glow {
     animation: none;
