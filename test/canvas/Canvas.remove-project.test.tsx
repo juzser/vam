@@ -262,6 +262,41 @@ describe('removing a project, through Canvas', () => {
     expect(stored()).not.toContain('p1');
   });
 
+  /**
+   * A project with no source: removed for this run, and back on the next one.
+   *
+   * `prefs.hiddenProjects` is keyed by SOURCE -- the two-level shape that
+   * stops one source's removal from hiding another source's project of the
+   * same id. A project with no source has no bucket to key under, and there
+   * are only three things to do about it: invent a key (which reintroduces
+   * exactly the collision the keying exists to prevent), refuse the removal
+   * (a Remove item that does nothing), or remove it for this run and let it
+   * return. The third is chosen, and this pins it -- a hidden-until-reload
+   * project is defensible only as a decision somebody made on purpose.
+   *
+   * Every project from a real source has one; this is the fixture and
+   * hand-built case.
+   */
+  it('removes a source-less project for the run, and does not pretend to store it', async () => {
+    const noSource: CanvasModel = {
+      projects: [
+        { id: 'p9', name: 'unsourced', sessions: [session('n1')] },
+        { id: 'p2', name: 'beta', source: 'claude-code', sessions: [session('b1')] },
+      ],
+    };
+    const { unmount } = render(<Canvas model={noSource} source={sourceWith(async () => {})} />);
+    await removeProject('p9');
+    expect(heading('p9')).toBeNull();
+    expect(restore('p9')).not.toBeNull();
+    // Nothing was written under a key that does not exist.
+    expect(JSON.parse(stored() || '{}').hiddenProjects ?? {}).toEqual({});
+
+    unmount();
+    render(<Canvas model={noSource} source={sourceWith(async () => {})} />);
+    // Back, and that is the documented outcome rather than a leak.
+    expect(heading('p9')).not.toBeNull();
+  });
+
   it('REFUSES while another close is in flight, and removes nothing', async () => {
     // A `claude stop` can burn its whole 15s timeout. While it does,
     // `closeSession` returns at its own guard -- so a removal that went ahead

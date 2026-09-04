@@ -1170,8 +1170,23 @@ function CanvasInner({
     [source, pendingAction],
   );
 
-  /** Store the removal, or keep it for the session when there is nowhere to
-   *  store it. See `hiddenProjects`. */
+  /**
+   * Store the removal -- or, when there is nowhere to store it, keep it for
+   * this run and let the project come back.
+   *
+   * `prefs.hiddenProjects` is keyed by SOURCE, which is what stops one
+   * source's removal from hiding another source's project of the same id. A
+   * project with no `source` has no bucket to key under, and the three
+   * available answers are: invent a key, which reintroduces exactly the
+   * collision the keying exists to prevent; refuse, which leaves a Remove item
+   * that does nothing; or remove it for this run and let it return on the next
+   * launch. THE THIRD IS CHOSEN. It is the weakest of the three outcomes and
+   * the only honest one -- vam removes what the operator asked it to remove,
+   * and does not claim to have remembered something it could not write. A test
+   * holds it there, because a hidden-until-reload project is defensible only
+   * as a decision somebody made rather than as something nobody noticed. Every
+   * project from a real source has a source; this is the fixture case.
+   */
   const setProjectRemoved = useCallback(
     (project: Project, removed: boolean) => {
       const projectSource = project.source;

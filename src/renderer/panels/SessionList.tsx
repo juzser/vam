@@ -195,35 +195,36 @@ export type SessionListProps = {
   readonly collapsedProjects?: readonly string[];
   readonly onToggleCollapse?: (project: Project) => void;
   /**
-   * The ids of the projects REMOVED from vam, and the ask to remove one or
-   * bring it back.
+   * Removing a project, and bringing one back. ALL THREE ARE REQUIRED, and
+   * that is the decision -- read on before making them optional again.
    *
-   * Optional on exactly the terms `collapsedProjects` is, and for the same
-   * reason: without them the component keeps the list in its own state, so
-   * removal works the day it ships; pass them -- from `prefs.hiddenProjects`
-   * via `isProjectHidden`/`setProjectHidden` -- and it survives a reload.
+   * The neighbours above (`collapsedProjects`, `onToggleCollapse`) are
+   * optional, with an internal fallback, so folding works for a caller that
+   * passes nothing. This trio deliberately does NOT follow them. A fallback
+   * here would work -- the component can keep its own hidden list and call
+   * `onClose` per session -- and that is precisely the problem: a caller that
+   * dropped one of these props would go on removing projects, silently, into
+   * state that dies with the component. The operator would see the project
+   * disappear, and see it again on the next launch, which is the exact bug the
+   * persisted list exists to prevent. Required means the compiler notices
+   * instead of the operator.
    *
-   * Ending the sessions is NOT one of these. It goes through `onClose`, which
-   * is already the route a row's close button takes and already reaches the
-   * one place allowed to kill a tmux session; a second route to the same act
-   * would be a second thing to keep correct.
+   * `hiddenProjects` is the ids removed under THIS source, from
+   * `prefs.hiddenProjects` via `isProjectHidden`.
+   *
+   * `onRemoveProject` performs the whole act -- end, hide, report -- because
+   * the caller can do things this component cannot: `Canvas` holds one
+   * in-flight action at a time and returns early while one is running, so a
+   * loop of `onClose` calls issued at the wrong moment would end nothing while
+   * the project disappeared anyway. All this component owes it is a `plan` it
+   * has already disclosed and had confirmed.
+   *
+   * `onHideProject` is the restore strip's route, and only that: bringing a
+   * project back ends nothing, so there is nothing to serialise or refuse.
    */
-  readonly hiddenProjects?: readonly string[];
-  readonly onHideProject?: (project: Project, hidden: boolean) => void;
-  /**
-   * Perform the removal, when the caller can do it better than this component.
-   *
-   * `SessionList` can end a project's sessions by calling `onClose` for each,
-   * and that is what it does when this is absent -- the standalone behaviour,
-   * on the same terms as `collapsedProjects`. What it CANNOT do is refuse:
-   * `Canvas` holds one in-flight action at a time and returns early while one
-   * is running, so a loop of `onClose` calls issued at the wrong moment ends
-   * nothing while the project disappears anyway. Given this, the caller owns
-   * the whole act -- ending, hiding and reporting -- and this component only
-   * asks for it, having already disclosed and confirmed exactly what `plan`
-   * contains.
-   */
-  readonly onRemoveProject?: (project: Project, plan: RemovalPlan) => void;
+  readonly hiddenProjects: readonly string[];
+  readonly onHideProject: (project: Project, hidden: boolean) => void;
+  readonly onRemoveProject: (project: Project, plan: RemovalPlan) => void;
   /**
    * The project `p` has just asked to reveal, or null when nothing has been
    * asked. A fresh object each press, so pressing `p` twice reveals twice.
@@ -399,8 +400,7 @@ export function SessionList(props: SessionListProps) {
   const collapsed = collapsedProjects ?? localCollapsed;
   /** Never `entries`. See `allEntries` on the props for what reads this. */
   const allEntries = unfiltered ?? entries;
-  const [localHidden, setLocalHidden] = useState<readonly string[]>([]);
-  const hidden = hiddenProjects ?? localHidden;
+  const hidden = hiddenProjects;
   /** The project whose removal is being confirmed, or null. One at a time. */
   const [confirming, setConfirming] = useState<Project | null>(null);
 
@@ -424,23 +424,6 @@ export function SessionList(props: SessionListProps) {
       );
     },
     [onToggleCollapse],
-  );
-
-  const setHidden = useCallback(
-    (project: Project, next: boolean) => {
-      if (onHideProject !== undefined) {
-        onHideProject(project, next);
-        return;
-      }
-      setLocalHidden((current) =>
-        next
-          ? current.includes(project.id)
-            ? current
-            : [...current, project.id]
-          : current.filter((id) => id !== project.id),
-      );
-    },
-    [onHideProject],
   );
 
   /**
@@ -1300,7 +1283,7 @@ export function SessionList(props: SessionListProps) {
               type="button"
               data-restore-project={project.id}
               aria-label={`restore ${project.name}`}
-              onClick={() => setHidden(project, false)}
+              onClick={() => onHideProject(project, false)}
               className="flex cursor-pointer items-center gap-1 rounded-[6px] border border-line px-1.5 py-0.5 text-[10.5px] text-ink-faint hover:border-line-strong hover:text-ink"
             >
               <RotateCcw size={10} strokeWidth={1.8} />
@@ -1316,20 +1299,11 @@ export function SessionList(props: SessionListProps) {
           plan={planFor(confirming)}
           onCancel={() => setConfirming(null)}
           onConfirm={() => {
-            const plan = planFor(confirming);
-            if (onRemoveProject !== undefined) {
-              // The caller owns ending, hiding and reporting -- see the prop.
-              onRemoveProject(confirming, plan);
-            } else {
-              // Standalone: ending comes first, because the hide is what makes
-              // the project stay gone and doing it first would drop the
-              // sessions out of this component's own reach before it had
-              // closed them.
-              for (const sessionId of plan.end) {
-                onClose(sessionId);
-              }
-              setHidden(confirming, true);
-            }
+            // The caller owns ending, hiding and reporting -- see the prop.
+            // Everything this component owed the operator happened before the
+            // click: the plan was computed over the whole project and stated,
+            // count by count, in the dialog they are answering.
+            onRemoveProject(confirming, planFor(confirming));
             setConfirming(null);
           }}
         />

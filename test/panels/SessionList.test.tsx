@@ -122,6 +122,12 @@ function baseProps(entries: readonly SessionEntry[]): SessionListProps {
     onNewProject: noop,
     newSessionDecline: null,
     onPickIcon: noop,
+    // Required, not optional -- see the props. A test that wants to observe a
+    // removal overrides these; a test that does not still has to pass them,
+    // which is the whole point of their being required.
+    hiddenProjects: [],
+    onHideProject: noop,
+    onRemoveProject: noop,
     onSettings: noop,
     theme: 'dark',
     onToggleTheme: noop,
@@ -1399,11 +1405,15 @@ describe('removing a project', () => {
     expect(document.activeElement).toBe(container.querySelector('[data-confirm-cancel]'));
   });
 
-  it('CLOSES NOTHING when cancelled', () => {
+  it('ASKS FOR NOTHING when cancelled', () => {
+    const onRemoveProject = vi.fn();
     const onClose = vi.fn();
-    const { container } = render(<SessionList {...baseProps(mixed())} onClose={onClose} />);
+    const { container } = render(
+      <SessionList {...baseProps(mixed())} onClose={onClose} onRemoveProject={onRemoveProject} />,
+    );
     openConfirm(container);
     fireEvent.click(container.querySelector('[data-confirm-cancel]') as HTMLElement);
+    expect(onRemoveProject).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     expect(container.querySelector('[data-confirm-remove]')).toBeNull();
     expect(container.querySelector('[data-project-id="p1"]')).not.toBeNull();
@@ -1429,48 +1439,52 @@ describe('removing a project', () => {
     }
   });
 
-  it('ends EXACTLY the sessions vam controls, and hides the project', () => {
+  it('hands the caller the EXACT plan it disclosed, and ends nothing itself', () => {
+    const onRemoveProject = vi.fn();
     const onClose = vi.fn();
-    const { container } = render(<SessionList {...baseProps(mixed())} onClose={onClose} />);
+    const { container } = render(
+      <SessionList {...baseProps(mixed())} onClose={onClose} onRemoveProject={onRemoveProject} />,
+    );
     openConfirm(container);
     fireEvent.click(container.querySelector('[data-confirm-remove-go]') as HTMLElement);
-    expect(onClose.mock.calls).toEqual([['a1']]);
-    expect(container.querySelector('[data-project-id="p1"]')).toBeNull();
+    // The same two sets the dialog counted, by value. The component performs
+    // none of it: the caller ends, hides and reports, because only it can
+    // refuse -- see the props.
+    expect(onRemoveProject.mock.calls).toEqual([
+      [expect.objectContaining({ id: 'p1' }), { end: ['a1'], hide: ['a2'] }],
+    ]);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('removes a project vam cannot end a single session of', () => {
     const alpha = makeProject({ id: 'p1', name: 'alpha' }, []);
     const onClose = vi.fn();
     const entries = [{ project: alpha, session: makeSession({ id: 'a1', title: 'one' }) }];
-    const { container } = render(<SessionList {...baseProps(entries)} onClose={onClose} />);
+    const onRemoveProject = vi.fn();
+    const { container } = render(
+      <SessionList {...baseProps(entries)} onClose={onClose} onRemoveProject={onRemoveProject} />,
+    );
     openConfirm(container);
     expect(container.querySelector('[data-confirm-end-count]')?.textContent).toBe('0');
     fireEvent.click(container.querySelector('[data-confirm-remove-go]') as HTMLElement);
+    // Nothing to end, and the removal is still asked for: the sessions keep
+    // running and the project stops being drawn. That IS the removal for a
+    // project vam did not start.
+    expect(onRemoveProject.mock.calls).toEqual([
+      [expect.objectContaining({ id: 'p1' }), { end: [], hide: ['a1'] }],
+    ]);
     expect(onClose).not.toHaveBeenCalled();
-    // The sessions keep running; the project stops being drawn. That IS the
-    // removal for a project vam did not start.
-    expect(container.querySelector('[data-project-id="p1"]')).toBeNull();
   });
 
-  it('tells the caller to persist the removal when it is given the route', () => {
+  it('asks for a removed project to be brought back', () => {
     const onHideProject = vi.fn();
     const { container } = render(
-      <SessionList {...baseProps(mixed())} hiddenProjects={[]} onHideProject={onHideProject} />,
+      <SessionList {...baseProps(mixed())} hiddenProjects={['p1']} onHideProject={onHideProject} />,
     );
-    openConfirm(container);
-    fireEvent.click(container.querySelector('[data-confirm-remove-go]') as HTMLElement);
-    expect(onHideProject.mock.calls).toEqual([[expect.objectContaining({ id: 'p1' }), true]]);
-  });
-
-  it('brings a removed project back', () => {
-    const { container } = mount(mixed());
-    openConfirm(container);
-    fireEvent.click(container.querySelector('[data-confirm-remove-go]') as HTMLElement);
     const restore = container.querySelector('[data-restore-project="p1"]') as HTMLElement;
     expect(restore.textContent).toContain('alpha');
     fireEvent.click(restore);
-    expect(container.querySelector('[data-project-id="p1"]')).not.toBeNull();
-    expect(container.querySelector('[data-restore-project="p1"]')).toBeNull();
+    expect(onHideProject.mock.calls).toEqual([[expect.objectContaining({ id: 'p1' }), false]]);
   });
 
   it('draws a hidden project the caller passed in as hidden', () => {
@@ -1516,29 +1530,26 @@ describe('removing a project, under a filter', () => {
     expect(container.querySelector('[data-confirm-hide-count]')?.textContent).toBe('1');
   });
 
-  it('ends every vam-controlled session in the project, including filtered-out rows', () => {
-    const onClose = vi.fn();
+  it('plans every vam-controlled session in the project, including filtered-out rows', () => {
+    const onRemoveProject = vi.fn();
     const { container } = render(
-      <SessionList {...baseProps(narrowed)} allEntries={all} onClose={onClose} />,
+      <SessionList {...baseProps(narrowed)} allEntries={all} onRemoveProject={onRemoveProject} />,
     );
     fireEvent.click(container.querySelector('[data-project-menu="p1"]') as HTMLElement);
     fireEvent.click(container.querySelector('[data-project-menu-item="remove"]') as HTMLElement);
     fireEvent.click(container.querySelector('[data-confirm-remove-go]') as HTMLElement);
-    // `a2` has no row on screen. Hiding the project would strand it.
-    expect(onClose.mock.calls).toEqual([['a1'], ['a2']]);
+    // `a2` has no row on screen. Hiding the project while leaving it running
+    // would strand it.
+    expect(onRemoveProject.mock.calls).toEqual([
+      [expect.objectContaining({ id: 'p1' }), { end: ['a1', 'a2'], hide: ['a3'] }],
+    ]);
   });
 
   it('keeps the restore control when a search matches only another project', () => {
-    const { container, rerender } = render(
-      <SessionList {...baseProps(narrowed)} allEntries={all} />,
-    );
-    fireEvent.click(container.querySelector('[data-project-menu="p1"]') as HTMLElement);
-    fireEvent.click(container.querySelector('[data-project-menu-item="remove"]') as HTMLElement);
-    fireEvent.click(container.querySelector('[data-confirm-remove-go]') as HTMLElement);
-    // The operator now searches for something only beta matches. The removed
-    // project has no entry left in `entries` -- and its only way back must not
-    // vanish with it.
-    rerender(
+    // p1 is removed, and the operator searches for something only beta
+    // matches: the removed project has no entry left in `entries`, and its
+    // only way back must not vanish with it.
+    const { container } = render(
       <SessionList
         {...baseProps([all[3] as SessionEntry])}
         allEntries={all}
