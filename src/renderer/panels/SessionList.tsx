@@ -149,6 +149,13 @@ export type SessionListProps = {
    * make impossible, and the component cannot ask a source anything itself.
    */
   readonly newSessionDecline: string | null;
+  /**
+   * The id of the one action currently in flight -- a project id for a create,
+   * a session id for a close -- or `null`. Owned by `Canvas.tsx`, which is
+   * also where the guard that stops a second press lives; this draws it. One
+   * prop rather than one per control, because it is one fact.
+   */
+  readonly pendingAction: string | null;
   /** Opens the icon picker for a project's heading — the mouse route; there
    * is no keyboard shortcut for it, unlike the session picker's `s`. */
   readonly onPickIcon: (project: Project) => void;
@@ -207,6 +214,7 @@ export function SessionList(props: SessionListProps) {
     onAddInProject,
     onNewProject,
     newSessionDecline,
+    pendingAction,
     onPickIcon,
     collapsedProjects,
     onToggleCollapse,
@@ -216,6 +224,18 @@ export function SessionList(props: SessionListProps) {
     width,
     resizeHandle,
   } = props;
+
+  /**
+   * What a control wears while its own action is running: it cannot be pressed
+   * again, it says so to a screen reader and on hover, and `data-pending`
+   * carries the breathe in `styles.css` -- switched off under
+   * `prefers-reduced-motion`, where these attributes and the caption are what
+   * is left, and they are enough.
+   */
+  const pending = (id: string, busy: string) =>
+    pendingAction === id
+      ? ({ 'data-pending': 'true', 'aria-busy': true, disabled: true, title: busy } as const)
+      : {};
 
   const filterRef = useRef<HTMLInputElement>(null);
   const renameRef = useRef<HTMLInputElement>(null);
@@ -729,6 +749,7 @@ export function SessionList(props: SessionListProps) {
                 </span>
                 <span className="font-mono text-[9.5px] text-ink-faint">{group.items.length}</span>
                 <span className="flex-1" />
+
                 {/* Revealed, never conditional. The row's close button is
                     removed from the DOM until hover, and that is right for a
                     control with a keyboard twin (`x`); these two have none, so
@@ -820,6 +841,7 @@ export function SessionList(props: SessionListProps) {
                     title={newSessionDecline ?? `New session in ${group.project.name}`}
                     aria-label={`new session in ${group.project.name}`}
                     className="flex h-[19px] w-[19px] cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim"
+                    {...pending(group.project.id, `Starting a session in ${group.project.name}…`)}
                   >
                     <Plus size={13} strokeWidth={1.7} />
                   </button>
@@ -1022,6 +1044,7 @@ export function SessionList(props: SessionListProps) {
                               type="button"
                               onClick={() => onClose(session.id)}
                               aria-label={`close ${session.title}`}
+                              {...pending(session.id, `Stopping ${session.title}…`)}
                               className={[
                                 'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
                                 'opacity-0 hover:bg-panel hover:text-failed group-hover/row:opacity-100',
@@ -1060,10 +1083,18 @@ export function SessionList(props: SessionListProps) {
             ladder, and shorter and smaller in the same breath so the type
             still fits the box. Hover restores full ink, so it still reads as
             something you press. */}
+        {/* The footer names no project: it starts one in the FOCUSED session's,
+            exactly as `o` does, so it is pending for that same project id and
+            for no other. */}
         <button
           type="button"
           onClick={onAdd}
           aria-label="new session"
+          {...pending(
+            entries.find((candidate) => candidate.session.id === focusedSessionId)?.project.id ??
+              '',
+            'Starting a session…',
+          )}
           className="flex h-7 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[8px] border border-ink-ghost text-[11.5px] text-ink-dim hover:border-ink-faint hover:text-ink"
         >
           <Plus size={13} strokeWidth={1.7} />

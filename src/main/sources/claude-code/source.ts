@@ -36,7 +36,7 @@ import { basename, join } from 'node:path';
 import type { Project, Session } from '../../../renderer/domain/model.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { MainSource } from '../source.js';
-import { createTmuxRunner } from '../tmux/spawn.js';
+import { createTmuxRunner, listVamSessions, type TmuxSession } from '../tmux/spawn.js';
 import { type AgentRoster, readAgentRoster } from './agent-roster.js';
 import { type LiveAgent, listLiveAgents } from './agents.js';
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
@@ -47,7 +47,7 @@ import {
   type ReadPullRequests,
   readPullRequestsViaCli,
 } from './pull-requests.js';
-import { replyToSession } from './reply.js';
+import { paneForRow, replyToSession } from './reply.js';
 import { createBranchLookup } from './repo-branch.js';
 import { defaultSessionsRoot, readStatusUpdatedAt } from './session-status.js';
 import { stopSession, stopSessionViaCli } from './stop.js';
@@ -177,6 +177,12 @@ export async function loadClaudeCodeProjects(
   // rather than a surprise network call. `CLAUDE_CODE_SOURCE` injects the
   // throttled reader; tests inject invented answers.
   readPrs: ReadPullRequests | null = null,
+  // The tmux sessions vam started, for `Session.vamControlled`. NULL BY
+  // DEFAULT and null means "vam could not ask" -- the field is then left off
+  // the session entirely rather than defaulting to `false`, which would claim
+  // vam checked. `CLAUDE_CODE_SOURCE` passes the real listing; a listing vam
+  // failed to obtain arrives here as null too, not as an empty array.
+  tmuxSessions: readonly TmuxSession[] | null = null,
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
 
@@ -267,6 +273,14 @@ export async function loadClaudeCodeProjects(
         startedBy: agent.kind === 'interactive' ? 'human' : 'unknown',
         promptCount: null,
       },
+      // The SAME proof `stop.ts` acts on, computed once here so every consumer
+      // reads one answer: one tagged tmux session for this project, one live
+      // row in it. Anything ambiguous is `false` -- vam asked and cannot prove
+      // this row is that pane, which is exactly the case where acting on it
+      // would act on the wrong one.
+      ...(tmuxSessions === null
+        ? {}
+        : { vamControlled: paneForRow(tmuxSessions, agents, agent) !== null }),
     };
     const group = grouped.get(agent.cwd) ?? { cwd: agent.cwd, sessions: [] };
     group.sessions.push(session);
@@ -386,6 +400,14 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       // `gh` on every ten-second poll, which is the cost this feature must
       // not have.
       PR_READER,
+      // One extra tmux call per load, and it is what makes `vamControlled`
+      // answerable. `unavailable` stays NULL rather than becoming an empty
+      // list: vam could not ask, and must not report that as "vam started
+      // none of these".
+      await (async () => {
+        const listed = await listVamSessions(createTmuxRunner());
+        return listed.kind === 'ok' ? listed.sessions : null;
+      })(),
     ),
   /**
    * The live list is re-asked here rather than cached from `load()`: it is
@@ -409,7 +431,14 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    * process now.
    */
   closeSession: async (sessionId) =>
-    stopSession(await listLiveAgents(), sessionId, (id) => stopSessionViaCli({ sessionId: id })),
+    stopSession(
+      await listLiveAgents(),
+      sessionId,
+      (id) => stopSessionViaCli({ sessionId: id }),
+      // With a runner in hand, a session vam started is killed rather than
+      // refused -- see `stop.ts`. Without one it would still be refused.
+      createTmuxRunner(),
+    ),
   /**
    * The live list is re-asked here too, and for a third reason of its own: it
    * is the only thing that maps a project id back to a directory, and a

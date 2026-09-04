@@ -222,3 +222,25 @@ export function listSessionsArgv(): readonly string[] {
 export function tagSessionArgv(name: string, projectId: string): readonly string[] {
   return ['set-option', '-t', name, VAM_PROJECT_OPTION, projectId];
 }
+
+/**
+ * End a session vam started.
+ *
+ * THIS BUILDER WAS HERE BEFORE AND WAS DELETED, in PR 123's review fixes, as a
+ * session-destroying argv with no caller on a branch whose scope excluded the
+ * Terminal tab. That was right by the rule it applied, and it left an
+ * asymmetry: the same branch shipped `o`, so vam started sessions it had no
+ * way to end. It has a caller now (`claude-code/stop.ts`), and only ever for a
+ * session vam can PROVE it started -- the `@vam-project` pairing above.
+ *
+ * TARGET SYNTAX, and it differs from the two verbs directly above it.
+ * `kill-session` takes a target-SESSION, so it wants `=name` and NOT the
+ * trailing `:` that `capture-pane` and `send-keys` need -- those take a
+ * target-PANE, and the colon is what keeps tmux reading the name as a session
+ * there. The `=` is non-negotiable in either form: a bare `-t vam-a1` is
+ * resolved by prefix and then by fnmatch, and killing the wrong session is not
+ * recoverable.
+ */
+export function killSessionArgv(name: string): readonly string[] {
+  return ['kill-session', '-t', target(name)];
+}

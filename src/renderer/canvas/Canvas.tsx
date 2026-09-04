@@ -616,7 +616,22 @@ function CanvasInner({
   /** True while a write is in flight — Enter must not fire twice. */
   const [writing, setWriting] = useState(false);
   /** The same guard for `x`: one keypress must not become two stop attempts. */
-  const [closing, setClosing] = useState(false);
+  /**
+   * THE ONE PENDING FLAG, and it is one on purpose.
+   *
+   * Creating a session and closing one both spawn a subprocess with a ten
+   * second timeout, and nothing on screen used to change between the click and
+   * the result -- so a slow action and an ignored click looked the same, which
+   * is what the operator reported. This holds the id of whatever is currently
+   * in flight (a project id for a create, a session id for a close) and is
+   * threaded outward; a flag per button would be several sources of truth for
+   * one fact, and the second press guard is exactly the thing that must not
+   * disagree with the spinner.
+   *
+   * A press while it is set RETURNS BEFORE SPAWNING. A double press that
+   * starts two sessions is a worse bug than the missing indicator.
+   */
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
   const { getNodes, zoomIn, zoomOut, fitView } = useReactFlow();
@@ -1068,7 +1083,7 @@ function CanvasInner({
    */
   const closeSession = useCallback(
     async (sessionId: string, title: string) => {
-      if (closing) {
+      if (pendingAction !== null) {
         return;
       }
       if (source.kind !== 'session') {
@@ -1084,7 +1099,8 @@ function CanvasInner({
         );
         return;
       }
-      setClosing(true);
+      setPendingAction(sessionId);
+      setStatus(`stopping "${title}"…`);
       try {
         await sessionSource.write.closeSession(sessionId);
         setStatus(
@@ -1094,10 +1110,13 @@ function CanvasInner({
       } catch (cause) {
         setStatus(describeFailure(cause));
       } finally {
-        setClosing(false);
+        // EVERY path, and that is the whole of this `finally`. A spinner still
+        // spinning after a refusal turns a clear failure into an apparent
+        // hang, which is worse than never having shown one.
+        setPendingAction(null);
       }
     },
-    [source, closing],
+    [source, pendingAction],
   );
 
   /**
@@ -1118,11 +1137,19 @@ function CanvasInner({
    */
   const createSession = useCallback(
     async (projectId: string, projectName: string) => {
+      if (pendingAction !== null) {
+        return;
+      }
       const route = newSessionRoute(source);
       if (!route.ok) {
         setStatus(route.decline);
         return;
       }
+      setPendingAction(projectId);
+      // The first half of one sentence: this and the success below are a
+      // sequence -- "starting…" then "started … it may take a moment to
+      // appear" -- rather than two unrelated remarks about the same click.
+      setStatus(`starting a new session in ${projectName}…`);
       try {
         await route.write.createSession?.(projectId, projectName);
         // The write resolves when the SESSION exists, not when the agent
@@ -1137,9 +1164,11 @@ function CanvasInner({
         if (source.kind === 'session') source.onWrote();
       } catch (cause) {
         setStatus(describeFailure(cause));
+      } finally {
+        setPendingAction(null);
       }
     },
-    [source],
+    [source, pendingAction],
   );
 
   /**
@@ -1782,6 +1811,7 @@ function CanvasInner({
             void createSession(focusedEntry.project.id, focusedEntry.project.name);
           }}
           onAddInProject={(project) => void createSession(project.id, project.name)}
+          pendingAction={pendingAction}
           onNewProject={() => void newProject()}
           newSessionDecline={newSessionDecline}
           onPickIcon={(project: Project) => {

@@ -17,6 +17,7 @@ import {
   listLiveAgents,
   parseAgentRows,
 } from '../../src/main/sources/claude-code/agents.js';
+import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
 import {
   CLAUDE_CODE_SOURCE,
   loadClaudeCodeProjects,
@@ -235,6 +236,46 @@ describe('loadClaudeCodeProjects', () => {
     utimesSync(file, when, when);
     return file;
   };
+
+  /**
+   * `vamControlled` is a THREE-state fact and the third state is the point:
+   * absent means vam could not ask tmux, which is not the same as "vam did not
+   * start this one". See `model.ts`.
+   */
+  describe('vamControlled', () => {
+    const only = agent({ cwd: '/w/alpha' });
+
+    it('is absent when no tmux listing was offered -- vam has nothing to say', async () => {
+      const [project] = await loadClaudeCodeProjects(root, [only], NOW);
+      expect(project?.sessions[0]).not.toHaveProperty('vamControlled');
+    });
+
+    it('is true for a session paired with a tmux session vam tagged', async () => {
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [only],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        [{ project: projectIdOf('/w/alpha'), name: 'vam-alpha-a1b2c3' }],
+      );
+      expect(project?.sessions[0]?.vamControlled).toBe(true);
+    });
+
+    it('is false, not absent, for a session vam looked for and did not start', async () => {
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [only],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        [],
+      );
+      expect(project?.sessions[0]?.vamControlled).toBe(false);
+    });
+  });
 
   it('takes the session list from the live agents, not from the transcript directory', async () => {
     writeTranscript('slug-a', 'stale-and-dead', jsonl(reply('old')));

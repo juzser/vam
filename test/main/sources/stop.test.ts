@@ -10,6 +10,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
 import { registerSourceIpc } from '../../../src/main/ipc/handlers.js';
+import { projectIdOf } from '../../../src/main/sources/claude-code/project-id.js';
 import { CLAUDE_CODE_SOURCE } from '../../../src/main/sources/claude-code/source.js';
 import {
   classifyStopFailure,
@@ -18,18 +19,21 @@ import {
   stopSession,
 } from '../../../src/main/sources/claude-code/stop.js';
 import type { MainSource } from '../../../src/main/sources/source.js';
+import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
 
 const background: StoppableAgent = {
   key: 'sess-1#4242',
   sessionId: 'sess-1',
   kind: 'background',
   name: 'nightly sweep',
+  cwd: '/w/alpha',
 };
 const interactive: StoppableAgent = {
   key: 'sess-2#77',
   sessionId: 'sess-2',
   kind: 'interactive',
   name: 'my terminal',
+  cwd: '/w/beta',
 };
 
 describe('stopArgv', () => {
@@ -183,5 +187,96 @@ describe('the Claude Code source itself', () => {
     expect(CLAUDE_CODE_SOURCE.descriptor.capabilities.closeSession).toBe(true);
     expect(CLAUDE_CODE_SOURCE.descriptor.declines.closeSession).toBeUndefined();
     expect(typeof CLAUDE_CODE_SOURCE.closeSession).toBe('function');
+  });
+});
+
+/**
+ * A session vam started is INTERACTIVE -- it runs bare `claude` in a tmux pane
+ * -- so the gate above used to refuse the one class of session vam is entitled
+ * to end. These pin the route that fixes it, and the negatives that keep it
+ * safe.
+ */
+describe('closing a session vam itself started', () => {
+  const OWNED = 'vam-alpha-a1b2c3';
+  const ok: TmuxRunResult = { failure: null, stdout: '', stderr: '' };
+  /** The row vam started: interactive, and alone in its project. */
+  const owned: StoppableAgent = {
+    key: 'sess-9#12',
+    sessionId: 'sess-9',
+    kind: 'interactive',
+    name: 'alpha',
+    cwd: '/w/alpha',
+  };
+  const listing = (line: string): TmuxRunResult => ({
+    failure: null,
+    stdout: `${line}\n`,
+    stderr: '',
+  });
+  const runner = (
+    rest: TmuxRunResult = ok,
+    listed = listing(`${projectIdOf('/w/alpha')}\t${OWNED}`),
+  ) => {
+    const calls: string[][] = [];
+    const run: TmuxRun = async (argv) => {
+      calls.push([...argv]);
+      return argv[0] === 'list-sessions' ? listed : rest;
+    };
+    return { calls, run };
+  };
+
+  it('kills the EXACT tagged tmux session, never a prefix of it', async () => {
+    const { calls, run } = runner();
+    const stop = vi.fn(async () => null);
+    await expect(stopSession([owned], 'sess-9#12', stop, run)).resolves.toBeNull();
+    expect(calls).toContainEqual(['kill-session', '-t', `=${OWNED}`]);
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it('SPAWNS NOTHING for an interactive session vam did not start', async () => {
+    // No tmux session carries this row's project, so no pairing exists.
+    const { calls, run } = runner(ok, listing(`${projectIdOf('/w/elsewhere')}\t${OWNED}`));
+    const stop = vi.fn(async () => null);
+    const error = await stopSession([interactive], 'sess-2#77', stop, run);
+    expect(error?.code).toBe('interactive-session');
+    expect(error?.message).toContain('close that terminal yourself');
+    expect(stop).not.toHaveBeenCalled();
+    expect(calls.every((argv) => argv[0] === 'list-sessions')).toBe(true);
+  });
+
+  it('reports the kill failing rather than claiming the session went away', async () => {
+    const { run } = runner({
+      failure: { message: 'boom', code: 1 },
+      stdout: '',
+      stderr: "can't find session",
+    });
+    const error = await stopSession(
+      [owned],
+      'sess-9#12',
+      vi.fn(async () => null),
+      run,
+    );
+    expect(error?.code).toBe('no-such-session');
+  });
+
+  it('falls back to the honest refusal when the pairing is ambiguous', async () => {
+    // Two live rows in one project: which pane is which cannot be proven, and
+    // a guess would kill the wrong session.
+    const twin: StoppableAgent = { ...owned, key: 'sess-8#13', sessionId: 'sess-8' };
+    const { calls, run } = runner();
+    const error = await stopSession(
+      [owned, twin],
+      'sess-9#12',
+      vi.fn(async () => null),
+      run,
+    );
+    expect(error?.code).toBe('interactive-session');
+    expect(calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
+  });
+
+  it('still stops a BACKGROUND session through the CLI', async () => {
+    const { run } = runner();
+    const stop = vi.fn(async () => null);
+    await expect(stopSession([background], 'sess-1#4242', stop, run)).resolves.toBeNull();
+    expect(stop).toHaveBeenCalledWith('sess-1');
   });
 });
