@@ -144,6 +144,38 @@ describe('the pane declines the keys that are not its own', () => {
     }
   });
 
+  it('leaves an Alt chord to vam, which genuinely binds that space', async () => {
+    const heard: string[] = [];
+    const onKey = (event: KeyboardEvent) => heard.push(event.key);
+    window.addEventListener('keydown', onKey);
+    try {
+      const send = await open();
+      // `normalizeKey` has an `Alt-` token, so these are vam's to answer.
+      // A one-character `event.key` was the whole test for "printable", and
+      // it let `Alt+1` and `Alt+k` be typed into the agent instead.
+      fireEvent.keyDown(pane() as HTMLElement, { key: '1', altKey: true });
+      fireEvent.keyDown(pane() as HTMLElement, { key: 'k', altKey: true });
+      await settle();
+      expect(send).not.toHaveBeenCalled();
+      expect(heard).toEqual(['1', 'k']);
+    } finally {
+      window.removeEventListener('keydown', onKey);
+    }
+  });
+
+  it('still types a SHIFTED character, which is how capitals are made', async () => {
+    // Shift is not a chord modifier: exempting it would make the pane refuse
+    // every capital letter and every symbol on a number row.
+    const send = await open();
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'K', shiftKey: true });
+    fireEvent.keyDown(pane() as HTMLElement, { key: '!', shiftKey: true });
+    await settle();
+    expect(keys(send)).toEqual([
+      { kind: 'text', text: 'K' },
+      { kind: 'text', text: '!' },
+    ]);
+  });
+
   it('leaves the scrolling keys to the browser, which is why the focus stop exists', async () => {
     const send = await open();
     for (const key of ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End']) {

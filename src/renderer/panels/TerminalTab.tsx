@@ -307,11 +307,23 @@ export function TerminalTab({
    * WHO OWNS A KEY WHILE THE PANE HAS FOCUS. Three answers, and the middle one
    * is the one that was easy to get wrong.
    *
-   * A Cmd/Ctrl chord is VAM'S, always. It is not text on any layout, and the
-   * canvas already exempts chords from its own typing guard for exactly this
-   * reason: the shortcut that takes you elsewhere must work from wherever you
-   * are. Nothing is sent and nothing is stopped, so it reaches the window
-   * listener and does its one thing.
+   * A Cmd/Ctrl/Alt chord is VAM'S, always. The shortcut that takes you
+   * elsewhere must work from wherever you are, which is why the canvas
+   * exempts chords from its own typing guard.
+   *
+   * ALT IS IN THAT LIST BECAUSE VAM BINDS IT: `normalizeKey` emits an `Alt-`
+   * token (`keyboard/chords.ts`). Alt was missing here and the test for
+   * "printable" was a one-character `event.key`, which `Alt+1` and `Alt+k`
+   * both satisfy -- so those were stopped and typed into the agent while vam
+   * never heard them.
+   *
+   * SHIFT IS DELIBERATELY NOT IN IT. Shift is how a capital and every symbol
+   * on the number row is produced, so exempting it would leave a pane that
+   * cannot type `K` or `!`. It is not a chord modifier; it is part of the
+   * character.
+   *
+   * Nothing is sent and nothing is stopped for a chord, so it reaches the
+   * window listener and does its one thing.
    *
    * WHICH MEANS CTRL+C DOES NOT INTERRUPT THE AGENT, and someone who can type
    * into this pane will eventually try it. It is vam's chord here like every
@@ -340,7 +352,7 @@ export function TerminalTab({
    */
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLElement>) => {
-      if (event.metaKey || event.ctrlKey) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       const surface = event.currentTarget;
       if (event.key === 'Escape') {
         // THE WAY OUT. A focus stop that consumes keys and cannot be left
