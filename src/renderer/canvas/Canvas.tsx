@@ -177,6 +177,59 @@ export function compactTokens(n: number): string {
   return String(n);
 }
 
+/**
+ * How many characters of a status message the bar will claim at most.
+ *
+ * This is a backstop, not the layout mechanism. The width-responsive half is
+ * CSS (`min-w-0 truncate`): a flex child with `min-w-0` shrinks below its
+ * content and ellipses, so a narrow window truncates further than this number
+ * ever would, and no character count has to guess at the window. What the cap
+ * buys is the wide window, where a two-hundred-character refusal would
+ * otherwise stretch across the whole bar -- the same "give way before the
+ * layout does" the token formatter above is written for.
+ */
+const STATUS_MAX_CHARS = 72;
+
+/**
+ * A status message shortened for the bar, never for the log.
+ *
+ * `describeFailure` renders failures as `code: message` and the codes are
+ * deliberately distinct -- "no sessions" and "vam could not ask" are separate
+ * facts and must not read alike. So the cut is at the TAIL: the code leads the
+ * string, and clipping the end keeps the half that says which failure this is
+ * while spending the sentence that elaborates it. The full text is one hover
+ * or one focus away.
+ */
+export function truncateStatus(text: string): string {
+  if (text.length <= STATUS_MAX_CHARS) {
+    return text;
+  }
+  return `${text.slice(0, STATUS_MAX_CHARS - 1).trimEnd()}\u2026`;
+}
+
+/**
+ * The status bar's message cell.
+ *
+ * The tooltip is `Note` (Radix) rather than a `title` attribute, and the
+ * difference is not cosmetic: no browser opens a `title` on keyboard focus, so
+ * on a modal keyboard-first app whose status bar sits beside a `?` shortcut
+ * tag, a `title` would put the truncated half of every failure out of reach of
+ * the primary input device. `Note` opens on focus too, which is why the cell
+ * takes a tab stop -- a tooltip that opens on focus is worth nothing on an
+ * element that cannot be focused.
+ */
+export function StatusCell({ text }: { readonly text: string }) {
+  return (
+    <Note text={text}>
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the
+          feature -- see the comment above. */}
+      <span data-status tabIndex={0} className="min-w-0 truncate text-ink-dim">
+        {truncateStatus(text)}
+      </span>
+    </Note>
+  );
+}
+
 /** Now the DEFAULT of a stored preference rather than the value itself: the
  *  settings overlay writes `prefs.focusViewportShare`, and this is what a
  *  browser with nothing stored falls back to. Still 0.6, still one literal. */
@@ -2147,7 +2200,7 @@ function CanvasInner({
             on the canvas -- so the bar was restating a view of itself.
             `tally` itself stays: the sidebar's filter counts read it. */}
 
-        {status !== null && <span className="truncate text-ink-dim">{status}</span>}
+        {status !== null && <StatusCell text={status} />}
 
         <span className="flex-1" />
         {/* The right-hand end is one cell wide, again at the operator's

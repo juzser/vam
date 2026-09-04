@@ -135,6 +135,12 @@ const iconPicker = () => document.querySelector('[data-icon-picker]');
 /** The status bar's own text. The header badge carries the same words in demo
  *  mode, so a bare text query cannot tell "it refused" from "it is a demo". */
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
+/** The status cell shows a shortened message and carries the whole one on its
+ *  tooltip, so an assertion about the tail of a message reads THIS, not the
+ *  bar's visible text. See `StatusCell` in `Canvas.tsx`. */
+const statusFull = () =>
+  document.querySelector('[data-status-bar] [data-status]')?.getAttribute('data-note') ?? '';
+
 const actionPane = () =>
   document.querySelector('[data-action-pane]')?.getAttribute('data-action-pane') ?? '';
 // The sidebar renders first among the two resizable `<aside>`s; the detail
@@ -1367,9 +1373,12 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
       };
     });
     await submit(source, 'hello');
+    // The code leads, so it survives the cell's truncation; the remedy is in
+    // the sentence that follows and is reachable on the tooltip.
     expect(statusBar()).toContain('session-running: session a1 is running');
-    expect(statusBar()).toContain('claude attach');
+    expect(statusFull()).toContain('claude attach');
     expect(statusBar()).not.toContain('[object Object]');
+    expect(statusFull()).not.toContain('[object Object]');
     expect(wrote.count).toBe(0);
     expect(promptInput()?.value).toBe('hello');
   });
