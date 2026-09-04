@@ -322,18 +322,17 @@ body {
   }
 }
 
-/* A terminal's caret: hard on, hard off, no fade in between. `steps(1)` is
-   what makes it a BLINK rather than a pulse -- an eased opacity ramp is the
-   `vam-breathe` idiom, and the point of this one is that it reads as a shell
-   waiting on its next character. 1.06s is a VT100's own rate, near enough. */
-@keyframes vam-term-cursor {
+/* The running caption's ellipsis: three dots taking turns, the agent's own
+   idiom for "this sentence has not finished happening". An eased ramp, like
+   `vam-breathe` and unlike the hard blink of the caret this replaced -- the
+   dots belong to the words, and words do not flicker. */
+@keyframes vam-ellipsis {
   0%,
-  49% {
-    opacity: 1;
-  }
-  50%,
   100% {
-    opacity: 0;
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
   }
 }
 
@@ -362,21 +361,21 @@ body {
   animation: vam-breathe 1.8s ease-in-out infinite;
 }
 
-/* The block itself is drawn, not typed: a filled rectangle in the line's own
-   colour, so it inherits whatever the text around it is wearing and needs no
-   token of its own. `currentColor` rather than a variable is deliberate -- the
-   caret belongs to the line, and a line that dims should dim its caret too.
-   `0.9em` keeps it inside the cap height of an 11.5px line instead of pushing
-   the row taller. */
-.vam-term-cursor {
-  display: inline-block;
-  width: 0.5em;
-  height: 0.9em;
-  margin-left: 0.25em;
-  vertical-align: text-bottom;
-  background: currentColor;
-  opacity: 1;
-  animation: vam-term-cursor 1.06s steps(1, end) infinite;
+/* The dots are three elements rather than one animated glyph so the wave can
+   travel along them, and they carry no colour of their own: the ellipsis
+   belongs to the word, and a word that dims should dim its dots too. The
+   stagger is a third of the period, which is what makes it read as travelling
+   rather than as three things pulsing together. */
+.vam-ellipsis > span {
+  animation: vam-ellipsis 1.2s ease-in-out infinite;
+}
+
+.vam-ellipsis > span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.vam-ellipsis > span:nth-child(3) {
+  animation-delay: 0.4s;
 }
 
 /*
@@ -487,17 +486,17 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .vam-spin,
   .vam-breathe,
-  .vam-term-cursor,
+  .vam-ellipsis > span,
   .vam-running-edge::after,
   .vam-focus-glow,
   .vam-cursor-glow {
     animation: none;
   }
-  /* A caret frozen mid-blink is either invisible or a stray mark at some
-     arbitrary opacity. Stopped, it parks ON: a solid block after the words,
-     which is what a terminal looks like between keystrokes anyway, and still
-     says the line is being written. */
-  .vam-term-cursor {
+  /* Dots frozen mid-wave are two faint marks and one solid one, which reads as
+     damage. Stopped, all three park ON: a plain ellipsis after the word, which
+     is what an unfinished sentence looks like anyway and still says the session
+     is working. */
+  .vam-ellipsis > span {
     opacity: 1;
   }
   /* The halo carried the signal; with motion off, a static ring has to — the

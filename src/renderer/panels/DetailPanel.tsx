@@ -1167,6 +1167,18 @@ export function DetailPanel(props: DetailPanelProps) {
   /** The words themselves — `null` when there is no live turn, or when the
    * source cannot say what it is doing. */
   const liveActivity = outIsLive ? entry.session.activity : null;
+  /**
+   * The one detail clause vam can source for the running caption.
+   *
+   * `Session.age` is how long ago the session last did anything, already
+   * compact (model.ts). It is NOT this turn's elapsed time and is not labelled
+   * as one. The reference caption this line is modelled on also carries a
+   * token count and an effort level; vam has neither per session -- the only
+   * token figure in the model is `CanvasBudget`, the factory's whole-canvas
+   * total, which would be a lie about one session -- so those clauses are not
+   * printed rather than printed as zeros.
+   */
+  const liveAge = outIsLive ? entry.session.age : null;
   const total = entry?.session.decisions.length ?? 0;
   // Oldest first: `decisions` arrives newest first. That
   // ordering is what makes "the last line" and "the newest turn" the same
@@ -1512,18 +1524,21 @@ export function DetailPanel(props: DetailPanelProps) {
                      While the session is working, this line is the only thing
                      in the pane that changes -- so it carries the work rather
                      than a sentence that reads the same on a session that has
-                     quietly died. The idiom is a terminal's: a blinking block
-                     caret trailing the words, because that is what a line still
-                     being written looks like. It REPLACES the `vam-breathe`
-                     pulse this line shipped with -- one motion story, not an
-                     opacity ramp and a blink arguing -- and it stops under
-                     `prefers-reduced-motion` (styles.css), where it parks on as
-                     a solid block. It is withheld from every stopped status for
-                     the reason recorded at PANE_STATUS_BREATHES. A null
-                     `activity` is a source that cannot say (model.ts): the
-                     sentence stays and no words are invented, and the caret is
-                     still honest, because it asserts only that the session is
-                     running, which it is. */
+                     quietly died. The idiom is the agent's own running caption:
+                     a star, the word for what it is doing, and an ellipsis that
+                     animates. The WORD is `activity` -- the newest tool call the
+                     source reported (transcript.ts) -- so it cycles as the work
+                     does, off data vam has, rather than off a rotating list of
+                     invented gerunds. It REPLACES the blinking block caret this
+                     line shipped with (and the `vam-breathe` pulse before that)
+                     -- one motion story, not three -- and under
+                     `prefers-reduced-motion` the dots park on at full opacity
+                     (styles.css), which still reads as "still going". It is
+                     withheld from every stopped status for the reason recorded
+                     at PANE_STATUS_BREATHES. A null `activity` is a source that
+                     cannot say (model.ts): the sentence stays as the word and no
+                     words are invented, because it asserts only that the session
+                     is running, which it is. */
                   <p
                     data-out-empty={
                       decision.output === null || decision.output === '' ? true : undefined
@@ -1531,11 +1546,31 @@ export function DetailPanel(props: DetailPanelProps) {
                     data-out-live={outIsLive ? 'true' : undefined}
                     className="text-[11.5px] text-ink-faint"
                   >
-                    {liveActivity ?? noAnswerNote(decision.output, entry?.session.status ?? null)}
-                    {/* Decorative: a screen reader should read the activity,
-                        not a block character. */}
-                    {outIsLive && (
-                      <span aria-hidden="true" data-out-cursor className="vam-term-cursor" />
+                    {outIsLive ? (
+                      /* Star and word share one accent, the app's own `running`
+                         token; the detail is dim. Decorative marks are hidden
+                         from assistive tech, which should read the activity and
+                         not a star and three dots. */
+                      <span data-out-running className="text-running">
+                        <span aria-hidden="true">{'\u2733'}</span>{' '}
+                        <span data-out-running-word>
+                          {liveActivity ??
+                            noAnswerNote(decision.output, entry?.session.status ?? null)}
+                        </span>
+                        <span aria-hidden="true" data-out-ellipsis className="vam-ellipsis">
+                          <span>.</span>
+                          <span>.</span>
+                          <span>.</span>
+                        </span>
+                        {liveAge !== null && (
+                          <span data-out-running-detail className="text-ink-faint">
+                            {' '}
+                            (last active {liveAge} ago)
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      noAnswerNote(decision.output, entry?.session.status ?? null)
                     )}
                   </p>
                 )}
