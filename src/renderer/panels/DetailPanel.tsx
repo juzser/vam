@@ -378,11 +378,10 @@ export type DetailPanelProps = {
    * The tab `Mod-Shift-<digit>` has just asked for, or null when nothing has
    * been asked.
    *
-   * A REQUEST, not the selection: the tab itself stays this pane's own state,
-   * so the tab bar keeps working with no caller at all and the canvas gets no
-   * presentation toggle in its model. A fresh object each press is what makes
-   * asking for the tab already showing (or the same one twice) still an ask,
-   * which a bare `Tab | null` could not express.
+   * A REQUEST, not the selection: the tab stays this pane's own state, so the
+   * bar keeps working with no caller at all and the canvas gets no
+   * presentation toggle in its model. A fresh object each press is what keeps
+   * asking twice for the same tab an ask, which `Tab | null` could not say.
    */
   readonly tabRequest?: { readonly tab: Tab } | null;
   /** The current rendered width (task-1's `renderedWidth`), applied inline. */

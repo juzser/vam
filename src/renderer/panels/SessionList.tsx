@@ -374,14 +374,12 @@ export function SessionList(props: SessionListProps) {
    *
    * IT USED TO OWN ITS OWN WINDOW LISTENER HERE, on the argument that a new
    * action kind would be a compile error in two files that task did not own.
-   * The argument was sound and the price was two defects this project has
-   * fixed everywhere else: the key was in no `buildKeySheet` row, because the
-   * sheet is derived from the chord tables and this was not in one; and it
-   * fired while an overlay was open, because the overlay guard lives in the
-   * one listener this one bypassed. So the key moved into the table and
-   * only its EFFECT stayed here — the reveal and the focus are this
-   * component's own state and refs, and lifting those would have put a hover
-   * highlight in the canvas's model.
+   * Sound, and the price was two defects this project has fixed everywhere
+   * else: the key was in no `buildKeySheet` row, because the sheet is derived
+   * from the chord tables and this was not in one; and it fired while an
+   * overlay was open, because the overlay guard lives in the one listener this
+   * one bypassed. So the KEY moved into the table and only its EFFECT stayed —
+   * the reveal and the focus are this component's own state and refs.
    */
   useEffect(() => {
     if (revealRequest === null || revealRequest === undefined) {

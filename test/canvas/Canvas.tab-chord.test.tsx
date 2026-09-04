@@ -3,16 +3,14 @@
 /**
  * `Mod-Shift-<digit>` picks the detail pane's tab, and `p` joins the grammar.
  *
- * Two properties are asserted together on purpose. The digit row now means a
- * POSITION in two families — `Mod-1` a session, `Mod-Shift-1` a tab — and the
- * failure mode of that pair is one answering the other, which only a test that
- * presses both can catch.
+ * Both families are pressed here on purpose: the digit row now means a
+ * POSITION twice over — `Mod-1` a session, `Mod-Shift-1` a tab — and the
+ * failure mode of that pair is one answering the other.
  *
  * `p` was real but ungoverned: hand-wired to its own window listener in
  * `SessionList.tsx`, it appeared in no key sheet and fired straight through an
- * open overlay. Both are asserted here, the second as a direct negative rather
- * than through a status message, because the guard being tested is the one
- * `#130` installed for every other chord.
+ * open overlay. Both are asserted, the second as a direct negative rather than
+ * through a status message, because the overlay guard is the subject.
  */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';

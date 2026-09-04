@@ -160,11 +160,11 @@ export type KeyAction =
       sidebar, zero-based here because that is what an index into the list is.
       `Mod-9` is deliberately NOT in this family: it is `last` (below). */
   | { readonly kind: 'sessionAt'; readonly index: number }
-  /** `Mod-Shift-1` … `Mod-Shift-4` — show one of the detail pane's tabs. The
-      tab is named rather than numbered because a position is what the KEY
-      means, not what the action does: reorder the bar and the binding follows
-      the name, and the sheet keeps saying which tab it opens. A type-only
-      import, so the grammar still pulls no component in at runtime. */
+  /** `Mod-Shift-1` … `Mod-Shift-4` — show one of the detail pane's tabs. Named
+      rather than numbered because a position is what the KEY means, not what
+      the action does: reorder the bar and the binding follows the name, and
+      the sheet keeps saying which tab it opens. Type-only import, so the
+      grammar still pulls no component in at runtime. */
   | { readonly kind: 'detailTab'; readonly tab: DetailTab }
   /** `p` — reveal the focused session's project in the sidebar and put the
       keyboard on its fold. */

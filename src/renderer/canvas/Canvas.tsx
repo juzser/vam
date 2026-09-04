@@ -621,11 +621,11 @@ function CanvasInner({
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   /**
    * The two chords whose EFFECT belongs to a panel: `Mod-Shift-<digit>` picks
-   * a detail tab, `p` reveals a project. Each is a fresh object per press,
-   * never the state itself — the tab and the reveal stay where they are drawn,
-   * and what travels is only the ask. That keeps the keys in the chord table
-   * (so the sheet lists them and an open overlay silences them) without
-   * pulling a panel's presentation into the canvas's model.
+   * a detail tab, `p` reveals a project. A fresh object per press, never the
+   * state itself — the tab and the reveal stay where they are drawn and only
+   * the ask travels, which keeps both keys in the chord table (so the sheet
+   * lists them and an open overlay silences them) without pulling a panel's
+   * presentation into the canvas's model.
    */
   const [tabRequest, setTabRequest] = useState<{ readonly tab: DetailTab } | null>(null);
   const [revealRequest, setRevealRequest] = useState<{ readonly projectId: string } | null>(null);
@@ -1313,10 +1313,9 @@ function CanvasInner({
       // from one — so a box that is capturing letters has no claim on it. That
       // matters for exactly the case `Mod-Shift-<digit>` was added for: the
       // operator is in the prompt box, which is where the reason to look at
-      // another tab comes from, and a shortcut that stops working precisely
-      // there is a shortcut for a state nobody is in. Everything unmodified
-      // still belongs to the box: the palette's filtering, the search line,
-      // the prompt's own `!` typeahead and its Enter and Escape.
+      // another tab comes from, so a shortcut dead there is dead. Unmodified,
+      // everything still belongs to the box: the palette's filtering, the
+      // search line, the prompt's `!` typeahead and its Enter and Escape.
       if (typing && !(event.metaKey || event.ctrlKey)) {
         return; // the palette, the search line and the prompt own their own keys
       }
