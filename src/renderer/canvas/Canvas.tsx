@@ -60,6 +60,7 @@ import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
+import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { nextNode } from '../keyboard/spatial-nav.js';
 import { DetailPanel, type Tab as DetailTab, TABS } from '../panels/DetailPanel.js';
 import { IconPicker } from '../panels/IconPicker.js';
@@ -588,12 +589,25 @@ function CanvasInner({
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState('');
   /**
-   * Which pane the keyboard belongs to. `I` hands it to the action pane, `H` and
-   * `Esc` hand it back. Two panes and one explicit owner, rather than a guess
-   * based on what was last clicked — a keyboard-first tool cannot afford to be
-   * wrong about where the next keystroke goes.
+   * WHICH CURSOR MODE THE KEYBOARD IS IN — Select or Insert.
+   *
+   * `I` enters Insert, `H` and `Esc` return to Select. One explicit owner
+   * rather than a guess based on what was last clicked: a keyboard-first tool
+   * cannot afford to be wrong about where the next keystroke goes.
+   *
+   * THIS IS ONE FACT, NOT TWO, and that is the whole reason it is named. The
+   * same state decides which pane the keyboard belongs to AND what a key
+   * means, so `hjkl` and `Mod+<digit>` read it rather than carrying a second
+   * notion of where focus is — two parallel notions of one fact is how the
+   * digit table went stale three times in a day.
+   *
+   *   Select — `hjkl` chooses a session, `Mod+<digit>` a session by position.
+   *   Insert — `hjkl` chooses an agent option when one is being asked,
+   *            `Mod+<digit>` switches tab.
+   *
+   * The names are the operator's own, and `keysheet.ts` prints the same two.
    */
-  const [pane, setPane] = useState<'list' | 'action'>('list');
+  const [mode, setMode] = useState<CursorMode>('select');
   const [actionIndex, setActionIndex] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   /**
@@ -1433,6 +1447,26 @@ function CanvasInner({
         return; // the palette, the search line and the prompt own their own keys
       }
 
+      /**
+       * A KEY SOMETHING ELSE HAS ALREADY ANSWERED IS NOT THIS GRAMMAR'S.
+       *
+       * The options list of an open question is a real widget with its own
+       * `hjkl`, its own digits and its own Enter, and it calls
+       * `preventDefault` on precisely the keys it handled. React dispatches at
+       * its root container, which is BELOW this window listener, so by the
+       * time a key arrives here the pane has already had its say — and this is
+       * how the two cursor modes stay out of each other's way without either
+       * side enumerating the other's keys.
+       *
+       * It is deliberately not `stopPropagation` on the other side. The list
+       * handles some keys and not others, and the ones it does not handle
+       * (`Escape`, `H`) are exactly the ways OUT of it: swallowing everything
+       * would strand the keyboard in a list it could not leave.
+       */
+      if (event.defaultPrevented) {
+        return;
+      }
+
       // A bare modifier is a hand moving, not a keystroke. Letting it through
       // would abandon a half-typed chord the moment you reached for Cmd and
       // thought better of it.
@@ -1494,15 +1528,15 @@ function CanvasInner({
 
       switch (action.kind) {
         case 'move': {
-          if (pane === 'action' && (action.direction === 'down' || action.direction === 'up')) {
+          if (mode === 'insert' && (action.direction === 'down' || action.direction === 'up')) {
             // In the action pane the vertical axis belongs to the actions —
             // every command the step proposed, and the prompt last.
             const delta = action.direction === 'down' ? 1 : -1;
             setActionIndex((current) => clampIndex(current + delta, actions.length));
             return;
           }
-          if (pane === 'action' && action.direction === 'left') {
-            setPane('list');
+          if (mode === 'insert' && action.direction === 'left') {
+            setMode('select');
             return;
           }
           // The cursor can be left on a node the filter has just made
@@ -1595,7 +1629,7 @@ function CanvasInner({
            * pressing it again. Refusing out loud is what the sidebar half
            * below already does for an out-of-range row.
            */
-          if (pane === 'action') {
+          if (mode === 'insert') {
             if (!visible.detail) {
               setStatus('the detail pane is hidden — z0 brings it back');
               return;
@@ -1681,11 +1715,11 @@ function CanvasInner({
             setStatus('the detail pane is hidden — z0 brings it back');
             return;
           }
-          setPane('action');
+          setMode('insert');
           setActionIndex(0);
           return;
         case 'focusList':
-          setPane('list');
+          setMode('select');
           setComposing(false);
           return;
         case 'rename':
@@ -1743,7 +1777,7 @@ function CanvasInner({
         case 'resizePane': {
           // Which pane owns the keyboard right now decides which one moves —
           // the same `pane` state `I`/`H` already set, nothing new (epic.md §4.5).
-          const target: 'sidebar' | 'detail' = pane === 'action' ? 'detail' : 'sidebar';
+          const target: 'sidebar' | 'detail' = mode === 'insert' ? 'detail' : 'sidebar';
           // A width you cannot see change is a keypress that did nothing and
           // said nothing. The `I` guard above keeps the cursor off a hidden
           // detail pane, but the sidebar can be hidden under a cursor that is
@@ -1764,7 +1798,7 @@ function CanvasInner({
           // person with a layout that still has a column missing, and set both
           // widths they cannot see while it did. Restoring the shipped layout
           // is one idea, not two.
-          setPane('list');
+          setMode('select');
           savePrefs(
             setPaneVisibility(
               setPaneWidth(
@@ -1789,11 +1823,11 @@ function CanvasInner({
           // problem mirrored: 'list' is drawn by those two — the row's focus
           // ring and the card's — so with neither on screen a list cursor is
           // pointing at nothing, and the only pane left is the one to be in.
-          if (!shown.detail && pane === 'action') {
-            setPane('list');
+          if (!shown.detail && mode === 'insert') {
+            setMode('select');
             setComposing(false);
-          } else if (!shown.sidebar && !shown.canvas && pane === 'list') {
-            setPane('action');
+          } else if (!shown.sidebar && !shown.canvas && mode === 'select') {
+            setMode('insert');
             setActionIndex(0);
           }
           savePrefs(next);
@@ -1809,11 +1843,19 @@ function CanvasInner({
           // used to land on went with the strip the operator asked to remove,
           // and their commands are offered by the `!` typeahead inside the
           // composer instead.
+          //
+          // AND IT ENTERS INSERT, which it did not before. Composing was its
+          // own third name in the mode cell while the mode state stayed on
+          // Select, so the bar said Select to an operator typing a prompt —
+          // and `Mod+<digit>`, which reads the mode and is designed to work
+          // from inside the box, moved a session instead of switching a tab.
+          // Composing happens INSIDE Insert; there was never a third mode.
+          setMode('insert');
           setComposing(true);
           return;
         }
         case 'open': {
-          if (pane !== 'action') {
+          if (mode !== 'insert') {
             setStatus('the full detail is already in the right panel');
             return;
           }
@@ -1837,7 +1879,7 @@ function CanvasInner({
           setComposing(false);
           setRenamingId(null);
           setPickingIconFor(null);
-          setPane('list');
+          setMode('select');
           setStatus(null);
           return;
         default: {
@@ -1871,7 +1913,7 @@ function CanvasInner({
     createSession,
     stepSession,
     focusSession,
-    pane,
+    mode,
     actionIndex,
     actions,
     prefs,
@@ -1957,7 +1999,7 @@ function CanvasInner({
           }}
           onPick={(sessionId) => {
             focusSession(sessionId);
-            setPane('list');
+            setMode('select');
           }}
           onClose={(sessionId) => {
             // The row's title, not the id: the same sentence the keyboard
@@ -2187,7 +2229,7 @@ function CanvasInner({
           draft={draft}
           onDraftChange={setDraft}
           onSubmit={sendPrompt}
-          active={pane === 'action'}
+          active={mode === 'insert'}
           actionIndex={actionIndex}
           composing={composing}
           onCompose={() => setComposing(true)}
@@ -2196,13 +2238,13 @@ function CanvasInner({
             setDraft('');
             // Escape out of the composer returns the keyboard to the SIDEBAR,
             // which is the pane the operator asked to get back to. Without
-            // this, a prompt opened with `I` leaves `pane === 'action'`, so
+            // this, a prompt opened with `I` leaves `mode === 'insert'`, so
             // the blur hands the keys back to a window where `j`/`k` walk the
             // detail pane's actions instead of the session list — the keys
             // work, they just do the wrong thing, which is worse than being
             // swallowed. The `i` path already sat on 'list' and was unaffected,
             // which is why this only ever bit one of the two entry points.
-            setPane('list');
+            setMode('select');
           }}
           width={detailWidth}
           /* Only where it would move something. The detail pane is a fixed
@@ -2320,15 +2362,14 @@ function CanvasInner({
             does not say which mode it is in is the single worst thing a modal
             app can be. */}
         <span data-mode className="font-semibold text-ink">
-          {jumping
-            ? 'JUMP'
-            : filtering
-              ? 'FILTER'
-              : composing
-                ? 'PROMPT'
-                : pane === 'action'
-                  ? 'ACTION'
-                  : 'NORMAL'}
+          {/* JUMP and FILTER are transient — a key is being awaited — so they
+              outrank the resting mode and keep their own names. Underneath
+              them there are exactly two, and they are the operator's words:
+              Select and Insert. `PROMPT` is gone as a third name because it
+              never was one: composing happens INSIDE Insert, and printing it
+              as a peer of the other two implied a mode the grammar has no
+              state for. */}
+          {jumping ? 'JUMP' : filtering ? 'FILTER' : MODE_TITLES[mode]}
         </span>
         {/* The `project/session` cell that used to sit here is gone at the
             operator's request: the slash between a project and a session made

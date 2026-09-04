@@ -136,7 +136,7 @@ describe('the status bar after the trim', () => {
 
   it('keeps the mode indicator and the usage cell, which nobody asked to lose', () => {
     render(<Canvas model={MODEL} />);
-    expect(statusBar()?.querySelector('[data-mode]')?.textContent).toBe('NORMAL');
+    expect(statusBar()?.querySelector('[data-mode]')?.textContent).toBe('Select');
     expect(statusBar()?.querySelector('[data-usage]')).not.toBeNull();
   });
 });

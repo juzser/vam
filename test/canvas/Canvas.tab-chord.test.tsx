@@ -241,10 +241,27 @@ describe('the generated key sheet tells the truth about the digits', () => {
    * operator is in the response pane. It names BOTH, which is what the key
    * actually does.
    */
-  it('says a digit means a session or a tab, depending on the pane', () => {
-    const row = rows().find((candidate) => candidate.keys === 'Mod-2');
-    expect(row?.label).toContain('session 2');
-    expect(row?.label).toContain('tab 2');
+  it('says a digit means a session or a tab, one row per cursor mode', () => {
+    // Two rows now, not one caption naming both: the operator's point is that
+    // the two meanings belong to two named modes and do not interfere, and a
+    // single undifferentiated row is what hid that.
+    const digit = rows().filter((candidate) => candidate.keys === 'Mod-2');
+    expect(digit.map((row) => row.mode)).toEqual(['select', 'insert']);
+    const select = digit.find((row) => row.mode === 'select');
+    const insert = digit.find((row) => row.mode === 'insert');
+    expect(select?.label).toContain('Select');
+    expect(select?.label).toContain('session 2');
+    expect(select?.label).not.toContain('tab 2');
+    expect(insert?.label).toContain('Insert');
+    expect(insert?.label).toContain('tab 2');
+    expect(insert?.label).not.toContain('session 2');
+  });
+
+  it('splits hjkl the same way — a session in Select, an option in Insert', () => {
+    const walk = rows().filter((candidate) => candidate.keys === 'j');
+    expect(walk.map((row) => row.mode)).toEqual(['select', 'insert']);
+    expect(walk.find((row) => row.mode === 'select')?.label).toContain('session list');
+    expect(walk.find((row) => row.mode === 'insert')?.label).toContain('options');
   });
 
   it('says the ninth is the last session rather than a ninth one', () => {

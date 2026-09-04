@@ -40,6 +40,26 @@ import {
  * - `view` — surfaces that overlay the whole app: palette, filter, settings,
  *   this sheet.
  */
+/**
+ * The two cursor modes, named by the operator: Select is what the sheet used
+ * to call NORMAL, Insert is the resting state of the right pane.
+ *
+ * They exist HERE, in the sheet, and not only in the canvas, because the
+ * operator's point about them is a point about the sheet: `hjkl` and
+ * `Mod+<digit>` mean one thing in each mode and the two sets do not interfere,
+ * and a sheet that lists those bindings undifferentiated hides exactly that.
+ * `Canvas.tsx` imports `CursorMode` from here so there is one spelling of the
+ * fact rather than two.
+ */
+export type CursorMode = 'select' | 'insert';
+
+export const CURSOR_MODES = ['select', 'insert'] as const;
+
+export const MODE_TITLES: Readonly<Record<CursorMode, string>> = {
+  select: 'Select',
+  insert: 'Insert',
+};
+
 export type ActionGroup = 'navigation' | 'session' | 'panes' | 'review' | 'view';
 
 export const GROUP_ORDER = ['navigation', 'session', 'panes', 'review', 'view'] as const;
@@ -56,6 +76,18 @@ type Meta<K extends KeyAction['kind']> = {
   readonly group: ActionGroup;
   /** A function of the action, so `h` and `j` cannot share one vague caption. */
   readonly label: (action: Extract<KeyAction, { kind: K }>) => string;
+  /**
+   * For the two families whose meaning DEPENDS on the cursor mode: one caption
+   * per mode, and the sheet prints a row for each.
+   *
+   * Absent means mode-independent, which is most of the table — `yy` copies in
+   * either mode and a row per mode would be the same row twice. So this is
+   * opt-in, and the day a third mode-dependent binding is added, adding it here
+   * is the whole change.
+   */
+  readonly byMode?: (
+    action: Extract<KeyAction, { kind: K }>,
+  ) => Readonly<Record<CursorMode, string>>;
 };
 
 /**
@@ -75,7 +107,15 @@ const LAYOUT_LABELS: Readonly<Record<LayoutName, string>> = {
 };
 
 export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
-  move: { group: 'navigation', label: (a) => `move ${a.direction}` },
+  move: {
+    group: 'navigation',
+    label: (a) => `move ${a.direction}`,
+    // `hjkl`, the binding the operator's whole naming argument is about.
+    byMode: (a) => ({
+      select: `move ${a.direction} — the session list`,
+      insert: `move ${a.direction} — the options of an open question, when one is asked`,
+    }),
+  },
   // Derived from the action's own `name`, so a third layout added to the
   // table gets a row here without anyone editing this file — and one added
   // with a name this switch does not cover fails to compile.
@@ -103,6 +143,13 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
       a.digit === 9
         ? 'position 9 — the LAST session in the sidebar, whatever the count'
         : `position ${a.digit} — session ${a.digit} in the sidebar, tab ${a.digit} in the response pane`,
+    byMode: (a) => ({
+      select:
+        a.digit === 9
+          ? 'the LAST session in the sidebar, whatever the count'
+          : `session ${a.digit} in the sidebar`,
+      insert: `tab ${a.digit} in the response pane`,
+    }),
   },
   revealProject: { group: 'navigation', label: () => 'reveal this session’s project' },
   search: { group: 'navigation', label: () => 'search sessions' },
@@ -132,7 +179,16 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   cancel: { group: 'view', label: () => 'close / cancel' },
 };
 
-export type SheetRow = { readonly keys: string; readonly label: string };
+export type SheetRow = {
+  readonly keys: string;
+  readonly label: string;
+  /**
+   * Which cursor mode this row is true in, or `null` for a key that means the
+   * same in both. A row tagged with a mode is one HALF of a binding: `hjkl`
+   * yields two rows, and neither of them is the whole truth on its own.
+   */
+  readonly mode: CursorMode | null;
+};
 export type SheetGroup = {
   readonly group: ActionGroup;
   readonly title: string;
@@ -147,11 +203,21 @@ export type SheetGroup = {
  * it was just indexed by. Narrowing it away would mean a switch, which is the
  * scattering the table replaces.
  */
-export function describeAction(action: KeyAction): { group: ActionGroup; label: string } {
+export function describeAction(action: KeyAction): {
+  group: ActionGroup;
+  label: string;
+  /** One caption per mode, or `null` where the key means the same in both. */
+  byMode: Readonly<Record<CursorMode, string>> | null;
+} {
   // `never` in the parameter position is what makes every `Meta<K>` assignable
   // to one type here; the kind that produced it is checked at the table above.
-  const meta: { group: ActionGroup; label: (action: never) => string } | undefined =
-    ACTION_LABELS[action.kind];
+  const meta:
+    | {
+        group: ActionGroup;
+        label: (action: never) => string;
+        byMode?: (action: never) => Readonly<Record<CursorMode, string>>;
+      }
+    | undefined = ACTION_LABELS[action.kind];
   if (meta === undefined) {
     throw new Error(`no label for key action "${action.kind}" — add one to ACTION_LABELS`);
   }
@@ -159,7 +225,11 @@ export function describeAction(action: KeyAction): { group: ActionGroup; label: 
   if (label === '') {
     throw new Error(`empty label for key action "${action.kind}"`);
   }
-  return { group: meta.group, label };
+  const byMode =
+    meta.byMode === undefined
+      ? null
+      : (meta.byMode as (a: KeyAction) => Readonly<Record<CursorMode, string>>)(action);
+  return { group: meta.group, label, byMode };
 }
 
 /** One editable action: what it is called, and the keys it holds right now. */
@@ -168,6 +238,13 @@ export type BindingRow = {
   readonly label: string;
   /** Up to `MAX_BINDINGS` chords, as they are written down. */
   readonly keys: readonly string[];
+  /**
+   * The per-mode captions, for a binding whose meaning depends on the mode —
+   * `null` otherwise. Exported so the settings shortcut page can group by mode
+   * without re-deriving which bindings are mode-dependent; re-deriving it there
+   * is how the two would drift apart.
+   */
+  readonly byMode: Readonly<Record<CursorMode, string>> | null;
   /** True when the operator moved it off the shipped keys. */
   readonly overridden: boolean;
 };
@@ -190,11 +267,12 @@ export function buildBindingSheet(
 ): readonly BindingGroup[] {
   const byGroup = new Map<ActionGroup, BindingRow[]>();
   for (const binding of effectiveBindings(overrides)) {
-    const { group, label } = describeAction(binding.action);
+    const { group, label, byMode } = describeAction(binding.action);
     const rows = byGroup.get(group) ?? [];
     rows.push({
       id: binding.id,
       label,
+      byMode,
       keys: binding.chords.map(chordText),
       overridden: overrides[binding.id] !== undefined,
     });
@@ -206,14 +284,35 @@ export function buildBindingSheet(
   });
 }
 
-/** The sheet: every binding, grouped, in the declared group order. */
+/**
+ * The sheet: every binding, grouped, in the declared group order — and split
+ * by cursor mode wherever a binding has two meanings.
+ *
+ * The split is the operator's requirement stated as data. `hjkl` chooses a
+ * session in Select and an option in Insert; printing one undifferentiated row
+ * for it is how the sheet came to be wrong about it. So a mode-dependent
+ * binding contributes one row PER MODE, each carrying the mode it is true in,
+ * in `CURSOR_MODES` order; every other binding contributes the one row it
+ * always did, with `mode: null`.
+ */
 export function buildKeySheet(overrides: KeyBindings = activeBindings()): SheetGroup[] {
   return (
     buildBindingSheet(overrides)
       .map(({ group, title, rows }) => ({
         group,
         title,
-        rows: rows.flatMap((row) => row.keys.map((keys) => ({ keys, label: row.label }))),
+        rows: rows.flatMap((row) =>
+          row.keys.flatMap((keys): readonly SheetRow[] => {
+            const captions = row.byMode;
+            return captions === null
+              ? [{ keys, label: row.label, mode: null }]
+              : CURSOR_MODES.map((mode) => ({
+                  keys,
+                  label: `${MODE_TITLES[mode]} · ${captions[mode]}`,
+                  mode,
+                }));
+          }),
+        ),
       }))
       // An operator who unbinds every action in a group leaves it with no rows,
       // and a titled empty group is a heading that advertises nothing.

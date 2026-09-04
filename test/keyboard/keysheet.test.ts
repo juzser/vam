@@ -38,7 +38,12 @@ describe('the sheet is generated from the binding tables', () => {
     for (const { keys } of boundKeys()) {
       expect(rendered, `binding "${keys}" is bound but missing from the sheet`).toContain(keys);
     }
-    expect(new Set(rendered).size).toBe(rendered.length);
+    // Unique per KEY AND MODE. A mode-dependent binding is deliberately listed
+    // twice — once per cursor mode — so the old "exactly once per key" rule
+    // would now forbid the very split the sheet exists to show. What must
+    // still never happen is the same key listed twice for the same mode.
+    const stamped = sheetRows().map((row) => `${row.keys}@${row.mode ?? 'both'}`);
+    expect(new Set(stamped).size).toBe(stamped.length);
   });
 
   it('shows no key that is not in a table', () => {

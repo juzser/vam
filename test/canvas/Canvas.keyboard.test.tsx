@@ -528,14 +528,14 @@ describe('jumps', () => {
     expect(mode()).toBe('JUMP');
     press('a');
     expect(focused()).toBe('alpha/a1');
-    expect(mode()).toBe('NORMAL');
+    expect(mode()).toBe('Select');
   });
 
   it('Escape leaves jump mode without moving', () => {
     render(<Canvas model={MODEL} />);
     press('f');
     press('Escape');
-    expect(mode()).toBe('NORMAL');
+    expect(mode()).toBe('Select');
     expect(focused()).toBe('alpha/a1');
   });
 });
@@ -606,7 +606,7 @@ describe('the prompt box', () => {
   it('i focuses it', () => {
     render(<Canvas model={MODEL} />);
     press('i');
-    expect(mode()).toBe('PROMPT');
+    expect(mode()).toBe('Insert');
   });
 
   it('will not write from a canvas that was given no source', () => {
@@ -627,7 +627,7 @@ describe('the prompt box', () => {
     press('i');
     typeInto(promptInput() as HTMLTextAreaElement, 'halfway typed');
     keyOn(promptInput() as HTMLTextAreaElement, 'Escape');
-    expect(mode()).toBe('NORMAL');
+    expect(mode()).toBe('Select');
     expect(promptInput()?.value).toBe('');
   });
 });
@@ -696,7 +696,7 @@ describe('filtering the sidebar with /', () => {
     press('/');
     typeInto(filterInput() as HTMLInputElement, 'alpha');
     keyOn(filterInput() as HTMLInputElement, 'Enter');
-    expect(mode()).toBe('NORMAL');
+    expect(mode()).toBe('Select');
     press('j');
     // a2 is the next row that survived the filter, so the walk reaches it,
     expect(focused()).toBe('alpha/a2');
@@ -1034,10 +1034,10 @@ describe('handing the keyboard to the right pane', () => {
     expect(actionPane()).toBe('idle');
     press('I');
     expect(actionPane()).toBe('active');
-    expect(mode()).toBe('ACTION');
+    expect(mode()).toBe('Insert');
     press('H');
     expect(actionPane()).toBe('idle');
-    expect(mode()).toBe('NORMAL');
+    expect(mode()).toBe('Select');
   });
 
   it('Escape also hands it back, from wherever you were', () => {
@@ -1054,7 +1054,7 @@ describe('handing the keyboard to the right pane', () => {
     press('j');
     expect(focused()).toBe('beta/b1'); // the session did not move
     press('Enter'); // past the last command is the prompt box
-    expect(mode()).toBe('PROMPT');
+    expect(mode()).toBe('Insert');
   });
 
   it('Enter in the action pane opens the composer, the only stop left in it', async () => {
@@ -1064,7 +1064,7 @@ describe('handing the keyboard to the right pane', () => {
     press('G');
     press('I');
     await pressAsync('Enter');
-    expect(mode()).toBe('PROMPT');
+    expect(mode()).toBe('Insert');
   });
 
   it('h leaves the pane the same way H does', () => {
@@ -1901,22 +1901,29 @@ describe('Cmd-number jumps to a session while the sidebar has the keyboard', () 
     expect(statusBar()).toContain('only 2 sessions');
   });
 
-  it('still jumps while a text box has the keyboard, and keeps the draft', () => {
+  it('still fires a Mod-chord while a text box has the keyboard, and keeps the draft', () => {
     // REVERSED, deliberately. The window listener used to step aside for every
     // keystroke aimed at an INPUT or a TEXTAREA, which killed Cmd-chords
     // exactly where an operator's hands are. A Cmd/Ctrl chord is not text
     // entry on any layout, so the box has no claim on it. What the box does
     // keep is everything unmodified, including the draft already typed.
     //
-    // `i` composes without moving the KEYBOARD out of the list — `I` is what
-    // does that — so the digit is still counting sessions here.
+    // WHAT THE DIGIT COUNTS HERE CHANGED WITH THE MODE NAMING, and the change
+    // is the operator's own mapping: they named Insert after the PROMPT state,
+    // so `i` enters Insert exactly as `I` does. The digit therefore switches a
+    // TAB, which is what Insert binds it to — the cell no longer says one mode
+    // while the digit obeys another. The property under test is unchanged: the
+    // chord fired from inside the box, and the draft survived it.
     render(<Canvas model={MODEL} />);
     press('j');
     press('i'); // the composer, aimed at alpha/a2
     const box = promptInput() as HTMLTextAreaElement;
     typeInto(box, 'half a prompt');
     keyOn(box, '1', { metaKey: true, code: 'Digit1' });
-    expect(focused()).toBe('alpha/a1');
+    expect(
+      document.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('data-tab'),
+    ).toBe('response');
+    expect(focused()).toBe('alpha/a2');
     expect(promptInput()?.value).toBe('half a prompt');
   });
 
