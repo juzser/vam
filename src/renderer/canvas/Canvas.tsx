@@ -1165,13 +1165,23 @@ function CanvasInner({
           return;
         case 'layout': {
           const next = setLayout(prefs, action.name);
-          // Hiding the pane the keyboard is in would strand the cursor in a
-          // pane nothing draws — the same defect the `I` guard refuses, only
-          // arriving from the other side. 'list' is the fallback the composer
-          // and Escape already use.
-          if (!next.paneVisibility.detail) {
+          const shown = next.paneVisibility;
+          // Hiding the pane the keyboard is in strands the cursor in a pane
+          // nothing draws — the same defect the `I` guard refuses, arriving
+          // from the other side, so the layout has to move the focus itself.
+          //
+          // Both directions are live. Losing the detail pane sends the
+          // keyboard back to 'list', the fallback the composer and Escape
+          // already use. Losing BOTH the sidebar and the canvas is the same
+          // problem mirrored: 'list' is drawn by those two — the row's focus
+          // ring and the card's — so with neither on screen a list cursor is
+          // pointing at nothing, and the only pane left is the one to be in.
+          if (!shown.detail && pane === 'action') {
             setPane('list');
             setComposing(false);
+          } else if (!shown.sidebar && !shown.canvas && pane === 'list') {
+            setPane('action');
+            setActionIndex(0);
           }
           savePrefs(next);
           return;
@@ -1542,19 +1552,6 @@ function CanvasInner({
                 nodeColor={minimapChipColor}
               />
             </ReactFlow>
-
-            {paletteOpen && (
-              <CommandPalette
-                entries={entries}
-                onPick={(sessionId) => {
-                  focusSession(sessionId);
-                  setPaletteOpen(false);
-                }}
-                onClose={() => setPaletteOpen(false)}
-              />
-            )}
-
-            {keySheetOpen && <KeySheet onClose={() => setKeySheetOpen(false)} />}
           </div>
         </CanvasColumn>
 
@@ -1605,6 +1602,26 @@ function CanvasInner({
           }
         />
       </div>
+
+      {/* Moved out of the canvas column when the canvas became hideable: the
+          palette is a window overlay, not part of the graph, and left inside
+          that column `Mod-k` opened a palette nothing could draw in either of
+          the two layouts that hide the canvas. It sits with the other overlays
+          now, over whichever columns are on screen. */}
+      {/* Same reason as the palette above: `?` in a layout that hides the
+          canvas would otherwise open a sheet nothing could draw. */}
+      {keySheetOpen && <KeySheet onClose={() => setKeySheetOpen(false)} />}
+
+      {paletteOpen && (
+        <CommandPalette
+          entries={entries}
+          onPick={(sessionId) => {
+            focusSession(sessionId);
+            setPaletteOpen(false);
+          }}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
 
       {pickingIconFor !== null && (
         <IconPicker
