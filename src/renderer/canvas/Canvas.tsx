@@ -928,6 +928,47 @@ function CanvasInner({
   );
 
   /**
+   * Start a new session — really, when the source can.
+   *
+   * WHICH PROJECT, and never a guess. A new session has to be born somewhere,
+   * and the only directory vam is entitled to use is one it already knows a
+   * project by; so this takes the project explicitly and the keyboard path
+   * passes the focused session's own. With nothing focused there is no
+   * project, and it says so rather than starting a session in a plausible
+   * directory — the same discipline main keeps in `create-session.ts`.
+   *
+   * The refusal is rendered in the source's own words. A source that cannot
+   * create carries no `createSession` member at all (the port's promise:
+   * absent means absent), so the guard below is what makes "it cannot" and
+   * "it failed" two different sentences.
+   */
+  const createSession = useCallback(
+    async (projectId: string, projectName: string) => {
+      if (source.kind !== 'session') {
+        setStatus('black-smith has no new-session command');
+        return;
+      }
+      const sessionSource = source.source;
+      if (!canWriteTo(sessionSource) || sessionSource.write.createSession === undefined) {
+        setStatus(
+          `${sessionSource.label} cannot start a session — ${
+            sessionSource.declines.createSession ?? 'it advertises no way to'
+          }`,
+        );
+        return;
+      }
+      try {
+        await sessionSource.write.createSession(projectId, projectName);
+        setStatus(`started a new session in ${projectName}`);
+        source.onWrote();
+      } catch (cause) {
+        setStatus(describeFailure(cause));
+      }
+    },
+    [source],
+  );
+
+  /**
    * Keep the name the operator just typed. Local by design: `claude agents`
    * has no rename subcommand, so there is nothing upstream to call, and vam
    * does not write into the operator's own Claude Code state — see
@@ -1232,10 +1273,15 @@ function CanvasInner({
           void closeSession(focusedEntry.session.id, focusedEntry.session.title);
           return;
         case 'newSession':
-          // A session is created by a person running `smith event append`
-          // session-start, or by opening one. There is no route, and inventing
-          // one would let vam mint sessions nobody is driving.
-          setStatus('sessions are created from the CLI — smith event append session-start');
+          // Real now: main starts a detached tmux session running `claude` in
+          // the project's own directory. Which project is the focused
+          // session's — with nothing focused there is no directory to use, and
+          // vam will not pick one.
+          if (focusedEntry === null) {
+            setStatus('pick a session first — a new one is started in its project');
+            return;
+          }
+          void createSession(focusedEntry.project.id, focusedEntry.project.name);
           return;
         case 'settings':
           setSettingsOpen(true);
@@ -1483,14 +1529,16 @@ function CanvasInner({
             const entry = allEntries.find((e) => e.session.id === sessionId);
             void closeSession(sessionId, entry?.session.title ?? sessionId);
           }}
-          onAdd={() =>
-            setStatus('sessions are created from the CLI — smith event append session-start')
-          }
-          onAddInProject={(project) =>
-            setStatus(
-              `sessions are created from the CLI — smith event append session-start (${project.name})`,
-            )
-          }
+          onAdd={() => {
+            // The footer strip names no project, so it uses the focused
+            // session's, exactly as `o` does — the two controls are one path.
+            if (focusedEntry === null) {
+              setStatus('pick a session first — a new one is started in its project');
+              return;
+            }
+            void createSession(focusedEntry.project.id, focusedEntry.project.name);
+          }}
+          onAddInProject={(project) => void createSession(project.id, project.name)}
           onPickIcon={(project: Project) => {
             // Same refusal as the session picker (§ above): a project with no
             // source has no bucket to store under, and guessing one would
