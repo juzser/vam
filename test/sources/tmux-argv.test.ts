@@ -22,9 +22,15 @@ import {
 
 describe('tmux argv', () => {
   it('creates a detached, named session in a cwd running a command', () => {
-    expect(
-      newSessionArgv({ name: 'vam-a1b2c3', cwd: '/w/demo', command: 'claude' }),
-    ).toEqual(['new-session', '-d', '-s', 'vam-a1b2c3', '-c', '/w/demo', 'claude']);
+    expect(newSessionArgv({ name: 'vam-a1b2c3', cwd: '/w/demo', command: 'claude' })).toEqual([
+      'new-session',
+      '-d',
+      '-s',
+      'vam-a1b2c3',
+      '-c',
+      '/w/demo',
+      'claude',
+    ]);
   });
 
   it('keeps a command with spaces and metacharacters as ONE argv element', () => {
@@ -47,12 +53,7 @@ describe('tmux argv', () => {
   it('targets exactly, never by prefix, for every verb that names a session', () => {
     expect(hasSessionArgv('vam-a1b2c3')).toEqual(['has-session', '-t', '=vam-a1b2c3']);
     expect(killSessionArgv('vam-a1b2c3')).toEqual(['kill-session', '-t', '=vam-a1b2c3']);
-    expect(capturePaneArgv('vam-a1b2c3')).toEqual([
-      'capture-pane',
-      '-p',
-      '-t',
-      '=vam-a1b2c3',
-    ]);
+    expect(capturePaneArgv('vam-a1b2c3')).toEqual(['capture-pane', '-p', '-t', '=vam-a1b2c3']);
     expect(sendKeysArgv('vam-a1b2c3', 'hello')).toEqual([
       'send-keys',
       '-t',
