@@ -327,8 +327,10 @@ describe('the out text size is an appearance setting', () => {
     open();
     expect(control().closest('section')?.querySelector('h2, h3')?.textContent).toBe('appearance');
     // Not in Canvas: `out` is the right pane, and it is drawn by layouts that
-    // hide the canvas entirely.
-    expect(screen.getByText('focus zoom').closest('section')).not.toBe(
+    // hide the canvas entirely. The other half of this assertion used to read
+    // the focus-zoom control's section; that control is gone with the automatic
+    // zoom it configured, so the section is named directly instead.
+    expect(document.querySelector('[data-settings-panel="canvas"]')).not.toBe(
       control().closest('section'),
     );
   });

@@ -3,8 +3,7 @@
  *
  * Four sections, and every one of them is wiring rather than invention: the
  * theme is `prefs.theme` and `applyTheme`, which shipped long ago with one
- * toggle as their whole interface; the focus zoom share is the constant in
- * `Canvas.tsx` whose own comment promised this pane; the layout section is a
+ * toggle as their whole interface; the layout section is a
  * picker over `LAYOUTS`, which another epic built and this one only reads; and
  * the keyboard reference is `buildKeySheet()`, the same generator the `?` sheet
  * renders, so a row here can only exist because a binding exists.
@@ -37,14 +36,11 @@ import { ALL_VISIBLE, columnOrder, LAYOUTS, type LayoutName } from '../prefs/pan
 import {
   clearPalette,
   clearPaletteColor,
-  FOCUS_SHARE_MAX,
-  FOCUS_SHARE_MIN,
   OUT_FONT_SIZE_MAX,
   OUT_FONT_SIZE_MIN,
   PALETTE_TOKENS,
   type Prefs,
   paletteValue,
-  setFocusShare,
   setKeyBindings,
   setLayout,
   setOutFontSize,
@@ -425,20 +421,12 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
               active={section === 'canvas'}
               hint="how the canvas itself behaves — not a colour, and not chrome"
             >
-              <Block label="focus zoom" hint="how much of the canvas a focused session fills">
-                {/* The units change at the control boundary: a spinbutton
-                    reading `0.45` is one nobody can use, and `45%` is already
-                    what this surface printed. The share itself is unchanged. */}
-                <Stepper
-                  name="focus zoom share"
-                  min={Math.round(FOCUS_SHARE_MIN * 100)}
-                  max={Math.round(FOCUS_SHARE_MAX * 100)}
-                  step={5}
-                  value={Math.round(prefs.focusViewportShare * 100)}
-                  unit="%"
-                  onCommit={(next) => onChange(setFocusShare(prefs, next / 100))}
-                />
-              </Block>
+              {/* The focus zoom share used to live here. The automatic zoom
+                  onto a focused node is gone — it overrode a zoom the operator
+                  had set by hand — so the control configured nothing and went
+                  with it. `prefs.focusViewportShare` deliberately stays in the
+                  store: dropping a persisted field is a data migration, and
+                  prefs degrade per field, so an unread one is inert. */}
             </Panel>
 
             <Panel
@@ -630,7 +618,11 @@ function Panel({
   readonly id: SectionId;
   readonly active: boolean;
   readonly hint: string;
-  readonly children: React.ReactNode;
+  // Optional, because a section can be empty: Canvas is, since the automatic
+  // focus zoom it configured was removed. The heading and its hint still say
+  // what the section is for, which is the honest state to be in until either
+  // the next canvas setting lands or the section itself is retired.
+  readonly children?: React.ReactNode;
 }) {
   return (
     <section
@@ -671,7 +663,10 @@ function Choice({
       type="button"
       aria-pressed={selected}
       onClick={onPick}
-      className={`cursor-pointer rounded border px-2 py-1 text-xs ${FOCUS_RING} ${
+      // Restyled, deliberately not re-roled: three `aria-pressed` toggles for a
+      // single-select is a real (small) wart, but a radiogroup is outside the
+      // asks and costs two assertions. Raised as a follow-up instead.
+      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-[12px] ${FOCUS_RING} ${
         selected ? 'border-line-loudest bg-raised text-ink' : 'border-line text-ink-dim'
       }`}
     >

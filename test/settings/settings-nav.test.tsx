@@ -106,14 +106,15 @@ describe('the nav is steerable without a mouse', () => {
 
   it('switches section on Ctrl-Tab from inside a panel, and takes focus back to the nav', () => {
     open();
-    fireEvent.click(nav('canvas'));
-    const slider = screen.getByLabelText('focus zoom share');
-    act(() => (slider as HTMLElement).focus());
-    fireEvent.keyDown(slider, { key: 'Tab', ctrlKey: true });
-    expect(shown()).toEqual(['keyboard']);
-    expect(document.activeElement).toBe(nav('keyboard'));
-    fireEvent.keyDown(nav('keyboard'), { key: 'Tab', ctrlKey: true, shiftKey: true });
-    expect(shown()).toEqual(['canvas']);
+    // Any focusable control inside any panel makes the point; this one is in
+    // Appearance because the Canvas section has no control left to focus.
+    const field = screen.getByLabelText('out text size');
+    act(() => (field as HTMLElement).focus());
+    fireEvent.keyDown(field, { key: 'Tab', ctrlKey: true });
+    expect(shown()).toEqual(['layout']);
+    expect(document.activeElement).toBe(nav('layout'));
+    fireEvent.keyDown(nav('layout'), { key: 'Tab', ctrlKey: true, shiftKey: true });
+    expect(shown()).toEqual(['appearance']);
   });
 });
 

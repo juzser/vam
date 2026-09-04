@@ -16,7 +16,7 @@ import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import { buildKeySheet } from '../../src/renderer/keyboard/keysheet.js';
 import { LAYOUTS } from '../../src/renderer/prefs/panes.js';
-import { DEFAULT_FOCUS_SHARE, type Prefs } from '../../src/renderer/prefs/prefs.js';
+import type { Prefs } from '../../src/renderer/prefs/prefs.js';
 
 function session(id: string): Session {
   return {
@@ -170,20 +170,6 @@ describe('the theme section is the same state as the sidebar toggle', () => {
     // Stored as `system`, not resolved to a colour: the store has to be able to
     // tell "follow the OS" from "I picked dark and the OS happens to agree".
     expect(stored().theme).toBe('system');
-  });
-});
-
-describe('the focus zoom share is editable', () => {
-  it('starts at the stored value and writes what you set, clamped', () => {
-    render(<Canvas model={MODEL} />);
-    press(',');
-    // The stepper reads the percentage integer, not the 0..1 share: a
-    // spinbutton showing `0.45` is one nobody can use, and `45%` is what this
-    // surface already printed. The stored share is unchanged.
-    const stepper = screen.getByLabelText('focus zoom share') as HTMLInputElement;
-    expect(Number(stepper.value)).toBe(DEFAULT_FOCUS_SHARE * 100);
-    fireEvent.change(stepper, { target: { value: '90' } });
-    expect(stored().focusViewportShare).toBe(0.9);
   });
 });
 
