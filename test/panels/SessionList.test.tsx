@@ -763,7 +763,9 @@ describe('SessionList projects header', () => {
  * answer to "is this heading showing its controls" rather than two.
  */
 function heading(root: ParentNode, projectId: string) {
-  return root.querySelector(`[data-project-heading][data-project-id="${projectId}"]`) as HTMLElement;
+  return root.querySelector(
+    `[data-project-heading][data-project-id="${projectId}"]`,
+  ) as HTMLElement;
 }
 
 function pressKey(key: string, target: Element = document.body) {
@@ -831,9 +833,9 @@ describe('SessionList project controls', () => {
     // The other project is untouched.
     expect(container.querySelector('[data-session-row="b1"]')).not.toBeNull();
     expect(
-      heading(container, 'p1').querySelector('[data-project-collapse="p1"]')?.getAttribute(
-        'aria-expanded',
-      ),
+      heading(container, 'p1')
+        .querySelector('[data-project-collapse="p1"]')
+        ?.getAttribute('aria-expanded'),
     ).toBe('false');
   });
 
@@ -910,9 +912,7 @@ describe('SessionList project menu', () => {
     const { container } = mount(twoProjects());
     openMenu(container);
     act(() => {
-      (
-        container.querySelector('[data-project-menu-item="collapse"]') as HTMLElement
-      ).click();
+      (container.querySelector('[data-project-menu-item="collapse"]') as HTMLElement).click();
     });
     expect(container.querySelector('[data-session-row="a1"]')).toBeNull();
     expect(container.querySelector('[data-project-menu-panel]')).toBeNull();
