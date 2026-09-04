@@ -330,6 +330,14 @@ describe('normalizeKey — the digit row is a position, not a character', () => 
     expect(normalizeKey({ key: '1', code: 'Digit1' })).toBe('1');
   });
 
+  it('spells Alt and Mod-Alt over the position too', () => {
+    // macOS Alt+1 prints `\u00a1`; the position is still Digit1.
+    expect(normalizeKey({ key: '\u00a1', code: 'Digit1', altKey: true })).toBe('Alt-1');
+    expect(normalizeKey({ key: '\u00a1', code: 'Digit1', altKey: true, metaKey: true })).toBe(
+      'Mod-Alt-1',
+    );
+  });
+
   it('falls back to the character when no code is reported', () => {
     expect(normalizeKey({ key: '1', metaKey: true })).toBe('Mod-1');
   });
