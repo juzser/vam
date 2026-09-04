@@ -1454,7 +1454,10 @@ describe('the live line stands beside the answer, not instead of it', () => {
 
   it('leaves no live line on an older turn of a running session', () => {
     draw({
-      entry: { project: PROJECT, session: { ...SESSION, status: 'running', activity: 'editing transcript.ts' } },
+      entry: {
+        project: PROJECT,
+        session: { ...SESSION, status: 'running', activity: 'editing transcript.ts' },
+      },
       decision: DECISIONS[2] as Decision,
     });
     expect(all('[data-out-live]')).toHaveLength(0);
