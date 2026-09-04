@@ -36,7 +36,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import type { Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
-import { STATUS_FILTERS } from '../domain/session-filter.js';
+import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filter.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { OverlayScroll } from './OverlayScroll.js';
 
@@ -64,6 +64,28 @@ function splitBranch(branch: string): { head: string; tail: string } {
     ? { head: '', tail: branch }
     : { head: branch.slice(0, cut + 1), tail: branch.slice(cut + 1) };
 }
+
+/**
+ * How wide the filter popover opens when the sidebar has room for it.
+ *
+ * It replaces a fixed 212px, which was cramped enough that the two origin
+ * rows truncated their own labels — and which, at the 200px sidebar minimum,
+ * hung 36px off the LEFT EDGE OF THE WINDOW: the popover is anchored
+ * `right-0` inside `data-projects-header`, whose padding box ends 12px short
+ * of the sidebar's right edge, and the sidebar starts at the window's.
+ *
+ * So this is a ceiling, not a width. The floor is the column itself: the
+ * drawn width is `min(this, sidebar - 24)` — a 12px gutter on each side —
+ * which keeps the popover inside the sidebar, and therefore inside the
+ * window, at every width the resizer allows (`SIDEBAR_MIN` = 200 gives 176,
+ * the default 264 gives 240, and from 312 up it opens at its full 288).
+ * Growing past the column would put it over the canvas, which is not a wider
+ * popover so much as a popover somewhere else.
+ */
+export const FILTER_POPOVER_WIDTH = 288;
+
+/** `px-3` on each side of `data-projects-header`, mirrored as a gutter. */
+const FILTER_POPOVER_GUTTER = 24;
 
 export type SessionListProps = {
   readonly entries: readonly SessionEntry[];
@@ -364,10 +386,26 @@ export function SessionList(props: SessionListProps) {
    * the set of things the popover can turn on, so the badge can never drift
    * from what the popover shows.
    */
+  const applied = (key: keyof SessionFilters) =>
+    originFilters[key] && !DEFAULT_SESSION_FILTERS[key] ? 1 : 0;
   const activeFilters =
-    (statusFilter === 'all' ? 0 : 1) +
-    (originFilters.hideAgentStarted ? 1 : 0) +
-    (originFilters.onlyPrompted ? 1 : 0);
+    (statusFilter === 'all' ? 0 : 1) + applied('hideAgentStarted') + applied('onlyPrompted');
+
+  /**
+   * Whether ANY rule is narrowing the list, default or not — what the toggle's
+   * own border says.
+   *
+   * The badge and the border answer two different questions on purpose. The
+   * badge counts rules the OPERATOR applied, so a default never shows up as a
+   * number they did not put there. The border reports the state of the list,
+   * so a default that is holding rows back still lights the control that opens
+   * the popover explaining it: hidden, uncounted AND unmarked would leave a
+   * hidden session indistinguishable from one that does not exist.
+   */
+  const narrowing =
+    activeFilters > 0 || originFilters.hideAgentStarted || originFilters.onlyPrompted;
+
+  const popoverWidth = Math.min(FILTER_POPOVER_WIDTH, width - FILTER_POPOVER_GUTTER);
 
   // `entries` arrives project-major (see the file doc comment), so one pass
   // collapsing consecutive same-project runs is a grouping, not a sort.
@@ -510,7 +548,7 @@ export function SessionList(props: SessionListProps) {
           onClick={() => onFilterMenuToggle(!filterMenuOpen)}
           className={[
             'relative flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border bg-panel',
-            filterMenuOpen || activeFilters > 0
+            filterMenuOpen || narrowing
               ? 'border-line-loud text-ink'
               : 'border-line text-ink-faint hover:border-line-strong',
           ].join(' ')}
@@ -518,11 +556,16 @@ export function SessionList(props: SessionListProps) {
           <Filter size={13} strokeWidth={1.6} />
           {/* Absent at zero, not a zero. A badge reading "0" is a badge
               claiming something is narrowed when nothing is, and the count
-              this draws is the count of rules actually excluding sessions. */}
+              this draws is the count of rules actually excluding sessions.
+              A DEFAULT is not one of them: it is not a rule the operator
+              applied, so a fresh install would open showing a "1" for a
+              choice nobody made. The border above still reports it, and the
+              popover names it. The colour is `filter-badge`, which carries
+              waiting's amber under its own name — see `styles.css`. */}
           {activeFilters > 0 && (
             <span
               data-filter-badge
-              className="-top-1 -right-1 absolute flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-line-loudest px-[3px] font-mono text-[8.5px] text-ink"
+              className="-top-1 -right-1 absolute flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-filter-badge px-[3px] font-mono text-[8.5px] text-canvas"
             >
               {activeFilters}
             </span>
@@ -535,7 +578,8 @@ export function SessionList(props: SessionListProps) {
             data-filter-menu
             role="dialog"
             aria-label="session filters"
-            className="absolute top-[36px] right-0 z-20 flex w-[212px] flex-col gap-2 rounded-[9px] border border-line-strong bg-panel p-2.5 shadow-lg"
+            style={{ width: popoverWidth }}
+            className="absolute top-[36px] right-0 z-20 flex flex-col gap-2 rounded-[9px] border border-line-strong bg-panel p-2.5 shadow-lg"
           >
             <span className="font-mono text-[9.5px] text-ink-faint uppercase tracking-[0.12em]">
               Status
@@ -579,15 +623,17 @@ export function SessionList(props: SessionListProps) {
                   'Hide agent/test sessions',
                   originFilters.hideAgentStarted,
                   hiddenCounts.agent,
+                  DEFAULT_SESSION_FILTERS.hideAgentStarted,
                 ],
                 [
                   'prompted',
                   'Only ones I have prompted',
                   originFilters.onlyPrompted,
                   hiddenCounts.unprompted,
+                  DEFAULT_SESSION_FILTERS.onlyPrompted,
                 ],
               ] as const
-            ).map(([key, label, on, hides]) => (
+            ).map(([key, label, on, hides, byDefault]) => (
               <button
                 key={key}
                 type="button"
@@ -614,6 +660,19 @@ export function SessionList(props: SessionListProps) {
                   ].join(' ')}
                 />
                 <span className="min-w-0 flex-1 truncate">{label}</span>
+                {/* The one place the operator can learn that a rule they
+                    never chose is in force — the badge deliberately does not
+                    count it. Only while it is ON and still at its shipped
+                    value: once they turn it off and back on it is their
+                    choice, and this stops claiming otherwise. */}
+                {on && byDefault && (
+                  <span
+                    data-filter-default
+                    className="flex-none rounded-full border border-line px-1.5 font-mono text-[8.5px] text-ink-faint uppercase tracking-[0.08em]"
+                  >
+                    default
+                  </span>
+                )}
                 <span className="flex-none font-mono text-[9.5px] text-ink-faint">−{hides}</span>
               </button>
             ))}

@@ -11,11 +11,22 @@
  * values, which is what these tests hold.
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Decision, Project, Session, SourceId } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
-import { SessionList, type SessionListProps } from '../../src/renderer/panels/SessionList.js';
+import {
+  DEFAULT_SESSION_FILTERS,
+  type SessionFilters,
+} from '../../src/renderer/domain/session-filter.js';
+import {
+  FILTER_POPOVER_WIDTH,
+  SessionList,
+  type SessionListProps,
+} from '../../src/renderer/panels/SessionList.js';
+import { SIDEBAR_MIN } from '../../src/renderer/prefs/panes.js';
 
 function decision(id: string, output: string | null): Decision {
   return { id, label: `label-${id}`, input: 'input', output, commands: [] };
@@ -736,23 +747,149 @@ describe('SessionList projects header', () => {
     );
   });
 
-  it('badges how many filters are narrowing the list, and nothing at zero', () => {
+  it('badges how many filters the OPERATOR applied, and nothing at zero', () => {
     const { container } = mount(twoProjects());
     expect(container.querySelector('[data-filter-badge]')).toBeNull();
     cleanup();
 
+    // `hideAgentStarted` is ON here and still not counted: it is on at its
+    // shipped default, and a default is not a rule the operator applied. Only
+    // the status choice is theirs, so the badge reads 1.
     const { container: two } = mountWith(twoProjects(), {
       statusFilter: 'waiting',
       originFilters: { hideAgentStarted: true, onlyPrompted: false },
     });
-    expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('2');
+    expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('1');
     cleanup();
 
     const { container: three } = mountWith(twoProjects(), {
       statusFilter: 'done',
       originFilters: { hideAgentStarted: true, onlyPrompted: true },
     });
-    expect(three.querySelector('[data-filter-badge]')?.textContent).toBe('3');
+    expect(three.querySelector('[data-filter-badge]')?.textContent).toBe('2');
+  });
+});
+
+/**
+ * The filter popover's own geometry, its badge colour, and the one rule the
+ * badge must not count.
+ */
+describe('SessionList filter popover', () => {
+  const menu = (root: ParentNode) => root.querySelector('[data-filter-menu]') as HTMLElement;
+
+  it('opens at its roomy width, and never wider than the sidebar holding it', () => {
+    // The popover is anchored inside `data-projects-header`, whose padding box
+    // is the sidebar minus `px-3` on each side, so a 12px gutter on the free
+    // side bounds it at `width - 24`.
+    const { container } = mountWith(twoProjects(), { filterMenuOpen: true, width: 480 });
+    expect(menu(container).style.width).toBe(`${FILTER_POPOVER_WIDTH}px`);
+    cleanup();
+
+    const { container: narrow } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      width: SIDEBAR_MIN,
+    });
+    const drawn = Number.parseInt(menu(narrow).style.width, 10);
+    expect(drawn).toBe(SIDEBAR_MIN - 24);
+    // Inside the sidebar, therefore inside the window: the sidebar starts at
+    // the window's left edge.
+    expect(drawn + 24).toBeLessThanOrEqual(SIDEBAR_MIN);
+    expect(drawn).toBeLessThan(FILTER_POPOVER_WIDTH);
+    cleanup();
+
+    // Roomier than the 212px it replaced, at the default sidebar width.
+    const { container: normal } = mountWith(twoProjects(), { filterMenuOpen: true, width: 264 });
+    expect(Number.parseInt(menu(normal).style.width, 10)).toBeGreaterThan(212);
+  });
+
+  it('draws the badge in the filter badge yellow, not in a status colour', () => {
+    const { container } = mountWith(twoProjects(), { statusFilter: 'waiting' });
+    const badge = container.querySelector('[data-filter-badge]') as HTMLElement;
+    expect(badge.className).toContain('bg-filter-badge');
+    expect(badge.className).not.toContain('bg-waiting');
+  });
+
+  it('leaves the default hide-agent rule out of the badge, and counts applied rules', () => {
+    // The default is not a rule the operator applied, so it is not one of the
+    // rules the badge counts -- even though it does narrow the list.
+    const { container } = mountWith(twoProjects(), {
+      originFilters: DEFAULT_SESSION_FILTERS,
+      hiddenCounts: { agent: 3, unprompted: 0 },
+    });
+    expect(container.querySelector('[data-filter-badge]')).toBeNull();
+    cleanup();
+
+    // An operator-applied rule does count, and the default still does not.
+    const { container: one } = mountWith(twoProjects(), {
+      statusFilter: 'waiting',
+      originFilters: DEFAULT_SESSION_FILTERS,
+    });
+    expect(one.querySelector('[data-filter-badge]')?.textContent).toBe('1');
+    cleanup();
+
+    const { container: two } = mountWith(twoProjects(), {
+      statusFilter: 'waiting',
+      originFilters: { hideAgentStarted: true, onlyPrompted: true },
+    });
+    expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('2');
+  });
+
+  it('says in the popover that the default is in force, with what it hides', () => {
+    // Uncounted must not mean invisible: a hidden session that is neither
+    // shown nor counted is indistinguishable from one that does not exist.
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: DEFAULT_SESSION_FILTERS,
+      hiddenCounts: { agent: 3, unprompted: 0 },
+    });
+    const row = container.querySelector('[data-origin-toggle="agent"]') as HTMLElement;
+    expect(row.getAttribute('aria-pressed')).toBe('true');
+    expect(row.querySelector('[data-filter-default]')?.textContent).toBe('default');
+    expect(row.textContent).toContain('3');
+    // And it is still the control that turns the default off.
+    const seen: SessionFilters[] = [];
+    cleanup();
+    const { container: live } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: DEFAULT_SESSION_FILTERS,
+      onOriginFilters: (next) => seen.push(next),
+    });
+    act(() => {
+      fireEvent.click(live.querySelector('[data-origin-toggle="agent"]') as Element);
+    });
+    expect(seen).toEqual([{ hideAgentStarted: false, onlyPrompted: false }]);
+  });
+
+  it('drops the default tag from a rule the operator applied', () => {
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: { hideAgentStarted: true, onlyPrompted: true },
+    });
+    const prompted = container.querySelector('[data-origin-toggle="prompted"]') as HTMLElement;
+    expect(prompted.querySelector('[data-filter-default]')).toBeNull();
+  });
+});
+
+describe('the filter badge yellow, in styles.css', () => {
+  const CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
+  const block = (selector: string) => {
+    const start = CSS.indexOf(`${selector} {`);
+    expect(start, `no rule for ${selector}`).toBeGreaterThanOrEqual(0);
+    return CSS.slice(start, CSS.indexOf('\n}', start));
+  };
+  const read = (b: string, name: string) =>
+    b.match(new RegExp(`--${name}:\\s*([^;]+);`))?.[1]?.trim();
+
+  it('carries waiting’s value under its own name, in both themes', () => {
+    for (const selector of [':root', 'html.light']) {
+      const b = block(selector);
+      expect(read(b, 'vam-filter-badge'), `no badge yellow in ${selector}`).toBeDefined();
+      expect(read(b, 'vam-filter-badge')).toBe(read(b, 'vam-waiting'));
+    }
+    // Its own name, mapped as its own colour -- the `--vam-cursor-ring`
+    // precedent. Borrowing `--color-waiting` for decoration is what would
+    // stop the status amber meaning "this session is waiting".
+    expect(CSS).toMatch(/--color-filter-badge:\s*var\(--vam-filter-badge\);/);
   });
 });
 
