@@ -73,6 +73,23 @@ export const isVamSession = (name: string): boolean => name.startsWith(VAM_SESSI
 const target = (name: string): string => `=${name}`;
 
 /**
+ * The same exactness, for the verbs that want a TARGET-PANE rather than a
+ * target-session -- `capture-pane` and `send-keys`.
+ *
+ * The trailing `:` is not decoration. A target-pane is `session:window.pane`,
+ * and without the colon tmux does not read the string as naming a session at
+ * all: measured against a real tmux, `capture-pane -t '=vam-x'` answers
+ * `can't find pane: =vam-x` and exits 1, which the failure classifier then
+ * reports as a session that no longer exists. Both halves of the string
+ * matter, and for opposite reasons -- the `=` keeps tmux from resolving the
+ * name by prefix and fnmatch onto a session vam did not mean, and the `:`
+ * keeps tmux reading the name as a session. Omitting the window and pane
+ * leaves tmux to use the session's current ones, which for a vam session is
+ * the only pane it has.
+ */
+const paneTarget = (name: string): string => `=${name}:`;
+
+/**
  * Create a DETACHED session: vam is not a terminal and has nothing to attach
  * to. The command is SPREAD across the trailing elements, so tmux execs it
  * directly instead of running it through `sh -c` (see the module note).
@@ -119,12 +136,12 @@ export function hasSessionArgv(name: string): readonly string[] {
  * and half of it would be worse than none.
  */
 export function capturePaneArgv(name: string): readonly string[] {
-  return ['capture-pane', '-p', '-t', target(name)];
+  return ['capture-pane', '-p', '-t', paneTarget(name)];
 }
 
 /** Type text and press Return. The keys are one element. */
 export function sendKeysArgv(name: string, keys: string): readonly string[] {
-  return ['send-keys', '-t', target(name), keys, 'Enter'];
+  return ['send-keys', '-t', paneTarget(name), keys, 'Enter'];
 }
 
 /**

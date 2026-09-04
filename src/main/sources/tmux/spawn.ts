@@ -18,20 +18,21 @@
  * says of its own: a test that ran these would create and kill sessions on the
  * operator's real tmux server. So the runner is a parameter.
  *
- * WHAT IS ACTUALLY CALLED IN PRODUCTION, TODAY. Only `createVamSession`, from
- * `claude-code/create-session.ts`. `listVamSessions` and `readPane` -- and the
- * `has-session`, `capture-pane` and `send-keys` argv builders behind them --
- * are the Terminal tab's IPC surface, written ahead of the tab and reachable
- * from nothing but vitest. They are kept because the Terminal tab is the next
- * thing to be built on them and their shape is the reviewed part; they are NOT
- * kept because anything calls them.
+ * WHAT IS ACTUALLY CALLED IN PRODUCTION. `createVamSession`, from
+ * `claude-code/create-session.ts`, and -- since the Terminal tab was built --
+ * `listVamSessions` and `readPane`, from `main/terminal/pane.ts`. The
+ * `has-session` builder is still called by nothing.
  *
- * That has one consequence worth stating outright, because it is the rule this
- * module exists to keep: the no-server-to-EMPTY-LIST mapping in
- * `listVamSessions` -- the care that stops "vam could not ask" being shown as
- * "you have no sessions" -- does not execute in production yet. It is asserted
- * by test only. Whoever wires the Terminal tab is the first person to run it,
- * and is the one who has to confirm it behaves on a real server.
+ * The note that stood here asked whoever wired the tab to confirm the read
+ * path on a real server, because the no-server-to-EMPTY-LIST mapping in
+ * `listVamSessions` was asserted by test only. That was done, against a real
+ * tmux on a private `-L` socket, and it found a defect no unit test could
+ * have: `capture-pane -t '=name'` answers `can't find pane` and exits 1,
+ * because `=name` is a target-SESSION and those verbs want a target-PANE
+ * (`tmux/argv.ts` now explains the `:` that fixes it). Both halves were being
+ * reported as `no-such-session` -- a working session drawn as one that had
+ * ended. The mapping itself behaves: no server resolves to the empty list, a
+ * live vam session to its screen.
  */
 
 import { execFile } from 'node:child_process';

@@ -88,11 +88,23 @@ describe('tmux argv', () => {
 
   it('targets exactly, never by prefix, for every verb that names a session', () => {
     expect(hasSessionArgv('vam-a1b2c3')).toEqual(['has-session', '-t', '=vam-a1b2c3']);
-    expect(capturePaneArgv('vam-a1b2c3')).toEqual(['capture-pane', '-p', '-t', '=vam-a1b2c3']);
+  });
+
+  it('names a PANE, not a bare session, wherever tmux wants a target-pane', () => {
+    // Measured against a real tmux (on a private `-L` socket, never the
+    // operator's server): `capture-pane -t '=vam-a1b2c3'` answers
+    // `can't find pane: =vam-a1b2c3` and exits 1, and `send-keys` does the
+    // same. `=name` is how a TARGET-SESSION is written exactly; a target-pane
+    // is `session:window.pane`, so the session part needs its `:` before tmux
+    // will read it as a session at all. Dropping the `=` would work and is not
+    // the fix: tmux would then resolve the name by prefix and then by fnmatch,
+    // and `send-keys` reaching a session other than the one vam meant is the
+    // thing the exactness is there to prevent.
+    expect(capturePaneArgv('vam-a1b2c3')).toEqual(['capture-pane', '-p', '-t', '=vam-a1b2c3:']);
     expect(sendKeysArgv('vam-a1b2c3', 'hello')).toEqual([
       'send-keys',
       '-t',
-      '=vam-a1b2c3',
+      '=vam-a1b2c3:',
       'hello',
       'Enter',
     ]);

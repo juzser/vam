@@ -78,7 +78,7 @@ describe('reading the pane', () => {
     // Exact targeting: `-t vam-atlas-a1` would reach `vam-atlas-a1b2c3` by
     // tmux's own prefix resolution, and on send-keys that is someone else's
     // session.
-    expect(argvs[1]).toEqual(['capture-pane', '-p', '-t', '=vam-atlas-a1b2c3']);
+    expect(argvs[1]).toEqual(['capture-pane', '-p', '-t', '=vam-atlas-a1b2c3:']);
   });
 
   it('reports no session of vam-s, and captures nothing, when nothing matches', async () => {
