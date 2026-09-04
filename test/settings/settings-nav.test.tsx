@@ -15,8 +15,8 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_PREFS, type Prefs } from '../../src/renderer/prefs/prefs.js';
-import { SECTIONS } from '../../src/renderer/settings/sections.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
+import { SECTIONS } from '../../src/renderer/settings/sections.js';
 
 afterEach(cleanup);
 
@@ -114,6 +114,42 @@ describe('the nav is steerable without a mouse', () => {
     expect(document.activeElement).toBe(nav('keyboard'));
     fireEvent.keyDown(nav('keyboard'), { key: 'Tab', ctrlKey: true, shiftKey: true });
     expect(shown()).toEqual(['canvas']);
+  });
+});
+
+describe('below md the same nav is a segmented strip', () => {
+  /** One tablist reaches the accessibility tree, never two: Tailwind's `hidden`
+   *  leaves both markups in the document, and two tablists over one state
+   *  announce every section twice. */
+  it('renders one nav, and it is the strip when the window is narrow', () => {
+    const wide = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (media: string) => ({
+        media,
+        matches: false,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }),
+    });
+    try {
+      open();
+      expect(document.querySelectorAll('[role="tablist"]').length).toBe(1);
+      expect(document.querySelectorAll('[data-settings-nav-item]').length).toBe(SECTIONS.length);
+      expect(document.querySelector('[data-settings-nav]')?.getAttribute('aria-orientation')).toBe(
+        'horizontal',
+      );
+      // Still one nav state, not two components with two: the strip steers the
+      // same sections with the same keys.
+      fireEvent.keyDown(nav('appearance'), { key: 'ArrowRight' });
+      expect(shown()).toEqual(['layout']);
+    } finally {
+      if (wide === undefined) {
+        Reflect.deleteProperty(window, 'matchMedia');
+      } else {
+        Object.defineProperty(window, 'matchMedia', wide);
+      }
+    }
   });
 });
 

@@ -13,9 +13,9 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { columnOrder, LAYOUTS } from '../../src/renderer/prefs/panes.js';
-import { EMPTY_PREFS, setLayout, type Prefs } from '../../src/renderer/prefs/prefs.js';
-import { LAYOUT_CHOICES, LAYOUT_DESCRIPTION } from '../../src/renderer/settings/sections.js';
+import { EMPTY_PREFS, type Prefs, setLayout } from '../../src/renderer/prefs/prefs.js';
 import { currentLayout, SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
+import { LAYOUT_CHOICES, LAYOUT_DESCRIPTION } from '../../src/renderer/settings/sections.js';
 
 afterEach(cleanup);
 
@@ -27,6 +27,15 @@ function open(prefs: Prefs = EMPTY_PREFS) {
 }
 const onClose = () => {};
 
+/** The prefs one `onChange` call carried — a helper, because an optional chain
+ *  cast to `Prefs` reads as a value that might not be there and the assertion
+ *  that it IS there is half the point. */
+function changed(onChange: { mock: { calls: unknown[][] } }, index = 0): Prefs {
+  const call = onChange.mock.calls[index];
+  expect(call, `onChange was not called ${index + 1} time(s)`).toBeDefined();
+  return (call ?? [])[0] as Prefs;
+}
+
 const tile = (choice: string) =>
   document.querySelector<HTMLElement>(`[data-layout-option="${choice}"]`) as HTMLElement;
 /** The column blocks the tile's diagram draws, in the order they are drawn. */
@@ -36,9 +45,8 @@ const drawn = (choice: string) =>
   );
 const at = (choice: string, column: string) =>
   Number(
-    tile(choice)
-      .querySelector(`[data-diagram-column="${column}"]`)
-      ?.getAttribute('x') ?? Number.NaN,
+    tile(choice).querySelector(`[data-diagram-column="${column}"]`)?.getAttribute('x') ??
+      Number.NaN,
   );
 
 describe('the picker is a radiogroup of image choices', () => {
@@ -87,8 +95,7 @@ describe('picking a tile really applies the layout', () => {
       const start: Prefs = setLayout(EMPTY_PREFS, 'responseOnly');
       const { onChange } = open(choice === 'responseOnly' ? EMPTY_PREFS : start);
       fireEvent.click(tile(choice));
-      const next = onChange.mock.calls[0]?.[0] as Prefs;
-      expect(next, 'the pick wrote nothing').toBeDefined();
+      const next = changed(onChange);
       expect(currentLayout(next.paneVisibility)).toBe(choice);
       if (choice !== 'full') {
         expect(columnOrder(next.paneVisibility)).toEqual(columnOrder(LAYOUTS[choice]));
@@ -99,11 +106,11 @@ describe('picking a tile really applies the layout', () => {
   it('moves and selects with the arrows, wrapping', () => {
     const { onChange } = open();
     fireEvent.keyDown(tile('full'), { key: 'ArrowRight' });
-    expect((onChange.mock.calls[0]?.[0] as Prefs).paneVisibility).toEqual(
+    expect(changed(onChange, 0).paneVisibility).toEqual(
       setLayout(EMPTY_PREFS, 'focusResponse').paneVisibility,
     );
     fireEvent.keyDown(tile('full'), { key: 'ArrowLeft' });
-    expect((onChange.mock.calls[1]?.[0] as Prefs).paneVisibility).toEqual(
+    expect(changed(onChange, 1).paneVisibility).toEqual(
       setLayout(EMPTY_PREFS, 'responseOnly').paneVisibility,
     );
   });
@@ -111,7 +118,7 @@ describe('picking a tile really applies the layout', () => {
   it('selects on Space, the explicit path a screen-reader user takes', () => {
     const { onChange } = open();
     fireEvent.keyDown(tile('noCanvas'), { key: ' ' });
-    expect(currentLayout((onChange.mock.calls[0]?.[0] as Prefs).paneVisibility)).toBe('noCanvas');
+    expect(currentLayout(changed(onChange).paneVisibility)).toBe('noCanvas');
   });
 });
 
