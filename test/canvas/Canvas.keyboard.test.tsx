@@ -1826,7 +1826,7 @@ describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
 /**
  * Ten sessions under one project, all `done`, so the status ranking cannot
  * reorder them and the sidebar prints exactly source order. Nine of anything
- * is the whole point of `Mod-Shift-9`, and MODEL's three cannot reach it.
+ * is the whole point of `Mod-9`, and MODEL's three cannot reach it.
  */
 const MANY: CanvasModel = {
   projects: [
@@ -1840,19 +1840,17 @@ const MANY: CanvasModel = {
 };
 
 /**
- * `Cmd+Shift+<n>` — the sidebar's positions, which is where they moved when
- * the tabs took the bare digit row (the operator's collision report).
+ * `Cmd+<n>` — the sidebar's positions, while the sidebar has the keyboard.
  *
- * Pressed as a real keydown carries them: on a US layout the browser shifts
- * the digit to `!`, `@`, `#`…, and only `event.code` says which POSITION was
- * struck. Passing the shifted character here is what makes these tests fail if
- * `normalizeKey` is ever simplified back to reading `event.key`.
+ * The pane fork itself lives in `Canvas.tab-chord.test.tsx`; what these pin is
+ * the sidebar half, which is the half that counts rows. Pressed with a
+ * `code`, because that is what a real keydown carries and what
+ * `normalizeKey` reads.
  */
-const SHIFTED = ['!', '@', '#', '$', '%', '^', '&', '*', '('] as const;
 const sessionAt = (n: number, extra: KeyboardEventInit = {}) =>
-  press(SHIFTED[n - 1] as string, { metaKey: true, shiftKey: true, code: `Digit${n}`, ...extra });
+  press(String(n), { metaKey: true, code: `Digit${n}`, ...extra });
 
-describe('Cmd-Shift-number jumps to a session in the sidebar', () => {
+describe('Cmd-number jumps to a session while the sidebar has the keyboard', () => {
   it('lands on the first row from wherever the cursor was', () => {
     render(<Canvas model={MODEL} />);
     press('j');
@@ -1865,7 +1863,7 @@ describe('Cmd-Shift-number jumps to a session in the sidebar', () => {
     render(<Canvas model={MODEL} />);
     // a1, a2 sit under alpha and b1 under beta; the third digit is the third
     // SESSION, not the third row of a list that counted its own headings.
-    press('#', { ctrlKey: true, shiftKey: true, code: 'Digit3' });
+    press('3', { ctrlKey: true, code: 'Digit3' });
     expect(focused()).toBe('beta/b1');
   });
 
@@ -1907,16 +1905,17 @@ describe('Cmd-Shift-number jumps to a session in the sidebar', () => {
     // REVERSED, deliberately. The window listener used to step aside for every
     // keystroke aimed at an INPUT or a TEXTAREA, which killed Cmd-chords
     // exactly where an operator's hands are. A Cmd/Ctrl chord is not text
-    // entry on any layout, so the box has no claim on it — the rule that lets
-    // `Mod-<digit>` reach the tab bar from the prompt box is the same rule
-    // here, and one rule is what keeps it predictable. What the box does keep
-    // is everything unmodified, including the draft already typed.
+    // entry on any layout, so the box has no claim on it. What the box does
+    // keep is everything unmodified, including the draft already typed.
+    //
+    // `i` composes without moving the KEYBOARD out of the list — `I` is what
+    // does that — so the digit is still counting sessions here.
     render(<Canvas model={MODEL} />);
     press('j');
     press('i'); // the composer, aimed at alpha/a2
     const box = promptInput() as HTMLTextAreaElement;
     typeInto(box, 'half a prompt');
-    keyOn(box, '!', { metaKey: true, shiftKey: true, code: 'Digit1' });
+    keyOn(box, '1', { metaKey: true, code: 'Digit1' });
     expect(focused()).toBe('alpha/a1');
     expect(promptInput()?.value).toBe('half a prompt');
   });
@@ -1924,10 +1923,9 @@ describe('Cmd-Shift-number jumps to a session in the sidebar', () => {
   it('consumes the event, so the host does not also act on it', () => {
     render(<Canvas model={MODEL} />);
     const event = new KeyboardEvent('keydown', {
-      key: '@',
+      key: '2',
       code: 'Digit2',
       metaKey: true,
-      shiftKey: true,
       bubbles: true,
       cancelable: true,
     });
@@ -1944,8 +1942,8 @@ describe('the grammar hint in the footer', () => {
     render(<Canvas model={MODEL} />);
     // The operator asked for one cell at the right end. The digit jump did
     // not become invisible with it: the `?` sheet is generated from
-    // BINDING_TABLES, so `Mod-Shift-1..9` is named there, and the bar now
-    // points at the sheet instead of paraphrasing it.
+    // BINDING_TABLES, so `Mod-1..9` is named there, and the bar now points
+    // at the sheet instead of paraphrasing it.
     const bar = document.querySelector('[data-status-bar]')?.textContent ?? '';
     expect(bar).not.toMatch(/\^1-9/);
     expect(bar).toMatch(/\?/);

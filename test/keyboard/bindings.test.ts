@@ -50,7 +50,7 @@ describe('the default catalogue', () => {
     const ids = defaultBindings().map((b) => b.id);
     expect(ids).toContain('move:left');
     expect(ids).toContain('move:right');
-    expect(ids).toContain('sessionAt:0');
+    expect(ids).toContain('position:1');
   });
 
   it('folds an action bound twice by default into one entry with two chords', () => {

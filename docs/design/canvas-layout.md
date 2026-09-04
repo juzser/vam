@@ -168,31 +168,52 @@ No real modes. A handful of vim-style chords plus a command palette.
 | `H` | leaves the action pane, back to the session list |
 | `gr` | clears every pinned position, returns the canvas to auto-layout |
 | `o` `Mod-n` | starts a session — the vim gesture, and the chord every application spells "new" |
-| `Mod-1` … `Mod-4` | shows one of the detail pane's four tabs |
-| `Mod-Shift-1` … `Mod-Shift-8` | jumps to the session at that position in the sidebar |
-| `Mod-Shift-9` | jumps to the LAST session, whatever the count |
+| `Mod-1` … `Mod-9` | a **position**, in whichever pane has the keyboard: a session in the sidebar, a tab in the response pane (`Mod-9` = the LAST session) |
 | `1` … `9` (in an open question) | marks the option beside that number |
 
 `hjkl` must be computed from real coordinates at press time, **not** from a
 fixed index — that is the condition that lets drag-and-drop and keyboard
 navigation coexist.
 
-**The digit row, and which family holds the bare `Mod-<digit>`.** It shipped
-the other way round — sessions on `Mod-1..9`, tabs pushed onto
-`Mod-Shift-1..4` because the plain row was taken — and the operator reported
-that as a collision: `Cmd+number` is the tab gesture in every browser and
-editor, so reaching for a tab moved the cursor in the sidebar. The tabs hold
-the bare row. There are exactly four of them, they are the same four in every
-session and always on screen, so the digit is a label read off the bar;
-sessions are many, they reorder, and past the eighth the number is not
-reachable at all, so the position you have to count is the one that can afford
-the extra modifier. `Mod-5`..`Mod-9` and `Mod-0` are unbound.
+**The digit row means a position, in whatever the keyboard is pointed at.**
+That is the rule; the table above is only today's reading of it. Two earlier
+arrangements enumerated meanings instead — sessions on the bare row with tabs
+under Shift, then the reverse — and both were wrong the same way: a digit that
+means one fixed thing sends half an operator's presses to the pane they are
+not looking at. `Cmd+2` now switches session when the cursor is in the sidebar
+and shows the PRs tab when it is in the response pane, off `pane` in
+`Canvas.tsx` — the same state the status-bar mode cell reads, deliberately not
+a second notion of where focus is.
 
-Both families are spelled from `event.code`, not from the character: under
-Shift a digit arrives as `!`, and on a layout whose digit row is shifted
-(AZERTY) an unshifted `Cmd+1` arrives as `&`. Reading the position is what
-keeps either family alive there, and it is not an implementation detail to
-simplify away.
+Consequences worth stating:
+
+- **The focus indicator is load-bearing.** Until now `pane` only changed what
+  the arrow keys did. It now changes what `Cmd+1` does, so which pane holds
+  the keyboard has to be visible without being hunted for.
+- **`Mod-5`..`Mod-9` in the response pane refuse out loud** (`only 4 tabs`)
+  rather than falling through to the sidebar. Falling through would move a
+  cursor in the pane the operator is not looking at, which is the defect the
+  rule exists to remove; silence would leave them pressing it again.
+- **Nothing is bound under Shift, and nothing can be.** macOS captures
+  `Cmd+Shift+3`, `4` and `5` for its screenshot commands before any Electron
+  window sees the keydown (`com.apple.symbolichotkeys`, entries 28-31 and 184,
+  modifier mask `0x120000`). Both earlier arrangements had two dead bindings
+  from the day they merged, and no test could have caught it: the OS never
+  delivers the event a test synthesises.
+- **The grammar stays pure.** `resolveChord` reports `{ kind: 'position',
+  digit }` and nothing else; `Canvas` maps it. Passing the pane into the
+  reducer would have worked too, and was rejected because it puts a React
+  state in the signature of the one layer that is exhaustively testable
+  without a DOM.
+
+Both readings are still spelled from `event.code`, not from the character: on a
+layout whose digit row is shifted (AZERTY) an unshifted `Cmd+1` arrives as `&`.
+Reading the position is what keeps the family alive there, and it is not an
+implementation detail to simplify away.
+
+The generated key sheet names both meanings in one row — `position 2 — session
+2 in the sidebar, tab 2 in the response pane` — because a sheet that said
+"session 2" would be wrong half the time.
 
 The option digits are BARE, and safe by scope rather than by luck: they are
 handled by the question listbox itself, so they can only fire while the

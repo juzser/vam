@@ -1,13 +1,16 @@
 // @vitest-environment happy-dom
 
 /**
- * `Mod-<digit>` picks the detail pane's tab, and `p` joins the grammar.
+ * `Mod-<digit>` is a position in whichever pane has the keyboard, and `p`
+ * joins the grammar.
  *
- * Both families are pressed here on purpose: the digit row means a POSITION
- * twice over — `Mod-1` a tab, `Mod-Shift-1` a session — and the failure mode
- * of that pair is one answering the other. They shipped the other way round
- * and the operator reported the collision: Cmd+number is the tab gesture
- * everywhere else, so the tabs took the bare row.
+ * There is one digit family now, and both of its meanings are pressed here on
+ * purpose: the failure mode of a context-dependent key is that the context is
+ * ignored. It took three arrangements to get here — sessions on the bare row
+ * with tabs under Shift, then the reverse — and both were wrong in the same
+ * way, plus a defect neither could survive: macOS captures `Cmd+Shift+3/4/5`
+ * for screenshots before any Electron window sees them, so a quarter of each
+ * arrangement was unreachable on the only platform vam ships to.
  *
  * `p` was real but ungoverned: hand-wired to its own window listener in
  * `SessionList.tsx`, it appeared in no key sheet and fired straight through an
@@ -44,6 +47,7 @@ const MODEL: CanvasModel = {
 };
 
 const focusedTitle = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
+const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
 const selectedTab = () =>
   document.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('data-tab') ?? null;
 const sheet = () => document.querySelector('[data-key-sheet]');
@@ -62,18 +66,16 @@ function press(key: string, modifiers: KeyboardEventInit = {}, target?: HTMLElem
   });
 }
 
-/** `Cmd+<n>` — the tab, spelled the way a real keyboard reports it. */
-function tabChord(n: number, target?: HTMLElement) {
+/** `Cmd+<n>`, spelled the way a real keyboard reports it. ONE chord now: what
+ *  it counts depends on which pane has the keyboard, which is the subject of
+ *  the tests below. */
+function digitChord(n: number, target?: HTMLElement) {
   press(String(n), { metaKey: true, code: `Digit${n}` }, target);
 }
 
-/** `Cmd+Shift+<n>` — the session jump that shares the digit row. On a US
- *  layout the browser hands us `!` for Shift+1, so the shifted characters are
- *  what a real keydown carries; the POSITION is in `code`. */
-const SHIFTED = ['!', '@', '#', '$', '%', '^', '&', '*', '('] as const;
-function sessionChord(n: number) {
-  press(SHIFTED[n - 1] as string, { metaKey: true, shiftKey: true, code: `Digit${n}` });
-}
+/** Into the response pane and back, the way an operator gets there. */
+const intoResponsePane = () => press('I');
+const backToList = () => press('H');
 
 /** A focused session, which is what makes the detail pane draw its tabs. */
 function mountFocused() {
@@ -115,32 +117,68 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe('Mod-<digit> switches the detail pane tab', () => {
-  it('selects the tab at that position', () => {
-    mountFocused();
-    expect(selectedTab()).toBe('response');
-    tabChord(4);
-    expect(selectedTab()).toBe('agents');
-    tabChord(2);
-    expect(selectedTab()).toBe('prs');
-    tabChord(1);
-    expect(selectedTab()).toBe('response');
-  });
-
-  it('leaves Mod-Shift-<digit> jumping to a session', () => {
+describe('Mod-<digit> is a position in whatever pane has the keyboard', () => {
+  it('switches SESSION while the cursor is in the sidebar', () => {
     mountFocused();
     expect(focusedTitle()).toBe('a1');
-    sessionChord(2);
+    digitChord(2);
     expect(focusedTitle()).toBe('a2');
     // And the tab it shares a digit with did not move.
     expect(selectedTab()).toBe('response');
   });
 
+  it('switches TAB once the keyboard is in the response pane', () => {
+    mountFocused();
+    intoResponsePane();
+    digitChord(4);
+    expect(selectedTab()).toBe('agents');
+    digitChord(2);
+    expect(selectedTab()).toBe('prs');
+    // The sidebar cursor stayed where it was: this press was not for it.
+    expect(focusedTitle()).toBe('a1');
+  });
+
+  it('goes back to sessions when the keyboard goes back to the list', () => {
+    mountFocused();
+    intoResponsePane();
+    digitChord(4);
+    expect(selectedTab()).toBe('agents');
+    backToList();
+    digitChord(2);
+    expect(focusedTitle()).toBe('a2');
+    // Still on the tab the operator chose — moving in the list is not a
+    // reason to reset the pane they were reading.
+    expect(selectedTab()).toBe('agents');
+  });
+
+  /**
+   * There are four tabs, and `Mod-5`..`Mod-9` are bound. In the response pane
+   * they refuse OUT LOUD rather than falling through to the sidebar: a digit
+   * that quietly moved the cursor in a pane the operator is not looking at is
+   * the exact defect this arrangement exists to fix, and silence would leave
+   * them pressing it again.
+   */
+  it('refuses a digit past the last tab, and does not fall through to sessions', () => {
+    mountFocused();
+    intoResponsePane();
+    digitChord(7);
+    expect(selectedTab()).toBe('response');
+    expect(focusedTitle()).toBe('a1');
+    expect(statusBar()).toContain('only 4 tabs');
+  });
+
+  it('the ninth is the LAST session while the sidebar has the keyboard', () => {
+    mountFocused();
+    digitChord(9);
+    expect(focusedTitle()).toBe('b1'); // three sessions, and 9 still lands
+  });
+
   it('fires with the prompt box focused, where the operator actually is', () => {
     const { container } = mountFocused();
+    intoResponsePane();
     const box = container.querySelector('[aria-label="prompt to session"]') as HTMLTextAreaElement;
     box.focus();
-    tabChord(4, box);
+    digitChord(4, box);
     expect(selectedTab()).toBe('agents');
   });
 
@@ -151,13 +189,15 @@ describe('Mod-<digit> switches the detail pane tab', () => {
     // `!` is what Shift+1 produces as text, and typing it must stay typing.
     press('!', { shiftKey: true, code: 'Digit1' }, box);
     expect(selectedTab()).toBe('response');
+    expect(focusedTitle()).toBe('a1');
   });
 
   it('does not fire while an overlay is open', () => {
     mountFocused();
     press('?', { shiftKey: true });
     expect(sheet()).not.toBeNull();
-    tabChord(4);
+    digitChord(2);
+    expect(focusedTitle()).toBe('a1');
     expect(selectedTab()).toBe('response');
   });
 });
@@ -179,33 +219,37 @@ describe('`p` is a binding like every other', () => {
   });
 });
 
-describe('the generated key sheet lists both', () => {
+describe('the generated key sheet tells the truth about the digits', () => {
   const rows = () => buildKeySheet().flatMap((group) => group.rows);
-  const keyFor = (label: string) =>
-    rows()
-      .filter((row) => row.label === label)
-      .map((row) => row.keys);
+  const keys = () => rows().map((row) => row.keys);
 
-  it('lists the tabs on the bare digits, by value', () => {
-    expect(keyFor('the response tab')).toEqual(['Mod-1']);
-    expect(keyFor('the prs tab')).toEqual(['Mod-2']);
-    expect(keyFor('the terminal tab')).toEqual(['Mod-3']);
-    expect(keyFor('the agents tab')).toEqual(['Mod-4']);
+  it('lists every bound digit, and only those', () => {
+    for (let digit = 1; digit <= 9; digit += 1) {
+      expect(keys(), `Mod-${digit}`).toContain(`Mod-${digit}`);
+    }
+    expect(keys()).not.toContain('Mod-0');
   });
 
-  it('lists the sessions on the shifted digits, by value', () => {
-    for (let position = 1; position <= 8; position += 1) {
-      expect(keyFor(`session ${position} in the sidebar`)).toEqual([`Mod-Shift-${position}`]);
+  it('names NO Mod-Shift digit — macOS owns three of them', () => {
+    for (let digit = 1; digit <= 9; digit += 1) {
+      expect(keys(), `Mod-Shift-${digit}`).not.toContain(`Mod-Shift-${digit}`);
     }
-    // `last` holds two keys, and the ninth shifted digit is the second.
-    expect(keyFor('last session')).toEqual(['G', 'Mod-Shift-9']);
   });
 
-  it('names no digit nothing is bound to', () => {
-    const keys = rows().map((row) => row.keys);
-    for (const digit of ['Mod-5', 'Mod-6', 'Mod-7', 'Mod-8', 'Mod-9', 'Mod-0']) {
-      expect(keys, digit).not.toContain(digit);
-    }
+  /**
+   * The row cannot say "session 1", because that is wrong every time the
+   * operator is in the response pane. It names BOTH, which is what the key
+   * actually does.
+   */
+  it('says a digit means a session or a tab, depending on the pane', () => {
+    const row = rows().find((candidate) => candidate.keys === 'Mod-2');
+    expect(row?.label).toContain('session 2');
+    expect(row?.label).toContain('tab 2');
+  });
+
+  it('says the ninth is the last session rather than a ninth one', () => {
+    const row = rows().find((candidate) => candidate.keys === 'Mod-9');
+    expect(row?.label).toContain('LAST');
   });
 
   it('lists `p`, which was bound and invisible', () => {

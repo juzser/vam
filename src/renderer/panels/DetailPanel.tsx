@@ -375,7 +375,7 @@ export type DetailPanelProps = {
    */
   readonly sending?: boolean;
   /**
-   * The tab `Mod-Shift-<digit>` has just asked for, or null when nothing has
+   * The tab `Mod-<digit>` has just asked for, or null when nothing has
    * been asked.
    *
    * A REQUEST, not the selection: the tab stays this pane's own state, so the
@@ -400,7 +400,10 @@ export type DetailPanelProps = {
  * label any more, so the `data-placeholder` branch that drew the inert ones is
  * gone with it.
  */
-const TABS = ['Response', 'PRs', 'Terminal', 'Agents'] as const;
+/** The tab bar, in order. Exported because `Mod-<digit>` counts POSITIONS in
+ *  it and the count has to come from the bar itself: a handler with its own
+ *  idea of how many tabs there are is a fifth digit that opens nothing. */
+export const TABS = ['Response', 'PRs', 'Terminal', 'Agents'] as const;
 
 /** Exported for the chord table alone, which names the tab its digit opens.
  *  A type-only import there, so nothing of this file reaches the grammar. */

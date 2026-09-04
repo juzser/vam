@@ -61,7 +61,7 @@ import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
 import { nextNode } from '../keyboard/spatial-nav.js';
-import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
+import { DetailPanel, type Tab as DetailTab, TABS } from '../panels/DetailPanel.js';
 import { IconPicker } from '../panels/IconPicker.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
@@ -652,7 +652,7 @@ function CanvasInner({
   /** The sidebar's filter popover — the ONE home for narrowing (SessionList). */
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   /**
-   * The two chords whose EFFECT belongs to a panel: `Mod-Shift-<digit>` picks
+   * The two chords whose EFFECT belongs to a panel: `Mod-<digit>` picks
    * a detail tab, `p` reveals a project. A fresh object per press, never the
    * state itself — the tab and the reveal stay where they are drawn and only
    * the ask travels, which keeps both keys in the chord table (so the sheet
@@ -1424,7 +1424,7 @@ function CanvasInner({
       const typing = target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName);
       // A Cmd/Ctrl chord is never text entry — no layout produces a character
       // from one — so a box that is capturing letters has no claim on it. That
-      // matters for exactly the case `Mod-Shift-<digit>` was added for: the
+      // matters for exactly the case the digit chords were added for: the
       // operator is in the prompt box, which is where the reason to look at
       // another tab comes from, so a shortcut dead there is dead. Unmodified,
       // everything still belongs to the box: the palette's filtering, the
@@ -1582,11 +1582,41 @@ function CanvasInner({
           }
           return;
         }
-        case 'sessionAt': {
+        case 'position': {
+          /**
+           * One digit, two meanings, and `pane` is what decides — the same
+           * state the status-bar mode cell reads, deliberately not a second
+           * notion of where focus is.
+           *
+           * In the response pane the digit is a TAB. Past the four that exist
+           * it says so and stops: falling through to the sidebar would move a
+           * cursor in a pane the operator is not looking at, which is the
+           * failure this whole change is about, and silence would leave them
+           * pressing it again. Refusing out loud is what the sidebar half
+           * below already does for an out-of-range row.
+           */
+          if (pane === 'action') {
+            if (!visible.detail) {
+              setStatus('the detail pane is hidden — z0 brings it back');
+              return;
+            }
+            const tab = TABS[action.digit - 1];
+            if (tab === undefined) {
+              setStatus(`only ${TABS.length} tabs`);
+              return;
+            }
+            setTabRequest({ tab });
+            return;
+          }
           // `entries` is what the sidebar prints — filter, status pills and
           // all — so the digits count the rows the operator can see. Counting
           // the whole model would land the cursor somewhere nobody is looking.
-          const target = entries[action.index];
+          //
+          // 9 is the LAST row whatever the count, the convention every browser
+          // tab bar taught, and far more use than a ninth position once the
+          // list outgrows nine.
+          const target =
+            action.digit === 9 ? entries[entries.length - 1] : entries[action.digit - 1];
           if (target === undefined) {
             // Refused out loud, and not clamped to the last row: a jump that
             // silently lands one short is worse than one that does not happen,
@@ -1702,16 +1732,6 @@ function CanvasInner({
           return;
         case 'settings':
           setSettingsOpen(true);
-          return;
-        case 'detailTab':
-          // Same guard as `I`: a pane that is not drawn cannot be asked to
-          // show a tab, and a keystroke that silently changed a hidden pane's
-          // state would surface later as a tab nobody chose.
-          if (!visible.detail) {
-            setStatus('the detail pane is hidden — z0 brings it back');
-            return;
-          }
-          setTabRequest({ tab: action.tab });
           return;
         case 'revealProject':
           if (focusedEntry === null) {
