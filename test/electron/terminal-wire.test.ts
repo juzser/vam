@@ -58,7 +58,7 @@ function wire(stdout: string, panes: ReadonlyMap<string, string>) {
 describe('the preload terminal bridge reaches the handlers it names', () => {
   it('carries a keystroke to the pane the ROW published, argument order and all', async () => {
     const { api, argvs } = wire(TWO, new Map([[ATLAS, 'vam-atlas-g7h8i9']]));
-    expect(await api.send(ATLAS, { kind: 'text', text: 'h' }, ATLAS)).toBe(true);
+    expect(await api.send(ATLAS, { kind: 'text', text: 'h' }, ATLAS)).toBe('sent');
     // The literal send, aimed at the SECOND session -- which is only
     // reachable if `rowId` survived the crossing. Dropping it leaves the
     // project alone to answer, and a project with two sessions cannot.
@@ -75,7 +75,7 @@ describe('the preload terminal bridge reaches the handlers it names', () => {
 
   it('sends without a row too, where the project alone can answer', async () => {
     const { api, argvs } = wire(`${ATLAS}\tvam-atlas-a1b2c3\n`, new Map());
-    expect(await api.send(ATLAS, { kind: 'text', text: 'h' })).toBe(true);
+    expect(await api.send(ATLAS, { kind: 'text', text: 'h' })).toBe('sent');
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', '-l', '--', 'h']);
   });
 
@@ -108,11 +108,11 @@ describe('the preload terminal bridge reaches the handlers it names', () => {
     expect(argvs[1]).toEqual(['capture-pane', '-p', '-t', '=vam-atlas-g7h8i9:']);
   });
 
-  it('answers false, having sent nothing, when the renderer asks with rubbish', async () => {
+  it('answers `unaimed`, having sent nothing, when the renderer asks with rubbish', async () => {
     const { api, argvs } = wire(TWO, new Map());
     // The preload does not validate; main does, and this is the path that
     // proves the renderer cannot reach tmux around it.
-    expect(await api.send(ATLAS, { kind: 'text', text: '' } as never, ATLAS)).toBe(false);
+    expect(await api.send(ATLAS, { kind: 'text', text: '' } as never, ATLAS)).toBe('unaimed');
     expect(argvs).toHaveLength(0);
   });
 });

@@ -23,8 +23,8 @@
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
-import type { PaneKey, PaneView } from '../../src/shared/terminal.js';
+import { REFRESH_MS, TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
+import type { PaneKey, PaneSendResult, PaneView } from '../../src/shared/terminal.js';
 
 afterEach(cleanup);
 
@@ -32,6 +32,7 @@ const q = <T extends Element>(selector: string) => document.querySelector<T>(sel
 const pane = () => q<HTMLElement>('[data-terminal-pane]');
 
 const ATLAS = 'claude-code:atlas-11111111';
+const BEACON = 'claude-code:beacon-22222222';
 const ok = (text = 'the screen'): PaneView => ({ kind: 'ok', name: 'vam-atlas-a1b2c3', text });
 
 const settle = async () => {
@@ -42,7 +43,7 @@ const settle = async () => {
 };
 
 /** A tab showing a real pane, with a send path that records what it is asked. */
-async function open(view: PaneView = ok(), sent = true) {
+async function open(view: PaneView = ok(), sent: PaneSendResult = 'sent') {
   const send = vi.fn(async (_project: string, _key: PaneKey, _row?: string) => sent);
   render(
     <TerminalTab
@@ -203,9 +204,106 @@ describe('the pane declines the keys that are not its own', () => {
 
   it('leaves Tab alone, so the focus order still gets out', async () => {
     const send = await open();
-    fireEvent.keyDown(pane() as HTMLElement, { key: 'Tab' });
+    // NOT PREVENTED: `fireEvent` answers false when the default was stopped,
+    // and Tab's default IS the focus move. Asserting only that nothing was
+    // sent would stay green while the second way out of this surface was
+    // quietly killed.
+    expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Tab' })).toBe(true);
     await settle();
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('keys reach the pane in the order they were typed', () => {
+  /** A send that answers only when the test says so, one call at a time. */
+  function gated() {
+    const pending: { key: PaneKey; settle: (result: PaneSendResult) => void }[] = [];
+    const send = vi.fn(
+      (_project: string, key: PaneKey) =>
+        new Promise<PaneSendResult>((resolve) => {
+          pending.push({ key, settle: resolve });
+        }),
+    );
+    return { send, pending };
+  }
+
+  it('sends the next key only after the previous one has answered', async () => {
+    const { send, pending } = gated();
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        rowId={ATLAS}
+        read={vi.fn(async () => ok())}
+        resize={undefined}
+        send={send}
+      />,
+    );
+    await settle();
+
+    // `n`, `o`, Return typed faster than tmux can answer. Unqueued, each of
+    // these is a `list-sessions` and a `send-keys` racing the other two, and
+    // the Return finishing first SUBMITS a half-typed line to a live agent.
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'n' });
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'o' });
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'Enter' });
+    await settle();
+    expect(send).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pending[0]?.settle('sent');
+      await Promise.resolve();
+    });
+    expect(send).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      pending[1]?.settle('sent');
+      await Promise.resolve();
+    });
+    expect(send).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      pending[2]?.settle('sent');
+      await Promise.resolve();
+    });
+    expect(pending.map((call) => call.key)).toEqual([
+      { kind: 'text', text: 'n' },
+      { kind: 'text', text: 'o' },
+      { kind: 'enter' },
+    ]);
+  });
+
+  it('drops what is queued behind a refusal instead of sending it into the gap', async () => {
+    const { send, pending } = gated();
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        rowId={ATLAS}
+        read={vi.fn(async () => ok())}
+        resize={undefined}
+        send={send}
+      />,
+    );
+    await settle();
+
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'n' });
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'o' });
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'Enter' });
+    await settle();
+
+    await act(async () => {
+      pending[0]?.settle('refused');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // The `o` and the Return are gone. Sending them now would submit a line
+    // with a hole in it, which reads as the operator's own typing.
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(q('[data-terminal-refused]')).not.toBeNull();
+
+    // A key typed AFTER the refusal is on screen is a new decision, and runs.
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'x' });
+    await settle();
+    expect(send).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -220,6 +318,84 @@ describe('there is a way out that does not need a mouse', () => {
   });
 });
 
+describe('the way out stays out', () => {
+  it('does not grab focus back when the pane is redrawn for another session', async () => {
+    const read = vi.fn(async () => ok());
+    const view = render(
+      <TerminalTab
+        projectId={ATLAS}
+        rowId={ATLAS}
+        read={read}
+        resize={undefined}
+        send={vi.fn(async () => 'sent' as const)}
+      />,
+    );
+    await settle();
+    expect(document.activeElement).toBe(pane());
+
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'Escape' });
+    await settle();
+    expect(document.activeElement).not.toBe(pane());
+
+    // `j` in the canvas moves to the next session, which changes the project
+    // this tab is about: `view` is cleared during render, so the pane goes
+    // away and comes back. It must NOT take focus with it -- if it does, the
+    // next `j` is typed into that session's agent instead of moving on, and
+    // there is no way out that stays out.
+    view.rerender(
+      <TerminalTab
+        projectId={BEACON}
+        rowId={BEACON}
+        read={read}
+        resize={undefined}
+        send={vi.fn(async () => 'sent' as const)}
+      />,
+    );
+    await settle();
+    expect(pane()).not.toBeNull();
+    expect(document.activeElement).not.toBe(pane());
+  });
+
+  it('does not grab focus back after a transient unavailable read', async () => {
+    const views: PaneView[] = [
+      ok(),
+      { kind: 'unavailable', error: { kind: 'unreachable', code: 'timeout', message: 'slow' } },
+      ok(),
+    ];
+    let call = 0;
+    const read = vi.fn(async () => views[Math.min(call++, views.length - 1)] as PaneView);
+    vi.useFakeTimers();
+    try {
+      render(
+        <TerminalTab
+          projectId={ATLAS}
+          rowId={ATLAS}
+          read={read}
+          resize={undefined}
+          send={vi.fn(async () => 'sent' as const)}
+        />,
+      );
+      await settle();
+      fireEvent.keyDown(pane() as HTMLElement, { key: 'Escape' });
+      await settle();
+
+      // The pane goes away on the unavailable read and comes back on the next
+      // one. Neither may take focus: the operator left.
+      for (const _ of [0, 1]) {
+        await act(async () => {
+          vi.advanceTimersByTime(REFRESH_MS);
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+      }
+      expect(q('[data-terminal-pane]')).not.toBeNull();
+      expect(document.activeElement).not.toBe(pane());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('the pane says whether what is typed is going anywhere', () => {
   it('says where the keys go while it can send them', async () => {
     await open();
@@ -227,13 +403,46 @@ describe('the pane says whether what is typed is going anywhere', () => {
   });
 
   it('says so when vam refused, rather than swallowing the keystroke', async () => {
-    const send = await open(ok(), false);
+    const send = await open(ok(), 'unaimed');
     fireEvent.keyDown(pane() as HTMLElement, { key: 'h' });
     await settle();
     expect(send).toHaveBeenCalledTimes(1);
     const said = q('[data-terminal-refused]')?.textContent ?? '';
     expect(said).not.toBe('');
     expect(said.toLowerCase()).toContain('did not');
+  });
+
+  it('names the refusal it actually got, rather than always blaming the pairing', async () => {
+    const send = await open(ok(), 'refused');
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'h' });
+    await settle();
+    const said = q('[data-terminal-refused]');
+    // tmux declined to deliver to a session vam DID name -- almost always one
+    // that just ended. Sending the operator after a pairing problem here
+    // sends them after something that is not there.
+    expect(said?.getAttribute('data-terminal-refusal')).toBe('refused');
+    expect(said?.textContent).toContain('may have just ended');
+    expect(said?.textContent).not.toContain('name one session');
+  });
+
+  it('drops a refusal raised for another session rather than drawing it over this one', async () => {
+    const send = vi.fn(async () => 'unaimed' as const);
+    const read = vi.fn(async () => ok());
+    const view = render(
+      <TerminalTab projectId={ATLAS} rowId={ATLAS} read={read} resize={undefined} send={send} />,
+    );
+    await settle();
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'h' });
+    await settle();
+    expect(q('[data-terminal-refused]')).not.toBeNull();
+
+    view.rerender(
+      <TerminalTab projectId={BEACON} rowId={BEACON} read={read} resize={undefined} send={send} />,
+    );
+    await settle();
+    // A claim about Atlas, drawn over Beacon's pane, is a claim about Beacon
+    // that nothing ever made.
+    expect(q('[data-terminal-refused]')).toBeNull();
   });
 
   it('says the keys go nowhere when there is no send path at all', async () => {
@@ -246,7 +455,13 @@ describe('the pane says whether what is typed is going anywhere', () => {
       />,
     );
     await settle();
-    fireEvent.keyDown(pane() as HTMLElement, { key: 'h' });
+    // AND THE KEY IS NOT EATEN. A build that cannot deliver must not consume:
+    // cancelling first left the browser build swallowing every printable key,
+    // Return and Backspace, which killed vam's own keyboard for anyone whose
+    // focus had landed here.
+    expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'h' })).toBe(true);
+    expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Enter' })).toBe(true);
+    expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Backspace' })).toBe(true);
     await settle();
     expect(q('[data-terminal-typing]')?.textContent?.toLowerCase()).toContain('cannot');
   });

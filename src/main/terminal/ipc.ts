@@ -12,7 +12,12 @@
  * requirement for this tab, and the reason main holds no timer of its own.
  */
 
-import { isPaneKey, isPaneSize, type PaneView } from '../../shared/terminal.js';
+import {
+  isPaneKey,
+  isPaneSize,
+  type PaneSendResult,
+  type PaneView,
+} from '../../shared/terminal.js';
 import { CHANNELS } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
 import { readPublishedPanes } from '../sources/claude-code/session-pane.js';
@@ -121,28 +126,33 @@ export function registerTerminalIpc(
    * one of the two things tmux can deliver, and its text is bounded so this
    * cannot become an unbounded paste (`shared/terminal.ts`).
    *
-   * `false` is every refusal, including the one that matters most -- a
-   * project whose pane vam cannot name. Nothing is sent in that case, and the
-   * tab says so where the operator is looking.
+   * `unaimed` covers every refusal this handler makes itself, including a
+   * malformed ask: nothing was sent, and nothing was aimed. The two answers
+   * from below it are passed through unchanged, because the tab draws a
+   * different sentence for a pairing it cannot make than for a session that
+   * ended under it.
    */
-  ipcMain.handle(CHANNELS.terminalSend, async (_event, ...args: unknown[]): Promise<boolean> => {
-    const [projectId, key, rowId] = args;
-    if (
-      args.length < 2 ||
-      args.length > 3 ||
-      typeof projectId !== 'string' ||
-      projectId.length > MAX_PROJECT_ID_LENGTH ||
-      !isPaneKey(key) ||
-      (rowId !== undefined && (typeof rowId !== 'string' || rowId.length > MAX_PROJECT_ID_LENGTH))
-    ) {
-      return false;
-    }
-    return sendSessionKey(
-      run,
-      projectId,
-      key,
-      rowId,
-      rowId === undefined ? undefined : await readPanes(),
-    );
-  });
+  ipcMain.handle(
+    CHANNELS.terminalSend,
+    async (_event, ...args: unknown[]): Promise<PaneSendResult> => {
+      const [projectId, key, rowId] = args;
+      if (
+        args.length < 2 ||
+        args.length > 3 ||
+        typeof projectId !== 'string' ||
+        projectId.length > MAX_PROJECT_ID_LENGTH ||
+        !isPaneKey(key) ||
+        (rowId !== undefined && (typeof rowId !== 'string' || rowId.length > MAX_PROJECT_ID_LENGTH))
+      ) {
+        return 'unaimed';
+      }
+      return sendSessionKey(
+        run,
+        projectId,
+        key,
+        rowId,
+        rowId === undefined ? undefined : await readPanes(),
+      );
+    },
+  );
 }

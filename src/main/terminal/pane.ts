@@ -26,7 +26,7 @@
  * nobody set reads back as the empty string, which is exactly that answer.
  */
 
-import type { PaneKey, PaneSize, PaneView } from '../../shared/terminal.js';
+import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
 import { sessionIdOf } from '../sources/claude-code/deliver.js';
 import { sendBackspaceArgv, sendEnterArgv, sendTextArgv } from '../sources/tmux/argv.js';
 import {
@@ -192,8 +192,11 @@ export async function resizeSessionPane(
  * project and is not vam's to type into), and `ambiguous` is two candidates,
  * where guessing would land a keystroke in the wrong agent's prompt.
  *
- * The refusal is a bare `false` because the tab has somewhere to put it: the
- * pane says so on the surface rather than swallowing what was typed.
+ * The refusal is REPORTED rather than swallowed, and it says which refusal it
+ * was: `unaimed` when the pairing named no single session, `refused` when
+ * tmux would not deliver to the session vam did name. The tab draws a
+ * different sentence for each, because they send the operator to different
+ * places.
  *
  * THE RACE THIS DOES NOT CLOSE, stated plainly because it is real and because
  * a comment that implied otherwise would be worse than none. Ownership is
@@ -234,11 +237,14 @@ export async function sendSessionKey(
   key: PaneKey,
   rowId?: string,
   panes?: ReadonlyMap<string, string>,
-): Promise<boolean> {
+): Promise<PaneSendResult> {
   const listed = await listVamSessions(run);
-  if (listed.kind === 'unavailable') return false;
+  // vam could not look, so it cannot claim a pairing problem either -- but it
+  // certainly did not deliver. `unaimed` is the honest half of that: nothing
+  // was aimed at anything.
+  if (listed.kind === 'unavailable') return 'unaimed';
   const match = targetSession(listed.sessions, projectId, rowId, panes);
-  if (match.kind !== 'one') return false;
+  if (match.kind !== 'one') return 'unaimed';
   // The three builders are kept apart in `tmux/argv.ts` for the one reason
   // that matters here: `-l` types, and Return and Backspace have to be
   // PRESSED. There is deliberately no builder that takes a key name, so
@@ -249,5 +255,5 @@ export async function sendSessionKey(
       : key.kind === 'backspace'
         ? sendBackspaceArgv(match.name)
         : sendTextArgv(match.name, key.text);
-  return (await run(argv)).failure === null;
+  return (await run(argv)).failure === null ? 'sent' : 'refused';
 }

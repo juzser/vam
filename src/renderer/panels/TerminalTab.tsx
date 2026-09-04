@@ -21,7 +21,7 @@
  */
 
 import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
-import type { PaneKey, PaneSize, PaneView } from '../../shared/terminal.js';
+import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
 import { fitPane, sameSize } from './terminal-size.js';
 
 /**
@@ -78,7 +78,7 @@ export type ResizePane = (
  * a key sent to a wrongly-resolved pane is typed into someone else's work.
  * The boolean is that refusal, and it is drawn rather than dropped.
  */
-export type SendKey = (projectId: string, key: PaneKey, rowId?: string) => Promise<boolean>;
+export type SendKey = (projectId: string, key: PaneKey, rowId?: string) => Promise<PaneSendResult>;
 
 /**
  * How long a wrapper has to stop moving before tmux is told about it.
@@ -285,22 +285,73 @@ export function TerminalTab({
    */
   const showing = view !== null && view.kind === 'ok';
 
-  /** Whether the LAST keystroke landed. `true` is drawn, not swallowed. */
-  const [refused, setRefused] = useState(false);
+  /** Why the last keystroke did NOT land, or `null`. Drawn, not swallowed. */
+  const [refused, setRefused] = useState<PaneSendResult | null>(null);
 
   /**
-   * FOCUS ON ARRIVAL. This component is mounted by the tab switch and by
-   * nothing else, so a pane appearing IS the operator arriving at the
+   * The refusal belongs to the session it was raised for. `sent.current` and
+   * `view` are already cleared when the tab changes what it is about, for the
+   * same reason this must be: a sentence saying vam could not type into
+   * session A, still on screen over session B's pane, is a claim about B that
+   * nothing ever made. The row is part of the identity because two sessions
+   * of one project are two different panes.
+   */
+  const shownAbout = `${projectId ?? ''}|${rowId ?? ''}`;
+  const refusalFor = useRef(shownAbout);
+  if (refusalFor.current !== shownAbout) {
+    refusalFor.current = shownAbout;
+    if (refused !== null) setRefused(null);
+  }
+
+  /**
+   * THE ORDER KEYS ARE TYPED IS THE ORDER THEY MUST ARRIVE, and nothing about
+   * two `execFile` spawns per keystroke guarantees that on its own. Each key
+   * costs a `list-sessions` and a `send-keys`, both unordered with respect to
+   * every other key's pair, so typing `n`, `o`, Return can finish in any
+   * order at all -- and the one that matters is Return overtaking, which
+   * SUBMITS a half-typed line to a live agent and leaves the rest of the
+   * word landing on the next prompt.
+   *
+   * Measured elsewhere in this project, scheduling starvation has stretched
+   * an 11ms operation past five seconds. Two spawns per keystroke is not a
+   * narrow window.
+   *
+   * So the sends are a chain: each key waits for the previous one to answer
+   * before it is sent. The cost is that fast typing is delivered at the rate
+   * tmux can take it, which is the correct trade -- an ordered line typed
+   * slightly late beats a scrambled one typed at once.
+   */
+  const chain = useRef<Promise<void>>(Promise.resolve());
+  /**
+   * Which run of the chain is still wanted. A send that fails abandons every
+   * key QUEUED BEHIND IT rather than sending them into the gap it just left:
+   * continuing would hand the agent a line with a hole in it, which is the
+   * same class of harm as typing into the wrong pane -- damage that looks
+   * like the operator's own text. Keys typed AFTER the refusal is on screen
+   * are a new decision by a person who can see it, so they start a new run.
+   */
+  const run = useRef(0);
+
+  /**
+   * FOCUS ON ARRIVAL, ONCE. This component is mounted by the tab switch and by
+   * nothing else, so the first pane it draws IS the operator arriving at the
    * terminal, and the tab they opened to type in should be ready to type in.
    *
-   * `showing` and not mount: before the first read answers there is no
-   * element to focus, and every other answer draws a sentence instead of a
-   * pane. It therefore also cannot steal focus while the tab is not being
-   * shown -- nothing polls into a hidden window (see the read effect above),
-   * so no pane appears and this never fires.
+   * THE LATCH IS THE WHOLE POINT and it was missing. `showing` is not a mount
+   * signal: the `shownFor` block above sets `view` to `null` DURING RENDER
+   * whenever the project changes, so `showing` goes true, false, true again
+   * on every session switch -- and a bare `if (showing) focus()` therefore
+   * took focus back every time. Escape let go and the next read grabbed on,
+   * so `j` to move to the next session typed a `j` into that session's agent
+   * instead, forever. A transient `unavailable` read did the same thing.
+   * Latching means the way out stays out: once this component has given the
+   * pane focus, only the operator decides where focus goes next.
    */
+  const grabbed = useRef(false);
   useEffect(() => {
-    if (showing) paneRef.current?.focus();
+    if (!showing || grabbed.current) return;
+    grabbed.current = true;
+    paneRef.current?.focus();
   }, [showing]);
 
   /**
@@ -378,14 +429,29 @@ export function TerminalTab({
               ? { kind: 'text', text: event.key }
               : null;
       if (stroke === null) return;
+      // THE GUARD COMES BEFORE THE CANCELLING, and it did not. A build with no
+      // bridge behind it -- the browser one -- consumed every printable key,
+      // Return and Backspace and delivered none of them, which left vam's own
+      // keyboard dead for anyone whose focus had landed here until they found
+      // Escape or Tab. A key vam cannot deliver is not vam's to eat: it goes
+      // back to the window listener, where the chords still work.
+      if (send === undefined || projectId === null) return;
       event.preventDefault();
       event.stopPropagation();
-      if (send === undefined || projectId === null) return;
       // Return is NOT sent behind the text: each keystroke is one call, so
       // submitting is the operator pressing Return and never vam adding one.
-      void send(projectId, stroke, rowId)
-        .then((landed) => setRefused(!landed))
-        .catch(() => setRefused(true));
+      // Queued behind the previous key rather than raced against it, and the
+      // run is captured now so a failure can abandon what is already waiting.
+      const mine = run.current;
+      chain.current = chain.current.then(async () => {
+        if (run.current !== mine) return;
+        const landed = await send(projectId, stroke, rowId).catch((): PaneSendResult => 'refused');
+        if (landed === 'sent') return;
+        // Everything still queued was typed before the operator could know
+        // this failed, so it is dropped rather than sent into the hole.
+        run.current += 1;
+        setRefused(landed);
+      });
     },
     [send, projectId, rowId],
   );
@@ -491,9 +557,22 @@ export function TerminalTab({
           ? 'vam cannot type into this pane here — the desktop app can.'
           : `keys go to ${view.name} — Escape leaves the pane.`}
       </p>
-      {refused && (
-        <p data-terminal-refused className="flex-none text-[10px] text-ink-faint">
-          vam did not type that: it can no longer name one session of its own for this project.
+      {refused !== null && (
+        <p
+          data-terminal-refused
+          data-terminal-refusal={refused}
+          className="flex-none text-[10px] text-ink-faint"
+        >
+          {refused === 'unaimed'
+            ? // vam declined to guess: no session of its own answers for this
+              // project, or two do.
+              'vam did not type that: it can no longer name one session of its own for this project.'
+            : // tmux would not deliver to a session vam DID name -- almost
+              // always one that ended between the listing and the send, which
+              // the next read draws as `gone`. Sending the operator after a
+              // pairing problem here would send them after nothing.
+              'vam did not type that: tmux would not deliver it, so the session may have just ended.'}
+          {' Anything typed behind it was dropped rather than sent into the gap.'}
         </p>
       )}
       {/* A FOCUS STOP, AND NOW A TYPING SURFACE -- and the second is why the

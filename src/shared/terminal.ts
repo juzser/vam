@@ -94,6 +94,20 @@ export type PaneKey =
  */
 export const MAX_KEY_TEXT = 16;
 
+/**
+ * What became of one keystroke. THREE ANSWERS, and the split exists because a
+ * boolean made the tab lie.
+ *
+ * `unaimed` is vam declining to guess: no session of its own answers for this
+ * project, or two do. `refused` is tmux having rejected the delivery to a
+ * session vam DID name -- overwhelmingly the session ending between the
+ * listing and the send, which the tab's own next read will show as `gone`.
+ * They are different sentences to a person: one sends them looking for a
+ * pairing problem, the other tells them their agent exited. A single `false`
+ * said the first for both.
+ */
+export type PaneSendResult = 'sent' | 'unaimed' | 'refused';
+
 /** Whether a value off the bridge is a keystroke vam will send. */
 export function isPaneKey(value: unknown): value is PaneKey {
   if (typeof value !== 'object' || value === null) return false;

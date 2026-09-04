@@ -21,7 +21,7 @@
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
 import type { Project } from '../renderer/domain/model.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
-import type { PaneKey, PaneView } from '../shared/terminal.js';
+import type { PaneKey, PaneSendResult, PaneView } from '../shared/terminal.js';
 import type { UsageSnapshot } from '../shared/usage.js';
 
 /** The slice of `ipcRenderer` used here, so this module is testable without electron. */
@@ -142,12 +142,13 @@ export type TerminalApi = {
    * ONE keystroke into the pane, answered by whether it landed.
    *
    * The only member of this bridge that writes into a session an agent is
-   * RUNNING in, and the only one whose false answer is drawn on the tab: main
-   * refuses when the recorded pairing names no single session of vam's, and a
-   * surface that took the key and said nothing would be a text box that eats
-   * what you type.
+   * RUNNING in, and the only one whose refusal is drawn on the tab: a surface
+   * that took the key and said nothing would be a text box that eats what you
+   * type. It answers WHICH refusal (`shared/terminal.ts`) -- vam could not
+   * name a single session of its own, or tmux would not deliver to the one it
+   * named -- because those are different sentences to the person typing.
    */
-  send(projectId: string, key: PaneKey, rowId?: string): Promise<boolean>;
+  send(projectId: string, key: PaneKey, rowId?: string): Promise<PaneSendResult>;
 };
 
 /**
@@ -169,7 +170,7 @@ export function createTerminalApi(ipc: InvokerLike): TerminalApi {
     send: (projectId, key, rowId) =>
       (rowId === undefined
         ? ipc.invoke(CHANNELS.terminalSend, projectId, key)
-        : ipc.invoke(CHANNELS.terminalSend, projectId, key, rowId)) as Promise<boolean>,
+        : ipc.invoke(CHANNELS.terminalSend, projectId, key, rowId)) as Promise<PaneSendResult>,
   };
 }
 

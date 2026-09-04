@@ -42,7 +42,7 @@ const listing = (rows: string) => ({ 'list-sessions': ok(rows), 'send-keys': ok(
 describe('typing into the session vam started for a project', () => {
   it('sends one literal send-keys for a character, and no Return', async () => {
     const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
-    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe(true);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe('sent');
     // `-l` is the whole correctness: without it tmux looks the argument up as
     // a KEY NAME, so a pane would be sent `^[` for the letters of `Escape`.
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', '-l', '--', 'h']);
@@ -53,21 +53,21 @@ describe('typing into the session vam started for a project', () => {
 
   it('sends the interpreted Return for Enter, and nothing literal', async () => {
     const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
-    expect(await sendSessionKey(run, ATLAS, { kind: 'enter' })).toBe(true);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'enter' })).toBe('sent');
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'Enter']);
     expect(argvs[1]).not.toContain('-l');
   });
 
   it('sends Backspace as the interpreted key, so a typo can be corrected', async () => {
     const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
-    expect(await sendSessionKey(run, ATLAS, { kind: 'backspace' })).toBe(true);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'backspace' })).toBe('sent');
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'BSpace']);
     expect(argvs[1]).not.toContain('-l');
   });
 
   it('refuses a Backspace it cannot aim, exactly like every other key', async () => {
     const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
-    expect(await sendSessionKey(run, ATLAS, { kind: 'backspace' })).toBe(false);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'backspace' })).toBe('unaimed');
     expect(verbs()).toEqual(['list-sessions']);
   });
 
@@ -79,7 +79,7 @@ describe('typing into the session vam started for a project', () => {
 
   it('sends NOTHING when no session vam started carries this project', async () => {
     const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
-    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe(false);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe('unaimed');
     expect(verbs()).toEqual(['list-sessions']);
   });
 
@@ -87,7 +87,7 @@ describe('typing into the session vam started for a project', () => {
     // An unset `@vam-project` reads back as the empty string: the operator's
     // own session, listed beside vam's. It is not vam's to type into.
     const { run, verbs } = runner(listing('\tsome-session\n'));
-    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe(false);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe('unaimed');
     expect(verbs()).toEqual(['list-sessions']);
   });
 
@@ -97,22 +97,26 @@ describe('typing into the session vam started for a project', () => {
     const { run, verbs } = runner(
       listing(`${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-g7h8i9\n`),
     );
-    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe(false);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe('unaimed');
     expect(verbs()).toEqual(['list-sessions']);
   });
 
   it('sends NOTHING when vam could not reach tmux at all', async () => {
     const { run, verbs } = runner({ 'list-sessions': failed('no server running') });
-    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe(false);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe('unaimed');
     expect(verbs()).toEqual(['list-sessions']);
   });
 
-  it('reports false when tmux refused the keystroke', async () => {
+  it('reports a REFUSAL, not a pairing failure, when tmux declined the keystroke', async () => {
+    // vam named a session and tmux would not deliver to it -- almost always
+    // one that ended between the listing and the send. Reporting that as
+    // `unaimed` sent the operator looking for a pairing problem that is not
+    // there; the tab draws a different sentence for each.
     const { run } = runner({
       'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
       'send-keys': failed("can't find pane"),
     });
-    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe(false);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe('refused');
   });
 
   it('aims at the pane the session published, not at the project', async () => {
@@ -120,7 +124,9 @@ describe('typing into the session vam started for a project', () => {
       listing(`${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-g7h8i9\n`),
     );
     const panes = new Map([[ATLAS, 'vam-atlas-g7h8i9']]);
-    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(true);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(
+      'sent',
+    );
     expect(argvs[1]?.[2]).toBe('=vam-atlas-g7h8i9:');
   });
 
@@ -131,7 +137,9 @@ describe('typing into the session vam started for a project', () => {
     // keystroke was typed into Beacon's running agent.
     const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
     const panes = new Map([[ATLAS, 'vam-beacon-d4e5f6']]);
-    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(false);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(
+      'unaimed',
+    );
     expect(verbs()).toEqual(['list-sessions']);
   });
 
@@ -140,7 +148,9 @@ describe('typing into the session vam started for a project', () => {
       listing(`${ATLAS}\tvam-atlas-a1b2c3\n${BEACON}\tvam-beacon-d4e5f6\n`),
     );
     const panes = new Map([[ATLAS, 'vam-beacon-d4e5f6']]);
-    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(true);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(
+      'sent',
+    );
     expect(argvs[1]?.[2]).toBe('=vam-atlas-a1b2c3:');
   });
 
@@ -149,7 +159,9 @@ describe('typing into the session vam started for a project', () => {
     // never acted on: the fallback is the project tag, which does not name it.
     const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
     const panes = new Map([[ATLAS, 'their-own-session']]);
-    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(false);
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(
+      'unaimed',
+    );
     expect(verbs()).toEqual(['list-sessions']);
   });
 });
@@ -170,13 +182,13 @@ describe('the send channel refuses what the renderer may not ask', () => {
 
   it('carries a Backspace across the bridge like the other two keys', async () => {
     const { send, argvs } = handler();
-    expect(await send({}, ATLAS, { kind: 'backspace' })).toBe(true);
+    expect(await send({}, ATLAS, { kind: 'backspace' })).toBe('sent');
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'BSpace']);
   });
 
   it('answers a plain boolean, and true only when the key landed', async () => {
     const { send, argvs } = handler();
-    expect(await send({}, ATLAS, { kind: 'text', text: 'h' })).toBe(true);
+    expect(await send({}, ATLAS, { kind: 'text', text: 'h' })).toBe('sent');
     expect(argvs[1]).toContain('-l');
   });
 
@@ -193,7 +205,7 @@ describe('the send channel refuses what the renderer may not ask', () => {
     ['one argument too many', [ATLAS, { kind: 'enter' }, ATLAS, 'extra']],
   ])('refuses %s without running tmux', async (_why, args) => {
     const { send, argvs } = handler();
-    expect(await send({}, ...args)).toBe(false);
+    expect(await send({}, ...args)).toBe('unaimed');
     expect(argvs).toHaveLength(0);
   });
 });

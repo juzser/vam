@@ -2141,7 +2141,7 @@ describe('the Terminal tab costs nothing until it is opened', () => {
         text: 'the pane',
       }),
     );
-    const send = vi.fn(async () => true);
+    const send = vi.fn(async () => 'sent' as const);
     Object.defineProperty(window, 'api', {
       configurable: true,
       value: { terminal: { read, send } },
