@@ -16,8 +16,10 @@ import { registerSourceIpc } from './ipc/handlers.js';
 import { releaseCloseAccelerator } from './menu.js';
 import { isSameOrigin } from './origin.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
+import { createTmuxRunner } from './sources/tmux/spawn.js';
 import { createNodeEventSource } from './stream/event-source.js';
 import { registerStreamIpc } from './stream/register.js';
+import { registerTerminalIpc } from './terminal/ipc.js';
 import { registerUsageIpc } from './usage/ipc.js';
 import { readUsage } from './usage/reader.js';
 
@@ -184,6 +186,10 @@ void app.whenReady().then(() => {
   // `clipboard-sanitized-write`, so a renderer-side write is refused in the
   // packaged app. See `./clipboard/ipc.ts`.
   registerClipboardIpc(ipcMain, clipboard);
+  // The Terminal tab's only route to tmux. Registered unconditionally, but it
+  // spawns nothing until the renderer asks -- and the renderer asks only while
+  // the tab is open, so a closed tab costs a process nothing.
+  registerTerminalIpc(ipcMain, createTmuxRunner());
   createWindow();
 });
 

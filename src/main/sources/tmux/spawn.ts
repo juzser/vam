@@ -18,25 +18,32 @@
  * says of its own: a test that ran these would create and kill sessions on the
  * operator's real tmux server. So the runner is a parameter.
  *
- * WHAT IS ACTUALLY CALLED IN PRODUCTION, TODAY. Only `createVamSession`, from
- * `claude-code/create-session.ts`. `listVamSessions` and `readPane` -- and the
- * `has-session`, `capture-pane` and `send-keys` argv builders behind them --
- * are the Terminal tab's IPC surface, written ahead of the tab and reachable
- * from nothing but vitest. They are kept because the Terminal tab is the next
- * thing to be built on them and their shape is the reviewed part; they are NOT
- * kept because anything calls them.
+ * WHAT IS ACTUALLY CALLED IN PRODUCTION. `createVamSession`, from
+ * `claude-code/create-session.ts`, and -- since the Terminal tab was built --
+ * `listVamSessions` and `readPane`, from `main/terminal/pane.ts`. The
+ * `has-session` builder is still called by nothing.
  *
- * That has one consequence worth stating outright, because it is the rule this
- * module exists to keep: the no-server-to-EMPTY-LIST mapping in
- * `listVamSessions` -- the care that stops "vam could not ask" being shown as
- * "you have no sessions" -- does not execute in production yet. It is asserted
- * by test only. Whoever wires the Terminal tab is the first person to run it,
- * and is the one who has to confirm it behaves on a real server.
+ * The note that stood here asked whoever wired the tab to confirm the read
+ * path on a real server, because the no-server-to-EMPTY-LIST mapping in
+ * `listVamSessions` was asserted by test only. That was done, against a real
+ * tmux on a private `-L` socket, and it found a defect no unit test could
+ * have: `capture-pane -t '=name'` answers `can't find pane` and exits 1,
+ * because `=name` is a target-SESSION and those verbs want a target-PANE
+ * (`tmux/argv.ts` now explains the `:` that fixes it). Both halves were being
+ * reported as `no-such-session` -- a working session drawn as one that had
+ * ended. The mapping itself behaves: no server resolves to the empty list, a
+ * live vam session to its screen.
  */
 
 import { execFile } from 'node:child_process';
 import type { SourceError } from '../../ipc/channels.js';
-import { capturePaneArgv, isVamSession, listSessionsArgv, newSessionArgv } from './argv.js';
+import {
+  capturePaneArgv,
+  isVamSession,
+  listSessionsArgv,
+  newSessionArgv,
+  tagSessionArgv,
+} from './argv.js';
 
 /** tmux answers in milliseconds; a slow one is a broken one. */
 const TMUX_TIMEOUT_MS = 10_000;
@@ -177,9 +184,18 @@ export function createTmuxRunner(binary = 'tmux'): TmuxRun {
     });
 }
 
+/**
+ * One session on the server, as vam sees it: the project id vam recorded on it
+ * (`''` when nothing did -- see `VAM_PROJECT_OPTION`) and the session name.
+ */
+export type TmuxSession = {
+  readonly project: string;
+  readonly name: string;
+};
+
 /** Either the thing, or why vam could not get it -- never one standing in for the other. */
-export type TmuxNames =
-  | { readonly kind: 'ok'; readonly names: readonly string[] }
+export type TmuxSessions =
+  | { readonly kind: 'ok'; readonly sessions: readonly TmuxSession[] }
   | { readonly kind: 'unavailable'; readonly error: SourceError };
 
 export type TmuxText =
@@ -196,19 +212,25 @@ export type TmuxText =
  * session is never presented as something vam started -- and never offered to
  * a caller that might kill it.
  */
-export async function listVamSessions(run: TmuxRun): Promise<TmuxNames> {
+export async function listVamSessions(run: TmuxRun): Promise<TmuxSessions> {
   const { failure, stdout, stderr } = await run(listSessionsArgv());
   if (failure !== null) {
     const error = classifyTmuxFailure({ failure, stderr, action: 'listing sessions' });
-    return error.code === 'no-server' ? { kind: 'ok', names: [] } : { kind: 'unavailable', error };
+    return error.code === 'no-server'
+      ? { kind: 'ok', sessions: [] }
+      : { kind: 'unavailable', error };
   }
-  return {
-    kind: 'ok',
-    names: stdout
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(isVamSession),
-  };
+  const sessions: TmuxSession[] = [];
+  for (const line of stdout.split('\n')) {
+    // Split ONCE. The name is whatever follows the first tab, so a value that
+    // somehow held one cannot shorten the name it is paired with.
+    const tab = line.indexOf('\t');
+    if (tab === -1) continue;
+    const name = line.slice(tab + 1).trim();
+    if (!isVamSession(name)) continue;
+    sessions.push({ project: line.slice(0, tab).trim(), name });
+  }
+  return { kind: 'ok', sessions };
 }
 
 /**
@@ -217,12 +239,30 @@ export async function listVamSessions(run: TmuxRun): Promise<TmuxNames> {
  */
 export async function createVamSession(
   run: TmuxRun,
-  input: { name: string; cwd: string; command: readonly string[] },
+  input: { name: string; cwd: string; command: readonly string[]; projectId: string },
 ): Promise<SourceError | null> {
   const { failure, stderr } = await run(newSessionArgv(input));
-  return failure === null
-    ? null
-    : classifyTmuxFailure({ failure, stderr, action: `creating session ${input.name}` });
+  if (failure !== null) {
+    return classifyTmuxFailure({ failure, stderr, action: `creating session ${input.name}` });
+  }
+  // THE PAIRING IS RECORDED HERE OR NOWHERE. tmux has no way to create a
+  // session and set an option on it in one command, so this is a second call
+  // and it can fail on its own.
+  const tagged = await run(tagSessionArgv(input.name, input.projectId));
+  if (tagged.failure === null) return null;
+  // The session IS running -- reporting a failure to start it would send the
+  // operator looking for something that is not wrong. What is wrong is that
+  // the Terminal tab will not find it, and that is what this says.
+  const error = classifyTmuxFailure({
+    failure: tagged.failure,
+    stderr: tagged.stderr,
+    action: `recording which project ${input.name} belongs to`,
+  });
+  return {
+    ...error,
+    code: 'session-untagged',
+    message: `the session started, but vam could not record which project it belongs to, so the Terminal tab will not find it: ${error.message}`,
+  };
 }
 
 /**

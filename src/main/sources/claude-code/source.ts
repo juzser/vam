@@ -307,7 +307,11 @@ const DESCRIPTOR: SourceDescriptor = {
     // `gh pr list --head <branch>`, run in the session's own working
     // directory. See `pull-requests.ts` for what happens when it cannot be.
     pullRequests: true,
-    terminal: false,
+    // `tmux capture-pane -p` on the session vam started for this project,
+    // paired by the id recorded on the tmux session at creation. The canvas
+    // reads this to decide whether to OFFER the Terminal tab at all, so a
+    // source without the surface no longer gets a tab that can only apologise.
+    terminal: true,
     // `<sessionId>/subagents/` is real and is now read: each agent's own
     // transcript for whether it is running, and the `meta.json` beside it for
     // what it is. See `agent-roster.ts`.
@@ -330,11 +334,10 @@ const DESCRIPTOR: SourceDescriptor = {
     governance: NOT_RECORDED,
     // No entry for pullRequests: a decline is written only for a capability
     // that is false, and this one is now true.
-    // Still false, and precisely: vam can now START a pty via tmux, but it
-    // has no terminal renderer to draw one, and `capture-pane` gives a
-    // snapshot rather than the live stream a terminal tab would need.
-    terminal:
-      'vam can start a tmux session but has no terminal renderer to draw one; only a plain-text snapshot of the screen is available',
+    // No entry for terminal: a decline is written only for a capability that
+    // is false, and this one is now true. What the surface IS -- a plain-text
+    // `capture-pane` snapshot, not a rendered live stream -- is said by the
+    // tab itself, which is where a person can read it.
     // No entry for agentRoster: a decline is written only for a capability
     // that is false, and this one is now true.
   },

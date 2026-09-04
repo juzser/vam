@@ -73,6 +73,7 @@ import {
 } from './highlight.js';
 import { Note } from './Note.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
+import { TerminalTab } from './TerminalTab.js';
 
 /** The three things this pane needs to know about a file it was handed. */
 export type AttachedFile = {
@@ -279,6 +280,18 @@ export type DetailPanelProps = {
    */
   readonly delivers?: boolean;
   /**
+   * Whether the focused session's source has a terminal surface --
+   * `capabilities.terminal`, passed down exactly as `delivers` is.
+   *
+   * `false` WITHDRAWS THE TAB. It was declared by the source and read by
+   * nothing while the tab mounted unconditionally, so the flag could be
+   * flipped either way with no visible effect -- a capability nobody reads is
+   * worse than none, because the next person trusts it. Absent means the
+   * caller said nothing and the tab stays, which is the same reading `delivers`
+   * gives its own absence.
+   */
+  readonly terminal?: boolean;
+  /**
    * True while a write is in flight.
    *
    * `claude --resume` is a subprocess with a 120-second timeout
@@ -296,20 +309,18 @@ export type DetailPanelProps = {
 };
 
 /**
- * The tab bar's four entries, and which of them have anything behind them.
+ * The tab bar's four entries. All four now select something.
  *
  * `Agents` joined `Response` when a source that actually reports a roster
- * arrived (`Session.agents`), and `PRs` joined them when one learned to ask
- * `gh` (`Session.pullRequests`). `Terminal` still has no data source at all --
- * vam holds no PTY -- so it stays exactly what it was: a label marked
- * `data-placeholder`, taking neither focus nor hover.
+ * arrived (`Session.agents`), `PRs` joined them when one learned to ask `gh`,
+ * and `Terminal` was the last placeholder: it had no data source because vam
+ * held no PTY, and the tmux provider is that source. Nothing in `TABS` is a
+ * label any more, so the `data-placeholder` branch that drew the inert ones is
+ * gone with it.
  */
 const TABS = ['Response', 'PRs', 'Terminal', 'Agents'] as const;
 
 type Tab = (typeof TABS)[number];
-
-/** The tabs that select something. Everything else in `TABS` is a label. */
-const LIVE_TABS: readonly Tab[] = ['Response', 'PRs', 'Agents'];
 
 /**
  * The mockup's mode segments, and which one it draws as current. Presentation
@@ -328,20 +339,21 @@ const MODES = ['Auto', 'Manual', 'Plan'] as const;
  * for a session vam could not ask about, which is the one conflation this
  * pane exists to avoid.
  *
- * TWO KINDS OF PILL, and the difference is whether the tab selects anything.
- * A live tab is a real <button> — Tab reaches it, Enter and Space activate it,
- * `role="tab"` and `aria-selected` say which one is showing — because it now
- * moves what the pane renders. The empty two are still plain labels, for the
- * reason they became labels: they were buttons wrapping a note explaining why
- * they were empty, the operator asked for the note to go, and a focus stop
- * that activates nothing and explains nothing is a keyboard trap with a hover
- * state. `data-placeholder` still says in the markup which one is unbacked.
+ * EVERY PILL IS A REAL <button> NOW — Tab reaches it, Enter and Space activate
+ * it, `role="tab"` and `aria-selected` say which one is showing. The three
+ * that were plain labels became buttons as each got something behind it; the
+ * rule that made them labels stands unchanged for any future one, because a
+ * focus stop that activates nothing and explains nothing is a keyboard trap
+ * with a hover state.
  */
 function TabBar({
+  tabs,
   runningAgents,
   current,
   onSelect,
 }: {
+  /** The tabs this source offers -- `TABS` minus the ones it has said it lacks. */
+  readonly tabs: readonly Tab[];
   readonly runningAgents: number;
   readonly current: Tab;
   readonly onSelect: (tab: Tab) => void;
@@ -351,7 +363,7 @@ function TabBar({
       role="tablist"
       className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px]"
     >
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const selected = tab === current;
         const badge = tab === 'Agents' && runningAgents > 0 ? runningAgents : null;
         const shape = [
@@ -373,7 +385,7 @@ function TabBar({
             )}
           </>
         );
-        return LIVE_TABS.includes(tab) ? (
+        return (
           <button
             key={tab}
             type="button"
@@ -385,10 +397,6 @@ function TabBar({
           >
             {label}
           </button>
-        ) : (
-          <span key={tab} data-placeholder={`tab-${tab.toLowerCase()}`} className={shape}>
-            {label}
-          </span>
         );
       })}
     </div>
@@ -996,6 +1004,7 @@ export function DetailPanel(props: DetailPanelProps) {
     active,
     actionIndex,
     delivers,
+    terminal,
     sending = false,
     width,
     resizeHandle,
@@ -1028,6 +1037,12 @@ export function DetailPanel(props: DetailPanelProps) {
    * is looking at agents, not at whichever tab the last session left behind.
    */
   const [tab, setTab] = useState<Tab>('Response');
+  // Which tabs this source actually has. A withdrawn tab cannot stay SHOWING:
+  // the operator can be on Terminal when focus moves to a session from a
+  // source without one, and a tab bar with nothing selected over a pane
+  // drawing a tab that is no longer offered is the state this collapses.
+  const tabs = TABS.filter((name) => name !== 'Terminal' || terminal !== false);
+  const current = tabs.includes(tab) ? tab : 'Response';
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
   useEffect(() => {
@@ -1261,7 +1276,12 @@ export function DetailPanel(props: DetailPanelProps) {
             the `progress` section's own counter, and the age is on the session
             card in the sidebar and on the canvas. */}
 
-        <TabBar runningAgents={entry?.session.runningAgents ?? 0} current={tab} onSelect={setTab} />
+        <TabBar
+          tabs={tabs}
+          runningAgents={entry?.session.runningAgents ?? 0}
+          current={current}
+          onSelect={setTab}
+        />
       </div>
 
       {/*
@@ -1282,7 +1302,7 @@ export function DetailPanel(props: DetailPanelProps) {
             reports `working` for a session the CLI calls failed, so it is not
             a second opinion worth showing. Naming the gap is the whole of
             what can honestly be said. */}
-        {tab === 'Response' && entry?.session.status === 'failed' && (
+        {current === 'Response' && entry?.session.status === 'failed' && (
           <p
             data-session-failed
             className="flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-panel px-3 py-2 text-[11px] text-failed leading-[1.45]"
@@ -1298,9 +1318,19 @@ export function DetailPanel(props: DetailPanelProps) {
             </Note>
           </p>
         )}
-        {tab === 'Agents' ? (
+        {current === 'Terminal' ? (
+          /* Mounted by this branch and by nothing else, which is the whole of
+             the tab's laziness: while another tab is showing, the component
+             does not exist, so no timer runs and no `capture-pane` is spawned.
+             `window.api` exists only in the Electron shell (App.tsx); in the
+             browser build the tab says so instead of asking. */
+          <TerminalTab
+            projectId={entry?.project.id ?? null}
+            read={globalThis.window?.api?.terminal?.read}
+          />
+        ) : current === 'Agents' ? (
           <AgentsTab agents={entry?.session.agents} />
-        ) : tab === 'PRs' ? (
+        ) : current === 'PRs' ? (
           <PullRequestsTab pullRequests={entry?.session.pullRequests} />
         ) : decision === null ? (
           <p className="text-[11px] text-ink-faint">

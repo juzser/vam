@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import type { ClipboardApi, DesktopSourceApi, UsageApi } from '../preload/api.js';
+import type { ClipboardApi, DesktopSourceApi, TerminalApi, UsageApi } from '../preload/api.js';
 import type { PreloadSourceApi } from '../shared/preload-api.js';
 import { SmithClient } from './adapter/client.js';
 import { useCanvas } from './adapter/useCanvas.js';
@@ -37,6 +37,7 @@ declare global {
     readonly api?: DesktopSourceApi & {
       readonly usage: UsageApi;
       readonly clipboard: ClipboardApi;
+      readonly terminal: TerminalApi;
     };
   }
 }

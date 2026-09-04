@@ -30,16 +30,42 @@
  */
 
 /**
- * The prefix that makes a session vam's own.
+ * The prefix that makes a session vam's own, AT A GLANCE.
  *
  * vam shares one tmux server with whatever the operator is running, and it
- * must never present their unrelated work as its own, nor kill it. A name
- * prefix is the only marker tmux carries that survives a detach, a restart of
- * vam, and a machine the operator later attaches to over ssh -- session
- * options would not, and a side-file would go stale the moment tmux was used
- * without vam.
+ * must never present their unrelated work as its own, nor kill it. The prefix
+ * is what makes that visible to a person running `tmux ls`, and it is the
+ * cheap first filter on the listing.
+ *
+ * It is NOT the pairing, and the note that stood here claiming session options
+ * would not survive was wrong -- measured against a real tmux on a private
+ * `-L` socket, a user option set on a session is reported by `list-sessions
+ * -F` and survives `rename-session`. See `VAM_PROJECT_OPTION`.
  */
 export const VAM_SESSION_PREFIX = 'vam-';
+
+/**
+ * WHERE THE PAIRING LIVES, and it is the one decision in this file worth
+ * reading twice.
+ *
+ * A tmux session vam started carries the id of the project it was started for,
+ * as a tmux USER OPTION set on the session at creation. The tab reads it back
+ * and matches on it, exactly. Nothing is re-derived from a name.
+ *
+ * The scheme it replaced derived the name again from a label and matched by
+ * prefix, and it was lossy in both directions. The creator was handed a
+ * project NAME while the tab asked with a session TITLE -- different strings,
+ * so nothing ever matched and every session was drawn as one vam had not
+ * started. And the slug is truncated to 24 characters, so
+ * `atlas frontend rewrite phase two` and `atlas frontend rewrite plan` share a
+ * prefix: two sessions, one pane, silently.
+ *
+ * MEASURED, on tmux 3.7b over a private `-L` socket, because none of it may be
+ * assumed: a user option round-trips through `list-sessions -F`, an option
+ * nobody set formats as the EMPTY STRING rather than an error, and the value
+ * survives a `rename-session`.
+ */
+export const VAM_PROJECT_OPTION = '@vam-project';
 
 /** Characters tmux itself dislikes in a session name (`.` and `:` are targets). */
 const UNSAFE_NAME = /[^A-Za-z0-9_-]+/g;
@@ -71,6 +97,23 @@ export const isVamSession = (name: string): boolean => name.startsWith(VAM_SESSI
  * and reaching someone else's.
  */
 const target = (name: string): string => `=${name}`;
+
+/**
+ * The same exactness, for the verbs that want a TARGET-PANE rather than a
+ * target-session -- `capture-pane` and `send-keys`.
+ *
+ * The trailing `:` is not decoration. A target-pane is `session:window.pane`,
+ * and without the colon tmux does not read the string as naming a session at
+ * all: measured against a real tmux, `capture-pane -t '=vam-x'` answers
+ * `can't find pane: =vam-x` and exits 1, which the failure classifier then
+ * reports as a session that no longer exists. Both halves of the string
+ * matter, and for opposite reasons -- the `=` keeps tmux from resolving the
+ * name by prefix and fnmatch onto a session vam did not mean, and the `:`
+ * keeps tmux reading the name as a session. Omitting the window and pane
+ * leaves tmux to use the session's current ones, which for a vam session is
+ * the only pane it has.
+ */
+const paneTarget = (name: string): string => `=${name}:`;
 
 /**
  * Create a DETACHED session: vam is not a terminal and has nothing to attach
@@ -119,19 +162,40 @@ export function hasSessionArgv(name: string): readonly string[] {
  * and half of it would be worse than none.
  */
 export function capturePaneArgv(name: string): readonly string[] {
-  return ['capture-pane', '-p', '-t', target(name)];
+  return ['capture-pane', '-p', '-t', paneTarget(name)];
 }
 
 /** Type text and press Return. The keys are one element. */
 export function sendKeysArgv(name: string, keys: string): readonly string[] {
-  return ['send-keys', '-t', target(name), keys, 'Enter'];
+  return ['send-keys', '-t', paneTarget(name), keys, 'Enter'];
 }
 
 /**
- * Every session on the server, one name per line. The filtering to vam's own
- * happens after the read, in `spawn.ts`: tmux's `-f` filter language is
- * another string to get wrong, and the names are already in hand.
+ * Every session on the server: the project vam recorded on it, a TAB, and the
+ * session name. The filtering to vam's own happens after the read, in
+ * `spawn.ts`: tmux's `-f` filter language is another string to get wrong, and
+ * the rows are already in hand.
+ *
+ * A tab separates them because a session name cannot contain one -- tmux
+ * rejects it -- and a project id is a digest (`project-id.ts`), so neither
+ * field can swallow the other. An unset option arrives as an empty first
+ * field, which is precisely the answer "vam did not start this one".
  */
 export function listSessionsArgv(): readonly string[] {
-  return ['list-sessions', '-F', '#{session_name}'];
+  return ['list-sessions', '-F', `#{${VAM_PROJECT_OPTION}}\t#{session_name}`];
+}
+
+/**
+ * Record which project a session belongs to, on the session itself.
+ *
+ * `-t` IS BARE HERE, and it is the one place in this file that does not get an
+ * `=`. Measured against a real tmux: `set-option -t '=vam-x'` answers
+ * `no such session: =vam-x` and exits 1, where every other verb accepts it.
+ * The bare target is safe for exactly this call and no other -- tmux resolves
+ * a bare `-t` by exact match FIRST, and this runs immediately after
+ * `new-session` created that exact name, so there is nothing for a prefix or
+ * an fnmatch to fall through to.
+ */
+export function tagSessionArgv(name: string, projectId: string): readonly string[] {
+  return ['set-option', '-t', name, VAM_PROJECT_OPTION, projectId];
 }

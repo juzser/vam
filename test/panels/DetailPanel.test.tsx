@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import {
@@ -37,6 +37,7 @@ import {
   hasContentBelow,
   isAtBottom,
 } from '../../src/renderer/panels/stick-to-bottom.js';
+import type { PaneView } from '../../src/shared/terminal.js';
 
 /** `attachIntoDraft` for the cases a test knows will be accepted. */
 function attachOk(draft: string, file: AttachedFile): string {
@@ -306,6 +307,33 @@ function draw(over: Partial<DetailPanelProps> = {}) {
     ...over,
   };
   render(<DetailPanel {...props} />);
+}
+
+/** `draw`, but able to re-render with new props -- for a capability that changes. */
+function drawFor(over: Partial<DetailPanelProps> = {}) {
+  const build = (extra: Partial<DetailPanelProps>): DetailPanelProps => ({
+    entry: ENTRY,
+    decision: DECISIONS[0] as Decision,
+    draft: '',
+    onDraftChange: () => {},
+    onSubmit: () => {},
+    onCopyCommand: () => {},
+    onCopyAllCommands: () => {},
+    composing: false,
+    onCompose: () => {},
+    onStopComposing: () => {},
+    active: false,
+    actionIndex: 0,
+    width: 408,
+    resizeHandle: null,
+    ...over,
+    ...extra,
+  });
+  const view = render(<DetailPanel {...build({})} />);
+  return {
+    rerender: (extra: Partial<DetailPanelProps>) =>
+      view.rerender(<DetailPanel {...build(extra)} />),
+  };
 }
 
 const q = <T extends Element>(selector: string) => document.querySelector<T>(selector);
@@ -881,18 +909,13 @@ describe('the mode pills select, and what they select gets recorded', () => {
 describe('the empty tabs carry no tooltip, and the other notes stay', () => {
   it('drops the tab note without touching the mode, attach or model notes', () => {
     draw();
-    // ONE placeholder now, not two: `Agents` has a roster behind it and `PRs`
-    // has `gh` behind it. `Terminal` has neither -- vam holds no PTY -- and is
-    // unchanged.
-    const tabs = all('[data-placeholder^="tab-"]');
-    expect(tabs).toHaveLength(1);
-    expect(tabs.map((t) => t.getAttribute('data-placeholder'))).toEqual(['tab-terminal']);
-    for (const tab of tabs) {
-      // No note, and therefore no reason to be a focus stop either: a button
-      // that does nothing and explains nothing is a keyboard trap with a hover
-      // state.
+    // NO placeholder left in the tab bar. `Agents` has a roster behind it,
+    // `PRs` has `gh`, and `Terminal` -- the last one -- has the tmux provider.
+    // Each became a real control as it got a source, and none of them ever
+    // carried a note explaining an emptiness.
+    expect(all('[data-placeholder^="tab-"]')).toHaveLength(0);
+    for (const tab of all('[role="tab"]')) {
       expect(tab.closest('[data-note]')).toBeNull();
-      expect(tab.closest('button')).toBeNull();
     }
     // The three the operator asked to KEEP.
     expect(q<HTMLElement>('[data-attach]')?.getAttribute('data-note')).not.toBeNull();
@@ -923,15 +946,18 @@ describe('the Agents tab', () => {
     fireEvent.click(button);
   };
 
-  it('is a real control, unlike the one tab with no data behind it', () => {
+  it('is a real control, as every tab in the bar now is', () => {
     draw({ entry: withAgents([]) });
     expect(agentsTab()).not.toBeNull();
     expect(agentsTab()?.tagName).toBe('BUTTON');
-    // `PRs` has since become a control of its own; `Terminal` is the one that
-    // stays inert -- still a label, still marked as a placeholder.
-    const tab = q<HTMLElement>('[data-placeholder="tab-terminal"]');
-    expect(tab).not.toBeNull();
-    expect(tab?.closest('button')).toBeNull();
+    // `PRs` and `Terminal` have since become controls of their own, so the bar
+    // holds four buttons and no inert label.
+    expect(all('[role="tab"]').map((t) => t.tagName)).toEqual([
+      'BUTTON',
+      'BUTTON',
+      'BUTTON',
+      'BUTTON',
+    ]);
   });
 
   it('starts on Response and moves the pane content when Agents is picked', () => {
@@ -1611,15 +1637,11 @@ describe('the PRs tab', () => {
     ],
   };
 
-  it('is a real control now, and leaves Terminal exactly as it was', () => {
+  it('is a real control now, and no tab in the bar is a placeholder any more', () => {
     draw({ entry: withPrs({ kind: 'ok', prs: [] }) });
     expect(prsTab()).not.toBeNull();
     expect(prsTab()?.tagName).toBe('BUTTON');
-    // ONE placeholder left. Terminal has no PTY behind it and is untouched by
-    // this work: still a label, still marked, still not a focus stop.
-    const placeholders = all('[data-placeholder^="tab-"]');
-    expect(placeholders.map((t) => t.getAttribute('data-placeholder'))).toEqual(['tab-terminal']);
-    expect(placeholders[0]?.closest('button')).toBeNull();
+    expect(all('[data-placeholder^="tab-"]')).toHaveLength(0);
   });
 
   it('moves the pane content when picked, and gives it back to Response', () => {
@@ -1716,5 +1738,108 @@ describe('the PRs tab', () => {
     // Truncation is visual, so the full title stays in the DOM for anything
     // that reads rather than looks.
     expect(title?.textContent).toBe(POPULATED?.kind === 'ok' ? POPULATED.prs[0]?.title : '');
+  });
+});
+
+/**
+ * The Terminal tab's laziness, which is an operator requirement and not an
+ * optimisation: the tab loads only when it is opened.
+ *
+ * Asserted from the pane rather than from the component, because the pane is
+ * where the decision is: the tab's content is mounted by one branch of one
+ * ternary, so "closed" has to mean the component does not exist -- not that it
+ * exists and skips its work. A `display:none` tab is still a tab, still
+ * mounted, and still holding an interval that spawns `tmux capture-pane` every
+ * second for a session nobody is looking at.
+ */
+describe('the Terminal tab costs nothing until it is opened', () => {
+  const withBridge = (read: (title: string) => Promise<PaneView>) => {
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { terminal: { read } },
+    });
+  };
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'api');
+  });
+
+  it('issues no read at all while another tab is showing', async () => {
+    const read = vi.fn(async (): Promise<PaneView> => ({ kind: 'not-vam' }));
+    withBridge(read);
+
+    // Response, then every other tab that is not Terminal. None of them may
+    // reach tmux.
+    draw();
+    fireEvent.click(q<HTMLButtonElement>('[data-tab="agents"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-tab="prs"]') as HTMLButtonElement);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(read).toHaveBeenCalledTimes(0);
+    expect(q('[data-terminal]')).toBeNull();
+  });
+
+  it('reads once the tab is opened, for the focused session, and stops when it is left', async () => {
+    const read = vi.fn(
+      async (): Promise<PaneView> => ({
+        kind: 'ok',
+        name: 'vam-sprint-board-reorder-a1b2c3',
+        text: 'the pane',
+      }),
+    );
+    withBridge(read);
+    draw();
+
+    await act(async () => {
+      fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
+      await Promise.resolve();
+    });
+    // BY PROJECT ID, not by the session title. The tmux pairing is recorded on
+    // the tmux session at creation and read back; a title was slugged and
+    // truncated on the way in and matched nothing that was ever created.
+    expect(read).toHaveBeenCalledWith(PROJECT.id);
+    expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).toContain('the pane');
+
+    const whileOpen = read.mock.calls.length;
+    fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // Unmounted, so the interval is cleared with it: leaving the tab stops the
+    // spawning, exactly as closing it never started any.
+    expect(q('[data-terminal]')).toBeNull();
+    expect(read).toHaveBeenCalledTimes(whileOpen);
+  });
+});
+
+/**
+ * `capabilities.terminal` was declared and then read by nothing, while the tab
+ * was mounted unconditionally -- a flag that could be flipped either way with
+ * no visible effect, which is worse than no flag.
+ */
+describe('the Terminal tab is offered only by a source that has one', () => {
+  it('drops the tab entirely for a source that says it has no terminal', () => {
+    draw({ terminal: false });
+    expect(q('[data-tab="terminal"]')).toBeNull();
+    expect(all('[role="tab"]').map((t) => t.getAttribute('data-tab'))).not.toContain('terminal');
+  });
+
+  it('keeps it for a source that has one', () => {
+    draw({ terminal: true });
+    expect(q('[data-tab="terminal"]')).not.toBeNull();
+  });
+
+  it('falls back to Response when the showing tab is withdrawn', () => {
+    // Reachable: the operator opens Terminal, then focus moves to a session
+    // from a source without one. A tab bar with nothing selected and a pane
+    // drawing a withdrawn tab is the state this prevents.
+    const { rerender } = drawFor({ terminal: true });
+    fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
+    expect(q('[data-terminal]')).not.toBeNull();
+    rerender({ terminal: false });
+    expect(q('[data-terminal]')).toBeNull();
+    expect(q<HTMLElement>('[data-tab="response"]')?.getAttribute('aria-selected')).toBe('true');
   });
 });

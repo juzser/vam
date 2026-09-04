@@ -47,6 +47,13 @@ export const CHANNELS = {
    * answer, and there is no source to refuse anything in the words of.
    */
   clipboardWrite: 'vam:clipboard:write',
+  /**
+   * The Terminal tab's read. Like the two above it answers bare -- a
+   * `PaneView`, not an `IpcResult` -- because that type already carries its
+   * own failure branch (see `src/main/terminal/ipc.ts`). It is invoked ONLY
+   * while the tab is open, which is why there is no push half to it.
+   */
+  terminalRead: 'vam:terminal:read',
 } as const;
 
 /**

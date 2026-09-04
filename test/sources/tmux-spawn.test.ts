@@ -96,7 +96,7 @@ describe('listVamSessions', () => {
       failure: { message: 'exit 1' },
       stderr: 'no server running on /tmp/tmux-501/default',
     }));
-    await expect(listVamSessions(run)).resolves.toEqual({ kind: 'ok', names: [] });
+    await expect(listVamSessions(run)).resolves.toEqual({ kind: 'ok', sessions: [] });
   });
 
   it('is unavailable -- NOT empty -- when tmux is not installed', async () => {
@@ -107,10 +107,33 @@ describe('listVamSessions', () => {
   });
 
   it("filters to vam's own sessions and leaves the operator's alone", async () => {
-    const run = fakeTmux(() => ({ stdout: 'notes\nvam-demo-a1b2c3\n0\nvam-api-d4e5f6\nirc\n' }));
+    const run = fakeTmux(() => ({
+      stdout: [
+        '\tnotes',
+        'claude-code:demo-11111111\tvam-demo-a1b2c3',
+        '\t0',
+        'claude-code:api-22222222\tvam-api-d4e5f6',
+        '\tirc',
+        '',
+      ].join('\n'),
+    }));
     await expect(listVamSessions(run)).resolves.toEqual({
       kind: 'ok',
-      names: ['vam-demo-a1b2c3', 'vam-api-d4e5f6'],
+      sessions: [
+        { project: 'claude-code:demo-11111111', name: 'vam-demo-a1b2c3' },
+        { project: 'claude-code:api-22222222', name: 'vam-api-d4e5f6' },
+      ],
+    });
+  });
+
+  it('reports an untagged vam session as tagged with nothing, not as tagged with its name', async () => {
+    // A session started by an older vam, or one whose `set-option` failed. The
+    // empty first field is what an unset user option formats as (measured), and
+    // it must stay empty: the matcher refuses to pair on it.
+    const run = fakeTmux(() => ({ stdout: '\tvam-old-a1b2c3\n' }));
+    await expect(listVamSessions(run)).resolves.toEqual({
+      kind: 'ok',
+      sessions: [{ project: '', name: 'vam-old-a1b2c3' }],
     });
   });
 });
@@ -122,11 +145,45 @@ describe('createVamSession', () => {
       name: 'vam-demo-a1b2c3',
       cwd: '/w/demo',
       command: ['claude'],
+      projectId: 'claude-code:demo-11111111',
     });
     expect(created).toBeNull();
     expect(run.calls).toEqual([
       ['new-session', '-d', '-s', 'vam-demo-a1b2c3', '-c', '/w/demo', 'claude'],
+      ['set-option', '-t', 'vam-demo-a1b2c3', '@vam-project', 'claude-code:demo-11111111'],
     ]);
+  });
+
+  it('records the pairing on the session, because nothing else can reconstruct it', async () => {
+    // The whole of the fix to the Terminal tab is this second call. Deleting it
+    // leaves a session that runs perfectly and that vam can never find again.
+    const run = fakeTmux(() => ({}));
+    await createVamSession(run, {
+      name: 'vam-demo-a1b2c3',
+      cwd: '/w/demo',
+      command: ['claude'],
+      projectId: 'claude-code:demo-11111111',
+    });
+    expect(run.calls.map((argv) => argv[0])).toEqual(['new-session', 'set-option']);
+  });
+
+  it('says the session started but is unpaired when only the recording failed', async () => {
+    // Not "creating a session failed": the session IS running, and sending the
+    // operator to look for one that never started would be the wrong repair.
+    const run = fakeTmux((argv) =>
+      argv[0] === 'set-option'
+        ? { failure: { message: 'exit 1' }, stderr: 'unknown option: @vam-project' }
+        : {},
+    );
+    const created = await createVamSession(run, {
+      name: 'vam-demo-a1b2c3',
+      cwd: '/w/demo',
+      command: ['claude'],
+      projectId: 'claude-code:demo-11111111',
+    });
+    expect(created?.code).toBe('session-untagged');
+    expect(created?.message).toContain('the session started');
+    expect(created?.message).toContain('Terminal tab');
   });
 
   it('resolves to the error rather than throwing', async () => {
@@ -138,6 +195,7 @@ describe('createVamSession', () => {
       name: 'vam-demo-a1b2c3',
       cwd: '/w/demo',
       command: ['claude'],
+      projectId: 'claude-code:demo-11111111',
     });
     expect(created?.code).toBe('session-exists');
   });
@@ -150,7 +208,7 @@ describe('readPane', () => {
       kind: 'ok',
       text: '> hello\nworking...\n',
     });
-    expect(run.calls).toEqual([['capture-pane', '-p', '-t', '=vam-demo-a1b2c3']]);
+    expect(run.calls).toEqual([['capture-pane', '-p', '-t', '=vam-demo-a1b2c3:']]);
   });
 
   it('distinguishes a session that is gone from a tmux that is gone', async () => {
