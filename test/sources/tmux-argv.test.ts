@@ -22,6 +22,7 @@ import {
   listSessionsArgv,
   newSessionArgv,
   sendBackspaceArgv,
+  sendBackTabArgv,
   sendEnterArgv,
   sendTextArgv,
   tagSessionArgv,
@@ -121,6 +122,18 @@ describe('tmux argv', () => {
     // typed the six letters into the line. Backspace is a key, not text.
     expect(sendBackspaceArgv('vam-a1b2c3')).toEqual(['send-keys', '-t', '=vam-a1b2c3:', 'BSpace']);
     expect(sendBackspaceArgv('vam-a1b2c3')).not.toContain('-l');
+    // The FOURTH interpreted key, and the one whose wrong spelling is silent.
+    // Measured on tmux 3.7b over a private `-L` socket, against `cat -v` in
+    // the pane: `send-keys BTab` put `^[[Z` on the screen -- the escape
+    // sequence a terminal sends for Shift-Tab -- while `send-keys S-Tab`
+    // EXITED 0 and delivered a plain tab, and `send-keys -l -- 'BTab'` typed
+    // the four letters. So the only wrong spelling that reports a failure is
+    // the literal one; `S-Tab` looks like it worked and moves the cursor in
+    // somebody's running agent instead of cycling its mode.
+    expect(sendBackTabArgv('vam-a1b2c3')).toEqual(['send-keys', '-t', '=vam-a1b2c3:', 'BTab']);
+    expect(sendBackTabArgv('vam-a1b2c3')).not.toContain('-l');
+    expect(sendBackTabArgv('vam-a1b2c3')).not.toContain('S-Tab');
+    expect(sendBackTabArgv('vam-a1b2c3')).not.toContain('Tab');
   });
 
   it('types text tmux would otherwise read as a key or as an option', () => {

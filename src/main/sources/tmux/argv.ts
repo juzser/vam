@@ -233,7 +233,7 @@ export function sendEnterArgv(name: string): readonly string[] {
  * operator's text just as happily, and the day something passed a reply
  * through it, a message reading `C-c` would interrupt the agent instead of
  * being typed to it. One named builder per key that vam actually presses
- * keeps that impossible, and there are now exactly four of them.
+ * keeps that impossible, and there are now exactly five of them.
  *
  * MEASURED, on tmux 3.7b over a private `-L` socket, because the choice
  * between the key name and a literal `0x7f` may not be guessed: typing `abX`,
@@ -282,6 +282,33 @@ export function sendDownArgv(name: string): readonly string[] {
  */
 export function sendRightArgv(name: string): readonly string[] {
   return ['send-keys', '-t', paneTarget(name), 'Right'];
+}
+
+/**
+ * Press Shift-Tab -- the FIFTH named key, and the one that cycles a session's
+ * mode.
+ *
+ * THE MODE IS THE SESSION'S, NOT VAM'S. Claude Code's own footer reads
+ * `auto mode on (shift+tab to cycle)`: the mode lives in the agent and the
+ * chord is its binding, pressed inside its terminal. vam has no API for it,
+ * so the honest control is the key itself, pressed in the pane vam started.
+ *
+ * `BTab`, AND THE SPELLING IS THE WHOLE OF IT. Measured on tmux 3.7b over a
+ * private `-L` socket, against `cat -v` running in the pane: `send-keys BTab`
+ * put `^[[Z` on the screen, which is the escape sequence a terminal sends for
+ * Shift-Tab; `send-keys S-Tab` EXITED 0 and delivered a plain tab; and
+ * `send-keys -l -- 'BTab'` typed the four letters. So `S-Tab` is the worst of
+ * the three: it is the spelling a person reaches for, it reports success, and
+ * what arrives in a running agent is a Tab -- a completion or an indent, in
+ * someone's prompt, with nothing anywhere saying the mode did not change.
+ *
+ * A builder of its own for the reason the other four are, and it is sharper
+ * here than anywhere: a general `sendKeyArgv(name, keyName)` reachable from
+ * the renderer would accept `C-c` from a text field just as happily as this
+ * accepts nothing at all.
+ */
+export function sendBackTabArgv(name: string): readonly string[] {
+  return ['send-keys', '-t', paneTarget(name), 'BTab'];
 }
 
 /**
