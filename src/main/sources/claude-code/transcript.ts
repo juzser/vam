@@ -24,6 +24,7 @@
  */
 
 import type { Decision } from '../../../renderer/domain/model.js';
+import { extractCommands } from './commands.js';
 
 /** The canvas shows three; carrying more costs parsing and buys nothing. */
 const MAX_DECISIONS = 3;
@@ -153,16 +154,21 @@ export function summarizeTranscript(tail: string, decisionIdPrefix: string): Tra
   const decisions: readonly Decision[] = turns
     .slice(-MAX_DECISIONS)
     .reverse()
-    .map((turn, index) => ({
-      id: `${decisionIdPrefix}:${index}`,
-      label: agentName ?? 'claude-code',
-      input: turn.input,
-      output: turn.output,
-      // Claude Code hands commands back as prose inside an answer, not as
-      // structured data, and guessing which fenced block is meant for a human
-      // to run would put words in the agent's mouth.
-      commands: [],
-    }));
+    .map((turn, index) => {
+      const id = `${decisionIdPrefix}:${index}`;
+      return {
+        id,
+        label: agentName ?? 'claude-code',
+        input: turn.input,
+        output: turn.output,
+        // Claude Code hands commands back as prose inside an answer, not as
+        // structured data, so `commands.ts` reads the fenced blocks of that
+        // answer under a rule tuned to accept nothing it cannot vouch for.
+        // The prefix is the decision's OWN id, so no two decisions mint the
+        // same command id -- the canvas finds a command by id to copy it.
+        commands: turn.output === null ? [] : extractCommands(turn.output, id),
+      };
+    });
 
   return { aiTitle, branch, activity, decisions };
 }
