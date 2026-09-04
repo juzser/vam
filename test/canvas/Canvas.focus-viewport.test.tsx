@@ -21,7 +21,9 @@ type CenterOptions = { readonly zoom?: number; readonly duration?: number };
 type FitViewOptions = { readonly nodes?: readonly { readonly id: string }[] };
 
 const fitView = vi.fn((_options?: FitViewOptions) => Promise.resolve(true));
-const setCenter = vi.fn((_x: number, _y: number, _options?: CenterOptions) => Promise.resolve(true));
+const setCenter = vi.fn((_x: number, _y: number, _options?: CenterOptions) =>
+  Promise.resolve(true),
+);
 
 vi.mock('@xyflow/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@xyflow/react')>();
@@ -61,6 +63,8 @@ const MODEL: Model = {
   ],
 };
 
+/** `j` walks off the first session onto the second, `k` walks back — the two
+ *  sessions the model carries, and the canvas must follow both ways. */
 function press(key: string) {
   act(() => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
@@ -97,7 +101,7 @@ describe('moving focus between sessions', () => {
   it('does not change the zoom level', () => {
     render(<Canvas model={MODEL} />);
     press('j');
-    press('j');
+    press('k');
 
     // Framing a set of nodes is a scale change by construction: it picks
     // whatever zoom makes them fit. Nothing but the operator's own controls
@@ -115,12 +119,12 @@ describe('moving focus between sessions', () => {
     const first = setCenter.mock.calls.length;
     expect(first).toBeGreaterThan(0);
 
-    press('j');
+    press('k');
     // A second session, a second centring — on a different point, or the
     // canvas did not actually follow the cursor anywhere.
     expect(setCenter.mock.calls.length).toBeGreaterThan(first);
-    const [ax, ay] = setCenter.mock.calls[first - 1];
-    const [bx, by] = setCenter.mock.calls[setCenter.mock.calls.length - 1];
-    expect([ax, ay]).not.toEqual([bx, by]);
+    const before = setCenter.mock.calls.at(first - 1)?.slice(0, 2);
+    const after = setCenter.mock.calls.at(-1)?.slice(0, 2);
+    expect(before).not.toEqual(after);
   });
 });

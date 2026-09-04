@@ -679,7 +679,7 @@ function CanvasInner({
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
-  const { getNodes, zoomIn, zoomOut, fitView } = useReactFlow();
+  const { getNodes, zoomIn, zoomOut, fitView, setCenter } = useReactFlow();
 
   const matches = useMemo(() => searchMatches(allEntries, query), [allEntries, query]);
 
@@ -784,6 +784,9 @@ function CanvasInner({
     [layout, focusedId],
   );
   const focusedEntry: SessionEntry | null = focusedSpec?.entry ?? null;
+  /** Which session the focus sits in — the id the strip filter and the
+   *  sidebar cursor both read. */
+  const focusedSessionId = focusedSpec?.entry.session.id ?? null;
 
   /**
    * The viewport follows focus.
@@ -797,64 +800,28 @@ function CanvasInner({
    *
    * The zoom argument is deliberately omitted: `setCenter` keeps the current
    * scale, so following focus never overrides a zoom the operator chose.
+   *
+   * A PAN, NEVER A FIT. An intermediate version framed the focused session's
+   * whole row with `fitView`, which is a scale change by construction — it
+   * picks whatever zoom makes those nodes fit — and its own comment admitted
+   * it overrode a zoom the operator had set by hand. The operator asked for
+   * that automatic zoom onto a node or a session to go. Following focus is
+   * what makes `j`/`k` usable and stays; the scale change is what left.
    */
-  /**
-   * Which nodes make up the focused session's ROW — its info card, its steps,
-   * its fan and its slots. The slots matter: they hold the three step
-   * positions even when the session has fewer than three, so framing them is
-   * what guarantees all three slots are visible rather than however many
-   * happen to be filled.
-   */
-  const focusedSessionId = focusedSpec?.entry.session.id ?? null;
-  const focusRowNodeIds = useMemo(() => {
-    if (focusedSessionId === null) {
-      return null;
-    }
-    return [
-      ...layout.nodes.filter((n) => n.entry.session.id === focusedSessionId),
-      ...layout.fans.filter((f) => f.sessionId === focusedSessionId),
-      ...layout.slots.filter((sl) => sl.sessionId === focusedSessionId),
-    ].map((n) => ({ id: n.id }));
-  }, [layout, focusedSessionId]);
+  // Lifted out of the effect so the dependency array names exactly what the
+  // effect reads. Depending on `focusedSpec` itself would re-centre on every
+  // layout rebuild — the object is rebuilt each render — and fight a manual pan.
+  const focusCenterX =
+    focusedSpec === null ? null : focusedSpec.position.x + focusedSpec.size.width / 2;
+  const focusCenterY =
+    focusedSpec === null ? null : focusedSpec.position.y + focusedSpec.size.height / 2;
 
-  /**
-   * The viewport frames the focused row.
-   *
-   * `j`/`k` can walk to an off-screen session, and before this the canvas did
-   * not move at all — the sidebar and detail panel updated while the cards
-   * stayed put, so the one pane that shows a session's SHAPE was the one that
-   * did not follow you.
-   *
-   * `fitView` over the row's own nodes rather than `setCenter`, because the
-   * ask is a ZOOM as well as a position: all three steps legible, with the
-   * neighbouring sessions still peeking in at the edges so you keep your place
-   * in the list. `padding` is what buys that peek — it is a fraction of the
-   * fitted bounds, so it scales with the viewport instead of assuming one.
-   * `maxZoom` stops a session with a single short step from filling the screen.
-   *
-   * This deliberately overrides a zoom the operator set by hand. An earlier
-   * version preserved it (`setCenter` keeps the current scale) and the
-   * operator asked for the opposite: focusing should frame the row.
-   */
   useEffect(() => {
-    if (focusRowNodeIds === null || focusRowNodeIds.length === 0) {
+    if (focusCenterX === null || focusCenterY === null) {
       return;
     }
-    // `padding` is derived, not tuned. It is a fraction added around the fitted
-    // bounds, so the row occupies 1/(1 + 2p) of the viewport — and the target
-    // is the thing worth naming, since it is what a settings pane will
-    // eventually write to. See FOCUS_VIEWPORT_SHARE above.
-    //
-    // `maxZoom` is 1.6 rather than 1 because a short row would otherwise stop
-    // scaling at 1 and sit well under the target — the case the cap used to
-    // silently produce.
-    void fitView({
-      nodes: focusRowNodeIds,
-      padding: focusPadding(prefs.focusViewportShare),
-      maxZoom: 1.6,
-      duration: 220,
-    });
-  }, [focusRowNodeIds, fitView, prefs.focusViewportShare]);
+    setCenter(focusCenterX, focusCenterY, { duration: 220 });
+  }, [focusCenterX, focusCenterY, setCenter]);
 
   /**
    * What the detail panel expands: the focused step if a step is focused, else
