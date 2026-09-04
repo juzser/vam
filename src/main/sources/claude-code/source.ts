@@ -30,7 +30,6 @@
  * web target is unaffected.
  */
 
-import { createHash } from 'node:crypto';
 import { open, readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -39,12 +38,15 @@ import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { MainSource } from '../source.js';
 import { type AgentRoster, readAgentRoster } from './agent-roster.js';
 import { type LiveAgent, listLiveAgents } from './agents.js';
+import { createTmuxRunner } from '../tmux/spawn.js';
+import { createSessionInProject } from './create-session.js';
 import { deliverPromptViaCli, deliverToSession } from './deliver.js';
 import {
   createPullRequestReader,
   type ReadPullRequests,
   readPullRequestsViaCli,
 } from './pull-requests.js';
+import { projectIdOf } from './project-id.js';
 import { createBranchLookup } from './repo-branch.js';
 import { defaultSessionsRoot, readStatusUpdatedAt } from './session-status.js';
 import { stopSession, stopSessionViaCli } from './stop.js';
@@ -157,18 +159,6 @@ async function readTranscript(
   }
 }
 
-/**
- * A stable project id that carries no path.
- *
- * The last segment alone would merge two genuinely different checkouts that
- * happen to share a directory name, and the full path would render the
- * operator's home directory into the DOM of a public application. A digest
- * disambiguates without disclosing.
- */
-function projectId(cwd: string): string {
-  return `claude-code:${basename(cwd)}-${createHash('sha256').update(cwd).digest('hex').slice(0, 8)}`;
-}
-
 export async function loadClaudeCodeProjects(
   root: string,
   agents: readonly LiveAgent[],
@@ -269,7 +259,7 @@ export async function loadClaudeCodeProjects(
   }
 
   return [...grouped.values()].map((group) => ({
-    id: projectId(group.cwd),
+    id: projectIdOf(group.cwd),
     name: basename(group.cwd),
     // Deprecated on the model, and still set: the launched-app harness asserts
     // that what main serves carries at least the key set the browser demo
@@ -308,7 +298,11 @@ const DESCRIPTOR: SourceDescriptor = {
     // in the source's own words is exactly what `declines` cannot express, so
     // the refusal travels as a `SourceError` at call time instead.
     closeSession: true,
-    createSession: false,
+    // `tmux new-session -d -c <cwd> claude` really starts one, so `o` is no
+    // longer a refusal on this source. What it starts is vam's own session in
+    // a detachable pty; the operator's existing sessions still cannot be
+    // adopted, and nothing here claims otherwise. See `create-session.ts`.
+    createSession: true,
     governance: false,
     // `gh pr list --head <branch>`, run in the session's own working
     // directory. See `pull-requests.ts` for what happens when it cannot be.
@@ -331,11 +325,16 @@ const DESCRIPTOR: SourceDescriptor = {
     renameSession: NO_SURFACE,
     // No entry for closeSession: a decline is written only for a capability
     // that is false, and this one is now true.
-    createSession: NOT_YET_WRITTEN,
+    // No entry for createSession: a decline is written only for a capability
+    // that is false, and this one is now true.
     governance: NOT_RECORDED,
     // No entry for pullRequests: a decline is written only for a capability
     // that is false, and this one is now true.
-    terminal: 'vam holds no PTY, and attaching to a session needs one',
+    // Still false, and precisely: vam can now START a pty via tmux, but it
+    // has no terminal renderer to draw one, and `capture-pane` gives a
+    // snapshot rather than the live stream a terminal tab would need.
+    terminal:
+      'vam can start a tmux session but has no terminal renderer to draw one; only a plain-text snapshot of the screen is available',
     // No entry for agentRoster: a decline is written only for a capability
     // that is false, and this one is now true.
   },
@@ -387,4 +386,17 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    */
   closeSession: async (sessionId) =>
     stopSession(await listLiveAgents(), sessionId, (id) => stopSessionViaCli({ sessionId: id })),
+  /**
+   * The live list is re-asked here too, and for a third reason of its own: it
+   * is the only thing that maps a project id back to a directory, and a
+   * canvas drawn minutes ago may name a project whose last session has since
+   * exited.
+   */
+  createSession: async (projectId, title) =>
+    createSessionInProject({
+      agents: await listLiveAgents(),
+      projectId,
+      title,
+      run: createTmuxRunner(),
+    }),
 };

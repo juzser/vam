@@ -161,8 +161,7 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
           ),
         };
       }
-      // Two writes main can perform today, so two channels with a surface
-      // behind them. Validation and the capability gate above both ran first:
+      // The writes main can perform today, each with a surface behind it. Validation and the capability gate above both ran first:
       // nothing reaches a source's write path unvalidated, and nothing
       // reaches it that the source did not advertise.
       //
@@ -176,6 +175,10 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
       }
       if (channel === CHANNELS.closeSession && source.closeSession !== undefined) {
         const failure = await source.closeSession(args[0] as string);
+        return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
+      }
+      if (channel === CHANNELS.createSession && source.createSession !== undefined) {
+        const failure = await source.createSession(args[0] as string, args[1] as string);
         return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
       }
       // Advertised, but this source carries no member for it. Saying so beats

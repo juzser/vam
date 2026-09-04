@@ -36,4 +36,11 @@ export type MainSource = {
    * words instead of being flattened into `unreachable/source-failed`.
    */
   closeSession?(sessionId: string): Promise<SourceError | null>;
+  /**
+   * Start a new session in a project, present only on a source that really
+   * can. Same contract again: it RESOLVES to the `SourceError`, so "vam
+   * cannot tell which directory that project is" survives as its own code
+   * instead of becoming `unreachable/source-failed`.
+   */
+  createSession?(projectId: string, title: string): Promise<SourceError | null>;
 };
