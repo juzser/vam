@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 import {
   capturePaneArgv,
   hasSessionArgv,
+  killSessionArgv,
   listSessionsArgv,
   newSessionArgv,
   sendEnterArgv,
@@ -158,5 +159,21 @@ describe('tmux argv', () => {
     const name = vamSessionName('demo project');
     expect(name.startsWith(VAM_SESSION_PREFIX)).toBe(true);
     expect(name).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+});
+
+describe('killSessionArgv', () => {
+  /**
+   * `kill-session` takes a target-SESSION, so the exact-match `=` is right and
+   * the trailing `:` of a target-PANE is wrong -- see the note on `paneTarget`
+   * in `argv.ts`. A prefix-resolvable bare name here would kill a session vam
+   * never started.
+   */
+  it('is exactly `kill-session -t =<name>`, with no pane colon', () => {
+    expect(killSessionArgv('vam-a1b2c3')).toEqual(['kill-session', '-t', '=vam-a1b2c3']);
+  });
+
+  it('never builds a bare target tmux could resolve by prefix', () => {
+    expect(killSessionArgv('vam-a1')).not.toContain('vam-a1');
   });
 });

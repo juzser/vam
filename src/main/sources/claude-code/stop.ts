@@ -23,7 +23,10 @@
 
 import { execFile } from 'node:child_process';
 import type { SourceError } from '../../ipc/channels.js';
+import { killSessionArgv } from '../tmux/argv.js';
+import { classifyTmuxFailure, listVamSessions, type TmuxRun } from '../tmux/spawn.js';
 import { sessionIdOf } from './deliver.js';
+import { paneForRow } from './reply.js';
 
 /** Stopping is a signal, not a model call, so this is far shorter than delivery's. */
 const STOP_TIMEOUT_MS = 15_000;
@@ -109,6 +112,8 @@ export type StoppableAgent = {
   readonly sessionId: string;
   readonly kind: 'interactive' | 'background';
   readonly name: string | null;
+  /** What the tmux pairing is matched on -- see `stopSession`. */
+  readonly cwd: string;
 };
 
 /** What actually performs the stop. Injectable so the join is testable without a spawn. */
@@ -116,13 +121,31 @@ export type StopFn = (sessionId: string) => Promise<SourceError | null>;
 
 /**
  * Resolve a row id to a live session and stop it, if stopping it is a thing
- * that exists. The `kind` gate is checked BEFORE anything is called, so an
- * interactive row provably spawns nothing.
+ * that exists.
+ *
+ * THREE ROUTES, and the first one is new. The `kind` gate below was written
+ * for ONE case -- a terminal the operator is sitting in front of -- and it was
+ * refusing TWO. A session vam started runs bare `claude` in a tmux pane it
+ * owns, so it reports as `interactive` too, and the gate refused the one class
+ * of session vam is actually entitled to end: vam created sessions it could
+ * not close. So a row vam can PROVE it started is killed at the tmux level
+ * first, and everything else keeps the old behaviour exactly.
+ *
+ * THE PROOF IS `paneForRow`'S, NOT A NEW ONE. It is the same two conditions
+ * `reply.ts` documents -- one tagged tmux session for this project, one live
+ * row in it -- and it must be, because the failure it prevents is worse here:
+ * a reply typed into the wrong pane is embarrassing, a session killed by
+ * mistake is unrecoverable. Anything ambiguous falls through to the refusal
+ * below rather than picking a candidate.
+ *
+ * `run` is optional so a caller with no tmux to offer keeps the CLI-only
+ * behaviour; when it is absent nothing here can kill anything.
  */
 export async function stopSession(
   agents: readonly StoppableAgent[],
   rowId: string,
   stop: StopFn,
+  run?: TmuxRun,
 ): Promise<SourceError | null> {
   const sessionId = sessionIdOf(rowId);
   const row = agents.find((a) => a.key === rowId) ?? agents.find((a) => a.sessionId === sessionId);
@@ -134,6 +157,20 @@ export async function stopSession(
     };
   }
   if (row.kind === 'interactive') {
+    // Only an interactive row can be one of vam's panes: a pane runs bare
+    // `claude`. A BACKGROUND row is never killed here even when a tmux session
+    // vam started sits in the same project -- `claude stop` is the verb that
+    // fits it, and it is the pane's neighbour, not the pane.
+    if (run !== undefined) {
+      const listed = await listVamSessions(run);
+      const pane = listed.kind === 'ok' ? paneForRow(listed.sessions, agents, row) : null;
+      if (pane !== null) {
+        const { failure, stderr } = await run(killSessionArgv(pane));
+        return failure === null
+          ? null
+          : classifyTmuxFailure({ failure, stderr, action: `closing session ${pane}` });
+      }
+    }
     return {
       kind: 'refused',
       code: 'interactive-session',
