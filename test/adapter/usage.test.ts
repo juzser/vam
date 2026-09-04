@@ -159,6 +159,9 @@ describe('describeUsage', () => {
       text: '40% used · 1h 15m · 30% used · 4d 20h',
       reason: null,
       highUsage: false,
+      // The numbers behind the text, for the status bar's bars. Present
+      // exactly when the text is not the em-dash.
+      windows: snapshot.windows,
     });
   });
 
@@ -167,6 +170,10 @@ describe('describeUsage', () => {
     const result = describeUsage(snapshot, now);
     expect(result.text).toBe('—');
     expect(result.reason).toMatch(/keychain|token/i);
+    // No windows, so the status bar has nothing to draw a bar from. A bar at
+    // zero width would read as "0% used", which is a lie in the safe-looking
+    // direction; this is the field that makes that unrepresentable.
+    expect(result.windows).toBeNull();
   });
 
   it('gives a DIFFERENT reason for a refused request than for a missing token', () => {
@@ -188,6 +195,7 @@ describe('describeUsage', () => {
     const result = describeUsage(snapshot, now);
     expect(result.text).toBe('—');
     expect(result.reason).toMatch(/stale/i);
+    expect(result.windows).toBeNull();
   });
 
   it('treats an unparseable observedAt as stale, not as fresh', () => {

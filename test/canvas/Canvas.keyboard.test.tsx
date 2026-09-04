@@ -91,8 +91,22 @@ const MODEL: CanvasModel = {
  */
 const EMPTY: CanvasModel = { projects: [] };
 
-/** The status bar's cells, queried by name — the tree has three `<footer>`s. */
-const focused = () => document.querySelector('[data-focus]')?.textContent ?? '';
+/**
+ * Which session the keyboard is on, as `project/session`.
+ *
+ * Read off the DETAIL PANE'S HEADER, not the status bar: the footer's
+ * `project/session` cell was removed at the operator's request (the slash read
+ * as a git ref). The header names the same session — it is the one the prompt
+ * box writes to — and, unlike the canvas card's focus ring, it stays put while
+ * `h`/`l` walk that session's chain. What these tests assert — where focus
+ * moved — is unchanged.
+ */
+const focused = () => {
+  const title = document.querySelector('[data-prompt-target]')?.textContent ?? '';
+  if (title === '' || title === 'No session selected') return '';
+  const project = document.querySelector('[data-prompt-project]')?.textContent ?? '';
+  return `${project}/${title}`;
+};
 const mode = () => document.querySelector('[data-mode]')?.textContent ?? '';
 /** Which step the detail panel is expanding. */
 const detailStep = () => document.querySelector('[data-detail-step]')?.textContent ?? '';

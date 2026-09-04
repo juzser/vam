@@ -132,6 +132,17 @@ export type UsageDisplay = {
   readonly text: string;
   readonly reason: string | null;
   readonly highUsage: boolean;
+  /**
+   * The numbers behind `text`, for the status bar's bars -- and `null` exactly
+   * when `text` is the em-dash.
+   *
+   * A progress bar has no honest width for "unknown": drawn at zero it reads
+   * as "0% used", which is a lie in the safe-looking direction. So the one
+   * function that decides whether a reading can be shown at all decides it
+   * once, here, rather than the renderer re-deriving staleness and the two
+   * disagreeing.
+   */
+  readonly windows: UsageWindows | null;
 };
 
 /**
@@ -142,7 +153,7 @@ export type UsageDisplay = {
  */
 export function describeUsage(snapshot: UsageSnapshot, now: Date): UsageDisplay {
   if (snapshot.kind !== 'ok') {
-    return { text: '—', reason: reasonText(snapshot.reason), highUsage: false };
+    return { text: '—', reason: reasonText(snapshot.reason), highUsage: false, windows: null };
   }
   const observedAt = new Date(snapshot.observedAt).getTime();
   if (Number.isNaN(observedAt) || now.getTime() - observedAt > STALE_AFTER_MS) {
@@ -150,6 +161,7 @@ export function describeUsage(snapshot: UsageSnapshot, now: Date): UsageDisplay 
       text: '—',
       reason: 'last reading is stale — no fresh data received',
       highUsage: false,
+      windows: null,
     };
   }
   const { fiveHour, sevenDay } = snapshot.windows;
@@ -157,5 +169,6 @@ export function describeUsage(snapshot: UsageSnapshot, now: Date): UsageDisplay 
     text: `${formatWindow(fiveHour, now)} · ${formatWindow(sevenDay, now)}`,
     reason: null,
     highUsage: isHighUsage(snapshot.windows),
+    windows: snapshot.windows,
   };
 }
