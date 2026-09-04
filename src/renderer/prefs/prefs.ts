@@ -58,6 +58,19 @@ export type StorageLike = {
 export type IconChoice = { readonly icon: string; readonly at: string };
 
 /**
+ * A session's local name, and when you gave it one.
+ *
+ * DELIBERATELY VAM'S OWN, and deliberately local. Claude Code keeps its own
+ * notion of a user-set name -- `~/.claude/sessions/<pid>.json` carries `name`
+ * and `nameSource: "user"` -- and `claude agents` exposes no rename
+ * subcommand, so there is no call to make; writing that file ourselves is the
+ * "fix" this comment exists to forestall. vam does not write into the
+ * operator's Claude Code state. The override lives here, wins over whatever
+ * the source calls the session, and clearing it gives the source's name back.
+ */
+export type RenameChoice = { readonly title: string; readonly at: string };
+
+/**
  * Which of the mockup's two artboards you are looking at.
  *
  * Stored, not sniffed. `prefers-color-scheme` answers a question about the
@@ -141,6 +154,13 @@ export type Prefs = {
    * `theme`, `panes` and `filters`: a fold is a fact about the person.
    */
   readonly collapsedProjects: Readonly<Record<string, readonly string[]>>;
+  /**
+   * Source id → session id → the name you gave it. Same keying, storage and
+   * TTL as `icons`, for the same reasons -- and the TTL applies for one more:
+   * a name for a session that stopped existing months ago is not worth
+   * keeping either.
+   */
+  readonly renames: Readonly<Record<string, Readonly<Record<string, RenameChoice>>>>;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -151,6 +171,7 @@ export const EMPTY_PREFS: Prefs = {
   projectIcons: {},
   filters: DEFAULT_SESSION_FILTERS,
   collapsedProjects: {},
+  renames: {},
 };
 
 /**
@@ -203,10 +224,11 @@ export function readPrefs(
     projectIcons?: unknown;
     filters?: unknown;
     collapsedProjects?: unknown;
+    renames?: unknown;
   };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   return {
-    icons: pruneIcons(readIcons(record.icons, migrateSource), cutoff),
+    icons: pruneBuckets(readIcons(record.icons, migrateSource), cutoff),
     // Not pruned by the TTL icons get. A theme is about the person, and one
     // who opens vam twice a year still wants the theme they chose.
     theme: readTheme((parsed as { theme?: unknown }).theme),
@@ -221,13 +243,16 @@ export function readPrefs(
     paneVisibility: readPaneVisibility(record.paneVisibility),
     // Same TTL as session icons, same reasoning: a project's glyph is not
     // worth remembering forever either.
-    projectIcons: pruneIcons(readProjectIcons(record.projectIcons), cutoff),
+    projectIcons: pruneBuckets(readProjectIcons(record.projectIcons), cutoff),
     // Same argument again: not pruned, and per-field defensive so one garbage
     // toggle cannot drag the other back to its default with it.
     filters: readFilters(record.filters),
     // Not pruned either, and per-source defensive: one garbage bucket cannot
     // unfold the projects another source folded.
     collapsedProjects: readCollapsed(record.collapsedProjects),
+    // Same TTL and same shape as the icons above; a payload written before
+    // this field existed simply has none, and reads as `{}`.
+    renames: pruneBuckets(readBuckets(record.renames, readRename), cutoff),
   };
 }
 
@@ -484,6 +509,61 @@ export function setProjectIcon(
 }
 
 /**
+ * An empty title CLEARS the override, restoring the source's own name.
+ *
+ * That is the whole undo, and it is why the editor's empty string is not
+ * treated as a bad input: a rename you cannot take back is worse than no
+ * rename at all.
+ */
+export function setRename(
+  prefs: Prefs,
+  sourceId: SourceId,
+  sessionId: string,
+  title: string,
+  now: Date,
+): Prefs {
+  const bucket = prefs.renames[sourceId] ?? emptyMap<RenameChoice>();
+  const trimmed = title.trim();
+  const nextBucket =
+    trimmed === ''
+      ? withoutEntry(bucket, sessionId)
+      : withEntry(bucket, sessionId, { title: trimmed, at: now.toISOString() });
+  const renames =
+    Object.keys(nextBucket).length > 0
+      ? withEntry(prefs.renames, sourceId, nextBucket)
+      : withoutEntry(prefs.renames, sourceId);
+  return { ...prefs, renames };
+}
+
+/**
+ * Put the stored names onto the model, once, before anything reads it -- the
+ * same trick `applyIcons` plays one field over, and for the same reason: the
+ * sidebar, the canvas node and the detail panel all render `session.title`,
+ * and none of them should have to know that a title can be local.
+ */
+export function applyRenames(model: CanvasModel, renames: Prefs['renames']): CanvasModel {
+  if (Object.keys(renames).length === 0) {
+    return model;
+  }
+  return {
+    ...model,
+    projects: model.projects.map((project) => {
+      const bucket = project.source === undefined ? undefined : renames[project.source];
+      if (bucket === undefined) {
+        return project;
+      }
+      return {
+        ...project,
+        sessions: project.sessions.map((session) => {
+          const choice = bucket[session.id];
+          return choice === undefined ? session : { ...session, title: choice.title };
+        }),
+      };
+    }),
+  };
+}
+
+/**
  * Put the stored icons onto the model, once, before anything reads it.
  *
  * The sidebar and the canvas node both render `session.icon`, and neither
@@ -609,15 +689,47 @@ function readIcons(raw: unknown, migrateSource: SourceId): Prefs['icons'] {
 }
 
 /** `fresh` applied per source, dropping a source whose bucket becomes empty. */
-function pruneIcons(icons: Prefs['icons'], cutoff: string): Prefs['icons'] {
-  let out = emptyMap<IconsBySession>();
-  for (const [source, bucket] of Object.entries(icons)) {
+function pruneBuckets<T extends { at: string }>(
+  buckets: Readonly<Record<string, Readonly<Record<string, T>>>>,
+  cutoff: string,
+): Readonly<Record<string, Readonly<Record<string, T>>>> {
+  let out = emptyMap<Readonly<Record<string, T>>>();
+  for (const [source, bucket] of Object.entries(buckets)) {
     const kept = fresh(bucket, cutoff);
     if (Object.keys(kept).length > 0) {
       out = withEntry(out, source, kept);
     }
   }
   return out;
+}
+
+/** One level of `readMap`, per source -- `readProjectIcons` generalised. */
+function readBuckets<T>(
+  raw: unknown,
+  read: (entry: unknown) => T | null,
+): Readonly<Record<string, Readonly<Record<string, T>>>> {
+  if (typeof raw !== 'object' || raw === null) {
+    return emptyMap<Readonly<Record<string, T>>>();
+  }
+  const out = emptyMap<Readonly<Record<string, T>>>();
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const nested = readMap(value, read);
+    if (Object.keys(nested).length > 0) {
+      out[key] = nested;
+    }
+  }
+  return out;
+}
+
+function readRename(entry: unknown): RenameChoice | null {
+  if (typeof entry !== 'object' || entry === null) {
+    return null;
+  }
+  const { title, at } = entry as { title?: unknown; at?: unknown };
+  if (typeof title !== 'string' || title === '' || typeof at !== 'string') {
+    return null;
+  }
+  return { title, at };
 }
 
 function readIcon(entry: unknown): IconChoice | null {
