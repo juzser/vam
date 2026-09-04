@@ -19,7 +19,7 @@ import {
 /** A runner that records what it was asked and answers with a canned result. */
 function fakeTmux(
   answer: (argv: readonly string[]) => {
-    failure?: { message: string; code?: string | number; killed?: boolean };
+    failure?: { message: string; code?: string | number; killed?: boolean; signal?: string };
     stdout?: string;
     stderr?: string;
   },
@@ -47,7 +47,7 @@ describe('classifyTmuxFailure', () => {
   it('gives each failure its own kind+code, pairwise distinct', () => {
     const outcomes = [
       at({ message: 'spawn tmux ENOENT', code: 'ENOENT' }),
-      at({ message: 'killed', killed: true }),
+      at({ message: 'killed', killed: true, signal: 'SIGTERM' }),
       at({ message: 'exit 1' }, 'no server running on /tmp/tmux-501/default'),
       at({ message: 'exit 1' }, "can't find session: vam-nope"),
       at({ message: 'exit 1' }, 'duplicate session: vam-taken'),
@@ -63,6 +63,24 @@ describe('classifyTmuxFailure', () => {
       'refused/session-exists',
       'refused/tmux-failed',
     ]);
+  });
+
+  it('does not call a SIGKILL from outside a timeout', () => {
+    // node's own timeout kills with SIGTERM. A SIGKILL means something else
+    // killed tmux -- the OOM killer, most plainly -- and reporting that as
+    // "tmux did not answer within 10s" sends the operator after a hang that
+    // never happened. A wrong cause is worse than an unknown one.
+    const timedOut = at({ message: 'killed', killed: true, signal: 'SIGTERM' });
+    const oomKilled = at({ message: 'killed', killed: true, signal: 'SIGKILL' });
+    expect(timedOut.code).toBe('timed-out');
+    expect(oomKilled.code).toBe('killed');
+    expect(oomKilled.message).toContain('SIGKILL');
+    expect(oomKilled.message).not.toMatch(/did not answer|timed out/i);
+  });
+
+  it('reports a kill with no signal as a kill, not as a timeout', () => {
+    const killed = at({ message: 'killed', killed: true });
+    expect(killed.code).toBe('killed');
   });
 
   it("carries tmux's own words for a failure it does not recognise", () => {

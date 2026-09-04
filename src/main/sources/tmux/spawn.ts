@@ -41,6 +41,14 @@ import { capturePaneArgv, isVamSession, listSessionsArgv, newSessionArgv } from 
 /** tmux answers in milliseconds; a slow one is a broken one. */
 const TMUX_TIMEOUT_MS = 10_000;
 
+/**
+ * The signal node sends when the timeout above fires. It is node's default for
+ * `killSignal`, and it is what tells a timeout apart from a kill vam did not
+ * ask for -- so `createTmuxRunner` passes it explicitly rather than leaving the
+ * classifier's reasoning resting on a default that could change.
+ */
+const TIMEOUT_SIGNAL = 'SIGTERM';
+
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 /** Enough of what tmux said to act on. */
@@ -51,6 +59,8 @@ export type SpawnFailure = {
   readonly message: string;
   readonly code?: string | number | undefined;
   readonly killed?: boolean | undefined;
+  /** Which signal ended it, when one did. `execFile` reports this beside `killed`. */
+  readonly signal?: string | undefined;
 };
 
 export type TmuxRunResult = {
@@ -98,11 +108,25 @@ export function classifyTmuxFailure(input: {
       message: `the \`tmux\` command was not found, so vam cannot manage sessions (${action})`,
     };
   }
+  // A kill is TWO different facts wearing one flag. `createTmuxRunner` sets a
+  // timeout, and node enforces it with SIGTERM -- that one is a hang. Any other
+  // signal means something outside vam ended tmux (the OOM killer sends
+  // SIGKILL), which is not a hang and must not be reported as one: the
+  // operator would go looking for a slow tmux that was never slow.
   if (failure.killed === true) {
+    if (failure.signal === TIMEOUT_SIGNAL) {
+      return {
+        kind: 'unreachable',
+        code: 'timed-out',
+        message: `tmux did not answer within ${Math.round(TMUX_TIMEOUT_MS / 1000)}s (${action})`,
+      };
+    }
     return {
       kind: 'unreachable',
-      code: 'timed-out',
-      message: `tmux did not answer within ${Math.round(TMUX_TIMEOUT_MS / 1000)}s (${action})`,
+      code: 'killed',
+      message: `tmux was killed before it answered${
+        failure.signal === undefined ? '' : ` by ${failure.signal}`
+      }, which vam did not ask for (${action})`,
     };
   }
   if (NO_SERVER.test(stderr)) {
@@ -140,7 +164,12 @@ export function createTmuxRunner(binary = 'tmux'): TmuxRun {
       execFile(
         binary,
         [...argv],
-        { timeout: TMUX_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true },
+        {
+          timeout: TMUX_TIMEOUT_MS,
+          killSignal: TIMEOUT_SIGNAL,
+          maxBuffer: MAX_OUTPUT_BYTES,
+          windowsHide: true,
+        },
         (failure, stdout, stderr) => {
           resolve({ failure, stdout: String(stdout), stderr: String(stderr) });
         },
