@@ -522,6 +522,14 @@ export type DetailPanelProps = {
    * only behaviour allowed to wear the `yy` glyph.
    */
   readonly onCopyAllCommands: () => void;
+  /**
+   * The command row whose `copy` control should take the keyboard -- what `i`
+   * asks for when the cursor is on a command row. A command row has no reason
+   * box, so this is its equivalent of `ReviewQueueProps.focusNoteFor`.
+   */
+  readonly focusCommandId?: string | null;
+  /** Cleared once the focus has landed, so a second `i` on the same row asks again. */
+  readonly onCommandFocused?: () => void;
   /** True while the prompt box owns the keyboard. */
   readonly composing: boolean;
   readonly onCompose: () => void;
@@ -912,6 +920,8 @@ export function DetailPanel(props: DetailPanelProps) {
     onSubmit,
     onCopyCommand,
     onCopyAllCommands,
+    focusCommandId = null,
+    onCommandFocused,
     composing,
     onCompose,
     onStopComposing,
@@ -925,6 +935,17 @@ export function DetailPanel(props: DetailPanelProps) {
   } = props;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * The `copy` button of each command row, by command id, so `i` can hand one
+   * of them the keyboard. A ref map rather than state: which element is which
+   * is not something a render depends on.
+   */
+  const copyRefs = useRef(new Map<string, HTMLButtonElement>());
+  useEffect(() => {
+    if (focusCommandId === null) return;
+    copyRefs.current.get(focusCommandId)?.focus();
+    onCommandFocused?.();
+  }, [focusCommandId, onCommandFocused]);
   /**
    * `progress` is context, not the thing you read, so it opens showing no turn
    * at all — the newest five are one keystroke away.
@@ -1457,6 +1478,13 @@ export function DetailPanel(props: DetailPanelProps) {
                           <button
                             type="button"
                             data-command-copy
+                            ref={(element) => {
+                              if (element === null) {
+                                copyRefs.current.delete(command.id);
+                              } else {
+                                copyRefs.current.set(command.id, element);
+                              }
+                            }}
                             onClick={() => onCopyCommand(command.id)}
                             title={`copy: ${command.label}`}
                             className="ml-auto cursor-pointer rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-[10px] text-ink-faint hover:bg-raised hover:text-ink"

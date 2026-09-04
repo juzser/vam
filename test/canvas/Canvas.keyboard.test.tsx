@@ -173,6 +173,28 @@ function typeInto(input: HTMLInputElement | HTMLTextAreaElement, text: string) {
   });
 }
 
+/**
+ * A keydown whose effect is asynchronous, flushed.
+ *
+ * Copying is one: it now AWAITS the clipboard and reports what actually
+ * happened, so the status bar is written a microtask later than the keypress.
+ * `test/canvas/Canvas.clipboard.test.tsx` is where that outcome is asserted in
+ * both directions; here it only has to be waited for.
+ */
+async function pressAsync(key: string) {
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+  });
+}
+
+/** A clipboard that accepts. Neither happy-dom nor the browser build has one. */
+function stubClipboard() {
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: async () => {} },
+  });
+}
+
 function keyOn(element: Element, key: string) {
   act(() => {
     element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
@@ -212,6 +234,7 @@ beforeAll(() => {
 
 afterEach(() => {
   cleanup();
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
   // Canvas now reads localStorage on mount. A pin or an icon left by one test
   // would silently place a node — or draw an emoji — in the next.
   localStorage.clear();
@@ -549,11 +572,12 @@ describe('the detail panel', () => {
     expect(screen.getByText(/vam does not run them/)).toBeTruthy();
   });
 
-  it('yy reports what it copied', () => {
+  it('yy reports what it copied', async () => {
+    stubClipboard();
     render(<Canvas model={MODEL} />);
     press('G');
     press('y');
-    press('y');
+    await pressAsync('y');
     expect(screen.getByText(/copied 1 command/)).toBeTruthy();
   });
 
@@ -1010,11 +1034,12 @@ describe('handing the keyboard to the right pane', () => {
     expect(mode()).toBe('PROMPT');
   });
 
-  it('Enter on a command copies it rather than running it', () => {
+  it('Enter on a command copies it rather than running it', async () => {
+    stubClipboard();
     render(<Canvas model={MODEL} />);
     press('G');
     press('I');
-    press('Enter');
+    await pressAsync('Enter');
     expect(screen.getByText(/copied "sign"/)).toBeTruthy();
   });
 

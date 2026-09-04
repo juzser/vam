@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import type { DesktopSourceApi, UsageApi } from '../preload/api.js';
+import type { ClipboardApi, DesktopSourceApi, UsageApi } from '../preload/api.js';
 import type { PreloadSourceApi } from '../shared/preload-api.js';
 import { SmithClient } from './adapter/client.js';
 import { useCanvas } from './adapter/useCanvas.js';
@@ -34,7 +34,10 @@ declare global {
      * answers `usage:get`'s bare `UsageSnapshot`, not a `PreloadSourceApi`
      * member's `IpcResult` envelope.
      */
-    readonly api?: DesktopSourceApi & { readonly usage: UsageApi };
+    readonly api?: DesktopSourceApi & {
+      readonly usage: UsageApi;
+      readonly clipboard: ClipboardApi;
+    };
   }
 }
 

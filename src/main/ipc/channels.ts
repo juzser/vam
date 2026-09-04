@@ -41,6 +41,12 @@ export const CHANNELS = {
    * `UsageSnapshot`, never an `IpcResult` -- see `src/main/usage/ipc.ts`.
    */
   usageGet: 'vam:usage:get',
+  /**
+   * The clipboard channel. Like `usageGet` it answers bare -- a `boolean`,
+   * not an `IpcResult`: "did the text reach the clipboard" is the whole
+   * answer, and there is no source to refuse anything in the words of.
+   */
+  clipboardWrite: 'vam:clipboard:write',
 } as const;
 
 /**

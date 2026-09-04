@@ -96,6 +96,23 @@ export function createUsageApi(ipc: InvokerLike): UsageApi {
   };
 }
 
+/** The bridge's clipboard member: one write, answered by whether it landed. */
+export type ClipboardApi = {
+  writeText(text: string): Promise<boolean>;
+};
+
+/**
+ * `clipboard.writeText` forwards straight to `vam:clipboard:write` -- no
+ * `unwrap`, because that channel answers with a bare `boolean` rather than an
+ * `IpcResult` (see `src/main/clipboard/ipc.ts`). The renderer uses it in
+ * preference to `navigator.clipboard`, whose permission this app denies.
+ */
+export function createClipboardApi(ipc: InvokerLike): ClipboardApi {
+  return {
+    writeText: (text) => ipc.invoke(CHANNELS.clipboardWrite, text) as Promise<boolean>,
+  };
+}
+
 /**
  * Builds `subscribe`: a closure over the renderer's `onChange`, registered
  * with `ipcRenderer.on` and removed by `ipcRenderer.removeListener` with the

@@ -72,6 +72,7 @@ import {
 import { canWriteTo } from '../sources/port.js';
 import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
+import { copyText } from './clipboard.js';
 import { infoNodeId, layoutCanvas, orderedSessions } from './layout.js';
 import { type FlowNodeLike, toNavNodes } from './nav-nodes.js';
 import { SessionFanNode } from './SessionFanNode.js';
@@ -589,6 +590,12 @@ function CanvasInner({
   const [notes, setNotes] = useState<Record<string, string>>({});
   /** The row whose note box `i` has just asked for. */
   const [noteFocus, setNoteFocus] = useState<string | null>(null);
+  /**
+   * The command row whose copy control `i` has just asked for. Cleared by the
+   * panel once the focus has landed, so pressing `i` twice on the same row
+   * asks twice — the same handshake `noteFocus`/`onNoteDone` already uses.
+   */
+  const [commandFocus, setCommandFocus] = useState<string | null>(null);
 
   /**
    * Everything the action pane can land on, in the order it is drawn.
@@ -731,14 +738,19 @@ function CanvasInner({
   }, []);
 
   const copyCommand = useCallback(
-    (commandId: string) => {
+    async (commandId: string) => {
       const command = focusedDecision?.commands.find((c) => c.id === commandId);
       if (command === undefined) {
         return;
       }
       // Vam copies. Vam does not run — §4: the nod is still yours.
-      void navigator.clipboard?.writeText(command.command);
-      setStatus(`copied: ${command.label}`);
+      //
+      // Awaited, and the outcome is what the status bar reports. The old
+      // shape fired the write and announced success on the next line, so in
+      // the packaged app — where the permission policy refuses a renderer-side
+      // clipboard write — every copy failed and every copy said "copied".
+      const copied = await copyText(command.command);
+      setStatus(copied ? `copied: ${command.label}` : `could not copy: ${command.label}`);
     },
     [focusedDecision],
   );
@@ -904,14 +916,16 @@ function CanvasInner({
     [source, notes, answer],
   );
 
-  const copyAllCommands = useCallback(() => {
+  const copyAllCommands = useCallback(async () => {
     const commands = focusedDecision?.commands ?? [];
     if (commands.length === 0) {
       setStatus('no command to copy');
       return;
     }
-    void navigator.clipboard?.writeText(commands.map((c) => c.command).join('\n'));
-    setStatus(`copied ${commands.length} commands`);
+    const copied = await copyText(commands.map((c) => c.command).join('\n'));
+    setStatus(
+      copied ? `copied ${commands.length} commands` : `could not copy ${commands.length} commands`,
+    );
   }, [focusedDecision]);
 
   const stepSession = useCallback(
@@ -1066,7 +1080,7 @@ function CanvasInner({
           setJumping(true);
           return;
         case 'copy':
-          copyAllCommands();
+          void copyAllCommands();
           return;
         case 'search':
           searchOrigin.current = focusedId;
@@ -1183,10 +1197,18 @@ function CanvasInner({
           // action pane that is usually a queue row's reason box, and sending
           // it to the prompt instead would put a waiver's justification into a
           // message to the session.
+          // Every row but the prompt one IS a thing to act on, commands
+          // included: a command row has no reason box, so `i` puts the
+          // keyboard on its copy control instead — the row is then genuinely
+          // focused rather than the composer having stolen the keys.
           const selected =
             pane === 'action' ? actions[clampIndex(actionIndex, actions.length)] : undefined;
-          if (selected !== undefined && selected.rowId !== null && selected.kind !== 'command') {
-            setNoteFocus(selected.rowId);
+          if (selected !== undefined && selected.rowId !== null) {
+            if (selected.kind === 'command') {
+              setCommandFocus(selected.rowId);
+            } else {
+              setNoteFocus(selected.rowId);
+            }
             return;
           }
           setComposing(true);
@@ -1213,8 +1235,13 @@ function CanvasInner({
               if (command === undefined) {
                 return;
               }
-              void navigator.clipboard?.writeText(command.command);
-              setStatus(`vam does not run them — copied "${command.label}", run it yourself`);
+              void copyText(command.command).then((copied) => {
+                setStatus(
+                  copied
+                    ? `vam does not run them — copied "${command.label}", run it yourself`
+                    : `could not copy "${command.label}"`,
+                );
+              });
               return;
             }
             case 'prompt':
@@ -1570,6 +1597,8 @@ function CanvasInner({
           onSubmit={sendPrompt}
           onCopyCommand={copyCommand}
           onCopyAllCommands={copyAllCommands}
+          focusCommandId={commandFocus}
+          onCommandFocused={() => setCommandFocus(null)}
           active={pane === 'action'}
           actionIndex={actionIndex}
           review={{
