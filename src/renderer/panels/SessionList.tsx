@@ -42,7 +42,7 @@ import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filte
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { OverlayScroll } from './OverlayScroll.js';
-import { removalPlan } from './remove-project.js';
+import { type RemovalPlan, removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
 
 const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
@@ -211,6 +211,20 @@ export type SessionListProps = {
   readonly hiddenProjects?: readonly string[];
   readonly onHideProject?: (project: Project, hidden: boolean) => void;
   /**
+   * Perform the removal, when the caller can do it better than this component.
+   *
+   * `SessionList` can end a project's sessions by calling `onClose` for each,
+   * and that is what it does when this is absent -- the standalone behaviour,
+   * on the same terms as `collapsedProjects`. What it CANNOT do is refuse:
+   * `Canvas` holds one in-flight action at a time and returns early while one
+   * is running, so a loop of `onClose` calls issued at the wrong moment ends
+   * nothing while the project disappears anyway. Given this, the caller owns
+   * the whole act -- ending, hiding and reporting -- and this component only
+   * asks for it, having already disclosed and confirmed exactly what `plan`
+   * contains.
+   */
+  readonly onRemoveProject?: (project: Project, plan: RemovalPlan) => void;
+  /**
    * The project `p` has just asked to reveal, or null when nothing has been
    * asked. A fresh object each press, so pressing `p` twice reveals twice.
    *
@@ -271,6 +285,7 @@ export function SessionList(props: SessionListProps) {
     onToggleCollapse,
     hiddenProjects,
     onHideProject,
+    onRemoveProject,
     onSettings,
     theme,
     onToggleTheme,
@@ -1302,13 +1317,19 @@ export function SessionList(props: SessionListProps) {
           onCancel={() => setConfirming(null)}
           onConfirm={() => {
             const plan = planFor(confirming);
-            // Ending comes first: the hide is what makes the project stay
-            // gone, and doing it first would drop the sessions out of this
-            // component's own reach before it had closed them.
-            for (const sessionId of plan.end) {
-              onClose(sessionId);
+            if (onRemoveProject !== undefined) {
+              // The caller owns ending, hiding and reporting -- see the prop.
+              onRemoveProject(confirming, plan);
+            } else {
+              // Standalone: ending comes first, because the hide is what makes
+              // the project stay gone and doing it first would drop the
+              // sessions out of this component's own reach before it had
+              // closed them.
+              for (const sessionId of plan.end) {
+                onClose(sessionId);
+              }
+              setHidden(confirming, true);
             }
-            setHidden(confirming, true);
             setConfirming(null);
           }}
         />

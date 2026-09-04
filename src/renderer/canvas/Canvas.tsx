@@ -65,6 +65,7 @@ import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
 import { IconPicker } from '../panels/IconPicker.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
+import type { RemovalPlan } from '../panels/remove-project.js';
 import { SessionList } from '../panels/SessionList.js';
 import {
   ALL_VISIBLE,
@@ -83,12 +84,14 @@ import {
   browserStorage,
   DEFAULT_FOCUS_SHARE,
   type EffectiveTheme,
+  isProjectHidden,
   type Prefs,
   readPrefs,
   setIcon,
   setLayout,
   setPaneVisibility,
   setPaneWidth,
+  setProjectHidden,
   setProjectIcon,
   setRename,
   setSessionFilters,
@@ -677,6 +680,9 @@ function CanvasInner({
    * starts two sessions is a worse bug than the missing indicator.
    */
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  /** Removals that cannot be stored, because the project has no source to key
+   *  them under. See `hiddenProjects`. */
+  const [hiddenSourceless, setHiddenSourceless] = useState<readonly string[]>([]);
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
   const { getNodes, zoomIn, zoomOut, fitView, setCenter } = useReactFlow();
@@ -701,9 +707,42 @@ function CanvasInner({
    * SET, so a filter now narrows what is drawn as well, and `All` (or Escape
    * out of `/`) puts every card back.
    */
+  /**
+   * The projects removed from vam, as the ids the sidebar draws from.
+   *
+   * Derived per project from `prefs.hiddenProjects`, which is keyed by SOURCE:
+   * an id counts as removed only under ITS OWN source's bucket, so one
+   * source's removal cannot hide another source's project that happens to
+   * share an id. A project with no source at all cannot be keyed, so its
+   * removal is kept for the session in `hiddenSourceless` rather than
+   * refused -- the same shape `onPickIcon` refuses on, answered differently
+   * because a removal that silently did nothing would be worse than one that
+   * is not remembered.
+   */
+  const hiddenProjects = useMemo(() => {
+    const ids: string[] = [];
+    for (const entry of allEntries) {
+      const { id, source: projectSource } = entry.project;
+      if (ids.includes(id)) continue;
+      if (
+        projectSource === undefined
+          ? hiddenSourceless.includes(id)
+          : isProjectHidden(prefs, projectSource, id)
+      ) {
+        ids.push(id);
+      }
+    }
+    return ids;
+  }, [allEntries, prefs, hiddenSourceless]);
+
   const entries = useMemo(() => {
+    // FIRST, and not only in the sidebar. A removed project whose cards stayed
+    // drawn would leave `j` stepping onto a session with no row -- the exact
+    // defect the note below this memo describes, reintroduced by a different
+    // route. The three views agree on the SET.
+    const visible = allEntries.filter((e) => !hiddenProjects.includes(e.project.id));
     const byText =
-      query.trim() === '' ? allEntries : allEntries.filter((e) => matches.includes(e.session.id));
+      query.trim() === '' ? visible : visible.filter((e) => matches.includes(e.session.id));
     const byStatus =
       statusFilter === 'all' ? byText : byText.filter((e) => e.session.status === statusFilter);
     // Both origin rules only ever exclude something vam POSITIVELY classified
@@ -711,7 +750,7 @@ function CanvasInner({
     // `unknown` and survives both, because hiding what you did not check is
     // how a filter loses work rather than narrowing it.
     return byStatus.filter((e) => !isHiddenByOriginFilters(e.session, prefs.filters));
-  }, [allEntries, matches, query, statusFilter, prefs.filters]);
+  }, [allEntries, hiddenProjects, matches, query, statusFilter, prefs.filters]);
 
   /**
    * What each origin rule takes away, counted over the WHOLE workspace and
@@ -1129,6 +1168,69 @@ function CanvasInner({
       }
     },
     [source, pendingAction],
+  );
+
+  /** Store the removal, or keep it for the session when there is nowhere to
+   *  store it. See `hiddenProjects`. */
+  const setProjectRemoved = useCallback(
+    (project: Project, removed: boolean) => {
+      const projectSource = project.source;
+      if (projectSource === undefined) {
+        setHiddenSourceless((current) =>
+          removed
+            ? current.includes(project.id)
+              ? current
+              : [...current, project.id]
+            : current.filter((id) => id !== project.id),
+        );
+        return;
+      }
+      savePrefs(setProjectHidden(prefs, projectSource, project.id, removed));
+    },
+    [prefs, savePrefs],
+  );
+
+  /**
+   * Remove a project: end what vam started, then stop drawing it.
+   *
+   * THE ORDER IS THE SAFETY. The hide is what makes a removal stick, and doing
+   * it first would take the sessions out of reach before they were ended --
+   * running, with no row and no card to reach them by. So every close is
+   * awaited first and the project is hidden only after.
+   *
+   * IT REFUSES OUTRIGHT while another action is in flight, rather than trying.
+   * `closeSession` returns at its own guard when `pendingAction` is set -- a
+   * `claude stop` can burn its full 15s timeout -- so a removal that pressed
+   * on would hide the project having ended nothing and said nothing. Refusing
+   * here also makes the loop below sound: with `pendingAction` proven null at
+   * entry, the `closeSession` this closure holds is one whose own guard cannot
+   * fire, so each session is really closed rather than silently skipped.
+   *
+   * `plan` is the SIDEBAR'S, and is not recomputed: it is exactly what the
+   * confirm dialog disclosed and the operator agreed to. Recomputing it here
+   * against a model that may have polled since would end sessions the sentence
+   * they read did not mention.
+   */
+  const removeProject = useCallback(
+    async (project: Project, plan: RemovalPlan) => {
+      if (pendingAction !== null) {
+        setStatus(
+          `something else is still running — "${project.name}" was not removed; try again in a moment`,
+        );
+        return;
+      }
+      for (const sessionId of plan.end) {
+        const entry = allEntries.find((e) => e.session.id === sessionId);
+        await closeSession(sessionId, entry?.session.title ?? sessionId);
+      }
+      setProjectRemoved(project, true);
+      setStatus(
+        plan.end.length === 0
+          ? `removed "${project.name}" from vam — nothing was ended, and nothing left this machine`
+          : `removed "${project.name}" from vam — ended ${plan.end.length} session${plan.end.length === 1 ? '' : 's'} vam started; nothing left this machine`,
+      );
+    },
+    [allEntries, closeSession, pendingAction, setProjectRemoved],
   );
 
   /**
@@ -1839,6 +1941,11 @@ function CanvasInner({
           }}
           onAddInProject={(project) => void createSession(project.id, project.name)}
           pendingAction={pendingAction}
+          hiddenProjects={hiddenProjects}
+          // Restoring is the only thing the sidebar asks for by itself: it
+          // ends nothing, so there is nothing to serialise or refuse.
+          onHideProject={setProjectRemoved}
+          onRemoveProject={(project, plan) => void removeProject(project, plan)}
           revealRequest={revealRequest}
           onNewProject={() => void newProject()}
           newSessionDecline={newSessionDecline}
