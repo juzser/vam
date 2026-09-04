@@ -1210,8 +1210,22 @@ function CanvasInner({
             focusSession(next.session.id);
             return;
           }
-          // Live geometry, read now — not a list captured at render time.
-          const live = toNavNodes(getNodes() as unknown as FlowNodeLike[], nodeIds);
+          // Live geometry, read now — not a list captured at render time —
+          // over the WHOLE laid-out set, not only what the canvas draws.
+          // `getNodes` returns what ReactFlow was given, which in the strip is
+          // the focused session alone; navigating that would make `l` answer
+          // "nothing lies right" at the edge of a cell while the sidebar still
+          // lists the session sitting beside it. The strip narrows what is
+          // drawn, never what the model holds, so the undrawn nodes fall back
+          // to their laid-out rectangles — the same ones `layoutCanvas`
+          // computed for them — and every other consumer's rule holds here too.
+          const drawn = new Map(
+            (getNodes() as unknown as FlowNodeLike[]).map((node) => [node.id, node]),
+          );
+          const live = toNavNodes(
+            (initialNodes as unknown as FlowNodeLike[]).map((node) => drawn.get(node.id) ?? node),
+            nodeIds,
+          );
           const landed = nextNode(live, focusedId, action.direction);
           if (landed === null) {
             setStatus(`nothing lies ${action.direction}`);
@@ -1516,6 +1530,7 @@ function CanvasInner({
     focusedEntry,
     focusedSessionId,
     nodeIds,
+    initialNodes,
     entries,
     getNodes,
     jumping,

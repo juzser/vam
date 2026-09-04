@@ -371,3 +371,36 @@ describe('below the width three fixed columns need', () => {
     expect(stored().paneVisibility.canvas).toBe(true);
   });
 });
+
+/**
+ * The strip narrows what is DRAWN, never what the model holds.
+ *
+ * That is this branch's own rule, and `j`/`k`, `Cmd+number`, `gg`/`G`, search
+ * and the palette all honour it by resolving through the unfiltered set.
+ * `h`/`l` read ReactFlow's live nodes, which in the strip ARE the filter — so
+ * walking right off the focused session's own chain answered "nothing lies
+ * right" instead of arriving at the next cell.
+ */
+describe('h and l reach the whole model from inside the strip', () => {
+  it('walks out of the focused cell into the session beside it', () => {
+    seed({ paneVisibility: LAYOUTS.focusResponse });
+    render(<Canvas model={MODEL} />);
+    expect(drawnSessions()).toEqual(['a1']);
+    press('l');
+    press('l');
+    expect(drawnSessions()).toEqual(['a2']);
+  });
+
+  it('and back again, so the strip is not a one-way door', () => {
+    seed({ paneVisibility: LAYOUTS.focusResponse });
+    render(<Canvas model={MODEL} />);
+    press('l');
+    press('l');
+    // Asserted mid-walk: without it a test that never left a1 would pass by
+    // standing still, which is exactly the behaviour it exists to exclude.
+    expect(drawnSessions()).toEqual(['a2']);
+    press('h');
+    press('h');
+    expect(drawnSessions()).toEqual(['a1']);
+  });
+});
