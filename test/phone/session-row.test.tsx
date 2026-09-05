@@ -141,16 +141,39 @@ describe('the text the phone list screen is made of', () => {
    */
   it('keeps no ink-faint on the search label, the captions or the empty state', () => {
     draw(true);
-    const faint = [...document.querySelectorAll('[class*="text-ink-faint"]')].map((n) =>
-      (n.textContent ?? '').trim().slice(0, 24),
-    );
-    expect(faint, 'still failing AA on the phone list screen').not.toContain('Search sessions');
-    expect(faint).not.toContain('PROJECTS');
+    // FOUND, then judged. A sweep that asserts "none of these is faint" over a
+    // corpus it never located is green having examined nothing, which is how
+    // four guards in a sibling repo passed over zero files.
+    const named = (text: string) => {
+      const hit = [...document.querySelectorAll('span, button')].filter(
+        (n) => (n.textContent ?? '').trim() === text,
+      );
+      expect(hit.length, `no element on this screen reads "${text}"`).toBeGreaterThan(0);
+      return hit;
+    };
+    for (const node of named('Search sessions')) {
+      // The control as well as the label: the class sits on the button, and a
+      // check that only reached the inner span survived reverting it.
+      expect(node.className, 'the search label').not.toContain('text-ink-faint');
+      expect(node.closest('button')?.className, 'the search control').not.toContain(
+        'text-ink-faint',
+      );
+    }
+
+    // The filter popover's two captions -- the phone's only text-search route
+    // reaches this surface, so they are on the critical path too.
+    cleanup();
+    render(<SessionList {...baseProps(entries())} phone width={undefined} filterMenuOpen />);
+    for (const text of ['Status', 'Origin']) {
+      for (const node of named(text)) {
+        expect(node.className, text).not.toContain('text-ink-faint');
+      }
+    }
 
     cleanup();
     render(<SessionList {...baseProps([])} phone width={undefined} />);
     const empty = document.querySelector('li');
-    expect(empty?.textContent, 'the empty state').not.toBe('');
+    expect(empty?.textContent?.trim(), 'the empty state').not.toBe('');
     expect(empty?.className).not.toContain('text-ink-faint');
   });
 });
