@@ -253,7 +253,9 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     });
   };
 
-  read('/api/describe', async () => servedDescriptor(options.source.descriptor, options.allowWrites));
+  read('/api/describe', async () =>
+    servedDescriptor(options.source.descriptor, options.allowWrites),
+  );
   read('/api/load', async () => await options.source.load());
 
   table.set('/api/stream', { method: 'GET', route: stream(options) });

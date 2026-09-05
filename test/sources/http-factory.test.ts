@@ -12,9 +12,13 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import {
+  createHttpSourceApi,
+  createSourceFromHttp,
+  type HttpTransport,
+} from '../../src/renderer/sources/http-factory.js';
 import type { SourceCapabilities } from '../../src/renderer/sources/port.js';
 import { canSubscribeTo, canWriteTo } from '../../src/renderer/sources/port.js';
-import { createSourceFromHttp, type HttpTransport } from '../../src/renderer/sources/http-factory.js';
 import { createSourceFromPreload } from '../../src/renderer/sources/preload-factory.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../../src/shared/preload-api.js';
 
@@ -69,7 +73,7 @@ function fetcher(
       statusText: 'OK',
       json: async () => body,
     };
-  }) as HttpTransport['fetch'] & { calls: Call[] };
+  }) as unknown as HttpTransport['fetch'] & { calls: Call[] };
   fake.calls = calls;
   return fake;
 }
@@ -89,7 +93,12 @@ function stream() {
       closed = true;
     },
   });
-  return { open, tick: () => listeners.forEach((l) => l()), isClosed: () => closed };
+  const tick = (): void => {
+    for (const listener of listeners) {
+      listener();
+    }
+  };
+  return { open, tick, isClosed: () => closed };
 }
 
 describe('createSourceFromHttp', () => {
@@ -108,7 +117,9 @@ describe('createSourceFromHttp', () => {
     expect(overHttp.id).toBe(bridged.id);
     expect(overHttp.capabilities).toEqual(bridged.capabilities);
     expect(Object.keys(overHttp).sort()).toEqual(Object.keys(bridged).sort());
-    expect(Object.keys(overHttp.write ?? {}).sort()).toEqual(Object.keys(bridged.write ?? {}).sort());
+    expect(Object.keys(overHttp.write ?? {}).sort()).toEqual(
+      Object.keys(bridged.write ?? {}).sort(),
+    );
   });
 
   it('reads the model through /api/load', async () => {
@@ -174,8 +185,64 @@ describe('createSourceFromHttp', () => {
     const dead = (async () => {
       throw new Error('connection reset');
     }) as unknown as HttpTransport['fetch'];
-    await expect(createSourceFromHttp({ fetch: dead, openStream: stream().open })).rejects.toMatchObject(
-      { kind: 'unreachable' },
+    await expect(
+      createSourceFromHttp({ fetch: dead, openStream: stream().open }),
+    ).rejects.toMatchObject({ kind: 'unreachable' });
+  });
+});
+
+/**
+ * The api under the factory. Every member is present unconditionally, exactly
+ * as the preload's are -- three of them address routes this server does not
+ * register, and what keeps them from being called is the descriptor's `false`,
+ * not their absence from this object.
+ */
+describe('createHttpSourceApi', () => {
+  it('addresses each route relative to the base url it was given', async () => {
+    const fetch = fetcher(READS);
+    const api = createHttpSourceApi({
+      baseUrl: 'https://vam.example',
+      fetch,
+      openStream: stream().open,
+    });
+    await api.describe();
+    expect(fetch.calls[0]?.url).toBe('https://vam.example/api/describe');
+  });
+
+  it('rejects with no-such-route for a member the server never registered', async () => {
+    const absent = (path: string) => ({
+      ok: false,
+      error: { kind: 'unreachable', code: 'no-such-route', message: path },
+    });
+    const api = createHttpSourceApi({
+      fetch: fetcher({
+        '/api/rename-session': absent('/api/rename-session'),
+        '/api/apply-waivers': absent('/api/apply-waivers'),
+        '/api/transition-lesson': absent('/api/transition-lesson'),
+      }),
+      openStream: stream().open,
+    });
+    const code = { code: 'no-such-route' };
+    await expect(api.renameSession('s1', 'new name')).rejects.toMatchObject(code);
+    await expect(api.applyWaivers('s1', ['f1'])).rejects.toMatchObject(code);
+    await expect(api.transitionLesson('s1', 'l1', 'accepted')).rejects.toMatchObject(code);
+  });
+
+  it('reads an answer that is not an envelope as "not a vam endpoint"', async () => {
+    const notVam = (async () => ({
+      status: 404,
+      statusText: 'Not Found',
+      json: async () => '<!doctype html>',
+    })) as unknown as HttpTransport['fetch'];
+    await expect(
+      createHttpSourceApi({ fetch: notVam, openStream: stream().open }).describe(),
+    ).rejects.toMatchObject({ kind: 'unreachable', code: 'http-404' });
+  });
+
+  it('says so rather than hanging when the runtime has no event stream', () => {
+    const api = createHttpSourceApi({ fetch: fetcher(READS) });
+    expect(() => api.subscribe(() => {})).toThrow(
+      expect.objectContaining({ code: 'no-event-source' }) as unknown as Error,
     );
   });
 });

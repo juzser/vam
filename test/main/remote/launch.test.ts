@@ -101,3 +101,25 @@ describe('accessKeySet', () => {
     expect(notOk).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('the web root', () => {
+  it('is carried through when the operator names one', () => {
+    const config = remoteConfigFromEnv({
+      VAM_REMOTE_PORT: '8787',
+      VAM_ACCESS_TEAM: 'team',
+      VAM_ACCESS_AUD: 'aud',
+      VAM_REMOTE_WEB_ROOT: '/srv/vam/dist-web',
+    });
+    expect(config?.webRoot).toBe('/srv/vam/dist-web');
+  });
+
+  it('is absent when the variable is empty, so an unset shell expansion is not a root', () => {
+    const config = remoteConfigFromEnv({
+      VAM_REMOTE_PORT: '8787',
+      VAM_ACCESS_TEAM: 'team',
+      VAM_ACCESS_AUD: 'aud',
+      VAM_REMOTE_WEB_ROOT: '',
+    });
+    expect(config === null ? 'null' : 'webRoot' in config).toBe(false);
+  });
+});

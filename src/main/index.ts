@@ -209,10 +209,16 @@ function startRemoteTransport(): void {
     browsers.add(onChange);
     return () => browsers.delete(onChange);
   };
-  void startRemoteServer({ ...config, source: DESKTOP_SOURCE, subscribe }).catch((error) => {
-    console.error(`[vam] remote transport refused to start: ${String(error)}`);
-    app.exit(1);
-  });
+  // The page the browser loads. `VAM_REMOTE_WEB_ROOT` wins; otherwise it is
+  // the `dist-web` build beside the app, and a missing one answers 404 rather
+  // than half a page -- `serveAsset` opens files, it does not invent them.
+  const webRoot = config.webRoot ?? join(app.getAppPath(), 'dist-web');
+  void startRemoteServer({ ...config, webRoot, source: DESKTOP_SOURCE, subscribe }).catch(
+    (error) => {
+      console.error(`[vam] remote transport refused to start: ${String(error)}`);
+      app.exit(1);
+    },
+  );
 }
 
 void app.whenReady().then(() => {

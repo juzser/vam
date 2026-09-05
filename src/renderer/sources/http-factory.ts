@@ -17,8 +17,8 @@
  * politeness, on top of a refusal that does not depend on it.
  */
 
-import type { Project } from '../domain/model.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../../shared/preload-api.js';
+import type { Project } from '../domain/model.js';
 import type { SessionSource, SourceError } from './port.js';
 import { createSourceFromPreload } from './preload-factory.js';
 import { activeProviderId } from './provider.js';
@@ -53,8 +53,9 @@ const unreachable = (code: string, message: string): SourceError => ({
 });
 
 function defaultStream(url: string): ReturnType<HttpTransport['openStream']> {
-  const Ctor = (globalThis as { EventSource?: new (url: string) => ReturnType<HttpTransport['openStream']> })
-    .EventSource;
+  const Ctor = (
+    globalThis as { EventSource?: new (url: string) => ReturnType<HttpTransport['openStream']> }
+  ).EventSource;
   if (Ctor === undefined) {
     throw unreachable('no-event-source', 'this browser cannot open a server-sent event stream');
   }
@@ -98,7 +99,10 @@ async function call<T>(
     parsed = null;
   }
   if (typeof parsed !== 'object' || parsed === null || !('ok' in parsed)) {
-    throw unreachable(`http-${answer.status}`, answer.statusText || 'the answer was not an envelope');
+    throw unreachable(
+      `http-${answer.status}`,
+      answer.statusText || 'the answer was not an envelope',
+    );
   }
   const envelope = parsed as Envelope;
   if (!envelope.ok) {
@@ -123,7 +127,7 @@ export function createHttpSourceApi(options: HttpSourceOptions = {}): PreloadSou
       ((url, init) => fetch(url, init) as unknown as ReturnType<HttpTransport['fetch']>),
     openStream: options.openStream ?? defaultStream,
   };
-  const get = <T,>(path: string): Promise<T> => call<T>(transport, `${base}${path}`);
+  const get = <T>(path: string): Promise<T> => call<T>(transport, `${base}${path}`);
   const post = (path: string, body: Record<string, unknown>): Promise<void> =>
     call<void>(transport, `${base}${path}`, body);
 
