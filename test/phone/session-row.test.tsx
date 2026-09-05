@@ -31,12 +31,7 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { SessionList } from '../../src/renderer/panels/SessionList.js';
-import {
-  baseProps,
-  decision,
-  makeProject,
-  makeSession,
-} from '../panels/session-list-props.js';
+import { baseProps, decision, makeProject, makeSession } from '../panels/session-list-props.js';
 
 const ASKED = 'Does cross-origin EventSource reach the 127.0.0.1 server?';
 
@@ -56,11 +51,23 @@ function entries(): SessionEntry[] {
     },
     {
       project,
-      session: makeSession({ id: 'a2', title: 'crosscheck-2', status: 'running', branch: null, age: '26m' }),
+      session: makeSession({
+        id: 'a2',
+        title: 'crosscheck-2',
+        status: 'running',
+        branch: null,
+        age: '26m',
+      }),
     },
     {
       project,
-      session: makeSession({ id: 'a3', title: 'dogfood-4', status: 'done', branch: 'feat/x', age: '2h' }),
+      session: makeSession({
+        id: 'a3',
+        title: 'dogfood-4',
+        status: 'done',
+        branch: 'feat/x',
+        age: '2h',
+      }),
     },
   ];
 }

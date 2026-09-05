@@ -46,7 +46,11 @@ function phoneList() {
       <div data-phone-shell="list">
         <SessionList
           {...baseProps([
-            { project: PROJECT, session: makeSession({ id: 'a1', status: 'waiting' }), group: GROUP },
+            {
+              project: PROJECT,
+              session: makeSession({ id: 'a1', status: 'waiting' }),
+              group: GROUP,
+            },
           ])}
           phone
           width={undefined}

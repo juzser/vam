@@ -1819,44 +1819,44 @@ export function SessionList(props: SessionListProps) {
                                 channel over data no source supplies, so a row at
                                 rest read as a dashboard reporting nothing. */}
                                 {!phone && (
-                                <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
-                                  <span className="flex min-w-0 flex-1 items-center gap-1">
-                                    <GitBranch size={10} strokeWidth={1.6} />
+                                  <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
+                                    <span className="flex min-w-0 flex-1 items-center gap-1">
+                                      <GitBranch size={10} strokeWidth={1.6} />
+                                      <span
+                                        data-session-branch
+                                        title={
+                                          session.branch === null
+                                            ? 'this source cannot say which branch the session is on'
+                                            : session.branch
+                                        }
+                                        className="flex min-w-0 items-center"
+                                      >
+                                        {session.branch === null ? (
+                                          '—'
+                                        ) : (
+                                          <>
+                                            <span data-branch-head className="truncate">
+                                              {splitBranch(session.branch).head}
+                                            </span>
+                                            <span data-branch-tail className="flex-none">
+                                              {splitBranch(session.branch).tail}
+                                            </span>
+                                          </>
+                                        )}
+                                      </span>
+                                    </span>
                                     <span
-                                      data-session-branch
+                                      data-session-age
                                       title={
-                                        session.branch === null
-                                          ? 'this source cannot say which branch the session is on'
-                                          : session.branch
+                                        session.age === null
+                                          ? 'this source cannot say when the session last did anything'
+                                          : `last activity ${session.age} ago`
                                       }
-                                      className="flex min-w-0 items-center"
+                                      className="flex-none"
                                     >
-                                      {session.branch === null ? (
-                                        '—'
-                                      ) : (
-                                        <>
-                                          <span data-branch-head className="truncate">
-                                            {splitBranch(session.branch).head}
-                                          </span>
-                                          <span data-branch-tail className="flex-none">
-                                            {splitBranch(session.branch).tail}
-                                          </span>
-                                        </>
-                                      )}
+                                      {session.age ?? '—'}
                                     </span>
                                   </span>
-                                  <span
-                                    data-session-age
-                                    title={
-                                      session.age === null
-                                        ? 'this source cannot say when the session last did anything'
-                                        : `last activity ${session.age} ago`
-                                    }
-                                    className="flex-none"
-                                  >
-                                    {session.age ?? '—'}
-                                  </span>
-                                </span>
                                 )}
                               </button>
 

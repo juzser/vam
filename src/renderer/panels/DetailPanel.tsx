@@ -2281,17 +2281,17 @@ export function DetailPanel(props: DetailPanelProps) {
         className={`flex flex-col gap-2.5 border-line border-b px-3.5 ${phone ? 'pt-2.5' : 'pt-3'}`}
       >
         {!phone && (
-        <div className="flex items-start gap-2">
-          <span
-            data-pane-status={entry?.session.status ?? 'none'}
-            className={[
-              'mt-1.5 h-1.5 w-1.5 flex-none rounded-full',
-              entry === null ? 'bg-line-strong' : PANE_STATUS_DOT[entry.session.status],
-              entry !== null && PANE_STATUS_BREATHES[entry.session.status] ? 'vam-breathe' : '',
-            ].join(' ')}
-          />
-          <div className="min-w-0 flex-1">
-            {/* `data-prompt-target` lives here now, not beside the composer.
+          <div className="flex items-start gap-2">
+            <span
+              data-pane-status={entry?.session.status ?? 'none'}
+              className={[
+                'mt-1.5 h-1.5 w-1.5 flex-none rounded-full',
+                entry === null ? 'bg-line-strong' : PANE_STATUS_DOT[entry.session.status],
+                entry !== null && PANE_STATUS_BREATHES[entry.session.status] ? 'vam-breathe' : '',
+              ].join(' ')}
+            />
+            <div className="min-w-0 flex-1">
+              {/* `data-prompt-target` lives here now, not beside the composer.
                 The operator asked for the branch line under the input to go;
                 the guarantee it carried must not go with it. One input serving
                 many sessions is the easiest possible way to send the right
@@ -2299,35 +2299,35 @@ export function DetailPanel(props: DetailPanelProps) {
                 which session is about to be written to — and the pane header
                 already did, two lines up from where the chip was. The tests
                 that covered the chip now assert against this. */}
-            <div
-              data-prompt-target
-              className="truncate font-medium text-[14px] text-ink leading-[1.35]"
-            >
-              {entry === null ? 'No session selected' : entry.session.title}
+              <div
+                data-prompt-target
+                className="truncate font-medium text-[14px] text-ink leading-[1.35]"
+              >
+                {entry === null ? 'No session selected' : entry.session.title}
+              </div>
+              <div className="mt-1 flex items-center gap-[5px] font-mono text-[10px] text-ink-faint">
+                <span data-prompt-project className="truncate text-ink-dim">
+                  {entry?.project.name ?? '—'}
+                </span>
+                <span>·</span>
+                <span className="truncate">{entry?.session.epic ?? '—'}</span>
+                <span>·</span>
+                <span className="flex-none">
+                  {entry === null || entry.session.runningAgents === 0
+                    ? 'no agent'
+                    : `${entry.session.runningAgents} agents`}
+                </span>
+              </div>
             </div>
-            <div className="mt-1 flex items-center gap-[5px] font-mono text-[10px] text-ink-faint">
-              <span data-prompt-project className="truncate text-ink-dim">
-                {entry?.project.name ?? '—'}
-              </span>
-              <span>·</span>
-              <span className="truncate">{entry?.session.epic ?? '—'}</span>
-              <span>·</span>
-              <span className="flex-none">
-                {entry === null || entry.session.runningAgents === 0
-                  ? 'no agent'
-                  : `${entry.session.runningAgents} agents`}
-              </span>
-            </div>
-          </div>
-          {/* Which step the panel is expanding. The mockup puts it at the far
+            {/* Which step the panel is expanding. The mockup puts it at the far
               right of the title row, where the eye lands last — it names the
               thing you are reading, not the thing you are choosing. */}
-          {decision !== null && (
-            <span data-detail-step className="flex-none font-mono text-[10px] text-ink-dim">
-              {decision.label}
-            </span>
-          )}
-        </div>
+            {decision !== null && (
+              <span data-detail-step className="flex-none font-mono text-[10px] text-ink-dim">
+                {decision.label}
+              </span>
+            )}
+          </div>
         )}
 
         {/* The row that stood here carried the `x/y` step counter, its
