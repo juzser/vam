@@ -691,6 +691,80 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
     expect(q('[data-mode-refusal]')).toBeNull();
   });
 
+  /**
+   * WHAT THE PRESS ITSELF SAYS, at the keystroke and at the answer.
+   *
+   * Every other channel that could report a mode cycle is absent by
+   * construction: the composer is drawn only while the tab is not Terminal, so
+   * the pane is not on screen, and the MODE pills read the draft rather than
+   * the pane. The caption is the whole of the feedback, and it used to go back
+   * to its resting text on success -- pixel-identical to a chord nothing was
+   * bound to.
+   *
+   * `deferred` is the point of these tests: a caption asserted only after the
+   * promise settles cannot tell an immediate indicator from a late one.
+   */
+  it('says the chord is in flight before the pane has answered', async () => {
+    let land: (result: PaneSendResult) => void = () => {};
+    withBridge(
+      () =>
+        new Promise<PaneSendResult>((resolve) => {
+          land = resolve;
+        }),
+    );
+    draw();
+    const resting = q<HTMLElement>('[data-mode-cycle]')?.textContent;
+    await press(true);
+    // NOT resolved yet: this is the state the operator sees while three tmux
+    // spawns at ten seconds apiece are still out.
+    const inFlight = q<HTMLElement>('[data-mode-cycle]');
+    expect(inFlight?.getAttribute('data-mode-cycle-state')).toBe('busy');
+    expect(inFlight?.textContent).not.toBe(resting);
+    expect(inFlight?.textContent).toContain('sending');
+    expect(q('[data-mode-refusal]')).toBeNull();
+    await act(async () => {
+      land('sent');
+      await Promise.resolve();
+    });
+  });
+
+  it('reports the delivery on success, and claims only what vam knows', async () => {
+    withBridge(async () => 'sent');
+    draw();
+    const resting = q<HTMLElement>('[data-mode-cycle]')?.textContent;
+    await press(true);
+    const said = q<HTMLElement>('[data-mode-cycle]');
+    expect(said?.getAttribute('data-mode-cycle-state')).toBe('sent');
+    expect(said?.textContent).not.toBe(resting);
+    expect(said?.textContent).toContain('sent');
+    // WHAT IT MAY NOT SAY: vam presses a key into the pane and never reads
+    // back which mode resulted, so the delivery is the only true claim here.
+    expect(said?.textContent).not.toContain('mode is');
+    expect(said?.textContent).toContain('does not read the mode back');
+  });
+
+  it('does not queue a second press into the agent while one is out', async () => {
+    let sends = 0;
+    let land: (result: PaneSendResult) => void = () => {};
+    withBridge(() => {
+      sends += 1;
+      return new Promise<PaneSendResult>((resolve) => {
+        land = resolve;
+      });
+    });
+    draw();
+    await press(true);
+    await press(true);
+    expect(sends).toBe(1);
+    // And the second press is not swallowed in silence: the caption raised by
+    // the first is still on screen saying the chord is out.
+    expect(q<HTMLElement>('[data-mode-cycle]')?.getAttribute('data-mode-cycle-state')).toBe('busy');
+    await act(async () => {
+      land('sent');
+      await Promise.resolve();
+    });
+  });
+
   it('says so when there is no bridge to press the key with', async () => {
     // The browser build has no `window.api`. The row is drawn from the
     // session's own facts, so this is the one case where it can be on screen

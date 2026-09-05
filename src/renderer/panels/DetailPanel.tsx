@@ -1279,6 +1279,12 @@ function stopWording(result: Exclude<AnswerResult, { readonly kind: 'sent' }>): 
  * outcome to avoid: the chord is invisible once pressed, so silence reads as
  * "the mode changed" for an agent that was never put into it.
  */
+type CycleNote = {
+  /** `busy` while the keys are out, then one of the two answers. */
+  readonly kind: 'busy' | 'sent' | 'refused';
+  readonly text: string;
+};
+
 function cycleWording(result: PaneSendResult): string | null {
   switch (result) {
     case 'sent':
@@ -1763,13 +1769,20 @@ export function DetailPanel(props: DetailPanelProps) {
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /**
-   * Why the last Shift-Tab did not reach the pane, or `null` when it did.
+   * WHAT THE LAST SHIFT-TAB DID, in flight and afterwards, or `null` at rest.
+   *
+   * Three states rather than a refusal alone, because this caption is the
+   * whole of the feedback for the chord: the composer is drawn only while the
+   * tab is not Terminal, so the pane it presses into is by construction not on
+   * screen, and the MODE pills read the draft, which Shift-Tab does not touch.
+   * With `busy` and `sent` missing, a successful press put the resting text
+   * back and was pixel-identical to a key nothing was bound to.
    *
    * Component state because it is about ONE keypress in this pane and nothing
    * outside has an opinion about it -- the same reason the tab and the
    * progress region are held here.
    */
-  const [cycleRefusal, setCycleRefusal] = useState<string | null>(null);
+  const [cycleNote, setCycleNote] = useState<CycleNote | null>(null);
   /**
    * Whether a mode can ACTUALLY be chosen for the focused session -- the one
    * condition the row is drawn on: hidden where the factory has already
@@ -1795,14 +1808,31 @@ export function DetailPanel(props: DetailPanelProps) {
   const cycleMode = async () => {
     const send = globalThis.window?.api?.terminal?.send;
     if (entry === null) return;
+    // One chord at a time. Held down, this queued a `back-tab` per repeat into
+    // a live agent with nothing on screen counting them; the caption raised
+    // below is what answers the second press instead.
+    if (cycleNote?.kind === 'busy') return;
     if (send === undefined) {
-      setCycleRefusal('not sent — this build has no keyboard into a session’s pane');
+      setCycleNote({
+        kind: 'refused',
+        text: 'not sent — this build has no keyboard into a session’s pane',
+      });
       return;
     }
+    // BEFORE THE AWAIT: one to three tmux spawns follow, at ten seconds each.
+    setCycleNote({ kind: 'busy', text: '⇧Tab · sending…' });
     const landed = await send(entry.project.id, { kind: 'back-tab' }, entry.session.id).catch(
       (): PaneSendResult => 'refused',
     );
-    setCycleRefusal(cycleWording(landed));
+    const refusal = cycleWording(landed);
+    setCycleNote(
+      refusal === null
+        ? // THE DELIVERY, NOT THE MODE. vam presses the session's own chord
+          // into the pane and never reads back which mode the agent landed
+          // in, so naming one here would be a claim nothing checked.
+          { kind: 'sent', text: '⇧Tab sent — vam does not read the mode back' }
+        : { kind: 'refused', text: refusal },
+    );
   };
   /** The first option of the open question, when one is being asked. */
   const firstOptionRef = useRef<HTMLButtonElement>(null);
@@ -2911,13 +2941,18 @@ export function DetailPanel(props: DetailPanelProps) {
                 binding may bring it back and the caption alone may not. */}
               <span
                 data-mode-cycle
-                data-mode-refusal={cycleRefusal === null ? undefined : 'true'}
+                data-mode-cycle-state={cycleNote?.kind ?? 'resting'}
+                data-mode-refusal={cycleNote?.kind === 'refused' ? 'true' : undefined}
                 className={[
                   'ml-auto flex-none whitespace-nowrap font-mono text-[9.5px]',
-                  cycleRefusal === null ? 'text-ink-faint' : 'text-waiting',
-                ].join(' ')}
+                  cycleNote === null ? 'text-ink-faint' : '',
+                  cycleNote?.kind === 'refused' ? 'text-waiting' : '',
+                  cycleNote !== null && cycleNote.kind !== 'refused' ? 'text-ink-dim' : '',
+                ]
+                  .filter((part) => part !== '')
+                  .join(' ')}
               >
-                {cycleRefusal ?? '⇧Tab · cycle mode'}
+                {cycleNote?.text ?? '⇧Tab · cycle mode'}
               </span>
             </div>
           )}
