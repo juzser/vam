@@ -515,13 +515,19 @@ function TabBar({
   return (
     <div
       role="tablist"
+      /* The hook `.vam-phone-typing` hides this bar by. That rule used to name
+         `[role='tablist']` and so took the QUESTION strip with it -- the
+         control for choosing WHICH question you are answering vanished the
+         moment you tapped the composer to answer one. It names this bar now,
+         and survives the move off the tablist role that the UI spec proposes. */
+      data-view-tabs
       className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px]"
     >
       {tabs.map((tab, index) => {
         const selected = tab === current;
         const badge = tab === 'Agents' && runningAgents > 0 ? runningAgents : null;
         const shape = [
-          'flex h-[26px] flex-1 items-center justify-center gap-[5px] rounded-[7px] text-[12px]',
+          'vam-tap flex h-[26px] flex-1 items-center justify-center gap-[5px] rounded-[7px] text-[12px]',
           selected ? 'bg-line-strong font-medium text-ink' : 'text-ink-dim',
         ].join(' ');
         const label = (
@@ -2447,7 +2453,7 @@ export function DetailPanel(props: DetailPanelProps) {
                     data-progress-toggle
                     aria-expanded={progressOpen}
                     onClick={() => setProgressOpen((open) => !open)}
-                    className="flex cursor-pointer items-center gap-1 rounded-[var(--radius-sm)] px-1 py-0.5 text-ink-faint hover:bg-raised hover:text-ink"
+                    className="vam-tap flex cursor-pointer items-center gap-1 rounded-[var(--radius-sm)] px-1 py-0.5 text-ink-faint hover:bg-raised hover:text-ink"
                   >
                     {total} turns
                     {progressOpen ? (
@@ -2855,7 +2861,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   data-attach
                   aria-label="attach a text file to this prompt"
                   onClick={() => fileRef.current?.click()}
-                  className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border border-line-strong text-ink-dim hover:bg-raised hover:text-ink"
+                  className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border border-line-strong text-ink-dim hover:bg-raised hover:text-ink"
                 >
                   <Paperclip size={12} strokeWidth={1.7} />
                 </button>
@@ -2891,7 +2897,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
                   placeholder="model"
                   aria-label="model requested in this prompt"
-                  className="h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[10px] text-ink-dim outline-none placeholder:text-ink-ghost focus:text-ink"
+                  className="vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[10px] text-ink-dim outline-none placeholder:text-ink-ghost focus:text-ink"
                 />
               </Note>
               {/* The way OUT, shown only while you are in — the moment it is the

@@ -893,31 +893,41 @@ body {
 /* WCAG 2.2 SC 2.5.5 (AAA) and Apple's own HIG figure. The record button ships
    at 28px, which is under even the AA floor of 24.
  *
- * BROAD, with named exceptions -- and it earned that shape the hard way. The
- * first form here enumerated seven controls, and every one of those seven did
- * measure 44 at 390px while SEVENTEEN of the twenty-three on the list screen
- * did not: a 15px project icon, a 17px collapse, a 17px row menu, a 19px
- * per-project new-session, three 26px header actions, a 30px search and a 28px
- * footer button. None of them were in the list because none of them are markup
- * this shell writes -- they belong to the panels it HOSTS, and the shell is
- * answerable for what it puts on a phone screen, not only for what it authors.
- * An enumeration omits whatever is added next; a rule with carve-outs does not.
+ * ENUMERATED, never `[data-phone-shell] button`. That form reached every
+ * control in the markup the shell HOSTS, including a 15px project-icon button
+ * inside a 21px heading row, which it inflated to 44 and burst the row. A hit
+ * area is a decision per control, and the controls below are the ones the
+ * phone shell is answerable for. */
+[data-phone-shell] > header button,
+[data-phone-shell] > footer button,
+[data-phone-shell] [data-avatar-bar] button,
+[data-phone-shell] [data-step-chip],
+[data-phone-shell] [data-remote-limits] summary,
+[data-phone-shell] [data-prompt-record],
+[data-phone-shell] [data-status-pill] {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* The same floor, for a control the shell HOSTS rather than owns -- opted into
+   at the component, never reached for from here.
  *
- * The earlier form burst a 21px project-heading row, and that is still true --
- * the row is now 44px tall on a phone, which is the size a finger needs and
- * the size the row should have been. It is a layout cost, taken deliberately.
+ * Measured at 390px, seventeen of the twenty-three controls on the list screen
+ * were under 44px while every one of the seven above measured exactly 44: a
+ * 15px project icon, 17px collapse and menu, a 19px per-project new session,
+ * three 26px header actions, a 30px search and a 28px footer button, plus the
+ * view tabs, the progress toggle, the attach button and the model box on the
+ * session screen. All of them belong to `SessionList` and `DetailPanel`.
  *
- * The one carve-out is the kind of element for which 44px is wrong rather than
- * merely inconvenient: the composer's file input is 0x0 BECAUSE the visible
- * `data-attach` button is its proxy, and inflating it would put a second,
- * invisible 44px control over the first. Links are not sized here: `min-*`
- * does nothing to a non-replaced inline box, so a link that needed a hit area
- * would need a display change, which is a decision per link. */
-[data-phone-shell] button,
-[data-phone-shell] summary,
-[data-phone-shell] [role='button'],
-[data-phone-shell] input:not([type='file']),
-[data-phone-shell] textarea {
+ * The temptation is to widen the selector above to `[data-phone-shell] button`
+ * and be done. That was tried, and it is what burst the heading row: a net
+ * cast from a stylesheet cannot know what it is catching, and it trades a
+ * silent omission for a silent deformation. So the decision stays with the
+ * component -- each control names itself a tap target by wearing `vam-tap` --
+ * and the phone decides only how big a tap target is. A control added
+ * tomorrow is not silently sized here; it is silently NOT sized, which the
+ * Playwright pass at 390px reports as a measured box, by name. */
+.vam-phone .vam-tap {
   min-height: 44px;
   min-width: 44px;
 }
@@ -953,8 +963,22 @@ body {
 /* While the soft keyboard is up it owns roughly half the viewport, and 44px
    of tab bar out of the ~400px left is chrome spent on a control the operator
    has already used to get here. It returns the moment the composer blurs.
-   `prefers-reduced-motion` has nothing to remove: there is no transition. */
-.vam-phone-typing [role='tablist'] {
+   `prefers-reduced-motion` has nothing to remove: there is no transition.
+ *
+ * NAMED, not roled. This read `[role='tablist']`, and two elements claim that
+ * role: the view tab bar, which is the 44px this comment is about, and
+ * `data-question-steps`, the strip that chooses WHICH question of a
+ * multi-question call you are answering. Typing is exactly when you need the
+ * second one, and the rule hid it -- the operator tapped the composer to
+ * answer and lost the control for picking what to answer. `data-view-tabs`
+ * names one bar and cannot collect the other.
+ *
+ * It is also load-bearing on that hook now: the UI spec proposes moving both
+ * strips off `role="tablist"` (neither has a `tabpanel`, so the role is a
+ * false claim), and a rule keyed on the role would quietly stop matching and
+ * put 44px of chrome back under the keyboard. Keyed on the hook, it survives
+ * that change. */
+.vam-phone-typing [data-view-tabs] {
   display: none;
 }
 

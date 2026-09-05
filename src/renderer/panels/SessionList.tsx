@@ -895,7 +895,7 @@ export function SessionList(props: SessionListProps) {
                   type="button"
                   onClick={onOpenFilter}
                   aria-label="search sessions"
-                  className="flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5 text-ink-faint hover:border-line-strong"
+                  className="vam-tap flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5 text-ink-faint hover:border-line-strong"
                 >
                   <Search size={14} strokeWidth={1.6} />
                   <span className="flex-1 text-left text-[12px]">Search sessions</span>
@@ -950,7 +950,7 @@ export function SessionList(props: SessionListProps) {
               setGroupDraft({ kind: 'new' });
             }}
             title="New project"
-            className="flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border border-line bg-panel text-ink-faint hover:border-line-strong"
+            className="vam-tap flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border border-line bg-panel text-ink-faint hover:border-line-strong"
           >
             <FolderPlus size={13} strokeWidth={1.6} />
           </button>
@@ -967,7 +967,7 @@ export function SessionList(props: SessionListProps) {
           aria-label="new project"
           onClick={onNewProject}
           title={newSessionDecline ?? 'Choose a directory and start a session in it'}
-          className="flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border border-line bg-panel text-ink-faint hover:border-line-strong"
+          className="vam-tap flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border border-line bg-panel text-ink-faint hover:border-line-strong"
         >
           <Plus size={13} strokeWidth={1.6} />
         </button>
@@ -983,7 +983,7 @@ export function SessionList(props: SessionListProps) {
             aria-label="filter sessions"
             onClick={() => onFilterMenuToggle(!filterMenuOpen)}
             className={[
-              'relative flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border bg-panel',
+              'vam-tap relative flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border bg-panel',
               filterMenuOpen || narrowing
                 ? 'border-line-loud text-ink'
                 : 'border-line text-ink-faint hover:border-line-strong',
@@ -1186,7 +1186,7 @@ export function SessionList(props: SessionListProps) {
                       aria-label={`${isGroupCollapsed ? 'expand' : 'collapse'} ${group.name}`}
                       onClick={() => toggleGroupCollapse(group)}
                       className={[
-                        'flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
+                        'vam-tap flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
                         revealed === group.id || isGroupCollapsed ? 'opacity-100' : 'opacity-0',
                       ].join(' ')}
                     >
@@ -1208,7 +1208,7 @@ export function SessionList(props: SessionListProps) {
                           setOpenGroupMenu((current) => (current === group.id ? null : group.id))
                         }
                         className={[
-                          'flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
+                          'vam-tap flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
                           revealed === group.id || openGroupMenu === group.id
                             ? 'opacity-100'
                             : 'opacity-0',
@@ -1232,7 +1232,7 @@ export function SessionList(props: SessionListProps) {
                         title={`Add a repo to ${group.name}`}
                         aria-label={`add a repo to ${group.name}`}
                         className={[
-                          'flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                          'vam-tap flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
                           revealed === group.id ? 'opacity-100' : 'opacity-0',
                         ].join(' ')}
                       >
@@ -1360,7 +1360,7 @@ export function SessionList(props: SessionListProps) {
                       data-project-icon={section.project.id}
                       onClick={() => onPickIcon(section.project)}
                       aria-label={`change icon for ${section.project.name}`}
-                      className="flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-[11px] leading-none text-ink-faint hover:text-ink-dim"
+                      className="vam-tap flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-[11px] leading-none text-ink-faint hover:text-ink-dim"
                     >
                       {section.project.icon ?? (
                         /* A monitor, not a middot. The glyph has to read as "this
@@ -1402,7 +1402,7 @@ export function SessionList(props: SessionListProps) {
                     aria-label={`${isCollapsed ? 'expand' : 'collapse'} ${section.project.name}`}
                     onClick={() => toggleCollapse(section.project)}
                     className={[
-                      'flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
+                      'vam-tap flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
                       isRevealed || isCollapsed ? 'opacity-100' : 'opacity-0',
                     ].join(' ')}
                   >
@@ -1432,7 +1432,7 @@ export function SessionList(props: SessionListProps) {
                       )
                     }
                     className={[
-                      'flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
+                      'vam-tap flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
                       isRevealed || openMenu === section.project.id ? 'opacity-100' : 'opacity-0',
                     ].join(' ')}
                   >
@@ -1482,7 +1482,7 @@ export function SessionList(props: SessionListProps) {
                     title={newSessionDecline ?? `New session in ${section.project.name}`}
                     aria-label={`new session in ${section.project.name}`}
                     className={[
-                      'flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                      'vam-tap flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
                       isRevealed ||
                       section.items.some((entry) => entry.session.id === focusedSessionId)
                         ? 'opacity-100'
@@ -1661,7 +1661,11 @@ export function SessionList(props: SessionListProps) {
                                 tabIndex={closing ? -1 : undefined}
                                 {...(closing ? { title: closingLabel } : {})}
                                 className={[
-                                  'relative flex w-full cursor-pointer flex-col gap-[7px] overflow-hidden rounded-[9px] px-2.5 py-2.5 text-left',
+                                  // `vam-tap`: the row is the screen's primary
+                                  // tap target, and it says so itself rather
+                                  // than relying on its content to happen to
+                                  // add up to 44px.
+                                  'vam-tap relative flex w-full cursor-pointer flex-col gap-[7px] overflow-hidden rounded-[9px] px-2.5 py-2.5 text-left',
                                   isFocused
                                     ? 'border border-line-loud bg-raised'
                                     : 'border border-transparent',
@@ -1872,7 +1876,7 @@ export function SessionList(props: SessionListProps) {
                 '',
               'Starting a session…',
             )}
-            className="flex h-7 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[8px] border border-ink-ghost text-[11.5px] text-ink-dim hover:border-ink-faint hover:text-ink"
+            className="vam-tap flex h-7 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[8px] border border-ink-ghost text-[11.5px] text-ink-dim hover:border-ink-faint hover:text-ink"
           >
             <Plus size={13} strokeWidth={1.7} />
             New session
