@@ -15,9 +15,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { AnswerStep } from '../../../src/shared/answer.js';
 import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
 import { answerQuestion } from '../../../src/main/terminal/answer.js';
+import type { AnswerStep } from '../../../src/shared/answer.js';
 import {
   COLOUR_ASKED,
   COLOUR_ON,
@@ -217,7 +217,10 @@ describe('the tail, and what the word sent is allowed to mean', () => {
   });
 
   it('will not press Return on a review whose cursor is not on Submit', async () => {
-    const cancel = REVIEW.replace('❯ 1. Submit answers\n  2. Cancel', '  1. Submit answers\n❯ 2. Cancel');
+    const cancel = REVIEW.replace(
+      '❯ 1. Submit answers\n  2. Cancel',
+      '  1. Submit answers\n❯ 2. Cancel',
+    );
     const { run, keys } = runner([...REAL.slice(0, 6), cancel]);
     expect(await answerQuestion(run, ATLAS, SET)).toEqual({
       kind: 'unconfirmed',

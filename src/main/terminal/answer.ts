@@ -287,7 +287,8 @@ async function deliver(run: TmuxRun, name: string, request: AnswerRequest): Prom
    */
   const answered = request.steps.at(-1)?.multiSelect === false;
   const text = await read();
-  if (text === null) return answered ? { kind: 'unconfirmed', label: last } : { kind: 'unreadable' };
+  if (text === null)
+    return answered ? { kind: 'unconfirmed', label: last } : { kind: 'unreadable' };
   const panel = readPicker(text);
   if (panel === null) {
     return reviewed ? { kind: 'unconfirmed', label: last } : { kind: 'sent', answer };

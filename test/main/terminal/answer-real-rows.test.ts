@@ -20,9 +20,6 @@ describe('a real picker, whose rows are interleaved with their descriptions', ()
   });
 
   it('still reads the review screen, whose rows ARE adjacent', () => {
-    expect(readPicker(REVIEW)?.rows.map((row) => row.label)).toEqual([
-      'Submit answers',
-      'Cancel',
-    ]);
+    expect(readPicker(REVIEW)?.rows.map((row) => row.label)).toEqual(['Submit answers', 'Cancel']);
   });
 });

@@ -55,11 +55,12 @@ const colours = (row: number, labels = ['Crimson', 'Cobalt', 'Emerald']) =>
 const FRUIT_Q = 'Which fruits do you like?';
 const fruits = (row: number, ticked: readonly number[]) =>
   [FRUIT_Q, '']
-    .concat(['Apple', 'Banana', 'Cherry']
-    .map(
-      (label, at) =>
-        `${at === row ? '❯' : ' '} ${at + 1}. [${ticked.includes(at) ? '✔' : ' '}] ${label}`,
-    ))
+    .concat(
+      ['Apple', 'Banana', 'Cherry'].map(
+        (label, at) =>
+          `${at === row ? '❯' : ' '} ${at + 1}. [${ticked.includes(at) ? '✔' : ' '}] ${label}`,
+      ),
+    )
     .join('\n');
 
 const REVIEW = [
@@ -436,9 +437,10 @@ describe('when the pane stops cooperating part way through', () => {
     // And after it: the keys went in and vam cannot say what happened, which is
     // `unconfirmed` -- never `sent`.
     const short = flaky([...blind, REVIEW], 0);
-    expect(
-      await answerQuestion(short.run, ATLAS, oneFruit),
-    ).toEqual({ kind: 'unconfirmed', label: 'Apple' });
+    expect(await answerQuestion(short.run, ATLAS, oneFruit)).toEqual({
+      kind: 'unconfirmed',
+      label: 'Apple',
+    });
   });
 
   it('will not call an unreadable screen a confirmation for a single answer either', async () => {
@@ -477,5 +479,4 @@ describe('against real capture-pane bytes', () => {
   // The end-to-end walk across these screens moved to `answer-steps.test.ts`,
   // where the fixtures are a real TWO-question call captured from Claude Code
   // itself -- strictly better bytes for the same claim.
-
 });
