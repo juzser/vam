@@ -59,7 +59,10 @@ export function IconPicker({ title, onPick, onClose }: IconPickerProps) {
       <div
         ref={shellRef}
         data-icon-picker
-        className="relative z-10 overflow-hidden rounded-[var(--radius-lg)] border border-line bg-panel shadow-[var(--shadow-node)]"
+        // The width lives here rather than on the grid because the phone
+        // sheet needs the grid to be `100%` of whatever the sheet is; on the
+        // desktop the panel is what fixes the picker at the grid's own 340px.
+        className="relative z-10 w-[340px] overflow-hidden rounded-[var(--radius-lg)] border border-line bg-panel shadow-[var(--shadow-node)]"
       >
         <div className="flex items-center gap-2 border-line border-b px-3 py-2">
           <span className="text-[11px] text-ink-faint">icon cho</span>
@@ -74,7 +77,7 @@ export function IconPicker({ title, onPick, onClose }: IconPickerProps) {
         </div>
         <Suspense
           fallback={
-            <div className="flex h-[380px] w-[340px] items-center justify-center text-[11px] text-ink-faint">
+            <div className="flex h-[380px] w-full items-center justify-center text-[11px] text-ink-faint">
               loading icon grid…
             </div>
           }

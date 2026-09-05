@@ -29,7 +29,10 @@ export default function EmojiGrid({ onPick }: EmojiGridProps) {
       theme={Theme.DARK}
       autoFocusSearch
       lazyLoadEmojis
-      width={340}
+      // `100%` of the panel, which is 340px on the desktop and the whole sheet
+      // on a phone -- where `styles.css` also stretches this grid's height, so
+      // its scroller starts above where an iOS keyboard ends.
+      width="100%"
       height={380}
       previewConfig={{ showPreview: false }}
       searchPlaceholder="find an icon…"
