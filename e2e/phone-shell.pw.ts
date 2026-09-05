@@ -128,6 +128,38 @@ async function openFirstSession(page: Page): Promise<void> {
   await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
 }
 
+/**
+ * Every painted skin on the screen the page is currently showing, with the box
+ * that takes the tap beside it.
+ *
+ * A function rather than one `$$eval`, because the skins are spread over two
+ * screens and only one of them can be on the page at a time.
+ */
+async function readSkins(page: Page): Promise<
+  readonly {
+    label: string;
+    w: number;
+    h: number;
+    ownerW: number;
+    ownerH: number;
+  }[]
+> {
+  return page.$$eval('[data-phone-shell] [data-tap-skin]', (els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect();
+      const owner = el.closest('button, summary, [role="button"]');
+      const o = owner?.getBoundingClientRect() ?? new DOMRect();
+      return {
+        label: (owner?.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 30),
+        w: Math.round(r.width * 10) / 10,
+        h: Math.round(r.height * 10) / 10,
+        ownerW: Math.round(o.width * 10) / 10,
+        ownerH: Math.round(o.height * 10) / 10,
+      };
+    }),
+  );
+}
+
 test.describe('the phone shell at 390px', () => {
   test('the two screens navigate: list -> session -> back', async ({ page }) => {
     await openDemo(page);
@@ -281,34 +313,33 @@ test.describe('the phone shell at 390px', () => {
    */
   test('every painted skin is smaller than the box that takes the tap', async ({ page }) => {
     await openDemo(page);
-    const skins = await page.$$eval('[data-phone-shell] [data-tap-skin]', (els) =>
-      els.map((el) => {
-        const r = el.getBoundingClientRect();
-        const owner = el.closest('button, summary, [role="button"]');
-        const o = owner?.getBoundingClientRect() ?? new DOMRect();
-        return {
-          label: (owner?.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 30),
-          w: Math.round(r.width * 10) / 10,
-          h: Math.round(r.height * 10) / 10,
-          ownerW: Math.round(o.width * 10) / 10,
-          ownerH: Math.round(o.height * 10) / 10,
-        };
-      }),
-    );
+    // BOTH SCREENS, AND A FLOOR ON EACH, which is not the same guard as one
+    // floor over the sum. The list screen carries three skins and the session
+    // screen four -- the response tab strip and the composer's attach control,
+    // which was the last class-A control still painting its border on the 44
+    // box. A sweep of the list alone could not see it at all; a single floor
+    // over both screens could be satisfied by the list's three plus any one of
+    // the session's, so removing the attach skin again would leave the count
+    // green. Two floors are what make the number mean the thing it counts.
+    const listSkins = await readSkins(page);
+    await openFirstSession(page);
+    const sessionSkins = await readSkins(page);
+    const skins = [...listSkins, ...sessionSkins];
 
-    expect(skins.length, 'painted skins found on the list screen').toBeGreaterThanOrEqual(3);
+    expect(listSkins.length, 'painted skins on the LIST screen').toBeGreaterThanOrEqual(3);
+    expect(sessionSkins.length, 'painted skins on the SESSION screen').toBeGreaterThanOrEqual(4);
 
     const fmt = (s: (typeof skins)[number]) =>
       `"${s.label}" paints ${s.w}x${s.h} inside a ${s.ownerW}x${s.ownerH} hit box`;
     expect(
       skins.length === 0
-        ? ['no [data-tap-skin] on the list screen at all -- this guard measured nothing']
+        ? ['no [data-tap-skin] on either phone screen -- this guard measured nothing']
         : skins.filter((s) => s.w > SKIN_MAX_W || s.h > SKIN_MAX_H).map(fmt),
       `skins painting larger than ${SKIN_MAX_W}x${SKIN_MAX_H}`,
     ).toEqual([]);
     expect(
       skins.length === 0
-        ? ['no [data-tap-skin] on the list screen at all -- this guard measured nothing']
+        ? ['no [data-tap-skin] on either phone screen -- this guard measured nothing']
         : skins.filter((s) => s.ownerW < TOUCH_MIN || s.ownerH < TOUCH_MIN).map(fmt),
       'skins whose owner stopped being a 44px touch target',
     ).toEqual([]);

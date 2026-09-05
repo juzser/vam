@@ -2959,9 +2959,21 @@ export function DetailPanel(props: DetailPanelProps) {
                   data-attach
                   aria-label="attach a text file to this prompt"
                   onClick={() => fileRef.current?.click()}
-                  className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border border-line-strong text-ink-dim hover:bg-raised hover:text-ink"
+                  className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
                 >
-                  <Paperclip size={12} strokeWidth={1.7} />
+                  {/* HIT ON THE ELEMENT, PAINT ON THE SKIN -- the same shape
+                  the phone's other class-A controls take, and the last one
+                  still painting its border on the 44 box. The button keeps its
+                  box and centres; the border, the ground and the radius move
+                  inward, where the phone rule can shrink them to 30 without
+                  touching the touch target (`styles.css`). */}
+                  <span
+                    aria-hidden="true"
+                    data-tap-skin
+                    className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-panel hover:bg-raised"
+                  >
+                    <Paperclip size={12} strokeWidth={1.7} />
+                  </span>
                 </button>
               </Note>
               {attachedName !== null && (
