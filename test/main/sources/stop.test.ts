@@ -106,11 +106,19 @@ describe('classifyStopFailure', () => {
     expect(error.message).toContain('no such background session');
   });
 
-  it('falls back to the spawn message when the CLI said nothing', () => {
-    expect(
-      classifyStopFailure({ failure: { message: 'exit 1' }, stderr: '   ', sessionId: 's' })
-        .message,
-    ).toContain('exit 1');
+  it("says so plainly when the CLI said nothing, without republishing node's argv", () => {
+    // node's ExecException.message is `Command failed: <file> <args joined>`.
+    // Repeating it here put the spawned argv into the error log and from
+    // there into a prefilled PUBLIC issue body -- the same fallback in
+    // `deliver.ts` carried the operator's whole prompt out that way.
+    const error = classifyStopFailure({
+      failure: { message: 'Command failed: claude stop 1234-abcd' },
+      stderr: '   ',
+      sessionId: 's',
+    });
+    expect(error.message).not.toContain('Command failed');
+    expect(error.message).toContain('s');
+    expect(error.message.length).toBeLessThan(200);
   });
 });
 

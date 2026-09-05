@@ -80,7 +80,12 @@ describe('the prompt never reaches a composed report', () => {
   });
 
   it("keeps the CLI's own stderr, which is the operator's only clue", () => {
-    const failure = externallyKilled(deliverArgv(SESSION, SECRET_PROMPT));
+    // A plain non-zero exit: node still put the argv in `message`, but the
+    // CLI said something, and what it said is what the operator gets.
+    const failure = Object.assign(
+      new Error(`Command failed: claude ${deliverArgv(SESSION, SECRET_PROMPT).join(' ')}`),
+      { code: 2 },
+    );
     const error = classifyDeliverFailure({
       failure,
       stderr: 'Error: something else entirely',

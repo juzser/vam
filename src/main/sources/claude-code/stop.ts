@@ -51,6 +51,14 @@ export function stopArgv(sessionId: string): readonly string[] {
 }
 
 /** What a failed `execFile` hands back -- the same shape `deliver.ts` documents. */
+/**
+ * The fallback when stderr was empty. Never `failure.message`: node builds
+ * that as `Command failed: <file> <args joined>`, which republishes the argv
+ * unbounded into the error log and a prefilled PUBLIC issue body (see
+ * `deliver.ts`, where the argv held the operator's prompt).
+ */
+const NO_WORDS = 'the command exited without saying why';
+
 export type SpawnFailure = {
   readonly message: string;
   readonly code?: string | number | undefined;
@@ -82,7 +90,7 @@ export function classifyStopFailure(input: {
   return {
     kind: 'refused',
     code: 'cli-failed',
-    message: `stopping session ${sessionId} failed: ${said === '' ? failure.message : said}`,
+    message: `stopping session ${sessionId} failed: ${said === '' ? NO_WORDS : said}`,
   };
 }
 

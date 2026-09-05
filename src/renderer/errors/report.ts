@@ -46,9 +46,11 @@ export type Report = {
 const FOOTER = [
   '---',
   "Composed by vam's error log and scrubbed before leaving the machine:",
-  'home paths, project and branch names, quoted session names, session ids,',
-  'pids and email addresses were replaced. No prompt or transcript content is',
-  'ever included. Please add anything else you are able to share.',
+  'home paths, quoted names, vam tmux session names, session ids, pids and',
+  'email addresses were replaced, and no prompt or transcript text is ever',
+  'included. The scrubber works by shape, so an unquoted name or a path',
+  'outside your home directory can survive it -- please read the body before',
+  'you submit, and add anything else you are able to share.',
 ].join('\n');
 
 /**

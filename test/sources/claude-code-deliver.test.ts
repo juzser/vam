@@ -81,7 +81,10 @@ describe('classifyDeliverFailure', () => {
   });
 
   it('maps a timeout onto unreachable', () => {
-    const failure = Object.assign(new Error('timeout'), { killed: true });
+    // The shape node really produces at the timeout: it kills with the
+    // configured `killSignal` and sets `killed`. An external kill sets
+    // neither, which is why the classifier reads the signal (see below).
+    const failure = Object.assign(new Error('timeout'), { killed: true, signal: 'SIGTERM' });
     const error = classifyDeliverFailure({ failure, stderr: '', sessionId: SESSION });
     expect(error.kind).toBe('unreachable');
     expect(error.code).toBe('timed-out');

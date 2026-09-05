@@ -69,7 +69,27 @@ export type SpawnFailure = {
   readonly message: string;
   readonly code?: string | number | undefined;
   readonly killed?: boolean | undefined;
+  readonly signal?: string | undefined;
 };
+
+/** What node kills a timed-out child with, and the ONLY signal it ever sends. */
+const TIMEOUT_SIGNAL = 'SIGTERM';
+
+/**
+ * What the operator is told when the CLI failed with nothing on stderr.
+ *
+ * `failure.message` is NOT used here and must never be: node builds it as
+ * `Command failed: <file> <args joined>` (measured on node 26), and
+ * `deliverArgv` puts the operator's whole prompt in that argv. Printing it
+ * carries the prompt into the error log and from there into a prefilled
+ * PUBLIC issue body, under a footer that promises no prompt is ever
+ * included. Nothing downstream can undo that: the scrubber redacts shapes
+ * -- paths, ids, quoted names -- and a prompt is free prose. The argv is
+ * also unbounded (a prompt may be a million characters) while `clip` is
+ * applied to stderr only. So the fallback is a fixed sentence, which costs
+ * a detail node never had and keeps a guarantee vam does.
+ */
+const NO_WORDS = 'the CLI exited without saying why';
 
 /** The CLI's own sentence for a session it will not resume while it runs. */
 const RUNNING_MARKER = /is running as a background session/i;
@@ -97,11 +117,27 @@ export function classifyDeliverFailure(input: {
       message: `the \`claude\` command was not found, so vam cannot reach session ${sessionId}`,
     };
   }
-  if (failure.killed === true) {
+  // A kill is TWO different facts, and `killed` is not the flag that tells
+  // them apart: node sets it only when NODE killed the child, and node only
+  // ever kills with `killSignal`. A child killed from OUTSIDE (the OOM
+  // killer, a stray `kill`) arrives as `{code: null, killed: false, signal:
+  // 'SIGKILL'}` -- measured on node 26 -- so branching on `killed` sent every
+  // real external kill down to `cli-failed`, i.e. reported as a refusal the
+  // CLI never made. Branch on the signal.
+  if (failure.killed === true || failure.signal !== undefined) {
+    if (failure.killed === true && failure.signal === TIMEOUT_SIGNAL) {
+      return {
+        kind: 'unreachable',
+        code: 'timed-out',
+        message: `session ${sessionId} did not answer within ${Math.round(DELIVER_TIMEOUT_MS / 1000)}s`,
+      };
+    }
     return {
       kind: 'unreachable',
-      code: 'timed-out',
-      message: `session ${sessionId} did not answer within ${Math.round(DELIVER_TIMEOUT_MS / 1000)}s`,
+      code: 'killed',
+      message: `the \`claude\` process for session ${sessionId} was killed${
+        failure.signal === undefined ? '' : ` by ${failure.signal}`
+      }, which vam did not ask for`,
     };
   }
   if (RUNNING_MARKER.test(stderr)) {
@@ -117,7 +153,7 @@ export function classifyDeliverFailure(input: {
   return {
     kind: 'refused',
     code: 'cli-failed',
-    message: `delivering to session ${sessionId} failed: ${said === '' ? failure.message : said}`,
+    message: `delivering to session ${sessionId} failed: ${said === '' ? NO_WORDS : said}`,
   };
 }
 
@@ -186,7 +222,13 @@ export function deliverPromptViaCli(input: {
     execFile(
       binary,
       deliverArgv(sessionId, prompt),
-      { cwd, timeout: DELIVER_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true },
+      {
+        cwd,
+        timeout: DELIVER_TIMEOUT_MS,
+        killSignal: TIMEOUT_SIGNAL,
+        maxBuffer: MAX_OUTPUT_BYTES,
+        windowsHide: true,
+      },
       (failure, stdout, stderr) => {
         resolve(
           failure
