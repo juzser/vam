@@ -48,6 +48,16 @@ const IOS_KEYBOARD_CSS_PX = 336;
 /** WCAG 2.2 SC 2.5.5 (AAA) and Apple's HIG figure -- the shell's own comment. */
 const TOUCH_MIN = 44;
 
+/**
+ * The painted ceiling, from the UI spec's table (`vam-phone-controls`, 3.2):
+ * the widest skin it authorises is the 36px record disc, and the widest square
+ * one is the 30px ambient chip. 32x36 is that table's outer envelope, so a
+ * skin over it is a control painting bigger than the spec allows, not a
+ * control this guard failed to anticipate.
+ */
+const SKIN_MAX_W = 32;
+const SKIN_MAX_H = 36;
+
 type Box = {
   readonly label: string;
   readonly tag: string;
@@ -123,10 +133,20 @@ test.describe('the phone shell at 390px', () => {
     await openDemo(page);
     await openFirstSession(page);
 
-    // The session screen is the session screen: its own app bar, and the step
-    // rail carrying the chain the canvas is not drawn to carry.
+    // The session screen is the session screen: its own app bar, carrying the
+    // back chevron, the name of the session about to be written to, and the
+    // view icons.
+    //
+    // NOT `[data-step-rail] [data-step-chip]`, which is what this line read
+    // when the suite was written. #205 removed the step rail and the body tab
+    // strip outright, so that selector now matches nothing -- and a selector
+    // matching nothing is the failure mode this repo has already shipped once
+    // (`styles.css`'s row-close rule, green in a content-scan test for a whole
+    // release while the S2 it named stayed live). Re-pointed at the chrome
+    // that survives, which is what the screen is now.
     await expect(page.locator('[data-phone-back]')).toBeVisible();
-    await expect(page.locator('[data-step-rail] [data-step-chip]').first()).toBeVisible();
+    await expect(page.locator('[data-prompt-target]')).toBeVisible();
+    await expect(page.locator('[data-phone-views] [data-phone-view]').first()).toBeVisible();
 
     await page.locator('[data-phone-back]').tap();
     await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'list');
@@ -235,6 +255,62 @@ test.describe('the phone shell at 390px', () => {
     expect(
       undersized(boxes),
       'measured bounding boxes under 44x44 on the list screen',
+    ).toEqual([]);
+  });
+
+  /**
+   * The paint, which is the half of the sizing the two sweeps above cannot
+   * see.
+   *
+   * They measure the ELEMENT box and would stay green through the exact
+   * complaint that started this work: a `border-line` rectangle drawn AT 44
+   * around a 16px glyph, which is why the phone's bordered controls read as
+   * the heaviest objects on the screen while every guard passed. The rule is
+   * hit on the element, paint on a `[data-tap-skin]` child (UI spec
+   * `vam-phone-controls`, 3.1) -- so the ceiling below catches a border
+   * re-inflating back onto the 44 box, and the paired floor stops anyone
+   * satisfying the ceiling by shrinking the hit box instead.
+   *
+   * THE COUNT IS PART OF THE ASSERTION, not a courtesy beside it. A filter
+   * over an empty list is empty, so a guard written the obvious way passes
+   * loudest at the moment the hook is renamed away and it is measuring
+   * nothing at all. This session has already produced one guard that passed
+   * having examined a corpus of zero. Hence both an explicit floor on the
+   * count and, inside the expression the assertion actually reads, an empty
+   * corpus reported as a violation in its own right.
+   */
+  test('every painted skin is smaller than the box that takes the tap', async ({ page }) => {
+    await openDemo(page);
+    const skins = await page.$$eval('[data-phone-shell] [data-tap-skin]', (els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect();
+        const owner = el.closest('button, summary, [role="button"]');
+        const o = owner?.getBoundingClientRect() ?? new DOMRect();
+        return {
+          label: (owner?.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 30),
+          w: Math.round(r.width * 10) / 10,
+          h: Math.round(r.height * 10) / 10,
+          ownerW: Math.round(o.width * 10) / 10,
+          ownerH: Math.round(o.height * 10) / 10,
+        };
+      }),
+    );
+
+    expect(skins.length, 'painted skins found on the list screen').toBeGreaterThanOrEqual(3);
+
+    const fmt = (s: (typeof skins)[number]) =>
+      `"${s.label}" paints ${s.w}x${s.h} inside a ${s.ownerW}x${s.ownerH} hit box`;
+    expect(
+      skins.length === 0
+        ? ['no [data-tap-skin] on the list screen at all -- this guard measured nothing']
+        : skins.filter((s) => s.w > SKIN_MAX_W || s.h > SKIN_MAX_H).map(fmt),
+      `skins painting larger than ${SKIN_MAX_W}x${SKIN_MAX_H}`,
+    ).toEqual([]);
+    expect(
+      skins.length === 0
+        ? ['no [data-tap-skin] on the list screen at all -- this guard measured nothing']
+        : skins.filter((s) => s.ownerW < TOUCH_MIN || s.ownerH < TOUCH_MIN).map(fmt),
+      'skins whose owner stopped being a 44px touch target',
     ).toEqual([]);
   });
 
