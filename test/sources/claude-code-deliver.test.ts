@@ -144,6 +144,32 @@ describe('readDeliverResult', () => {
   });
 });
 
+/**
+ * THE REFUSAL THAT MATTERS MOST, because it fires exactly when a person is
+ * needed. This module's own header records, from measurement, that the CLI
+ * declines while the target session is RUNNING -- and a session waiting on a
+ * question is running. So the one in-app reply route refuses precisely on the
+ * sessions that are asking, and until now it said only that the session had
+ * rejected the prompt. A refusal that names no remedy is the defect this
+ * codebase keeps having to fix.
+ */
+describe('the refusal a busy session comes back with', () => {
+  const refused = readDeliverResult(
+    JSON.stringify({ is_error: true, result: 'session is currently running' }),
+    'sess-1',
+  );
+
+  it("is still a refusal, with its own code and the CLI's own words", () => {
+    expect(refused?.kind).toBe('refused');
+    expect(refused?.code).toBe('delivery-failed');
+    expect(refused?.message).toContain('session is currently running');
+  });
+
+  it('names the route that DOES reach a running session', () => {
+    expect(refused?.message).toContain('Terminal tab');
+  });
+});
+
 describe('deliverToSession', () => {
   const agents = [
     {
