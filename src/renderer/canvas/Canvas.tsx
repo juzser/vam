@@ -79,6 +79,8 @@ import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { SessionList } from '../panels/SessionList.js';
 import { visibleTabs } from '../panels/tabs.js';
+import { PhoneShell } from '../phone/PhoneShell.js';
+import { usePhoneViewport } from '../phone/viewport.js';
 import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
 import {
   ALL_VISIBLE,
@@ -489,6 +491,32 @@ function Columns({ order, children }: { order: readonly ColumnId[]; children: Re
   return <div className="flex min-h-0 flex-1">{order.map((id) => byId.get(id))}</div>;
 }
 
+/**
+ * Where the rows came from, said out loud.
+ *
+ * Its own component because two shells draw it: the canvas top bar, and the
+ * phone shell's app bar, which has no canvas top bar to put it in. The one
+ * thing a dashboard must never do is look the same whether or not it is
+ * connected, so it is never dropped from either.
+ */
+function SourceReadout({ source }: { source: CanvasSource }) {
+  return (
+    <span data-source className="min-w-0 truncate font-mono text-[10px]">
+      {source.kind === 'demo' ? (
+        <span className="text-waiting">● {source.note}</span>
+      ) : source.kind === 'session' ? (
+        <span className="text-done">● {source.source.label}</span>
+      ) : source.status === 'error' ? (
+        <span className="text-failed">● {source.error}</span>
+      ) : source.status === 'loading' ? (
+        <span className="text-ink-faint">○ connecting to black-smith…</span>
+      ) : (
+        <span className="text-done">● black-smith</span>
+      )}
+    </span>
+  );
+}
+
 function CanvasInner({
   model: factoryModel,
   source,
@@ -548,6 +576,12 @@ function CanvasInner({
   // `prefs.paneVisibility` is untouched, so widening the window restores it.
   const visible = layoutForViewport(prefs.paneVisibility, viewportWidth);
   const order = columnOrder(visible);
+  /**
+   * Which shell this viewport gets. `false` wherever `matchMedia` is missing,
+   * so every environment without one -- jsdom, happy-dom, the tests -- keeps
+   * the columns it was written against.
+   */
+  const phone = usePhoneViewport();
   // The canvas is a strip exactly when it is drawn but is not the main column.
   const canvasStrip = visible.canvas && !canvasIsMain(visible);
   const { sidebar: sidebarWidth, detail: detailWidth } = layoutWidths(
@@ -1882,6 +1916,12 @@ function CanvasInner({
   );
 
   useEffect(() => {
+    // The chord layer is OFF on a phone, not simulated: `hjkl` moves a cursor
+    // that does not exist, `Mod-<digit>` resolves against panes that are not
+    // drawn, and a soft keyboard fires `keydown` for ordinary typing behind a
+    // focus guard already known to leak. An armed grammar there is how `x`
+    // closes a session nobody meant to close.
+    if (phone) return;
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target;
       const typing = target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName);
@@ -2367,6 +2407,7 @@ function CanvasInner({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
+    phone,
     focusedId,
     focusedEntry,
     focusedSessionId,
@@ -2631,7 +2672,11 @@ function CanvasInner({
 
   return (
     <div className="relative flex h-full flex-col">
-      <Columns order={order}>
+      {/* Named none of them on a phone: `Columns` renders by order, so a
+          column the order does not name is never created -- which is what
+          "unmounted" has to mean for a pane that is measured, focused and
+          queried. The phone shell below takes their place. */}
+      <Columns order={phone ? [] : order}>
         <SidebarSlot key="sidebar" show={visible.sidebar} {...sidebarProps} />
 
         <CanvasColumn
@@ -2652,22 +2697,7 @@ function CanvasInner({
             <span className="shrink-0 font-medium text-[13px] text-ink">Canvas</span>
             <span className="mx-1 h-3.5 w-px shrink-0 bg-line-strong" />
 
-            {/* Where the rows came from, said out loud. The one thing a
-                dashboard must never do is look the same whether or not it is
-                connected — so this sits before the filters, not in a corner. */}
-            <span data-source className="min-w-0 truncate font-mono text-[10px]">
-              {source.kind === 'demo' ? (
-                <span className="text-waiting">● {source.note}</span>
-              ) : source.kind === 'session' ? (
-                <span className="text-done">● {source.source.label}</span>
-              ) : source.status === 'error' ? (
-                <span className="text-failed">● {source.error}</span>
-              ) : source.status === 'loading' ? (
-                <span className="text-ink-faint">○ connecting to black-smith…</span>
-              ) : (
-                <span className="text-done">● black-smith</span>
-              )}
-            </span>
+            <SourceReadout source={source} />
 
             <span className="flex-1" />
 
@@ -2795,6 +2825,18 @@ function CanvasInner({
 
         <DetailSlot key="detail" show={visible.detail} {...detailProps} />
       </Columns>
+
+      {phone && (
+        <PhoneShell
+          sidebar={sidebarProps}
+          detail={detailProps}
+          sourceReadout={<SourceReadout source={source} />}
+          failureCount={failureCount}
+          onOpenErrorLog={() => setErrorLogOpen(true)}
+          tally={tally}
+          declines={source.kind === 'session' ? source.source.declines : {}}
+        />
+      )}
 
       {/* Moved out of the canvas column when the canvas became hideable: the
           palette is a window overlay, not part of the graph, and left inside
@@ -2930,104 +2972,111 @@ function CanvasInner({
         />
       )}
 
+      {/* Not drawn on a phone. Its mode cell names Select/Insert, which do
+          not exist there, and its usage bars read a `window.api` a browser
+          does not have -- a bar that is always empty and a cell reporting a
+          state nothing can change. The phone shell draws its own bar with the
+          two things that survive. */}
       {/* Named cells, not positional ones. There are three `<footer>`s in this
           tree now and a query that counted on order would silently start
           reading the sidebar's. */}
-      <footer
-        data-status-bar
-        className="flex h-8 flex-none items-center gap-3 border-line border-t bg-sidebar px-3 font-mono text-[10px] text-ink-faint"
-      >
-        {/* The mode indicator is not in the mockup, and it stays: ADE is a
-            mouse-and-keyboard app, vam is a modal one, and a modal app that
-            does not say which mode it is in is the single worst thing a modal
-            app can be. */}
-        <span data-mode className="font-semibold text-ink">
-          {/* JUMP and FILTER are transient — a key is being awaited — so they
-              outrank the resting mode and keep their own names. Underneath
-              them there are exactly two, and they are the operator's words:
-              Select and Insert. `PROMPT` is gone as a third name because it
-              never was one: composing happens INSIDE Insert, and printing it
-              as a peer of the other two implied a mode the grammar has no
-              state for. */}
-          {jumping ? 'JUMP' : filtering ? 'FILTER' : MODE_TITLES[mode]}
-        </span>
-        {/* The `project/session` cell that used to sit here is gone at the
-            operator's request: the slash between a project and a session made
-            the pair read as a git ref, and the sidebar row, the canvas card
-            and the detail header all already say which session the keyboard
-            is on. The REAL branch displays -- the sidebar row's and the
-            card's -- are untouched; only this restatement is gone. */}
-        <SourceGlyph
-          source={
-            focusedEntry === null
-              ? null
-              : (focusedEntry.session.source ?? focusedEntry.project.source ?? null)
-          }
-        />
-
-        <span className="h-3 w-px bg-line" />
-        {usage.reason === null ? (
-          <span data-usage className={usage.highUsage ? 'text-failed' : undefined}>
-            {usage.text}
+      {!phone && (
+        <footer
+          data-status-bar
+          className="flex h-8 flex-none items-center gap-3 border-line border-t bg-sidebar px-3 font-mono text-[10px] text-ink-faint"
+        >
+          {/* The mode indicator is not in the mockup, and it stays: ADE is a
+              mouse-and-keyboard app, vam is a modal one, and a modal app that
+              does not say which mode it is in is the single worst thing a modal
+              app can be. */}
+          <span data-mode className="font-semibold text-ink">
+            {/* JUMP and FILTER are transient — a key is being awaited — so they
+                outrank the resting mode and keep their own names. Underneath
+                them there are exactly two, and they are the operator's words:
+                Select and Insert. `PROMPT` is gone as a third name because it
+                never was one: composing happens INSIDE Insert, and printing it
+                as a peer of the other two implied a mode the grammar has no
+                state for. */}
+            {jumping ? 'JUMP' : filtering ? 'FILTER' : MODE_TITLES[mode]}
           </span>
-        ) : (
-          <Note text={usage.reason}>
-            <span data-usage>{usage.text}</span>
-          </Note>
-        )}
-        {usage.windows !== null && (
-          <span className="flex items-center gap-2">
-            {/* Five hours first: it is the window that moves minute to minute. */}
-            <UsageBar label="5h" usageWindow={usage.windows.fiveHour} high={usage.highUsage} />
-            <UsageBar label="7d" usageWindow={usage.windows.sevenDay} high={usage.highUsage} />
+          {/* The `project/session` cell that used to sit here is gone at the
+              operator's request: the slash between a project and a session made
+              the pair read as a git ref, and the sidebar row, the canvas card
+              and the detail header all already say which session the keyboard
+              is on. The REAL branch displays -- the sidebar row's and the
+              card's -- are untouched; only this restatement is gone. */}
+          <SourceGlyph
+            source={
+              focusedEntry === null
+                ? null
+                : (focusedEntry.session.source ?? focusedEntry.project.source ?? null)
+            }
+          />
+
+          <span className="h-3 w-px bg-line" />
+          {usage.reason === null ? (
+            <span data-usage className={usage.highUsage ? 'text-failed' : undefined}>
+              {usage.text}
+            </span>
+          ) : (
+            <Note text={usage.reason}>
+              <span data-usage>{usage.text}</span>
+            </Note>
+          )}
+          {usage.windows !== null && (
+            <span className="flex items-center gap-2">
+              {/* Five hours first: it is the window that moves minute to minute. */}
+              <UsageBar label="5h" usageWindow={usage.windows.fiveHour} high={usage.highUsage} />
+              <UsageBar label="7d" usageWindow={usage.windows.sevenDay} high={usage.highUsage} />
+            </span>
+          )}
+
+          {/* The session tallies and the project count are gone at the
+              operator's request: "statusbar khong can list so session va
+              session status". Every one of those numbers is already on screen
+              as the thing it counts -- the sidebar's filter counts, the cards
+              on the canvas -- so the bar was restating a view of itself.
+              `tally` itself stays: the sidebar's filter counts read it. */}
+
+          {status !== null && <StatusCell text={status} />}
+
+          {/* The way back to a failure that has already scrolled past. A status
+              line lives until the next status replaces it, which in practice is
+              seconds; before this cell existed the only record of a `cli-failed`
+              was whatever the operator managed to read. Hidden entirely while
+              nothing has broken -- a permanent `0` is noise. */}
+          {failureCount > 0 && (
+            <button
+              type="button"
+              data-error-log-button
+              onClick={() => setErrorLogOpen(true)}
+              className="rounded-[4px] border border-line-strong px-1.5 py-px text-failed"
+            >
+              {failureCount} {failureCount === 1 ? 'failure' : 'failures'}
+            </button>
+          )}
+
+          <span className="flex-1" />
+          {/* The right-hand end is one cell wide, again at the operator's
+              request: "Phan ben phai status bar, chi de `?` keyboard shortcut
+              thoi". The budget cell that used to sit here went with the rest;
+              `?` is the `help` chord in BINDING_TABLES, so the one key still
+              printed is a key the grammar answers to. */}
+          <span className="flex items-center gap-1.5">
+            {/* A tag rather than loose text: `?` has to read as a key you press.
+                A bare glyph in a corner reads as punctuation, and the label
+                beside it is what makes the sheet discoverable to someone who
+                does not already know it is there. */}
+            <span
+              data-keysheet-hint
+              className="rounded-[4px] border border-line-strong px-1.5 py-px text-ink-dim"
+            >
+              ?
+            </span>
+            Keyboard shortcut
           </span>
-        )}
-
-        {/* The session tallies and the project count are gone at the
-            operator's request: "statusbar khong can list so session va
-            session status". Every one of those numbers is already on screen
-            as the thing it counts -- the sidebar's filter counts, the cards
-            on the canvas -- so the bar was restating a view of itself.
-            `tally` itself stays: the sidebar's filter counts read it. */}
-
-        {status !== null && <StatusCell text={status} />}
-
-        {/* The way back to a failure that has already scrolled past. A status
-            line lives until the next status replaces it, which in practice is
-            seconds; before this cell existed the only record of a `cli-failed`
-            was whatever the operator managed to read. Hidden entirely while
-            nothing has broken -- a permanent `0` is noise. */}
-        {failureCount > 0 && (
-          <button
-            type="button"
-            data-error-log-button
-            onClick={() => setErrorLogOpen(true)}
-            className="rounded-[4px] border border-line-strong px-1.5 py-px text-failed"
-          >
-            {failureCount} {failureCount === 1 ? 'failure' : 'failures'}
-          </button>
-        )}
-
-        <span className="flex-1" />
-        {/* The right-hand end is one cell wide, again at the operator's
-            request: "Phan ben phai status bar, chi de `?` keyboard shortcut
-            thoi". The budget cell that used to sit here went with the rest;
-            `?` is the `help` chord in BINDING_TABLES, so the one key still
-            printed is a key the grammar answers to. */}
-        <span className="flex items-center gap-1.5">
-          {/* A tag rather than loose text: `?` has to read as a key you press.
-              A bare glyph in a corner reads as punctuation, and the label
-              beside it is what makes the sheet discoverable to someone who
-              does not already know it is there. */}
-          <span
-            data-keysheet-hint
-            className="rounded-[4px] border border-line-strong px-1.5 py-px text-ink-dim"
-          >
-            ?
-          </span>
-          Keyboard shortcut
-        </span>
-      </footer>
+        </footer>
+      )}
     </div>
   );
 }

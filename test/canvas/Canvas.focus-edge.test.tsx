@@ -57,12 +57,17 @@ function press(key: string, modifiers: KeyboardEventInit = {}) {
   });
 }
 
-/** `matches` answers every query, which is how reduced motion is simulated. */
+/**
+ * `matches` answers the REDUCED-MOTION query, which is what this file
+ * simulates. It used to answer every query, which was fine while there was
+ * only one; the renderer now also asks `(max-width: ...)` to choose a shell,
+ * and a stub saying yes to that would put these desktop assertions on a phone.
+ */
 function stubMatchMedia(matches: boolean) {
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: (query: string) => ({
-      matches,
+      matches: matches && query.includes('reduced-motion'),
       media: query,
       addEventListener: () => {},
       removeEventListener: () => {},

@@ -9,8 +9,12 @@
 
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import {
+  PHONE_MAX_WIDTH,
+  PHONE_QUERY,
+  usePhoneViewport,
+} from '../../src/renderer/phone/viewport.js';
 import { DETAIL_MIN, SIDEBAR_MIN } from '../../src/renderer/prefs/panes.js';
-import { PHONE_MAX_WIDTH, PHONE_QUERY, usePhoneViewport } from '../../src/renderer/phone/viewport.js';
 
 type Listener = () => void;
 
