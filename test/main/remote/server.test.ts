@@ -9,55 +9,31 @@
  * from a route that exists and complies; a route that was never registered
  * cannot be reached by any request at all.
  *
- * Every key pair and token is generated in-process, and every request goes to
- * 127.0.0.1. Nothing here reaches Cloudflare.
+ * Every token here is a literal invented for the test, no device name is a
+ * real one, and every request goes to 127.0.0.1. Nothing reaches a network.
  */
 
-import { createSign, generateKeyPairSync, type KeyObject } from 'node:crypto';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { SourceError } from '../../../src/main/ipc/channels.js';
-import type { AccessAuth } from '../../../src/main/remote/auth.js';
+import type { DeviceDirectory, Identity } from '../../../src/main/remote/auth.js';
 import { type RemoteServerOptions, startRemoteServer } from '../../../src/main/remote/server.js';
 import type { MainSource } from '../../../src/main/sources/source.js';
 import type { Project } from '../../../src/renderer/domain/model.js';
 
-const AUDIENCE = 'test-audience-tag';
-const ISSUER = 'https://example.test';
+const PAIRED: Identity = { deviceId: 'device-1', name: 'the paired phone' };
+const TOKEN = 'a-token-this-server-minted';
 
 const PROJECTS: readonly Project[] = [
   { id: 'p1', name: 'demo', sessions: [] } as unknown as Project,
 ];
 
-let auth: AccessAuth;
-let privateKey: KeyObject;
-
-const b64 = (value: object): string => Buffer.from(JSON.stringify(value)).toString('base64url');
-
-function token(over: Record<string, unknown> = {}): string {
-  const header = { alg: 'RS256', kid: 'key-one' };
-  const payload = {
-    aud: [AUDIENCE],
-    iss: ISSUER,
-    exp: Math.floor(Date.now() / 1000) + 600,
-    email: 'operator@example.test',
-    ...over,
-  };
-  const body = `${b64(header)}.${b64(payload)}`;
-  const signer = createSign('RSA-SHA256');
-  signer.update(body);
-  return `${body}.${signer.sign(privateKey).toString('base64url')}`;
-}
-
-beforeAll(() => {
-  const pair = generateKeyPairSync('rsa', { modulusLength: 2048 });
-  privateKey = pair.privateKey;
-  const jwk = { ...pair.publicKey.export({ format: 'jwk' }), kid: 'key-one' };
-  auth = { audience: AUDIENCE, issuer: ISSUER, keys: async () => [jwk] };
-});
+/** A directory holding exactly one paired device. `devices.ts` is where the
+ *  real one lives; here the point is what the SERVER does with its answer. */
+const devices: DeviceDirectory = { find: (token) => (token === TOKEN ? PAIRED : null) };
 
 const descriptor = {
   id: 'claude-code',
@@ -83,7 +59,7 @@ const listeners = new Set<() => void>();
 async function start(over: Partial<RemoteServerOptions> = {}): Promise<string> {
   const server = await startRemoteServer({
     port: 0,
-    auth,
+    devices,
     allowWrites: true,
     source: makeSource(),
     subscribe: (onChange) => {
@@ -101,20 +77,20 @@ async function start(over: Partial<RemoteServerOptions> = {}): Promise<string> {
   return `http://127.0.0.1:${address.port}`;
 }
 
-const get = (base: string, path: string, jwt: string | null = token()): Promise<Response> =>
-  fetch(`${base}${path}`, {
-    headers: jwt === null ? {} : { 'cf-access-jwt-assertion': jwt },
-  });
+const bearer = (token: string): Record<string, string> => ({ authorization: `Bearer ${token}` });
+
+const get = (base: string, path: string, token: string | null = TOKEN): Promise<Response> =>
+  fetch(`${base}${path}`, { headers: token === null ? {} : bearer(token) });
 
 const post = (
   base: string,
   path: string,
   body: unknown,
-  jwt: string = token(),
+  token: string = TOKEN,
 ): Promise<Response> =>
   fetch(`${base}${path}`, {
     method: 'POST',
-    headers: { 'cf-access-jwt-assertion': jwt, 'content-type': 'application/json' },
+    headers: { ...bearer(token), 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
 
@@ -128,18 +104,18 @@ afterEach(async () => {
 });
 
 describe('startRemoteServer', () => {
-  it('refuses to start with no Access configuration, and says why', async () => {
-    await expect(start({ auth: undefined })).rejects.toThrow(/Cloudflare Access/i);
+  it('refuses to start with no device registry, and says why', async () => {
+    await expect(start({ devices: undefined })).rejects.toThrow(/device registry/i);
   });
 
-  it('refuses to start when the audience or issuer is blank', async () => {
-    await expect(start({ auth: { ...auth, audience: '' } })).rejects.toThrow(/Cloudflare Access/i);
+  it('refuses any bind address other than loopback, because Serve proxies there', async () => {
+    await expect(start({ host: '0.0.0.0' })).rejects.toThrow(/127\.0\.0\.1/);
   });
 
   it('binds loopback only, never a routable address', async () => {
     const server = await startRemoteServer({
       port: 0,
-      auth,
+      devices,
       allowWrites: false,
       source: makeSource(),
       subscribe: () => () => {},
@@ -151,27 +127,30 @@ describe('startRemoteServer', () => {
 });
 
 describe('identity', () => {
-  it('refuses a request carrying no assertion at all', async () => {
+  it('refuses an unpaired request, carrying no token at all', async () => {
     const response = await get(await start(), '/api/load', null);
     expect(response.status).toBe(401);
   });
 
-  it('refuses a forged assertion', async () => {
-    const base = await start();
-    const [head, payload] = token().split('.');
-    const forged = `${head}.${payload}.${Buffer.from('nope').toString('base64url')}`;
-    expect((await get(base, '/api/load', forged)).status).toBe(401);
+  it('refuses a forged token', async () => {
+    expect((await get(await start(), '/api/load', 'not-a-token-we-minted')).status).toBe(401);
   });
 
-  it('refuses an expired assertion', async () => {
-    const base = await start();
-    const expired = token({ exp: Math.floor(Date.now() / 1000) - 1 });
-    expect((await get(base, '/api/load', expired)).status).toBe(401);
+  it('refuses a token that was revoked -- the directory is consulted per request', async () => {
+    let live = true;
+    const revocable: DeviceDirectory = { find: (t) => (live && t === TOKEN ? PAIRED : null) };
+    const base = await start({ devices: revocable });
+    expect((await get(base, '/api/load')).status).toBe(200);
+    live = false;
+    expect((await get(base, '/api/load')).status).toBe(401);
   });
 
-  it('refuses an assertion minted for another Access application', async () => {
+  it('reads no identity out of a Tailscale header, which anything local can forge', async () => {
     const base = await start();
-    expect((await get(base, '/api/load', token({ aud: ['elsewhere'] }))).status).toBe(401);
+    const response = await fetch(`${base}/api/load`, {
+      headers: { 'tailscale-user-login': 'someone@example.test' },
+    });
+    expect(response.status).toBe(401);
   });
 
   it('checks identity before the route exists, so an unknown path is 401 too', async () => {
@@ -251,7 +230,8 @@ describe('write routes', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, value: null });
     expect(closeSession).toHaveBeenCalledWith('session-1');
-    expect(audit).toHaveBeenCalledWith(expect.stringContaining('operator@example.test'));
+    expect(audit).toHaveBeenCalledWith(expect.stringContaining(PAIRED.name));
+    expect(audit).toHaveBeenCalledWith(expect.stringContaining(PAIRED.deviceId));
   });
 
   it("forwards the source's own refusal, whole", async () => {
@@ -277,7 +257,7 @@ describe('write routes', () => {
     const base = await start();
     const response = await fetch(`${base}/api/close-session`, {
       method: 'POST',
-      headers: { 'cf-access-jwt-assertion': token() },
+      headers: bearer(TOKEN),
       body: 'not json at all',
     });
     expect(response.status).toBe(400);
@@ -324,7 +304,7 @@ describe('write routes', () => {
     const huge = JSON.stringify({ sessionId: 's1', prompt: 'x'.repeat(3_000_000) });
     await fetch(`${base}/api/record-prompt`, {
       method: 'POST',
-      headers: { 'cf-access-jwt-assertion': token() },
+      headers: bearer(TOKEN),
       body: huge,
     }).catch(() => undefined);
     expect(recordPrompt).not.toHaveBeenCalled();
@@ -450,7 +430,7 @@ describe('static assets', () => {
 
   it('refuses an asset to a forged assertion', async () => {
     const base = await start({ webRoot: root });
-    expect((await get(base, '/assets/app.js', 'not.a.token')).status).toBe(401);
+    expect((await get(base, '/assets/app.js', 'not-a-token-we-minted')).status).toBe(401);
   });
 
   it('serves the page at the root to a verified identity', async () => {

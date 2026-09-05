@@ -3,13 +3,14 @@
  *
  * THREE PROPERTIES ARE STRUCTURAL, not policy a handler applies.
  *
- * 1. It binds 127.0.0.1 and nothing else. `cloudflared` dials OUT from this
- *    machine, so a tunnel needs no listening address of its own -- and
- *    `vite.config.ts` already says nothing here should be reachable from
- *    another machine. This keeps that true while letting a tunnel reach in.
- * 2. It refuses to start without Cloudflare Access configured. A route here
- *    can type into a running agent and kill sessions; a default-open mode
- *    someone later runs by accident is remote code execution by proxy.
+ * 1. It binds 127.0.0.1 and nothing else. `tailscale serve` proxies tailnet
+ *    requests to `http://127.0.0.1:<port>` on this machine, so no listening
+ *    address of its own is needed -- and Tailscale recommends loopback-only
+ *    for exactly this reason (https://tailscale.com/kb/1312/serve). Any other
+ *    bind address is refused rather than honoured.
+ * 2. It refuses to start without a device registry. A route here can type into
+ *    a running agent and kill sessions; a default-open mode someone later runs
+ *    by accident is remote code execution by proxy.
  * 3. In read-only mode the write routes ARE NOT REGISTERED. Not a flag a
  *    handler consults, not a descriptor capability the client reads -- the
  *    table has no entry, and the process answers 404. Capability gating in
@@ -20,6 +21,13 @@
  * anonymous caller cannot even learn which paths exist, and a long-lived SSE
  * connection was opened by a verified identity rather than merely by whoever
  * reached the port first.
+ *
+ * TAILSCALE AUTHENTICATES A DEVICE ONTO A NETWORK; IT DOES NOT AUTHORISE THAT
+ * DEVICE TO DRIVE YOUR AGENTS. The whole tailnet -- and every shared-in
+ * external user, and every local process that can reach loopback -- can open a
+ * socket here. The bearer token is what separates reaching the port from being
+ * allowed to use it. `Tailscale-User-*` headers are proxy-asserted and forgeable
+ * by anything local, so they are never read as a credential.
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -29,13 +37,10 @@ import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
 import type { MainSource } from '../sources/source.js';
 import { serveAsset } from './assets.js';
-import { type AccessAuth, type Identity, verifyAccessToken } from './auth.js';
+import { authenticateDevice, type DeviceDirectory, type Identity } from './auth.js';
 
 /** The one address this server may ever bind. */
 export const LOOPBACK = '127.0.0.1';
-
-/** The header Cloudflare Access sets on every request it lets through. */
-const ASSERTION_HEADER = 'cf-access-jwt-assertion';
 
 /** Far above any real payload; `recordPrompt` accepts a pasted prompt. */
 const MAX_BODY_BYTES = 2_000_000;
@@ -45,7 +50,12 @@ const MAX_PROMPT_LENGTH = 1_000_000;
 export type RemoteServerOptions = {
   readonly port: number;
   /** Optional in the TYPE so the unconfigured case is testable, never at runtime. */
-  readonly auth: AccessAuth | undefined;
+  readonly devices: DeviceDirectory | undefined;
+  /**
+   * Present only so a test can prove the refusal below. There is no
+   * configuration path that sets it to anything but `LOOPBACK`.
+   */
+  readonly host?: string;
   readonly allowWrites: boolean;
   readonly source: MainSource;
   readonly subscribe: (onChange: () => void) => () => void;
@@ -165,7 +175,7 @@ function write(
       });
       return;
     }
-    audit(`remote write ${name} by ${identity.email}`);
+    audit(`remote write ${name} by ${identity.name} (${identity.deviceId})`);
     // The source RESOLVES to its refusal rather than throwing it, exactly as
     // over IPC, so `null` is the success -- and `envelope` is still here for
     // the unexpected throw that must never take the process with it.
@@ -344,12 +354,21 @@ function stream(options: RemoteServerOptions): Route {
  * request nobody signed for.
  */
 export async function startRemoteServer(options: RemoteServerOptions): Promise<Server> {
-  const { auth } = options;
-  if (auth === undefined || auth.audience.length === 0 || auth.issuer.length === 0) {
+  const { devices } = options;
+  if (devices === undefined) {
     throw new Error(
-      'the remote server will not start without Cloudflare Access configured: ' +
-        'set the Access application audience and team issuer. This endpoint can ' +
-        'type into running agents, so there is no unauthenticated mode of it.',
+      'the remote server will not start without a device registry: pairing is ' +
+        'what authorises a device to drive an agent, and being on the tailnet ' +
+        'is not that. This endpoint can type into running agents, so there is ' +
+        'no unpaired mode of it.',
+    );
+  }
+  const host = options.host ?? LOOPBACK;
+  if (host !== LOOPBACK) {
+    throw new Error(
+      `the remote server binds ${LOOPBACK} and nothing else, not ${host}: ` +
+        '`tailscale serve` proxies to loopback, so a tailnet-facing bind is ' +
+        'an open port with no proxy in front of it.',
     );
   }
 
@@ -358,9 +377,7 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
 
   const server = createServer((request, response) => {
     void (async () => {
-      const assertion = request.headers[ASSERTION_HEADER];
-      const token = typeof assertion === 'string' ? assertion : '';
-      const outcome = await verifyAccessToken(token, auth);
+      const outcome = authenticateDevice(request.headers.authorization, devices);
       if (!outcome.ok) {
         send(response, 401, {
           ok: false,

@@ -172,11 +172,17 @@ function createWindow(): void {
 /**
  * The browser transport, off unless the environment asks for it.
  *
- * It listens on loopback and is meant to be reached through `cloudflared`,
- * which dials out from this machine: no inbound port is opened here. A
- * misconfiguration is fatal ON PURPOSE -- vam would rather not start than
- * start with a port nobody has to authenticate to, because the write routes
- * can type into a running agent.
+ * It listens on LOOPBACK ONLY and is meant to be reached through `tailscale
+ * serve`, which proxies tailnet requests to `http://127.0.0.1:<port>` on this
+ * machine and terminates TLS with a publicly trusted certificate, so the phone
+ * gets a secure context and can hold a credential at all
+ * (https://tailscale.com/kb/1312/serve). Never `tailscale funnel`: that is the
+ * public-internet variant, and this surface drives agents.
+ *
+ * Being on the tailnet is not authorisation. Every device on it -- and every
+ * local process that can reach loopback -- can open a socket here, so each
+ * device must be paired from the desktop before any route answers it. A
+ * misconfiguration is fatal ON PURPOSE.
  */
 function startRemoteTransport(): void {
   let config: ReturnType<typeof remoteConfigFromEnv>;
@@ -213,7 +219,10 @@ function startRemoteTransport(): void {
   // the `dist-web` build beside the app, and a missing one answers 404 rather
   // than half a page -- `serveAsset` opens files, it does not invent them.
   const webRoot = config.webRoot ?? join(app.getAppPath(), 'dist-web');
-  void startRemoteServer({ ...config, webRoot, source: DESKTOP_SOURCE, subscribe }).catch(
+  // The paired devices. Empty until the pairing screen grants one, and held
+  // in memory only for now -- the durable registry is its own module.
+  const devices = { find: () => null };
+  void startRemoteServer({ ...config, devices, webRoot, source: DESKTOP_SOURCE, subscribe }).catch(
     (error) => {
       console.error(`[vam] remote transport refused to start: ${String(error)}`);
       app.exit(1);
