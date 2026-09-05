@@ -1341,9 +1341,39 @@ function QuestionCard({
    * options is a ring -- there is no last one. A set of steps is a sequence
    * with a Submit at the end of it, and stepping past the last one back to the
    * first reads as progress that did not happen.
+   *
+   * IT ALSO CARRIES THE CURSOR. The option cursor is DOM focus rather than an
+   * index, so the button holding it unmounts when the step changes and focus
+   * falls back to `document.body` -- and from the body the keys are no longer
+   * this listbox's. React reconciles the options by label, so the cursor
+   * survived only when a label happened to recur in the next question (it
+   * does: `Cobalt` was measured in both questions of a real call), which made
+   * the same gesture work or fail depending on the call. `landing` is the step
+   * a walk asks the effect below to put the cursor on -- and a walk that the
+   * clamp turned into a no-op asks for nothing, because the cursor is already
+   * where the operator put it.
    */
-  const walk = (by: number) =>
-    setShowing((now) => Math.min(Math.max(now + by, 0), questions.length - 1));
+  const [landing, setLanding] = useState<number | null>(null);
+  const stepTabRef = useRef<HTMLButtonElement>(null);
+  const walk = (by: number) => {
+    const next = Math.min(Math.max(showing + by, 0), questions.length - 1);
+    if (next === showing) return;
+    setShowing(next);
+    setLanding(next);
+  };
+
+  /**
+   * The cursor lands on the new step's first option -- or on its tab, for a
+   * step already answered, which has no options list to land in. Only after a
+   * WALK: arriving at the card is `active`'s business one screen down, and
+   * stealing focus on every render would take it off whatever the operator
+   * clicked.
+   */
+  useEffect(() => {
+    if (landing === null) return;
+    setLanding(null);
+    (firstOptionRef.current ?? stepTabRef.current)?.focus();
+  }, [landing, firstOptionRef]);
 
   const send = async () => {
     // The marks IN THE ORDER THEY ARE DRAWN, not the order they were clicked:
@@ -1528,6 +1558,7 @@ function QuestionCard({
               type="button"
               role="tab"
               aria-selected={index === showing}
+              ref={index === showing ? stepTabRef : undefined}
               data-question-step
               data-current={index === showing ? 'true' : undefined}
               data-answered={one.answer === null ? undefined : 'true'}

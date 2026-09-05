@@ -278,3 +278,101 @@ describe('the mouse reaches the composer by the same route the keyboard does', (
     expect(focusedSession()).toBe('a1');
   });
 });
+
+/**
+ * `l` in Insert, on both routes into the failure.
+ *
+ * The option cursor is DOM focus, so it only exists while an option button
+ * holds focus. Walking to the next question unmounted the focused button and
+ * focus fell to `document.body`; from there `l` was no longer the listbox's
+ * and reached the canvas grammar, which moved the cursor to another node
+ * under the pane the operator was reading.
+ *
+ * The labels here are DISTINCT PER QUESTION on purpose. React reconciles the
+ * option buttons by label, so a label that recurs in the next question keeps
+ * the DOM node alive and focus survives by accident -- `shared/answer.ts`
+ * records that this really happens ("Cobalt was an option in BOTH questions"),
+ * which is why the same gesture used to work or fail depending on the call.
+ */
+const FIRST: AgentQuestion = {
+  id: 'toolu_2:0',
+  header: 'Colour',
+  question: 'Which colour?',
+  multiSelect: false,
+  options: [
+    { label: 'Crimson', description: null },
+    { label: 'Cobalt', description: null },
+  ],
+  answer: null,
+};
+const SECOND: AgentQuestion = {
+  id: 'toolu_2:1',
+  header: 'Fruit',
+  question: 'Which fruit?',
+  multiSelect: false,
+  options: [
+    { label: 'Apple', description: null },
+    { label: 'Pear', description: null },
+  ],
+  answer: null,
+};
+const TWO_QUESTIONS: CanvasModel = {
+  projects: [
+    {
+      id: 'p1',
+      name: 'alpha',
+      source: 'black-smith',
+      sessions: [session('a1', { questions: [FIRST, SECOND] }), session('a2')],
+    },
+  ],
+};
+
+describe('walking to the next question keeps the option cursor', () => {
+  it('lands on the new step first option rather than on the body', () => {
+    render(<Canvas model={TWO_QUESTIONS} />);
+    press('I');
+    expect(cursorOption()).toBe('Crimson');
+    pressFocused('l');
+    expect(document.querySelector('[data-question-text]')?.textContent).toBe('Which fruit?');
+    expect(cursorOption()).toBe('Apple');
+  });
+
+  it('leaves the next h and l inside the card, not on the canvas', () => {
+    render(<Canvas model={TWO_QUESTIONS} />);
+    press('I');
+    pressFocused('l');
+    pressFocused('j');
+    expect(cursorOption()).toBe('Pear');
+    pressFocused('l');
+    // The canvas cursor did not move under the pane being read.
+    expect(focusedSession()).toBe('a1');
+  });
+});
+
+/**
+ * The root cause, reachable without walking a step at all: press `I` with no
+ * question open. Nothing takes the option cursor, focus stays on the body, and
+ * `l` used to fall past both Insert guards to the canvas spatial walk -- which
+ * moved the cursor onto another session's card under a pane being read.
+ *
+ * The Select case is asserted first, so this cannot pass by the walk having
+ * had nowhere to go: two `l` presses cross a1's own step and land on a2.
+ */
+describe('Insert owns the horizontal keys even with no question open', () => {
+  it('walks the canvas with l in Select, as it always has', () => {
+    render(<Canvas model={QUIET} />);
+    press('l');
+    press('l');
+    expect(focusedSession()).toBe('a2');
+  });
+
+  it('does not walk the canvas with l when nothing holds the option cursor', () => {
+    render(<Canvas model={QUIET} />);
+    press('I');
+    expect(mode()).toBe('Insert');
+    press('l');
+    press('l');
+    expect(focusedSession()).toBe('a1');
+    expect(mode()).toBe('Insert');
+  });
+});

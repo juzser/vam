@@ -1792,6 +1792,18 @@ function CanvasInner({
             setMode('select');
             return;
           }
+          if (mode === 'insert') {
+            // `right` — the fourth direction, and the one that had no branch.
+            // Insert owns all of `hjkl` or none of it: while a question is
+            // open the listbox handles `l` itself and this never runs, but
+            // with no question open (or with the option cursor momentarily
+            // off a button) `l` fell through to the spatial walk below and
+            // moved the canvas cursor under the pane being read. That is the
+            // "the keys work, they just do the wrong thing" failure the mode
+            // naming exists to end, so the grammar closes it here rather than
+            // leaving it to a DOM focus that can be dropped.
+            return;
+          }
           // The cursor can be left on a node the filter has just made
           // unreachable. Land on the first survivor rather than navigating from
           // a node that is no longer in the set — `nextNode` throws on an origin
