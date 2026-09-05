@@ -102,6 +102,18 @@ describe('RemotePanel', () => {
     expect((await screen.findByTestId('remote-off')).textContent).toMatch(/desktop app/i);
   });
 
+  it('copies the https address through electron clipboard, not the page own', async () => {
+    const copyText = vi.fn(async () => true);
+    const api = fakeApi({
+      address: { kind: 'found', url: 'https://example-machine.example-tailnet.ts.net' },
+    });
+    render(<RemotePanel api={api} copyText={copyText} active />);
+
+    await userEvent.click(await screen.findByText('Copy address'));
+
+    expect(copyText).toHaveBeenCalledWith('https://example-machine.example-tailnet.ts.net');
+  });
+
   it('forwards allow, remove and revoke-all to main', async () => {
     const api = fakeApi({
       view: { ...IDLE.view, awaiting: { name: 'a phone', source: '127.0.0.1' } },
