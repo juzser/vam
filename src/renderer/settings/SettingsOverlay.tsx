@@ -58,6 +58,7 @@ import {
   type Theme,
 } from '../prefs/prefs.js';
 import { LayoutPicker } from './LayoutPicker.js';
+import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
 import { FULL, type LayoutChoice, SECTIONS, type SectionId, shortcutSections } from './sections.js';
 
 export type SettingsOverlayProps = {
@@ -535,6 +536,21 @@ export function SettingsOverlay({ prefs, theme, onChange, onClose }: SettingsOve
                   in the project’s directory.
                 </p>
               </Block>
+            </Panel>
+
+            <Panel
+              id="remote"
+              active={section === 'remote'}
+              hint="pair a phone over your tailnet — in person, at this machine"
+            >
+              {/* The bridge is read HERE rather than passed down from the
+                  canvas: `window.api` exists only in the Electron shell, and
+                  this is the one section that needs it. */}
+              <RemotePanel
+                api={desktopRemoteApi()}
+                copyText={window.api?.clipboard?.writeText}
+                active={section === 'remote'}
+              />
             </Panel>
 
             <Panel

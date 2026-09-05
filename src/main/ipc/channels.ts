@@ -98,6 +98,25 @@ export const CHANNELS = {
    * `showOpenDialog`, which is why it cannot exist in the browser build.
    */
   chooseDirectory: 'vam:dialog:choose-directory',
+  /**
+   * The pairing screen's channels. Every one of them answers a bare
+   * `RemoteState` (`src/main/remote/ipc.ts`) rather than an `IpcResult`: the
+   * screen's whole content is that one snapshot, so an act returning the
+   * state it produced is what keeps the panel from drawing a stale code for
+   * a poll interval after the operator pressed something.
+   *
+   * THESE ARE DESKTOP-ONLY ACTS. `open`, `approve` and `deny` are reachable
+   * from this bridge and from nowhere else -- the remote server is handed a
+   * `PairPort` with `submit` alone (`remote/server.ts`), because opening the
+   * screen clears the pairing lockout and that is only defensible while it
+   * takes a human at this machine.
+   */
+  remoteState: 'vam:remote:state',
+  pairingOpen: 'vam:pairing:open',
+  pairingApprove: 'vam:pairing:approve',
+  pairingDeny: 'vam:pairing:deny',
+  deviceRemove: 'vam:remote:device-remove',
+  deviceRemoveAll: 'vam:remote:device-remove-all',
 } as const;
 
 /**

@@ -7,6 +7,7 @@
  * separately by `test/electron/launch.test.ts`.
  */
 
+import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session } from 'electron';
@@ -17,6 +18,8 @@ import { registerSourceIpc } from './ipc/handlers.js';
 import { releaseCloseAccelerator } from './menu.js';
 import { isSameOrigin } from './origin.js';
 import { openDeviceRegistry, registryPath } from './remote/devices.js';
+import { readServeAddress } from './remote/hostname.js';
+import { registerRemoteIpc } from './remote/ipc.js';
 import { remoteConfigFromEnv } from './remote/launch.js';
 import { createPairing } from './remote/pairing.js';
 import { createStreamRegistry, startRemoteServer } from './remote/server.js';
@@ -231,6 +234,16 @@ function startRemoteTransport(): void {
       onRevoked: (deviceId) => streams.closeFor(deviceId),
     });
     const pairing = createPairing({ grant: (name) => devices.grant(name) });
+    // The desktop half: the screen that mints a code, the prompt that allows a
+    // device, and the list that revokes one. Registered only when the remote
+    // endpoint is configured at all -- with no endpoint there is nothing to
+    // pair with, and the panel says so rather than offering a dead control.
+    registerRemoteIpc(ipcMain, {
+      pairing,
+      devices,
+      allowWrites: config.allowWrites,
+      readAddress: () => readServeAddress(runTailscale),
+    });
     await startRemoteServer({
       ...config,
       devices,
@@ -243,6 +256,28 @@ function startRemoteTransport(): void {
   })().catch((error) => {
     console.error(`[vam] remote transport refused to start: ${String(error)}`);
     app.exit(1);
+  });
+}
+
+/**
+ * `tailscale status --json`, if there is a `tailscale` to run.
+ *
+ * BEST-EFFORT AND BOUNDED. A missing CLI is the ordinary case, not an error --
+ * it rejects, and `readServeAddress` reports "could not ask" rather than
+ * guessing a hostname. `execFile` with an argument array, a short timeout and
+ * a small buffer: this runs on main's event loop, and a CLI that hangs must
+ * not take the pairing screen with it.
+ */
+function runTailscale(args: readonly string[]): Promise<{ code: number; stdout: string }> {
+  return new Promise((resolve, reject) => {
+    const options = { timeout: 3_000, maxBuffer: 1_000_000 };
+    execFile('tailscale', [...args], options, (error, stdout) => {
+      // A non-zero exit still carries a status body worth reading -- a stopped
+      // tailnet answers that way -- so only a failure to RUN the command at
+      // all is a rejection.
+      if (error !== null && stdout === '') reject(error);
+      else resolve({ code: error === null ? 0 : 1, stdout });
+    });
   });
 }
 

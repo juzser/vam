@@ -19,6 +19,7 @@
  */
 
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
+import type { RemoteState } from '../main/remote/state.js';
 import type { Project } from '../renderer/domain/model.js';
 import type { AnswerRequest, AnswerResult } from '../shared/answer.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
@@ -261,3 +262,44 @@ export function createStreamSubscribe(
     };
   };
 }
+
+/**
+ * The bridge's pairing member: the desktop half of remote access.
+ *
+ * Every call answers a bare `RemoteState` -- no `unwrap`, because these
+ * channels answer bare (see `src/main/remote/ipc.ts`) -- and every ACT
+ * answers the state it produced, so the panel never draws a code the operator
+ * has already replaced.
+ *
+ * `open`, `approve` and `deny` exist HERE and on no network route. Opening
+ * the screen clears the pairing lockout, which is only defensible while
+ * pressing it takes a human at this machine; the remote server is given
+ * `submit` alone.
+ *
+ * A REJECTION IS AN ANSWER. With no `VAM_REMOTE_PORT` configured, main never
+ * registers these channels and `invoke` rejects -- which is the honest report
+ * that the remote endpoint is off, and the panel says exactly that.
+ */
+export type RemoteApi = {
+  state(): Promise<RemoteState>;
+  open(): Promise<RemoteState>;
+  approve(): Promise<RemoteState>;
+  deny(): Promise<RemoteState>;
+  remove(deviceId: string): Promise<RemoteState>;
+  revokeAll(): Promise<RemoteState>;
+};
+
+export function createRemoteApi(ipc: InvokerLike): RemoteApi {
+  const ask = (channel: string, ...args: unknown[]) =>
+    ipc.invoke(channel, ...args) as Promise<RemoteState>;
+  return {
+    state: () => ask(CHANNELS.remoteState),
+    open: () => ask(CHANNELS.pairingOpen),
+    approve: () => ask(CHANNELS.pairingApprove),
+    deny: () => ask(CHANNELS.pairingDeny),
+    remove: (deviceId) => ask(CHANNELS.deviceRemove, deviceId),
+    revokeAll: () => ask(CHANNELS.deviceRemoveAll),
+  };
+}
+
+export type { RemoteState };

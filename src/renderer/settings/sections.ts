@@ -8,7 +8,7 @@
  * test can read is arithmetic that can be wrong loudly.
  */
 
-import { Bot, Columns3, Frame, Keyboard, type LucideIcon, Palette } from 'lucide-react';
+import { Bot, Columns3, Frame, Keyboard, type LucideIcon, Palette, Smartphone } from 'lucide-react';
 import {
   type BindingGroup,
   type BindingRow,
@@ -26,7 +26,7 @@ import {
   type LayoutName,
 } from '../prefs/panes.js';
 
-export type SectionId = 'appearance' | 'layout' | 'canvas' | 'sessions' | 'keyboard';
+export type SectionId = 'appearance' | 'layout' | 'canvas' | 'sessions' | 'remote' | 'keyboard';
 
 /**
  * The order is hard-coded and never sorted: a nav that reorders under the
@@ -51,6 +51,10 @@ export const SECTIONS: readonly {
   // and the longest, and a list that ends in a reference reads as a list that
   // ended. Nothing else depends on the position.
   { id: 'sessions', label: 'Sessions', Icon: Bot },
+  // Where a phone is paired. Beside Sessions rather than under it: what it
+  // grants is the ability to drive those sessions from somewhere else, and it
+  // stays before Keyboard for the reason above.
+  { id: 'remote', label: 'Remote', Icon: Smartphone },
   { id: 'keyboard', label: 'Keyboard', Icon: Keyboard },
 ];
 
