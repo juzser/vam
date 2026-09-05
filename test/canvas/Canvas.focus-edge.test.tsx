@@ -11,9 +11,12 @@
  * lists of expected strings — it is by asserting they move together off the
  * same state, in the same press.
  *
- * The line is drawn on every SHOWN column that the mode is drawn in: Select is
- * one cursor seen twice, in the sidebar row's ring and the canvas card's, so
- * both columns wear it; Insert is the response pane alone.
+ * The line is drawn on the column that HOLDS THE KEYBOARD, and the canvas is
+ * never that column: Select types into the sidebar's list and Insert into the
+ * response pane, while the canvas only shows what the cursor landed on. So the
+ * canvas wears no line in any mode -- that used to be an invariant of this file
+ * in the other direction, and the assertions below are the same decision with
+ * the answer corrected, not new ones.
  *
  * The sweep along it used to run once and stop, and this file used to hold it
  * to that. It travels continuously now, borrowing the running node's own
@@ -84,9 +87,9 @@ beforeAll(() => stubMatchMedia(false));
 afterEach(cleanup);
 
 describe('the focused pane wears the line and the unfocused one does not', () => {
-  it('draws it on the two columns Select is drawn in, and not on the response', () => {
+  it('draws it on the sidebar alone in Select -- never on the canvas', () => {
     render(<Canvas model={MODEL} />);
-    expect(edges()).toEqual(['sidebar', 'canvas']);
+    expect(edges()).toEqual(['sidebar']);
   });
 
   it('moves it to the response pane when the keyboard goes there', () => {
@@ -99,7 +102,7 @@ describe('the focused pane wears the line and the unfocused one does not', () =>
     render(<Canvas model={MODEL} />);
     press('I');
     press('H');
-    expect(edges()).toEqual(['sidebar', 'canvas']);
+    expect(edges()).toEqual(['sidebar']);
   });
 
   it('is decoration to a screen reader — the word carries the state', () => {
@@ -121,9 +124,12 @@ describe('the line and the status word cannot disagree', () => {
 
     for (const { word, panes } of seen) {
       // One predicate, read twice. `Insert` is the response pane and nothing
-      // else; `Select` is every shown column the list cursor is drawn in.
+      // else; `Select` is the sidebar and nothing else. The canvas is in
+      // neither list, in any mode -- it is a view, not a place the keyboard
+      // goes.
       expect(panes.includes('action')).toBe(word === 'Insert');
       expect(panes.includes('sidebar')).toBe(word === 'Select');
+      expect(panes.includes('canvas')).toBe(false);
     }
   });
 });
@@ -132,7 +138,7 @@ describe('reduced motion loses the sweep, not the indicator', () => {
   it('still draws the line when the operator asked for no motion', () => {
     stubMatchMedia(true);
     render(<Canvas model={MODEL} />);
-    expect(edges()).toEqual(['sidebar', 'canvas']);
+    expect(edges()).toEqual(['sidebar']);
     stubMatchMedia(false);
   });
 
@@ -200,10 +206,10 @@ describe('the top line is the ONLY thing the response pane says it with', () => 
  * running animation -- `getComputedStyle` on the edge returns the inline
  * cascade and no more. These are therefore assertions about the RULE, read out
  * of `styles.css` as text: that the focus edge and the running node's edge
- * declare one and the same animation. The claim that the canvas column's line
- * is actually painted was settled by measuring it in a real browser against
- * the built page -- `e2e/focus-edge-visibility.mjs`, whose committed output is
- * the evidence -- because it is exactly the claim a DOM test cannot make.
+ * declare one and the same animation. Whether a mounted line is actually
+ * PAINTED is a claim about pixels that no DOM test can make; it is measured in
+ * a real browser against the built page by `e2e/focus-edge-visibility.mjs`,
+ * which now expects the canvas column to report no edge mounted at all.
  *
  * Why the two rules must be one rule: the operator asked for the top line to
  * carry "the running node effect". If that means the same thing to a reader it
