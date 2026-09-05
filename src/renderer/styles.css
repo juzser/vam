@@ -999,6 +999,61 @@ body {
   min-width: 44px;
 }
 
+/* The other half of the sizing: the hit stays 44, the PAINT comes inward.
+ *
+ * The operator's complaint ("on mobile the buttons are too big") and the
+ * guard ("every control measures at least 44") are both true, because they
+ * are about two different boxes. Measured on the shipped screenshots, the
+ * controls that look too big are exactly the ones whose border is painted ON
+ * the 44 box -- a `border-line` rectangle at 44 around a 13px glyph. The
+ * per-project `+` beside them is the same 44 box with no border and reads
+ * correctly sized. So the element keeps its 44 and centres only, and one
+ * inner `[data-tap-skin]` carries the border, the ground and the radius.
+ *
+ * 30 sits between vam's own desktop 26 and the 32-36 orca's phone chrome
+ * uses, and radius 8 at 30 keeps the desktop's 7-at-26 corner ratio. Two
+ * adjacent 44 boxes then show 14px between painted edges with a container gap
+ * of 0, so the trio reads as three chips rather than one slab.
+ *
+ * NOT the desktop's `.vam-hit-24`, which solves the same problem the other
+ * way round -- small element, hit area hung off an `::after`. The phone guard
+ * reads `getBoundingClientRect()` on the element and a rect cannot see a
+ * pseudo-element, so that route would report a 30x30 button as 30x30 and
+ * fail. Teaching the guard about pseudo-elements is how a guard stops
+ * guarding; `e2e/phone-shell.pw.ts` measures both boxes instead, and caps
+ * this one. */
+.vam-phone .vam-tap > [data-tap-skin] {
+  height: 30px;
+  width: 30px;
+  border-radius: 8px;
+}
+
+/* A phone has no hover, so every hover-only affordance is dead there and the
+   press is the only feedback a finger gets. Drawn on the skin, like
+   everything else visible. */
+.vam-phone .vam-tap:active > [data-tap-skin] {
+  border-color: var(--color-line-strong);
+}
+
+/* A hardware keyboard at 390px is real -- the inline-chord rule below stays
+   alive for exactly that reason -- so the ring must still be drawn. Drawn on
+   the 44 box while the paint is 30 it would float in space, so it moves to
+   the skin.
+ *
+ * `:has(> [data-tap-skin])` and not a bare `.vam-tap`, which is the part that
+ * matters: a blanket `outline: none` on every phone tap target would strip
+ * the ring from the ones that have NO skin -- the borderless glyph buttons,
+ * back and close -- and leave them with nothing drawing it. Suppressed only
+ * where something else is drawing it, and the two halves sit together so
+ * neither can be removed without the other. */
+.vam-phone .vam-tap:has(> [data-tap-skin]):focus-visible {
+  outline: none;
+}
+.vam-phone .vam-tap:focus-visible > [data-tap-skin] {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 1px;
+}
+
 /* A control a finger can never reveal, and therefore must not be able to hit.
  *
  * The row's close `x` is `opacity-0` until `group-hover/row`, which a coarse

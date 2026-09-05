@@ -37,7 +37,7 @@ import {
   Sun,
   Trash2,
 } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { Group, Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
@@ -117,6 +117,73 @@ export const FILTER_POPOVER_WIDTH = 288;
 
 /** `px-3` on each side of `data-projects-header`, mirrored as a gutter. */
 const FILTER_POPOVER_GUTTER = 24;
+
+/**
+ * The breathing space left below the popover's own bottom edge.
+ *
+ * The ONLY constant in the height cap, and deliberately: it is a margin, not a
+ * position. Everything that says WHERE the popover is comes from measuring it
+ * -- see `useFilterPopoverCap`.
+ */
+const FILTER_POPOVER_FOOT = 8;
+
+/**
+ * How tall the popover may be: the distance from where it actually is to the
+ * bottom of the viewport, measured.
+ *
+ * WHY IT NEEDED ONE AT ALL. It is an anchored popover, so it is deliberately
+ * excluded from the phone sheet rules in `styles.css` -- turning it into a
+ * bottom sheet would move it away from the control it belongs to, and that
+ * exclusion is a decision this does not overturn. But the exclusion left it
+ * with `max-height: none` and `overflow-y: visible`, so its usable height was
+ * whatever the viewport happened to leave below its anchor. Measured at
+ * 375x667 (iPhone SE portrait, still shipping) with the viewport shrunk by a
+ * keyboard, two of its controls sat at 383px and 422px in a 331px viewport
+ * with nothing to scroll: a control that cannot be reached and cannot be
+ * scrolled to.
+ *
+ * WHY MEASURED AND NOT A CONSTANT. CSS cannot say "as tall as the distance
+ * from here to the bottom of the viewport" for an absolutely positioned box,
+ * and every constant that could stand in for it is tuned to one anchor
+ * position -- it would go wrong the first time the header grows a row. The
+ * element's own rect knows where it is; asking it costs one read.
+ *
+ * WHY IT RE-MEASURES. `resize` and not `visualViewport`: on Android the
+ * layout viewport really does shrink when the keyboard opens, and a cap taken
+ * only at open time would still be the pre-keyboard one. `visualViewport` is
+ * the listener `styles.css` rules out for its jitter and double-resize loops,
+ * and this does not use it -- on iOS the layout viewport does not move, the
+ * controls are covered rather than off-screen, and the popover's own scroller
+ * is what brings them back.
+ *
+ * Returns `null` while closed, so the popover renders exactly as it does
+ * today until it has been measured once.
+ */
+function useFilterPopoverCap(
+  open: boolean,
+  menuRef: RefObject<HTMLDivElement | null>,
+): number | null {
+  const [cap, setCap] = useState<number | null>(null);
+  useEffect(() => {
+    if (!open) {
+      setCap(null);
+      return;
+    }
+    const measure = () => {
+      const menu = menuRef.current;
+      if (menu === null) return;
+      // `top`, not `bottom`: the top edge is where the anchor put it and does
+      // not move when the cap is applied, so re-measuring cannot walk the
+      // popover down the screen one resize at a time.
+      const top = menu.getBoundingClientRect().top;
+      setCap(Math.max(0, window.innerHeight - top - FILTER_POPOVER_FOOT));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [open, menuRef]);
+  return cap;
+}
 
 export type SessionListProps = {
   readonly entries: readonly SessionEntry[];
@@ -417,6 +484,7 @@ export function SessionList(props: SessionListProps) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuWasOpen = useRef(false);
+  const filterPopoverCap = useFilterPopoverCap(filterMenuOpen, menuRef);
 
   /**
    * Where the keyboard goes when the popover opens, and where it comes back
@@ -973,9 +1041,28 @@ export function SessionList(props: SessionListProps) {
               setGroupDraft({ kind: 'new' });
             }}
             title="New project"
-            className="vam-tap flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border border-line bg-panel text-ink-faint hover:border-line-strong"
+            className="vam-tap flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center text-ink-faint"
           >
-            <FolderPlus size={13} strokeWidth={1.6} />
+            {/* THE HIT IS 44 ON A PHONE, THE PAINT IS 30. On the desktop this
+                skin is the 26px square the button used to be and nothing
+                moves. On a phone `.vam-phone .vam-tap` grows the BUTTON to 44
+                and `styles.css` sizes the skin to 30 -- because what makes a
+                phone control read as too big is not the 44, it is a
+                `border-line` rectangle drawn AT 44 around a 13px glyph
+                (UI spec `vam-phone-controls`, 2.1 and 3.1). The per-project
+                `+` beside it is the same 44 box with no border and reads
+                correctly sized, which is the whole finding. Not the desktop's
+                `vam-hit-24` inversion: that hangs the hit area off an
+                `::after`, and the phone guard reads
+                `getBoundingClientRect()` on the element, which cannot see
+                one. */}
+            <span
+              aria-hidden="true"
+              data-tap-skin
+              className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border border-line bg-panel hover:border-line-strong"
+            >
+              <FolderPlus size={13} strokeWidth={1.6} />
+            </span>
           </button>
         )}
         {/* Choose a directory, start a session in it. That is the ONLY thing
@@ -990,10 +1077,16 @@ export function SessionList(props: SessionListProps) {
           aria-label="new project"
           onClick={onNewProject}
           title={newSessionDecline ?? 'Choose a directory and start a session in it'}
-          className="vam-tap flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border border-line bg-panel text-ink-faint hover:border-line-strong"
+          className="vam-tap flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center text-ink-faint"
           {...pending(NEW_PROJECT_PENDING, 'Starting a session in the chosen directory…')}
         >
-          <Plus size={13} strokeWidth={1.6} />
+          <span
+            aria-hidden="true"
+            data-tap-skin
+            className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border border-line bg-panel hover:border-line-strong"
+          >
+            <Plus size={13} strokeWidth={1.6} />
+          </span>
         </button>
         {/* Search answers "the one called permalink"; this answers "the ones
             that stopped" — two different questions, so two controls. */}
@@ -1007,14 +1100,28 @@ export function SessionList(props: SessionListProps) {
             aria-label="filter sessions"
             onClick={() => onFilterMenuToggle(!filterMenuOpen)}
             className={[
-              'vam-tap relative flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border bg-panel',
-              filterMenuOpen || narrowing
-                ? 'border-line-loud text-ink'
-                : 'border-line text-ink-faint hover:border-line-strong',
+              'vam-tap flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center',
+              filterMenuOpen || narrowing ? 'text-ink' : 'text-ink-faint',
             ].join(' ')}
           >
-            <Filter size={13} strokeWidth={1.6} />
-            {/* Absent at zero, not a zero. A badge reading "0" is a badge
+            {/* The badge rides INSIDE the skin, not on the button. On a phone
+                the button is 44 and the skin 30, so a badge placed against
+                the button's corner would float 7px clear of the chip it
+                counts for. `aria-hidden` costs nothing here: the button carries
+                `aria-label`, so its accessible name is "filter sessions"
+                either way and the digit was never announced. */}
+            <span
+              aria-hidden="true"
+              data-tap-skin
+              className={[
+                'relative flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border bg-panel',
+                filterMenuOpen || narrowing
+                  ? 'border-line-loud'
+                  : 'border-line hover:border-line-strong',
+              ].join(' ')}
+            >
+              <Filter size={13} strokeWidth={1.6} />
+              {/* Absent at zero, not a zero. A badge reading "0" is a badge
                 claiming something is narrowed when nothing is, and the count
                 this draws is the count of rules actually excluding sessions.
                 A DEFAULT is not one of them: it is not a rule the operator
@@ -1022,14 +1129,15 @@ export function SessionList(props: SessionListProps) {
                 choice nobody made. The border above still reports it, and the
                 popover names it. The colour is `filter-badge`, which carries
                 waiting's amber under its own name — see `styles.css`. */}
-            {activeFilters > 0 && (
-              <span
-                data-filter-badge
-                className="-top-1 -right-1 absolute flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-filter-badge px-[3px] font-mono text-[8.5px] text-canvas"
-              >
-                {activeFilters}
-              </span>
-            )}
+              {activeFilters > 0 && (
+                <span
+                  data-filter-badge
+                  className="-top-1 -right-1 absolute flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-filter-badge px-[3px] font-mono text-[8.5px] text-canvas"
+                >
+                  {activeFilters}
+                </span>
+              )}
+            </span>
           </button>
         </ShortcutTip>
 
@@ -1039,7 +1147,11 @@ export function SessionList(props: SessionListProps) {
             data-filter-menu
             role="dialog"
             aria-label="session filters"
-            style={{ width: popoverWidth }}
+            style={
+              filterPopoverCap === null
+                ? { width: popoverWidth }
+                : { width: popoverWidth, maxHeight: filterPopoverCap, overflowY: 'auto' }
+            }
             className="absolute top-[36px] right-0 z-20 flex flex-col gap-2 rounded-[9px] border border-line-strong bg-panel p-2.5 shadow-lg"
           >
             <span className="font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">

@@ -299,3 +299,269 @@ does. Remove the throwaway `$STATE_DIR` yourself; `dist/`,
 above) — nothing in vam's own gates will tell a future change that this spec
 rotted either. Re-run it by hand alongside AC-G1 after any change to the SSE
 wire contract, the vite proxy, or `src/adapter/**`.
+
+---
+
+# The phone shell at 390px — what a content scan could not say
+
+`e2e/phone-shell.pw.ts`, its own config (`e2e/playwright.phone.config.ts`,
+port 5277). It exists because two properties of the phone shell (PR #191) are
+asserted in the unit suite by reading `src/renderer/styles.css` as **bytes**:
+`test/phone/touch-targets.test.tsx` and `test/phone/overlay-sheets.test.ts`.
+Both headers say so themselves, and both name a Playwright pass at 390px as
+the thing that would settle them. jsdom lays nothing out, so a scan can only
+say the rules EXIST — never that a control is 44px, that a sheet's bottom edge
+is where it should be, or that a selector matches anything at all.
+
+## Run
+
+Needs nothing but a free port 5277 — no black-smith, no state dir, no
+environment variables. The fixture is the built page's own `?demo=1` mode, and
+the config builds and serves it itself.
+
+```bash
+e2e/node_modules/.bin/playwright test --config=e2e/playwright.phone.config.ts
+```
+
+## What it found (2026-09-05, against `4c7188f`)
+
+Four failures, all product findings, none of them a defect in this harness.
+
+1. **The hover-only close control is still hit-testable, and still takes the
+   row's tap.** `styles.css` carries
+   `[data-phone-shell] [data-session-row] button[aria-label^='close '] { display: none }`
+   and the unit scan asserts that text is present. The selector **matches
+   nothing**: the close `x` is a SIBLING of `[data-session-row]`, not a
+   descendant of it, so it stays `opacity: 0` with `pointer-events: auto` over
+   the row's own top-right. A tap there is measured to leave the shell on the
+   list and to put the close route's refusal on the status line — the exact S2
+   #191 was written to remove, still live at real width behind a green test.
+
+2. **17 of 23 controls on the list screen are under 44x44**, including
+   `data-project-icon` at 15x15 and the row close buttons at 15x16.5. The
+   `styles.css` rule enumerates seven controls, and the ones it names DO
+   measure 44 (settings, the theme toggle, the step chips, the composer's
+   record button, the phone app bar's back and close); everything the shell
+   HOSTS rather than owns was never in the list. Issue #188 is open on this.
+
+3. **6 of 17 on the session screen**: the three response tabs at 115.7x26,
+   `data-progress-toggle` at 63.1x18.3, `data-attach` at 24x24 and
+   `data-model-request` at 84x24.
+
+4. **The icon picker cannot bring an emoji above an iOS keyboard.** See below.
+
+Green in the same run: list -> session -> back; the session bar's close control
+(visible, 44x44, clear of the back chevron); both reachable sheets
+bottom-anchored, capped at 85dvh and scrolling within themselves; and the
+sheet re-capping when the layout viewport shrinks.
+
+## The keyboard, and the line this harness does not cross
+
+A headless Chromium at 390x844 has no soft keyboard, and its `visualViewport`
+is not the thing that breaks on iOS. Nothing here simulates one. The claim is
+split in two instead:
+
+- **The Android/Chrome case is reproduced exactly.** Those engines shrink the
+  LAYOUT viewport when the keyboard opens and `dvh` tracks it; resizing the
+  viewport is that same event. Measured: the sheet re-caps to 85% of the
+  shrunk viewport and stays wholly inside it.
+- **The iOS case is computed, not simulated.** On iOS the layout viewport does
+  NOT shrink, so every box measured here sits at the coordinate it would
+  occupy on the device; the keyboard merely covers the bottom of them. Whether
+  the sheet's own scroller can lift its primary action into the band that is
+  left is then a scroll, and a scroll is layout. Measured, with the picker's
+  own search box focused (which is what raises the keyboard on a device): the
+  icon picker sheet spans 411–844px, its ONLY scroller spans 581–831px, and
+  after every scroll it allows the first emoji's bottom sits at 621px. A
+  336px keyboard leaves the top 508px visible, so the picker's entire reason
+  for existing is 113px under the fold with nothing left to scroll.
+
+`IOS_KEYBOARD_CSS_PX` (336) is an estimate and is used as one — iPhone
+portrait keyboards run roughly 291–380px depending on the accessory and
+prediction rows. The assertion reports the margin it failed by, so a real
+device figure can be substituted at the top of the file and the verdict
+re-derived rather than re-argued. Any keyboard taller than 264px covers that
+first emoji row.
+
+## What it still cannot say
+
+Two of the four `data-overlay-host` sheets could not be opened at 390px at
+all in this fixture, and the suite says so in a `test.skip` with the reason
+rather than asserting them from CSS a second time. `ErrorLogPanel`'s only
+phone route is the `N failures` button, which `PhoneShell` draws when
+`failureCount > 0`; demo mode records every refused write as a `refusal`, never
+a `failure`, so the count is structurally 0. `ProjectPicker` opens from
+`onAddToGroup`, which needs a group, which needs a source that accepts writes.
+The shared sheet RULE is now measured on two real panels — a short one and one
+with a fixed `h-[min(600px,80vh)]` of its own — but each unopened panel's own
+inner layout is not.
+
+Nor is any of this a device. It is one engine at one width with square pixels
+and no rubber-band scrolling; Safari's own sheet behaviour, the accessory bar,
+and `env(safe-area-inset-bottom)` (0 in this browser) are all outside it.
+
+## Exposure shared with the specs above
+
+`vitest.config.ts`, `tsconfig*.json` and `biome.json` exclude `e2e/`, so
+nothing in vam's gates will tell a future change that this spec rotted either.
+Re-run it by hand after any change to `styles.css`'s phone block,
+`src/renderer/phone/**`, `SessionList`, `DetailPanel`, or any of the four
+overlay hosts.
+
+## Second pass (2026-09-05, against `985f96b`) — the search route and the last two sheets
+
+### `vam-phone-uiux/spec.md` §5.3's premise is false, and that is the answer to it
+
+§5.3 asks whether the phone's search route is survivable, on the reading that
+the "Search sessions" control opens `data-filter-menu` — the one overlay family
+the phone rules deliberately do not adapt. It does not. `onOpenFilter` is
+`setFiltering(true)` (`Canvas.tsx`), and `SessionList.tsx:870`'s ternary swaps
+the button for an **in-place `<input aria-label="filter sessions">`** in the
+same row. Measured at 390x844 with a query typed: the box sits at **117–141px**,
+is focused by the shell itself, and is 16px (no iOS zoom); the list region
+starts at **210px**; the surviving result sits at **236–300px**. All of it is
+inside the 508px an iOS keyboard leaves, and the list's own scroll region
+begins above that band — which is exactly the property the icon picker lacks.
+`[data-filter-menu]` is not in the DOM on this route at all.
+
+So §5.1 (do not build a palette bottom sheet) is not blocked by §5.3, and the
+"make the search control a real sheet" remedy is answering a problem the
+measurement does not find.
+
+### The filter popover, measured for its own sake
+
+`data-filter-menu` (behind the funnel, `data-filter-toggle`) holds status and
+mode toggles and **no text box**, so nothing in it raises a keyboard. At
+390x844 it spans 193–433px, entirely inside the band, with its four status
+buttons at 44px.
+
+Its exposure is structural rather than iOS-specific and it is left red: it has
+`max-height: none`, `overflow-y: visible` and no scroller, so its usable height
+is fixed by where it is anchored. At 375x667 (iPhone SE portrait, still
+shipping) with the viewport shrunk by a keyboard, its two mode toggles are
+**off-screen at 383px and 422px in a 331px viewport, with nothing to scroll**.
+The four sheet-ruled hosts get a cap and a scroller for exactly this case; this
+popover is excluded from them by design.
+
+### The two sheets the first pass could not reach
+
+Both are now measured, without touching `src/`, by answering `/api/describe`
+and `/api/load` from the test instead of using the demo fixture — `App.tsx`'s
+browser path asks its own origin for those two routes. The stub is a
+**transport, not a server**: it serves a descriptor and three sessions and
+refuses every write in the port's own envelope, which is enough to draw both
+sheets and enough to record a real failure (a refused write rejects in
+`http-factory`'s `call` and `Canvas` puts it through `noteFailure`, which is
+what `failureCount` counts). It settles layout and nothing else.
+
+- **`ErrorLogPanel`** — reachable, and correct as a sheet: opened from the
+  44x44 `N failures` button, spans 731–843px in an 844px viewport, capped at
+  717.4px (85dvh), `overflow-y: auto`. Its own two controls are 47.7x22
+  ("Clear") and 57.8x22.5 ("Report"), both under 44.
+- **`ProjectPicker`** — correct as a sheet (727–844px, capped, `auto`), and
+  **it has no phone route at all**. Its only opener, `data-add-to-group`, is
+  19x19 and `opacity: 0` until its heading is hover-`revealed`; a coarse
+  pointer cannot satisfy that, and no chord or other control reaches it. Same
+  family as the row's close `x`, but without the second route — the sheet
+  above was measured through a forced tap, which the suite says out loud so
+  the geometry is not misread as evidence that the route works.
+
+Six red of sixteen when this pass was written: the four from the first pass,
+plus the filter popover's missing scroller and the project picker's missing
+route. Then #197 landed — see below.
+
+## Third pass (2026-09-05, against `2569a81`, i.e. after PR #197)
+
+**All four of the first pass's findings are fixed and their tests are green.**
+Re-measured against the fixed build, and the numbers in the two sections above
+are now history — they describe `4c7188f`:
+
+- Every interactive control on both phone screens now measures at least 44x44
+  (19 controls on the list screen, 17 on the session screen, **0 undersized**).
+  The list screen has four controls fewer than before because the row's close
+  `x` is genuinely gone from the tree rather than merely invisible.
+- The tap at the row's top-right opens the session.
+- The icon picker now clears an iOS keyboard with room to spare: the sheet
+  spans **127–844px** (a full 85dvh, where it used to be 411–844) and its
+  scroller starts at **296px**, well above the 508px band, so an emoji can be
+  brought up. It used to start at 581px, below the band, which is what made it
+  unreachable.
+
+**Two remain red, both found in the second pass and neither addressed by #197:**
+
+1. `data-filter-menu` still has `max-height: none`, `overflow-y: visible` and
+   no scroller (test: *the filter popover has no scroller…*).
+2. `ProjectPicker` still has no phone route. #197 sized the opener — it now
+   measures 44x44 instead of 19x19 — but it is **still `opacity: 0` until
+   hover**, so a finger still cannot reveal it. A touch-target sweep is
+   satisfied by that change and a hit test is not: this is the same pairing
+   that made the row's close `x` survive a green content scan, in the other
+   direction.
+
+## Fourth pass (2026-09-05, against `be88c7d`) — on `main`, and green
+
+**The suite is on `main` now.** Every pass above ran because someone dispatched
+it by hand, off an unmerged branch, which means the guards that caught the
+invisible close button, the 17 undersized controls and the icon picker under
+an iOS keyboard were guarding nothing. Three defects, all real, none visible to
+jsdom. That is the change this pass is mostly about.
+
+Nothing in vam's gates runs it — `e2e/` is excluded from `vitest.config.ts`,
+`tsconfig*.json` and `biome.json`, by design and unchanged — so "on main" means
+reachable and green, not automatic. The re-run list at the end of the first
+section still applies.
+
+**17 of 17 pass.** Three things had moved under the suite since the third pass:
+
+1. **The step rail and the body tab strip are gone** (#205). The navigation
+   test asserted `[data-step-rail] [data-step-chip]`, which now matches
+   nothing — and a selector matching nothing is the exact failure this file
+   was written to catch, in `styles.css`'s row-close rule. Re-pointed at the
+   chrome the session screen has now: the back chevron, `data-prompt-target`,
+   and the view icons.
+2. **The 44px sweep measures five app-bar buttons where it measured two**, from
+   the same PR. Still 0 undersized on both screens.
+3. **`ProjectPicker` has a phone route** (#202), so the second of the two
+   findings left red by the third pass now passes on its own.
+
+### The filter popover: fixed, and the test now asserts reach
+
+The remaining red one. It kept `max-height: none` and `overflow-y: visible`
+because it is an anchored popover deliberately excluded from the phone sheet
+rules — turning it into a bottom sheet moves it away from the control it
+belongs to, and that exclusion stands. What it lacked was a cap, and the cap
+could not be a constant: CSS cannot say "as tall as the distance from here to
+the bottom of the viewport" for an absolutely positioned box, and any number
+that stood in for it would be tuned to one anchor position.
+
+`SessionList`'s `useFilterPopoverCap` measures the popover's own top edge —
+which is where its anchor put it — and caps it at the distance from there to
+the viewport foot, re-measured on `resize` (window, never `visualViewport`,
+which `styles.css` rules out for jitter). One constant survives, an 8px foot,
+and it is a margin rather than a position.
+
+The test changed shape with it, and the shape is the point: it asserts REACH,
+not position. The popover must fit its viewport, and every control in it must
+be on screen at some scroll offset of its own scroller — sampled at both
+extremes, because a cap without a scroller would clip exactly the controls the
+old layout pushed off the bottom, and a test that only looked at the top would
+not have seen the difference. Falsified: reverting the cap reddens it with
+`bottom 447 > viewport 331` at 375x667.
+
+### One test added: the paint, which the sweeps cannot see
+
+*every painted skin is smaller than the box that takes the tap.* The two 44px
+sweeps measure the ELEMENT box, so they stay green through the complaint that
+started this work — a `border-line` rectangle drawn AT 44 around a 13px glyph,
+which is what made the phone's bordered controls the heaviest objects on the
+screen. The rule is hit on the element, paint on a `[data-tap-skin]` child, so
+this test caps the skin at 32x36 and, in the same breath, requires its owner
+to still measure 44: the ceiling catches a border re-inflating onto the hit
+box, and the paired floor stops anyone satisfying the ceiling by shrinking the
+hit box instead.
+
+Three skins on the list screen today. The count is asserted twice — as a floor
+and inside the expression the assertion reads — because a filter over an empty
+list is empty, and a guard written the obvious way passes loudest at the moment
+the hook is renamed away. Falsified both ways: re-inflating the skin to 44
+names all three controls; renaming the hook fails on the count.
