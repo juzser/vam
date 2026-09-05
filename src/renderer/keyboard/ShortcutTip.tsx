@@ -79,8 +79,7 @@ export function ShortcutTip({
   mode,
   children,
 }: {
-  /** What the button is called. Not derived: the sheet's action captions name
-      the action for the sheet's reader, and a button says its own name. */
+  /** What the button is called — its own name, not the sheet's caption. */
   readonly label: string;
   /** Omitted for a control no chord reaches — the tooltip is then the label. */
   readonly action?: KeyAction;
