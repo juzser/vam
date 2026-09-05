@@ -238,6 +238,58 @@ describe('loadClaudeCodeProjects', () => {
   };
 
   /**
+   * WHAT THE SESSION SAYS IT IS BLOCKED ON. A tool-approval prompt leaves no
+   * transcript record at all, so `questions` is empty for it and this is the
+   * only surface that can tell the operator the session is stuck.
+   */
+  describe('waitingFor', () => {
+    const writeWaiting = (pid: number, over: Record<string, unknown>) => {
+      writeFileSync(
+        join(sessionsRoot, `${pid}.json`),
+        JSON.stringify({ pid, sessionId: 'sess-1', statusUpdatedAt: NOW - 1000, ...over }),
+      );
+    };
+
+    it('carries the cause a waiting process named, verbatim', async () => {
+      writeWaiting(4242, { status: 'waiting', waitingFor: 'permission prompt' });
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent({ pid: 4242 })],
+        NOW,
+        undefined,
+        sessionsRoot,
+      );
+      expect(project?.sessions[0]?.waitingFor).toBe('permission prompt');
+    });
+
+    it('is present-but-null for a process waiting on something it did not name', async () => {
+      writeWaiting(4242, { status: 'waiting' });
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent({ pid: 4242 })],
+        NOW,
+        undefined,
+        sessionsRoot,
+      );
+      expect(project?.sessions[0]).toHaveProperty('waitingFor');
+      expect(project?.sessions[0]?.waitingFor).toBeNull();
+    });
+
+    it('is ABSENT for an idle process, and for a row with no pid to ask about', async () => {
+      writeWaiting(4242, { status: 'idle', waitingFor: '-' });
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent({ pid: 4242 }), agent({ key: 'sess-1#101' })],
+        NOW,
+        undefined,
+        sessionsRoot,
+      );
+      expect(project?.sessions[0]).not.toHaveProperty('waitingFor');
+      expect(project?.sessions[1]).not.toHaveProperty('waitingFor');
+    });
+  });
+
+  /**
    * `vamControlled` is a THREE-state fact and the third state is the point:
    * absent means vam could not ask tmux, which is not the same as "vam did not
    * start this one". See `model.ts`.
