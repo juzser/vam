@@ -20,7 +20,7 @@ import { BASH_PERMISSION } from './permission-screens.js';
 
 const ok = (stdout: string): TmuxRunResult => ({ failure: null, stdout, stderr: '' });
 const fail = (stderr: string): TmuxRunResult => ({
-  failure: { kind: 'status', status: 1 },
+  failure: { message: stderr, code: 1 },
   stdout: '',
   stderr,
 });

@@ -2717,6 +2717,10 @@ function CanvasInner({
     // are both reasons to draw no Submit at all. `undefined` in the
     // browser build.
     answer: globalThis.window?.api?.terminal?.answer,
+    // The other half of the same act: the question a permission prompt is
+    // asking exists only on the pane, so the card that answers it has to read
+    // it first. `undefined` in the browser build, exactly as `answer` is.
+    prompt: globalThis.window?.api?.terminal?.prompt,
     // The flag the source declares, finally read. `false` withdraws the
     // tab rather than mounting one that can only apologise.
     terminal: terminalTab,
