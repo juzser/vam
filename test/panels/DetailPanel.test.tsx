@@ -1033,6 +1033,104 @@ describe('the attachment button inlines a file into the text that gets recorded'
   });
 });
 
+/**
+ * WHAT THE PICKER DOES BEFORE IT DECODES ANYTHING.
+ *
+ * `File.size` is known without reading the file, and `File.text()` on a file
+ * of any size decodes the WHOLE of it into one JS string -- past V8's string
+ * cap that rejects, past the machine's memory the renderer dies, and a dead
+ * renderer takes the composed draft with it. So the refusals that a name and
+ * a size already settle are settled here, before the read, and the read that
+ * does happen has somewhere to put a failure.
+ *
+ * Each test hands the picker a `text()` that never resolves or always
+ * rejects: a sentence drawn while the decode is still pending is the only
+ * proof that the size was tested first.
+ */
+describe('the attachment picker decides what it can before it reads the file', () => {
+  type PickedFile = {
+    readonly name: string;
+    readonly size: number;
+    readonly text: () => Promise<string>;
+  };
+
+  const picker = () => q<HTMLInputElement>('input[type="file"]') as HTMLInputElement;
+
+  const choose = (file: PickedFile) => {
+    const input = picker();
+    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+    fireEvent.change(input);
+  };
+
+  it('refuses an oversized file from its size alone, with nothing decoded', () => {
+    let decodes = 0;
+    draw();
+    act(() => {
+      choose({
+        name: 'huge.log',
+        size: ATTACH_LIMIT_BYTES + 1,
+        text: () => {
+          decodes += 1;
+          // Never resolves: if the guard moved back behind the decode, this
+          // is where the test would sit and the sentence below never appear.
+          return new Promise<string>(() => {});
+        },
+      });
+    });
+    expect(decodes).toBe(0);
+    const said = q<HTMLElement>('[data-attach-error]');
+    expect(said?.textContent).toContain('64 KB');
+    expect(said?.textContent).toContain('huge.log');
+  });
+
+  it('refuses a second file the same way, naming the one already in the draft', () => {
+    let decodes = 0;
+    draw({ draft: attachOk('ask', { name: 'plan.md', size: 4, text: 'x' }) });
+    act(() => {
+      choose({
+        name: 'other.txt',
+        size: 4,
+        text: () => {
+          decodes += 1;
+          return new Promise<string>(() => {});
+        },
+      });
+    });
+    expect(decodes).toBe(0);
+    expect(q<HTMLElement>('[data-attach-error]')?.textContent).toContain('plan.md');
+  });
+
+  it('says so when the read itself fails, rather than dropping the rejection', async () => {
+    draw();
+    await act(async () => {
+      choose({ name: 'gone.txt', size: 10, text: () => Promise.reject(new Error('ENOENT')) });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const said = q<HTMLElement>('[data-attach-error]');
+    expect(said?.textContent).toContain('gone.txt');
+    expect(said?.textContent).toContain('nothing was attached');
+  });
+
+  it('still inlines a file that is small enough to read', async () => {
+    let draft = 'ask';
+    draw({
+      draft,
+      onDraftChange: (value: string) => {
+        draft = value;
+      },
+    });
+    await act(async () => {
+      choose({ name: 'notes.md', size: 11, text: () => Promise.resolve('hello there') });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(draft).toContain('--- attached: notes.md ---');
+    expect(draft).toContain('hello there');
+    expect(q('[data-attach-error]')).toBeNull();
+  });
+});
+
 describe('the model field writes the request into the prompt, and claims nothing more', () => {
   it('puts the request on its own leading line, and round-trips it', () => {
     const withModel = setModelRequest('redo the gate', 'opus');

@@ -146,17 +146,34 @@ const ATTACH_BLOCK = /\n*^--- attached: (.+) ---$\n[\s\S]*?^--- end attached ---
  * string that gets recorded: the whole thing genuinely arrives, and nothing on
  * screen implies a transfer vam cannot perform.
  */
-export function attachIntoDraft(draft: string, file: AttachedFile): AttachResult {
+/**
+ * The refusals a NAME AND A SIZE already settle, decided before a byte is read.
+ *
+ * `File.size` costs nothing and `File.text()` decodes the whole file into one
+ * JS string: on a large one that is a frozen renderer at best and a dead one
+ * past V8's string cap, and a dead renderer takes the draft the operator was
+ * composing with it. Telling somebody afterwards that the file was too big is
+ * a sentence delivered to a window that is no longer there.
+ *
+ * Two call sites, and they need it for opposite reasons: the picker calls it
+ * FIRST, so the decode never starts, and `attachIntoDraft` calls it because it
+ * is also reachable with text already in hand.
+ */
+export function refuseUnreadFile(
+  draft: string,
+  file: { name: string; size: number },
+): string | null {
   const already = readAttachedName(draft);
-  if (already !== null) {
-    return { ok: false, message: `one file at a time — take ${already} off first` };
-  }
+  if (already !== null) return `one file at a time — take ${already} off first`;
   if (file.size > ATTACH_LIMIT_BYTES) {
-    return {
-      ok: false,
-      message: `${file.name} is larger than 64 KB — vam inlines the file's own text, so it refuses rather than sending half of it`,
-    };
+    return `${file.name} is larger than 64 KB — vam inlines the file's own text, so it refuses rather than sending half of it`;
   }
+  return null;
+}
+
+export function attachIntoDraft(draft: string, file: AttachedFile): AttachResult {
+  const unread = refuseUnreadFile(draft, file);
+  if (unread !== null) return { ok: false, message: unread };
   // The replacement character is what a UTF-8 decode leaves behind when the
   // bytes were never UTF-8, and a NUL is the other reliable sign of the same
   // thing. Either way what would be inlined is noise, not text.
@@ -1939,11 +1956,26 @@ export function DetailPanel(props: DetailPanelProps) {
     // Cleared immediately, so choosing the same file twice still fires.
     input.value = '';
     if (file === undefined) return;
-    const result = attachIntoDraft(draft, {
-      name: file.name,
-      size: file.size,
-      text: await file.text(),
-    });
+    // BEFORE THE AWAIT, on the size the picker already handed over: the read
+    // that a refusal here prevents is the one that can take the renderer, and
+    // the draft, down with it. What survives the decode is bounded by the
+    // limit, so it is sub-frame and needs no in-flight indicator of its own.
+    const unread = refuseUnreadFile(draft, { name: file.name, size: file.size });
+    if (unread !== null) {
+      setAttachError(unread);
+      return;
+    }
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      // A file removed between the picker and the read, or one the shell
+      // cannot open. Uncaught this was an unhandled rejection and a silent
+      // paperclip -- the operator's only reading of which is that it worked.
+      setAttachError(`${file.name} could not be read — nothing was attached`);
+      return;
+    }
+    const result = attachIntoDraft(draft, { name: file.name, size: file.size, text });
     setAttachError(result.ok ? null : result.message);
     if (result.ok) onDraftChange(result.draft);
   };
