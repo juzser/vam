@@ -43,7 +43,7 @@ import type { SessionEntry } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filter.js';
 import type { KeyAction } from '../keyboard/chords.js';
-import { ShortcutTip, shortcutLines } from '../keyboard/ShortcutTip.js';
+import { InlineChord, ShortcutTip } from '../keyboard/ShortcutTip.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { FocusEdge } from './FocusEdge.js';
@@ -58,19 +58,6 @@ const SEARCH_ACTION: KeyAction = { kind: 'search' };
 const FILTER_MENU_ACTION: KeyAction = { kind: 'filterMenu' };
 const CLOSE_ACTION: KeyAction = { kind: 'close' };
 const NEW_SESSION_ACTION: KeyAction = { kind: 'newSession' };
-
-/** The chord printed INSIDE a button, beside its name — and nothing at all
- *  when the action is unbound. Two of these were literals (`/` and `o`). */
-function InlineChord({
-  action,
-  className,
-}: {
-  readonly action: KeyAction;
-  readonly className: string;
-}) {
-  const keys = shortcutLines(action, undefined)[0]?.keys ?? null;
-  return keys === null ? null : <span className={className}>{keys}</span>;
-}
 
 const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   running: 'bg-running',
@@ -1363,24 +1350,29 @@ export function SessionList(props: SessionListProps) {
                   }
                   className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5"
                 >
-                  <button
-                    type="button"
-                    data-project-icon={section.project.id}
-                    onClick={() => onPickIcon(section.project)}
-                    aria-label={`change icon for ${section.project.name}`}
-                    title="change project icon"
-                    className="flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-[11px] leading-none text-ink-faint hover:text-ink-dim"
-                  >
-                    {section.project.icon ?? (
-                      /* A monitor, not a middot. The glyph has to read as "this
-                       is a machine you can name" — the middot read as a bullet
-                       and gave a clickable control no affordance at all. It is
-                       a placeholder in the literal sense: the picker replaces
-                       it with whatever emoji you choose, and choosing nothing
-                       leaves something that still looks deliberate. */
-                      <Monitor data-project-icon-placeholder size={11} strokeWidth={1.7} />
-                    )}
-                  </button>
+                  {/* No chord picks a PROJECT icon — `icon` (`s`) picks the
+                      focused SESSION's, which is a different subject — so the
+                      tip is the label alone. It replaces a native `title`,
+                      which no browser opens on keyboard focus. */}
+                  <ShortcutTip label="Change project icon">
+                    <button
+                      type="button"
+                      data-project-icon={section.project.id}
+                      onClick={() => onPickIcon(section.project)}
+                      aria-label={`change icon for ${section.project.name}`}
+                      className="flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-[11px] leading-none text-ink-faint hover:text-ink-dim"
+                    >
+                      {section.project.icon ?? (
+                        /* A monitor, not a middot. The glyph has to read as "this
+                         is a machine you can name" — the middot read as a bullet
+                         and gave a clickable control no affordance at all. It is
+                         a placeholder in the literal sense: the picker replaces
+                         it with whatever emoji you choose, and choosing nothing
+                         leaves something that still looks deliberate. */
+                        <Monitor data-project-icon-placeholder size={11} strokeWidth={1.7} />
+                      )}
+                    </button>
+                  </ShortcutTip>
                   <span className="truncate font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
                     {section.project.name}
                   </span>

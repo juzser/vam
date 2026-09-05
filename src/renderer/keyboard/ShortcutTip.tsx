@@ -25,7 +25,9 @@
  *    notice; what makes that safe is that settings is a MODAL overlay, so no
  *    tip can be open while the keys are being edited. A shell that ever puts
  *    the keyboard editor and the chrome on screen together breaks it, and the
- *    fix is a subscription here, not a note there.
+ *    fix is a subscription here — which is why the warning is stated AGAIN in
+ *    `phone/PhoneShell.tsx`, the file a shell author actually opens: nobody
+ *    re-hosting these panels has any reason to read this one.
  * 2. `Tooltip.Trigger asChild` adds NO element: the trigger is the caller's own
  *    button with a few attributes merged in. Wrapping is therefore invisible to
  *    descendant selectors — `group-hover/row:` reveals, a `button` rule setting
@@ -71,6 +73,37 @@ export function shortcutLines(
   }
   const modes = mode === undefined ? CURSOR_MODES : [mode];
   return modes.map((each) => ({ caption: `${MODE_TITLES[each]} · ${byMode[each]}`, keys }));
+}
+
+/**
+ * The ONE chord to print inside a control, beside its name — and nothing when
+ * the action is unbound.
+ *
+ * One, not all of them, and that is the difference between the two surfaces
+ * this module serves: a tooltip is a box of its own and can name every binding
+ * an action holds, while an inline chip shares a 28px-high button with a label
+ * in a pane the operator can drag narrow. `newSession` holds two chords out of
+ * the box (`o` and `Mod-n`), and the footer cell that used to read `o` would
+ * read `o or Mod-n` if it printed the same string the tip does.
+ */
+export function primaryChord(action: KeyAction, overrides = activeBindings()): string | null {
+  return bindingChords(overrides, actionId(action))[0] ?? null;
+}
+
+/**
+ * That chord as the chip itself. Lives here rather than in one panel because
+ * three cells across two files print a key beside a control, and every one of
+ * them was a literal before this: `/`, `o`, and the status bar's `?`.
+ */
+export function InlineChord({
+  action,
+  className,
+}: {
+  readonly action: KeyAction;
+  readonly className: string;
+}) {
+  const keys = primaryChord(action);
+  return keys === null ? null : <span className={className}>{keys}</span>;
 }
 
 /**
