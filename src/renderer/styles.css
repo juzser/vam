@@ -628,10 +628,17 @@ body {
  * element's own background at 55% -- always there, full bleed, corner to
  * corner of the column, because "the keyboard is here" is a state and a static
  * line states it perfectly well. The SWEEP is the `::after` child, at full
- * strength, and it runs ONCE: "the keyboard just arrived here" is an event,
- * and an event that keeps announcing itself is peripheral motion in a window
- * that stays open all day. `.vam-running-edge` runs forever for the opposite
- * reason -- a running session is transient and the motion IS the report.
+ * strength, and it TRAVELS FOR AS LONG AS THE LINE IS DRAWN.
+ *
+ * It ran once, on arrival, on the argument that "the keyboard just arrived
+ * here" is an event and an event that keeps announcing itself is peripheral
+ * motion all day. The operator read the result the other way round: 1.4s after
+ * a hand-over the line stops, so at almost every moment there is no moving
+ * line anywhere, and the ask was for this to carry the running node's effect
+ * instead. So it takes `.vam-running-edge::after`'s animation EXACTLY -- same
+ * keyframes, same 2.1s, same linear, same `infinite` -- and the two are held
+ * equal by a test rather than by two rules that agree today. What stays the
+ * edge's own is its HUE: `--vam-focus-edge`, never a status token.
  *
  * 2px rather than the running edge's 1px: that one is measured off a card a
  * few hundred pixels wide, this spans a whole column and is answering "where
@@ -648,7 +655,7 @@ body {
   width: 34%;
   height: 100%;
   background: linear-gradient(90deg, transparent, var(--color-focus-edge), transparent);
-  animation: vam-sweep 1.4s ease-out 1;
+  animation: vam-sweep 2.1s linear infinite;
 }
 
 /*
@@ -736,9 +743,11 @@ body {
   .vam-ellipsis > span,
   .vam-running-edge::after,
   /* Only the travelling half. The resting 55% line is the element's own
-     background and survives, so reduced motion loses the arrival and keeps the
-     indicator -- which is what makes "once, then rest" honest here rather than
-     a treatment that has to invent a second appearance for this case. */
+     background and survives, so reduced motion loses the travel and keeps the
+     indicator. This rule carries more weight than it did: the sweep no longer
+     stops on its own after 1.4s, so without it a 2px line would shimmer for
+     every minute the window is open -- which is the thing the preference
+     exists to stop. */
   .vam-focus-edge::after,
   .vam-focus-glow,
   .vam-cursor-glow {

@@ -14,6 +14,11 @@
  * The line is drawn on every SHOWN column that the mode is drawn in: Select is
  * one cursor seen twice, in the sidebar row's ring and the canvas card's, so
  * both columns wear it; Insert is the response pane alone.
+ *
+ * The sweep along it used to run once and stop, and this file used to hold it
+ * to that. It travels continuously now, borrowing the running node's own
+ * animation -- see the last describe block for why, and for what a test in
+ * this environment can honestly claim about it.
  */
 
 import { readFileSync } from 'node:fs';
@@ -140,9 +145,6 @@ describe('reduced motion loses the sweep, not the indicator', () => {
     expect(block).toContain('.vam-focus-edge::after');
     expect(/\.vam-focus-edge\s*\{/.test(block)).toBe(false);
     expect(/\.vam-focus-edge\s*\{[^}]*background:/.test(css)).toBe(true);
-    // Once on arrival, not forever: permanent chrome that shimmers is motion in
-    // the corner of the eye during every minute of reading.
-    expect(/\.vam-focus-edge::after\s*\{[^}]*animation:[^;]*infinite/.test(css)).toBe(false);
   });
 });
 
@@ -187,5 +189,67 @@ describe('the top line is the ONLY thing the response pane says it with', () => 
     expect(document.querySelector('[data-action-pane]')?.getAttribute('data-action-pane')).toBe(
       'active',
     );
+  });
+});
+
+/**
+ * The line MOVES, and it moves the way a running node's edge moves.
+ *
+ * What can be asserted here and what cannot. happy-dom parses no stylesheet
+ * and lays nothing out, so nothing in this file can see a painted pixel or a
+ * running animation -- `getComputedStyle` on the edge returns the inline
+ * cascade and no more. These are therefore assertions about the RULE, read out
+ * of `styles.css` as text: that the focus edge and the running node's edge
+ * declare one and the same animation. The claim that the canvas column's line
+ * is actually painted was settled by measuring it in a real browser against
+ * the built page -- `e2e/focus-edge-visibility.mjs`, whose committed output is
+ * the evidence -- because it is exactly the claim a DOM test cannot make.
+ *
+ * Why the two rules must be one rule: the operator asked for the top line to
+ * carry "the running node effect". If that means the same thing to a reader it
+ * has to be the same declaration, or the day someone retunes the running edge
+ * the two quietly stop matching and nothing says so.
+ */
+describe('the top line moves like a running node', () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
+  /** The `animation:` shorthand declared by a selector's rule block. */
+  function animationOf(selector: string): string {
+    const rule = new RegExp(`${selector.replace(/[.:*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`);
+    const body = css.match(rule)?.[1] ?? '';
+    return (body.match(/animation:\s*([^;]+);/)?.[1] ?? '').replace(/\s+/g, ' ').trim();
+  }
+
+  it('declares the same animation the running node’s edge declares', () => {
+    // `.vam-running-edge` is what a RUNNING NODE wears -- `StepNode` and
+    // `SessionInfoNode` both draw it. (The `vam-running-sheen` on
+    // `.vam-running-word` is the detail pane's running *word*, a gradient
+    // clipped to glyphs, and would animate nothing on a translated bar.)
+    expect(animationOf('.vam-focus-edge::after')).toBe(animationOf('.vam-running-edge::after'));
+  });
+
+  it('runs continuously rather than once on arrival', () => {
+    // The shipped rule swept once, 1.4s, and then the line sat still: more
+    // than 1.4s after any hand-over there was no moving line in ANY column.
+    expect(animationOf('.vam-focus-edge::after')).toContain('infinite');
+  });
+
+  it('keeps its own hue and never borrows a status colour', () => {
+    // Matching the running node's MOTION must not become matching its colour:
+    // the edge has `--vam-focus-edge` for exactly this reason.
+    const body = css.match(/\.vam-focus-edge::after\s*\{([^}]*)\}/)?.[1] ?? '';
+    expect(body).toContain('var(--color-focus-edge)');
+    expect(body).not.toContain('--color-running');
+  });
+
+  it('is still stopped under prefers-reduced-motion, now that it never ends', () => {
+    // A one-shot that outstays its welcome by 1.4s and a line that shimmers
+    // for as long as the window is open are different sizes of the same
+    // problem, so this rule matters MORE than it did.
+    const block = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+    const suppressed = block.slice(0, block.indexOf('animation: none;'));
+    expect(suppressed).toContain('.vam-focus-edge::after');
+    // And the resting line survives it -- reduced motion loses the travel,
+    // never the answer to "where is my cursor".
+    expect(/\.vam-focus-edge\s*\{[^}]*background:/.test(css)).toBe(true);
   });
 });
