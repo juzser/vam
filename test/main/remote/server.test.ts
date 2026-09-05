@@ -20,7 +20,12 @@ import { join } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { SourceError } from '../../../src/main/ipc/channels.js';
 import type { DeviceDirectory, Identity } from '../../../src/main/remote/auth.js';
-import { type RemoteServerOptions, startRemoteServer } from '../../../src/main/remote/server.js';
+import type { PairOutcome } from '../../../src/main/remote/pairing.js';
+import {
+  createStreamRegistry,
+  type RemoteServerOptions,
+  startRemoteServer,
+} from '../../../src/main/remote/server.js';
 import type { MainSource } from '../../../src/main/sources/source.js';
 import type { Project } from '../../../src/renderer/domain/model.js';
 
@@ -341,6 +346,94 @@ describe('SSE', () => {
     expect(listeners.size).toBe(1);
     await reader.cancel();
     await vi.waitFor(() => expect(listeners.size).toBe(0));
+  });
+
+  it('drops the stream of a device whose pairing was revoked', async () => {
+    const streams = createStreamRegistry();
+    const base = await start({ streams });
+    const response = await get(base, '/api/stream');
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+    await reader.read();
+    expect(listeners.size).toBe(1);
+    streams.closeFor(PAIRED.deviceId);
+    // The connection ENDS: a revoked device must not keep a socket it opened
+    // while it was still paired.
+    await vi.waitFor(async () => expect((await reader.read()).done).toBe(true));
+    expect(listeners.size).toBe(0);
+  });
+
+  it('leaves other devices connected when one is revoked', async () => {
+    const streams = createStreamRegistry();
+    const base = await start({ streams });
+    const response = await get(base, '/api/stream');
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+    await reader.read();
+    streams.closeFor('some-other-device');
+    expect(listeners.size).toBe(1);
+    await reader.cancel();
+  });
+});
+
+/**
+ * `/api/pair` is the ONE route an unpaired caller may reach, and it exists
+ * only while the operator has the pairing screen open. Everything else is
+ * behind the token this route is the only way to obtain.
+ */
+describe('the pairing route', () => {
+  const pair = (base: string, body: unknown): Promise<Response> =>
+    fetch(`${base}/api/pair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  const stubPairing = (outcome: PairOutcome) => ({
+    submit: async () => outcome,
+  });
+
+  it('is unreachable when no pairing screen is open -- 401, like any stranger', async () => {
+    const base = await start();
+    expect((await pair(base, { code: 'ABCD2345', name: 'a phone' })).status).toBe(401);
+  });
+
+  it('hands the token over exactly once, on a correct code', async () => {
+    const granted: PairOutcome = { ok: true, identity: PAIRED, token: 'a-fresh-token' };
+    const base = await start({ pairing: stubPairing(granted) });
+    const response = await pair(base, { code: 'ABCD2345', name: 'a phone' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      value: { token: 'a-fresh-token', deviceId: PAIRED.deviceId, name: PAIRED.name },
+    });
+  });
+
+  it('refuses a wrong code with 401 and the reason the phone must show', async () => {
+    const base = await start({ pairing: stubPairing({ ok: false, reason: 'burned' }) });
+    const response = await pair(base, { code: 'ZZZZZZZZ', name: 'a phone' });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: { message: 'burned' } });
+  });
+
+  it('refuses a body of the wrong shape before pairing sees it', async () => {
+    const submit = vi.fn(async () => ({ ok: false, reason: 'wrong-code' }) as PairOutcome);
+    const base = await start({ pairing: { submit } });
+    expect((await pair(base, { code: 42 })).status).toBe(400);
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('carries no token in the URL, only in the body', async () => {
+    const minted = 'zzz-minted-token-zzz';
+    const base = await start({
+      pairing: stubPairing({ ok: true, identity: PAIRED, token: minted }),
+    });
+    const response = await pair(base, { code: 'ABCD2345', name: 'a phone' });
+    expect(response.url).not.toContain(minted);
+    expect(new URL(response.url).search).toBe('');
+  });
+
+  it('rejects a GET on it, which would put a code in a server log', async () => {
+    const base = await start({ pairing: stubPairing({ ok: false, reason: 'no-code' }) });
+    expect((await get(base, '/api/pair', null)).status).toBe(401);
   });
 });
 

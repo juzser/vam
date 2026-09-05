@@ -38,6 +38,7 @@ import type { SourceError } from '../ipc/channels.js';
 import type { MainSource } from '../sources/source.js';
 import { serveAsset } from './assets.js';
 import { authenticateDevice, type DeviceDirectory, type Identity } from './auth.js';
+import type { PairOutcome } from './pairing.js';
 
 /** The one address this server may ever bind. */
 export const LOOPBACK = '127.0.0.1';
@@ -56,6 +57,13 @@ export type RemoteServerOptions = {
    * configuration path that sets it to anything but `LOOPBACK`.
    */
   readonly host?: string;
+  /**
+   * The pairing screen's half of `/api/pair`. Absent means the route answers
+   * 401 like any other path an unpaired caller reaches -- see below.
+   */
+  readonly pairing?: PairPort;
+  /** Where live SSE connections are held, so a revoked device can be dropped. */
+  readonly streams?: StreamRegistry;
   readonly allowWrites: boolean;
   readonly source: MainSource;
   readonly subscribe: (onChange: () => void) => () => void;
@@ -68,6 +76,48 @@ export type RemoteServerOptions = {
    */
   readonly webRoot?: string;
 };
+
+/** What this server needs of `createPairing`, and nothing more. */
+export type PairPort = {
+  submit(code: string, name: string, source: string): Promise<PairOutcome>;
+};
+
+/**
+ * The live SSE connections, by device.
+ *
+ * Revocation has to reach INSIDE an open connection: a stream opened while a
+ * device was paired outlives the pairing otherwise, and "remove this device"
+ * would leave it reading the model until it chose to hang up.
+ */
+export type StreamRegistry = {
+  add(deviceId: string, close: () => void): () => void;
+  closeFor(deviceId: string): void;
+};
+
+export function createStreamRegistry(): StreamRegistry {
+  const open = new Map<string, Set<() => void>>();
+  return {
+    add(deviceId, close) {
+      const set = open.get(deviceId) ?? new Set();
+      set.add(close);
+      open.set(deviceId, set);
+      return () => {
+        set.delete(close);
+        if (set.size === 0) {
+          open.delete(deviceId);
+        }
+      };
+    },
+    closeFor(deviceId) {
+      // Only this device's connections: revoking one pairing must not hang up
+      // on the others.
+      for (const close of open.get(deviceId) ?? []) {
+        close();
+      }
+      open.delete(deviceId);
+    },
+  };
+}
 
 type Envelope = { ok: true; value: unknown } | { ok: false; error: SourceError };
 
@@ -326,7 +376,7 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
  * says "ask again", and the client re-reads `/api/load`.
  */
 function stream(options: RemoteServerOptions): Route {
-  return (request, response) => {
+  return (request, response, { identity }) => {
     response.writeHead(200, {
       'content-type': 'text/event-stream',
       'cache-control': 'no-store',
@@ -338,13 +388,57 @@ function stream(options: RemoteServerOptions): Route {
     const unsubscribe = options.subscribe(() => {
       response.write('event: change\ndata: {}\n\n');
     });
+    let forget = (): void => {};
     const stop = (): void => {
       unsubscribe();
+      forget();
       response.end();
     };
+    forget = options.streams?.add(identity.deviceId, stop) ?? (() => {});
     request.on('close', stop);
     request.on('error', stop);
   };
+}
+
+/**
+ * One pairing attempt. The body is read and shape-checked before the pairing
+ * service sees it, and the token leaves in the RESPONSE BODY only -- never in
+ * a URL, a redirect or a query string, where a proxy log or a browser history
+ * would keep it.
+ */
+async function handlePair(
+  pairing: PairPort,
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  const body = await readBody(request);
+  if (body === null || !isText(body.code) || !isText(body.name)) {
+    send(response, 400, {
+      ok: false,
+      error: { kind: 'refused', code: 'invalid-payload', message: 'pair: wrong shape' },
+    });
+    return;
+  }
+  // The peer address, for the rate limiter and for the warning the desktop
+  // shows. Not an identity: it is whatever `tailscale serve` is proxying from,
+  // which is loopback, and it is never trusted for anything but counting.
+  const source = request.socket.remoteAddress ?? 'unknown';
+  const outcome = await pairing.submit(body.code, body.name, source);
+  if (!outcome.ok) {
+    send(response, 401, {
+      ok: false,
+      error: { kind: 'refused', code: 'pairing-refused', message: outcome.reason },
+    });
+    return;
+  }
+  send(response, 200, {
+    ok: true,
+    value: {
+      token: outcome.token,
+      deviceId: outcome.identity.deviceId,
+      name: outcome.identity.name,
+    },
+  });
 }
 
 /**
@@ -377,6 +471,21 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
 
   const server = createServer((request, response) => {
     void (async () => {
+      const path = new URL(request.url ?? '/', `http://${LOOPBACK}`).pathname;
+      // THE ONE DOOR AN UNPAIRED CALLER MAY KNOCK ON, and the only way to
+      // obtain the token every other path requires. It is not a hole in the
+      // identity-before-routing rule: pairing is how identity is granted, and
+      // this door exists only while the operator has the screen open, holds a
+      // live code, and answers "allow this device?" in person.
+      //
+      // A refusal is 401 with the same shape an unauthenticated request gets,
+      // so a caller cannot tell "no screen is open" from "no token": the only
+      // thing it learns is the reason its own attempt failed, which is what
+      // the phone must show the person typing.
+      if (options.pairing !== undefined && request.method === 'POST' && path === '/api/pair') {
+        await handlePair(options.pairing, request, response);
+        return;
+      }
       const outcome = authenticateDevice(request.headers.authorization, devices);
       if (!outcome.ok) {
         send(response, 401, {
@@ -385,7 +494,6 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
         });
         return;
       }
-      const path = new URL(request.url ?? '/', `http://${LOOPBACK}`).pathname;
       const entry = table.get(path);
       if (entry === undefined) {
         // AFTER the identity check and only after it: a static file must not

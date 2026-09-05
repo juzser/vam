@@ -15,6 +15,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { Identity } from '../../../src/main/remote/auth.js';
+import type { Grant } from '../../../src/main/remote/devices.js';
 import {
   APPROVAL_TIMEOUT_MS,
   CODE_ALPHABET,
@@ -30,13 +31,14 @@ import {
 } from '../../../src/main/remote/pairing.js';
 
 const GRANTED: Identity = { deviceId: 'device-1', name: 'a phone' };
+const grantOf = async (name: string): Promise<Grant> => ({
+  identity: { ...GRANTED, name },
+  token: 'a-token-this-test-invented',
+});
 
-function harness(over: { grant?: (name: string) => Promise<Identity> } = {}) {
+function harness(over: { grant?: (name: string) => Promise<Grant> } = {}) {
   let now = 1_000_000;
-  const pairing = createPairing({
-    now: () => now,
-    grant: over.grant ?? (async (name) => ({ ...GRANTED, name })),
-  });
+  const pairing = createPairing({ now: () => now, grant: over.grant ?? grantOf });
   return { pairing, advance: (ms: number) => (now += ms) };
 }
 
@@ -195,7 +197,7 @@ describe('wrong answers', () => {
 
 describe('the operator confirmation', () => {
   it('grants nothing until the operator says yes', async () => {
-    const grant = vi.fn(async (name: string) => ({ ...GRANTED, name }));
+    const grant = vi.fn(grantOf);
     const { pairing } = harness({ grant });
     const { code } = pairing.open();
     const settled = pairing.submit(code, 'a phone', '100.64.0.2');
@@ -206,6 +208,7 @@ describe('the operator confirmation', () => {
     expect(await settled).toEqual({
       ok: true,
       identity: { deviceId: 'device-1', name: 'a phone' },
+      token: 'a-token-this-test-invented',
     });
     expect(grant).toHaveBeenCalledWith('a phone');
   });

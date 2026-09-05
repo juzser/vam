@@ -16,8 +16,10 @@ import { registerDialogIpc } from './dialog/ipc.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { releaseCloseAccelerator } from './menu.js';
 import { isSameOrigin } from './origin.js';
+import { openDeviceRegistry, registryPath } from './remote/devices.js';
 import { remoteConfigFromEnv } from './remote/launch.js';
-import { startRemoteServer } from './remote/server.js';
+import { createPairing } from './remote/pairing.js';
+import { createStreamRegistry, startRemoteServer } from './remote/server.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
 import { createTmuxRunner } from './sources/tmux/spawn.js';
 import { createNodeEventSource } from './stream/event-source.js';
@@ -219,15 +221,29 @@ function startRemoteTransport(): void {
   // the `dist-web` build beside the app, and a missing one answers 404 rather
   // than half a page -- `serveAsset` opens files, it does not invent them.
   const webRoot = config.webRoot ?? join(app.getAppPath(), 'dist-web');
-  // The paired devices. Empty until the pairing screen grants one, and held
-  // in memory only for now -- the durable registry is its own module.
-  const devices = { find: () => null };
-  void startRemoteServer({ ...config, devices, webRoot, source: DESKTOP_SOURCE, subscribe }).catch(
-    (error) => {
-      console.error(`[vam] remote transport refused to start: ${String(error)}`);
-      app.exit(1);
-    },
-  );
+  // The paired devices, their live streams, and the screen that grants a
+  // pairing. Revoking a device closes ITS OWN open connections at once: a
+  // stream opened while it was paired otherwise outlives the pairing.
+  const streams = createStreamRegistry();
+  void (async () => {
+    const devices = await openDeviceRegistry({
+      path: registryPath(app.getPath('userData')),
+      onRevoked: (deviceId) => streams.closeFor(deviceId),
+    });
+    const pairing = createPairing({ grant: (name) => devices.grant(name) });
+    await startRemoteServer({
+      ...config,
+      devices,
+      pairing,
+      streams,
+      webRoot,
+      source: DESKTOP_SOURCE,
+      subscribe,
+    });
+  })().catch((error) => {
+    console.error(`[vam] remote transport refused to start: ${String(error)}`);
+    app.exit(1);
+  });
 }
 
 void app.whenReady().then(() => {

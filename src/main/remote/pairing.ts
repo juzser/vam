@@ -26,6 +26,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { constantTimeEquals, type Identity } from './auth.js';
+import type { Grant } from './devices.js';
 
 /**
  * Crockford base32 minus the glyphs a human confuses: no I, L, O or U, and no
@@ -118,14 +119,14 @@ export type PairingState = {
 export type PairReason = 'no-code' | 'wrong-code' | 'burned' | 'throttled' | 'denied';
 
 export type PairOutcome =
-  | { readonly ok: true; readonly identity: Identity }
+  | { readonly ok: true; readonly identity: Identity; readonly token: string }
   | { readonly ok: false; readonly reason: PairReason };
 
 export type PairingOptions = {
   /** Injected so a test owns the clock; the two-minute life is the point. */
   readonly now?: () => number;
   /** Mints and persists the device token. See `devices.ts`. */
-  readonly grant: (name: string) => Promise<Identity>;
+  readonly grant: (name: string) => Promise<Grant>;
 };
 
 export type Pairing = {
@@ -251,7 +252,8 @@ export function createPairing(options: PairingOptions): Pairing {
       }
       // The token is minted and PERSISTED here, before the phone is told
       // anything: a credential is not valid until its durable write succeeds.
-      return { ok: true, identity: await options.grant(proposed) };
+      const granted = await options.grant(proposed);
+      return { ok: true, identity: granted.identity, token: granted.token };
     },
 
     approve(): void {
