@@ -107,6 +107,10 @@ import {
 } from './highlight.js';
 import { Note } from './Note.js';
 import { newestSet, toolUseOf } from './question-set.js';
+import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
+
+import { TerminalTab } from './TerminalTab.js';
+import { TABS, type Tab, visibleTabs } from './tabs.js';
 
 /**
  * How often the pane is re-read while a row says it is waiting.
@@ -119,9 +123,6 @@ import { newestSet, toolUseOf } from './question-set.js';
  * that vam started.
  */
 const PROMPT_POLL_MS = 2_000;
-import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
-import { TerminalTab } from './TerminalTab.js';
-import { TABS, type Tab, visibleTabs } from './tabs.js';
 
 /** The three things this pane needs to know about a file it was handed. */
 export type AttachedFile = {

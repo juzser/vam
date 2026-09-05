@@ -29,7 +29,6 @@
  * is a refusal, and the tag path is never a fallback for one.
  */
 
-import { MAX_QUESTION_TEXT } from '../../shared/answer.js';
 import type {
   AnswerRequest,
   AnswerResult,
@@ -37,6 +36,7 @@ import type {
   PanePrompt,
   PromptView,
 } from '../../shared/answer.js';
+import { MAX_QUESTION_TEXT } from '../../shared/answer.js';
 import { sendDownArgv, sendEnterArgv, sendRightArgv } from '../sources/tmux/argv.js';
 import { listVamSessions, readPane, type TmuxRun } from '../sources/tmux/spawn.js';
 import { targetSession } from './pane.js';
@@ -77,7 +77,7 @@ export type Picker = { readonly rows: readonly PickerRow[]; readonly cursor: num
  * coloured line. Stripped once, at the two doors -- the parser and the read --
  * so nothing downstream has to remember.
  */
-const CSI = /\u001b\[[0-9;:?]*[ -/]*[@-~]/g;
+const CSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;:?]*[ -/]*[@-~]`, 'g');
 
 const plain = (text: string): string => text.replace(CSI, '');
 

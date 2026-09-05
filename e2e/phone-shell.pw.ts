@@ -323,6 +323,15 @@ test.describe('the phone shell at 390px', () => {
     // green. Two floors are what make the number mean the thing it counts.
     const listSkins = await readSkins(page);
     await openFirstSession(page);
+    // THE COMPOSER STANDS DOWN WHILE A QUESTION IS OPEN, and the first row of
+    // the fixture is now a session blocked on a permission prompt -- a shape
+    // that has no transcript record and is read off the pane instead. So the
+    // attach control, which is one of the four skins this floor counts, is
+    // legitimately absent until the card is left. `Chat about this` is the way
+    // back, and taking it here measures the same four skins as before AND
+    // proves the route out of a pane-read card exists on the phone.
+    const chat = page.locator('[data-question-chat]');
+    if ((await chat.count()) > 0) await chat.first().click();
     const sessionSkins = await readSkins(page);
     const skins = [...listSkins, ...sessionSkins];
 

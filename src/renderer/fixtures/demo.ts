@@ -34,7 +34,30 @@
  * Not shipped: `dev` renders it, the real app will not.
  */
 
+import type { PromptView } from '../../shared/answer.js';
 import type { CanvasModel } from '../domain/model.js';
+
+/**
+ * The prompt `factory-sse-1` is blocked on, as vam would read it off the pane.
+ *
+ * INVENTED, like every value in this file -- the command and the path are
+ * stand-ins. It exists because a tool-approval prompt writes no transcript
+ * record, so there is no `questions` entry that could put it on a screenshot:
+ * without this, the commonest asking shape there is stays invisible to every
+ * non-unit gate in the repo, which is exactly what the questions PR found for the
+ * AskUserQuestion card.
+ */
+export const DEMO_PROMPT: PromptView = {
+  kind: 'prompt',
+  prompt: {
+    title: 'Do you want to run this command?',
+    options: [
+      'Yes',
+      'Yes, and do not ask again for scripts/rebuild-index.sh',
+      'No, and tell the agent what to do differently',
+    ],
+  },
+};
 
 export const DEMO_MODEL: CanvasModel = {
   projects: [

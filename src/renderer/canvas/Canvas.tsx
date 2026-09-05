@@ -67,6 +67,7 @@ import type { StatusFilter } from '../domain/session-filter.js';
 import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain/session-filter.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
+import { DEMO_PROMPT } from '../fixtures/demo.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
@@ -2719,8 +2720,13 @@ function CanvasInner({
     answer: globalThis.window?.api?.terminal?.answer,
     // The other half of the same act: the question a permission prompt is
     // asking exists only on the pane, so the card that answers it has to read
-    // it first. `undefined` in the browser build, exactly as `answer` is.
-    prompt: globalThis.window?.api?.terminal?.prompt,
+    // it first. `undefined` in the browser build, exactly as `answer` is --
+    // and the fixture in demo mode, because a shape with no transcript record
+    // is otherwise invisible to every screenshot and every e2e spec there is.
+    // No `answer` accompanies it there: the demo refuses every write, so the
+    // card draws no Submit rather than one that would apologise.
+    prompt:
+      source.kind === 'demo' ? async () => DEMO_PROMPT : globalThis.window?.api?.terminal?.prompt,
     // The flag the source declares, finally read. `false` withdraws the
     // tab rather than mounting one that can only apologise.
     terminal: terminalTab,
