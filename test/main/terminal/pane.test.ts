@@ -21,7 +21,7 @@ import { describe, expect, it } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
 import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
 import { registerTerminalIpc } from '../../../src/main/terminal/ipc.js';
-import { matchVamSession, readSessionPane } from '../../../src/main/terminal/pane.js';
+import { matchVamSession, readSessionPane, targetSession } from '../../../src/main/terminal/pane.js';
 
 const ok = (stdout: string): TmuxRunResult => ({ failure: null, stdout, stderr: '' });
 const failed = (stderr: string): TmuxRunResult => ({
@@ -340,6 +340,69 @@ describe('reading the pane a session published', () => {
     const { run } = runner({ 'list-sessions': ok('') });
     expect(await readSessionPane(run, ATLAS, 'sess-alpha#7', new Map())).toEqual({
       kind: 'not-vam',
+    });
+  });
+});
+
+/**
+ * A PUBLISHED PANE IS AN EXCLUSIVE CLAIM, and this is the case the fourth
+ * answer above did not cover.
+ *
+ * Measured on a real machine: four live sessions, one of them publishing a
+ * pane and the other three publishing nothing. Focusing one of the three found
+ * no published pane for it, fell through to the project tag, and the tag found
+ * exactly one vam session in that project -- the one the FOURTH row is in. So
+ * vam drew another row's screen under this row's name, and had already
+ * reflowed that session to fit this row's window.
+ *
+ * The published branch already refuses a value that DISAGREES, because a
+ * disagreement is evidence of corruption rather than absence of evidence. What
+ * was missing is the row that publishes nothing: absence was read as "nobody
+ * has an opinion, guess by project" when another row had in fact already
+ * spoken for the only candidate. It has not; a claimed pane is unavailable to
+ * guessing, and the honest answer is `none`.
+ *
+ * The fallback is NOT removed. An UNCLAIMED vam session -- one whose Claude
+ * Code is too old to publish a `tmux` field, or one not under tmux -- still
+ * resolves through the tag, which is the case that path exists for.
+ */
+describe('a pane another row published is not available to the project tag', () => {
+  const ALPHA_PANE = 'vam-atlas-aa11bb';
+
+  it('answers none for a row whose project holds only a session another row claims', () => {
+    const sessions = [{ project: ATLAS, name: ALPHA_PANE }];
+    const panes = new Map([['sess-alpha', ALPHA_PANE]]);
+    expect(targetSession(sessions, ATLAS, 'sess-gamma#9', panes)).toEqual({ kind: 'none' });
+  });
+
+  it('still resolves a session NOBODY claimed -- the legacy case the tag exists for', () => {
+    // No `tmux` field published anywhere: an older Claude Code, or a session
+    // not under tmux. The tag is the only pairing available and still answers.
+    const sessions = [{ project: ATLAS, name: ALPHA_PANE }];
+    expect(targetSession(sessions, ATLAS, 'sess-gamma#9', new Map())).toEqual({
+      kind: 'one',
+      name: ALPHA_PANE,
+    });
+  });
+
+  it('leaves the claimant itself resolving to its own pane', () => {
+    const sessions = [{ project: ATLAS, name: ALPHA_PANE }];
+    const panes = new Map([['sess-alpha', ALPHA_PANE]]);
+    expect(targetSession(sessions, ATLAS, 'sess-alpha#7', panes)).toEqual({
+      kind: 'one',
+      name: ALPHA_PANE,
+    });
+  });
+
+  it('leaves a published pane in the wrong project mispaired, with no fall-through', () => {
+    // #176's guarantee, re-pinned beside the new rule: the row said where it
+    // is, it is somewhere vam must not act on, and the tag does not get a
+    // second try at answering for it.
+    const sessions = [{ project: BEACON, name: 'vam-beacon-b2c3d4' }];
+    const panes = new Map([['sess-alpha', 'vam-beacon-b2c3d4']]);
+    expect(targetSession(sessions, ATLAS, 'sess-alpha#7', panes)).toEqual({
+      kind: 'mispaired',
+      published: 'vam-beacon-b2c3d4',
     });
   });
 });
