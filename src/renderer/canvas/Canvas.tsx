@@ -2675,7 +2675,12 @@ function CanvasInner({
   };
 
   return (
-    <div className="relative flex h-full flex-col">
+    // `vam-phone` is the hook the OVERLAYS hang off: they are siblings of the
+    // shell rather than children of it, so `[data-phone-shell]` cannot reach
+    // them and this class on the common root can. It is set from the same
+    // derived breakpoint, never from a second media query with the number
+    // written out again.
+    <div className={`relative flex h-full flex-col ${phone ? 'vam-phone' : ''}`}>
       {/* Named none of them on a phone: `Columns` renders by order, so a
           column the order does not name is never created -- which is what
           "unmounted" has to mean for a pane that is measured, focused and

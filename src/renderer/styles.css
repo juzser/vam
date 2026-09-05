@@ -935,3 +935,46 @@ body {
 .vam-phone-typing [role='tablist'] {
   display: none;
 }
+
+/*
+ * The overlays, as bottom sheets.
+ *
+ * Every overlay in vam is a full-screen host (`inset-0`, `flex items-start
+ * justify-center`, a `pt-*` that pushes its panel down from the top) with a
+ * scrim button and one panel inside it. On a 750px-tall screen with the soft
+ * keyboard up, `pt-16` puts the panel's own bottom -- which is where its
+ * confirm sits -- below the fold with nothing to scroll: a control you cannot
+ * finish using, which reads as working right up until it doesn't.
+ *
+ * So on a phone the panel is anchored to the BOTTOM, capped at 85dvh, and
+ * scrolls within itself. `data-overlay-host` marks the four that are reachable
+ * from a phone; the anchored popovers (`data-filter-menu`) are deliberately
+ * not marked, because they are positioned against a control rather than
+ * against the viewport and turning one into a sheet would move it away from
+ * the thing it belongs to.
+ *
+ * WHAT THIS DOES NOT PROMISE: on iOS the soft keyboard shrinks the visual
+ * viewport without shrinking the layout viewport, and `dvh` does not track it.
+ * A sheet's own scroller is what lets the operator bring an action up above
+ * the keyboard; that it is ENOUGH is a claim only a real device can settle,
+ * and the Playwright pass at 390px is where it gets settled. The alternative
+ * -- a `visualViewport` listener -- is ruled out by the spec for the jitter
+ * and double-resize loops it is a known source of.
+ */
+.vam-phone [data-overlay-host] {
+  align-items: flex-end;
+  padding-top: 0;
+}
+
+/* The panel, never the scrim: every one of these hosts opens with a
+   full-bleed `<button>` that is the click-away target. */
+.vam-phone [data-overlay-host] > :not(button) {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  max-height: 85dvh;
+  overflow-y: auto;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
