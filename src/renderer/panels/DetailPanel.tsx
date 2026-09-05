@@ -2489,13 +2489,23 @@ export function DetailPanel(props: DetailPanelProps) {
               questions={newestQuestions}
               firstOptionRef={firstOptionRef}
               onChat={startChat}
-              /* THREE THINGS HAVE TO BE TRUE before a Submit is drawn: the
+              /* FOUR THINGS HAVE TO BE TRUE before a Submit is drawn: the
                  source really delivers prompts, the shell really has the
-                 bridge (there is none in the browser build), and there is a
-                 row to aim at. Any of them missing draws no button rather
-                 than one that would refuse -- see `QuestionCard`. */
+                 bridge (there is none in the browser build), there is a row to
+                 aim at, and VAM STARTED THAT ROW'S SESSION. The fourth is the
+                 same test the mode row makes (`canCycleMode`) and for the same
+                 reason: vam can press a key only in a pane it started, because
+                 no process may take over another's controlling TTY. A focused
+                 row is not an aimable pane, so `entry !== null` was drawing an
+                 enabled Submit over the operator's own terminal that could
+                 only ever come back refused. Any of the four missing draws no
+                 button rather than one that would refuse -- see
+                 `QuestionCard`. */
               onAnswer={
-                delivers === true && answer !== undefined && entry !== null
+                delivers === true &&
+                answer !== undefined &&
+                entry !== null &&
+                entry.session.vamControlled === true
                   ? (request) => answer(entry.project.id, request, entry.session.id)
                   : null
               }

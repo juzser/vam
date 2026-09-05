@@ -49,6 +49,9 @@ const FRUIT: AgentQuestion = {
 };
 
 const SESSION: Session = {
+  // vam started this one: Submit is drawn only over a pane vam can press a
+  // key in, which is the same test the mode row makes.
+  vamControlled: true,
   id: 's1',
   title: 'Colour study',
   icon: null,
