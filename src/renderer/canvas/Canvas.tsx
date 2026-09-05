@@ -62,13 +62,14 @@ import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../er
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { nextNode } from '../keyboard/spatial-nav.js';
-import { DetailPanel, type Tab as DetailTab, TABS } from '../panels/DetailPanel.js';
+import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
 import { FocusEdge } from '../panels/FocusEdge.js';
 import { IconPicker } from '../panels/IconPicker.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { SessionList } from '../panels/SessionList.js';
+import { visibleTabs } from '../panels/tabs.js';
 import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
 import {
   ALL_VISIBLE,
@@ -634,6 +635,12 @@ function CanvasInner({
   const [errorLogOpen, setErrorLogOpen] = useState(false);
   /** Any full-screen overlay on screen. See the keydown handler for the rule. */
   const overlayOpen = paletteOpen || keySheetOpen || settingsOpen || errorLogOpen;
+  /**
+   * Whether the source has a terminal to draw, which decides how many tabs the
+   * bar has. Read in two places -- the pane is told, and `Mod-<digit>` counts
+   * the same list -- and that is the point: the digit must count what is drawn.
+   */
+  const terminalTab = source.kind === 'session' && source.source.capabilities.terminal;
   /**
    * How many things have BROKEN this session. Refusals are excluded on
    * purpose: a badge that counted vam's intended "no"s would be a number that
@@ -1899,9 +1906,15 @@ function CanvasInner({
               setStatus('the detail pane is hidden — z0 brings it back');
               return;
             }
-            const tab = TABS[action.digit - 1];
+            // THE DRAWN LIST, not the constant. A source with no terminal
+            // has that tab withdrawn and everything after it moves up a
+            // position, so indexing the constant opened a tab that was not
+            // there -- accepted, then silently reverted to Response -- and
+            // refused with a count the operator could see was wrong.
+            const drawn = visibleTabs(terminalTab);
+            const tab = drawn[action.digit - 1];
             if (tab === undefined) {
-              setStatus(`only ${TABS.length} tabs`);
+              setStatus(`only ${drawn.length} tab${drawn.length === 1 ? '' : 's'}`);
               return;
             }
             setTabRequest({ tab });
@@ -2187,6 +2200,7 @@ function CanvasInner({
     actions,
     prefs,
     savePrefs,
+    terminalTab,
     visible,
     overlayOpen,
     openSessionIconPicker,
@@ -2505,7 +2519,7 @@ function CanvasInner({
           answer={globalThis.window?.api?.terminal?.answer}
           // The flag the source declares, finally read. `false` withdraws the
           // tab rather than mounting one that can only apologise.
-          terminal={source.kind === 'session' && source.source.capabilities.terminal}
+          terminal={terminalTab}
           // The flag has guarded double-submit here since the composer was
           // written; the pane never saw it, so a two-minute `claude --resume`
           // looked like Enter doing nothing.
