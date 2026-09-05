@@ -13,15 +13,15 @@
  * back -- a check that refuses after spawning has not refused.
  */
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createSessionInDirectory } from '../../src/main/sources/claude-code/create-session.js';
-import { newSessionArgv } from '../../src/main/sources/tmux/argv.js';
 import { repoRootOf, whyNotARepository } from '../../src/main/sources/repo.js';
-import { DEFAULT_PROVIDER_ID, resolveProvider } from '../../src/shared/providers.js';
+import { newSessionArgv } from '../../src/main/sources/tmux/argv.js';
 import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
+import { DEFAULT_PROVIDER_ID, resolveProvider } from '../../src/shared/providers.js';
 
 const made: string[] = [];
 

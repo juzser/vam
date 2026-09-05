@@ -19,6 +19,7 @@
 
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { whyNotARepository } from '../../src/main/sources/repo.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasSource } from '../../src/renderer/canvas/source.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
@@ -209,6 +210,34 @@ describe('new project', () => {
     render(<Canvas model={MODEL} source={source} />);
     await clickNewProject();
     expect(statusBar()).toContain('no-such-directory');
+    expect(wrote.count).toBe(0);
+  });
+
+  /**
+   * The narrowing the operator asked for, seen from where they see it. The
+   * refusal is main's (`src/main/sources/repo.ts`) and it is asserted here BY
+   * ITS OWN WORDS rather than by a stand-in shape: the failure mode this
+   * closes is picking a directory that is not a repository and being told
+   * nothing, so what has to hold is that main's sentence -- the path included
+   * -- reaches the status bar.
+   */
+  it('a chosen directory that is not a repository is refused, in main’s own words', async () => {
+    const { source, wrote } = sourceWith(true);
+    const refusal = whyNotARepository(CHOSEN);
+    const inner = (source as { source: SessionSource }).source as unknown as {
+      write: { createSessionIn: unknown };
+    };
+    inner.write.createSessionIn = async () => {
+      throw refusal;
+    };
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(refusal?.code).toBe('not-a-repository');
+    expect(statusBar()).toContain('not-a-repository');
+    // The path, because "invalid directory" would leave the operator retracing
+    // which one they clicked.
+    expect(statusBar()).toContain(CHOSEN);
     expect(wrote.count).toBe(0);
   });
 });

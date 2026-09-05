@@ -8,7 +8,10 @@
  * message would still pass if the handler ran the command and then refused.
  */
 
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { CHANNELS } from '../../src/main/ipc/channels.js';
 import { registerSourceIpc } from '../../src/main/ipc/handlers.js';
 import {
@@ -30,6 +33,26 @@ function recordingTmux(stderr = ''): TmuxRun & { calls: (readonly string[])[] } 
   run.calls = calls;
   return run;
 }
+
+/**
+ * A real directory that really is a repository work tree. The chosen-directory
+ * path refuses anything else (`src/main/sources/repo.ts`), so a made-up string
+ * is no longer a usable cwd for it -- and a check that only a made-up string
+ * could pass would not be the check.
+ */
+const repos: string[] = [];
+function tempRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'vam-create-'));
+  mkdirSync(join(dir, '.git'));
+  repos.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  while (repos.length > 0) {
+    rmSync(repos.pop() as string, { recursive: true, force: true });
+  }
+});
 
 const agent = (cwd: string) => ({
   key: `s1#101`,
@@ -137,8 +160,9 @@ describe('o, on the Claude Code source', () => {
 describe('a new session in a chosen directory', () => {
   it('starts claude there, and records the id the next load() will report', async () => {
     const run = recordingTmux();
+    const orchard = tempRepo();
     const failure = await createSessionInDirectory({
-      cwd: '/srv/work/orchard',
+      cwd: orchard,
       title: 'orchard',
       run,
       name: 'vam-orchard-a1b2c3',
@@ -146,22 +170,25 @@ describe('a new session in a chosen directory', () => {
 
     expect(failure).toBeNull();
     expect(run.calls).toEqual([
-      ['new-session', '-d', '-s', 'vam-orchard-a1b2c3', '-c', '/srv/work/orchard', 'claude'],
+      ['new-session', '-d', '-s', 'vam-orchard-a1b2c3', '-c', orchard, 'claude'],
       // The SAME digest every other project id comes from. Anything else and
       // the Terminal tab would find nothing for a session vam itself started.
-      ['set-option', '-t', 'vam-orchard-a1b2c3', '@vam-project', projectIdOf('/srv/work/orchard')],
+      ['set-option', '-t', 'vam-orchard-a1b2c3', '@vam-project', projectIdOf(orchard)],
     ]);
   });
 
   it('forwards tmux’s own failure rather than reporting a session it did not start', async () => {
-    const run = recordingTmux("can't create session: /srv/work/gone: No such file or directory");
+    const run = recordingTmux("can't create session: gone: No such file or directory");
+    // A repository whose directory tmux then fails on: the repo check is not
+    // what answers here, the spawn is.
     const failure = await createSessionInDirectory({
-      cwd: '/srv/work/gone',
+      cwd: tempRepo(),
       title: 'gone',
       run,
       name: 'vam-gone-a1b2c3',
     });
     expect(failure?.kind).toBe('refused');
+    expect(failure?.code).not.toBe('not-a-repository');
   });
 
   it('is gated by createSession, and SPAWNS NOTHING when that is false', async () => {
@@ -193,8 +220,9 @@ describe('a new session in a chosen directory', () => {
 describe('the provider the session is started with', () => {
   it('runs the chosen provider’s command, by value', async () => {
     const run = recordingTmux();
+    const orchard = tempRepo();
     const failure = await createSessionInDirectory({
-      cwd: '/srv/work/orchard',
+      cwd: orchard,
       title: 'orchard',
       run,
       name: 'vam-orchard-a1b2c3',
@@ -208,7 +236,7 @@ describe('the provider the session is started with', () => {
       '-s',
       'vam-orchard-a1b2c3',
       '-c',
-      '/srv/work/orchard',
+      orchard,
       ...resolveProvider('claude-code').command,
     ]);
   });
