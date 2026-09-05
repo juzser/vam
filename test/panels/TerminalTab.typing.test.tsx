@@ -459,9 +459,16 @@ describe('a pairing vam cannot use is said as that, not as an absence', () => {
 });
 
 describe('the pane says whether what is typed is going anywhere', () => {
-  it('says where the keys go while it can send them', async () => {
+  it('draws no chrome above the pane at all, which is the space the operator asked for', async () => {
     await open();
-    expect(q('[data-terminal-typing]')?.textContent).toContain('vam-atlas-a1b2c3');
+    // The two lines that stood here: the session's name, and a caption saying
+    // where the keys went. On a tab whose content is a screenful of someone's
+    // terminal, two rows of chrome is two rows of their work not shown.
+    expect(q('[data-terminal-name]')).toBeNull();
+    expect(q('[data-terminal-typing]')).toBeNull();
+    // What replaced the caption is behaviour, not text, and the pane itself
+    // still says whose screen it is.
+    expect(pane()?.getAttribute('aria-label')).toContain('vam-atlas-a1b2c3');
   });
 
   it('says so when vam refused, rather than swallowing the keystroke', async () => {
@@ -507,7 +514,7 @@ describe('the pane says whether what is typed is going anywhere', () => {
     expect(q('[data-terminal-refused]')).toBeNull();
   });
 
-  it('says the keys go nowhere when there is no send path at all', async () => {
+  it('eats nothing when there is no send path at all', async () => {
     render(
       <TerminalTab
         projectId={ATLAS}
@@ -525,6 +532,8 @@ describe('the pane says whether what is typed is going anywhere', () => {
     expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Enter' })).toBe(true);
     expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Backspace' })).toBe(true);
     await settle();
-    expect(q('[data-terminal-typing]')?.textContent?.toLowerCase()).toContain('cannot');
+    // No caption says so any more -- the honesty is in the behaviour above:
+    // nothing was consumed, so every one of those keys is still vam's.
+    expect(q('[data-terminal-typing]')).toBeNull();
   });
 });

@@ -79,7 +79,14 @@ describe('the Terminal tab shows the focused session pane', () => {
       />,
     );
     await settle();
-    expect(q<HTMLElement>('[data-terminal-name]')?.textContent).toContain('vam-atlas-a1b2c3');
+    // THE NAME MOVED, IT DID NOT GO. It was a line of chrome above the pane
+    // and the operator asked for that space back; the pane's accessible name
+    // still says whose screen this is, which is where a reader that cannot
+    // see the box was always getting it.
+    expect(q<HTMLElement>('[data-terminal-pane]')?.getAttribute('aria-label')).toContain(
+      'vam-atlas-a1b2c3',
+    );
+    expect(q('[data-terminal-name]')).toBeNull();
   });
 });
 
@@ -234,8 +241,8 @@ describe('the Terminal tab refreshes while it is open and stops when it is not',
 describe('the Terminal tab draws the session it was last asked about', () => {
   it('stops drawing the previous session the moment the project changes', async () => {
     // Up to the 10s tmux timeout, not the 1s refresh: the stale pane is drawn
-    // until a read for the NEW project comes back, and the name beside it
-    // attributes it to the wrong session the whole time.
+    // until a read for the NEW project comes back, and it is attributed to
+    // the wrong session -- by its own accessible name -- the whole time.
     const read = vi.fn(async (id: string) =>
       id === ATLAS ? ok('atlas screen', 'vam-atlas-a1b2c3') : ok('beacon screen', 'vam-beacon-d4'),
     );
@@ -257,14 +264,15 @@ describe('the Terminal tab draws the session it was last asked about', () => {
     );
     // The claim about atlas is gone BEFORE the answer about beacon arrives.
     expect(q('[data-terminal-pane]')).toBeNull();
-    expect(q('[data-terminal-name]')).toBeNull();
     expect(q('[data-terminal-pending]')).not.toBeNull();
 
     await act(async () => {
       resolve?.(ok('beacon screen', 'vam-beacon-d4'));
       await Promise.resolve();
     });
-    expect(q<HTMLElement>('[data-terminal-name]')?.textContent).toContain('vam-beacon-d4');
+    expect(q<HTMLElement>('[data-terminal-pane]')?.getAttribute('aria-label')).toContain(
+      'vam-beacon-d4',
+    );
   });
 
   it('says nothing is selected rather than reading a session forever', async () => {

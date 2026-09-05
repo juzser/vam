@@ -579,23 +579,24 @@ export function TerminalTab({
     );
   }
   return (
+    /* TWO LINES USED TO STAND HERE and the operator asked for the space back:
+       the tmux session's name, and a caption saying where the keys go. On a
+       tab whose whole content is a screenful of someone's terminal, two rows
+       of chrome above it is two rows of their work not shown.
+       
+       NEITHER FACT IS LOST. The session's name is in the pane's accessible
+       name, where a reader that cannot see the box still gets it. And the
+       caption's real job -- never look typable while swallowing what is typed
+       -- is behaviour, not text: a key vam cannot deliver is not cancelled,
+       so it goes back to vam's own keyboard (see `onKeyDown`), and a refusal
+       still draws its own line, which is not one of the two removed. */
     <div data-terminal className="flex min-h-0 flex-1 flex-col gap-1.5">
-      <p data-terminal-name className="flex-none font-mono text-[10px] text-ink-faint">
-        {/* Whose screen this is. The text below came from that session and
-            goes nowhere near vam's own output. */}
-        {view.name}
-      </p>
       {/* WHERE THE KEYS GO, said on the surface. A box that takes focus and
           swallows what is typed is worse than one that will not take focus,
           and there are two ways for this one to swallow: a build with no
           bridge behind it, and a keystroke main refused because it could no
           longer name a single session for this project. Both are sentences
           here rather than silence. */}
-      <p data-terminal-typing className="flex-none text-[10px] text-ink-faint">
-        {send === undefined
-          ? 'vam cannot type into this pane here — the desktop app can.'
-          : `keys go to ${view.name} — Escape leaves the pane.`}
-      </p>
       {refused !== null && (
         <p
           data-terminal-refused
