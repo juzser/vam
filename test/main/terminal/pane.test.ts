@@ -389,6 +389,24 @@ describe('a pane another row published is not available to the project tag', () 
     });
   });
 
+  it('does not turn ambiguous into one by subtracting the claimed session', () => {
+    // THE CLAIM MAY ONLY REMOVE AN ANSWER, NEVER CREATE ONE. Two vam sessions
+    // in one project, one of them claimed: filtering before counting leaves a
+    // single name and answers confidently for EVERY silent row -- at most one
+    // of which is in it. That is the ambiguity the published field exists to
+    // resolve, resolved by a coin toss. More than one candidate is owed a
+    // refusal, and `ambiguous` is the refusal the tab, the keystroke
+    // (`unaimed`) and the resize (nothing at all) already act on.
+    const sessions = [
+      { project: ATLAS, name: ALPHA_PANE },
+      { project: ATLAS, name: 'vam-atlas-cc22dd' },
+    ];
+    const panes = new Map([['sess-alpha', ALPHA_PANE]]);
+    const ambiguous = { kind: 'ambiguous', names: [ALPHA_PANE, 'vam-atlas-cc22dd'] };
+    expect(targetSession(sessions, ATLAS, 'sess-bravo#8', panes)).toEqual(ambiguous);
+    expect(targetSession(sessions, ATLAS, 'sess-charlie#9', panes)).toEqual(ambiguous);
+  });
+
   it('leaves the claimant itself resolving to its own pane', () => {
     const sessions = [{ project: ATLAS, name: ALPHA_PANE }];
     const panes = new Map([['sess-alpha', ALPHA_PANE]]);

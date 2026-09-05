@@ -180,6 +180,14 @@ describe('paneForRow and panes another row has claimed', () => {
     expect(paneForRow(one, [GAMMA], GAMMA, new Map())).toBe('vam-atlas-aa11bb');
   });
 
+  it('does not answer for two tagged sessions just because one is claimed', () => {
+    // The same ordering rule as `matchVamSession`'s: the claim is applied
+    // after the single-candidate count, so it can only ever veto. Subtracting
+    // first would leave one name here and type into it.
+    const panes = new Map([['sess-alpha', 'vam-atlas-aa11bb']]);
+    expect(paneForRow(two, [GAMMA], GAMMA, panes)).toBeNull();
+  });
+
   it('does not guess between two unpublished rows over one unclaimed session', () => {
     expect(paneForRow(one, [ALPHA, GAMMA], GAMMA, new Map())).toBeNull();
   });

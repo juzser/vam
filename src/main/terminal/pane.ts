@@ -85,12 +85,25 @@ export function matchVamSession(
   // would sweep up every session vam did not tag. It matches nothing.
   if (projectId === '') return { kind: 'none' };
   const mine = sessions
-    .filter((session) => session.project === projectId && claimed?.has(session.name) !== true)
+    .filter((session) => session.project === projectId)
     .map((session) => session.name)
     .sort();
   const [only] = mine;
   if (only === undefined) return { kind: 'none' };
-  return mine.length === 1 ? { kind: 'one', name: only } : { kind: 'ambiguous', names: mine };
+  // THE COUNT IS TAKEN BEFORE THE CLAIM IS APPLIED, AND THE ORDER IS THE
+  // WHOLE OF THE RULE: a claim may only ever REMOVE an answer, never create
+  // one. It turns `one` into `none`. It must never turn `ambiguous` into
+  // `one`.
+  //
+  // Subtracting first and counting the remainder manufactured certainty out
+  // of exactly the ambiguity the published field exists to resolve
+  // (`session-pane.ts`): two vam sessions in one project, one of them
+  // claimed, and every silent row resolved confidently onto the other. At
+  // most one of those rows is in it. Before, both got `ambiguous` -- no
+  // screen, `unaimed` on the keystroke, no resize -- which is a refusal, and
+  // a refusal is what more than one candidate is owed.
+  if (mine.length > 1) return { kind: 'ambiguous', names: mine };
+  return claimed?.has(only) === true ? { kind: 'none' } : { kind: 'one', name: only };
 }
 
 /**
