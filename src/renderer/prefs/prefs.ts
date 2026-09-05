@@ -109,16 +109,54 @@ export const FOCUS_SHARE_MIN = 0.3;
 export const FOCUS_SHARE_MAX = 1;
 
 /**
+ * Off: the canvas never frames a session by itself, it only follows focus.
+ *
+ * A value outside the range above rather than a second boolean field, because
+ * a boolean beside a share is two ways to say the same thing and they can
+ * disagree in storage. Zero reads literally as "the session takes none of the
+ * canvas", which is not a framing anyone could want, so it is free to mean
+ * this instead.
+ *
+ * It exists because the operator asked for the automatic framing to be removed
+ * once already. Whoever wants it gone again should be able to say so here
+ * rather than by asking for the code to be deleted a second time.
+ */
+export const FOCUS_SHARE_OFF = 0;
+
+/**
  * Total, like `clampPaneWidth`: a stored share can be a string an older vam
  * wrote, a `NaN` from a hand-edited payload, or an Infinity from devtools, and
  * none of those may reach `focusPadding` — a `NaN` padding is a canvas that
  * renders nothing and says nothing.
+ *
+ * `FOCUS_SHARE_OFF` passes through whole. It is the one value below the
+ * minimum that is not garbage, and clamping it up to 0.3 would make "off"
+ * unstorable.
  */
 export function clampFocusShare(share: number): number {
   if (typeof share !== 'number' || Number.isNaN(share)) {
     return DEFAULT_FOCUS_SHARE;
   }
+  if (share === FOCUS_SHARE_OFF) {
+    return FOCUS_SHARE_OFF;
+  }
   return Math.min(FOCUS_SHARE_MAX, Math.max(FOCUS_SHARE_MIN, share));
+}
+
+/**
+ * Where a stepper lands when it is asked to move to `next`.
+ *
+ * Off and the smallest useful share are ADJACENT: there is nothing between
+ * them, so a step into the gap means "cross it" rather than "clamp back to the
+ * side you came from". Without this the control is a one-way door — the minus
+ * button at 30% would ask for 25%, `clampFocusShare` would return 30%, and off
+ * would be reachable only by typing a zero into the box.
+ */
+export function nudgeFocusShare(current: number, next: number): number {
+  if (next >= FOCUS_SHARE_MIN) {
+    return clampFocusShare(next);
+  }
+  return current === FOCUS_SHARE_OFF ? FOCUS_SHARE_MIN : FOCUS_SHARE_OFF;
 }
 
 /** The root text size of the `out` pane, in px. 12 because `styles.css` says
@@ -177,23 +215,17 @@ export type Prefs = {
   readonly icons: Readonly<Record<string, IconsBySession>>;
   readonly theme: Theme;
   /**
-   * The share of the viewport a focused row is framed to occupy. Same TTL
-   * exemption as `theme` and `panes`, for the same reason: it is a fact about
-   * how you like to read the canvas, not about a session.
+   * The share of the canvas WIDTH a focused session is framed to occupy, or
+   * `FOCUS_SHARE_OFF` for "never frame it". Same TTL exemption as `theme` and
+   * `panes`, for the same reason: it is a fact about how you like to read the
+   * canvas, not about a session.
    *
-   * @deprecated NOTHING READS THIS ANY MORE. The behaviour it configured --
-   * the canvas automatically scaling to frame the focused session -- was
-   * removed at the operator's request; following focus now pans and leaves
-   * the zoom exactly where the operator put it, so there is no framing target
-   * left to tune.
-   *
-   * DELETING IT IS A PERSISTED-DATA MIGRATION, NOT A DELETE, the same rule
-   * `Project.source` records. The value sits at the top level of stored JSON
-   * that shipped vams have already written; the reader below still parses and
-   * clamps it, which costs nothing and keeps `readPrefs` total. Whoever drops
-   * the field drops the stored key with it and ships a migration for existing
-   * stores -- until then a dead field is the cheap, safe state, because reads
-   * here degrade per field and an unknown key is simply ignored.
+   * It spent a release marked deprecated, read by nothing: the framing it
+   * configured had been removed and deleting a persisted field is a data
+   * migration, not a delete. The operator then asked for framing back in a
+   * different shape — the whole session rather than one node, and this share
+   * rather than a constant — so the field is live again, at the meaning it
+   * always had. Keeping it was what made that a UI change and not a migration.
    */
   readonly focusViewportShare: number;
   /**
