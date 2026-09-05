@@ -112,6 +112,7 @@ import { copyText } from './clipboard.js';
 import { KeySheet } from './KeySheet.js';
 import { infoNodeId, layoutCanvas, orderedSessions } from './layout.js';
 import { type FlowNodeLike, toNavNodes } from './nav-nodes.js';
+import { countTurnsWithInput, type PendingPrompt, reconcile, withPending } from './optimistic.js';
 import { PROVIDER_MARKS } from './provider-marks.js';
 import { SessionFanNode } from './SessionFanNode.js';
 import { SessionInfoNode } from './SessionInfoNode.js';
@@ -557,7 +558,7 @@ function CanvasInner({
     return watchOsTheme(() => setEffective(applyTheme('system')));
   }, [prefs.theme]);
 
-  const model = useMemo(
+  const sourceModel = useMemo(
     // Renames after icons, and in the same one place, for the same reason:
     // the sidebar, the node and the detail panel all render `session.title`,
     // and none of them should know a title can be vam's own rather than the
@@ -565,6 +566,28 @@ function CanvasInner({
     () => applyRenames(applyIcons(factoryModel, prefs.icons, prefs.projectIcons), prefs.renames),
     [factoryModel, prefs.icons, prefs.projectIcons, prefs.renames],
   );
+
+  /**
+   * The replies sent but not yet reported back by the source (`optimistic.ts`).
+   *
+   * Held here, one level above `model`, so every pane draws a pending reply
+   * exactly as it draws a real turn -- the sidebar, the step nodes and the
+   * detail panel all read `model` and none of them learns that a turn can be
+   * vam's own, which is the same rule the rename above follows.
+   */
+  const [pending, setPending] = useState<readonly PendingPrompt[]>([]);
+  const pendingSeq = useRef(0);
+  // Reconciled against `sourceModel`, which is the model WITHOUT the paint:
+  // counting a painted turn as a real one would retire the paint on the render
+  // that drew it.
+  useEffect(() => {
+    setPending((current) => {
+      const next = reconcile(sourceModel, current);
+      // Identity, not length, is what stops this effect from looping.
+      return next.length === current.length ? current : next;
+    });
+  }, [sourceModel]);
+  const model = useMemo(() => withPending(sourceModel, pending), [sourceModel, pending]);
 
   const allEntries = useMemo(() => orderedSessions(model), [model]);
 
@@ -1152,38 +1175,71 @@ function CanvasInner({
     if (writing) {
       return;
     }
-    setWriting(true);
-    try {
-      if (source.kind === 'session') {
-        const sessionSource = source.source;
-        if (!canWriteTo(sessionSource)) {
-          setStatus(`${sessionSource.label} cannot be written to`);
-          return;
-        }
-        await sessionSource.write.recordPrompt(entry.session.id, draft);
-        setDraft('');
-        setComposing(false);
+    const text = draft;
+    /**
+     * Draw the turn now and empty the composer, so the pane reacts to the key
+     * rather than to the round trip (`optimistic.ts`). `live` is the source's
+     * own `deliverPrompt` and decides ONLY whether the session is painted as
+     * running: a recorded prompt is still shown, because the operator typed it
+     * and it exists, but nothing claims an agent is answering it.
+     */
+    const beginPaint = (live: boolean): PendingPrompt => {
+      pendingSeq.current += 1;
+      const one: PendingPrompt = {
+        id: `vam-pending-${pendingSeq.current}`,
+        sessionId: entry.session.id,
+        input: text,
+        seen: countTurnsWithInput(sourceModel, entry.session.id, text),
+        live,
+      };
+      setPending((current) => [...current, one]);
+      setDraft('');
+      setComposing(false);
+      setWriting(true);
+      return one;
+    };
+    // A refusal must leave no trace of a turn that never happened -- and give
+    // the words back, so nothing has to be retyped.
+    const rollBack = (one: PendingPrompt) => {
+      setPending((current) => current.filter((other) => other.id !== one.id));
+      setDraft(text);
+      setComposing(true);
+    };
+    if (source.kind === 'session') {
+      const sessionSource = source.source;
+      if (!canWriteTo(sessionSource)) {
+        setStatus(`${sessionSource.label} cannot be written to`);
+        return;
+      }
+      const painted = beginPaint(sessionSource.capabilities.deliverPrompt);
+      try {
+        await sessionSource.write.recordPrompt(entry.session.id, text);
         setStatus(
           sessionSource.capabilities.deliverPrompt
             ? `sent into the running session of ${entry.session.title} — it will answer there`
             : `recorded in the log of ${entry.session.title} — recorded, not sent to the agent`,
         );
         source.onWrote();
-      } else {
-        await source.client.recordPrompt(entry.session.id, draft);
-        setDraft('');
-        setComposing(false);
-        setStatus(
-          `recorded in the log of ${entry.session.title} — recorded, not sent to the agent`,
-        );
-        source.onWrote();
+      } catch (cause) {
+        rollBack(painted);
+        setStatus(noteFailure('send prompt', cause));
+      } finally {
+        setWriting(false);
       }
+      return;
+    }
+    const painted = beginPaint(false);
+    try {
+      await source.client.recordPrompt(entry.session.id, text);
+      setStatus(`recorded in the log of ${entry.session.title} — recorded, not sent to the agent`);
+      source.onWrote();
     } catch (cause) {
+      rollBack(painted);
       setStatus(noteFailure('send prompt', cause));
     } finally {
       setWriting(false);
     }
-  }, [focusedEntry, draft, source, writing]);
+  }, [focusedEntry, draft, source, writing, sourceModel]);
 
   /**
    * Stop the focused session — really, when the source can.
