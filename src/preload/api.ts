@@ -114,20 +114,30 @@ export function createUsageApi(ipc: InvokerLike): UsageApi {
   };
 }
 
-/** The bridge's update member: one check, no argument, no write. */
+/**
+ * The bridge's update member: read the launch check's answer, and ask for the
+ * release page to be opened. Neither takes an argument -- `open` in
+ * particular cannot name a destination, so it is not a general "navigate
+ * anywhere" capability handed to the least trusted process.
+ */
 export type UpdateApi = {
   check(): Promise<UpdateStatus>;
+  /** True when the operator's own browser was opened on the release page. */
+  open(): Promise<boolean>;
 };
 
 /**
- * `update.check` forwards straight to `vam:update:check` -- no `unwrap`, that
- * channel answers a bare `UpdateStatus` (see `src/main/update/ipc.ts`). It is
- * a request the renderer makes and main throttles; the renderer cannot make
- * vam contact GitHub more often by calling this more often.
+ * Both forward straight through -- no `unwrap`, because these channels answer
+ * bare values rather than an `IpcResult` (see `src/main/update/ipc.ts`).
+ * `check` READS an answer main already has: the request went out once, at
+ * launch, so calling this more often does not make vam contact GitHub more
+ * often. `open` asks for the release page in the operator's browser; it
+ * downloads nothing.
  */
 export function createUpdateApi(ipc: InvokerLike): UpdateApi {
   return {
     check: () => ipc.invoke(CHANNELS.updateCheck) as Promise<UpdateStatus>,
+    open: () => ipc.invoke(CHANNELS.updateOpen) as Promise<boolean>,
   };
 }
 
