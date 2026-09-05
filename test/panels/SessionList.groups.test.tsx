@@ -277,3 +277,28 @@ describe('the group lifecycle', () => {
     expect(remove.className).toContain('text-danger');
   });
 });
+
+describe('group membership', () => {
+  it('offers a + on the group heading, asking the caller to open the list', () => {
+    const onAddToGroup = vi.fn();
+    const { container } = render(
+      <SessionList
+        {...baseProps(grouped())}
+        groups={[GROUP]}
+        collapsedGroups={[]}
+        onAddToGroup={onAddToGroup}
+      />,
+    );
+    const add = container.querySelector('[data-add-to-group="group:1"]') as HTMLElement;
+    expect(add.getAttribute('title')).toMatch(/repo/i);
+    fireEvent.click(add);
+    expect(onAddToGroup).toHaveBeenCalledWith(GROUP);
+  });
+
+  it('draws no + for a caller that cannot store membership', () => {
+    const { container } = render(
+      <SessionList {...baseProps(grouped())} groups={[GROUP]} collapsedGroups={[]} />,
+    );
+    expect(container.querySelector('[data-add-to-group="group:1"]')).toBeNull();
+  });
+});

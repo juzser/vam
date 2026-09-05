@@ -186,3 +186,70 @@ describe('the group lifecycle, stored', () => {
     expect(document.querySelector('[data-icon-picker]')?.textContent).toContain('work');
   });
 });
+
+describe('group membership, stored', () => {
+  const openList = (groupId: string) =>
+    act(() =>
+      document.querySelector<HTMLButtonElement>(`[data-add-to-group="${groupId}"]`)?.click(),
+    );
+  const choice = (id: string) =>
+    document.querySelector<HTMLButtonElement>(`[data-project-choice="${id}"]`);
+  const storedGroups = () =>
+    (storedPrefs().groups ?? {}) as Record<string, { id: string; projects: string[] }[]>;
+
+  it('offers the projects vam already knows, and no directory dialog', () => {
+    seed({ groups: { 'black-smith': [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
+    render(<Canvas model={MODEL} />);
+    openList('group:1');
+    expect(document.querySelector('[data-project-picker]')).toBeTruthy();
+    // Every project in the model, and nothing invented: p1 in, p2 offered.
+    expect(choice('p1')?.getAttribute('aria-pressed')).toBe('true');
+    expect(choice('p2')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('adds a project to the group and draws it there', () => {
+    seed({ groups: { 'black-smith': [{ id: 'group:1', name: 'work', projects: [] }] } });
+    render(<Canvas model={MODEL} />);
+    openList('group:1');
+    act(() => choice('p2')?.click());
+    expect(storedGroups()['black-smith']?.[0]?.projects).toEqual(['p2']);
+    expect(
+      document
+        .querySelector('[data-project-id="p2"]')
+        ?.closest('li')
+        ?.getAttribute('data-in-group'),
+    ).toBe('group:1');
+  });
+
+  it('MOVES a project that is already in another group', () => {
+    seed({
+      groups: {
+        'black-smith': [
+          { id: 'group:1', name: 'work', projects: ['p1'] },
+          { id: 'group:2', name: 'other', projects: ['p2'] },
+        ],
+      },
+    });
+    render(<Canvas model={MODEL} />);
+    openList('group:1');
+    expect(choice('p2')?.textContent).toContain('other');
+    act(() => choice('p2')?.click());
+    const stored = storedGroups()['black-smith'] ?? [];
+    expect(stored.find((g) => g.id === 'group:1')?.projects).toEqual(['p1', 'p2']);
+    expect(stored.find((g) => g.id === 'group:2')?.projects).toEqual([]);
+  });
+
+  it('takes one back out, leaving it at the top level', () => {
+    seed({ groups: { 'black-smith': [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
+    render(<Canvas model={MODEL} />);
+    openList('group:1');
+    act(() => choice('p1')?.click());
+    expect(storedGroups()['black-smith']?.[0]?.projects).toEqual([]);
+    expect(
+      document
+        .querySelector('[data-project-id="p1"]')
+        ?.closest('li')
+        ?.getAttribute('data-in-group'),
+    ).toBe(null);
+  });
+});

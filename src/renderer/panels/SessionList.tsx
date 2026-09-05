@@ -247,6 +247,12 @@ export type SessionListProps = {
   readonly onPickGroupIcon?: (group: Group) => void;
   readonly onUngroup?: (group: Group) => void;
   /**
+   * Open the list of repos to put in this group. The LIST lives in `Canvas`,
+   * like both icon pickers, because it is wider than this column -- the row
+   * only asks.
+   */
+  readonly onAddToGroup?: (group: Group) => void;
+  /**
    * Removing a project, and bringing one back. ALL THREE ARE REQUIRED, and
    * that is the decision -- read on before making them optional again.
    *
@@ -344,6 +350,7 @@ export function SessionList(props: SessionListProps) {
     onRenameGroup,
     onPickGroupIcon,
     onUngroup,
+    onAddToGroup,
     hiddenProjects,
     onHideProject,
     onRemoveProject,
@@ -1172,6 +1179,28 @@ export function SessionList(props: SessionListProps) {
                         ].join(' ')}
                       >
                         <MoreHorizontal size={12} strokeWidth={1.8} />
+                      </button>
+                    )}
+
+                    {/* Last in the row and last in tab order, as the project
+                        heading's own `+` is: the controls acting on the
+                        heading come first, the one that adds something to it
+                        comes after them. It offers what vam ALREADY KNOWS --
+                        no directory dialog, no validation, no IPC; see
+                        `ProjectPicker`. */}
+                    {onAddToGroup !== undefined && (
+                      <button
+                        type="button"
+                        data-add-to-group={group.id}
+                        onClick={() => onAddToGroup(group)}
+                        title={`Add a repo to ${group.name}`}
+                        aria-label={`add a repo to ${group.name}`}
+                        className={[
+                          'flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                          revealed === group.id ? 'opacity-100' : 'opacity-0',
+                        ].join(' ')}
+                      >
+                        <Plus size={13} strokeWidth={1.7} />
                       </button>
                     )}
 

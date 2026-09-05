@@ -75,6 +75,7 @@ import { FocusEdge } from '../panels/FocusEdge.js';
 import { IconPicker } from '../panels/IconPicker.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
+import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { SessionList } from '../panels/SessionList.js';
 import { visibleTabs } from '../panels/tabs.js';
@@ -90,6 +91,7 @@ import {
   layoutWidths,
 } from '../prefs/panes.js';
 import {
+  addProjectToGroup,
   applyIcons,
   applyPalette,
   applyRenames,
@@ -105,6 +107,7 @@ import {
   type Prefs,
   paletteFor,
   readPrefs,
+  removeProjectFromGroup,
   renameGroup,
   setDetailTab,
   setGroupCollapsed,
@@ -936,6 +939,50 @@ function CanvasInner({
     },
     [prefs, savePrefs],
   );
+
+  /**
+   * The group whose membership is being edited, captured when the list opens
+   * -- the reasoning both icon targets record.
+   */
+  const [pickingMembersFor, setPickingMembersFor] = useState<{
+    readonly source: SourceId;
+    readonly groupId: string;
+    readonly name: string;
+  } | null>(null);
+
+  /**
+   * What the membership list offers: THE PROJECTS VAM ALREADY KNOWS, within
+   * the group's own source, because a project id is a cwd digest unique only
+   * there and membership is matched the same way.
+   *
+   * There is no directory dialog on this path and no `.git` validation:
+   * `repo.ts` refuses to list what vam knows for CREATING a project, on the
+   * grounds that the only list it could offer is the directories it already
+   * has sessions in -- which is the wrong set there and exactly the right one
+   * here. You can only group what exists.
+   */
+  const memberChoices = useMemo((): readonly ProjectChoice[] => {
+    if (pickingMembersFor === null) return [];
+    const { source, groupId } = pickingMembersFor;
+    const choices: ProjectChoice[] = [];
+    for (const project of model.projects) {
+      if (project.source === source) {
+        choices.push({ id: project.id, name: project.name, member: false, groupName: null });
+      }
+    }
+    for (const group of model.groups ?? []) {
+      for (const project of group.projects) {
+        if (project.source !== source) continue;
+        choices.push({
+          id: project.id,
+          name: project.name,
+          member: group.id === groupId,
+          groupName: group.id === groupId ? null : group.name,
+        });
+      }
+    }
+    return choices;
+  }, [model, pickingMembersFor]);
 
   const toggleGroupCollapse = useCallback(
     (group: Group) => {
@@ -2466,6 +2513,11 @@ function CanvasInner({
             );
           }}
           onUngroup={ungroup}
+          onAddToGroup={(group) => {
+            const source = groupSource(prefs.groups, group.id);
+            if (source === null) return;
+            setPickingMembersFor({ source, groupId: group.id, name: group.name });
+          }}
           hiddenProjects={hiddenProjects}
           // Restoring is the only thing the sidebar asks for by itself: it
           // ends nothing, so there is nothing to serialise or refuse.
@@ -2794,6 +2846,41 @@ function CanvasInner({
             setPickingIconFor(null);
           }}
           onClose={() => setPickingIconFor(null)}
+        />
+      )}
+
+      {pickingMembersFor !== null && (
+        <ProjectPicker
+          groupName={pickingMembersFor.name}
+          choices={memberChoices}
+          onToggle={(projectId, member) => {
+            const name = memberChoices.find((choice) => choice.id === projectId)?.name ?? projectId;
+            savePrefs(
+              member
+                ? // MOVES it, at most one group per project: a project in two
+                  // groups walks its sessions twice and mints duplicate
+                  // `info:<sessionId>` node ids, which break ReactFlow and the
+                  // id `j`/`k` navigates by (`to-canvas.ts:312`).
+                  addProjectToGroup(
+                    prefs,
+                    pickingMembersFor.source,
+                    pickingMembersFor.groupId,
+                    projectId,
+                  )
+                : removeProjectFromGroup(
+                    prefs,
+                    pickingMembersFor.source,
+                    pickingMembersFor.groupId,
+                    projectId,
+                  ),
+            );
+            setStatus(
+              member
+                ? `${name} → ${pickingMembersFor.name}`
+                : `${name} left ${pickingMembersFor.name} — it is back at the top level`,
+            );
+          }}
+          onClose={() => setPickingMembersFor(null)}
         />
       )}
 
