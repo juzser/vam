@@ -27,6 +27,7 @@ import type { PreloadSourceApi } from '../shared/preload-api.js';
 import { SmithClient } from './adapter/client.js';
 import { useCanvas } from './adapter/useCanvas.js';
 import { Canvas } from './canvas/Canvas.js';
+import { ErrorBoundary } from './errors/ErrorBoundary.js';
 import { DEMO_MODEL } from './fixtures/demo.js';
 import { createSourceFromHttp } from './sources/http-factory.js';
 import { describeFailure, type SessionSource } from './sources/port.js';
@@ -83,10 +84,21 @@ export function App() {
   // `window.api` and nothing below it is reachable, which is why the check is
   // for the object rather than for a build flag.
   const api = globalThis.window?.api;
-  if (api !== undefined) {
-    return <DesktopCanvas api={api} update={api.update} />;
-  }
-  return isDemo() ? <DemoCanvas /> : <BrowserCanvas client={client} />;
+  // The outer boundary: the backstop for a throw in the routing itself or in
+  // `UpdateNotice`, neither of which the canvas boundary in `SourceCanvas`
+  // can see. It is the coarse one -- when it draws, the app is gone and only
+  // the card is left -- which is exactly why it is not the only one.
+  return (
+    <ErrorBoundary surface="vam">
+      {api !== undefined ? (
+        <DesktopCanvas api={api} update={api.update} />
+      ) : isDemo() ? (
+        <DemoCanvas />
+      ) : (
+        <BrowserCanvas client={client} />
+      )}
+    </ErrorBoundary>
+  );
 }
 
 /**
@@ -233,19 +245,26 @@ function SourceCanvas({
         </p>
       )}
       <div className="min-h-0 flex-1">
-        <Canvas
-          model={model}
-          source={
-            source === null
-              ? // Not the default `READ_ONLY_SOURCE`: it says "no write route
-                // — this canvas is read-only", which is a claim about a source
-                // that has not answered yet and, here, is usually wrong. With
-                // `shown` set there is no source and there will not be one, so
-                // the cell says that instead of connecting forever.
-                { kind: 'connecting', error: shown }
-              : { kind: 'session', source, error: shown, onWrote: reload }
-          }
-        />
+        {/* The canvas is where the throw actually comes from, and the banner
+            above it is usually the sentence that explains why -- so the
+            boundary goes HERE, under the banner, rather than at the root
+            where it would take the explanation down with the canvas. It also
+            covers the phone shell, which `Canvas` renders. */}
+        <ErrorBoundary surface="the canvas">
+          <Canvas
+            model={model}
+            source={
+              source === null
+                ? // Not the default `READ_ONLY_SOURCE`: it says "no write route
+                  // — this canvas is read-only", which is a claim about a source
+                  // that has not answered yet and, here, is usually wrong. With
+                  // `shown` set there is no source and there will not be one, so
+                  // the cell says that instead of connecting forever.
+                  { kind: 'connecting', error: shown }
+                : { kind: 'session', source, error: shown, onWrote: reload }
+            }
+          />
+        </ErrorBoundary>
       </div>
     </div>
   );
