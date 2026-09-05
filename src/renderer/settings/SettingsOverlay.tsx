@@ -827,9 +827,40 @@ function BindingLine({
   const slots = Array.from({ length: MAX_BINDINGS }, (_, slot) => slot);
   const armed = capturing?.id === row.id && capturing.scope === scope;
   return (
-    // Fixed key columns are what makes the list scan: every label starts at the
-    // same x, so the eye reads a column of actions rather than a ragged edge.
-    <li className="grid grid-cols-[68px_68px_1fr_auto] items-center gap-x-[10px] py-[3px]">
+    // Three columns, in the order the row is read: what the action is, then its
+    // first key, then its second. The label takes the one flexible track and
+    // the key slots are fixed, which is what makes the list scan -- every label
+    // starts at the same x AND both key columns hold one x down the whole list,
+    // however long the label above them was.
+    <li className="grid grid-cols-[1fr_68px_68px] items-center gap-x-[10px] py-[3px]">
+      {/* The reset control rides in the label column rather than claiming a
+          fourth one: a track that exists only on overridden rows would shove
+          their key slots sideways, and the operator asked for three columns.
+          `min-w-0` overrides a grid item's auto minimum, so a long label
+          truncates here instead of widening the track. */}
+      <span className="flex min-w-0 items-center gap-2">
+        {/* While the row is armed the label column carries the instruction that
+            used to live in the capture box's 160px placeholder -- which is how
+            the box keeps the same 68px geometry in every state. */}
+        <span
+          data-binding-label={row.id}
+          title={row.label}
+          className="truncate text-[13px] text-ink"
+        >
+          {armed ? 'press a key — Esc cancels' : row.label}
+        </span>
+        {row.overridden ? (
+          <button
+            type="button"
+            data-binding-reset={row.id}
+            aria-label={`reset ${row.label} shortcut`}
+            onClick={onReset}
+            className={`shrink-0 cursor-pointer text-ink-dim hover:text-ink ${FOCUS_RING}`}
+          >
+            <RotateCcw size={12} strokeWidth={1.8} aria-hidden="true" />
+          </button>
+        ) : null}
+      </span>
       {slots.map((slot) => {
         const keys = row.keys[slot];
         if (armed && capturing.slot === slot) {
@@ -891,23 +922,6 @@ function BindingLine({
           </button>
         );
       })}
-      {/* While the row is armed its label column carries the instruction that
-          used to live in the capture box's 160px placeholder — which is how the
-          box keeps the same 68px geometry in every state. */}
-      <span className="text-[13px] text-ink">
-        {armed ? 'press a key — Esc cancels' : row.label}
-      </span>
-      {row.overridden ? (
-        <button
-          type="button"
-          data-binding-reset={row.id}
-          aria-label={`reset ${row.label} shortcut`}
-          onClick={onReset}
-          className={`cursor-pointer text-ink-dim hover:text-ink ${FOCUS_RING}`}
-        >
-          <RotateCcw size={12} strokeWidth={1.8} aria-hidden="true" />
-        </button>
-      ) : null}
     </li>
   );
 }
