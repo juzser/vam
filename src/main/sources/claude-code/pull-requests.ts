@@ -88,6 +88,14 @@ const clip = (text: string): string =>
     : text.trim();
 
 /** What a failed `execFile` hands back. Written out for `deliver.ts`'s reason. */
+/**
+ * The fallback when stderr was empty. Never `failure.message`: node builds
+ * that as `Command failed: <file> <args joined>`, which republishes the argv
+ * unbounded into the error log and a prefilled PUBLIC issue body (see
+ * `deliver.ts`, where the argv held the operator's prompt).
+ */
+const NO_WORDS = 'the command exited without saying why';
+
 export type SpawnFailure = {
   readonly message: string;
   readonly code?: string | number | undefined;
@@ -155,7 +163,7 @@ export function classifyGhFailure(input: {
   }
   return unavailable(
     'gh-failed',
-    `asking GitHub about ${branch} failed: ${said === '' ? failure.message : said}`,
+    `asking GitHub about ${branch} failed: ${said === '' ? NO_WORDS : said}`,
   );
 }
 

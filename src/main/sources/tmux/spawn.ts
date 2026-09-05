@@ -64,9 +64,20 @@ const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_TMUX_MESSAGE = 400;
 
 /** What a failed `execFile` hands back -- the shape `deliver.ts` documents. */
+/**
+ * What the operator is told when the process failed with nothing on stderr.
+ *
+ * `failure.message` is NOT used: node builds it as `Command failed: <file>
+ * <args joined>`, so it republishes the argv -- tmux session names carry the
+ * project label, and the same fallback in `deliver.ts` carried the whole
+ * prompt into a prefilled PUBLIC issue body. It is also unbounded, while
+ * `clip` is applied to stderr only.
+ */
+const NO_WORDS = 'the process exited without saying why';
+
 export type SpawnFailure = {
   readonly message: string;
-  readonly code?: string | number | undefined;
+  readonly code?: string | number | null | undefined;
   readonly killed?: boolean | undefined;
   /** Which signal ended it, when one did. `execFile` reports this beside `killed`. */
   readonly signal?: string | undefined;
@@ -122,8 +133,14 @@ export function classifyTmuxFailure(input: {
   // signal means something outside vam ended tmux (the OOM killer sends
   // SIGKILL), which is not a hang and must not be reported as one: the
   // operator would go looking for a slow tmux that was never slow.
-  if (failure.killed === true) {
-    if (failure.signal === TIMEOUT_SIGNAL) {
+  // `killed` is NOT the flag that distinguishes them: node sets it only when
+  // node itself killed the child, and it only ever kills with TIMEOUT_SIGNAL.
+  // An external kill arrives as `{code: null, killed: false, signal:
+  // 'SIGKILL'}` -- measured on node 26 -- so the arm below was unreachable in
+  // production and every real kill fell through to `refused/tmux-failed`,
+  // i.e. "tmux understood and declined", for a process that was killed.
+  if (failure.killed === true || failure.signal !== undefined) {
+    if (failure.killed === true && failure.signal === TIMEOUT_SIGNAL) {
       return {
         kind: 'unreachable',
         code: 'timed-out',
@@ -162,7 +179,7 @@ export function classifyTmuxFailure(input: {
   return {
     kind: 'refused',
     code: 'tmux-failed',
-    message: `tmux failed while ${action}: ${said === '' ? failure.message : said}`,
+    message: `tmux failed while ${action}: ${said === '' ? NO_WORDS : said}`,
   };
 }
 

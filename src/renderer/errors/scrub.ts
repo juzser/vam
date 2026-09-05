@@ -26,6 +26,14 @@
  *      from the home directory and from any `/Users/<name>` in the text, so
  *      the browser build (which has no `homedir`) is covered by shape alone.
  *   6. Pids. A number that means nothing off the machine it was taken on.
+ *   7. tmux session names vam minted -- `vam-<project slug>-<tail>`. vam's
+ *      own messages carry them UNQUOTED, so rule 3 never sees them, and the
+ *      slug is the project label.
+ *
+ * WHAT IS NOT REMOVED, and the footer must not claim otherwise: an absolute
+ * path outside `/Users` and `/home` (`/Volumes/clients/acme/payroll`), and an
+ * unquoted project or branch name arriving in free prose. The report is shown
+ * to the operator before they submit it for exactly that reason.
  *
  * WHAT IS KEPT: the failure code, the surrounding prose, and plain counts --
  * "pairing refused, 3 live sessions share this cwd, 1 vam pane" survives
@@ -50,6 +58,14 @@ const SINGLE_QUOTED = /(^|[\s([:=])'[^']+'/g;
 const BACKTICKED = /`[^`]*`/g;
 const HOME_PATH = /(?:\/Users|\/home)\/([A-Za-z0-9._-]+)(\/[^\s"'`,;)\]]*)?/g;
 const PID = /\bpid[\s=:]+\d+/gi;
+/**
+ * A tmux session name vam created. `vam-<slug of the project label>-<tail>`
+ * (`tmux/argv.ts`), and vam's OWN failure messages interpolate it bare --
+ * `creating session vam-acme-corp-payroll-a1b2c3` -- so the quoted-name rule
+ * never sees it and the project label went out whole. Redacting by prefix
+ * needs no vocabulary: every name of this shape is one vam minted.
+ */
+const VAM_SESSION = /\bvam-[A-Za-z0-9_-]+/g;
 
 /** Regex-escape, so a username with a `.` in it cannot become a wildcard. */
 function literal(text: string): string {
@@ -82,7 +98,8 @@ export function scrub(text: string, homeDir?: string): string {
     .replace(HOME_PATH, (_match, _user, tail: string | undefined) =>
       tail === undefined || tail === '' ? '~' : `~/${REDACTED}`,
     )
-    .replace(PID, `pid ${REDACTED}`);
+    .replace(PID, `pid ${REDACTED}`)
+    .replace(VAM_SESSION, REDACTED);
 
   for (const name of names) {
     out = out.replace(new RegExp(`\\b${literal(name)}\\b`, 'g'), REDACTED);
