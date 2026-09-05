@@ -86,6 +86,7 @@ import {
   applyTheme,
   browserStorage,
   DEFAULT_FOCUS_SHARE,
+  FOCUS_SHARE_OFF,
   type EffectiveTheme,
   isProjectHidden,
   type Prefs,
@@ -110,7 +111,7 @@ import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
 import { copyText } from './clipboard.js';
 import { KeySheet } from './KeySheet.js';
-import { infoNodeId, layoutCanvas, orderedSessions } from './layout.js';
+import { infoNodeId, layoutCanvas, orderedSessions, sessionBounds } from './layout.js';
 import { type FlowNodeLike, toNavNodes } from './nav-nodes.js';
 import { countTurnsWithInput, type PendingPrompt, reconcile, withPending } from './optimistic.js';
 import { PROVIDER_MARKS } from './provider-marks.js';
@@ -740,7 +741,7 @@ function CanvasInner({
   const [hiddenSourceless, setHiddenSourceless] = useState<readonly string[]>([]);
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
-  const { getNodes, zoomIn, zoomOut, fitView, setCenter } = useReactFlow();
+  const { getNodes, zoomIn, zoomOut, fitView, fitBounds, setCenter } = useReactFlow();
 
   const matches = useMemo(() => searchMatches(allEntries, query), [allEntries, query]);
 
@@ -902,24 +903,36 @@ function CanvasInner({
   const focusedSessionId = focusedSpec?.entry.session.id ?? null;
 
   /**
-   * The viewport follows focus.
+   * The viewport follows focus, and frames a session when you arrive in one.
    *
-   * `j`/`k` can walk to a session that is off screen, and before this the
-   * canvas simply did not move — the sidebar and the detail panel updated
+   * `j`/`k` can walk to a session that is off screen, and before any of this
+   * the canvas simply did not move — the sidebar and the detail panel updated
    * while the cards stayed put, so the one pane that shows a session's SHAPE
-   * was the one pane that did not follow you. Centring on the focused node
-   * makes the three views agree about where you are, which is the same
-   * "one focus, three views" rule this file opens with.
+   * was the one pane that did not follow you.
    *
-   * The zoom argument is deliberately omitted: `setCenter` keeps the current
-   * scale, so following focus never overrides a zoom the operator chose.
+   * WHEN IT FRAMES IS THE WHOLE DESIGN, and it is a correction of a mistake
+   * this file has already made once. A previous version fitted on every focus
+   * move; the operator asked for it to be removed, and the comment that came
+   * with it admitted it deliberately overrode a zoom they had set by hand. The
+   * fault was not the fit, it was the frequency. Inside one session the
+   * framing is already right — every node of it is on screen — so a re-fit
+   * there can do nothing except undo whatever the operator just did with the
+   * zoom controls. Between sessions there is a new thing to look at and the
+   * old framing was chosen for something else.
    *
-   * A PAN, NEVER A FIT. An intermediate version framed the focused session's
-   * whole row with `fitView`, which is a scale change by construction — it
-   * picks whatever zoom makes those nodes fit — and its own comment admitted
-   * it overrode a zoom the operator had set by hand. The operator asked for
-   * that automatic zoom onto a node or a session to go. Following focus is
-   * what makes `j`/`k` usable and stays; the scale change is what left.
+   * So: arriving in a DIFFERENT session frames that session, whole — root card
+   * and step nodes, `sessionBounds` — at the operator's own share of the
+   * canvas width. Moving about inside one pans and nothing else, with the zoom
+   * argument omitted so `setCenter` keeps the scale exactly where it was.
+   *
+   * The share can be turned OFF (`FOCUS_SHARE_OFF`), and then this is a pan
+   * and only a pan, which is precisely the behaviour that shipped between the
+   * two asks. Somebody who wants that back should not have to ask for code to
+   * be deleted a second time.
+   *
+   * The FIRST landing is not a move between sessions and does not frame: focus
+   * settles on a session shortly after mount without anyone moving it, and the
+   * opening viewport belongs to `DEFAULT_VIEWPORT`, not to this effect.
    */
   // Lifted out of the effect so the dependency array names exactly what the
   // effect reads. Depending on `focusedSpec` itself would re-centre on every
@@ -929,12 +942,61 @@ function CanvasInner({
   const focusCenterY =
     focusedSpec === null ? null : focusedSpec.position.y + focusedSpec.size.height / 2;
 
+  // Same rule, and the same reason, for the session's frame: four numbers the
+  // geometry makes deterministic rather than one object identity that changes
+  // whenever the model is polled.
+  const frame = useMemo(
+    () => (focusedSessionId === null ? null : sessionBounds(layout, focusedSessionId)),
+    [layout, focusedSessionId],
+  );
+  const frameX = frame?.x ?? null;
+  const frameY = frame?.y ?? null;
+  const frameWidth = frame?.width ?? null;
+  const frameHeight = frame?.height ?? null;
+
+  /** The session last framed, so "a different session" is a comparison and not
+   *  a guess. `undefined` until focus first lands, which is what keeps the
+   *  opening render out of it. */
+  const framedSession = useRef<string | null | undefined>(undefined);
+  const focusShare = prefs.focusViewportShare;
+
   useEffect(() => {
     if (focusCenterX === null || focusCenterY === null) {
       return;
     }
+    // Re-frame when the SHARE changes too: the operator is looking at the
+    // canvas while they turn the stepper, and a setting whose effect waits for
+    // the next keypress reads as a setting that did nothing.
+    const key = focusedSessionId === null ? null : `${focusedSessionId}:${focusShare}`;
+    const arrived = framedSession.current !== undefined && framedSession.current !== key;
+    framedSession.current = key;
+    if (
+      arrived &&
+      focusShare !== FOCUS_SHARE_OFF &&
+      frameX !== null &&
+      frameY !== null &&
+      frameWidth !== null &&
+      frameHeight !== null
+    ) {
+      void fitBounds(
+        { x: frameX, y: frameY, width: frameWidth, height: frameHeight },
+        { padding: focusPadding(focusShare), duration: 220 },
+      );
+      return;
+    }
     setCenter(focusCenterX, focusCenterY, { duration: 220 });
-  }, [focusCenterX, focusCenterY, setCenter]);
+  }, [
+    focusCenterX,
+    focusCenterY,
+    focusedSessionId,
+    focusShare,
+    frameX,
+    frameY,
+    frameWidth,
+    frameHeight,
+    fitBounds,
+    setCenter,
+  ]);
 
   /**
    * What the detail panel expands: the focused step if a step is focused, else
