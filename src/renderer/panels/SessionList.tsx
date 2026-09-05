@@ -150,6 +150,16 @@ export type SessionListProps = {
    * change edit all of them to say "not focused".
    */
   readonly keyboardHere?: boolean;
+  /**
+   * Is this pane the whole screen, on a device with no keyboard and no canvas?
+   *
+   * Optional and defaulting to false for the same reason as `keyboardHere`.
+   * It selects the row variant the UI spec's D1 describes -- not a second
+   * component, the same one saying different things, because on a phone this
+   * list IS the surface: nothing beside it repeats a status, answers a
+   * question, or gives a cursor somewhere to be.
+   */
+  readonly phone?: boolean;
   /** Which factory this is. The mockup calls it a workspace; vam has one. */
   readonly workspace: string;
   readonly filter: string;
@@ -340,6 +350,7 @@ export function SessionList(props: SessionListProps) {
     allEntries: unfiltered,
     focusedSessionId,
     keyboardHere = false,
+    phone = false,
     workspace,
     filter,
     filtering,
@@ -907,7 +918,7 @@ export function SessionList(props: SessionListProps) {
                   type="button"
                   onClick={onOpenFilter}
                   aria-label="search sessions"
-                  className="vam-tap flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5 text-ink-faint hover:border-line-strong"
+                  className="vam-tap flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5 text-ink-dim hover:border-line-strong"
                 >
                   <Search size={14} strokeWidth={1.6} />
                   <span className="flex-1 text-left text-[12px]">Search sessions</span>
@@ -1031,7 +1042,7 @@ export function SessionList(props: SessionListProps) {
             style={{ width: popoverWidth }}
             className="absolute top-[36px] right-0 z-20 flex flex-col gap-2 rounded-[9px] border border-line-strong bg-panel p-2.5 shadow-lg"
           >
-            <span className="font-mono text-[9.5px] text-ink-faint uppercase tracking-[0.12em]">
+            <span className="font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
               Status
             </span>
             <div className="flex flex-wrap items-center gap-1.5">
@@ -1061,7 +1072,7 @@ export function SessionList(props: SessionListProps) {
               })}
             </div>
 
-            <span className="mt-0.5 font-mono text-[9.5px] text-ink-faint uppercase tracking-[0.12em]">
+            <span className="mt-0.5 font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
               Origin
             </span>
             {/* Each row says what it takes away. A count is the difference
@@ -1606,6 +1617,10 @@ export function SessionList(props: SessionListProps) {
                     {section.items.map(({ session }) => {
                       const isFocused = session.id === focusedSessionId;
                       const needsYou = session.status === 'waiting';
+                      // The newest step's own input: what the session asked,
+                      // in the words the session screen's IN region shows.
+                      // Newest first, which is the order `decisions` is in.
+                      const newestAsk = session.decisions[0]?.input ?? null;
                       // The SAME notion the close button already wears, applied
                       // to the whole row: closing can take the full stop timeout,
                       // and for those fifteen seconds the row is not something
@@ -1679,13 +1694,27 @@ export function SessionList(props: SessionListProps) {
                                   // than relying on its content to happen to
                                   // add up to 44px.
                                   'vam-tap relative flex w-full cursor-pointer flex-col gap-[7px] overflow-hidden rounded-[9px] px-2.5 py-2.5 text-left',
-                                  isFocused
+                                  // Over the 44 floor `vam-tap` sets, and the
+                                  // extra is what makes a scrolling list
+                                  // forgiving of a moving thumb.
+                                  phone ? 'min-h-[56px]' : '',
+                                  isFocused && !phone
                                     ? 'border border-line-loud bg-raised'
                                     : 'border border-transparent',
                                 ].join(' ')}
                               >
-                                {isFocused && (
+                                {/* Not on a phone. `focusedId` does not move
+                                    when the session screen closes, so one
+                                    round trip leaves this bar marking a
+                                    session the operator has already left --
+                                    and the ring around it measures 2.15:1 on
+                                    the light canvas, under even the 3:1
+                                    non-text floor (issue 188). On a desktop it
+                                    says where the next keystroke lands; here
+                                    nothing lands anywhere. */}
+                                {isFocused && !phone && (
                                   <span
+                                    data-row-cursor
                                     className={`absolute top-0 bottom-0 left-0 w-0.5 ${STATUS_DOT[session.status]}`}
                                   />
                                 )}
@@ -1708,18 +1737,88 @@ export function SessionList(props: SessionListProps) {
                                     is now the only surface that draws it, and
                                     the `s` chord still picks it. */}
                                   <span
-                                    className={`truncate text-[13px] ${isFocused ? 'font-medium text-ink' : 'text-ink-dim'}`}
+                                    data-row-title
+                                    className={[
+                                      'truncate text-[13px]',
+                                      // The dim-unless-focused title is a
+                                      // keyboard affordance: it exists so a
+                                      // cursor row pops out of a column. With
+                                      // no cursor it is only every row but one
+                                      // being harder to read than it needs to be.
+                                      phone
+                                        ? 'text-ink'
+                                        : isFocused
+                                          ? 'font-medium text-ink'
+                                          : 'text-ink-dim',
+                                    ].join(' ')}
                                   >
                                     {session.title}
                                   </span>
                                 </span>
 
+                                {/* One line of real information where the
+                                    desktop spends one on a placeholder. The
+                                    status WORD is the second channel WCAG
+                                    1.4.1 wants beside the dot; `needs you` is
+                                    the `waiting` token on session state, which
+                                    is what that token means and the only place
+                                    a row borrows one. The branch is appended
+                                    LAST so it is the segment that truncates
+                                    first at 320px -- the age never is. */}
+                                {phone && (
+                                  <span
+                                    data-row-meta
+                                    className="flex min-w-0 items-center gap-1 truncate font-mono text-[10px] text-ink-dim"
+                                  >
+                                    {session.status === 'waiting' ? (
+                                      <span data-row-needs-you className="flex-none text-waiting">
+                                        needs you
+                                      </span>
+                                    ) : (
+                                      <span className="flex-none">{session.status}</span>
+                                    )}
+                                    <span className="flex-none">·</span>
+                                    <span
+                                      data-session-age
+                                      title={
+                                        session.age === null
+                                          ? 'this source cannot say when the session last did anything'
+                                          : `last activity ${session.age} ago`
+                                      }
+                                      className="flex-none"
+                                    >
+                                      {session.age ?? 'no age'}
+                                    </span>
+                                    {session.branch !== null && (
+                                      <>
+                                        <span className="flex-none">·</span>
+                                        <span data-session-branch className="truncate">
+                                          {session.branch}
+                                        </span>
+                                      </>
+                                    )}
+                                  </span>
+                                )}
+                                {/* The waiting row's third line: what is being
+                                    asked, rather than only that something is.
+                                    The desktop sidebar sits beside a canvas and
+                                    a detail pane that answer it; this list has
+                                    nothing beside it. */}
+                                {phone && needsYou && newestAsk !== null && (
+                                  <span
+                                    data-row-question
+                                    className="line-clamp-2 text-[11px] text-ink-dim"
+                                  >
+                                    {newestAsk}
+                                  </span>
+                                )}
                                 {/* Branch on the left, time on the right, and nothing
                                 between them. The step-verb pill and the progress
                                 bar that used to sit here were removed at the
                                 operator's request: both drew a per-status colour
                                 channel over data no source supplies, so a row at
                                 rest read as a dashboard reporting nothing. */}
+                                {!phone && (
                                 <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
                                   <span className="flex min-w-0 flex-1 items-center gap-1">
                                     <GitBranch size={10} strokeWidth={1.6} />
@@ -1758,6 +1857,7 @@ export function SessionList(props: SessionListProps) {
                                     {session.age ?? '—'}
                                   </span>
                                 </span>
+                                )}
                               </button>
 
                               {/* Mouse route to the same thing `x` does. Hidden until the
@@ -1814,7 +1914,7 @@ export function SessionList(props: SessionListProps) {
           })}
 
           {entries.length === 0 && (
-            <li className="px-1 py-4 text-[11px] text-ink-faint">
+            <li className="px-1 py-4 text-[11px] text-ink-dim">
               {filter.trim() === '' ? 'No sessions yet' : 'No match'}
             </li>
           )}
@@ -1828,7 +1928,7 @@ export function SessionList(props: SessionListProps) {
           must never be ambiguous about. */}
       {removed.length > 0 && (
         <div className="flex flex-wrap gap-1.5 border-line border-t px-[11px] py-2">
-          <span className="w-full font-mono text-[9px] text-ink-faint uppercase tracking-[0.12em]">
+          <span className="w-full font-mono text-[9px] text-ink-dim uppercase tracking-[0.12em]">
             Removed
           </span>
           {removed.map((project) => (
