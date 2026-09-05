@@ -1345,6 +1345,56 @@ function cycleWording(result: PaneSendResult): string | null {
   }
 }
 
+/**
+ * What a session says it is waiting on, and whether vam can do anything about
+ * it.
+ *
+ * WHY THIS IS SEPARATE FROM THE QUESTION CARD. The card is drawn from
+ * `AskUserQuestion` records in the transcript. The commonest thing a session
+ * actually blocks on -- a tool-approval prompt -- has no transcript record
+ * while it is open, so `questions` is empty for it, no card is drawn, and the
+ * pane used to show NOTHING for a session that was stuck. This is drawn from
+ * the session's own per-process file, which is the only surface that says so
+ * (`waitingFor` in `model.ts`).
+ *
+ * THE ASYMMETRY IS STATED, NOT HIDDEN. vam can SEE any session waiting; it can
+ * only type into one it started. So the second line names which of the three
+ * cases this row is in, and the third state -- vam never got to ask tmux -- is
+ * kept apart from "vam did not start this", because a refusal that names the
+ * wrong cause sends the operator somewhere the answer is not.
+ */
+function WaitingNote({
+  waitingFor,
+  vamControlled,
+}: {
+  readonly waitingFor: string | null;
+  readonly vamControlled: boolean | undefined;
+}) {
+  const reach =
+    vamControlled === true ? 'answerable' : vamControlled === false ? 'unreachable' : 'unknown';
+  const remedy =
+    reach === 'answerable'
+      ? 'vam started this session — the Terminal tab types into its pane'
+      : reach === 'unreachable'
+        ? 'vam did not start this session, so it cannot type into it — answer it in the terminal it is running in'
+        : 'vam could not ask tmux which pane this is, so it cannot say whether it could reach it';
+  return (
+    <div
+      data-session-waiting
+      data-waiting-reach={reach}
+      className="flex flex-col gap-1 rounded-[10px] border border-waiting bg-panel px-2.5 py-2"
+    >
+      <p className="text-[11.5px] text-ink">
+        {/* The cause VERBATIM. The observed values are a sample of an open set,
+          so an unrecognised one is printed rather than swallowed -- a session
+          waiting on something vam has no word for is still waiting. */}
+        waiting on you — {waitingFor ?? 'the session did not say what for'}
+      </p>
+      <p className="text-[10.5px] text-ink-faint">{remedy}</p>
+    </div>
+  );
+}
+
 function QuestionCard({
   questions,
   firstOptionRef,
@@ -2164,6 +2214,15 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const questions = entry?.session.questions ?? [];
   /**
+   * WHAT THE SESSION ITSELF SAYS IT IS BLOCKED ON, which is a different fact
+   * from `questions` and mostly a disjoint one: a tool-approval prompt writes
+   * no transcript record, so the surface that names it is the session's own
+   * per-process file and there is never a question to go with it. ABSENT --
+   * not null -- is "nothing says anyone is waiting"; see `model.ts`.
+   */
+  const waitingFor =
+    entry === null || !('waitingFor' in entry.session) ? undefined : (entry.session.waitingFor ?? null);
+  /**
    * THE SET, not the question. One `AskUserQuestion` call can carry several,
    * and drawing the newest open one put question TWO of a two-question call on
    * screen with question one nowhere (`panels/question-set.ts`).
@@ -2651,7 +2710,7 @@ export function DetailPanel(props: DetailPanelProps) {
         off the composer's so the composer could stand down while a question is
         open, and a block that outlived its contents would be a doubled seam
         and 25px of dead height in the pane's most common state. */}
-      {current !== 'Terminal' && newestQuestion !== null && (
+      {current !== 'Terminal' && (newestQuestion !== null || waitingFor !== undefined) && (
         <div
           data-question-bar
           className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3"
@@ -2672,6 +2731,13 @@ export function DetailPanel(props: DetailPanelProps) {
             turn a pane into a queue. It answers nothing; see `QuestionCard`.
             A session that asked none, or asked outside the tail vam reads
             (`TAIL_BYTES`), draws nothing here rather than an empty box. */}
+          {/* Above the card, because it is the more general fact: the card is
+            one shape of ask, this is "somebody is blocked on you" whatever the
+            shape. A session can be both -- a question on screen IS a waiting
+            state -- and then the note says which pane can answer it. */}
+          {waitingFor !== undefined && (
+            <WaitingNote waitingFor={waitingFor} vamControlled={entry?.session.vamControlled} />
+          )}
           {newestQuestion !== null && (
             <QuestionCard
               key={setId}
