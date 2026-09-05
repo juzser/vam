@@ -294,6 +294,36 @@ describe('write routes', () => {
     expect(await response.json()).toMatchObject({ ok: false, error: { code: 'not-implemented' } });
   });
 
+  it('starts a session in a project, and one in a directory', async () => {
+    const createSession = vi.fn(async () => null);
+    const createSessionInDirectory = vi.fn(async () => null);
+    const base = await start({ source: makeSource({ createSession, createSessionInDirectory }) });
+    await post(base, '/api/create-session', { projectId: 'p1', title: 'a run' });
+    await post(base, '/api/create-session-in', { cwd: '/somewhere/else', title: 'a run' });
+    expect(createSession).toHaveBeenCalledWith('p1', 'a run', undefined);
+    expect(createSessionInDirectory).toHaveBeenCalledWith('/somewhere/else', 'a run', undefined);
+  });
+
+  it("refuses a relative directory, which would resolve against main's own cwd", async () => {
+    const createSessionInDirectory = vi.fn(async () => null);
+    const base = await start({ source: makeSource({ createSessionInDirectory }) });
+    const response = await post(base, '/api/create-session-in', { cwd: 'else', title: 'a run' });
+    expect(response.status).toBe(400);
+    expect(createSessionInDirectory).not.toHaveBeenCalled();
+  });
+
+  it('drops a body far larger than any real prompt instead of buffering it', async () => {
+    const recordPrompt = vi.fn(async () => null);
+    const base = await start({ source: makeSource({ recordPrompt }) });
+    const huge = JSON.stringify({ sessionId: 's1', prompt: 'x'.repeat(3_000_000) });
+    await fetch(`${base}/api/record-prompt`, {
+      method: 'POST',
+      headers: { 'cf-access-jwt-assertion': token() },
+      body: huge,
+    }).catch(() => undefined);
+    expect(recordPrompt).not.toHaveBeenCalled();
+  });
+
   it('rejects a GET on a write route', async () => {
     expect((await get(await start(), '/api/close-session')).status).toBe(405);
   });
