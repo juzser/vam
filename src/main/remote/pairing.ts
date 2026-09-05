@@ -90,10 +90,20 @@ export function normalizeCode(input: string): string {
     .slice(0, CODE_LENGTH);
 }
 
+/**
+ * The name a device proposes is ATTACKER-CHOSEN TEXT, and it is the operator's
+ * only discriminator in the Allow prompt: `source` behind `tailscale serve` is
+ * always 127.0.0.1 and says nothing. So quotation marks and brackets come out
+ * as well as control characters -- not because they inject anything (React
+ * escapes markup) but because a name that can close a quotation can prepend
+ * "Read-only." to the sentence and argue against the warning it sits inside.
+ * The panel renders the name in its own element for the same reason.
+ */
 function cleanName(name: string): string {
   const cleaned = name
     .slice(0, MAX_NAME_LENGTH * 4)
     .replace(/[\p{C}]/gu, ' ')
+    .replace(/["'\u2018\u2019\u201c\u201d\u00ab\u00bb`()[\]{}<>]/g, '')
     .trim()
     .replace(/\s+/g, ' ')
     .slice(0, MAX_NAME_LENGTH);
@@ -112,9 +122,13 @@ export type PairingState = {
 };
 
 /**
- * A closed vocabulary, and none of it tells a caller how close it got.
- * `no-code` covers expiry, consumption and "the screen is not open" alike --
- * three states an attacker must not be able to tell apart.
+ * The internal reason, for the desktop and for tests. IT IS NOT WHAT THE
+ * CALLER IS TOLD: `server.ts` collapses every one of these into a single 401
+ * that is byte-identical to the one an unauthenticated request gets. A caller
+ * that could tell `no-code` from `wrong-code` would learn exactly when the
+ * operator has the pairing screen open, which is the one moment worth
+ * attacking -- and the desktop, which needs to know a code burned, reads
+ * `state()` rather than a reply the phone relayed.
  */
 export type PairReason = 'no-code' | 'wrong-code' | 'burned' | 'throttled' | 'denied';
 
@@ -172,6 +186,15 @@ export function createPairing(options: PairingOptions): Pairing {
     }
   };
 
+  /**
+   * Every refused guess, not just a wrong code.
+   *
+   * A `no-code` attempt used to return before this and was therefore free:
+   * an attacker could poll once a second at no cost, watch for the moment the
+   * operator opened the screen, and only then spend its five guesses. Probing
+   * has to cost the same as guessing, or the throttle is guarding a door the
+   * attacker never has to walk through.
+   */
   const recordFailure = (): void => {
     const at = now();
     failures = failures.filter((when) => at - when < GLOBAL_WINDOW_MS);
@@ -190,6 +213,16 @@ export function createPairing(options: PairingOptions): Pairing {
       // Minting kills the old code AND any request waiting on it: the operator
       // pressing Regenerate is the operator saying "not that one".
       settleAwaiting(false);
+      // AND IT CLEARS THE THROTTLE. This is not a hole -- it is the whole
+      // point of the throttle. Opening the pairing screen is a human standing
+      // at this machine, which is a stronger signal than any failure counter,
+      // and an attacker cannot produce it: they are on the far side of the
+      // network with no way to press this button. Without the reset, ten
+      // cheap wrong guesses lock the operator's OWN phone out for fifteen
+      // minutes, and repeating that denies pairing forever. The throttle
+      // exists to stop guessing, never to stop the operator.
+      throttledUntil = 0;
+      failures = [];
       burned = false;
       attempts = 0;
       live = { code: mintCode(), expiresAt: now() + CODE_TTL_MS };
@@ -220,14 +253,21 @@ export function createPairing(options: PairingOptions): Pairing {
       if (throttledUntil > now()) {
         return { ok: false, reason: 'throttled' };
       }
+      const typed = normalizeCode(code);
       if (burned) {
+        // Compared against a decoy and counted, so a burned screen answers in
+        // the same time, at the same cost, as a live one.
+        constantTimeEquals(typed, mintCode());
+        recordFailure();
         return { ok: false, reason: 'burned' };
       }
       const open = current();
       if (open === null || awaiting !== null) {
+        constantTimeEquals(typed, mintCode());
+        recordFailure();
         return { ok: false, reason: 'no-code' };
       }
-      if (!constantTimeEquals(normalizeCode(code), open.code)) {
+      if (!constantTimeEquals(typed, open.code)) {
         attempts += 1;
         recordFailure();
         if (attempts >= MAX_ATTEMPTS_PER_CODE) {

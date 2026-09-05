@@ -12,7 +12,22 @@ import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as auth from '../../../src/main/remote/auth.js';
 import { openDeviceRegistry } from '../../../src/main/remote/devices.js';
+
+/**
+ * The comparison is spied on so the LOOP'S SHAPE can be asserted: a lookup
+ * that exits early does fewer comparisons, and that is the one part of the
+ * constant-time story a test can actually hold. It cannot hold the other
+ * part -- that `constantTimeEquals` is itself constant-time -- because timing
+ * is invisible to an assertion. See `matchAfterScanningEveryEntry`.
+ */
+vi.mock('../../../src/main/remote/auth.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/main/remote/auth.js')>();
+  return { ...actual, constantTimeEquals: vi.fn(actual.constantTimeEquals) };
+});
+
+const comparisons = auth.constantTimeEquals as unknown as ReturnType<typeof vi.fn>;
 
 const roots: string[] = [];
 
@@ -105,6 +120,23 @@ describe('openDeviceRegistry', () => {
     }
   });
 
+  it('compares against every entry, whichever one matches', async () => {
+    const registry = await openDeviceRegistry({ path: await fresh() });
+    const grants = [];
+    for (let i = 0; i < 5; i += 1) {
+      grants.push(await registry.grant(`device ${i}`));
+    }
+    // The FIRST device: an early exit would stop after one comparison and
+    // answer faster than a lookup for the last one does.
+    comparisons.mockClear();
+    expect(registry.find(grants[0]?.token ?? '')).not.toBeNull();
+    expect(comparisons).toHaveBeenCalledTimes(5);
+    // A miss walks the same distance.
+    comparisons.mockClear();
+    expect(registry.find('not-a-token-we-minted')).toBeNull();
+    expect(comparisons).toHaveBeenCalledTimes(5);
+  });
+
   it('reads a corrupt file as no devices rather than crashing the process', async () => {
     const path = await fresh();
     const registry = await openDeviceRegistry({ path });
@@ -145,6 +177,42 @@ describe('revocation', () => {
     await registry.remove(phone.identity.deviceId);
     expect(onRevoked).toHaveBeenCalledTimes(1);
     expect(onRevoked).toHaveBeenCalledWith(phone.identity.deviceId);
+  });
+
+  /**
+   * Two Remove clicks in the same tick. Unserialised, each computes its result
+   * from the same starting list and the second write puts back what the first
+   * removed -- after `onRevoked` already fired for it, so the operator watches
+   * a device disappear whose token still opens every route.
+   */
+  it('does not put a revoked device back when two revocations overlap', async () => {
+    const path = await fresh();
+    const registry = await openDeviceRegistry({ path });
+    const phone = await registry.grant('a phone');
+    const tablet = await registry.grant('a tablet');
+    await Promise.all([
+      registry.remove(phone.identity.deviceId),
+      registry.remove(tablet.identity.deviceId),
+    ]);
+    expect(registry.list()).toEqual([]);
+    expect(registry.find(phone.token)).toBeNull();
+    expect(registry.find(tablet.token)).toBeNull();
+    const reopened = await openDeviceRegistry({ path });
+    expect(reopened.find(phone.token)).toBeNull();
+    expect(reopened.find(tablet.token)).toBeNull();
+  });
+
+  it('does not lose a concurrent grant to a concurrent revocation', async () => {
+    const path = await fresh();
+    const registry = await openDeviceRegistry({ path });
+    const phone = await registry.grant('a phone');
+    const [, tablet] = await Promise.all([
+      registry.remove(phone.identity.deviceId),
+      registry.grant('a tablet'),
+    ]);
+    const reopened = await openDeviceRegistry({ path });
+    expect(reopened.find(tablet.token)).toEqual(tablet.identity);
+    expect(reopened.find(phone.token)).toBeNull();
   });
 
   it('persists before the in-memory swap: a failed write leaves the device paired', async () => {

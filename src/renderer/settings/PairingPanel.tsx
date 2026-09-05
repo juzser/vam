@@ -132,17 +132,32 @@ export function PairingPanel(props: PairingPanelProps) {
 
       {view.awaiting === null ? null : (
         <section data-testid="pairing-approval" aria-label="allow this device">
-          <p>
-            Allow “{view.awaiting.name}” ({view.awaiting.source})?{' '}
+          {/*
+            THE NAME IS ATTACKER-CHOSEN TEXT and it is the operator's only
+            discriminator here: `source` behind `tailscale serve` is always
+            127.0.0.1 and says nothing. So it is rendered as its own quoted
+            block, never inside the sentence -- a name that sat in the prose
+            could close a quotation and prepend "Read-only." to argue against
+            the warning it is standing in. Main strips the punctuation that
+            would let it try; this is the half that means it has nothing to
+            close even if some got through.
+          */}
+          <p>A device is asking to pair. It calls itself:</p>
+          <p data-testid="pairing-device-name" className="pairing-device-name">
+            {view.awaiting.name}
+          </p>
+          <p data-testid="pairing-grant">
+            Allow it?{' '}
             {props.allowWrites
               ? 'It will be able to read your sessions and to type into a running agent.'
               : 'It will be able to read your sessions; this server is read-only, so it cannot type into an agent.'}
           </p>
+          <p data-testid="pairing-source">Connecting from {view.awaiting.source}.</p>
           <button type="button" onClick={props.onApprove}>
             Allow this device
           </button>
           <button type="button" onClick={props.onDeny}>
-            Don’t allow
+            Don't allow
           </button>
         </section>
       )}

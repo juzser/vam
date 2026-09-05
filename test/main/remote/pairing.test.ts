@@ -24,6 +24,7 @@ import {
   createPairing,
   formatCode,
   GLOBAL_FAILURE_LIMIT,
+  GLOBAL_WINDOW_MS,
   LOCKOUT_MS,
   MAX_ATTEMPTS_PER_CODE,
   mintCode,
@@ -165,33 +166,63 @@ describe('wrong answers', () => {
     });
   });
 
+  it('counts a probe exactly like a guess: knocking with no code open is not free', async () => {
+    const { pairing } = harness();
+    // No screen has ever been opened. An attacker polling for the moment one
+    // IS open must pay for every knock, or the throttle guards a door it
+    // never has to walk through.
+    for (let i = 0; i < GLOBAL_FAILURE_LIMIT; i += 1) {
+      expect(await pairing.submit('ZZZZZZZZ', 'a phone', '100.64.0.2')).toEqual({
+        ok: false,
+        reason: 'no-code',
+      });
+    }
+    expect(pairing.state().throttledUntil).toBeGreaterThan(0);
+  });
+
   it('disables pairing for fifteen minutes after ten failures in a minute', async () => {
     const { pairing, advance } = harness();
+    pairing.open();
     for (let i = 0; i < GLOBAL_FAILURE_LIMIT; i += 1) {
-      pairing.open();
-      await pairing.submit('ZZZZZZZZ', 'a phone', `100.64.0.${i}`);
+      await pairing.submit('ZZZZZZZZ', 'a phone', '100.64.0.2');
       advance(1_000);
     }
-    const { code } = pairing.open();
-    expect(await pairing.submit(code, 'a phone', '100.64.0.2')).toEqual({
+    expect(pairing.state().throttledUntil).toBeGreaterThan(0);
+    expect(await pairing.submit('ZZZZZZZZ', 'a phone', '100.64.0.2')).toEqual({
       ok: false,
       reason: 'throttled',
     });
-    expect(pairing.state().throttledUntil).toBeGreaterThan(0);
     advance(LOCKOUT_MS + 1);
-    const fresh = pairing.open();
-    expect(await submitAndApprove(pairing, fresh.code)).toMatchObject({ ok: true });
+    expect(pairing.state().throttledUntil).toBe(0);
+  });
+
+  /**
+   * THE THROTTLE MUST NOT BECOME THE ATTACK. Ten cheap wrong guesses otherwise
+   * lock out the operator's own phone for fifteen minutes, and repeating that
+   * denies pairing forever. Opening the screen is a human at this machine --
+   * something an attacker on the far side of the network cannot produce.
+   */
+  it('lets the operator lift the throttle by opening the pairing screen', async () => {
+    const { pairing } = harness();
+    for (let i = 0; i < GLOBAL_FAILURE_LIMIT; i += 1) {
+      await pairing.submit('ZZZZZZZZ', 'a phone', '100.64.0.2');
+    }
+    expect(pairing.state().throttledUntil).toBeGreaterThan(0);
+    const { code } = pairing.open();
+    expect(pairing.state().throttledUntil).toBe(0);
+    expect(await submitAndApprove(pairing, code)).toMatchObject({ ok: true });
   });
 
   it('forgets failures older than the window rather than accumulating them', async () => {
     const { pairing, advance } = harness();
     for (let i = 0; i < GLOBAL_FAILURE_LIMIT - 1; i += 1) {
-      pairing.open();
       await pairing.submit('ZZZZZZZZ', 'a phone', '100.64.0.2');
     }
-    advance(61_000);
-    const { code } = pairing.open();
-    expect(await submitAndApprove(pairing, code)).toMatchObject({ ok: true });
+    advance(GLOBAL_WINDOW_MS + 1_000);
+    for (let i = 0; i < GLOBAL_FAILURE_LIMIT - 1; i += 1) {
+      await pairing.submit('ZZZZZZZZ', 'a phone', '100.64.0.2');
+    }
+    expect(pairing.state().throttledUntil).toBe(0);
   });
 });
 
@@ -265,6 +296,22 @@ describe('the operator confirmation', () => {
     if (outcome.ok) {
       expect(outcome.identity.name).not.toMatch(/\n/);
       expect(outcome.identity.name.length).toBeLessThanOrEqual(64);
+    }
+  });
+
+  /**
+   * `source` behind Serve is always 127.0.0.1, so the NAME is the operator's
+   * only discriminator in the Allow prompt. A name that can close a quotation
+   * can prepend "Read-only." and argue against the warning around it.
+   */
+  it('strips the punctuation a name would need to impersonate the prompt', async () => {
+    const { pairing } = harness();
+    const { code } = pairing.open();
+    const outcome = await submitAndApprove(pairing, code, 'phone" (Read-only.) [safe] <ok>');
+    expect(outcome).toMatchObject({ ok: true });
+    if (outcome.ok) {
+      expect(outcome.identity.name).not.toMatch(/["'`()[\]{}<>\u201c\u201d\u2018\u2019]/);
+      expect(outcome.identity.name).toContain('phone');
     }
   });
 });

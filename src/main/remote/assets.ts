@@ -76,6 +76,10 @@ export async function serveAsset(
     // one would be the hole this module exists not to open.
     'cache-control': 'no-store',
   });
-  createReadStream(target).pipe(response);
+  // The `error` listener is not optional: an unhandled stream error on a
+  // piped read is an uncaught exception, and this is a remote surface.
+  createReadStream(target)
+    .on('error', () => response.end())
+    .pipe(response);
   return true;
 }

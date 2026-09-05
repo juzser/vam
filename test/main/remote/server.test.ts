@@ -407,11 +407,29 @@ describe('the pairing route', () => {
     });
   });
 
-  it('refuses a wrong code with 401 and the reason the phone must show', async () => {
-    const base = await start({ pairing: stubPairing({ ok: false, reason: 'burned' }) });
-    const response = await pair(base, { code: 'ZZZZZZZZ', name: 'a phone' });
-    expect(response.status).toBe(401);
-    expect(await response.json()).toMatchObject({ error: { message: 'burned' } });
+  /**
+   * The refusal must not be an oracle for "is the operator looking at the
+   * pairing screen right now" -- which is the one moment worth attacking.
+   */
+  it('answers every refusal with the SAME 401 a stranger gets, byte for byte', async () => {
+    const stranger = await (await get(await start(), '/api/load', null)).json();
+    for (const reason of ['no-code', 'wrong-code', 'burned', 'throttled'] as const) {
+      const base = await start({ pairing: stubPairing({ ok: false, reason }) });
+      const response = await pair(base, { code: 'ZZZZZZZZ', name: 'a phone' });
+      expect(response.status, reason).toBe(401);
+      expect(await response.json(), reason).toEqual(stranger);
+    }
+  });
+
+  it('leaks nothing through the reason a token was refused either', async () => {
+    const base = await start();
+    const missing = await (await get(base, '/api/load', null)).json();
+    const malformed = await (
+      await fetch(`${base}/api/load`, { headers: { authorization: 'Basic x' } })
+    ).json();
+    const unknown = await (await get(base, '/api/load', 'not-a-token-we-minted')).json();
+    expect(malformed).toEqual(missing);
+    expect(unknown).toEqual(missing);
   });
 
   it('refuses a body of the wrong shape before pairing sees it', async () => {
@@ -429,6 +447,23 @@ describe('the pairing route', () => {
     const response = await pair(base, { code: 'ABCD2345', name: 'a phone' });
     expect(response.url).not.toContain(minted);
     expect(new URL(response.url).search).toBe('');
+  });
+
+  it('answers 500 rather than dying when a handler throws', async () => {
+    const base = await start({
+      pairing: {
+        submit: async () => {
+          throw new Error('the registry could not be written');
+        },
+      },
+    });
+    const response = await pair(base, { code: 'ABCD2345', name: 'a phone' });
+    // Not a crash, and not a hung socket: an unhandled rejection here would
+    // take the Electron main process with it.
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ error: { code: 'server-failed' } });
+    // Still answering afterwards.
+    expect((await get(base, '/api/load')).status).toBe(200);
   });
 
   it('rejects a GET on it, which would put a code in a server log', async () => {

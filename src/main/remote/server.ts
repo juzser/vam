@@ -119,6 +119,23 @@ export function createStreamRegistry(): StreamRegistry {
   };
 }
 
+/**
+ * THE ONLY 401 THIS SERVER SENDS, byte for byte, whoever asked and whatever
+ * was wrong.
+ *
+ * An unpaired stranger, a forged token, a revoked device, a wrong pairing
+ * code, a burned one, a screen that was never opened -- all of them get this.
+ * The moment the reply names the state, `/api/pair` becomes an oracle for
+ * "is the operator looking at the pairing screen right now", which is the one
+ * moment worth attacking. The desktop learns that a code burned from
+ * `pairing.state()`, on this side of the wire, not from a reply the phone
+ * relayed back.
+ */
+const UNAUTHENTICATED = {
+  ok: false,
+  error: { kind: 'refused', code: 'unauthenticated', message: 'unauthenticated' },
+} as const;
+
 type Envelope = { ok: true; value: unknown } | { ok: false; error: SourceError };
 
 type Route = (
@@ -419,16 +436,15 @@ async function handlePair(
     });
     return;
   }
-  // The peer address, for the rate limiter and for the warning the desktop
-  // shows. Not an identity: it is whatever `tailscale serve` is proxying from,
-  // which is loopback, and it is never trusted for anything but counting.
+  // Recorded and shown, never trusted or counted on. BEHIND `tailscale serve`
+  // THIS IS ALWAYS 127.0.0.1 -- the proxy is the peer -- so it discriminates
+  // nothing and the rate limit is deliberately global rather than per-source.
+  // It is here because on a direct loopback connection it is occasionally the
+  // one clue the operator gets, not because it is evidence.
   const source = request.socket.remoteAddress ?? 'unknown';
   const outcome = await pairing.submit(body.code, body.name, source);
   if (!outcome.ok) {
-    send(response, 401, {
-      ok: false,
-      error: { kind: 'refused', code: 'pairing-refused', message: outcome.reason },
-    });
+    send(response, 401, UNAUTHENTICATED);
     return;
   }
   send(response, 200, {
@@ -478,20 +494,19 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
       // this door exists only while the operator has the screen open, holds a
       // live code, and answers "allow this device?" in person.
       //
-      // A refusal is 401 with the same shape an unauthenticated request gets,
-      // so a caller cannot tell "no screen is open" from "no token": the only
-      // thing it learns is the reason its own attempt failed, which is what
-      // the phone must show the person typing.
+      // A refusal here is the SAME 401, byte for byte, that an unauthenticated
+      // request to any other path gets -- see `UNAUTHENTICATED`. A caller
+      // cannot tell "no screen is open" from "wrong code" from "no token", and
+      // a knock costs it a counted failure either way.
       if (options.pairing !== undefined && request.method === 'POST' && path === '/api/pair') {
         await handlePair(options.pairing, request, response);
         return;
       }
       const outcome = authenticateDevice(request.headers.authorization, devices);
       if (!outcome.ok) {
-        send(response, 401, {
-          ok: false,
-          error: { kind: 'refused', code: 'unauthenticated', message: outcome.reason },
-        });
+        // The reason is deliberately dropped rather than reported: see
+        // `UNAUTHENTICATED`. It exists for this process's own tests and logs.
+        send(response, 401, UNAUTHENTICATED);
         return;
       }
       const entry = table.get(path);
@@ -533,7 +548,24 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
         return;
       }
       await entry.route(request, response, { identity: outcome.identity, body });
-    })();
+    })().catch((error: unknown) => {
+      // THE LAST BOUNDARY, and it is not decoration. This handler is a
+      // floating promise: an unhandled rejection inside it terminates the
+      // Electron main process under Node's default policy, which would make
+      // this remote surface a way to kill the operator's whole session from
+      // the far side of the network. `envelope` already covers a source that
+      // throws; this covers everything else, including a registry write that
+      // fails while a device is being granted.
+      console.error(`[vam] remote request failed: ${String(error)}`);
+      if (!response.headersSent) {
+        send(response, 500, {
+          ok: false,
+          error: { kind: 'unreachable', code: 'server-failed', message: 'the request failed' },
+        });
+        return;
+      }
+      response.end();
+    });
   });
 
   await new Promise<void>((resolve) => server.listen(options.port, LOOPBACK, resolve));

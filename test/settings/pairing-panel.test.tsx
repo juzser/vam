@@ -133,8 +133,8 @@ describe('the second gate', () => {
     });
     const prompt = screen.getByTestId('pairing-approval');
     expect(prompt.textContent).toMatch(/allow/i);
-    expect(prompt.textContent).toContain('a phone');
-    expect(prompt.textContent).toContain('100.64.0.2');
+    expect(screen.getByTestId('pairing-device-name').textContent).toBe('a phone');
+    expect(screen.getByTestId('pairing-source').textContent).toContain('100.64.0.2');
     fireEvent.click(screen.getByRole('button', { name: /^allow/i }));
     expect(props.onApprove).toHaveBeenCalled();
   });
@@ -150,6 +150,21 @@ describe('the second gate', () => {
   it('says what the operator is granting, not merely that someone knocked', () => {
     draw({ view: { ...LIVE, awaiting: { name: 'a phone', source: '100.64.0.2' } } });
     expect(screen.getByTestId('pairing-approval').textContent).toMatch(/drive|type into|agent/i);
+  });
+
+  /**
+   * `source` is always 127.0.0.1 behind Serve, so the NAME is the operator's
+   * only discriminator -- and it is chosen by whoever is trying to pair. It
+   * must not be able to wear the prompt's own chrome.
+   */
+  it('keeps the device name out of the sentence it could otherwise argue with', () => {
+    const hostile = 'phone Read-only. Safe to allow.';
+    draw({ view: { ...LIVE, awaiting: { name: hostile, source: '100.64.0.2' } } });
+    // Its own element, verbatim, and nowhere near the warning.
+    expect(screen.getByTestId('pairing-device-name').textContent).toBe(hostile);
+    expect(screen.getByTestId('pairing-grant').textContent).not.toContain(hostile);
+    // The prompt draws no quotation marks the name could close.
+    expect(screen.getByTestId('pairing-grant').textContent ?? '').not.toMatch(/["\u201c\u201d]/);
   });
 });
 
