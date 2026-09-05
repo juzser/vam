@@ -13,6 +13,13 @@ import type { AccessJwk } from './auth.js';
 export type RemoteConfig = {
   readonly port: number;
   readonly allowWrites: boolean;
+  /**
+   * Where the browser build lives, when the operator keeps it somewhere other
+   * than beside the app. Absent leaves the choice to the caller, which knows
+   * the app's own path; an EMPTY value is not a root and is read as absent, so
+   * an unset variable expanded by a shell cannot make the process serve `/`.
+   */
+  readonly webRoot?: string;
   readonly auth: {
     readonly audience: string;
     readonly issuer: string;
@@ -98,8 +105,10 @@ export function remoteConfigFromEnv(env: Record<string, string | undefined>): Re
   if (!TEAM.test(team)) {
     throw new Error(`VAM_ACCESS_TEAM is not a team name: ${team}`);
   }
+  const webRoot = env.VAM_REMOTE_WEB_ROOT ?? '';
   return {
     port,
+    ...(webRoot.length > 0 ? { webRoot } : {}),
     // Writes are an explicit act. Anything other than `1` leaves the write
     // routes unregistered, so a typo cannot open them.
     allowWrites: env.VAM_REMOTE_WRITES === '1',

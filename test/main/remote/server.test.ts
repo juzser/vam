@@ -14,7 +14,10 @@
  */
 
 import { createSign, generateKeyPairSync, type KeyObject } from 'node:crypto';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import type { Server } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { SourceError } from '../../../src/main/ipc/channels.js';
 import type { AccessAuth } from '../../../src/main/remote/auth.js';
@@ -183,9 +186,12 @@ describe('read routes', () => {
     expect(await response.json()).toEqual({ ok: true, value: PROJECTS });
   });
 
-  it('answers the descriptor', async () => {
+  it('answers the descriptor, projected onto the routes it serves', async () => {
     const response = await get(await start(), '/api/describe');
-    expect(await response.json()).toEqual({ ok: true, value: descriptor });
+    const body = (await response.json()) as { ok: true; value: MainSource['descriptor'] };
+    expect(body.ok).toBe(true);
+    expect(body.value.id).toBe(descriptor.id);
+    expect(body.value.capabilities.recordPrompt).toBe(true);
   });
 
   it('forwards a source failure as an envelope rather than a crash', async () => {
@@ -355,5 +361,125 @@ describe('SSE', () => {
     expect(listeners.size).toBe(1);
     await reader.cancel();
     await vi.waitFor(() => expect(listeners.size).toBe(0));
+  });
+});
+
+/**
+ * A route this server does not carry is not a capability the browser may be
+ * shown. The descriptor main holds describes what the DESKTOP source can do;
+ * over HTTP, `renameSession`, governance and the whole terminal surface have
+ * no route, and in read-only mode neither do the writes. The client is told
+ * `false` with a reason, rather than left to discover it by calling.
+ */
+describe('the descriptor the server serves', () => {
+  const full = {
+    ...descriptor,
+    capabilities: {
+      liveUpdates: true,
+      recordPrompt: true,
+      deliverPrompt: true,
+      promptAttachments: true,
+      slashCommands: true,
+      renameSession: true,
+      closeSession: true,
+      createSession: true,
+      governance: true,
+      pullRequests: true,
+      terminal: true,
+      agentRoster: true,
+    },
+    declines: {},
+  } as unknown as MainSource['descriptor'];
+
+  const served = async (over: Partial<RemoteServerOptions> = {}) => {
+    const base = await start({ source: makeSource({ descriptor: full }), ...over });
+    const body = (await (await get(base, '/api/describe')).json()) as {
+      value: MainSource['descriptor'];
+    };
+    return body.value;
+  };
+
+  it('turns off every capability whose member has no route here', async () => {
+    const value = await served();
+    expect(value.capabilities.terminal).toBe(false);
+    expect(value.capabilities.renameSession).toBe(false);
+    expect(value.capabilities.governance).toBe(false);
+    // Served routes stay true.
+    expect(value.capabilities.closeSession).toBe(true);
+    expect(value.capabilities.liveUpdates).toBe(true);
+  });
+
+  it('writes a decline for each one, in the server’s own words', async () => {
+    const value = await served();
+    expect(value.declines.terminal).toMatch(/terminal/i);
+    expect(value.declines.renameSession).toBeTruthy();
+    expect(value.declines.governance).toBeTruthy();
+  });
+
+  it('turns off every write capability when the write routes are unregistered', async () => {
+    const value = await served({ allowWrites: false });
+    expect(value.capabilities.recordPrompt).toBe(false);
+    expect(value.capabilities.deliverPrompt).toBe(false);
+    expect(value.capabilities.closeSession).toBe(false);
+    expect(value.capabilities.createSession).toBe(false);
+    expect(value.declines.recordPrompt).toMatch(/read-only/i);
+  });
+});
+
+/**
+ * The page itself. An asset is served by the SAME request path as the API, so
+ * identity is verified before the file is opened -- a static file that could be
+ * fetched by someone `/api/load` would refuse is a way around the door.
+ */
+describe('static assets', () => {
+  let root: string;
+
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), 'vam-web-'));
+    await writeFile(join(root, 'index.html'), '<!doctype html><title>vam</title>');
+    await mkdir(join(root, 'assets'), { recursive: true });
+    await writeFile(join(root, 'assets', 'app.js'), 'export const vam = 1;\n');
+    await writeFile(join(root, '..', 'outside.txt'), 'not yours');
+  });
+
+  it('refuses an asset to a caller with no verified identity', async () => {
+    const response = await get(await start({ webRoot: root }), '/', null);
+    expect(response.status).toBe(401);
+    expect(response.headers.get('content-type')).toContain('application/json');
+  });
+
+  it('refuses an asset to a forged assertion', async () => {
+    const base = await start({ webRoot: root });
+    expect((await get(base, '/assets/app.js', 'not.a.token')).status).toBe(401);
+  });
+
+  it('serves the page at the root to a verified identity', async () => {
+    const response = await get(await start({ webRoot: root }), '/');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/html');
+    expect(await response.text()).toContain('<title>vam</title>');
+  });
+
+  it('serves a nested asset with its own content type', async () => {
+    const response = await get(await start({ webRoot: root }), '/assets/app.js');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('javascript');
+  });
+
+  it('will not walk out of the web root', async () => {
+    const base = await start({ webRoot: root });
+    expect((await get(base, '/../outside.txt')).status).toBe(404);
+    expect((await get(base, '/%2e%2e/outside.txt')).status).toBe(404);
+  });
+
+  it('never answers an /api path with a file', async () => {
+    const base = await start({ webRoot: root });
+    const response = await get(base, '/api/index.html');
+    expect(response.status).toBe(404);
+    expect(response.headers.get('content-type')).toContain('application/json');
+  });
+
+  it('answers 404 for any path when no web root is configured', async () => {
+    expect((await get(await start(), '/')).status).toBe(404);
   });
 });

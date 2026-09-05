@@ -27,6 +27,7 @@ import { SmithClient } from './adapter/client.js';
 import { useCanvas } from './adapter/useCanvas.js';
 import { Canvas } from './canvas/Canvas.js';
 import { DEMO_MODEL } from './fixtures/demo.js';
+import { createSourceFromHttp } from './sources/http-factory.js';
 import { describeFailure, type SessionSource } from './sources/port.js';
 import { createSourceFromPreload } from './sources/preload-factory.js';
 import { useSourceModel } from './sources/useSourceModel.js';
@@ -77,7 +78,63 @@ export function App() {
   if (api !== undefined) {
     return <DesktopCanvas api={api} />;
   }
-  return isDemo() ? <DemoCanvas /> : <LiveCanvas client={client} />;
+  return isDemo() ? <DemoCanvas /> : <BrowserCanvas client={client} />;
+}
+
+/**
+ * A browser, asking its own origin what it is.
+ *
+ * Two servers can put this page in front of an operator: vam's remote
+ * endpoint, which speaks the port's protocol at `/api/describe`, and anything
+ * else, where the page has always rendered black-smith's factory feed. The
+ * page cannot be built twice for that -- an operator serving `dist-web`
+ * through a tunnel would have to know which build they had -- so it ASKS, and
+ * the answer is the descriptor it needs anyway.
+ *
+ * The fallback is narrow on purpose. A `no-such-route` or a non-envelope
+ * answer means "no vam server here", and the factory feed is the right page. A
+ * vam endpoint that answered and FAILED is reported, because a refusal
+ * silently replaced by another data source is the swap this file already
+ * refuses to make for the demo fixture.
+ */
+export function BrowserCanvas({ client }: { readonly client: SmithClient }) {
+  const [remote, setRemote] = useState<SessionSource | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [asked, setAsked] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    createSourceFromHttp()
+      .then((assembled) => {
+        if (!cancelled) setRemote(assembled);
+      })
+      .catch((reason: unknown) => {
+        const code =
+          typeof reason === 'object' && reason !== null && 'code' in reason
+            ? String(reason.code)
+            : '';
+        // Not a vam endpoint at all -- no route, or no envelope behind it.
+        if (!(code === 'no-such-route' || code.startsWith('http-'))) {
+          if (!cancelled) setFailure(describeFailure(reason));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAsked(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Nothing until the origin has answered: a canvas drawn from the wrong
+  // source and swapped a tick later is two claims about the operator's work.
+  if (!asked) {
+    return null;
+  }
+  if (remote === null && failure === null) {
+    return <LiveCanvas client={client} />;
+  }
+  return <SourceCanvas source={remote} failure={failure} />;
 }
 
 /**
@@ -117,8 +174,23 @@ export function DesktopCanvas({ api }: { readonly api: DesktopSourceApi }) {
     };
   }, [api]);
 
+  return <SourceCanvas source={source} failure={assembleError} />;
+}
+
+/**
+ * A canvas over an assembled `SessionSource`, whichever transport assembled
+ * it: the Electron bridge or the remote endpoint. Shared rather than copied
+ * because the layout below is load-bearing, not decoration.
+ */
+function SourceCanvas({
+  source,
+  failure,
+}: {
+  readonly source: SessionSource | null;
+  readonly failure: string | null;
+}) {
   const { model, error, reload } = useSourceModel(source);
-  const shown = assembleError ?? error;
+  const shown = failure ?? error;
 
   // Empty and saying why, never a fixture standing in for a source that failed.
   //
