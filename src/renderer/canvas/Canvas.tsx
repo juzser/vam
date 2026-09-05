@@ -52,7 +52,15 @@ import {
   type UsageSnapshot,
   type UsageWindow,
 } from '../../shared/usage.js';
-import type { CanvasModel, Decision, Project, SessionStatus, SourceId } from '../domain/model.js';
+import { composeGroups, groupSource } from '../domain/grouping.js';
+import type {
+  CanvasModel,
+  Decision,
+  Group,
+  Project,
+  SessionStatus,
+  SourceId,
+} from '../domain/model.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { StatusFilter } from '../domain/session-filter.js';
@@ -67,6 +75,7 @@ import { FocusEdge } from '../panels/FocusEdge.js';
 import { IconPicker } from '../panels/IconPicker.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
+import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { SessionList } from '../panels/SessionList.js';
 import { visibleTabs } from '../panels/tabs.js';
@@ -82,19 +91,27 @@ import {
   layoutWidths,
 } from '../prefs/panes.js';
 import {
+  addProjectToGroup,
   applyIcons,
   applyPalette,
   applyRenames,
   applyTheme,
   browserStorage,
+  createGroup,
   DEFAULT_FOCUS_SHARE,
+  deleteGroup,
   type EffectiveTheme,
   FOCUS_SHARE_OFF,
+  isGroupCollapsed,
   isProjectHidden,
   type Prefs,
   paletteFor,
   readPrefs,
+  removeProjectFromGroup,
+  renameGroup,
   setDetailTab,
+  setGroupCollapsed,
+  setGroupIcon,
   setIcon,
   setLastFocus,
   setLayout,
@@ -611,7 +628,20 @@ function CanvasInner({
       return next.length === current.length ? current : next;
     });
   }, [sourceModel]);
-  const model = useMemo(() => withPending(sourceModel, pending), [sourceModel, pending]);
+  /**
+   * The drawn model: the source's, plus the optimistic paint, plus the
+   * operator's grouping resolved on top.
+   *
+   * COMPOSING RUNS LAST, downstream of `withPending`, because `withPending`
+   * spreads the model and rewrites `projects` -- composing first would have it
+   * rebuild the top level out of the ungrouped half alone. With nothing in
+   * `prefs.groups`, which is every store that exists, `composeGroups` hands
+   * back the very object it was given and this line costs nothing.
+   */
+  const model = useMemo(
+    () => composeGroups(withPending(sourceModel, pending), prefs.groups),
+    [sourceModel, pending, prefs.groups],
+  );
 
   const allEntries = useMemo(() => orderedSessions(model), [model]);
 
@@ -682,6 +712,13 @@ function CanvasInner({
   const [renameTarget, setRenameTarget] = useState<IconTarget | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [pickingIconFor, setPickingIconFor] = useState<IconTarget | null>(null);
+  /** The group whose glyph is being picked, captured when the picker opens --
+   *  the reasoning `ProjectIconTarget` records, one level up again. */
+  const [pickingGroupIconFor, setPickingGroupIconFor] = useState<{
+    readonly source: SourceId;
+    readonly groupId: string;
+    readonly name: string;
+  } | null>(null);
   const [pickingProjectIconFor, setPickingProjectIconFor] = useState<ProjectIconTarget | null>(
     null,
   );
@@ -811,6 +848,153 @@ function CanvasInner({
     return ids;
   }, [allEntries, prefs, hiddenSourceless]);
 
+  /**
+   * The groups folded shut, flattened across sources for the sidebar.
+   *
+   * Flattened because a group id is minted locally and derived from nothing,
+   * so it collides with nothing -- unlike a project id, which is a cwd digest
+   * unique only within its source and therefore has to stay keyed (see
+   * `hiddenProjects` above).
+   */
+  const collapsedGroups = useMemo(
+    () => Object.values(prefs.collapsedGroups).flat(),
+    [prefs.collapsedGroups],
+  );
+
+  /**
+   * Fold one group, and remember it. The source comes from the store the
+   * group is written in -- a group carries no source of its own, and guessing
+   * one from its members would have nothing to guess from while it is empty.
+   */
+  /**
+   * Which source a NEW group is written under.
+   *
+   * A group has no cwd, so it has no source of its own; membership, on the
+   * other hand, is matched within a source, because a project id is a cwd
+   * digest unique only there. So a group has to be filed under one, and the
+   * only honest candidate is the source the drawn projects come from: the
+   * first one that names one, which with vam's one live source is the only
+   * one there is. A model whose projects name none has nowhere to file a
+   * group, and the control says so rather than guessing -- the same refusal
+   * the project icon picker already makes, for the same reason.
+   *
+   * KNOWN AND STATED: with two sources on screen, a group made here is filed
+   * under the first and can therefore never hold the second's projects, since
+   * membership is matched within a source. Nothing in vam draws two sources
+   * at once today; the day something does, this is where the operator has to
+   * be asked which.
+   */
+  const groupHomeSource = useCallback((): SourceId | null => {
+    for (const project of model.projects) {
+      if (project.source !== undefined) return project.source;
+    }
+    for (const group of model.groups ?? []) {
+      for (const project of group.projects) {
+        if (project.source !== undefined) return project.source;
+      }
+    }
+    return null;
+  }, [model]);
+
+  const createNewGroup = useCallback(
+    (name: string) => {
+      const source = groupHomeSource();
+      if (source === null) {
+        setStatus('no source to file a project under — nothing was created');
+        return;
+      }
+      // Minted locally and derived from nothing: a group has no cwd to
+      // digest, must survive a rename, and must exist while it is empty.
+      const id = `group:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      savePrefs(createGroup(prefs, source, id, name));
+      setStatus(`${name} — a project kept on this machine, never in the event log`);
+    },
+    [groupHomeSource, prefs, savePrefs],
+  );
+
+  const renameOneGroup = useCallback(
+    (group: Group, name: string) => {
+      const source = groupSource(prefs.groups, group.id);
+      if (source === null) return;
+      savePrefs(renameGroup(prefs, source, group.id, name));
+    },
+    [prefs, savePrefs],
+  );
+
+  /**
+   * Dissolve a group. NO CONFIRM, and that is the decision rather than an
+   * omission: no session ends, nothing is hidden, `hiddenProjects` is not
+   * touched, and there is no source call to serialise behind `pendingAction`.
+   * What is lost is a name and a glyph; every project and every session stays
+   * on screen, one level up. The status line is the whole disclosure, and it
+   * is enough because the outcome is already visible.
+   */
+  const ungroup = useCallback(
+    (group: Group) => {
+      const source = groupSource(prefs.groups, group.id);
+      if (source === null) return;
+      const moved = group.projects.length;
+      savePrefs(deleteGroup(prefs, source, group.id));
+      setStatus(`${group.name} ungrouped — ${moved} ${moved === 1 ? 'repo' : 'repos'} moved up`);
+    },
+    [prefs, savePrefs],
+  );
+
+  /**
+   * The group whose membership is being edited, captured when the list opens
+   * -- the reasoning both icon targets record.
+   */
+  const [pickingMembersFor, setPickingMembersFor] = useState<{
+    readonly source: SourceId;
+    readonly groupId: string;
+    readonly name: string;
+  } | null>(null);
+
+  /**
+   * What the membership list offers: THE PROJECTS VAM ALREADY KNOWS, within
+   * the group's own source, because a project id is a cwd digest unique only
+   * there and membership is matched the same way.
+   *
+   * There is no directory dialog on this path and no `.git` validation:
+   * `repo.ts` refuses to list what vam knows for CREATING a project, on the
+   * grounds that the only list it could offer is the directories it already
+   * has sessions in -- which is the wrong set there and exactly the right one
+   * here. You can only group what exists.
+   */
+  const memberChoices = useMemo((): readonly ProjectChoice[] => {
+    if (pickingMembersFor === null) return [];
+    const { source, groupId } = pickingMembersFor;
+    const choices: ProjectChoice[] = [];
+    for (const project of model.projects) {
+      if (project.source === source) {
+        choices.push({ id: project.id, name: project.name, member: false, groupName: null });
+      }
+    }
+    for (const group of model.groups ?? []) {
+      for (const project of group.projects) {
+        if (project.source !== source) continue;
+        choices.push({
+          id: project.id,
+          name: project.name,
+          member: group.id === groupId,
+          groupName: group.id === groupId ? null : group.name,
+        });
+      }
+    }
+    return choices;
+  }, [model, pickingMembersFor]);
+
+  const toggleGroupCollapse = useCallback(
+    (group: Group) => {
+      const source = groupSource(prefs.groups, group.id);
+      if (source === null) return;
+      savePrefs(
+        setGroupCollapsed(prefs, source, group.id, !isGroupCollapsed(prefs, source, group.id)),
+      );
+    },
+    [prefs, savePrefs],
+  );
+
   const entries = useMemo(() => {
     // FIRST, and not only in the sidebar. A removed project whose cards stayed
     // drawn would leave `j` stepping onto a session with no row -- the exact
@@ -873,14 +1057,19 @@ function CanvasInner({
     if (kept.size === allEntries.length) {
       return model;
     }
-    return {
-      projects: model.projects
+    const narrow = (projects: readonly Project[]) =>
+      projects
         .map((project) => ({
           ...project,
           sessions: project.sessions.filter((s) => kept.has(s.id)),
         }))
-        .filter((project) => project.sessions.length > 0),
-    };
+        .filter((project) => project.sessions.length > 0);
+    // The grouped half is narrowed the same way and by the same set. Dropping
+    // it here instead would make a filter delete every grouped card from the
+    // canvas -- the "drawn but unreachable" defect this memo's own comment
+    // describes, in reverse.
+    const groups = model.groups?.map((group) => ({ ...group, projects: narrow(group.projects) }));
+    return { projects: narrow(model.projects), ...(groups === undefined ? {} : { groups }) };
   }, [model, entries, allEntries]);
 
   const layout = useMemo(() => layoutCanvas(visibleModel), [visibleModel]);
@@ -2306,6 +2495,29 @@ function CanvasInner({
           }}
           onAddInProject={(project) => void createSession(project.id, project.name)}
           pendingAction={pendingAction}
+          // The group layer. `model.groups` rather than the filtered model's,
+          // because the only thing this prop is for is a group holding no live
+          // project -- see the prop -- and a filter cannot narrow one further.
+          groups={model.groups ?? []}
+          collapsedGroups={collapsedGroups}
+          onToggleGroupCollapse={toggleGroupCollapse}
+          onCreateGroup={createNewGroup}
+          onRenameGroup={renameOneGroup}
+          onPickGroupIcon={(group) => {
+            const source = groupSource(prefs.groups, group.id);
+            if (source === null) return;
+            setPickingGroupIconFor((current) =>
+              current !== null && current.groupId === group.id
+                ? null
+                : { source, groupId: group.id, name: group.name },
+            );
+          }}
+          onUngroup={ungroup}
+          onAddToGroup={(group) => {
+            const source = groupSource(prefs.groups, group.id);
+            if (source === null) return;
+            setPickingMembersFor({ source, groupId: group.id, name: group.name });
+          }}
           hiddenProjects={hiddenProjects}
           // Restoring is the only thing the sidebar asks for by itself: it
           // ends nothing, so there is nothing to serialise or refuse.
@@ -2634,6 +2846,59 @@ function CanvasInner({
             setPickingIconFor(null);
           }}
           onClose={() => setPickingIconFor(null)}
+        />
+      )}
+
+      {pickingMembersFor !== null && (
+        <ProjectPicker
+          groupName={pickingMembersFor.name}
+          choices={memberChoices}
+          onToggle={(projectId, member) => {
+            const name = memberChoices.find((choice) => choice.id === projectId)?.name ?? projectId;
+            savePrefs(
+              member
+                ? // MOVES it, at most one group per project: a project in two
+                  // groups walks its sessions twice and mints duplicate
+                  // `info:<sessionId>` node ids, which break ReactFlow and the
+                  // id `j`/`k` navigates by (`to-canvas.ts:312`).
+                  addProjectToGroup(
+                    prefs,
+                    pickingMembersFor.source,
+                    pickingMembersFor.groupId,
+                    projectId,
+                  )
+                : removeProjectFromGroup(
+                    prefs,
+                    pickingMembersFor.source,
+                    pickingMembersFor.groupId,
+                    projectId,
+                  ),
+            );
+            setStatus(
+              member
+                ? `${name} → ${pickingMembersFor.name}`
+                : `${name} left ${pickingMembersFor.name} — it is back at the top level`,
+            );
+          }}
+          onClose={() => setPickingMembersFor(null)}
+        />
+      )}
+
+      {pickingGroupIconFor !== null && (
+        <IconPicker
+          title={pickingGroupIconFor.name}
+          onPick={(icon) => {
+            savePrefs(
+              setGroupIcon(prefs, pickingGroupIconFor.source, pickingGroupIconFor.groupId, icon),
+            );
+            setStatus(
+              icon === ''
+                ? 'icon cleared — kept on this machine, never in the event log'
+                : `${icon} — kept on this machine, never in the event log`,
+            );
+            setPickingGroupIconFor(null);
+          }}
+          onClose={() => setPickingGroupIconFor(null)}
         />
       )}
 

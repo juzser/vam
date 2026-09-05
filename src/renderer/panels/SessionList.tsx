@@ -24,6 +24,8 @@ import {
   ChevronDown,
   ChevronRight,
   Filter,
+  Folder,
+  FolderPlus,
   GitBranch,
   LoaderCircle,
   Monitor,
@@ -36,7 +38,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import type { Project, SessionStatus } from '../domain/model.js';
+import type { Group, Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filter.js';
@@ -207,6 +209,50 @@ export type SessionListProps = {
   readonly collapsedProjects?: readonly string[];
   readonly onToggleCollapse?: (project: Project) => void;
   /**
+   * The groups to draw headings for -- UI "project", the layer ABOVE a
+   * project; see the vocabulary table in `domain/model.ts`.
+   *
+   * PASSED RATHER THAN DERIVED FROM `entries`, and only for the empty case: a
+   * group the operator has just made holds no project, so no entry mentions
+   * it and a list built from the entries alone would draw nothing where they
+   * are standing. Every non-empty group is placed by `entry.group`, in the
+   * order `orderedSessions` ranked it.
+   *
+   * Optional and defaulting to none, like the fold below it: every test that
+   * renders this pane is about something else, and the empty list is what
+   * every store in existence holds.
+   */
+  readonly groups?: readonly Group[];
+  /**
+   * The ids of the groups folded shut, and the ask to fold one. Exactly
+   * `collapsedProjects`/`onToggleCollapse` one level up, with the same
+   * fallback-to-local-state decision and for the same reason: the control
+   * works the day it ships, and persists once the caller passes
+   * `prefs.collapsedGroups`.
+   */
+  readonly collapsedGroups?: readonly string[];
+  readonly onToggleGroupCollapse?: (group: Group) => void;
+  /**
+   * The group lifecycle: make one, rename it, give it a glyph, dissolve it.
+   *
+   * Every one of them is a prefs write and nothing else -- no session ends, no
+   * project is hidden, no source is asked anything -- which is why none of
+   * them is serialised behind `pendingAction` and why `onUngroup` needs no
+   * confirm. Optional, and a control whose handler is absent is not drawn: a
+   * caller that has nowhere to store a group must not be given a button that
+   * silently does nothing.
+   */
+  readonly onCreateGroup?: (name: string) => void;
+  readonly onRenameGroup?: (group: Group, name: string) => void;
+  readonly onPickGroupIcon?: (group: Group) => void;
+  readonly onUngroup?: (group: Group) => void;
+  /**
+   * Open the list of repos to put in this group. The LIST lives in `Canvas`,
+   * like both icon pickers, because it is wider than this column -- the row
+   * only asks.
+   */
+  readonly onAddToGroup?: (group: Group) => void;
+  /**
    * Removing a project, and bringing one back. ALL THREE ARE REQUIRED, and
    * that is the decision -- read on before making them optional again.
    *
@@ -297,6 +343,14 @@ export function SessionList(props: SessionListProps) {
     revealRequest,
     collapsedProjects,
     onToggleCollapse,
+    groups = [],
+    collapsedGroups,
+    onToggleGroupCollapse,
+    onCreateGroup,
+    onRenameGroup,
+    onPickGroupIcon,
+    onUngroup,
+    onAddToGroup,
     hiddenProjects,
     onHideProject,
     onRemoveProject,
@@ -411,6 +465,24 @@ export function SessionList(props: SessionListProps) {
    */
   const [localCollapsed, setLocalCollapsed] = useState<readonly string[]>([]);
   const collapsed = collapsedProjects ?? localCollapsed;
+  /** The same fallback for the group fold. See `collapsedGroups` on the props. */
+  const [localGroupCollapsed, setLocalGroupCollapsed] = useState<readonly string[]>([]);
+  const groupCollapsed = collapsedGroups ?? localGroupCollapsed;
+  /**
+   * The one group name being typed, and what it is for: a group about to
+   * exist, or one being renamed. ONE piece of state, because one editor is
+   * open at a time and two would need a rule about which wins.
+   *
+   * The idiom is the session rename's, deliberately -- a row that turns into
+   * a field, Enter commits, Escape cancels -- and NOT an overlay:
+   * `ConfirmRemoveProject`'s header states vam's overlay idiom exists to make
+   * a disclosure, and naming a group discloses nothing.
+   */
+  const [groupDraft, setGroupDraft] = useState<
+    { readonly kind: 'new' } | { readonly kind: 'rename'; readonly group: Group } | null
+  >(null);
+  const [groupDraftName, setGroupDraftName] = useState('');
+  const [openGroupMenu, setOpenGroupMenu] = useState<string | null>(null);
   /** Never `entries`. See `allEntries` on the props for what reads this. */
   const allEntries = unfiltered ?? entries;
   const hidden = hiddenProjects;
@@ -437,6 +509,40 @@ export function SessionList(props: SessionListProps) {
       );
     },
     [onToggleCollapse],
+  );
+
+  const cancelGroupDraft = useCallback(() => {
+    setGroupDraft(null);
+    setGroupDraftName('');
+  }, []);
+
+  /** An empty name creates nothing and renames nothing -- it just closes. */
+  const commitGroupDraft = useCallback(() => {
+    const name = groupDraftName.trim();
+    if (groupDraft !== null && name !== '') {
+      if (groupDraft.kind === 'new') {
+        onCreateGroup?.(name);
+      } else {
+        onRenameGroup?.(groupDraft.group, name);
+      }
+    }
+    setGroupDraft(null);
+    setGroupDraftName('');
+  }, [groupDraft, groupDraftName, onCreateGroup, onRenameGroup]);
+
+  const toggleGroupCollapse = useCallback(
+    (group: Group) => {
+      if (onToggleGroupCollapse !== undefined) {
+        onToggleGroupCollapse(group);
+        return;
+      }
+      setLocalGroupCollapsed((current) =>
+        current.includes(group.id)
+          ? current.filter((id) => id !== group.id)
+          : [...current, group.id],
+      );
+    },
+    [onToggleGroupCollapse],
   );
 
   /**
@@ -568,14 +674,20 @@ export function SessionList(props: SessionListProps) {
   const popoverWidth = Math.min(FILTER_POPOVER_WIDTH, width - FILTER_POPOVER_GUTTER);
 
   // `entries` arrives project-major (see the file doc comment), so one pass
-  // collapsing consecutive same-project runs is a grouping, not a sort.
-  const groups: { readonly project: Project; readonly items: readonly SessionEntry[] }[] = [];
+  // collapsing consecutive same-project runs is a grouping, not a sort. Each
+  // section also remembers the GROUP its entries came in under -- `null` for
+  // the top level, which is every section until the operator makes a group.
+  const sections: {
+    readonly project: Project;
+    readonly items: readonly SessionEntry[];
+    readonly group: Group | null;
+  }[] = [];
   for (const entry of entries) {
-    const current = groups[groups.length - 1];
+    const current = sections[sections.length - 1];
     if (current !== undefined && current.project.id === entry.project.id) {
       (current.items as SessionEntry[]).push(entry);
     } else {
-      groups.push({ project: entry.project, items: [entry] });
+      sections.push({ project: entry.project, items: [entry], group: entry.group ?? null });
     }
   }
 
@@ -593,14 +705,96 @@ export function SessionList(props: SessionListProps) {
     }
   }
 
-  /** The same groups, each carrying the two flags its heading renders from. */
-  const folded = groups
-    .filter((group) => !hidden.includes(group.project.id))
-    .map((group) => ({
-      ...group,
-      isCollapsed: collapsed.includes(group.project.id),
-      isRevealed: revealed === group.project.id,
+  /** The same sections, each carrying the two flags its heading renders from. */
+  const folded = sections
+    .filter((section) => !hidden.includes(section.project.id))
+    .map((section) => ({
+      ...section,
+      isCollapsed: collapsed.includes(section.project.id),
+      isRevealed: revealed === section.project.id,
     }));
+
+  /**
+   * What the list draws, top to bottom: group headings and project sections in
+   * ONE flat sequence.
+   *
+   * Flat, not nested, and that is the point. The rows are unchanged and so is
+   * every selector over them -- a grouped project keeps its own
+   * `data-project-heading` and `data-project-rows` exactly where a dozen tests
+   * expect them, and gains an indent and a `data-in-group` instead of a new
+   * wrapper. Headings at BOTH levels stay captions: neither is focusable, so a
+   * second caption level adds no stop for `j` to land on.
+   *
+   * Order comes from `entries`, which arrived from `orderedSessions` already
+   * ranked across both levels -- so a group appears where its most urgent
+   * session put it, and no re-sort happens here. A group holding no live
+   * project has no entry to appear beside, so it is appended: an empty group
+   * ranks last there too.
+   */
+  /**
+   * The one name editor, used by both routes. Rendered at most once: a new
+   * group's row sits at the top of the list, a rename replaces the heading's
+   * own name, and `groupDraft` says which.
+   */
+  /** Nothing to open a menu for when the caller wired no group action. */
+  const hasGroupMenu =
+    onRenameGroup !== undefined || onPickGroupIcon !== undefined || onUngroup !== undefined;
+
+  const groupEditor = (
+    <input
+      data-group-draft
+      value={groupDraftName}
+      placeholder="project name"
+      aria-label="project name"
+      ref={(node) => {
+        if (node !== null && document.activeElement !== node) {
+          node.focus();
+        }
+      }}
+      onChange={(event) => setGroupDraftName(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          commitGroupDraft();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          cancelGroupDraft();
+        }
+      }}
+      onBlur={cancelGroupDraft}
+      className="min-w-0 flex-1 rounded-[5px] border border-line-strong bg-panel px-1 py-0.5 font-mono text-[10px] text-ink outline-none"
+    />
+  );
+
+  const drawn: (
+    | { readonly kind: 'group'; readonly group: Group; readonly count: number }
+    | { readonly kind: 'section'; readonly section: (typeof folded)[number] }
+  )[] = [];
+  const drawnGroups = new Set<string>();
+  const countIn = (groupId: string) =>
+    folded
+      .filter((section) => section.group?.id === groupId)
+      .reduce((total, section) => total + section.items.length, 0);
+  for (const section of folded) {
+    const group = section.group;
+    if (group !== null && !drawnGroups.has(group.id)) {
+      drawnGroups.add(group.id);
+      drawn.push({ kind: 'group', group, count: countIn(group.id) });
+    }
+    if (group === null || !groupCollapsed.includes(group.id)) {
+      drawn.push({ kind: 'section', section });
+    }
+  }
+  for (const group of groups) {
+    // Only the genuinely EMPTY ones. A group whose members exist but were
+    // narrowed away by search or removed from the sidebar has nothing under
+    // it here, and a heading over nothing is not information -- while a group
+    // the operator just made and has put nothing in yet is the one thing they
+    // are looking for.
+    if (!drawnGroups.has(group.id) && group.projects.length === 0) {
+      drawn.push({ kind: 'group', group, count: 0 });
+    }
+  }
 
   return (
     <aside
@@ -697,6 +891,36 @@ export function SessionList(props: SessionListProps) {
           Projects
         </span>
         <span className="flex-1" />
+        {/* The layer above: a group of the projects vam already knows, named
+            "project" because that is the operator's word for it (see the
+            vocabulary table in `domain/model.ts`). LEFT of the directory
+            picker, which is untouched and unmoved: that one is the only route
+            to a repository vam has never seen, and this one cannot reach a
+            directory at all. Both are the same 26px square, in the row that
+            already held two.
+
+            THE ACCESSIBLE NAME IS QUALIFIED AND THE VISIBLE TITLE IS NOT.
+            "new project" is the name the control beside this one has answered
+            to since before the group layer existed, and two squares in one row
+            answering to one name is worse for a screen reader than a longer
+            phrase is for anyone. The tooltip a person reads is the operator's
+            word, unqualified; see the note in the plan -- this pairing is the
+            one open UI question and it is theirs to settle. */}
+        {onCreateGroup !== undefined && (
+          <button
+            type="button"
+            data-new-group
+            aria-label="new project (a group of repos)"
+            onClick={() => {
+              setGroupDraftName('');
+              setGroupDraft({ kind: 'new' });
+            }}
+            title="New project"
+            className="flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border border-line bg-panel text-ink-faint hover:border-line-strong"
+          >
+            <FolderPlus size={13} strokeWidth={1.6} />
+          </button>
+        )}
         {/* Choose a directory, start a session in it. That is the ONLY thing
             "new project" can mean here: a project is derived from the cwd of
             a live session, so there is nothing to create and nothing to
@@ -864,113 +1088,317 @@ export function SessionList(props: SessionListProps) {
         }}
       >
         <ul className="flex flex-col gap-3.5">
-          {folded.map(({ isCollapsed, isRevealed, ...group }) => (
-            <li key={group.project.id} className="flex flex-col gap-[5px]">
-              {/* A caption, not a stop. A plain <div>, so nothing can focus it
+          {groupDraft?.kind === 'new' && (
+            <li className="flex items-center gap-[7px] px-1 pb-0.5">
+              <span className="flex h-[15px] w-[15px] flex-none items-center justify-center text-ink-faint">
+                <Folder size={11} strokeWidth={1.7} />
+              </span>
+              {groupEditor}
+            </li>
+          )}
+          {drawn.map((item) => {
+            if (item.kind === 'group') {
+              const { group, count } = item;
+              const isGroupCollapsed = groupCollapsed.includes(group.id);
+              return (
+                <li key={group.id} className="flex flex-col gap-[5px]">
+                  {/* A caption over captions. Same <div>, same reasons as the
+                      project heading below: not a control, not focusable,
+                      never a stop for `j`. A second caption level adds no
+                      position, so `hjkl`, `Cmd+<digit>` and `gt`/`gT` count
+                      exactly what they counted before. */}
+                  {/* biome-ignore lint/a11y/noStaticElementInteractions: as the
+                      project heading -- the hover is a pure reveal and giving
+                      this a role would put a stop in the list. */}
+                  <div
+                    data-group-heading
+                    data-group-id={group.id}
+                    onMouseEnter={() => setRevealed(group.id)}
+                    onMouseLeave={() =>
+                      setRevealed((current) => (current === group.id ? null : current))
+                    }
+                    className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5"
+                  >
+                    <span
+                      data-group-icon={group.id}
+                      className="flex h-[15px] w-[15px] flex-none items-center justify-center text-[11px] leading-none text-ink-faint"
+                    >
+                      {group.icon ?? <Folder size={11} strokeWidth={1.7} />}
+                    </span>
+                    {groupDraft?.kind === 'rename' && groupDraft.group.id === group.id ? (
+                      groupEditor
+                    ) : (
+                      <span className="truncate font-mono text-[10px] text-ink uppercase tracking-[0.12em]">
+                        {group.name}
+                      </span>
+                    )}
+                    {/* Summed over every member, because that is what the
+                        heading is over. A count of one member's sessions under
+                        a caption naming several would be a number about
+                        something else. */}
+                    <span
+                      data-group-count={group.id}
+                      className="font-mono text-[9.5px] text-ink-faint"
+                    >
+                      {count}
+                    </span>
+                    <span className="flex-1" />
+                    <button
+                      type="button"
+                      data-group-collapse={group.id}
+                      aria-expanded={!isGroupCollapsed}
+                      aria-label={`${isGroupCollapsed ? 'expand' : 'collapse'} ${group.name}`}
+                      onClick={() => toggleGroupCollapse(group)}
+                      className={[
+                        'flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
+                        revealed === group.id || isGroupCollapsed ? 'opacity-100' : 'opacity-0',
+                      ].join(' ')}
+                    >
+                      {isGroupCollapsed ? (
+                        <ChevronRight size={12} strokeWidth={1.8} />
+                      ) : (
+                        <ChevronDown size={12} strokeWidth={1.8} />
+                      )}
+                    </button>
+
+                    {hasGroupMenu && (
+                      <button
+                        type="button"
+                        data-group-menu={group.id}
+                        aria-haspopup="menu"
+                        aria-expanded={openGroupMenu === group.id}
+                        aria-label={`more actions for ${group.name}`}
+                        onClick={() =>
+                          setOpenGroupMenu((current) => (current === group.id ? null : group.id))
+                        }
+                        className={[
+                          'flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
+                          revealed === group.id || openGroupMenu === group.id
+                            ? 'opacity-100'
+                            : 'opacity-0',
+                        ].join(' ')}
+                      >
+                        <MoreHorizontal size={12} strokeWidth={1.8} />
+                      </button>
+                    )}
+
+                    {/* Last in the row and last in tab order, as the project
+                        heading's own `+` is: the controls acting on the
+                        heading come first, the one that adds something to it
+                        comes after them. It offers what vam ALREADY KNOWS --
+                        no directory dialog, no validation, no IPC; see
+                        `ProjectPicker`. */}
+                    {onAddToGroup !== undefined && (
+                      <button
+                        type="button"
+                        data-add-to-group={group.id}
+                        onClick={() => onAddToGroup(group)}
+                        title={`Add a repo to ${group.name}`}
+                        aria-label={`add a repo to ${group.name}`}
+                        className={[
+                          'flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                          revealed === group.id ? 'opacity-100' : 'opacity-0',
+                        ].join(' ')}
+                      >
+                        <Plus size={13} strokeWidth={1.7} />
+                      </button>
+                    )}
+
+                    {openGroupMenu === group.id && (
+                      <div
+                        data-group-menu-panel={group.id}
+                        role="menu"
+                        aria-label={`${group.name} actions`}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            setOpenGroupMenu(null);
+                          }
+                        }}
+                        className="absolute top-[19px] right-0 z-20 flex w-[168px] flex-col rounded-[9px] border border-line-strong bg-panel p-1 shadow-lg"
+                      >
+                        {onRenameGroup !== undefined && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            data-group-menu-item="rename"
+                            onClick={() => {
+                              setGroupDraftName(group.name);
+                              setGroupDraft({ kind: 'rename', group });
+                              setOpenGroupMenu(null);
+                            }}
+                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                          >
+                            Rename project
+                          </button>
+                        )}
+                        {onPickGroupIcon !== undefined && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            data-group-menu-item="icon"
+                            onClick={() => {
+                              onPickGroupIcon(group);
+                              setOpenGroupMenu(null);
+                            }}
+                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                          >
+                            Change project icon
+                          </button>
+                        )}
+                        {/* PLAIN, and last only because it is the one that
+                            ends the group. It is not red and it opens no
+                            modal: `ConfirmRemoveProject`'s own header says the
+                            overlay idiom is there to make a disclosure rather
+                            than to add a click, and its disclosure is two
+                            session counts. Ungrouping has no counts -- no
+                            session ends, nothing is hidden, `hiddenProjects`
+                            is not touched -- and its entire outcome is on
+                            screen the instant it happens: the heading goes and
+                            its members reappear one level up. The red stays
+                            where the consequence is, on the project heading's
+                            "Remove project", so weight goes on keeping matching
+                            consequence. */}
+                        {onUngroup !== undefined && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            data-group-menu-item="ungroup"
+                            onClick={() => {
+                              onUngroup(group);
+                              setOpenGroupMenu(null);
+                            }}
+                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                          >
+                            Ungroup
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              );
+            }
+            const { isCollapsed, isRevealed, ...section } = item.section;
+            return (
+              <li
+                key={section.project.id}
+                {...(section.group === null ? {} : { 'data-in-group': section.group.id })}
+                className={[
+                  'flex flex-col gap-[5px]',
+                  // The indent the level above buys, on the container rather
+                  // than per row -- the same decision `data-project-rows` already
+                  // documents one level down, for the same reason.
+                  section.group === null ? '' : 'pl-2',
+                ].join(' ')}
+              >
+                {/* A caption, not a stop. A plain <div>, so nothing can focus it
                 and `j` never lands on a heading. */}
-              {/* `min-h` reserves the add button's own height. The heading is
+                {/* `min-h` reserves the add button's own height. The heading is
                   otherwise as tall as its tallest child, so the row -- and
                   every row under it -- would jump a few pixels each time focus
                   moved between projects and the add came or went. */}
-              {/* biome-ignore lint/a11y/noStaticElementInteractions: the hover is
+                {/* biome-ignore lint/a11y/noStaticElementInteractions: the hover is
                   a pure reveal, and the keyboard has its own path to the same
                   controls -- `p`. The rule exists to catch mouse-ONLY
                   interaction; giving this heading a role or a tabindex to
                   satisfy it would put a stop in the list that `j` lands on,
                   which is the thing the comment above deliberately avoids. */}
-              <div
-                data-project-heading
-                data-project-id={group.project.id}
-                {...(isRevealed ? { 'data-project-revealed': 'true' } : {})}
-                onMouseEnter={() => setRevealed(group.project.id)}
-                onMouseLeave={() =>
-                  setRevealed((current) => (current === group.project.id ? null : current))
-                }
-                className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5"
-              >
-                <button
-                  type="button"
-                  data-project-icon={group.project.id}
-                  onClick={() => onPickIcon(group.project)}
-                  aria-label={`change icon for ${group.project.name}`}
-                  title="change project icon"
-                  className="flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-[11px] leading-none text-ink-faint hover:text-ink-dim"
+                <div
+                  data-project-heading
+                  data-project-id={section.project.id}
+                  {...(isRevealed ? { 'data-project-revealed': 'true' } : {})}
+                  onMouseEnter={() => setRevealed(section.project.id)}
+                  onMouseLeave={() =>
+                    setRevealed((current) => (current === section.project.id ? null : current))
+                  }
+                  className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5"
                 >
-                  {group.project.icon ?? (
-                    /* A monitor, not a middot. The glyph has to read as "this
+                  <button
+                    type="button"
+                    data-project-icon={section.project.id}
+                    onClick={() => onPickIcon(section.project)}
+                    aria-label={`change icon for ${section.project.name}`}
+                    title="change project icon"
+                    className="flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-[11px] leading-none text-ink-faint hover:text-ink-dim"
+                  >
+                    {section.project.icon ?? (
+                      /* A monitor, not a middot. The glyph has to read as "this
                        is a machine you can name" — the middot read as a bullet
                        and gave a clickable control no affordance at all. It is
                        a placeholder in the literal sense: the picker replaces
                        it with whatever emoji you choose, and choosing nothing
                        leaves something that still looks deliberate. */
-                    <Monitor data-project-icon-placeholder size={11} strokeWidth={1.7} />
-                  )}
-                </button>
-                <span className="truncate font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
-                  {group.project.name}
-                </span>
-                <span className="font-mono text-[9.5px] text-ink-faint">{group.items.length}</span>
-                <span className="flex-1" />
+                      <Monitor data-project-icon-placeholder size={11} strokeWidth={1.7} />
+                    )}
+                  </button>
+                  <span className="truncate font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
+                    {section.project.name}
+                  </span>
+                  <span className="font-mono text-[9.5px] text-ink-faint">
+                    {section.items.length}
+                  </span>
+                  <span className="flex-1" />
 
-                {/* Revealed, never conditional. The row's close button is
+                  {/* Revealed, never conditional. The row's close button is
                     removed from the DOM until hover, and that is right for a
                     control with a keyboard twin (`x`); these two have none, so
                     removing them would leave the fold reachable by pointer
                     only. Transparent-but-present keeps Tab working, and
                     `focus:opacity-100` means the tab stop you land on is a
                     thing you can see. */}
-                <button
-                  type="button"
-                  ref={(node) => {
-                    if (node === null) {
-                      foldRefs.current.delete(group.project.id);
-                    } else {
-                      foldRefs.current.set(group.project.id, node);
-                    }
-                  }}
-                  data-project-collapse={group.project.id}
-                  aria-expanded={!isCollapsed}
-                  aria-label={`${isCollapsed ? 'expand' : 'collapse'} ${group.project.name}`}
-                  onClick={() => toggleCollapse(group.project)}
-                  className={[
-                    'flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
-                    isRevealed || isCollapsed ? 'opacity-100' : 'opacity-0',
-                  ].join(' ')}
-                >
-                  {isCollapsed ? (
-                    <ChevronRight size={12} strokeWidth={1.8} />
-                  ) : (
-                    <ChevronDown size={12} strokeWidth={1.8} />
-                  )}
-                </button>
+                  <button
+                    type="button"
+                    ref={(node) => {
+                      if (node === null) {
+                        foldRefs.current.delete(section.project.id);
+                      } else {
+                        foldRefs.current.set(section.project.id, node);
+                      }
+                    }}
+                    data-project-collapse={section.project.id}
+                    aria-expanded={!isCollapsed}
+                    aria-label={`${isCollapsed ? 'expand' : 'collapse'} ${section.project.name}`}
+                    onClick={() => toggleCollapse(section.project)}
+                    className={[
+                      'flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
+                      isRevealed || isCollapsed ? 'opacity-100' : 'opacity-0',
+                    ].join(' ')}
+                  >
+                    {isCollapsed ? (
+                      <ChevronRight size={12} strokeWidth={1.8} />
+                    ) : (
+                      <ChevronDown size={12} strokeWidth={1.8} />
+                    )}
+                  </button>
 
-                <button
-                  type="button"
-                  ref={(node) => {
-                    if (node === null) {
-                      projectMenuRefs.current.delete(group.project.id);
-                    } else {
-                      projectMenuRefs.current.set(group.project.id, node);
+                  <button
+                    type="button"
+                    ref={(node) => {
+                      if (node === null) {
+                        projectMenuRefs.current.delete(section.project.id);
+                      } else {
+                        projectMenuRefs.current.set(section.project.id, node);
+                      }
+                    }}
+                    data-project-menu={section.project.id}
+                    aria-haspopup="menu"
+                    aria-expanded={openMenu === section.project.id}
+                    aria-label={`more actions for ${section.project.name}`}
+                    onClick={() =>
+                      setOpenMenu((current) =>
+                        current === section.project.id ? null : section.project.id,
+                      )
                     }
-                  }}
-                  data-project-menu={group.project.id}
-                  aria-haspopup="menu"
-                  aria-expanded={openMenu === group.project.id}
-                  aria-label={`more actions for ${group.project.name}`}
-                  onClick={() =>
-                    setOpenMenu((current) =>
-                      current === group.project.id ? null : group.project.id,
-                    )
-                  }
-                  className={[
-                    'flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
-                    isRevealed || openMenu === group.project.id ? 'opacity-100' : 'opacity-0',
-                  ].join(' ')}
-                >
-                  <MoreHorizontal size={12} strokeWidth={1.8} />
-                </button>
+                    className={[
+                      'flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
+                      isRevealed || openMenu === section.project.id ? 'opacity-100' : 'opacity-0',
+                    ].join(' ')}
+                  >
+                    <MoreHorizontal size={12} strokeWidth={1.8} />
+                  </button>
 
-                {/* Real now: `createSession` starts a detached tmux session in
+                  {/* Real now: `createSession` starts a detached tmux session in
                   the project's own directory, so the caption says that. It
                   said "Sessions are created from the CLI" for a while after
                   that stopped being true, and carried `data-placeholder` on a
@@ -980,7 +1408,7 @@ export function SessionList(props: SessionListProps) {
                   answers on the status bar: refusing on click and saying why
                   is honest; refusing by being unclickable just reads as
                   broken. */}
-                {/* This used to render only for the project holding focus, on
+                  {/* This used to render only for the project holding focus, on
                   the reasoning that one `+` per heading meant a column of
                   boxes standing over the session names at all times, for a
                   control that "can only mean the project holding focus". Half
@@ -999,31 +1427,35 @@ export function SessionList(props: SessionListProps) {
                   path that matters -- `j`/`k` down the sessions, `p` to the
                   focused project's controls -- does not go through Tab at
                   all. */}
-                {/* Last in the row, and last in tab order with it. The two
+                  {/* Last in the row, and last in tab order with it. The two
                   controls that act on the heading itself come first; the one
                   that adds something to the project comes after them. DOM
                   order is the only thing setting tab order here -- there is no
                   tabindex anywhere in this row -- so moving the markup moved
                   the keyboard path, and that is the intent, not a side
                   effect. */}
-                <button
-                  type="button"
-                  data-new-session-in-project={group.project.id}
-                  onClick={() => onAddInProject(group.project)}
-                  title={newSessionDecline ?? `New session in ${group.project.name}`}
-                  aria-label={`new session in ${group.project.name}`}
-                  className={[
-                    'flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
-                    isRevealed || group.items.some((entry) => entry.session.id === focusedSessionId)
-                      ? 'opacity-100'
-                      : 'opacity-0',
-                  ].join(' ')}
-                  {...pending(group.project.id, `Starting a session in ${group.project.name}…`)}
-                >
-                  <Plus size={13} strokeWidth={1.7} />
-                </button>
+                  <button
+                    type="button"
+                    data-new-session-in-project={section.project.id}
+                    onClick={() => onAddInProject(section.project)}
+                    title={newSessionDecline ?? `New session in ${section.project.name}`}
+                    aria-label={`new session in ${section.project.name}`}
+                    className={[
+                      'flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                      isRevealed ||
+                      section.items.some((entry) => entry.session.id === focusedSessionId)
+                        ? 'opacity-100'
+                        : 'opacity-0',
+                    ].join(' ')}
+                    {...pending(
+                      section.project.id,
+                      `Starting a session in ${section.project.name}…`,
+                    )}
+                  >
+                    <Plus size={13} strokeWidth={1.7} />
+                  </button>
 
-                {/* There is still no "Project settings": vam has no
+                  {/* There is still no "Project settings": vam has no
                     per-project setting to open.
 
                     "Remove project" USED TO BE ABSENT FOR A REASON THAT HAS
@@ -1037,66 +1469,66 @@ export function SessionList(props: SessionListProps) {
                     persist a removal for the remainder, and state both counts
                     instead of reporting its own inability. It is destructive
                     and it is last, behind a confirm. */}
-                {openMenu === group.project.id && (
-                  <div
-                    ref={projectPanelRef}
-                    data-project-menu-panel={group.project.id}
-                    role="menu"
-                    aria-label={`${group.project.name} actions`}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Escape') {
-                        event.preventDefault();
-                        setOpenMenu(null);
-                      }
-                    }}
-                    className="absolute top-[19px] right-0 z-20 flex w-[168px] flex-col rounded-[9px] border border-line-strong bg-panel p-1 shadow-lg"
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      data-project-menu-item="collapse"
-                      onClick={() => {
-                        toggleCollapse(group.project);
-                        setOpenMenu(null);
+                  {openMenu === section.project.id && (
+                    <div
+                      ref={projectPanelRef}
+                      data-project-menu-panel={section.project.id}
+                      role="menu"
+                      aria-label={`${section.project.name} actions`}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          setOpenMenu(null);
+                        }
                       }}
-                      className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                      className="absolute top-[19px] right-0 z-20 flex w-[168px] flex-col rounded-[9px] border border-line-strong bg-panel p-1 shadow-lg"
                     >
-                      {isCollapsed ? 'Expand project' : 'Collapse project'}
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      data-project-menu-item="icon"
-                      onClick={() => {
-                        onPickIcon(group.project);
-                        setOpenMenu(null);
-                      }}
-                      className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
-                    >
-                      Change project icon
-                    </button>
-                    {/* Last, and the only red thing in the menu. The icon is
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-project-menu-item="collapse"
+                        onClick={() => {
+                          toggleCollapse(section.project);
+                          setOpenMenu(null);
+                        }}
+                        className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                      >
+                        {isCollapsed ? 'Expand project' : 'Collapse project'}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-project-menu-item="icon"
+                        onClick={() => {
+                          onPickIcon(section.project);
+                          setOpenMenu(null);
+                        }}
+                        className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                      >
+                        Change project icon
+                      </button>
+                      {/* Last, and the only red thing in the menu. The icon is
                         LEFT of the label, where the two items above have
                         nothing, because this is the one item you must not
                         press by mistake. */}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      data-project-menu-item="remove"
-                      onClick={() => {
-                        setConfirming(group.project);
-                        setOpenMenu(null);
-                      }}
-                      className="flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-danger hover:bg-raised"
-                    >
-                      <Trash2 size={12} strokeWidth={1.8} />
-                      Remove project
-                    </button>
-                  </div>
-                )}
-              </div>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-project-menu-item="remove"
+                        onClick={() => {
+                          setConfirming(section.project);
+                          setOpenMenu(null);
+                        }}
+                        className="flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-danger hover:bg-raised"
+                      >
+                        <Trash2 size={12} strokeWidth={1.8} />
+                        Remove project
+                      </button>
+                    </div>
+                  )}
+                </div>
 
-              {/* The indent lives on ONE container per project, not on each
+                {/* The indent lives on ONE container per project, not on each
                   row. A margin per row would have to be repeated on the
                   rename editor too, and any row that missed it would sit a
                   few pixels out of line with its neighbours' hover and focus
@@ -1112,103 +1544,103 @@ export function SessionList(props: SessionListProps) {
                   carry 10px of their own left padding, so this is a visible
                   step without spending a tab stop of a column where the
                   title, the branch and the age all truncate. */}
-              {!isCollapsed && (
-                <div
-                  data-project-rows={group.project.id}
-                  className="flex flex-col gap-[5px] pl-1.5"
-                >
-                  {group.items.map(({ session }) => {
-                    const isFocused = session.id === focusedSessionId;
-                    const needsYou = session.status === 'waiting';
-                    // The SAME notion the close button already wears, applied
-                    // to the whole row: closing can take the full stop timeout,
-                    // and for those fifteen seconds the row is not something
-                    // the operator can act on. `pendingAction` stays the one
-                    // source of truth -- there is no second pending state here.
-                    const closing = pendingAction === session.id;
-                    const closingLabel = `Stopping “${session.title}”…`;
+                {!isCollapsed && (
+                  <div
+                    data-project-rows={section.project.id}
+                    className="flex flex-col gap-[5px] pl-1.5"
+                  >
+                    {section.items.map(({ session }) => {
+                      const isFocused = session.id === focusedSessionId;
+                      const needsYou = session.status === 'waiting';
+                      // The SAME notion the close button already wears, applied
+                      // to the whole row: closing can take the full stop timeout,
+                      // and for those fifteen seconds the row is not something
+                      // the operator can act on. `pendingAction` stays the one
+                      // source of truth -- there is no second pending state here.
+                      const closing = pendingAction === session.id;
+                      const closingLabel = `Stopping “${session.title}”…`;
 
-                    return (
-                      <div key={session.id}>
-                        {renamingId === session.id ? (
-                          <div className="flex items-center gap-1.5 rounded-[9px] border border-line-loud bg-raised px-2.5 py-2.5">
-                            <input
-                              ref={renameRef}
-                              value={renameDraft}
-                              onChange={(event) => onRenameChange(event.target.value)}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter') {
-                                  event.preventDefault();
-                                  onRenameCommit();
-                                } else if (event.key === 'Escape') {
-                                  event.preventDefault();
-                                  onRenameCancel();
-                                }
-                              }}
-                              className="min-w-0 flex-1 rounded-[var(--radius-sm)] bg-panel px-1 font-mono text-[12px] text-ink outline-none ring-1 ring-waiting"
-                              aria-label="rename session"
-                            />
-                          </div>
-                        ) : (
-                          <div
-                            // A NAMED group. `group-hover:` matches ANY ancestor
-                            // carrying `group`, and OverlayScroll wraps this whole
-                            // list in one — so an unnamed group here meant hovering
-                            // anywhere in the sidebar revealed every row's close
-                            // button at once, the exact opposite of what the class
-                            // was there to do.
-                            // `data-row-pending` carries the dim (styles.css)
-                            // rather than an inline colour, so the row keeps
-                            // its own tokens and the treatment is one rule.
-                            {...(closing
-                              ? { 'data-row-pending': session.id, 'aria-busy': true }
-                              : {})}
-                            className="group/row relative"
-                          >
-                            <button
-                              type="button"
-                              // Held by id, like `foldRefs` above: the reveal
-                              // effect needs THIS session's row, and a
-                              // querySelector on every focus change would go
-                              // looking for it in the document instead.
-                              ref={(node) => {
-                                if (node === null) {
-                                  rowRefs.current.delete(session.id);
-                                } else {
-                                  rowRefs.current.set(session.id, node);
-                                }
-                              }}
-                              data-session-row={session.id}
-                              onClick={() => onPick(session.id)}
-                              // Not actionable and not a tab stop -- but still
-                              // drawn, and still the row for THIS session: the
-                              // operator has to be able to see which one is
-                              // closing, which is the whole point of the state.
-                              disabled={closing}
-                              tabIndex={closing ? -1 : undefined}
-                              {...(closing ? { title: closingLabel } : {})}
-                              className={[
-                                'relative flex w-full cursor-pointer flex-col gap-[7px] overflow-hidden rounded-[9px] px-2.5 py-2.5 text-left',
-                                isFocused
-                                  ? 'border border-line-loud bg-raised'
-                                  : 'border border-transparent',
-                              ].join(' ')}
+                      return (
+                        <div key={session.id}>
+                          {renamingId === session.id ? (
+                            <div className="flex items-center gap-1.5 rounded-[9px] border border-line-loud bg-raised px-2.5 py-2.5">
+                              <input
+                                ref={renameRef}
+                                value={renameDraft}
+                                onChange={(event) => onRenameChange(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    onRenameCommit();
+                                  } else if (event.key === 'Escape') {
+                                    event.preventDefault();
+                                    onRenameCancel();
+                                  }
+                                }}
+                                className="min-w-0 flex-1 rounded-[var(--radius-sm)] bg-panel px-1 font-mono text-[12px] text-ink outline-none ring-1 ring-waiting"
+                                aria-label="rename session"
+                              />
+                            </div>
+                          ) : (
+                            <div
+                              // A NAMED group. `group-hover:` matches ANY ancestor
+                              // carrying `group`, and OverlayScroll wraps this whole
+                              // list in one — so an unnamed group here meant hovering
+                              // anywhere in the sidebar revealed every row's close
+                              // button at once, the exact opposite of what the class
+                              // was there to do.
+                              // `data-row-pending` carries the dim (styles.css)
+                              // rather than an inline colour, so the row keeps
+                              // its own tokens and the treatment is one rule.
+                              {...(closing
+                                ? { 'data-row-pending': session.id, 'aria-busy': true }
+                                : {})}
+                              className="group/row relative"
                             >
-                              {isFocused && (
-                                <span
-                                  className={`absolute top-0 bottom-0 left-0 w-0.5 ${STATUS_DOT[session.status]}`}
-                                />
-                              )}
+                              <button
+                                type="button"
+                                // Held by id, like `foldRefs` above: the reveal
+                                // effect needs THIS session's row, and a
+                                // querySelector on every focus change would go
+                                // looking for it in the document instead.
+                                ref={(node) => {
+                                  if (node === null) {
+                                    rowRefs.current.delete(session.id);
+                                  } else {
+                                    rowRefs.current.set(session.id, node);
+                                  }
+                                }}
+                                data-session-row={session.id}
+                                onClick={() => onPick(session.id)}
+                                // Not actionable and not a tab stop -- but still
+                                // drawn, and still the row for THIS session: the
+                                // operator has to be able to see which one is
+                                // closing, which is the whole point of the state.
+                                disabled={closing}
+                                tabIndex={closing ? -1 : undefined}
+                                {...(closing ? { title: closingLabel } : {})}
+                                className={[
+                                  'relative flex w-full cursor-pointer flex-col gap-[7px] overflow-hidden rounded-[9px] px-2.5 py-2.5 text-left',
+                                  isFocused
+                                    ? 'border border-line-loud bg-raised'
+                                    : 'border border-transparent',
+                                ].join(' ')}
+                              >
+                                {isFocused && (
+                                  <span
+                                    className={`absolute top-0 bottom-0 left-0 w-0.5 ${STATUS_DOT[session.status]}`}
+                                  />
+                                )}
 
-                              <span className="flex items-center gap-2">
-                                <span
-                                  className={[
-                                    'h-[7px] w-[7px] flex-none rounded-full',
-                                    STATUS_DOT[session.status],
-                                    needsYou || session.status === 'running' ? 'vam-breathe' : '',
-                                  ].join(' ')}
-                                />
-                                {/* No session icon here. The row drew one --
+                                <span className="flex items-center gap-2">
+                                  <span
+                                    className={[
+                                      'h-[7px] w-[7px] flex-none rounded-full',
+                                      STATUS_DOT[session.status],
+                                      needsYou || session.status === 'running' ? 'vam-breathe' : '',
+                                    ].join(' ')}
+                                  />
+                                  {/* No session icon here. The row drew one --
                                     the shared chain, always occupying its slot
                                     -- and the operator removed it: an icon per
                                     project heading groups the list, and a
@@ -1217,76 +1649,76 @@ export function SessionList(props: SessionListProps) {
                                     width from the title. The canvas root node
                                     is now the only surface that draws it, and
                                     the `s` chord still picks it. */}
-                                <span
-                                  className={`truncate text-[13px] ${isFocused ? 'font-medium text-ink' : 'text-ink-dim'}`}
-                                >
-                                  {session.title}
+                                  <span
+                                    className={`truncate text-[13px] ${isFocused ? 'font-medium text-ink' : 'text-ink-dim'}`}
+                                  >
+                                    {session.title}
+                                  </span>
                                 </span>
-                              </span>
 
-                              {/* Branch on the left, time on the right, and nothing
+                                {/* Branch on the left, time on the right, and nothing
                                 between them. The step-verb pill and the progress
                                 bar that used to sit here were removed at the
                                 operator's request: both drew a per-status colour
                                 channel over data no source supplies, so a row at
                                 rest read as a dashboard reporting nothing. */}
-                              <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
-                                <span className="flex min-w-0 flex-1 items-center gap-1">
-                                  <GitBranch size={10} strokeWidth={1.6} />
+                                <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
+                                  <span className="flex min-w-0 flex-1 items-center gap-1">
+                                    <GitBranch size={10} strokeWidth={1.6} />
+                                    <span
+                                      data-session-branch
+                                      title={
+                                        session.branch === null
+                                          ? 'this source cannot say which branch the session is on'
+                                          : session.branch
+                                      }
+                                      className="flex min-w-0 items-center"
+                                    >
+                                      {session.branch === null ? (
+                                        '—'
+                                      ) : (
+                                        <>
+                                          <span data-branch-head className="truncate">
+                                            {splitBranch(session.branch).head}
+                                          </span>
+                                          <span data-branch-tail className="flex-none">
+                                            {splitBranch(session.branch).tail}
+                                          </span>
+                                        </>
+                                      )}
+                                    </span>
+                                  </span>
                                   <span
-                                    data-session-branch
+                                    data-session-age
                                     title={
-                                      session.branch === null
-                                        ? 'this source cannot say which branch the session is on'
-                                        : session.branch
+                                      session.age === null
+                                        ? 'this source cannot say when the session last did anything'
+                                        : `last activity ${session.age} ago`
                                     }
-                                    className="flex min-w-0 items-center"
+                                    className="flex-none"
                                   >
-                                    {session.branch === null ? (
-                                      '—'
-                                    ) : (
-                                      <>
-                                        <span data-branch-head className="truncate">
-                                          {splitBranch(session.branch).head}
-                                        </span>
-                                        <span data-branch-tail className="flex-none">
-                                          {splitBranch(session.branch).tail}
-                                        </span>
-                                      </>
-                                    )}
+                                    {session.age ?? '—'}
                                   </span>
                                 </span>
-                                <span
-                                  data-session-age
-                                  title={
-                                    session.age === null
-                                      ? 'this source cannot say when the session last did anything'
-                                      : `last activity ${session.age} ago`
-                                  }
-                                  className="flex-none"
-                                >
-                                  {session.age ?? '—'}
-                                </span>
-                              </span>
-                            </button>
+                              </button>
 
-                            {/* Mouse route to the same thing `x` does. Hidden until the
+                              {/* Mouse route to the same thing `x` does. Hidden until the
                             row is hovered, so a list at rest is a list of names
                             rather than a row of buttons. */}
-                            <button
-                              type="button"
-                              onClick={() => onClose(session.id)}
-                              aria-label={`close ${session.title}`}
-                              {...pending(session.id, `Stopping ${session.title}…`)}
-                              className={[
-                                'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
-                                'opacity-0 hover:bg-panel hover:text-failed group-hover/row:opacity-100',
-                              ].join(' ')}
-                            >
-                              ×
-                            </button>
+                              <button
+                                type="button"
+                                onClick={() => onClose(session.id)}
+                                aria-label={`close ${session.title}`}
+                                {...pending(session.id, `Stopping ${session.title}…`)}
+                                className={[
+                                  'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
+                                  'opacity-0 hover:bg-panel hover:text-failed group-hover/row:opacity-100',
+                                ].join(' ')}
+                              >
+                                ×
+                              </button>
 
-                            {/* The indicator, over the row rather than beside
+                              {/* The indicator, over the row rather than beside
                                 it. Three channels for one fact, because one of
                                 them is always missing for somebody: the turning
                                 mark, the word, and `aria-busy` on the row. With
@@ -1295,26 +1727,31 @@ export function SessionList(props: SessionListProps) {
                                 never "no indicator". `pointer-events-none` so
                                 it cannot become a second thing to click on a
                                 row that refuses clicks. */}
-                            {closing && (
-                              <span
-                                data-row-busy
-                                className="pointer-events-none absolute inset-0 flex items-center justify-center"
-                              >
-                                <span className="flex items-center gap-1.5 rounded-[7px] border border-line bg-panel px-2 py-1 text-[11px] text-ink-dim">
-                                  <LoaderCircle size={11} strokeWidth={1.8} className="vam-spin" />
-                                  {closingLabel}
+                              {closing && (
+                                <span
+                                  data-row-busy
+                                  className="pointer-events-none absolute inset-0 flex items-center justify-center"
+                                >
+                                  <span className="flex items-center gap-1.5 rounded-[7px] border border-line bg-panel px-2 py-1 text-[11px] text-ink-dim">
+                                    <LoaderCircle
+                                      size={11}
+                                      strokeWidth={1.8}
+                                      className="vam-spin"
+                                    />
+                                    {closingLabel}
+                                  </span>
                                 </span>
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </li>
-          ))}
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </li>
+            );
+          })}
 
           {entries.length === 0 && (
             <li className="px-1 py-4 text-[11px] text-ink-faint">
