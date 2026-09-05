@@ -82,6 +82,7 @@ import {
 } from '../prefs/panes.js';
 import {
   applyIcons,
+  applyPalette,
   applyRenames,
   applyTheme,
   browserStorage,
@@ -89,7 +90,9 @@ import {
   type EffectiveTheme,
   FOCUS_SHARE_OFF,
   isProjectHidden,
+  paletteFor,
   type Prefs,
+  type Theme,
   readPrefs,
   setDetailTab,
   setIcon,
@@ -561,12 +564,22 @@ function CanvasInner({
   // which is not what the overlay's own hint promises. Keeping the resolved
   // value in state is what lets the sidebar's label and its click describe the
   // screen rather than the store.
+  // The colour overrides move HERE too, in the same statement, because they are
+  // stored per theme: the class and the bucket in force are two halves of one
+  // appearance, and a flip that moved only the class would leave a light theme
+  // wearing dark's canvas until the next write. `writePrefs` covers an edit;
+  // only this covers the OS changing its mind with nothing else happening.
   const [effective, setEffective] = useState<EffectiveTheme>('dark');
   useEffect(() => {
-    setEffective(applyTheme(prefs.theme));
+    const show = (theme: Theme) => {
+      const next = applyTheme(theme);
+      setEffective(next);
+      applyPalette(paletteFor(prefs.palette, next));
+    };
+    show(prefs.theme);
     if (prefs.theme !== 'system') return;
-    return watchOsTheme(() => setEffective(applyTheme('system')));
-  }, [prefs.theme]);
+    return watchOsTheme(() => show('system'));
+  }, [prefs.theme, prefs.palette]);
 
   const sourceModel = useMemo(
     // Renames after icons, and in the same one place, for the same reason:
@@ -2500,6 +2513,7 @@ function CanvasInner({
       {settingsOpen && (
         <SettingsOverlay
           prefs={prefs}
+          theme={effective}
           onChange={savePrefs}
           onClose={() => setSettingsOpen(false)}
         />

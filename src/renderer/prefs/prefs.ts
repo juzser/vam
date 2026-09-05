@@ -294,14 +294,22 @@ export type Prefs = {
    */
   readonly renames: Readonly<Record<string, Readonly<Record<string, RenameChoice>>>>;
   /**
-   * Token → the colour the operator chose for it, for the few tokens vam
-   * offers. An OVERRIDE LAYER, not a palette: an absent token is not a stored
-   * default, it is "whatever styles.css says for the theme you are in", so the
-   * light/dark pair keeps working under a partial override and a reset is a
-   * deletion rather than a write. Exempt from the icon TTL for the reason
-   * `theme` is: it describes the person.
+   * The colours the operator chose, ONE SET PER THEME — dark's and light's,
+   * each a token → colour map for the few tokens vam offers.
+   *
+   * Per theme because a colour is only ever chosen against the theme that was
+   * on screen at the time. While this was one flat map, a canvas colour picked
+   * at night was pinned into the light theme too, where it could be
+   * unreadable, and there was no way to say so.
+   *
+   * An OVERRIDE LAYER still, and per theme it is one twice over: an absent
+   * token is not a stored default, it is "whatever styles.css says for the
+   * theme you are in", so a partial override keeps that theme's half of the
+   * light/dark pair working and a reset is a deletion rather than a write.
+   * Exempt from the icon TTL for the reason `theme` is: it describes the
+   * person.
    */
-  readonly palette: PaletteOverrides;
+  readonly palette: ThemePalettes;
   /**
    * Action id → the keys the operator gave it. Same "absent means shipped"
    * shape and the same reasoning as `palette`: the chord tables stay the
@@ -374,7 +382,7 @@ export const EMPTY_PREFS: Prefs = {
   collapsedProjects: {},
   hiddenProjects: {},
   renames: {},
-  palette: {},
+  palette: { dark: {}, light: {} },
   keyBindings: {},
   outFontSize: DEFAULT_OUT_FONT_SIZE,
   defaultProvider: DEFAULT_PROVIDER_ID,
@@ -492,7 +500,7 @@ function parsePrefs(
     // either of these has no key at all, and reads back as "no overrides" —
     // the shipped palette and the shipped chords — without touching a
     // neighbour.
-    palette: readPalette((parsed as { palette?: unknown }).palette),
+    palette: readPalettes((parsed as { palette?: unknown }).palette),
     keyBindings: readKeyBindings((parsed as { keyBindings?: unknown }).keyBindings),
     // Per field like the focus share above it, and clamped here rather than
     // only in the setter: this is the read a hand-edited file arrives by.
@@ -1211,6 +1219,18 @@ function fresh<T extends { at: string }>(
 export type PaletteOverrides = Readonly<Record<string, string>>;
 
 /**
+ * One override map per theme, keyed by the EFFECTIVE theme.
+ *
+ * `system` is not a bucket, and cannot become one: it names a source for the
+ * appearance, not an appearance, so there is nothing for an operator to have
+ * chosen a colour against. Every caller that picks a bucket resolves through
+ * `effectiveTheme` first — the same single source `applyTheme` reads — which
+ * is what makes the OS flipping under `system` swap the overrides in force at
+ * the same moment it swaps the class on `<html>`.
+ */
+export type ThemePalettes = Readonly<Record<EffectiveTheme, PaletteOverrides>>;
+
+/**
  * The colours the operator may adjust — TEN of about thirty, chosen rather
  * than enumerated.
  *
@@ -1230,7 +1250,12 @@ export type PaletteOverrides = Readonly<Record<string, string>>;
  *
  * No default value is stored here, and that is the design rather than an
  * omission: an unset token falls through to whichever half of the stylesheet's
- * light/dark pair is in force, so one override does not freeze the other theme.
+ * light/dark pair is in force. What a SET token does about the other theme is
+ * not this table's business — that is `ThemePalettes`, which keeps a map per
+ * theme, so a colour chosen in dark binds dark and leaves light exactly as
+ * unset as it was. (This paragraph once claimed the second half for the flat
+ * map that preceded it, and was wrong: one map applied to both themes froze
+ * the other theme on the first pick.)
  */
 export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: string }[] = [
   { token: '--vam-canvas', label: 'canvas' },
@@ -1257,7 +1282,7 @@ const PALETTE_KEYS = new Set(PALETTE_TOKENS.map((entry) => entry.token));
  */
 const COLOUR = /^#[0-9a-f]{6}$/i;
 
-function readPalette(raw: unknown): PaletteOverrides {
+function readBucket(raw: unknown): PaletteOverrides {
   if (typeof raw !== 'object' || raw === null) {
     return {};
   }
@@ -1270,6 +1295,39 @@ function readPalette(raw: unknown): PaletteOverrides {
     }
   }
   return out;
+}
+
+/**
+ * Both buckets — and the migration off the flat map that shipped first.
+ *
+ * A payload written before this feature is one flat token → colour map, and it
+ * is read into BOTH themes. That is the deliberate reading: it is the only one
+ * that leaves the screen on upgrade exactly as the operator left it. Loading
+ * the flat set into the theme in force alone would silently strip the other
+ * theme of colours it was visibly wearing, and loading it into neither would
+ * throw the operator's choices away — both are a change nobody asked for, made
+ * by a version bump. The cost is that the two buckets start out identical,
+ * which is a thing the operator can see and undo with one pick per theme.
+ *
+ * A payload counts as the new shape when either bucket key is present as an
+ * object, which is what keeps the per-field defence: a missing bucket costs an
+ * empty one, a garbage bucket costs itself and not its neighbour, and neither
+ * can reach a field beside `palette`.
+ */
+function readPalettes(raw: unknown): ThemePalettes {
+  if (typeof raw !== 'object' || raw === null) {
+    return { dark: {}, light: {} };
+  }
+  const shaped = raw as { dark?: unknown; light?: unknown };
+  if (isObject(shaped.dark) || isObject(shaped.light)) {
+    return { dark: readBucket(shaped.dark), light: readBucket(shaped.light) };
+  }
+  const flat = readBucket(raw);
+  return { dark: flat, light: { ...flat } };
+}
+
+function isObject(raw: unknown): boolean {
+  return typeof raw === 'object' && raw !== null;
 }
 
 function readKeyBindings(raw: unknown): KeyBindings {
@@ -1289,26 +1347,46 @@ function readKeyBindings(raw: unknown): KeyBindings {
   return out;
 }
 
-/** One colour chosen. A token vam does not offer, or a value that is not a
- *  colour, changes nothing — the picker cannot produce either, and a caller
- *  that does has a bug rather than a preference. */
-export function setPaletteColor(prefs: Prefs, token: string, value: string): Prefs {
+/** One colour chosen, IN ONE THEME — the effective one, which is the only
+ *  theme an operator can have been looking at when they chose. A token vam does
+ *  not offer, or a value that is not a colour, changes nothing: the picker
+ *  cannot produce either, and a caller that does has a bug rather than a
+ *  preference. */
+export function setPaletteColor(
+  prefs: Prefs,
+  theme: EffectiveTheme,
+  token: string,
+  value: string,
+): Prefs {
   if (!PALETTE_KEYS.has(token) || !COLOUR.test(value)) {
     return prefs;
   }
-  return { ...prefs, palette: withEntry({ ...prefs.palette }, token, value) };
+  return withBucket(prefs, theme, withEntry({ ...prefs.palette[theme] }, token, value));
 }
 
-/** Back to the stylesheet for one token — by DELETING the override. Writing
- *  today's value back would look identical on screen and would freeze that
- *  colour against the other theme forever. */
-export function clearPaletteColor(prefs: Prefs, token: string): Prefs {
-  return { ...prefs, palette: withoutEntry({ ...prefs.palette }, token) };
+/** Back to the stylesheet for one token in one theme — by DELETING the
+ *  override. Writing today's value back would look identical on screen and
+ *  would freeze that colour against a later stylesheet forever. */
+export function clearPaletteColor(prefs: Prefs, theme: EffectiveTheme, token: string): Prefs {
+  return withBucket(prefs, theme, withoutEntry({ ...prefs.palette[theme] }, token));
 }
 
-/** Back to the stylesheet for all of them. */
-export function clearPalette(prefs: Prefs): Prefs {
-  return { ...prefs, palette: {} };
+/** Back to the stylesheet for all of them, in ONE theme. The other theme's
+ *  colours were chosen on a screen this one cannot see, so a reset here is not
+ *  evidence that they are unwanted. */
+export function clearPalette(prefs: Prefs, theme: EffectiveTheme): Prefs {
+  return withBucket(prefs, theme, {});
+}
+
+function withBucket(prefs: Prefs, theme: EffectiveTheme, bucket: PaletteOverrides): Prefs {
+  return { ...prefs, palette: { ...prefs.palette, [theme]: bucket } };
+}
+
+/** The overrides in force. `theme` is the EFFECTIVE theme: resolve `system`
+ *  through `effectiveTheme` before you get here, or you are asking for the
+ *  colours of a screen nobody is looking at. */
+export function paletteFor(palettes: ThemePalettes, theme: EffectiveTheme): PaletteOverrides {
+  return palettes[theme];
 }
 
 /** Written by the shortcut editor; validated on the way back in by
@@ -1369,7 +1447,7 @@ export function applyOutFontSize(
 }
 
 export function activatePrefs(prefs: Prefs): Prefs {
-  applyPalette(prefs.palette);
+  applyPalette(paletteFor(prefs.palette, effectiveTheme(prefs.theme)));
   applyOutFontSize(prefs.outFontSize);
   setActiveBindings(prefs.keyBindings);
   setActiveProvider(prefs.defaultProvider);
