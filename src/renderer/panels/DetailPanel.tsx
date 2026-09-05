@@ -1784,6 +1784,21 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const [cycleNote, setCycleNote] = useState<CycleNote | null>(null);
   /**
+   * The note belongs to the session it was raised for.
+   *
+   * This pane is NOT remounted when `entry` changes, so A's amber "tmux would
+   * not deliver to that session", still on screen over B's mode row, is a
+   * claim about B that nothing ever made. The row is part of the identity
+   * because two sessions of one project are two different panes -- the same
+   * three lines, for the same reason, as `TerminalTab`'s `refusalFor`.
+   */
+  const cycleAbout = `${entry?.project.id ?? ''}|${entry?.session.id ?? ''}`;
+  const noteFor = useRef(cycleAbout);
+  if (noteFor.current !== cycleAbout) {
+    noteFor.current = cycleAbout;
+    if (cycleNote !== null) setCycleNote(null);
+  }
+  /**
    * Whether a mode can ACTUALLY be chosen for the focused session -- the one
    * condition the row is drawn on: hidden where the factory has already
    * chosen and vam cannot change it, shown only where a choice is possible.
@@ -1821,9 +1836,13 @@ export function DetailPanel(props: DetailPanelProps) {
     }
     // BEFORE THE AWAIT: one to three tmux spawns follow, at ten seconds each.
     setCycleNote({ kind: 'busy', text: '⇧Tab · sending…' });
+    const mine = cycleAbout;
     const landed = await send(entry.project.id, { kind: 'back-tab' }, entry.session.id).catch(
       (): PaneSendResult => 'refused',
     );
+    // Thirty seconds is long enough to move on, and an answer about the
+    // session that was here then says nothing about the one that is here now.
+    if (noteFor.current !== mine) return;
     const refusal = cycleWording(landed);
     setCycleNote(
       refusal === null

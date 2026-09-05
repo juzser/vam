@@ -765,6 +765,48 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
     });
   });
 
+  /**
+   * A REFUSAL BELONGS TO THE SESSION IT WAS RAISED FOR. `DetailPanel` is not
+   * remounted when `entry` changes, so A's amber "tmux would not deliver to
+   * that session", still drawn over B's mode row, is a statement about B that
+   * nothing ever made. `TerminalTab` holds the same three lines for the same
+   * reason, and this follows it rather than inventing a second pattern.
+   */
+  it('drops the note when the pane starts being about another session', async () => {
+    withBridge(async () => 'refused');
+    const { rerender } = drawFor();
+    await press(true);
+    expect(q('[data-mode-refusal]')).not.toBeNull();
+    act(() => {
+      rerender({ entry: { project: PROJECT, session: { ...SESSION, id: 's2', title: 'Other' } } });
+    });
+    const said = q<HTMLElement>('[data-mode-cycle]');
+    expect(said?.getAttribute('data-mode-cycle-state')).toBe('resting');
+    expect(said?.textContent).toContain('cycle mode');
+  });
+
+  it('does not land A’s late answer on the session that replaced it', async () => {
+    let land: (result: PaneSendResult) => void = () => {};
+    withBridge(
+      () =>
+        new Promise<PaneSendResult>((resolve) => {
+          land = resolve;
+        }),
+    );
+    const { rerender } = drawFor();
+    await press(true);
+    act(() => {
+      rerender({ entry: { project: PROJECT, session: { ...SESSION, id: 's2', title: 'Other' } } });
+    });
+    await act(async () => {
+      land('refused');
+      await Promise.resolve();
+    });
+    expect(q<HTMLElement>('[data-mode-cycle]')?.getAttribute('data-mode-cycle-state')).toBe(
+      'resting',
+    );
+  });
+
   it('says so when there is no bridge to press the key with', async () => {
     // The browser build has no `window.api`. The row is drawn from the
     // session's own facts, so this is the one case where it can be on screen
