@@ -10,7 +10,7 @@
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, session } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell } from 'electron';
 import { registerClipboardIpc } from './clipboard/ipc.js';
 import { contentSecurityPolicy } from './csp.js';
 import { registerDialogIpc } from './dialog/ipc.js';
@@ -299,12 +299,20 @@ void app.whenReady().then(() => {
   // module's -- main-process-only because a Keychain read is not a thing the
   // renderer, the least trusted process here, may ever perform.
   registerUsageIpc(ipcMain, () => readUsage());
-  // Contacts github.com, and ONLY when a surface asks -- there is no timer
-  // and no launch-time check, which is what makes an outbound call from a
-  // local-first tool opt-in rather than announced. It never downloads or
-  // installs anything: what comes back is a URL for the operator to decide
-  // about. See `./update/check.ts`.
-  registerUpdateIpc(ipcMain, () => checkForUpdate(app.getVersion()));
+  // Contacts github.com ONCE, here, as vam starts: one unauthenticated GET
+  // carrying no token, no query and nothing about this machine's sessions,
+  // projects or paths. Nothing is awaited -- the window is created below
+  // while the check is still in flight -- and there is no timer, so this is
+  // the only request of the session. It downloads and installs nothing; the
+  // second channel opens the release page in the operator's own browser.
+  // See `./update/check.ts`.
+  registerUpdateIpc(
+    ipcMain,
+    () => checkForUpdate(app.getVersion()),
+    async (url) => {
+      await shell.openExternal(url);
+    },
+  );
   // Electron's clipboard, not the page's: the permission policy above denies
   // `clipboard-sanitized-write`, so a renderer-side write is refused in the
   // packaged app. See `./clipboard/ipc.ts`.

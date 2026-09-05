@@ -20,6 +20,7 @@ import type {
   DesktopSourceApi,
   DialogApi,
   TerminalApi,
+  UpdateApi,
   UsageApi,
 } from '../preload/api.js';
 import type { PreloadSourceApi } from '../shared/preload-api.js';
@@ -31,6 +32,7 @@ import { createSourceFromHttp } from './sources/http-factory.js';
 import { describeFailure, type SessionSource } from './sources/port.js';
 import { createSourceFromPreload } from './sources/preload-factory.js';
 import { useSourceModel } from './sources/useSourceModel.js';
+import { UpdateNotice } from './update/UpdateNotice.js';
 
 declare global {
   interface Window {
@@ -47,6 +49,12 @@ declare global {
       readonly terminal: TerminalApi;
       /** Electron's `showOpenDialog`; the browser build has no picker at all. */
       readonly dialog: DialogApi;
+      /**
+       * The launch check's answer, and the click that opens the release page
+       * in the operator's browser. Desktop-only: the browser build has no
+       * bridge, so `UpdateNotice` simply never draws there.
+       */
+      readonly update: UpdateApi;
     };
   }
 }
@@ -76,7 +84,7 @@ export function App() {
   // for the object rather than for a build flag.
   const api = globalThis.window?.api;
   if (api !== undefined) {
-    return <DesktopCanvas api={api} />;
+    return <DesktopCanvas api={api} update={api.update} />;
   }
   return isDemo() ? <DemoCanvas /> : <BrowserCanvas client={client} />;
 }
@@ -150,7 +158,13 @@ export function BrowserCanvas({ client }: { readonly client: SmithClient }) {
  * actually reaches anything is `canWriteTo`'s call at the point of the write,
  * not a decision made here.
  */
-export function DesktopCanvas({ api }: { readonly api: DesktopSourceApi }) {
+export function DesktopCanvas({
+  api,
+  update,
+}: {
+  readonly api: DesktopSourceApi;
+  readonly update?: UpdateApi;
+}) {
   const [source, setSource] = useState<SessionSource | null>(null);
   const [assembleError, setAssembleError] = useState<string | null>(null);
 
@@ -174,7 +188,15 @@ export function DesktopCanvas({ api }: { readonly api: DesktopSourceApi }) {
     };
   }, [api]);
 
-  return <SourceCanvas source={source} failure={assembleError} />;
+  // The notice is a `fixed` popover in the top-right corner, so it takes no
+  // room from the canvas and pushes nothing off the bottom of the viewport --
+  // the failure the banner in `SourceCanvas` documents.
+  return (
+    <>
+      <UpdateNotice update={update} />
+      <SourceCanvas source={source} failure={assembleError} />
+    </>
+  );
 }
 
 /**

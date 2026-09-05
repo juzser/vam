@@ -62,6 +62,14 @@ export const CHANNELS = {
    */
   updateCheck: 'vam:update:check',
   /**
+   * "Take me to the release." Answers a bare boolean -- did the operator's
+   * browser open -- and takes NO argument: the URL opened is the one main's
+   * own launch check found, never one the renderer supplies. That is what
+   * keeps this from being a general "open any URL" capability in a window
+   * whose whole navigation policy is deny-by-default.
+   */
+  updateOpen: 'vam:update:open',
+  /**
    * The Terminal tab's read. Like the two above it answers bare -- a
    * `PaneView`, not an `IpcResult` -- because that type already carries its
    * own failure branch (see `src/main/terminal/ipc.ts`). It is invoked ONLY

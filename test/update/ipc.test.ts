@@ -1,11 +1,11 @@
 /**
- * `registerUpdateIpc`: pull-based, throttled in HOURS, and offline here --
- * the check is a stub, so no request leaves this file.
+ * `registerUpdateIpc`: one check, at launch, and never again in the session.
+ * The check is a stub in every test here, so no request leaves this file.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 import { CHANNELS } from '../../src/main/ipc/channels.js';
-import { MIN_CHECK_INTERVAL_MS, registerUpdateIpc } from '../../src/main/update/ipc.js';
+import { registerUpdateIpc } from '../../src/main/update/ipc.js';
 import { createUpdateApi } from '../../src/preload/api.js';
 import type { UpdateStatus } from '../../src/shared/update.js';
 
@@ -30,52 +30,52 @@ const AVAILABLE: UpdateStatus = {
 };
 
 describe('registerUpdateIpc', () => {
-  it('checks nothing until the renderer asks', async () => {
+  it('checks once at launch, before anything asks', () => {
+    const check = vi.fn(async () => AVAILABLE);
+    registerUpdateIpc(fakeIpcMain(), check);
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
+  it('never checks again, however often the renderer asks', async () => {
     const check = vi.fn(async () => AVAILABLE);
     const ipcMain = fakeIpcMain();
     registerUpdateIpc(ipcMain, check);
-    expect(check).not.toHaveBeenCalled();
 
-    expect(await ipcMain.invoke(CHANNELS.updateCheck)).toEqual(AVAILABLE);
+    for (let i = 0; i < 20; i += 1) {
+      expect(await ipcMain.invoke(CHANNELS.updateCheck)).toEqual(AVAILABLE);
+    }
     expect(check).toHaveBeenCalledTimes(1);
   });
 
-  it('is measured in hours, not renders: repeat asks are served from the last answer', async () => {
-    const check = vi.fn(async () => AVAILABLE);
+  it('does not wait for the check: registration returns while it is still running', async () => {
+    let settle: ((status: UpdateStatus) => void) | undefined;
+    const check = () =>
+      new Promise<UpdateStatus>((resolve) => {
+        settle = resolve;
+      });
     const ipcMain = fakeIpcMain();
-    let now = 1_000;
-    registerUpdateIpc(ipcMain, check, () => now);
 
-    await ipcMain.invoke(CHANNELS.updateCheck);
-    for (let i = 0; i < 20; i += 1) await ipcMain.invoke(CHANNELS.updateCheck);
-    expect(check).toHaveBeenCalledTimes(1);
+    registerUpdateIpc(ipcMain, check);
+    // Reached with the check still in flight -- the window is created on this
+    // same synchronous path, so anything awaited here would delay it.
+    expect(settle).toBeDefined();
 
-    now += MIN_CHECK_INTERVAL_MS;
-    await ipcMain.invoke(CHANNELS.updateCheck);
-    expect(check).toHaveBeenCalledTimes(2);
-    expect(MIN_CHECK_INTERVAL_MS).toBeGreaterThanOrEqual(60 * 60 * 1000);
+    const asked = ipcMain.invoke(CHANNELS.updateCheck);
+    settle?.(AVAILABLE);
+    expect(await asked).toEqual(AVAILABLE);
   });
 
-  it('throttles a failing check too, so a broken network is not asked twice a render', async () => {
-    const check = vi.fn(
-      async (): Promise<UpdateStatus> => ({ kind: 'unknown', reason: 'network' }),
-    );
+  it('turns a failing check into a quiet value, never a startup error', async () => {
     const ipcMain = fakeIpcMain();
-    registerUpdateIpc(ipcMain, check, () => 0);
-
-    expect(await ipcMain.invoke(CHANNELS.updateCheck)).toEqual({
-      kind: 'unknown',
-      reason: 'network',
-    });
-    await ipcMain.invoke(CHANNELS.updateCheck);
-    expect(check).toHaveBeenCalledTimes(1);
-  });
-
-  it('answers a value even when the check throws unexpectedly', async () => {
-    const ipcMain = fakeIpcMain();
+    const rejections: unknown[] = [];
+    process.on('unhandledRejection', (reason) => rejections.push(reason));
     registerUpdateIpc(ipcMain, async () => {
       throw new Error('boom');
     });
+    await new Promise((resolve) => setImmediate(resolve));
+    process.removeAllListeners('unhandledRejection');
+
+    expect(rejections).toEqual([]);
     expect(await ipcMain.invoke(CHANNELS.updateCheck)).toEqual({
       kind: 'unknown',
       reason: 'network',
@@ -85,7 +85,49 @@ describe('registerUpdateIpc', () => {
   it('crosses the bridge bare, with no envelope to unwrap', async () => {
     const ipcMain = fakeIpcMain();
     registerUpdateIpc(ipcMain, async () => AVAILABLE);
-    const api = createUpdateApi(ipcMain);
-    expect(await api.check()).toEqual(AVAILABLE);
+    expect(await createUpdateApi(ipcMain).check()).toEqual(AVAILABLE);
+  });
+
+  it('opens the release page the LAUNCH CHECK found, taking no URL from the renderer', async () => {
+    const opened: string[] = [];
+    const ipcMain = fakeIpcMain();
+    registerUpdateIpc(
+      ipcMain,
+      async () => AVAILABLE,
+      async (url) => {
+        opened.push(url);
+      },
+    );
+
+    // Whatever a caller passes is ignored: the handler takes no argument.
+    expect(await ipcMain.invoke(CHANNELS.updateOpen, 'https://example.invalid/evil')).toBe(true);
+    expect(opened).toEqual([AVAILABLE.url]);
+  });
+
+  it('opens nothing when there is no newer release to open', async () => {
+    const opened: string[] = [];
+    const ipcMain = fakeIpcMain();
+    registerUpdateIpc(
+      ipcMain,
+      async () => ({ kind: 'none' }),
+      async (url) => {
+        opened.push(url);
+      },
+    );
+
+    expect(await ipcMain.invoke(CHANNELS.updateOpen)).toBe(false);
+    expect(opened).toEqual([]);
+  });
+
+  it('answers false when the shell refuses to open the page', async () => {
+    const ipcMain = fakeIpcMain();
+    registerUpdateIpc(
+      ipcMain,
+      async () => AVAILABLE,
+      async () => {
+        throw new Error('no handler for https');
+      },
+    );
+    expect(await ipcMain.invoke(CHANNELS.updateOpen)).toBe(false);
   });
 });
