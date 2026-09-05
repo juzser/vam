@@ -50,27 +50,60 @@ const ROW = /^\s*(❯)?\s+(\d+)\.\s+(?:\[(.)\]\s+)?(\S.*?)\s*$/;
 /**
  * The picker on a captured screen, or `null` when what is there is not one.
  *
- * The block is found FROM THE CURSOR OUT, and the numbers must run from one:
- * a screen holding a session's own numbered prose above a real picker must
- * not have that prose read as options. Exactly one cursor, or this refuses --
- * two would mean vam cannot say which list it is about to answer.
+ * ROWS ARE FOUND BY THEIR NUMBERING, NOT BY BEING ADJACENT LINES, and that is
+ * the correction a real capture forced. What stood here walked outwards from
+ * the cursor while each neighbouring LINE parsed as a row -- and a real
+ * `AskUserQuestion` picker prints each option's description on its own line
+ * between the rows:
+ *
+ *     ❯ 1. Crimson
+ *          A deep, rich red.
+ *       2. Cobalt
+ *
+ * So the walk stopped at the first description and reported a ONE-ROW picker.
+ * With the cursor on row one that made every other option "not on the screen";
+ * with the cursor anywhere else the numbering check failed and the answer was
+ * "there is no picker here". Both refuse rather than misfire, which is why it
+ * was invisible -- and both mean the feature could not work against the thing
+ * it was built for. Measured, not reasoned: see `answer-live-screens.ts`.
+ *
+ * The group is therefore the run of rows numbered 1, 2, 3 ... in order, and
+ * the one containing the cursor is the picker. A screen holding a session's
+ * own numbered prose ABOVE a real picker still cannot merge with it: prose
+ * that restarts at 1 is its own run, and prose that does not is in no run at
+ * all. Exactly one cursor, or this refuses -- two would mean vam cannot say
+ * which list it is about to answer.
  */
 export function readPicker(text: string): Picker | null {
   const parsed = text.split('\n').map((line) => ROW.exec(line));
   const cursors = parsed.flatMap((row, at) => (row?.[1] === undefined ? [] : [at]));
   const [head] = cursors;
   if (head === undefined || cursors.length !== 1) return null;
-  let from = head;
-  while (parsed[from - 1] != null) from -= 1;
-  let to = head;
-  while (parsed[to + 1] != null) to += 1;
-  const rows = parsed.slice(from, to + 1);
-  if (!rows.every((row, at) => row?.[2] === String(at + 1))) return null;
+  /** Every run of rows numbered from one, in the order they are drawn. */
+  const runs: RegExpExecArray[][] = [];
+  let holdsCursor = false;
+  let found: RegExpExecArray[] | null = null;
+  for (const [at, row] of parsed.entries()) {
+    if (row === null) continue;
+    const run = runs.at(-1);
+    if (run !== undefined && row[2] === String(run.length + 1)) {
+      run.push(row);
+    } else if (row[2] === '1') {
+      if (holdsCursor) found = runs.at(-1) ?? null;
+      holdsCursor = false;
+      runs.push([row]);
+    } else {
+      continue;
+    }
+    if (at === head) holdsCursor = true;
+  }
+  const picker = found ?? (holdsCursor ? (runs.at(-1) ?? null) : null);
+  if (picker === null) return null;
   return {
-    cursor: head - from,
-    rows: rows.map((row) => ({
-      label: row?.[4] ?? '',
-      checked: row?.[3] === undefined ? null : row[3].trim() !== '',
+    cursor: picker.findIndex((row) => row[1] !== undefined),
+    rows: picker.map((row) => ({
+      label: row[4] ?? '',
+      checked: row[3] === undefined ? null : row[3].trim() !== '',
     })),
   };
 }
