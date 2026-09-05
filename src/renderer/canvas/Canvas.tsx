@@ -244,14 +244,23 @@ export function StatusCell({ text }: { readonly text: string }) {
 export const FOCUS_VIEWPORT_SHARE = DEFAULT_FOCUS_SHARE;
 
 /**
- * ReactFlow's `fitView` padding for a target share of the viewport.
+ * ReactFlow's fitting `padding` for a target share of the viewport.
  *
- * `padding` is a fraction added on each side of the fitted bounds, so the
- * content ends up occupying `1 / (1 + 2p)`. Inverting that gives the padding
- * for a share: p = (1/share - 1) / 2. At 0.6 that is 0.333.
+ * A numeric padding is resolved by the library as `(v - v / (1 + p)) / 2`
+ * pixels on each side of the axis of length `v`, which leaves the content
+ * spanning `1 / (1 + p)` of it. Inverting THAT gives p = 1/share - 1; at 0.6
+ * the padding is 0.667.
+ *
+ * It used to be `(1/share - 1) / 2`, from a reading of `padding` as a fraction
+ * of the fitted BOUNDS added to each side -- content at `1 / (1 + 2p)`. That
+ * is not what the installed ReactFlow does, and the difference is not
+ * academic: at the shipped 60% target it framed the session at 75%. Nothing
+ * caught it because the value it fed was only ever asserted against the same
+ * wrong model. `grid.test.ts` now measures the result through
+ * `getViewportForBounds`, the library's own arithmetic.
  */
 export function focusPadding(share: number): number {
-  return (1 / share - 1) / 2;
+  return 1 / share - 1;
 }
 
 function jumpLabels(ids: readonly string[]): Map<string, string> {

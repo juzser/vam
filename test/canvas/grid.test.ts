@@ -1,3 +1,4 @@
+import { getViewportForBounds } from '@xyflow/react';
 import { describe, expect, it } from 'vitest';
 import {
   compactTokens,
@@ -95,18 +96,55 @@ describe('fanPaths', () => {
  * a wrong inversion would be invisible on screen — the view would simply be
  * framed a bit differently — and no other test would catch it.
  */
-describe('focusPadding inverts ReactFlow fitView padding', () => {
+describe('focusPadding hits the asked-for share of the canvas width', () => {
+  /**
+   * Measured against ReactFlow's OWN viewport maths, not against a model of
+   * them. The previous version of this test asserted the model directly --
+   * "content occupies 1 / (1 + 2p)" -- and the model was wrong for the
+   * installed ReactFlow, which resolves a numeric padding to
+   * `(v - v / (1 + p)) / 2` pixels per side and so leaves the content at
+   * 1 / (1 + p) of the viewport. At the shipped 60% target the old inversion
+   * framed the session at 75%: invisible on screen, since the view is merely
+   * a bit differently framed, which is exactly why it is worth pinning here
+   * against the library rather than against prose.
+   */
+  const WIDTH = 1600;
+  const HEIGHT = 900;
+
+  /** What fraction of the canvas WIDTH the fitted content ends up spanning. */
+  function fittedWidthShare(share: number, bounds: { width: number; height: number }): number {
+    const viewport = getViewportForBounds(
+      { x: 0, y: 0, ...bounds },
+      WIDTH,
+      HEIGHT,
+      0.1,
+      4,
+      focusPadding(share),
+    );
+    return (bounds.width * viewport.zoom) / WIDTH;
+  }
+
+  /**
+   * A real session's frame: a cell's worth of card plus three step slots. Its
+   * aspect is wider than a window's, so width is the axis that binds and the
+   * share means what the operator said it means -- a percentage of canvas
+   * width. (`fitBounds` fits both axes and takes the smaller zoom; on a canvas
+   * shaped like a canvas, that is the width.)
+   */
+  const SESSION = {
+    width: STEP_ORIGIN.x + STEP_SIZE.width,
+    height: STEP_ORIGIN.y + 2 * STEP_PITCH + STEP_SIZE.height,
+  };
+
   it('round-trips every share back to itself', () => {
     for (const share of [0.5, 0.6, 0.7, 0.8, 0.95]) {
-      const p = focusPadding(share);
-      // ReactFlow adds `p` on each side, so content occupies 1/(1 + 2p).
-      expect(1 / (1 + 2 * p), `share ${share}`).toBeCloseTo(share, 10);
+      expect(fittedWidthShare(share, SESSION), `share ${share}`).toBeCloseTo(share, 2);
     }
   });
 
   it('is set to the asked-for 60 percent', () => {
     expect(FOCUS_VIEWPORT_SHARE).toBe(0.6);
-    expect(focusPadding(FOCUS_VIEWPORT_SHARE)).toBeCloseTo(1 / 3, 10);
+    expect(fittedWidthShare(FOCUS_VIEWPORT_SHARE, SESSION)).toBeCloseTo(0.6, 2);
   });
 
   it('asks for more padding as the target share shrinks', () => {
