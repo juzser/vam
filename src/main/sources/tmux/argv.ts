@@ -303,6 +303,25 @@ export function sendBackTabArgv(name: string): readonly string[] {
 }
 
 /**
+ * Press Escape -- the third key that is pressed rather than typed.
+ *
+ * IT IS LOAD-BEARING INSIDE THE PANE, which is why it is here at all. Escape
+ * cancels Claude Code's own pickers, leaves insert mode in vim, and dismisses
+ * half the TUIs an operator runs; a terminal that swallows it is not a
+ * terminal. It was vam's way out of the surface until the operator said
+ * plainly that it should do what it normally does, and they were right.
+ *
+ * The literal/interpreted split is the same one as everywhere in this file,
+ * and this key is the reason the split was documented in the first place:
+ * measured on tmux 3.7b over a private `-L` socket, `send-keys 'Escape'`
+ * delivers `^[` to the pane while `send-keys -l -- 'Escape'` types the six
+ * letters. Only the first of those is the key the operator pressed.
+ */
+export function sendEscapeArgv(name: string): readonly string[] {
+  return ['send-keys', '-t', paneTarget(name), 'Escape'];
+}
+
+/**
  * Every session on the server: the project vam recorded on it, a TAB, and the
  * session name. The filtering to vam's own happens after the read, in
  * `spawn.ts`: tmux's `-f` filter language is another string to get wrong, and

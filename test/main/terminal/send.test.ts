@@ -104,6 +104,19 @@ describe('typing into the session vam started for a project', () => {
     expect(verbs()).toEqual(['list-sessions']);
   });
 
+  it('sends Escape as the interpreted key, because a TUI cancels on it', async () => {
+    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'escape' })).toBe('sent');
+    expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'Escape']);
+    expect(argvs[1]).not.toContain('-l');
+  });
+
+  it('refuses an Escape it cannot aim, exactly like every other key', async () => {
+    const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'escape' })).toBe('unaimed');
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
   it('sends text that reads as a key name as the characters it is', async () => {
     const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
     await sendSessionKey(run, ATLAS, { kind: 'text', text: 'Escape' });

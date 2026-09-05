@@ -32,6 +32,7 @@ import {
   sendBackspaceArgv,
   sendBackTabArgv,
   sendEnterArgv,
+  sendEscapeArgv,
   sendTextArgv,
 } from '../sources/tmux/argv.js';
 import {
@@ -288,6 +289,11 @@ export async function sendSessionKey(
           ? // Aimed by the SAME guard as a character: a mode changed in the
             // wrong agent changes how somebody else's running work behaves.
             sendBackTabArgv(match.name)
-          : sendTextArgv(match.name, key.text);
+          : key.kind === 'escape'
+            ? // The operator's cancel, delivered as the KEY it is. Typed
+              // literally it would put the six letters of `Escape` into a
+              // prompt that was waiting to be dismissed.
+              sendEscapeArgv(match.name)
+            : sendTextArgv(match.name, key.text);
   return (await run(argv)).failure === null ? 'sent' : 'refused';
 }

@@ -307,14 +307,49 @@ describe('keys reach the pane in the order they were typed', () => {
   });
 });
 
-describe('there is a way out that does not need a mouse', () => {
-  it('Escape leaves the pane instead of being typed into it', async () => {
+describe('Escape belongs to the pane, and the way out is Tab', () => {
+  it('sends Escape to tmux instead of using it to leave', async () => {
+    // REVERSED ON THE OPERATOR'S WORDS. Escape was vam's exit; inside a
+    // terminal it has to be the key that cancels the picker, leaves insert
+    // mode, dismisses the prompt. Keeping it as an exit made the pane the one
+    // place in their tools where Escape did not mean escape.
     const send = await open();
     expect(document.activeElement).toBe(pane());
-    fireEvent.keyDown(pane() as HTMLElement, { key: 'Escape' });
+    expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Escape' })).toBe(false);
+    await settle();
+    expect(keys(send)).toEqual([{ kind: 'escape' }]);
+    // And it did NOT let go: the pane still has focus, so the next key is
+    // still the pane's.
+    expect(document.activeElement).toBe(pane());
+  });
+
+  it('still lets go on Tab, which is now the only key that does', async () => {
+    const send = await open();
+    // Not prevented: the default IS the focus move, and it is the whole exit
+    // now that Escape is the pane's. The trade is that Tab no longer reaches
+    // the shell for completion.
+    expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Tab' })).toBe(true);
     await settle();
     expect(send).not.toHaveBeenCalled();
-    expect(document.activeElement).not.toBe(pane());
+  });
+
+  it('says where the exit is, but only while the pane has focus', async () => {
+    // An exit nobody can find is not an exit, and the operator asked for the
+    // two lines above the pane back -- so the hint costs no row: it is
+    // absolutely positioned inside the pane and exists only while focused.
+    await open();
+    const hint = q('[data-terminal-exit-hint]');
+    expect(hint?.textContent).toContain('Tab');
+    expect(hint?.getAttribute('class')).toContain('absolute');
+
+    fireEvent.blur(pane() as HTMLElement);
+    await settle();
+    expect(q('[data-terminal-exit-hint]')).toBeNull();
+  });
+
+  it('names the exit in the accessible name too, for a reader that cannot see a corner', async () => {
+    await open();
+    expect(pane()?.getAttribute('aria-label')).toContain('Tab');
   });
 });
 
@@ -333,7 +368,9 @@ describe('the way out stays out', () => {
     await settle();
     expect(document.activeElement).toBe(pane());
 
-    fireEvent.keyDown(pane() as HTMLElement, { key: 'Escape' });
+    // Leaving is Tab now, and happy-dom does not move focus for a synthetic
+    // Tab, so the blur it would cause is what is simulated.
+    (pane() as HTMLElement).blur();
     await settle();
     expect(document.activeElement).not.toBe(pane());
 

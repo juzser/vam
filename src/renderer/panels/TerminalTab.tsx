@@ -137,6 +137,40 @@ function measurePane(pane: HTMLElement, ruler: HTMLElement): PaneSize | null {
  * process behind it. Not an empty pane: vam has not looked, so it may not say
  * there is nothing there.
  */
+/**
+ * The keystroke a key name becomes, or `null` when the pane does not want it.
+ *
+ * FOUR ANSWERS AND A REFUSAL, and the interesting one is Escape. It used to
+ * be vam's way out of this surface; the operator asked for it back in the
+ * words that settle it -- inside tmux, Escape should do what Escape does. It
+ * cancels Claude Code's picker, leaves vim's insert mode and dismisses most
+ * of what anyone runs in a terminal, so a surface that swallows it is not one
+ * you can work in.
+ *
+ * WHAT LEAVES INSTEAD IS TAB, which is the browser's own meaning for a focus
+ * stop and is `null` here on purpose. That is the trade, stated plainly: Tab
+ * no longer reaches the shell for completion, because a surface that consumes
+ * keys has to keep one key that lets go, and of the two only Escape is
+ * load-bearing INSIDE the pane. The corner hint says so while the pane has
+ * focus, so it is discoverable without reading this.
+ *
+ * `null` for every other named key -- the arrows, the Page keys, Home/End --
+ * which is what leaves the browser scrolling a region whose scrollbar is
+ * hidden, the reason this element takes focus at all.
+ */
+function strokeFor(key: string): PaneKey | null {
+  if (key === 'Enter') return { kind: 'enter' };
+  if (key === 'Escape') return { kind: 'escape' };
+  // Correcting a typo is part of typing: a pane that takes characters and
+  // cannot take them back strands the operator on a wrong line. It is a KEY,
+  // not the word -- see `sendBackspaceArgv`.
+  if (key === 'Backspace') return { kind: 'backspace' };
+  // One character is what a printable key produces, composed by the layout,
+  // so an accented character arrives already composed and a named key
+  // (`ArrowUp`, `F5`) never matches.
+  return key.length === 1 ? { kind: 'text', text: key } : null;
+}
+
 const NO_BRIDGE: PaneView = {
   kind: 'unavailable',
   error: {
@@ -285,6 +319,13 @@ export function TerminalTab({
    */
   const showing = view !== null && view.kind === 'ok';
 
+  /**
+   * Whether the pane itself has focus. It draws exactly one thing -- the hint
+   * naming the way out -- and it draws it only then, because Escape is the
+   * pane's now and Tab is all that is left to leave with.
+   */
+  const [hasFocus, setHasFocus] = useState(false);
+
   /** Why the last keystroke did NOT land, or `null`. Drawn, not swallowed. */
   const [refused, setRefused] = useState<PaneSendResult | null>(null);
 
@@ -404,30 +445,7 @@ export function TerminalTab({
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLElement>) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const surface = event.currentTarget;
-      if (event.key === 'Escape') {
-        // THE WAY OUT. A focus stop that consumes keys and cannot be left
-        // without a mouse is a keyboard trap, and this one consumes keys now.
-        event.preventDefault();
-        event.stopPropagation();
-        surface.blur();
-        return;
-      }
-      const stroke: PaneKey | null =
-        event.key === 'Enter'
-          ? { kind: 'enter' }
-          : // Correcting a typo is part of typing: a pane that takes
-            // characters and cannot take them back strands the operator on a
-            // wrong line with no way to fix it from vam. It is a KEY, not the
-            // word -- see `sendBackspaceArgv`.
-            event.key === 'Backspace'
-            ? { kind: 'backspace' }
-            : // One character is what a printable key produces, composed by
-              // the layout -- so an accented character arrives already
-              // composed and a named key (`ArrowUp`, `F5`) never matches.
-              event.key.length === 1
-              ? { kind: 'text', text: event.key }
-              : null;
+      const stroke = strokeFor(event.key);
       if (stroke === null) return;
       // THE GUARD COMES BEFORE THE CANCELLING, and it did not. A build with no
       // bridge behind it -- the browser one -- consumed every printable key,
@@ -621,7 +639,9 @@ export function TerminalTab({
         // biome-ignore lint/a11y/noNoninteractiveTabindex: see above -- a scrollable region that also takes keys
         tabIndex={0}
         onKeyDown={onKeyDown}
-        aria-label={`terminal of ${view.name}: typing goes to this session, Escape leaves`}
+        onFocus={() => setHasFocus(true)}
+        onBlur={() => setHasFocus(false)}
+        aria-label={`terminal of ${view.name}: typing goes to this session, press Tab to leave`}
         className="vam-no-scrollbar relative min-h-0 flex-1 overflow-auto rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-[10.5px] text-ink leading-[1.45] focus-visible:outline focus-visible:outline-2 focus-visible:outline-line-strong"
       >
         {/* The ruler. It is INSIDE the pane so that it inherits the exact font
@@ -640,6 +660,24 @@ export function TerminalTab({
           {RULER_TEXT}
         </span>
         <pre className="whitespace-pre">{view.text}</pre>
+        {/* THE WAY OUT, SAID WHERE IT IS NEEDED AND NOWHERE ELSE. Escape now
+            belongs to the pane, so Tab is the only key that lets go, and an
+            exit nobody can find is not an exit -- but the operator asked for
+            the two lines above this box back, so it may not cost a row.
+            Absolutely positioned inside the pane and shown only while the
+            pane has focus: no layout, no reader, nothing on screen at all
+            until the moment it is the answer to "how do I get out of here".
+            It sits above the text on purpose -- the last line of a terminal
+            is usually the prompt, and the corner is the emptiest part of it. */}
+        {hasFocus && (
+          <span
+            data-terminal-exit-hint
+            aria-hidden="true"
+            className="pointer-events-none absolute right-1.5 bottom-1 rounded-[5px] border border-line bg-panel px-1.5 py-0.5 text-[9px] text-ink-faint"
+          >
+            Tab leaves
+          </span>
+        )}
       </section>
     </div>
   );

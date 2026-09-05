@@ -79,7 +79,7 @@ export function isPaneSize(size: PaneSize): boolean {
  *
  * `text` is typed LITERALLY (`send-keys -l --`), which is what stops a pane
  * being sent `^[` because the operator typed the letters of `Escape`. `enter`,
- * `backspace` and `back-tab` have to be INTERPRETED, which `-l` forbids, so
+ * `backspace`, `back-tab` and `escape` have to be INTERPRETED, which `-l` forbids, so
  * each is its own kind rather than a character inside the text -- measured,
  * `send-keys -l -- 'BSpace'` types the word into the line.
  *
@@ -89,6 +89,10 @@ export function isPaneSize(size: PaneSize): boolean {
  * `back-tab` is that decision made once: the chord a Claude Code session
  * binds to cycling its own mode, a KIND rather than a key name in a field --
  * a field would let the least trusted process in the app ask for `C-c`.
+ * `escape` is the second, made on the operator's own words: it cancels a
+ * picker, leaves vim's insert mode and dismisses half the TUIs they run, and
+ * a terminal that eats it is not a terminal. It was vam's way out of the
+ * surface until they said it should be the pane's, and they were right.
  *
  * A discriminated pair rather than a string with a flag: the renderer is the
  * least trusted process in the app, and "was this literal?" must not be a
@@ -99,7 +103,9 @@ export type PaneKey =
   | { readonly kind: 'enter' }
   | { readonly kind: 'backspace' }
   /** Shift-Tab, `BTab` to tmux -- the session's own cycle-the-mode chord. */
-  | { readonly kind: 'back-tab' };
+  | { readonly kind: 'back-tab' }
+  /** Escape, `Escape` to tmux -- the key every TUI cancels on. */
+  | { readonly kind: 'escape' };
 
 /**
  * The longest text one keystroke may carry. A `KeyboardEvent.key` for a
@@ -127,7 +133,14 @@ export type PaneSendResult = 'sent' | 'unaimed' | 'refused';
 export function isPaneKey(value: unknown): value is PaneKey {
   if (typeof value !== 'object' || value === null) return false;
   const key = value as { kind?: unknown; text?: unknown };
-  if (key.kind === 'enter' || key.kind === 'backspace' || key.kind === 'back-tab') return true;
+  if (
+    key.kind === 'enter' ||
+    key.kind === 'backspace' ||
+    key.kind === 'back-tab' ||
+    key.kind === 'escape'
+  ) {
+    return true;
+  }
   return (
     key.kind === 'text' &&
     typeof key.text === 'string' &&
