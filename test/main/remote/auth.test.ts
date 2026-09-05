@@ -1,130 +1,114 @@
 /**
- * The identity layer, asserted against real RS256 signatures.
+ * Who a request is, under Tailscale.
  *
- * Every key pair here is generated in-process: a token in a fixture is a token
- * in a public repository, and this file is exactly where a real one would be
- * pasted. Nothing reaches the network -- Cloudflare's key set is a parameter,
- * not a fetch.
+ * Tailscale authenticates a DEVICE ONTO A NETWORK; it does not authorise that
+ * device to drive an agent. Every laptop, phone, tablet, server, CI runner and
+ * shared-in external user on the tailnet can reach the Serve URL, so the
+ * bearer token these tests exercise is the whole of the authorisation step.
+ *
+ * Nothing here reaches the network: every token is generated in-process and
+ * the directory is a literal map.
  */
 
-import { createSign, generateKeyPairSync, type KeyObject } from 'node:crypto';
-import { beforeAll, describe, expect, it } from 'vitest';
-import { type AccessAuth, verifyAccessToken } from '../../../src/main/remote/auth.js';
+import { describe, expect, it } from 'vitest';
+import {
+  authenticateDevice,
+  bearerFrom,
+  constantTimeEquals,
+  type DeviceDirectory,
+  type Identity,
+  MAX_TOKEN_LENGTH,
+} from '../../../src/main/remote/auth.js';
 
-const AUDIENCE = 'test-audience-tag';
-const ISSUER = 'https://example.test';
+const PHONE: Identity = { deviceId: 'd-1', name: 'a phone' };
 
-const b64 = (value: object | Buffer): string =>
-  (value instanceof Buffer ? value : Buffer.from(JSON.stringify(value))).toString('base64url');
-
-function sign(
-  key: KeyObject,
-  header: Record<string, unknown>,
-  payload: Record<string, unknown>,
-): string {
-  const body = `${b64(header)}.${b64(payload)}`;
-  const signer = createSign('RSA-SHA256');
-  signer.update(body);
-  return `${body}.${signer.sign(key).toString('base64url')}`;
-}
-
-let auth: AccessAuth;
-let privateKey: KeyObject;
-let otherKey: KeyObject;
-
-const claims = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
-  aud: [AUDIENCE],
-  iss: ISSUER,
-  exp: Math.floor(Date.now() / 1000) + 600,
-  email: 'operator@example.test',
-  ...over,
+const directory = (tokens: Record<string, Identity>): DeviceDirectory => ({
+  find: (token) => tokens[token] ?? null,
 });
 
-const header = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
-  alg: 'RS256',
-  kid: 'key-one',
-  ...over,
+const only = directory({ 'token-one': PHONE });
+
+describe('bearerFrom', () => {
+  it('reads the token out of an Authorization header', () => {
+    expect(bearerFrom('Bearer token-one')).toBe('token-one');
+  });
+
+  it('accepts the scheme in any case, as RFC 7235 requires', () => {
+    expect(bearerFrom('bearer token-one')).toBe('token-one');
+  });
+
+  it('refuses a header with no bearer scheme', () => {
+    expect(bearerFrom('Basic dXNlcjpwYXNz')).toBeNull();
+    expect(bearerFrom('token-one')).toBeNull();
+  });
+
+  it('refuses an absent or repeated header rather than picking one', () => {
+    expect(bearerFrom(undefined)).toBeNull();
+    expect(bearerFrom(['Bearer a', 'Bearer b'])).toBeNull();
+  });
+
+  it('refuses an oversized header before anything parses it', () => {
+    expect(bearerFrom(`Bearer ${'a'.repeat(MAX_TOKEN_LENGTH + 1)}`)).toBeNull();
+  });
 });
 
-beforeAll(() => {
-  const pair = generateKeyPairSync('rsa', { modulusLength: 2048 });
-  const second = generateKeyPairSync('rsa', { modulusLength: 2048 });
-  privateKey = pair.privateKey;
-  otherKey = second.privateKey;
-  const jwk = { ...pair.publicKey.export({ format: 'jwk' }), kid: 'key-one' };
-  auth = { audience: AUDIENCE, issuer: ISSUER, keys: async () => [jwk] };
+describe('authenticateDevice', () => {
+  it('names the device a valid token belongs to', () => {
+    const outcome = authenticateDevice('Bearer token-one', only);
+    expect(outcome).toEqual({ ok: true, identity: PHONE });
+  });
+
+  it('refuses a request that carries no credential at all', () => {
+    expect(authenticateDevice(undefined, only)).toEqual({ ok: false, reason: 'missing' });
+  });
+
+  it('refuses a malformed header without consulting the directory', () => {
+    let consulted = false;
+    const watched: DeviceDirectory = {
+      find: () => {
+        consulted = true;
+        return PHONE;
+      },
+    };
+    expect(authenticateDevice('Basic nope', watched)).toEqual({ ok: false, reason: 'malformed' });
+    expect(consulted).toBe(false);
+  });
+
+  it('refuses a forged token', () => {
+    expect(authenticateDevice('Bearer token-two', only)).toEqual({
+      ok: false,
+      reason: 'unknown-device',
+    });
+  });
+
+  it('refuses a token the directory no longer carries', () => {
+    const revoked = directory({});
+    expect(authenticateDevice('Bearer token-one', revoked)).toEqual({
+      ok: false,
+      reason: 'unknown-device',
+    });
+  });
+
+  it('keeps its reasons to a closed vocabulary', () => {
+    for (const header of [undefined, 'Basic x', 'Bearer nope', 'Bearer ']) {
+      const outcome = authenticateDevice(header, only);
+      expect(outcome.ok).toBe(false);
+      if (!outcome.ok) {
+        expect(['missing', 'malformed', 'unknown-device']).toContain(outcome.reason);
+      }
+    }
+  });
 });
 
-describe('verifyAccessToken', () => {
-  it('accepts a token signed by a key in the set and returns the identity', async () => {
-    const outcome = await verifyAccessToken(sign(privateKey, header(), claims()), auth);
-    expect(outcome).toEqual({ ok: true, identity: { email: 'operator@example.test' } });
+describe('constantTimeEquals', () => {
+  it('is true only for identical strings', () => {
+    expect(constantTimeEquals('abc', 'abc')).toBe(true);
+    expect(constantTimeEquals('abc', 'abd')).toBe(false);
   });
 
-  it('refuses a token signed by a key that is not in the set', async () => {
-    const outcome = await verifyAccessToken(sign(otherKey, header(), claims()), auth);
-    expect(outcome).toEqual({ ok: false, reason: 'bad-signature' });
-  });
-
-  it('refuses a token whose payload was edited after signing', async () => {
-    const token = sign(privateKey, header(), claims());
-    const [head, , signature] = token.split('.');
-    const forged = `${head}.${b64({ ...claims(), email: 'intruder@example.test' })}.${signature}`;
-    expect(await verifyAccessToken(forged, auth)).toEqual({ ok: false, reason: 'bad-signature' });
-  });
-
-  it('refuses an expired token', async () => {
-    const expired = claims({ exp: Math.floor(Date.now() / 1000) - 1 });
-    expect(await verifyAccessToken(sign(privateKey, header(), expired), auth)).toEqual({
-      ok: false,
-      reason: 'expired',
-    });
-  });
-
-  it('refuses a token for another audience', async () => {
-    const other = claims({ aud: ['some-other-application'] });
-    expect(await verifyAccessToken(sign(privateKey, header(), other), auth)).toEqual({
-      ok: false,
-      reason: 'wrong-audience',
-    });
-  });
-
-  it('refuses a token from another issuer', async () => {
-    const other = claims({ iss: 'https://elsewhere.test' });
-    expect(await verifyAccessToken(sign(privateKey, header(), other), auth)).toEqual({
-      ok: false,
-      reason: 'wrong-issuer',
-    });
-  });
-
-  it('refuses an unsigned `alg: none` token outright', async () => {
-    const unsigned = `${b64(header({ alg: 'none' }))}.${b64(claims())}.`;
-    expect(await verifyAccessToken(unsigned, auth)).toEqual({ ok: false, reason: 'bad-algorithm' });
-  });
-
-  it('refuses an HS256 token, which would let the public key be used as a secret', async () => {
-    const token = sign(privateKey, header({ alg: 'HS256' }), claims());
-    expect(await verifyAccessToken(token, auth)).toEqual({ ok: false, reason: 'bad-algorithm' });
-  });
-
-  it('refuses a token whose kid names no key in the set', async () => {
-    const token = sign(privateKey, header({ kid: 'rotated-away' }), claims());
-    expect(await verifyAccessToken(token, auth)).toEqual({ ok: false, reason: 'unknown-key' });
-  });
-
-  it('refuses a token that is not three parts, and anything empty', async () => {
-    expect(await verifyAccessToken('not-a-token', auth)).toEqual({
-      ok: false,
-      reason: 'malformed',
-    });
-    expect(await verifyAccessToken('', auth)).toEqual({ ok: false, reason: 'malformed' });
-  });
-
-  it('refuses a verified token that carries no email', async () => {
-    const anonymous = claims({ email: undefined });
-    expect(await verifyAccessToken(sign(privateKey, header(), anonymous), auth)).toEqual({
-      ok: false,
-      reason: 'no-identity',
-    });
+  it('compares strings of different lengths without throwing', () => {
+    expect(constantTimeEquals('abc', 'abcdefghij')).toBe(false);
+    expect(constantTimeEquals('', 'a')).toBe(false);
+    expect(constantTimeEquals('', '')).toBe(true);
   });
 });
