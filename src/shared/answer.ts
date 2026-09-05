@@ -156,3 +156,43 @@ export function isAnswerRequest(value: unknown): value is AnswerRequest {
     request.steps.every(isAnswerStep)
   );
 }
+
+/**
+ * A prompt READ OFF A PANE: the line that asks, and the rows on offer.
+ *
+ * WHY THIS SHAPE EXISTS AT ALL. A tool-approval prompt writes no transcript
+ * record while it is open, so there is no `Question` for it and there never
+ * will be -- the only surface that holds it is the screen. `title` is
+ * therefore not decoration: it is the needle `answerQuestion` checks the
+ * screen against before it presses anything, so a prompt travels with its
+ * question or it does not travel.
+ *
+ * The options are LABELS, exactly as they are drawn, because that is what an
+ * answer is matched by (`AnswerStep.labels`). Nothing here carries a position:
+ * the CLI reorders, and a position count would answer a different row with
+ * total confidence.
+ */
+export type PanePrompt = {
+  readonly title: string;
+  readonly options: readonly string[];
+};
+
+/**
+ * What vam sees in a row's pane -- a prompt, or the reason there is not one.
+ *
+ * SIX ANSWERS RATHER THAN A NULLABLE ONE, and the split is the same one the
+ * read and the write paths already make. `none` is a pane vam looked at and
+ * found nothing on; `unreadable` is vam not having looked; `unavailable` is
+ * tmux not answering at all, so vam has no opinion about pairings either;
+ * `mispaired` is a row that published a pane vam refused, which is the
+ * opposite of `unaimed` -- vam named a session and rejected it. Collapsing any
+ * pair of these would put a sentence on screen that sends the operator
+ * somewhere the answer is not.
+ */
+export type PromptView =
+  | { readonly kind: 'prompt'; readonly prompt: PanePrompt }
+  | { readonly kind: 'none' }
+  | { readonly kind: 'unaimed' }
+  | { readonly kind: 'unavailable' }
+  | { readonly kind: 'mispaired' }
+  | { readonly kind: 'unreadable' };

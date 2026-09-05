@@ -29,7 +29,14 @@
  * is a refusal, and the tag path is never a fallback for one.
  */
 
-import type { AnswerRequest, AnswerResult, AnswerStep } from '../../shared/answer.js';
+import { MAX_QUESTION_TEXT } from '../../shared/answer.js';
+import type {
+  AnswerRequest,
+  AnswerResult,
+  AnswerStep,
+  PanePrompt,
+  PromptView,
+} from '../../shared/answer.js';
 import { sendDownArgv, sendEnterArgv, sendRightArgv } from '../sources/tmux/argv.js';
 import { listVamSessions, readPane, type TmuxRun } from '../sources/tmux/spawn.js';
 import { targetSession } from './pane.js';
@@ -58,6 +65,22 @@ export type Picker = { readonly rows: readonly PickerRow[]; readonly cursor: num
  * OPTIONAL and appears once at each end: it cannot make a line that is not a
  * row into one, because the number, the dot and the anchors are untouched.
  */
+/**
+ * Every CSI sequence, so a screen can be read as text.
+ *
+ * `capturePaneArgv` asks for `-e`, which is what makes the Terminal tab
+ * COLOURED -- and it means every capture arrives with escape sequences in it.
+ * A row drawn as the cursor is exactly the row the CLI inverts, so the label
+ * this parser lifts off it carries the sequence unless something takes it
+ * off: the operator would be shown the bytes, and `text.includes(label)` on
+ * the review screen would compare a coloured label against a differently
+ * coloured line. Stripped once, at the two doors -- the parser and the read --
+ * so nothing downstream has to remember.
+ */
+const CSI = /\u001b\[[0-9;:?]*[ -/]*[@-~]/g;
+
+const plain = (text: string): string => text.replace(CSI, '');
+
 const ROW = /^\s*│?\s*(❯)?\s+(\d+)\.\s+(?:\[(.)\]\s+)?(\S.*?)\s*│?\s*$/;
 
 /**
@@ -88,7 +111,9 @@ const ROW = /^\s*│?\s*(❯)?\s+(\d+)\.\s+(?:\[(.)\]\s+)?(\S.*?)\s*│?\s*$/;
  * which list it is about to answer.
  */
 export function readPicker(text: string): Picker | null {
-  const parsed = text.split('\n').map((line) => ROW.exec(line));
+  const parsed = plain(text)
+    .split('\n')
+    .map((line) => ROW.exec(line));
   const cursors = parsed.flatMap((row, at) => (row?.[1] === undefined ? [] : [at]));
   const [head] = cursors;
   if (head === undefined || cursors.length !== 1) return null;
@@ -119,6 +144,72 @@ export function readPicker(text: string): Picker | null {
       checked: row[3] === undefined ? null : row[3].trim() !== '',
     })),
   };
+}
+
+/** A box border, at either end of a line, and nothing else. */
+const BORDER = /^\s*\u2502?\s*|\s*\u2502?\s*$/g;
+
+/**
+ * The prompt on a captured screen -- a picker, and the line that NAMES it.
+ *
+ * WHY THE TITLE IS THE WHOLE POINT. A permission prompt writes no transcript
+ * record, so the renderer has no question text of its own to send back: the
+ * only place the question exists is the screen. And `answerQuestion` will not
+ * press a key on a screen it has not first matched the question against
+ * (`see`), which is what keeps a walk from answering the question the CLI
+ * advanced to. So reading the title here is what makes the existing answer
+ * machine usable for a shape that has no record -- and a prompt with nothing
+ * above it is refused rather than answered with an empty needle that every
+ * screen would satisfy.
+ *
+ * The line taken is the LAST non-empty one above the first row, not the box's
+ * heading: the CLI draws `Bash command` at the top of the frame and the
+ * question directly over the options, and the heading is the same string for
+ * every Bash approval there will ever be.
+ */
+export function readPrompt(text: string): PanePrompt | null {
+  const picker = readPicker(text);
+  if (picker === null) return null;
+  const lines = plain(text).split('\n');
+  const first = lines.findIndex((line) => ROW.test(line));
+  if (first <= 0) return null;
+  const title = lines
+    .slice(0, first)
+    .map((line) => line.replace(BORDER, ''))
+    .reverse()
+    .find((line) => line !== '');
+  if (title === undefined || title.length > MAX_QUESTION_TEXT) return null;
+  return { title, options: picker.rows.map((row) => row.label) };
+}
+
+/**
+ * The prompt the session in this row's pane is showing, or why there is none.
+ *
+ * AIMED BY `targetSession`, the same rule the read, the resize, the keystroke
+ * and the answer use -- and the refusals are kept apart for the same reason
+ * they are there: `mispaired` is a row that published a pane vam rejected, and
+ * it may never fall through to the project tag, which would show the operator
+ * a prompt from a session this row was never in and then answer it.
+ *
+ * `none` is a pane vam READ and found no prompt on. It is not `unreadable`,
+ * which is vam not having looked, and the card draws them differently because
+ * one of them means the question may still be there.
+ */
+export async function readSessionPrompt(
+  run: TmuxRun,
+  projectId: string,
+  rowId?: string,
+  panes?: ReadonlyMap<string, string>,
+): Promise<PromptView> {
+  const listed = await listVamSessions(run);
+  if (listed.kind === 'unavailable') return { kind: 'unavailable' };
+  const match = targetSession(listed.sessions, projectId, rowId, panes);
+  if (match.kind === 'mispaired') return { kind: 'mispaired' };
+  if (match.kind !== 'one') return { kind: 'unaimed' };
+  const pane = await readPane(run, match.name);
+  if (pane.kind !== 'ok') return { kind: 'unreadable' };
+  const prompt = readPrompt(pane.text);
+  return prompt === null ? { kind: 'none' } : { kind: 'prompt', prompt };
 }
 
 const cursorLabel = (picker: Picker): string => picker.rows[picker.cursor]?.label ?? '';
@@ -177,7 +268,7 @@ async function deliver(run: TmuxRun, name: string, request: AnswerRequest): Prom
   /** The screen, or `null` when vam could not read it. Never a guess. */
   const read = async (): Promise<string | null> => {
     const pane = await readPane(run, name);
-    return pane.kind === 'ok' ? pane.text : null;
+    return pane.kind === 'ok' ? plain(pane.text) : null;
   };
   const press = async (argv: readonly string[]): Promise<boolean> =>
     (await run(argv)).failure === null;
