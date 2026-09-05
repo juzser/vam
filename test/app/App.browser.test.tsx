@@ -78,6 +78,14 @@ describe('a browser deciding what served it', () => {
     await waitFor(() =>
       expect(screen.getByTestId('source-failure').textContent).toMatch(/unauthenticated/),
     );
-    expect(screen.getByTestId('canvas').dataset.kind).toBe('none');
+    // NO SOURCE WAS SWAPPED IN, which is what this asserts and what it read
+    // as `'none'` while a sourceless canvas was passed nothing at all. It is
+    // now passed `'connecting'` carrying the same failure -- still no session
+    // source and still not the factory feed, but a source cell that says the
+    // endpoint refused instead of a green dot or an amber read-only note.
+    const kind = screen.getByTestId('canvas').dataset.kind;
+    expect(kind).not.toBe('session');
+    expect(kind).not.toBe('live');
+    expect(kind).toBe('connecting');
   });
 });

@@ -514,7 +514,7 @@ function SourceReadout({ source }: { source: CanvasSource }) {
         <span className="text-waiting">● {source.note}</span>
       ) : source.kind === 'connecting' ? (
         // Not `text-ink-faint`, which the browser arm below still uses: it
-        // measures 3.27:1 dark and 3.01:1 light (#188). Not a status token
+        // measures 3.27:1 dark and 3.01:1 light (issue 188). Not a status token
         // either -- "connecting" is not one of the four session states, and
         // the hollow glyph is what carries "not yet".
         source.error === undefined || source.error === null ? (
@@ -1510,6 +1510,14 @@ function CanvasInner({
     }
     if (source.kind === 'demo') {
       setStatus(source.note);
+      return;
+    }
+    // TOTALITY, not a reachable path: with no source there is no model, so
+    // there is no focused entry and the guard above has already returned. It
+    // refuses rather than falling through to the browser branch, which would
+    // read `client` off a source that has none.
+    if (source.kind === 'connecting') {
+      setStatus('still connecting to the source — there is nothing to send to yet');
       return;
     }
     if (writing) {

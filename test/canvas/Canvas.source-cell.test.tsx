@@ -111,7 +111,7 @@ describe('the source cell', () => {
     // that had not answered yet.
     expect(cell().textContent).not.toMatch(/read-only/i);
     expect(dot().className).not.toContain('text-done');
-    // Not `ink-faint`: 3.27:1 dark, 3.01:1 light (#188).
+    // Not `ink-faint`: 3.27:1 dark, 3.01:1 light (issue 188).
     expect(dot().className).not.toContain('ink-faint');
   });
 
