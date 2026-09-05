@@ -133,7 +133,16 @@ export function createStreamRegistry(): StreamRegistry {
  */
 const UNAUTHENTICATED = {
   ok: false,
-  error: { kind: 'refused', code: 'unauthenticated', message: 'unauthenticated' },
+  error: {
+    kind: 'refused',
+    code: 'unauthenticated',
+    // What the phone is entitled to say. It CANNOT know whether the code was
+    // wrong, burned, expired, or typed at a screen that was never open -- that
+    // is the point of the uniform refusal -- so "wrong code" would be a
+    // specific claim it has no standing to make. The desktop is two feet away
+    // and shows the truth.
+    message: 'not paired: check the pairing screen on the desktop',
+  },
 } as const;
 
 type Envelope = { ok: true; value: unknown } | { ok: false; error: SourceError };
@@ -418,10 +427,11 @@ function stream(options: RemoteServerOptions): Route {
 }
 
 /**
- * One pairing attempt. The body is read and shape-checked before the pairing
- * service sees it, and the token leaves in the RESPONSE BODY only -- never in
- * a URL, a redirect or a query string, where a proxy log or a browser history
- * would keep it.
+ * One pairing attempt. EVERY outcome that is not a grant is the same 401 as
+ * any other unauthenticated request, and every one of them costs the caller a
+ * counted failure -- including a body that is not a pairing request at all.
+ * The token leaves in the RESPONSE BODY only, never in a URL, a redirect or a
+ * query string, where a proxy log or a browser history would keep it.
  */
 async function handlePair(
   pairing: PairPort,
@@ -429,20 +439,21 @@ async function handlePair(
   response: ServerResponse,
 ): Promise<void> {
   const body = await readBody(request);
-  if (body === null || !isText(body.code) || !isText(body.name)) {
-    send(response, 400, {
-      ok: false,
-      error: { kind: 'refused', code: 'invalid-payload', message: 'pair: wrong shape' },
-    });
-    return;
-  }
   // Recorded and shown, never trusted or counted on. BEHIND `tailscale serve`
   // THIS IS ALWAYS 127.0.0.1 -- the proxy is the peer -- so it discriminates
   // nothing and the rate limit is deliberately global rather than per-source.
   // It is here because on a direct loopback connection it is occasionally the
   // one clue the operator gets, not because it is evidence.
   const source = request.socket.remoteAddress ?? 'unknown';
-  const outcome = await pairing.submit(body.code, body.name, source);
+  // A MALFORMED BODY IS STILL A KNOCK, and it used to be the one that cost
+  // nothing: it answered `400 invalid-payload` where every other refusal
+  // answers the uniform 401, and it did so before `submit` -- so before the
+  // failure was counted. It discloses only that a pairing door exists, which
+  // having the door implies, but free is free. It goes through `submit` like
+  // everything else, with values that cannot match any minted code.
+  const code = body !== null && isText(body.code) ? body.code : '';
+  const name = body !== null && isText(body.name) ? body.name : 'an unnamed device';
+  const outcome = await pairing.submit(code, name, source);
   if (!outcome.ok) {
     send(response, 401, UNAUTHENTICATED);
     return;

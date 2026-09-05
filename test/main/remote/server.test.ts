@@ -432,11 +432,15 @@ describe('the pairing route', () => {
     expect(unknown).toEqual(missing);
   });
 
-  it('refuses a body of the wrong shape before pairing sees it', async () => {
+  it('charges a malformed body like any other knock, rather than answering free', async () => {
     const submit = vi.fn(async () => ({ ok: false, reason: 'wrong-code' }) as PairOutcome);
     const base = await start({ pairing: { submit } });
-    expect((await pair(base, { code: 42 })).status).toBe(400);
-    expect(submit).not.toHaveBeenCalled();
+    const stranger = await (await get(await start(), '/api/load', null)).json();
+    const response = await pair(base, { code: 42 });
+    // Counted, and indistinguishable from every other refusal.
+    expect(submit).toHaveBeenCalled();
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual(stranger);
   });
 
   it('carries no token in the URL, only in the body', async () => {

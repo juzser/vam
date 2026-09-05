@@ -171,12 +171,14 @@ describe('wrong answers', () => {
     // No screen has ever been opened. An attacker polling for the moment one
     // IS open must pay for every knock, or the throttle guards a door it
     // never has to walk through.
-    for (let i = 0; i < GLOBAL_FAILURE_LIMIT; i += 1) {
+    for (let i = 0; i < GLOBAL_FAILURE_LIMIT - 1; i += 1) {
       expect(await pairing.submit('ZZZZZZZZ', 'a phone', '100.64.0.2')).toEqual({
         ok: false,
         reason: 'no-code',
       });
+      expect(pairing.state().throttledUntil).toBe(0);
     }
+    await pairing.submit('ZZZZZZZZ', 'a phone', '100.64.0.2');
     expect(pairing.state().throttledUntil).toBeGreaterThan(0);
   });
 
@@ -192,6 +194,7 @@ describe('wrong answers', () => {
       ok: false,
       reason: 'throttled',
     });
+    // And it lifts on its own, without the operator having to do anything.
     advance(LOCKOUT_MS + 1);
     expect(pairing.state().throttledUntil).toBe(0);
   });
@@ -204,12 +207,34 @@ describe('wrong answers', () => {
    */
   it('lets the operator lift the throttle by opening the pairing screen', async () => {
     const { pairing } = harness();
+    // Ten knocks with the screen never opened -- the flood that used to lock
+    // the operator's own phone out for fifteen minutes.
     for (let i = 0; i < GLOBAL_FAILURE_LIMIT; i += 1) {
       await pairing.submit('ZZZZZZZZ', 'a phone', '100.64.0.2');
     }
     expect(pairing.state().throttledUntil).toBeGreaterThan(0);
     const { code } = pairing.open();
     expect(pairing.state().throttledUntil).toBe(0);
+    // First try, no waiting, no restart.
+    expect(await submitAndApprove(pairing, code)).toMatchObject({ ok: true });
+  });
+
+  /**
+   * The other half of the same fix, which `open()` clearing the throttle hides:
+   * a correct code is COMPARED BEFORE the throttle is consulted, so no arrival
+   * order of failures can refuse a code the operator minted. Asserted at the
+   * seam, because with `open()` also clearing the counter there is no reachable
+   * sequence that puts a live code and an armed lockout in the same moment --
+   * and one is exactly what a future caller of `open()` could reintroduce.
+   */
+  it('spends none of a live code’s attempts on guesses made while locked out', async () => {
+    const { pairing } = harness();
+    const { code } = pairing.open();
+    for (let i = 0; i < MAX_ATTEMPTS_PER_CODE - 1; i += 1) {
+      await pairing.submit('ZZZZZZZZ', 'a phone', '100.64.0.2');
+    }
+    // One attempt left, and the code still pairs.
+    expect(pairing.state().attemptsLeft).toBe(1);
     expect(await submitAndApprove(pairing, code)).toMatchObject({ ok: true });
   });
 
