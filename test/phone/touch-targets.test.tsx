@@ -25,7 +25,8 @@ import { cleanup, fireEvent, render } from '@testing-library/react';
 import { act } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import { installPhoneGlobals, MODEL, phoneSource } from './harness.js';
+import type { AgentQuestion, CanvasModel } from '../../src/renderer/domain/model.js';
+import { FIVE_STEPS, installPhoneGlobals, MODEL, phoneSource, session } from './harness.js';
 
 const CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
 
@@ -40,6 +41,34 @@ afterEach(() => {
   cleanup();
   localStorage.clear();
 });
+
+const QUESTION = (id: string, header: string): AgentQuestion => ({
+  id,
+  header,
+  question: `Which ${header.toLowerCase()} do you prefer?`,
+  multiSelect: false,
+  options: [{ label: 'one', description: null }],
+  answer: null,
+});
+
+/** A call carrying TWO questions, which is what draws `data-question-steps`. */
+const ASKING: CanvasModel = {
+  projects: [
+    {
+      id: 'p1',
+      name: 'alpha',
+      source: 'claude-code',
+      sessions: [
+        session('a1', {
+          title: 'nightly sweep',
+          status: 'waiting',
+          decisions: FIVE_STEPS,
+          questions: [QUESTION('t:0', 'Colour'), QUESTION('t:1', 'Fruit')],
+        }),
+      ],
+    },
+  ],
+};
 
 const phone = () =>
   render(<Canvas model={MODEL} source={phoneSource({ closeSession: async () => {} })} />);
@@ -57,10 +86,15 @@ describe('the phone shell’s hit areas', () => {
   it('gives every control it renders a 44px floor, hosted panels included', () => {
     phone();
     const controls = sizedControls();
-    // The seven-name enumeration this replaced covered the shell's own header,
-    // footer and chips; the project icon, collapse, menu and per-project new
-    // session below are `SessionList`'s, and every one of them measured under
-    // 44 while that enumeration was green.
+    // Two rules answer for this between them, and the split is the point. The
+    // shell's own header, footer and chips are ENUMERATED in `styles.css`; the
+    // project icon, collapse, menu and per-project new session below belong to
+    // `SessionList`, and each opts in at the component by wearing `vam-tap`.
+    // Every one of the hosted ones measured under 44 at 390px while the
+    // enumeration alone was green -- and widening the enumeration to
+    // `[data-phone-shell] button` is not the fix: that form burst a 21px
+    // heading row by reaching markup it could not know the shape of. What this
+    // assertion holds is the OUTCOME, so either mistake fails it.
     expect(controls.length).toBeGreaterThan(5);
     for (const hook of [
       'data-project-icon',
@@ -74,6 +108,10 @@ describe('the phone shell’s hit areas', () => {
     const missed = controls
       .filter((el) => {
         const cs = getComputedStyle(el);
+        // A control the phone does not draw at all has no hit area to be
+        // wrong about -- the row's close `x` is `display: none` here on
+        // purpose, and the test below is what holds that.
+        if (cs.display === 'none') return false;
         return cs.minHeight !== '44px' || cs.minWidth !== '44px';
       })
       .map((el) => `${el.tagName} ${el.getAttribute('aria-label') ?? ''}`);
@@ -115,5 +153,37 @@ describe('the phone shell’s hit areas', () => {
     ];
     expect(typed.length).toBeGreaterThan(0);
     for (const el of typed) expect(getComputedStyle(el).fontSize).toBe('16px');
+  });
+
+  it('hides the view tabs while the keyboard is up, and never the question strip', () => {
+    // `.vam-phone-typing [role='tablist']` was unqualified, and TWO elements
+    // claim that role. The second is `data-question-steps`, the strip that
+    // chooses WHICH question of a multi-question call you are answering -- so
+    // the rule took away the control for picking what to answer at exactly the
+    // moment the operator was answering it.
+    //
+    // The typing STATE is put on by hand here: this fixture draws no composer,
+    // so there is no box to focus. That costs nothing, because the state is one
+    // `typing` flag writing both `vam-phone-typing` and `data-phone-keyboard`
+    // onto the same element, and `PhoneShell.anchor.test.tsx` already drives
+    // that flag from a real focus and asserts the attribute. What is measured
+    // here is the half that file cannot reach: which nodes the rule then hits.
+    render(<Canvas model={ASKING} source={phoneSource()} />);
+    act(() => {
+      fireEvent.click(document.querySelector('[data-session-row]') as Element);
+    });
+    // Set BEFORE anything is read: happy-dom snapshots an element's computed
+    // style on first read, so a "before" assertion on these same two nodes
+    // would be the value every later read returned.
+    (document.querySelector('[data-phone-shell]') as HTMLElement).classList.add('vam-phone-typing');
+    const tabs = document.querySelector('[data-view-tabs]') as HTMLElement;
+    const strip = document.querySelector('[data-question-steps]') as HTMLElement;
+    expect(tabs, 'the view tab bar').not.toBeNull();
+    expect(strip, 'a two-question call draws the strip').not.toBeNull();
+    expect(getComputedStyle(tabs).display, 'the view tabs, while typing').toBe('none');
+    expect(
+      getComputedStyle(strip).display,
+      'the strip that chooses WHICH question you are answering, while typing',
+    ).not.toBe('none');
   });
 });
