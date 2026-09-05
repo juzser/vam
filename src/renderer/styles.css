@@ -963,6 +963,37 @@ body {
   display: none;
 }
 
+/* The inline chord hints, suppressed rather than deleted.
+ *
+ * `InlineChord` prints `primaryChord(action)` unconditionally -- it knows
+ * nothing about viewports -- and two of its three call sites are on the phone's
+ * list screen: the `/` in the search control and the `o` in New session. A
+ * chord is the one part of that hint a touchscreen cannot use, and neither hint
+ * is the only thing saying what its button does: both carry an icon and their
+ * own words.
+ *
+ * NOT deleted, because the chord is not dead at 390px -- `Canvas`'s keydown
+ * listener is not phone-gated, so a Bluetooth or folio keyboard on a narrow
+ * viewport still fires every one. What a hardware-keyboard phone user loses is
+ * two inline reminders; `?` still opens the key sheet, which documents all of
+ * them. */
+[data-phone-shell] [data-inline-chord] {
+  display: none;
+}
+
+/* A hover reveal is not a reveal, and this is the row-close `x` inverted.
+ *
+ * `data-add-to-group` is `ProjectPicker`'s ONLY opener -- no chord reaches it,
+ * no other control opens the sheet -- and it is `opacity: 0` until its group
+ * heading is hovered, which a coarse pointer can never do. Sizing it to 44x44
+ * made it a passing touch target that a finger still cannot find: measured, a
+ * 44x44 box at opacity 0. Where the row's `x` was invisible and hittable and
+ * had to become absent, this one is invisible and unreachable and has to become
+ * visible; both come from `opacity: 0` not being absence. */
+.vam-phone [data-add-to-group] {
+  opacity: 1;
+}
+
 /* Without `viewport-fit=cover` in index.html this resolves to 0 and the
    record button sits under the iOS home indicator. */
 [data-phone-shell] [data-composer-bar] {
