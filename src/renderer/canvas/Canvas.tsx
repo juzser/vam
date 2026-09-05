@@ -78,7 +78,7 @@ import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
 import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
-import { SessionList } from '../panels/SessionList.js';
+import { NEW_PROJECT_PENDING, SessionList } from '../panels/SessionList.js';
 import { visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
@@ -1818,6 +1818,12 @@ function CanvasInner({
    * failure). Only past all three does anything spawn.
    */
   const newProject = useCallback(async () => {
+    if (pendingAction !== null) {
+      // OUT LOUD, like `removeProject` one screen up. A refused click that
+      // says nothing is indistinguishable from a dead control.
+      setStatus('something else is still running — nothing was started; try again in a moment');
+      return;
+    }
     const route = newSessionRoute(source);
     if (!route.ok) {
       // A refusal vam INTENDED. Recorded, because an operator who cannot see
@@ -1831,26 +1837,45 @@ function CanvasInner({
       setStatus('choosing a directory needs the desktop app — the browser build has no picker');
       return;
     }
-    let cwd: string | null;
+    const createSessionIn = route.write.createSessionIn;
+    // THE PENDING STATE STARTS AT THE DIALOG, not after it. The dialog is the
+    // first await on this path, and it is the window a second click used to
+    // land in: with nothing set, the guard above was false and the operator
+    // got a second picker and a SECOND session in the same directory. It also
+    // makes the `+` wear the action, which is the only thing on screen that
+    // does -- a native dialog is the OS's feedback, not vam's, and it is gone
+    // for the ~10s of spawning that follows it.
+    setPendingAction(NEW_PROJECT_PENDING);
+    setStatus('choosing a directory for a new session…');
     try {
-      cwd = await choose();
-    } catch (cause) {
-      setStatus(noteFailure('choose a directory', cause));
-      return;
+      let cwd: string | null;
+      try {
+        cwd = await choose();
+      } catch (cause) {
+        setStatus(noteFailure('choose a directory', cause));
+        return;
+      }
+      if (cwd === null) {
+        setStatus('no directory chosen — nothing started');
+        return;
+      }
+      const name = directoryName(cwd);
+      // The first half of one sentence, exactly as `createSession` says it:
+      // "starting…" here, "started … it may take a moment to appear" below.
+      setStatus(`starting a new session in ${name}…`);
+      try {
+        await createSessionIn(cwd, name);
+        setStatus(`started a new session in ${name} — it may take a moment to appear`);
+        if (source.kind === 'session') source.onWrote();
+      } catch (cause) {
+        setStatus(noteFailure('new project', cause));
+      }
+    } finally {
+      // EVERY path -- refusal, cancel and failure included. A spinner still
+      // spinning after a refusal turns a clear failure into an apparent hang.
+      setPendingAction(null);
     }
-    if (cwd === null) {
-      setStatus('no directory chosen — nothing started');
-      return;
-    }
-    const name = directoryName(cwd);
-    try {
-      await route.write.createSessionIn(cwd, name);
-      setStatus(`started a new session in ${name} — it may take a moment to appear`);
-      if (source.kind === 'session') source.onWrote();
-    } catch (cause) {
-      setStatus(noteFailure('new project', cause));
-    }
-  }, [source]);
+  }, [source, pendingAction]);
 
   /** The caption both `+` controls wear: the refusal, or nothing to say. */
   const newSessionDecline = useMemo(() => {
