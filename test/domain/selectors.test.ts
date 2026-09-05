@@ -175,3 +175,35 @@ describe('project shape', () => {
     expect(project.source).toBe('orca');
   });
 });
+
+/**
+ * THE UNGROUPED PATH IS THE MAJORITY PATH, not a corner case.
+ *
+ * With no groups stored -- every store that exists today, and the browser
+ * build forever, since it has no directory picker to make one with -- every
+ * project is ungrouped. So `null` is not the edge this suite checks once; it
+ * is what the rest of the file already exercises on every line, and these two
+ * tests only make that explicit and non-negotiable.
+ *
+ * The second is the merge-safety pin the group layer lands behind: with no
+ * groups, the flat order is what it was, entry for entry, so nothing between
+ * here and the canvas can start behaving differently before there is anything
+ * to behave differently about.
+ */
+describe('the ungrouped path', () => {
+  it('gives every session a null group when the model has none', () => {
+    const entries = allSessions(MODEL);
+    expect(entries).not.toHaveLength(0);
+    for (const entry of entries) {
+      expect(entry.group).toBeNull();
+    }
+  });
+
+  it('leaves the flat order and its projects exactly as they were', () => {
+    expect(allSessions(MODEL).map((e) => [e.project.id, e.session.id])).toEqual([
+      ['p-bs', 'D-257'],
+      ['p-bs', 'D-263'],
+      ['p-vam', 'epic-1'],
+    ]);
+  });
+});

@@ -5,7 +5,7 @@
  * time the number changes.
  */
 
-import type { CanvasModel, Command, Decision, Project, Session } from './model.js';
+import type { CanvasModel, Command, Decision, Group, Project, Session } from './model.js';
 
 /** How many decision rows a session node shows (docs/design/canvas-layout.md §3). */
 export const VISIBLE_DECISION_COUNT = 3;
@@ -13,6 +13,24 @@ export const VISIBLE_DECISION_COUNT = 3;
 export type SessionEntry = {
   readonly project: Project;
   readonly session: Session;
+  /**
+   * The group this session's project sits in, or `null` for the top level.
+   *
+   * `null` RATHER THAN ABSENT, and that is the point of the field: a consumer
+   * has to say what it does about a project belonging to no group instead of
+   * leaving the case theoretical. It is not theoretical. With nothing stored
+   * in `Prefs.groups` -- every store that exists, and the browser build
+   * permanently -- every entry is `null`, so this is the common path and the
+   * grouped one is the exception.
+   *
+   * Optional on the TYPE only, for the reason `Project.icon` is: MEASURED,
+   * requiring it fails 60 entry literals across 13 test files that build an
+   * entry by hand, none of which has an opinion about grouping. Optional costs
+   * nothing here, because the only PRODUCER is `allSessions` and it always
+   * writes the field -- a consumer that reads it still has to handle `null`,
+   * which is the case that matters.
+   */
+  readonly group?: Group | null;
 };
 
 /**
@@ -26,7 +44,10 @@ export function allSessions(model: CanvasModel): SessionEntry[] {
   const entries: SessionEntry[] = [];
   for (const project of model.projects) {
     for (const session of project.sessions) {
-      entries.push({ project, session });
+      // Ungrouped: this reads the model's flat `projects`, which is the level
+      // that has no group by definition. Composing the grouped level is a
+      // separate step above this one.
+      entries.push({ project, session, group: null });
     }
   }
   return entries;

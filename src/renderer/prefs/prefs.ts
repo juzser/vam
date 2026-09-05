@@ -191,6 +191,25 @@ export type IconsBySession = Readonly<Record<string, IconChoice>>;
  */
 export type FocusChoice = { readonly source: string; readonly session: string };
 
+/**
+ * One group as it is written to `localStorage`.
+ *
+ * DELIBERATELY NOT `Group` from `domain/model.ts`: that one carries resolved
+ * `Project` objects, which are derived from live sessions and must never be
+ * persisted -- storing them would freeze a session list into the prefs file
+ * and make it wrong within the minute. This carries member ids and nothing
+ * else, and the model's `Group` is rebuilt from it on each poll.
+ *
+ * `id` is minted by the caller and derived from nothing: a group has no cwd to
+ * digest, has to survive a rename, and has to exist while it holds nothing.
+ */
+export type StoredGroup = {
+  readonly id: string;
+  readonly name: string;
+  readonly icon?: string;
+  readonly projects: readonly string[];
+};
+
 export type Prefs = {
   /**
    * Source id → session id → the emoji you gave it.
@@ -287,6 +306,31 @@ export type Prefs = {
    */
   readonly hiddenProjects: Readonly<Record<string, readonly string[]>>;
   /**
+   * Source id → the groups the operator made in that source, in the order
+   * they were made. UI "project"; see the vocabulary table in
+   * `domain/model.ts` for why the code's word for it is `Group`.
+   *
+   * THE ONLY STORED HALF OF THE GROUP LAYER, and the only stored thing in vam
+   * that is not derivable from a poll: a project comes back from the cwd of a
+   * live session, a grouping comes back from nowhere. Keyed by source like the
+   * three buckets above, and for the same reason -- a project id is unique
+   * only within its source, so a flat list would let one source's group claim
+   * another's project.
+   *
+   * Members are project IDS, never paths, so nothing here can name a directory
+   * that has moved. A member id is KEPT even when no live project matches it:
+   * that is what makes a grouping survive the operator closing the last
+   * session in one of its projects. Exempt from the icon TTL, like the fold
+   * and the removal above -- it records a decision a person made.
+   */
+  readonly groups: Readonly<Record<string, readonly StoredGroup[]>>;
+  /**
+   * Source id → the ids of that source's groups you folded shut. Exactly
+   * `collapsedProjects`, one level up, with the same list-not-booleans shape
+   * and the same TTL exemption.
+   */
+  readonly collapsedGroups: Readonly<Record<string, readonly string[]>>;
+  /**
    * Source id → session id → the name you gave it. Same keying, storage and
    * TTL as `icons`, for the same reasons -- and the TTL applies for one more:
    * a name for a session that stopped existing months ago is not worth
@@ -381,6 +425,8 @@ export const EMPTY_PREFS: Prefs = {
   filters: DEFAULT_SESSION_FILTERS,
   collapsedProjects: {},
   hiddenProjects: {},
+  groups: {},
+  collapsedGroups: {},
   renames: {},
   palette: { dark: {}, light: {} },
   keyBindings: {},
@@ -459,6 +505,8 @@ function parsePrefs(
     filters?: unknown;
     collapsedProjects?: unknown;
     hiddenProjects?: unknown;
+    groups?: unknown;
+    collapsedGroups?: unknown;
     renames?: unknown;
   };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -493,6 +541,11 @@ function parsePrefs(
     // Per field and per source like the fold above it: a payload from a vam
     // that predates removal has no key, and reads back as "nothing removed".
     hiddenProjects: readIdsBySource(record.hiddenProjects),
+    // Per field and per source again, and NOT pruned by the TTL: every store
+    // in existence predates the group layer and has neither key, which reads
+    // back as "no groups" -- the state the whole app already renders.
+    groups: readGroups(record.groups),
+    collapsedGroups: readIdsBySource(record.collapsedGroups),
     // Same TTL and same shape as the icons above; a payload written before
     // this field existed simply has none, and reads as `{}`.
     renames: pruneBuckets(readBuckets(record.renames, readRename), cutoff),
@@ -617,6 +670,182 @@ export function setProjectHidden(
     ...prefs,
     hiddenProjects: withIdBySource(prefs.hiddenProjects, source, projectId, hidden),
   };
+}
+
+/**
+ * Every level defensive, like `readIdsBySource` above it: a non-array bucket
+ * is dropped whole, and a group missing an id or a name is dropped alone so
+ * one bad record cannot cost the operator every other group in that source. A
+ * non-string member id goes the same way -- dropped by itself, because the
+ * remaining members are still a grouping the operator made.
+ */
+function readGroups(raw: unknown): Readonly<Record<string, readonly StoredGroup[]>> {
+  if (typeof raw !== 'object' || raw === null) {
+    return emptyMap<readonly StoredGroup[]>();
+  }
+  const out = emptyMap<readonly StoredGroup[]>();
+  for (const [source, bucket] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(bucket)) {
+      continue;
+    }
+    const groups = bucket.map(readGroup).filter((group): group is StoredGroup => group !== null);
+    if (groups.length > 0) {
+      out[source] = groups;
+    }
+  }
+  return out;
+}
+
+function readGroup(raw: unknown): StoredGroup | null {
+  if (typeof raw !== 'object' || raw === null) {
+    return null;
+  }
+  const { id, name, icon, projects } = raw as Record<string, unknown>;
+  if (typeof id !== 'string' || id === '' || typeof name !== 'string') {
+    return null;
+  }
+  const members = Array.isArray(projects)
+    ? projects.filter((each): each is string => typeof each === 'string')
+    : [];
+  return typeof icon === 'string' && icon !== ''
+    ? { id, name, icon, projects: members }
+    : { id, name, projects: members };
+}
+
+/** Is this source's group folded shut? */
+export function isGroupCollapsed(prefs: Prefs, source: string, groupId: string): boolean {
+  return prefs.collapsedGroups[source]?.includes(groupId) === true;
+}
+
+/** Fold or unfold one group -- `setProjectCollapsed`, one level up. */
+export function setGroupCollapsed(
+  prefs: Prefs,
+  source: string,
+  groupId: string,
+  collapsed: boolean,
+): Prefs {
+  return {
+    ...prefs,
+    collapsedGroups: withIdBySource(prefs.collapsedGroups, source, groupId, collapsed),
+  };
+}
+
+/**
+ * Rewrite one source's groups, dropping the bucket when nothing is left.
+ *
+ * The empty-bucket rule is `withIdBySource`'s, for its reason: a store whose
+ * last group was dissolved then reads back identical to a fresh install, with
+ * no empty object left behind to be mistaken for a group layer in use.
+ */
+function withGroups(
+  prefs: Prefs,
+  source: string,
+  next: (groups: readonly StoredGroup[]) => readonly StoredGroup[],
+): Prefs {
+  const bucket = prefs.groups[source] ?? [];
+  const updated = next(bucket);
+  const groups =
+    updated.length > 0
+      ? withEntry(prefs.groups as Record<string, readonly StoredGroup[]>, source, updated)
+      : withoutEntry(prefs.groups as Record<string, readonly StoredGroup[]>, source);
+  return { ...prefs, groups };
+}
+
+/** One group, edited in place; a group id that is not there changes nothing. */
+function withGroup(
+  prefs: Prefs,
+  source: string,
+  groupId: string,
+  edit: (group: StoredGroup) => StoredGroup,
+): Prefs {
+  return withGroups(prefs, source, (groups) =>
+    groups.some((group) => group.id === groupId)
+      ? groups.map((group) => (group.id === groupId ? edit(group) : group))
+      : groups,
+  );
+}
+
+/**
+ * A new, empty group. `id` is minted by the caller -- see `StoredGroup.id`.
+ *
+ * Empty is a legitimate state, not a transient one: the operator names a group
+ * before they have anything to put in it, and a group that deleted itself the
+ * moment its last project left would take the name with it.
+ */
+export function createGroup(prefs: Prefs, source: string, id: string, name: string): Prefs {
+  return withGroups(prefs, source, (groups) =>
+    groups.some((group) => group.id === id) ? groups : [...groups, { id, name, projects: [] }],
+  );
+}
+
+export function renameGroup(prefs: Prefs, source: string, groupId: string, name: string): Prefs {
+  return withGroup(prefs, source, groupId, (group) => ({ ...group, name }));
+}
+
+/** An empty icon clears the choice rather than storing "", as `setIcon` does. */
+export function setGroupIcon(
+  prefs: Prefs,
+  source: string,
+  groupId: string,
+  icon: string | null,
+): Prefs {
+  return withGroup(prefs, source, groupId, ({ icon: _dropped, ...group }) =>
+    icon === null || icon === '' ? group : { ...group, icon },
+  );
+}
+
+/**
+ * Put a project in a group, MOVING it out of any group it was already in.
+ *
+ * At most one group per project, and it is enforced here rather than left to
+ * the caller because the cost of getting it wrong is not cosmetic: membership
+ * is array position, so a project in two groups has its sessions walked twice
+ * and mints two nodes carrying the same `info:<sessionId>` id -- which breaks
+ * the canvas and the keys `j`/`k` step through.
+ */
+export function addProjectToGroup(
+  prefs: Prefs,
+  source: string,
+  groupId: string,
+  projectId: string,
+): Prefs {
+  return withGroups(prefs, source, (groups) =>
+    groups.some((group) => group.id === groupId)
+      ? groups.map((group) =>
+          group.id === groupId
+            ? group.projects.includes(projectId)
+              ? group
+              : { ...group, projects: [...group.projects, projectId] }
+            : { ...group, projects: group.projects.filter((each) => each !== projectId) },
+        )
+      : groups,
+  );
+}
+
+export function removeProjectFromGroup(
+  prefs: Prefs,
+  source: string,
+  groupId: string,
+  projectId: string,
+): Prefs {
+  return withGroup(prefs, source, groupId, (group) => ({
+    ...group,
+    projects: group.projects.filter((each) => each !== projectId),
+  }));
+}
+
+/**
+ * Dissolve a group. Its members return to the top level, and its fold goes
+ * with it so a group created later under a reused id is not born folded.
+ *
+ * Nothing is ended and nothing is hidden: this is the reversible half and the
+ * only half there is. What is lost is a name and an icon.
+ */
+export function deleteGroup(prefs: Prefs, source: string, groupId: string): Prefs {
+  const withoutFold = setGroupCollapsed(prefs, source, groupId, false);
+  return withGroups(withoutFold, source, (groups) =>
+    groups.filter((group) => group.id !== groupId),
+  );
 }
 
 /** Per FIELD, not per object: a payload from an older vam has neither key,

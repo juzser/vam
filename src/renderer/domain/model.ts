@@ -369,6 +369,37 @@ export type Session = {
   readonly questions?: readonly AgentQuestion[];
 };
 
+/**
+ * VOCABULARY: the code's word and the UI's word for the same two layers, and
+ * they do not match. Read this before renaming anything below.
+ *
+ *   code `Project`  =  UI "repo"     =  one working directory
+ *                   =  the value of the `@vam-project` tmux option
+ *                   =  the key of three prefs buckets already on disk
+ *                      (`projectIcons`, `collapsedProjects`, `hiddenProjects`)
+ *   code `Group`    =  UI "project"  =  the layer ABOVE, added later, stored
+ *                      as a list of member `Project` ids and nothing else
+ *
+ * WHY THEY DIFFER, since the mismatch is deliberate and permanent. The
+ * operator's word for a checkout is "repo" and their word for the thing above
+ * it is "project", so the STRINGS on screen say that. The identifier cannot
+ * follow: `Project` here is a contract with a tmux user option set on sessions
+ * that are running right now, with three keys inside a store already written
+ * to the operator's disk, and with `revealProject`, `projectIdOf` and
+ * `MAX_PROJECT_ID_LENGTH`. A UI label is a string; those are a promise to data
+ * that already exists.
+ *
+ * THE HAZARD THAT CREATES, stated because it is this design's whole risk:
+ * after the group layer ships, "project" means the OUTER thing in the UI and
+ * the INNER thing in the code, and that inversion makes renaming `Project`
+ * look like a tidy-up someone forgot. It is not a tidy-up, it is the bug --
+ * repointing the tmux option makes the operator's live sessions read
+ * `mispaired` and refuse both Close and Enter, and renaming a prefs key
+ * silently reverts every icon, fold and removal they saved. Both are frozen by
+ * literal value in `test/sources/tmux-argv.test.ts` and
+ * `test/prefs/prefs.test.ts`; if you are here because one of those went red,
+ * the test is right.
+ */
 export type Project = {
   readonly id: string;
   readonly name: string;
@@ -402,6 +433,32 @@ export type Project = {
   readonly icon?: string | null;
 };
 
+/**
+ * A grouping of projects the operator made by hand -- UI "project", one level
+ * above the code's `Project` (see the vocabulary note above `Project`).
+ *
+ * STORED, NOT DERIVED, which is what makes it unlike everything else in this
+ * file: a project comes from the cwd of live sessions, so vam can rebuild one
+ * from a poll, while a group exists only because a person said so and would
+ * be gone on the next refresh if it were not written down (`Prefs.groups`).
+ *
+ * Its `id` is minted locally and derives from nothing -- a group has no cwd to
+ * digest, must survive being renamed, and must exist while it holds no
+ * projects at all.
+ *
+ * `projects` holds the members that are LIVE right now, resolved from the
+ * stored member ids. A stored id whose project has no running session is not
+ * dropped from the store; it simply has nothing to appear as here, and the
+ * project rejoins its group the next time a session starts in that directory.
+ */
+export type Group = {
+  readonly id: string;
+  readonly name: string;
+  /** A single glyph the operator picked, or `null` -- as `Project.icon`. */
+  readonly icon?: string | null;
+  readonly projects: readonly Project[];
+};
+
 /** Everything the canvas draws in one frame. */
 /**
  * Token spend against budget, when the source has such a thing.
@@ -418,6 +475,23 @@ export type CanvasBudget = {
 };
 
 export type CanvasModel = {
+  /**
+   * The top level. Once groups exist these are the projects belonging to NO
+   * group; with no groups stored, which is every store that has ever been
+   * written, it is every project and this field means exactly what it always
+   * did.
+   */
   readonly projects: readonly Project[];
+  /**
+   * The grouped top level, or absent for "this model has no groups" -- which
+   * is today's state everywhere, and permanently the browser build's, since it
+   * has no directory picker and so no way to make one.
+   *
+   * Optional for the reason `Project.icon` is: every `CanvasModel` literal
+   * across the fixtures and both adapters stays legal without an edit, and
+   * absent has to keep meaning what it means, because that is the case the
+   * whole existing suite exercises.
+   */
+  readonly groups?: readonly Group[];
   readonly budget?: CanvasBudget | null;
 };
