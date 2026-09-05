@@ -365,17 +365,18 @@ describe('Escape belongs to the pane, and the way out is Tab', () => {
   });
 
   it('says where the exit is, but only while the pane has focus', async () => {
-    // An exit nobody can find is not an exit, and the operator asked for the
-    // two lines above the pane back -- so the hint costs no row: it is
-    // absolutely positioned inside the pane and exists only while focused.
+    // An exit nobody can find is not an exit, and it may not cost a row: it
+    // rides the badge in the pane's corner and is appended only while the
+    // pane has focus, which is the only moment the question is asked.
     await open();
-    const hint = q('[data-terminal-exit-hint]');
-    expect(hint?.textContent).toContain('Tab');
-    expect(hint?.getAttribute('class')).toContain('absolute');
+    expect(q('[data-terminal-exit-hint]')?.textContent).toContain('Tab');
+    expect(q('[data-terminal-badge]')?.getAttribute('class')).toContain('absolute');
 
     fireEvent.blur(pane() as HTMLElement);
     await settle();
     expect(q('[data-terminal-exit-hint]')).toBeNull();
+    // The identity does NOT go with it. That was the whole defect.
+    expect(q('[data-terminal-badge]')?.textContent).toContain('vam-atlas-a1b2c3');
   });
 
   it('names the exit in the accessible name too, for a reader that cannot see a corner', async () => {
@@ -490,6 +491,35 @@ describe('a pairing vam cannot use is said as that, not as an absence', () => {
 });
 
 describe('the pane says whether what is typed is going anywhere', () => {
+  it('shows which session this is, VISIBLY, without being focused or read aloud', async () => {
+    // THE DEFECT THIS PINS. When the two lines came off, the name went into
+    // the pane's `aria-label` -- true for a screen reader, invisible to the
+    // person looking at the terminal, who then reported that switching to
+    // this tab tells them nothing about the session they are in.
+    //
+    // So the assertion is on what is DRAWN. `textContent` of the tab is what
+    // a person can read; an `aria-label` assertion is exactly the test that
+    // would have passed all along while the screen said nothing.
+    await open();
+    fireEvent.blur(pane() as HTMLElement);
+    await settle();
+    expect(q<HTMLElement>('[data-terminal]')?.textContent).toContain('vam-atlas-a1b2c3');
+  });
+
+  it('costs no row to say it: the badge is out of the flow, not a header', async () => {
+    await open();
+    const badge = q<HTMLElement>('[data-terminal-badge]');
+    // Absolutely positioned against the wrapper, so it takes no vertical
+    // space -- the two lines the operator removed were flow content.
+    expect(badge?.getAttribute('class')).toContain('absolute');
+    // And OUTSIDE the scrolling box: inside, it would be laid out against the
+    // content and scroll out of sight with the first screenful.
+    expect(badge?.closest('[data-terminal-pane]')).toBeNull();
+    // Still no flow chrome above the pane.
+    expect(q('[data-terminal-name]')).toBeNull();
+    expect(q('[data-terminal-typing]')).toBeNull();
+  });
+
   it('draws no chrome above the pane at all, which is the space the operator asked for', async () => {
     await open();
     // The two lines that stood here: the session's name, and a caption saying
@@ -497,8 +527,8 @@ describe('the pane says whether what is typed is going anywhere', () => {
     // terminal, two rows of chrome is two rows of their work not shown.
     expect(q('[data-terminal-name]')).toBeNull();
     expect(q('[data-terminal-typing]')).toBeNull();
-    // What replaced the caption is behaviour, not text, and the pane itself
-    // still says whose screen it is.
+    // The pane still says whose screen it is to a reader -- and, since the
+    // badge, to everybody else as well.
     expect(pane()?.getAttribute('aria-label')).toContain('vam-atlas-a1b2c3');
   });
 

@@ -609,7 +609,7 @@ export function TerminalTab({
        -- is behaviour, not text: a key vam cannot deliver is not cancelled,
        so it goes back to vam's own keyboard (see `onKeyDown`), and a refusal
        still draws its own line, which is not one of the two removed. */
-    <div data-terminal className="flex min-h-0 flex-1 flex-col gap-1.5">
+    <div data-terminal className="relative flex min-h-0 flex-1 flex-col gap-1.5">
       {/* WHERE THE KEYS GO, said on the surface. A box that takes focus and
           swallows what is typed is worse than one that will not take focus,
           and there are two ways for this one to swallow: a build with no
@@ -715,25 +715,44 @@ export function TerminalTab({
             </Fragment>
           ))}
         </pre>
-        {/* THE WAY OUT, SAID WHERE IT IS NEEDED AND NOWHERE ELSE. Escape now
-            belongs to the pane, so Tab is the only key that lets go, and an
-            exit nobody can find is not an exit -- but the operator asked for
-            the two lines above this box back, so it may not cost a row.
-            Absolutely positioned inside the pane and shown only while the
-            pane has focus: no layout, no reader, nothing on screen at all
-            until the moment it is the answer to "how do I get out of here".
-            It sits above the text on purpose -- the last line of a terminal
-            is usually the prompt, and the corner is the emptiest part of it. */}
+      </section>
+      {/* WHOSE TERMINAL THIS IS, and the way out of it, in one badge that
+          costs no row.
+
+          THE NAME WAS INVISIBLE AND THAT WAS A DEFECT OF MINE. When the two
+          lines above the pane came off, the session's name went into the
+          pane's `aria-label` -- which is real for a screen reader and nothing
+          at all for the person looking at the screen. The operator asked for
+          the CHROME back off the top, not for the identity to go with it, and
+          then reported exactly that: switching to this tab, they cannot see
+          which session they are looking at.
+
+          It is the tmux session's name rather than the row's title because
+          that is the fact this tab alone can tell them: the panel above
+          already names the session, and a project vam started twice has two
+          panes that only this name tells apart -- it is also what they would
+          read in `tmux ls`.
+
+          OUTSIDE THE SCROLLING BOX, positioned against the wrapper. Inside,
+          it would be laid out against the pane's content and would scroll up
+          out of sight with the first screenful. The bottom-right corner is
+          the emptiest part of a terminal -- the prompt sits bottom-LEFT --
+          and `pointer-events-none` keeps it from eating a click meant for the
+          text under it. The exit is appended only while the pane has focus,
+          because that is the only moment "how do I get out of here" is a
+          question anyone is asking. */}
+      <span
+        data-terminal-badge
+        aria-hidden="true"
+        className="pointer-events-none absolute right-1.5 bottom-1 max-w-[60%] truncate rounded-[5px] border border-line bg-panel px-1.5 py-0.5 font-mono text-[9px] text-ink-faint"
+      >
+        {view.name}
         {hasFocus && (
-          <span
-            data-terminal-exit-hint
-            aria-hidden="true"
-            className="pointer-events-none absolute right-1.5 bottom-1 rounded-[5px] border border-line bg-panel px-1.5 py-0.5 text-[9px] text-ink-faint"
-          >
-            Tab leaves
+          <span data-terminal-exit-hint className="text-ink-ghost">
+            {' · Tab leaves'}
           </span>
         )}
-      </section>
+      </span>
     </div>
   );
 }
