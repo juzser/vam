@@ -93,6 +93,7 @@ import type {
   SessionStatus,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import { questionKeys } from '../keyboard/question-keys.js';
 import { ShortcutTip } from '../keyboard/ShortcutTip.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import { FocusEdge } from './FocusEdge.js';
@@ -1423,6 +1424,15 @@ function QuestionCard({
 }) {
   /** Which step is showing, and what has been marked on EACH of them. */
   const [showing, setShowing] = useState(0);
+  /**
+   * The card's grammar, off the operator's own table rather than out of the
+   * literals that used to sit in the handler below. The sheet already promised
+   * the `move` binding walks these options; now it does. Every shape of card
+   * -- single, multi-select, and each step of a multi-question call -- reads
+   * this one value, because a picker driven by one grammar beside a prompt
+   * driven by another is what the operator asked to stop.
+   */
+  const keys = questionKeys();
   const [marks, setMarks] = useState<Readonly<Record<string, readonly string[]>>>({});
   /** What the last Submit came back with, and whether one is in flight. */
   const [outcome, setOutcome] = useState<AnswerResult | null>(null);
@@ -1570,7 +1580,7 @@ function QuestionCard({
     // keyboard is already in the options list -- which is where `i` puts it.
     // The entry itself is a button outside the list, reached by Tab or mouse
     // and activated by Enter, Space or a click, like any other.
-    if (event.key === 'c') {
+    if (keys.chat.includes(event.key)) {
       event.preventDefault();
       onChat();
       return;
@@ -1602,14 +1612,9 @@ function QuestionCard({
      * -- down the options, across the questions. `H` — capital, a different key — is still the way
      * back to Select, and Escape still leaves.
      */
-    if (
-      event.key === 'h' ||
-      event.key === 'l' ||
-      event.key === 'ArrowLeft' ||
-      event.key === 'ArrowRight'
-    ) {
+    if (keys.prev.includes(event.key) || keys.next.includes(event.key)) {
       event.preventDefault();
-      walk(event.key === 'l' || event.key === 'ArrowRight' ? 1 : -1);
+      walk(keys.next.includes(event.key) ? 1 : -1);
       return;
     }
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -1633,8 +1638,8 @@ function QuestionCard({
       toggle(option.label);
       return;
     }
-    const down = event.key === 'ArrowDown' || event.key === 'j';
-    const up = event.key === 'ArrowUp' || event.key === 'k';
+    const down = keys.down.includes(event.key);
+    const up = keys.up.includes(event.key);
     if (!down && !up) return;
     event.preventDefault();
     const step = down ? 1 : -1;
@@ -1783,7 +1788,17 @@ function QuestionCard({
             onClick={onChat}
             className="flex cursor-pointer items-baseline gap-1.5 rounded-[6px] border border-line border-dashed px-1.5 py-1 text-left hover:bg-raised"
           >
-            <span className="text-[10px] text-ink-faint tabular-nums">c</span>
+            {/* THE HINT COMES OFF THE SAME TABLE THE HANDLER READS, and is
+              not printed at all when the key is not held -- a caption naming a
+              key that does nothing is the defect, not the absence of one. */}
+            {keys.chat[0] !== undefined && (
+              <span
+                data-question-chat-key
+                className="text-[10px] text-ink-faint tabular-nums"
+              >
+                {keys.chat[0]}
+              </span>
+            )}
             <span className="min-w-0 text-[11px] text-ink">Chat about this</span>
             <span className="min-w-0 text-[10.5px] text-ink-faint">
               — vam adds this one; it opens the box below
