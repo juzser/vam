@@ -172,7 +172,6 @@ export function readPrompt(text: string): PanePrompt | null {
   if (picker === null) return null;
   const lines = plain(text).split('\n');
   const first = lines.findIndex((line) => ROW.test(line));
-  if (first <= 0) return null;
   const title = lines
     .slice(0, first)
     .map((line) => line.replace(BORDER, ''))
