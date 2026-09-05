@@ -968,7 +968,6 @@ body {
 [data-phone-shell] > header button,
 [data-phone-shell] > footer button,
 [data-phone-shell] [data-avatar-bar] button,
-[data-phone-shell] [data-step-chip],
 [data-phone-shell] [data-remote-limits] summary,
 [data-phone-shell] [data-prompt-record],
 [data-phone-shell] [data-status-pill] {
@@ -983,8 +982,9 @@ body {
  * were under 44px while every one of the seven above measured exactly 44: a
  * 15px project icon, 17px collapse and menu, a 19px per-project new session,
  * three 26px header actions, a 30px search and a 28px footer button, plus the
- * view tabs, the progress toggle, the attach button and the model box on the
- * session screen. All of them belong to `SessionList` and `DetailPanel`.
+ * progress toggle, the attach button and the model box on the session screen
+ * (the view tabs were on that list until the phone stopped drawing them). All
+ * of them belong to `SessionList` and `DetailPanel`.
  *
  * The temptation is to widen the selector above to `[data-phone-shell] button`
  * and be done. That was tried, and it is what burst the heading row: a net
@@ -1058,27 +1058,25 @@ body {
   padding-bottom: max(12px, env(safe-area-inset-bottom));
 }
 
-/* While the soft keyboard is up it owns roughly half the viewport, and 44px
-   of tab bar out of the ~400px left is chrome spent on a control the operator
-   has already used to get here. It returns the moment the composer blurs.
-   `prefers-reduced-motion` has nothing to remove: there is no transition.
+/* The rule that stood here hid `[data-view-tabs]` while the soft keyboard was
+   up -- 44px of tab bar out of the ~400px the keyboard leaves. It is GONE
+   because the bar is: the phone does not draw the view tabs at all now
+   (`DetailPanel`'s `phone` gate), and the step rail above it went with them,
+   so this selector matched nothing. A rule that matches nothing is
+   indistinguishable from a rule that works, which is how it was already
+   caught once here -- it read `[role='tablist']` and collected a second
+   element, `data-question-steps`, the strip for choosing WHICH question of a
+   multi-question call you are answering. Whatever replaces this must never
+   hide that strip: typing is exactly when it is needed.
+   `test/phone/touch-targets.test.tsx` holds that.
  *
- * NAMED, not roled. This read `[role='tablist']`, and two elements claim that
- * role: the view tab bar, which is the 44px this comment is about, and
- * `data-question-steps`, the strip that chooses WHICH question of a
- * multi-question call you are answering. Typing is exactly when you need the
- * second one, and the rule hid it -- the operator tapped the composer to
- * answer and lost the control for picking what to answer. `data-view-tabs`
- * names one bar and cannot collect the other.
- *
- * It is also load-bearing on that hook now: the UI spec proposes moving both
- * strips off `role="tablist"` (neither has a `tabpanel`, so the role is a
- * false claim), and a rule keyed on the role would quietly stop matching and
- * put 44px of chrome back under the keyboard. Keyed on the hook, it survives
- * that change. */
-.vam-phone-typing [data-view-tabs] {
-  display: none;
-}
+ * The views did not disappear, they moved into the app bar as icon buttons
+ * (`data-phone-views`), and that row is NOT hidden while typing: it is one row
+ * that also carries back, the session name and close, and hiding it would take
+ * the screen's only navigation away at the moment the operator is using the
+ * screen. It wears its own hook for the same reason this rule was re-pointed
+ * once already -- so nothing written for the desktop bar can collect it. */
+
 
 /*
  * The overlays, as bottom sheets.

@@ -532,11 +532,13 @@ function TabBar({
     // `phone/PhoneShell.tsx` reached the same conclusion first.
     <nav
       aria-label="views"
-      /* The hook `.vam-phone-typing` hides this bar by. That rule used to name
-         `[role='tablist']` and so took the QUESTION strip with it -- the
-         control for choosing WHICH question you are answering vanished the
-         moment you tapped the composer to answer one. It names this bar, which
-         is why the move off the role above could not silently switch it off. */
+      /* This bar is DESKTOP-ONLY now -- see the `phone` gate at its call site.
+         The rule that used to hide it while the phone keyboard was up
+         (`.vam-phone-typing [data-view-tabs]`) is gone: a phone that never
+         draws this bar makes that selector match nothing, and a rule matching
+         nothing is indistinguishable from a rule that works. The phone's own
+         icon row deliberately does NOT wear this hook, so no rule written for
+         a desktop bar can silently collect it. */
       data-view-tabs
       className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px]"
     >
@@ -2338,12 +2340,22 @@ export function DetailPanel(props: DetailPanelProps) {
             the `progress` section's own counter, and the age is on the session
             card in the sidebar and on the canvas. */}
 
-        <TabBar
-          tabs={tabs}
-          runningAgents={entry?.session.runningAgents ?? 0}
-          current={current}
-          onSelect={setTab}
-        />
+        {/* Not on a phone -- MOVED, not removed. Operator instruction: the
+            phone's session screen is the prompt screen, and a full-width strip
+            of words between the app bar and the output is chrome it cannot
+            afford (this bar, the deleted step rail and the bar's second line
+            cost 107px of an 844px viewport between them, measured). The same
+            views are icon buttons in the app
+            bar; `phone/PhoneShell.tsx` draws them, drives this pane's tab
+            through `tabRequest`, and carries the note about what that cost. */}
+        {!phone && (
+          <TabBar
+            tabs={tabs}
+            runningAgents={entry?.session.runningAgents ?? 0}
+            current={current}
+            onSelect={setTab}
+          />
+        )}
       </div>
 
       {/*

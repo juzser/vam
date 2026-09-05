@@ -1,16 +1,40 @@
 /**
  * vam on a phone: two screens in a stack, and no canvas.
  *
- * Screen one is the session list, screen two is one session -- its steps, its
- * output, its open question and its composer. The panels are RE-HOSTED, not
+ * Screen one is the session list, screen two is one session -- its output, its
+ * open question and its composer. The panels are RE-HOSTED, not
  * rewritten: `SessionList` and `DetailPanel` are handed the same prop objects
  * `Canvas` assembles for the columns, with the width left off so each fills
  * the screen. Every `data-` hook they carry is therefore still where the
  * desktop's tests expect it.
  *
  * One cell of one 580x290 canvas card does not fit in 390px, so the graph is
- * not drawn at all; the step rail below carries the decision chain the canvas
- * carried, and carries all of it rather than the three a grid cell holds.
+ * not drawn at all.
+ *
+ * WHAT SCREEN TWO IS FOR, AND WHAT THAT COST. It is the prompt screen: read
+ * the newest output, reply. It is NOT for browsing a session. Two strips of
+ * browsing chrome used to sit between the app bar and the output -- a step
+ * rail built here, and the view tab bar `DetailPanel` draws -- above a bar
+ * that was two rows deep. All three are gone, on the operator's instruction,
+ * and the desktop keeps the tabs. MEASURED at 390x844 against the demo
+ * fixture: the session's first line moves from y=209 to y=102, so 107px of an
+ * 844px viewport came back. The price, so that the next reader does not
+ * restore any of it as an obvious omission:
+ *   - The views are NOT lost: `Response / PRs / Agents` are icon buttons in
+ *     the app bar below, driving the pane through its `tabRequest` seam. What
+ *     is lost is the WORD on each one, which is why every icon carries an
+ *     `aria-label` and the selected one is marked by a shape, not a hue.
+ *   - There is no step navigation at all. The screen always shows the NEWEST
+ *     step (`session.decisions[0]`, derived on every render), which is the
+ *     step a waiting session is waiting in and the one a reply answers. Older
+ *     steps are unreachable from a phone.
+ *   - The bar's SECOND LINE is gone with it -- one row, as asked -- and the
+ *     project and the epic went with that line. The session's name stays (a
+ *     screen that cannot say which session you are in is not a prompt screen)
+ *     and the agent count stays as the Agents icon's badge.
+ * The `step` state that used to hold a chip selection was deleted with the
+ * rail rather than left as a prop nobody writes: an unwritten selector would
+ * have frozen the screen on whatever step it last held.
  *
  * ONE RULE ANY SHELL RE-HOSTING THESE PANELS INHERITS, INCLUDING THE NEXT ONE.
  * The panels' buttons carry `ShortcutTip`, which prints the chord in force by
@@ -24,10 +48,11 @@
  * `ShortcutTip.tsx` — a subscription — not in a note here.
  */
 
+import { Bot, GitPullRequest, type LucideIcon, MessageSquare, SquareTerminal } from 'lucide-react';
 import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react';
-import type { Decision } from '../domain/model.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
 import { SessionList } from '../panels/SessionList.js';
+import { type Tab, visibleTabs } from '../panels/tabs.js';
 import type { SourceDeclines } from '../sources/port.js';
 import { closeSession, isSessionEntry, openSession } from './history.js';
 
@@ -76,83 +101,104 @@ export type PhoneShellProps = {
 };
 
 /**
- * The step rail: the canvas's information, on one axis.
- *
- * Chips are drawn oldest-first so the numbers read 1..N, which is the order
- * `STEP n/N` has always counted in. The amber cursor ring is deliberately NOT
- * used for the waiting mark -- it measures 2.15:1 on the light canvas, which
- * fails even the 3:1 non-text threshold, and on a 36px chip it would be the
- * only channel.
+ * One icon per view, from the set the settings screen already draws with. A
+ * text glyph was tried first and read as punctuation at 16px -- `⎇` in
+ * particular is a keyboard symbol, not a branch, in the fonts a phone has.
  */
-function StepRail({
-  steps,
-  selected,
-  waiting,
+const VIEW_ICON: Record<Tab, LucideIcon> = {
+  Response: MessageSquare,
+  PRs: GitPullRequest,
+  Terminal: SquareTerminal,
+  Agents: Bot,
+};
+
+/**
+ * The views, as icon buttons in the app bar.
+ *
+ * They are the same views `DetailPanel`'s word strip offers -- `visibleTabs`
+ * is the one derivation, so a source with no terminal withdraws it here too --
+ * and they drive the pane through `tabRequest`, the seam `Mod-<digit>` already
+ * uses. The tab itself stays the pane's state; this is a request, which is why
+ * asking twice for the same view is still an ask.
+ *
+ * SIZED TO THE PAINT, NOT THE HIT: the 44 box takes the tap, a 30x30 skin
+ * takes the border, the ground and the 16px glyph. The reason is inside.
+ *
+ * A glyph alone is mystery meat, so each carries `aria-label`, and `Agents`
+ * puts its count in the label as well as beside the glyph -- the strip's
+ * `Agents 3` badge, kept. WHICH ONE IS ON is said three ways and only one of
+ * them is colour: `aria-pressed` for a screen reader, a filled ground, and the
+ * 2px mark below the glyph. Colour alone is a WCAG 1.4.1 Level A failure and
+ * this codebase has shipped one before.
+ *
+ * The hook is `data-phone-view`, deliberately NOT `data-view-tabs`: a rule
+ * written for the desktop bar must not be able to collect this row by
+ * accident, which is how `.vam-phone-typing [role='tablist']` once hid the
+ * control for choosing which question you were answering.
+ */
+function ViewIcons({
+  tabs,
+  current,
+  runningAgents,
   onSelect,
 }: {
-  readonly steps: readonly Decision[];
-  readonly selected: number;
-  readonly waiting: boolean;
-  readonly onSelect: (index: number) => void;
+  readonly tabs: readonly Tab[];
+  readonly current: Tab;
+  readonly runningAgents: number;
+  readonly onSelect: (tab: Tab) => void;
 }) {
-  const rail = useRef<HTMLElement>(null);
-  useEffect(() => {
-    rail.current?.querySelector('[data-step-chip][aria-current="step"]')?.scrollIntoView({
-      inline: 'center',
-      block: 'nearest',
-    });
-  }, []);
-  if (steps.length === 0) return null;
   return (
-    // A `nav`, which is what it is: the session screen's primary navigation,
-    // and an element that can carry a name. A bare `div` cannot -- and the
-    // `tablist` this used to claim to be needed a `tabpanel` it never had.
-    <nav
-      ref={rail}
-      data-step-rail
-      aria-label="steps"
-      className="flex h-[44px] flex-none select-none items-center gap-2 overflow-x-auto border-line border-b bg-panel px-2 vam-no-scrollbar"
-    >
-      {steps.map((step, index) => {
-        // The newest step is the one a waiting session is waiting in: it is
-        // the one `focusedDecision` opens on, and the only one still running.
-        const needsYou = waiting && index === steps.length - 1;
-        const on = index === selected;
+    <nav aria-label="views" data-phone-views className="flex flex-none items-center">
+      {tabs.map((tab) => {
+        const on = tab === current;
+        const count = tab === 'Agents' && runningAgents > 0 ? runningAgents : null;
+        const Icon = VIEW_ICON[tab];
         return (
           <button
-            key={step.id}
+            key={tab}
             type="button"
-            data-step-chip
-            // NOT `role="tab"`. These chips were written as a tablist and are
-            // not one: the region they change is `DetailPanel`'s body, which
-            // is no `tabpanel` of theirs, and a tab without its panel fails
-            // `aria-required-parent` (WCAG 1.3.1/4.1.2, Level A) on the one
-            // platform where a screen reader is standard equipment. They are
-            // buttons that move a position in a chain, and `aria-current`
-            // says exactly that much and no more.
-            aria-current={on ? 'step' : undefined}
-            onClick={() => onSelect(index)}
-            className={[
-              'flex min-h-[44px] flex-none items-center gap-1.5 whitespace-nowrap rounded-[7px] border px-3 text-[12px]',
-              on ? 'border-line bg-segment-on text-ink' : 'border-line text-ink-dim',
-              needsYou ? 'border-waiting' : '',
-              FOCUS_RING,
-            ].join(' ')}
+            data-phone-view={tab.toLowerCase()}
+            aria-label={count === null ? tab : `${tab}, ${count} running`}
+            aria-pressed={on}
+            onClick={() => onSelect(tab)}
+            className={`${TOUCH} ${FOCUS_RING} relative flex-none`}
           >
-            <span className="font-mono text-[11px]">{index + 1}</span>
-            {step.label}
-            {needsYou && <span className="text-waiting">needs you</span>}
+            {/* THE HIT IS 44, THE PAINT IS 30. A border or a resting ground
+                drawn ON the 44 box is what makes a phone control read as too
+                big -- measured on the shipped screenshots, where the bordered
+                44 buttons are the heaviest objects on the screen and the
+                unpainted 44 beside them reads correctly sized (UI spec
+                `vam-phone-controls`, 2.1). So the box stays 44 and centres
+                only, and this skin carries everything visible. Not the
+                desktop's `vam-hit-24` inversion: that hangs the hit area off a
+                `::after`, and the phone guard reads `getBoundingClientRect()`
+                on the element, which cannot see one. Adjacent icons then show
+                14px between painted edges with a container gap of 0. */}
+            <span
+              data-tap-skin
+              className={[
+                'flex h-[30px] w-[30px] items-center justify-center rounded-[8px]',
+                on ? 'bg-segment-on text-ink' : 'text-ink-dim active:bg-raised',
+              ].join(' ')}
+            >
+              {/* 16 is the size orca's phone icons cluster hard at, and above
+                  the 14 its own comment calls "read as decoration". */}
+              <Icon size={16} aria-hidden="true" />
+            </span>
+            {count !== null && (
+              <span className="absolute top-[7px] right-[4px] font-mono text-[9.5px] text-ink-dim">
+                {count}
+              </span>
+            )}
+            {on && (
+              <span
+                data-phone-view-mark
+                className="-translate-x-1/2 absolute bottom-[5px] left-1/2 h-[2px] w-[16px] rounded-full bg-ink"
+              />
+            )}
           </button>
         );
       })}
-      {/* Stuck to the rail's right edge, because it is a `flex-none` sibling
-          INSIDE the rail's own `overflow-x-auto`: on a session with more chips than fit, the only
-          element that says how many steps exist scrolled out of view with them.
-          `bg-panel` is the rail's own background, so the chips pass under it
-          rather than through it. */}
-      <span className="sticky right-0 flex-none bg-panel px-2 font-mono text-[11px] text-ink-dim">
-        STEP {selected + 1}/{steps.length}
-      </span>
     </nav>
   );
 }
@@ -213,24 +259,28 @@ export function PhoneShell({
    */
   const [typing, setTyping] = useState(false);
   /**
-   * Which step the rail is on, or `null` for "the newest".
-   *
-   * `null` rather than an index, because the reset is what was wrong: keying
-   * it on the session id skips every re-open of the SAME session -- leaving
-   * the screen does not move `focusedId` -- so opening a session, tapping
-   * chip 1, going back and opening it again reopened on step 1. A sentinel
-   * cannot go stale that way: the screen sets it on every push.
+   * Which view the icon row shows as on, and the request that puts the pane
+   * there. Two pieces because they say different things: the pane owns its tab
+   * and is ASKED to move (a fresh object per tap keeps a second ask an ask),
+   * while the row has to draw a selection without reaching into the pane.
+   * They start together because `initialTab` below is fixed at Response: a
+   * remembered desktop tab would arrive in the pane and not in this row.
    */
-  const [step, setStep] = useState<number | null>(null);
+  const [view, setView] = useState<Tab>('Response');
+  const [viewRequest, setViewRequest] = useState<{ readonly tab: Tab } | null>(null);
 
   const entry = detail.entry;
   const session = entry?.session ?? null;
-  // Oldest first, so the numbers on the chips are the numbers `STEP n/N`
-  // counts in. ALL of them: the canvas's three-card cap is a property of a
-  // 580x290 grid cell and this rail has no cell.
-  const steps: readonly Decision[] = session === null ? [] : [...session.decisions].reverse();
-  const newest = Math.max(steps.length - 1, 0);
-  const at = step === null ? newest : Math.min(step, newest);
+  /**
+   * The step this screen shows: the newest, always.
+   *
+   * `decisions` is newest-first, so this is `[0]` and not a stored index. That
+   * is the point -- with no rail there is no control to move it, and a piece of
+   * state nothing writes is exactly how a screen ends up stuck on a step the
+   * session left ten minutes ago.
+   */
+  const newest = session?.decisions[0] ?? null;
+  const views = visibleTabs(detail.terminal !== false);
 
   useEffect(() => {
     const pop = (event: PopStateEvent) => {
@@ -248,9 +298,8 @@ export function PhoneShell({
   const show = () => {
     openSession(window.history);
     pushed.current = true;
-    // Every push opens on the newest step: arriving at a session is arriving
-    // at what it just did, whether or not it is the session you last read.
-    setStep(null);
+    // Every push opens on the newest step, because that is the only step this
+    // screen has: arriving at a session is arriving at what it just did.
     setOpen(true);
   };
   const back = () => {
@@ -340,28 +389,26 @@ export function PhoneShell({
         >
           ‹
         </button>
-        {/* The session's whole identity, once. `DetailPanel`'s header block
-            printed the title and the project again immediately below this,
-            verbatim -- ~48px of an 844px screen on which chrome already reaches
-            a third before a word of the session. So the block is not drawn here
-            (UI spec D2) and its two remaining facts, the epic and the agent
-            count, join this line. `data-prompt-target` comes with them: that
-            hook's job is to name the session about to be written to, and one
-            composer serving many sessions is the easiest way to send the right
-            words to the wrong agent. */}
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span data-prompt-target className="truncate text-[15px] text-ink">
-            {session?.title}
-          </span>
-          <span className="truncate font-mono text-[11px] text-ink-dim">
-            <span data-prompt-project>{entry.project.name}</span>
-            {session?.epic !== null && session !== null && <> · {session.epic}</>}
-            {' · '}
-            {session === null || session.runningAgents === 0
-              ? 'no agent'
-              : `${session.runningAgents} agents`}
-          </span>
+        {/* ONE ROW: back, the session's name, the views, close. This bar used
+            to carry a second line (`project · epic · N agents`); the operator
+            asked for the header block to go, so it did, and the project and
+            the epic are not shown on a phone any more. The NAME stays and
+            keeps `data-prompt-target` -- that hook's job is to name the
+            session about to be written to, and one composer serving many
+            sessions is the easiest way to send the right words to the wrong
+            agent. The agent count is on the Agents icon beside it. */}
+        <span data-prompt-target className="min-w-0 flex-1 truncate text-[15px] text-ink">
+          {session?.title}
         </span>
+        <ViewIcons
+          tabs={views}
+          current={view}
+          runningAgents={session?.runningAgents ?? 0}
+          onSelect={(tab) => {
+            setView(tab);
+            setViewRequest({ tab });
+          }}
+        />
         {/* Closing a session, drawn where it can be seen and read.
             The list row's own `x` is revealed by hover and a finger has no
             hover, so on a phone it is not a control at all (styles.css) -- and
@@ -391,16 +438,10 @@ export function PhoneShell({
         {statusCell}
       </div>
 
-      {/* Out of the way while the keyboard is up: 44px of navigation the
-          operator has already used, out of the ~400px the keyboard leaves. */}
-      {!typing && (
-        <StepRail
-          steps={steps}
-          selected={at}
-          waiting={session?.status === 'waiting'}
-          onSelect={setStep}
-        />
-      )}
+      {/* Out of the way while the keyboard is up: chrome the operator is not
+          reading, out of the ~400px the keyboard leaves. The step rail that
+          stood here is gone entirely -- see the note at the top of this file
+          for what that costs. */}
       {!typing && <RemoteLimits declines={declines} />}
 
       {/* The output takes every pixel the bands above and the composer below do
@@ -428,7 +469,12 @@ export function PhoneShell({
           phone
           // There is nothing else on screen to be active.
           active={true}
-          decision={steps[at] ?? detail.decision}
+          decision={newest ?? detail.decision}
+          // Fixed, so the icon row and the pane cannot start on different
+          // views: `detail.initialTab` is a remembered DESKTOP choice, and the
+          // row has no way to learn it.
+          initialTab="Response"
+          tabRequest={viewRequest}
           records={records}
         />
       </div>

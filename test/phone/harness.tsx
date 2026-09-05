@@ -132,3 +132,5 @@ export const shell = (which: 'list' | 'session') =>
   document.querySelector(`[data-phone-shell="${which}"]`);
 export const rows = () => [...document.querySelectorAll('[data-session-row]')];
 export const chips = () => [...document.querySelectorAll('[data-step-chip]')];
+/** The view icons in the phone app bar, which replaced the body's tab strip. */
+export const views = () => [...document.querySelectorAll('[data-phone-view]')];

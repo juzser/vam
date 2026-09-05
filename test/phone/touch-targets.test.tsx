@@ -155,32 +155,33 @@ describe('the phone shell’s hit areas', () => {
     for (const el of typed) expect(getComputedStyle(el).fontSize).toBe('16px');
   });
 
-  it('hides the view tabs while the keyboard is up, and never the question strip', () => {
-    // `.vam-phone-typing [role='tablist']` was unqualified, and TWO elements
-    // claim that role. The second is `data-question-steps`, the strip that
-    // chooses WHICH question of a multi-question call you are answering -- so
-    // the rule took away the control for picking what to answer at exactly the
-    // moment the operator was answering it.
+  it('draws no view tabs at all, and leaves the question strip alone while typing', () => {
+    // WAS: `.vam-phone-typing [data-view-tabs] { display: none }` hides the
+    // view tab bar while the keyboard is up. The bar is not rendered on a
+    // phone any more, so that rule matched nothing and went with it -- a rule
+    // that matches nothing is indistinguishable from a rule that works.
+    //
+    // What is still worth measuring is the half that rule kept getting wrong:
+    // `data-question-steps`, the strip that chooses WHICH question of a
+    // multi-question call you are answering, must stay visible while you type
+    // -- an earlier `[role='tablist']` form took it away at exactly the moment
+    // it was needed. Nothing may hide it now either.
     //
     // The typing STATE is put on by hand here: this fixture draws no composer,
     // so there is no box to focus. That costs nothing, because the state is one
     // `typing` flag writing both `vam-phone-typing` and `data-phone-keyboard`
     // onto the same element, and `PhoneShell.anchor.test.tsx` already drives
-    // that flag from a real focus and asserts the attribute. What is measured
-    // here is the half that file cannot reach: which nodes the rule then hits.
+    // that flag from a real focus and asserts the attribute.
     render(<Canvas model={ASKING} source={phoneSource()} />);
     act(() => {
       fireEvent.click(document.querySelector('[data-session-row]') as Element);
     });
     // Set BEFORE anything is read: happy-dom snapshots an element's computed
-    // style on first read, so a "before" assertion on these same two nodes
-    // would be the value every later read returned.
+    // style on first read.
     (document.querySelector('[data-phone-shell]') as HTMLElement).classList.add('vam-phone-typing');
-    const tabs = document.querySelector('[data-view-tabs]') as HTMLElement;
+    expect(document.querySelector('[data-view-tabs]'), 'the view tab bar').toBeNull();
     const strip = document.querySelector('[data-question-steps]') as HTMLElement;
-    expect(tabs, 'the view tab bar').not.toBeNull();
     expect(strip, 'a two-question call draws the strip').not.toBeNull();
-    expect(getComputedStyle(tabs).display, 'the view tabs, while typing').toBe('none');
     expect(
       getComputedStyle(strip).display,
       'the strip that chooses WHICH question you are answering, while typing',
