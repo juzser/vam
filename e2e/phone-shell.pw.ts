@@ -345,6 +345,37 @@ test.describe('the phone shell at 390px', () => {
     ).toEqual([]);
   });
 
+  /**
+   * THE QUESTION CARD, at a phone viewport, for the first time.
+   *
+   * Until the demo fixture gained a question there was none to look at: the
+   * word `questions` appeared nowhere in it and nowhere under `e2e/`, so every
+   * "the card renders" verdict in this repo rested on happy-dom, where no
+   * stylesheet is loaded and every box is zero. The first run that did look
+   * found the step tabs 21px tall and the chat entry 26.8 -- half a touch
+   * target each, on the surface whose whole job is to be tapped.
+   */
+  test('the question card is made of touch targets too', async ({ page }) => {
+    await openDemo(page);
+    const asking = page.locator('[data-phone-shell] [data-session-row]', {
+      has: page.locator('text=vam-build-1'),
+    });
+    const box = await asking.first().boundingBox();
+    if (box === null) throw new Error('no session row asking a question');
+    await page.touchscreen.tap(box.x + 60, box.y + box.height / 2);
+    await expect(page.locator('[data-question]')).toBeVisible();
+
+    // The corpus, asserted before it is filtered: a card that failed to draw
+    // would otherwise pass this test loudest.
+    const steps = await page.locator('[data-question-step]').count();
+    expect(steps, 'step tabs on a two-question call').toBeGreaterThanOrEqual(2);
+    expect(await page.locator('[data-question-option]').count()).toBeGreaterThanOrEqual(3);
+
+    const inCard = (await controls(page)).filter((b) => b.hooks.includes('data-question'));
+    expect(inCard.length, 'controls measured inside the card').toBeGreaterThanOrEqual(6);
+    expect(undersized(inCard), 'question-card controls under 44x44').toEqual([]);
+  });
+
   test('every interactive control on the SESSION screen is at least 44x44', async ({ page }) => {
     await openDemo(page);
     await openFirstSession(page);

@@ -1700,7 +1700,11 @@ function QuestionCard({
               data-sent={takenIds.has(one.id) ? 'true' : undefined}
               onClick={() => setShowing(index)}
               className={[
-                'cursor-pointer rounded-[5px] border px-1.5 py-0.5 text-[10px]',
+                // `vam-tap` is how a control names itself a touch target
+                // (`styles.css`); the phone floor is 44 and these were 21 tall.
+                // The question surface reached a phone viewport for the first
+                // time when the demo fixture gained a question at all.
+                'vam-tap cursor-pointer rounded-[5px] border px-1.5 py-0.5 text-[10px]',
                 index === showing ? 'border-running text-ink' : 'border-line text-ink-faint',
               ].join(' ')}
             >
@@ -1754,7 +1758,7 @@ function QuestionCard({
                 data-picked={picked.includes(option.label) ? 'true' : undefined}
                 onClick={() => toggle(option.label)}
                 className={[
-                  'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                  'vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
                   picked.includes(option.label)
                     ? 'border-running bg-raised'
                     : 'border-line hover:bg-raised',
@@ -1798,7 +1802,7 @@ function QuestionCard({
             data-question-chat
             data-question-synthetic="true"
             onClick={onChat}
-            className="flex cursor-pointer items-baseline gap-1.5 rounded-[6px] border border-line border-dashed px-1.5 py-1 text-left hover:bg-raised"
+            className="vam-tap flex cursor-pointer items-baseline gap-1.5 rounded-[6px] border border-line border-dashed px-1.5 py-1 text-left hover:bg-raised"
           >
             {/* THE HINT COMES OFF THE SAME TABLE THE HANDLER READS, and is
               not printed at all when the key is not held -- a caption naming a
