@@ -449,6 +449,17 @@ export type DetailPanelProps = {
    */
   readonly width?: number;
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
+  /**
+   * Is this pane the whole screen, with an app bar above it?
+   *
+   * The phone shell draws the session's title and its project in that bar, and
+   * this header block drew both again immediately below -- verbatim, ~48px of
+   * an 844px screen (UI spec D2). On phone the bar takes the epic and the agent
+   * count too, and `data-prompt-target` moves there with them, so the guarantee
+   * that hook carries -- SOMETHING on screen names the session about to be
+   * written to -- is kept rather than dropped with the block.
+   */
+  readonly phone?: boolean;
   readonly resizeHandle: ReactNode;
   /**
    * Can this source record a prompt at all? Optional, and `undefined` means
@@ -494,7 +505,7 @@ const MODES = ['Auto', 'Manual', 'Plan'] as const;
  * pane exists to avoid.
  *
  * EVERY PILL IS A REAL <button> NOW — Tab reaches it, Enter and Space activate
- * it, `role="tab"` and `aria-selected` say which one is showing. The three
+ * it, and `aria-pressed` says which one is showing. The three
  * that were plain labels became buttons as each got something behind it; the
  * rule that made them labels stands unchanged for any future one, because a
  * focus stop that activates nothing and explains nothing is a keyboard trap
@@ -513,13 +524,19 @@ function TabBar({
   readonly onSelect: (tab: Tab) => void;
 }) {
   return (
-    <div
-      role="tablist"
+    // A `nav`, not a `tablist`. The role was an orphan: switching a body it
+    // does not own, this bar never had a `tabpanel` and there is none anywhere
+    // in this file, so `aria-required-children` failed (WCAG 1.3.1, Level A)
+    // on the one platform where a screen reader is standard equipment. It is a
+    // segmented control, `aria-pressed` is what one says, and `StepRail` in
+    // `phone/PhoneShell.tsx` reached the same conclusion first.
+    <nav
+      aria-label="views"
       /* The hook `.vam-phone-typing` hides this bar by. That rule used to name
          `[role='tablist']` and so took the QUESTION strip with it -- the
          control for choosing WHICH question you are answering vanished the
-         moment you tapped the composer to answer one. It names this bar now,
-         and survives the move off the tablist role that the UI spec proposes. */
+         moment you tapped the composer to answer one. It names this bar, which
+         is why the move off the role above could not silently switch it off. */
       data-view-tabs
       className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px]"
     >
@@ -556,9 +573,8 @@ function TabBar({
           >
             <button
               type="button"
-              role="tab"
               data-tab={tab.toLowerCase()}
-              aria-selected={selected}
+              aria-pressed={selected}
               onClick={() => onSelect(tab)}
               className={`${shape} cursor-pointer ${selected ? '' : 'hover:bg-raised hover:text-ink'}`}
             >
@@ -567,7 +583,7 @@ function TabBar({
           </ShortcutTip>
         );
       })}
-    </div>
+    </nav>
   );
 }
 
@@ -1590,12 +1606,12 @@ function QuestionCard({
           question at a time and does not say so is the hole this replaces
           wearing a different shape. */}
       {questions.length > 1 && (
-        <div
-          // A TABLIST, which is what it is: one question of the call showing at
-          // a time, walked with the horizontal keys. The role is also what
-          // makes the handler legitimate on this element rather than a
-          // keystroke bolted to a plain box.
-          role="tablist"
+        <nav
+          // NOT a tablist, for the reason `TabBar` above is not one: the
+          // region a step changes is the card below, which is no `tabpanel` of
+          // theirs and never was. A `nav` is what this is -- navigation within
+          // one call -- and a `nav` can carry the name a bare box cannot, which
+          // is what legitimises the horizontal keys landing here.
           aria-label="the questions this call asked"
           data-question-steps
           // THE STRIP TAKES THE HORIZONTAL KEYS TOO, and not for symmetry: the
@@ -1615,8 +1631,7 @@ function QuestionCard({
             <button
               key={one.id}
               type="button"
-              role="tab"
-              aria-selected={index === showing}
+              aria-pressed={index === showing}
               ref={index === showing ? stepTabRef : undefined}
               data-question-step
               data-current={index === showing ? 'true' : undefined}
@@ -1639,7 +1654,7 @@ function QuestionCard({
           <span data-question-position className="ml-auto text-[10px] text-ink-faint">
             step {showing + 1} of {questions.length}
           </span>
-        </div>
+        </nav>
       )}
       <div className="flex min-w-0 flex-col gap-0.5">
         {question.header !== null && (
@@ -1793,6 +1808,7 @@ export function DetailPanel(props: DetailPanelProps) {
     width,
     resizeHandle,
     records,
+    phone = false,
   } = props;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -2261,18 +2277,21 @@ export function DetailPanel(props: DetailPanelProps) {
       */}
       {active && <FocusEdge />}
       {resizeHandle}
-      <div className="flex flex-col gap-2.5 border-line border-b px-3.5 pt-3">
-        <div className="flex items-start gap-2">
-          <span
-            data-pane-status={entry?.session.status ?? 'none'}
-            className={[
-              'mt-1.5 h-1.5 w-1.5 flex-none rounded-full',
-              entry === null ? 'bg-line-strong' : PANE_STATUS_DOT[entry.session.status],
-              entry !== null && PANE_STATUS_BREATHES[entry.session.status] ? 'vam-breathe' : '',
-            ].join(' ')}
-          />
-          <div className="min-w-0 flex-1">
-            {/* `data-prompt-target` lives here now, not beside the composer.
+      <div
+        className={`flex flex-col gap-2.5 border-line border-b px-3.5 ${phone ? 'pt-2.5' : 'pt-3'}`}
+      >
+        {!phone && (
+          <div className="flex items-start gap-2">
+            <span
+              data-pane-status={entry?.session.status ?? 'none'}
+              className={[
+                'mt-1.5 h-1.5 w-1.5 flex-none rounded-full',
+                entry === null ? 'bg-line-strong' : PANE_STATUS_DOT[entry.session.status],
+                entry !== null && PANE_STATUS_BREATHES[entry.session.status] ? 'vam-breathe' : '',
+              ].join(' ')}
+            />
+            <div className="min-w-0 flex-1">
+              {/* `data-prompt-target` lives here now, not beside the composer.
                 The operator asked for the branch line under the input to go;
                 the guarantee it carried must not go with it. One input serving
                 many sessions is the easiest possible way to send the right
@@ -2280,35 +2299,36 @@ export function DetailPanel(props: DetailPanelProps) {
                 which session is about to be written to — and the pane header
                 already did, two lines up from where the chip was. The tests
                 that covered the chip now assert against this. */}
-            <div
-              data-prompt-target
-              className="truncate font-medium text-[14px] text-ink leading-[1.35]"
-            >
-              {entry === null ? 'No session selected' : entry.session.title}
+              <div
+                data-prompt-target
+                className="truncate font-medium text-[14px] text-ink leading-[1.35]"
+              >
+                {entry === null ? 'No session selected' : entry.session.title}
+              </div>
+              <div className="mt-1 flex items-center gap-[5px] font-mono text-[10px] text-ink-faint">
+                <span data-prompt-project className="truncate text-ink-dim">
+                  {entry?.project.name ?? '—'}
+                </span>
+                <span>·</span>
+                <span className="truncate">{entry?.session.epic ?? '—'}</span>
+                <span>·</span>
+                <span className="flex-none">
+                  {entry === null || entry.session.runningAgents === 0
+                    ? 'no agent'
+                    : `${entry.session.runningAgents} agents`}
+                </span>
+              </div>
             </div>
-            <div className="mt-1 flex items-center gap-[5px] font-mono text-[10px] text-ink-faint">
-              <span data-prompt-project className="truncate text-ink-dim">
-                {entry?.project.name ?? '—'}
-              </span>
-              <span>·</span>
-              <span className="truncate">{entry?.session.epic ?? '—'}</span>
-              <span>·</span>
-              <span className="flex-none">
-                {entry === null || entry.session.runningAgents === 0
-                  ? 'no agent'
-                  : `${entry.session.runningAgents} agents`}
-              </span>
-            </div>
-          </div>
-          {/* Which step the panel is expanding. The mockup puts it at the far
+            {/* Which step the panel is expanding. The mockup puts it at the far
               right of the title row, where the eye lands last — it names the
               thing you are reading, not the thing you are choosing. */}
-          {decision !== null && (
-            <span data-detail-step className="flex-none font-mono text-[10px] text-ink-dim">
-              {decision.label}
-            </span>
-          )}
-        </div>
+            {decision !== null && (
+              <span data-detail-step className="flex-none font-mono text-[10px] text-ink-dim">
+                {decision.label}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* The row that stood here carried the `x/y` step counter, its
             expandable note, and the session age. The operator found it did no

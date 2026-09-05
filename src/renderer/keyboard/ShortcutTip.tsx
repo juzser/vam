@@ -103,7 +103,16 @@ export function InlineChord({
   readonly className: string;
 }) {
   const keys = primaryChord(action);
-  return keys === null ? null : <span className={className}>{keys}</span>;
+  // `data-inline-chord` so a shell can suppress the whole family from CSS. The
+  // phone does (`styles.css`): a chord is exactly the part of this hint a
+  // touchscreen cannot use. Suppressed, never deleted -- the keydown listener
+  // is not phone-gated, so a folio keyboard at 390px still fires every chord,
+  // and the key sheet still documents them for that case.
+  return keys === null ? null : (
+    <span data-inline-chord className={className}>
+      {keys}
+    </span>
+  );
 }
 
 /**

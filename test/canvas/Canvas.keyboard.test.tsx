@@ -1938,7 +1938,7 @@ describe('Cmd-number jumps to a session while the sidebar has the keyboard', () 
     typeInto(box, 'half a prompt');
     keyOn(box, '1', { metaKey: true, code: 'Digit1' });
     expect(
-      document.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('data-tab'),
+      document.querySelector('[data-tab][aria-pressed="true"]')?.getAttribute('data-tab'),
     ).toBe('response');
     expect(focused()).toBe('alpha/a2');
     expect(promptInput()?.value).toBe('half a prompt');

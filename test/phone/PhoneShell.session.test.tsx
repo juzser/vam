@@ -83,7 +83,7 @@ describe('the phone session screen', () => {
 
   it('withdraws the Terminal tab structurally, rather than showing it disabled', () => {
     openSession();
-    const tabs = [...document.querySelectorAll('[role="tab"]')].map((t) => t.textContent);
+    const tabs = [...document.querySelectorAll('[data-tab]')].map((t) => t.textContent);
     expect(tabs.some((t) => t?.includes('Terminal'))).toBe(false);
     expect(tabs.some((t) => t?.includes('Response'))).toBe(true);
   });

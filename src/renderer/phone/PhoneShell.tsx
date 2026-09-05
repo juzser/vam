@@ -145,7 +145,12 @@ function StepRail({
           </button>
         );
       })}
-      <span className="flex-none px-2 font-mono text-[11px] text-ink-dim">
+      {/* Stuck to the rail's right edge, because it is a `flex-none` sibling
+          INSIDE the rail's own `overflow-x-auto`: on a session with more chips than fit, the only
+          element that says how many steps exist scrolled out of view with them.
+          `bg-panel` is the rail's own background, so the chips pass under it
+          rather than through it. */}
+      <span className="sticky right-0 flex-none bg-panel px-2 font-mono text-[11px] text-ink-dim">
         STEP {selected + 1}/{steps.length}
       </span>
     </nav>
@@ -270,6 +275,10 @@ export function PhoneShell({
             width={undefined}
             resizeHandle={null}
             keyboardHere={false}
+            // This list IS the screen here: no canvas repeats a status beside
+            // it, no detail pane answers a question, and no cursor has
+            // anywhere to be. The row says so itself (UI spec D1).
+            phone
             onPick={(id) => {
               sidebar.onPick(id);
               show();
@@ -331,9 +340,27 @@ export function PhoneShell({
         >
           ‹
         </button>
+        {/* The session's whole identity, once. `DetailPanel`'s header block
+            printed the title and the project again immediately below this,
+            verbatim -- ~48px of an 844px screen on which chrome already reaches
+            a third before a word of the session. So the block is not drawn here
+            (UI spec D2) and its two remaining facts, the epic and the agent
+            count, join this line. `data-prompt-target` comes with them: that
+            hook's job is to name the session about to be written to, and one
+            composer serving many sessions is the easiest way to send the right
+            words to the wrong agent. */}
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-[15px] text-ink">{session?.title}</span>
-          <span className="truncate text-[12px] text-ink-dim">{entry.project.name}</span>
+          <span data-prompt-target className="truncate text-[15px] text-ink">
+            {session?.title}
+          </span>
+          <span className="truncate font-mono text-[11px] text-ink-dim">
+            <span data-prompt-project>{entry.project.name}</span>
+            {session?.epic !== null && session !== null && <> · {session.epic}</>}
+            {' · '}
+            {session === null || session.runningAgents === 0
+              ? 'no agent'
+              : `${session.runningAgents} agents`}
+          </span>
         </span>
         {/* Closing a session, drawn where it can be seen and read.
             The list row's own `x` is revealed by hover and a finger has no
@@ -398,6 +425,7 @@ export function PhoneShell({
           {...detail}
           width={undefined}
           resizeHandle={null}
+          phone
           // There is nothing else on screen to be active.
           active={true}
           decision={steps[at] ?? detail.decision}

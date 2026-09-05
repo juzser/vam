@@ -1392,7 +1392,7 @@ describe('the empty tabs carry no tooltip, and the other notes stay', () => {
     // Each became a real control as it got a source, and none of them ever
     // carried a note explaining an emptiness.
     expect(all('[data-placeholder^="tab-"]')).toHaveLength(0);
-    for (const tab of all('[role="tab"]')) {
+    for (const tab of all('[data-tab]')) {
       expect(tab.closest('[data-note]')).toBeNull();
     }
     // The three the operator asked to KEEP.
@@ -1430,7 +1430,7 @@ describe('the Agents tab', () => {
     expect(agentsTab()?.tagName).toBe('BUTTON');
     // `PRs` and `Terminal` have since become controls of their own, so the bar
     // holds four buttons and no inert label.
-    expect(all('[role="tab"]').map((t) => t.tagName)).toEqual([
+    expect(all('[data-tab]').map((t) => t.tagName)).toEqual([
       'BUTTON',
       'BUTTON',
       'BUTTON',
@@ -1442,14 +1442,14 @@ describe('the Agents tab', () => {
     draw({ entry: withAgents([]) });
     expect(q('[data-detail-block="out"]')).not.toBeNull();
     expect(q('[data-agents]')).toBeNull();
-    expect(agentsTab()?.getAttribute('aria-selected')).toBe('false');
+    expect(agentsTab()?.getAttribute('aria-pressed')).toBe('false');
 
     openAgents();
 
     expect(q('[data-agents]')).not.toBeNull();
     expect(q('[data-detail-block="out"]')).toBeNull();
     expect(q('[data-detail-block="in"]')).toBeNull();
-    expect(agentsTab()?.getAttribute('aria-selected')).toBe('true');
+    expect(agentsTab()?.getAttribute('aria-pressed')).toBe('true');
 
     fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
     expect(q('[data-detail-block="out"]')).not.toBeNull();
@@ -2301,14 +2301,14 @@ describe('the PRs tab', () => {
   it('moves the pane content when picked, and gives it back to Response', () => {
     draw({ entry: withPrs({ kind: 'ok', prs: [] }) });
     expect(q('[data-prs]')).toBeNull();
-    expect(prsTab()?.getAttribute('aria-selected')).toBe('false');
+    expect(prsTab()?.getAttribute('aria-pressed')).toBe('false');
 
     openPrs();
 
     expect(q('[data-prs]')).not.toBeNull();
     expect(q('[data-detail-block="out"]')).toBeNull();
     expect(q('[data-agents]')).toBeNull();
-    expect(prsTab()?.getAttribute('aria-selected')).toBe('true');
+    expect(prsTab()?.getAttribute('aria-pressed')).toBe('true');
 
     fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
     expect(q('[data-prs]')).toBeNull();
@@ -2513,7 +2513,7 @@ describe('the Terminal tab is offered only by a source that has one', () => {
   it('drops the tab entirely for a source that says it has no terminal', () => {
     draw({ terminal: false });
     expect(q('[data-tab="terminal"]')).toBeNull();
-    expect(all('[role="tab"]').map((t) => t.getAttribute('data-tab'))).not.toContain('terminal');
+    expect(all('[data-tab]').map((t) => t.getAttribute('data-tab'))).not.toContain('terminal');
   });
 
   it('keeps it for a source that has one', () => {
@@ -2530,7 +2530,7 @@ describe('the Terminal tab is offered only by a source that has one', () => {
     expect(q('[data-terminal]')).not.toBeNull();
     rerender({ terminal: false });
     expect(q('[data-terminal]')).toBeNull();
-    expect(q<HTMLElement>('[data-tab="response"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(q<HTMLElement>('[data-tab="response"]')?.getAttribute('aria-pressed')).toBe('true');
   });
 });
 
