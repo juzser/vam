@@ -16,7 +16,12 @@ import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import { buildKeySheet } from '../../src/renderer/keyboard/keysheet.js';
 import { LAYOUTS } from '../../src/renderer/prefs/panes.js';
-import type { Prefs } from '../../src/renderer/prefs/prefs.js';
+import {
+  DEFAULT_FOCUS_SHARE,
+  FOCUS_SHARE_MIN,
+  FOCUS_SHARE_OFF,
+  type Prefs,
+} from '../../src/renderer/prefs/prefs.js';
 
 function session(id: string): Session {
   return {
@@ -170,6 +175,52 @@ describe('the theme section is the same state as the sidebar toggle', () => {
     // Stored as `system`, not resolved to a colour: the store has to be able to
     // tell "follow the OS" from "I picked dark and the OS happens to agree".
     expect(stored().theme).toBe('system');
+  });
+});
+
+/**
+ * The control the canvas framing reads, back in a section of its own.
+ *
+ * It was retired along with the framing it configured; the section went with
+ * it rather than stand empty. Both come back together, because the operator
+ * asked for the amount of framing to be theirs to set -- a percentage of the
+ * canvas width, which is what the stored share has always meant.
+ *
+ * The store round-trip proper lives in `test/prefs/prefs.settings.test.ts`.
+ * What is asserted here is the wiring: that the control shows the STORED
+ * value and that turning it writes one.
+ */
+describe('the session zoom share is editable', () => {
+  const openCanvasPanel = () => {
+    render(<Canvas model={MODEL} />);
+    press(',');
+    fireEvent.click(screen.getByRole('tab', { name: 'Canvas' }));
+    return screen.getByRole('spinbutton', { name: 'session zoom share' }) as HTMLInputElement;
+  };
+
+  it('starts at the stored value, as a percentage of the canvas width', () => {
+    seed({ focusViewportShare: 0.45 });
+    expect(Number(openCanvasPanel().value)).toBe(45);
+  });
+
+  it('falls back to the shipped default when nothing is stored', () => {
+    expect(Number(openCanvasPanel().value)).toBe(Math.round(DEFAULT_FOCUS_SHARE * 100));
+  });
+
+  it('writes the share the operator sets', () => {
+    const field = openCanvasPanel();
+    fireEvent.change(field, { target: { value: '90' } });
+    expect(stored().focusViewportShare).toBe(0.9);
+  });
+
+  it('turns the framing off one step below the smallest share', () => {
+    // The operator asked for this behaviour removed once; getting back to that
+    // state must not need another round trip. There is nothing between off and
+    // the smallest useful share, so one press crosses the gap.
+    seed({ focusViewportShare: FOCUS_SHARE_MIN });
+    openCanvasPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'decrease session zoom share' }));
+    expect(stored().focusViewportShare).toBe(FOCUS_SHARE_OFF);
   });
 });
 

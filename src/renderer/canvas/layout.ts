@@ -340,3 +340,54 @@ export function layoutCanvas(model: CanvasModel): CanvasLayout {
 
   return { nodes, fans, slots };
 }
+
+/** A rectangle in canvas coordinates — the shape ReactFlow's `fitBounds` takes. */
+export type Rect = Position & Size;
+
+/**
+ * The rectangle enclosing everything the canvas draws for one session.
+ *
+ * This is what "zoom to the session" means: the root card AND its steps, which
+ * is the correction the operator asked for -- framing the root alone left the
+ * steps outside the view, and the steps are most of what a session IS on this
+ * canvas.
+ *
+ * WHICH NODES BELONG TO THE SESSION is asked of the specs, never of their ids.
+ * A navigable spec carries the `SessionEntry` it was built from, and the
+ * scenery carries an explicit `sessionId` (the field `FanSpec` documents as
+ * being there so a consumer never has to parse `id`). `infoNodeId` and
+ * `stepNodeId` are this module's private minting convention, and a caller that
+ * re-derives them is a second copy of it.
+ *
+ * THE SLOTS ARE IN ON PURPOSE, and they are what makes the frame stable: a
+ * session reserves three step positions whether or not it has filled them, so
+ * every session frames to the same rectangle and walking `j` from a
+ * three-step session to a one-step one does not rescale the canvas by the
+ * accident of how far that session has got. A frame that resized per session
+ * would be the "the zoom fought me" complaint in another costume.
+ *
+ * Null when the session has nothing laid out — a filtered-out session, or an
+ * id from a model that has since been replaced.
+ */
+export function sessionBounds(layout: CanvasLayout, sessionId: string): Rect | null {
+  const parts: { position: Position; size: Size }[] = [
+    ...layout.nodes.filter((n) => n.entry.session.id === sessionId),
+    ...layout.fans.filter((f) => f.sessionId === sessionId),
+    ...layout.slots.filter((s) => s.sessionId === sessionId),
+  ];
+  const first = parts[0];
+  if (first === undefined) {
+    return null;
+  }
+  let left = first.position.x;
+  let top = first.position.y;
+  let right = first.position.x + first.size.width;
+  let bottom = first.position.y + first.size.height;
+  for (const part of parts) {
+    left = Math.min(left, part.position.x);
+    top = Math.min(top, part.position.y);
+    right = Math.max(right, part.position.x + part.size.width);
+    bottom = Math.max(bottom, part.position.y + part.size.height);
+  }
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}

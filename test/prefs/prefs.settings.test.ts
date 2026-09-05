@@ -17,6 +17,8 @@ import {
   EMPTY_PREFS,
   FOCUS_SHARE_MAX,
   FOCUS_SHARE_MIN,
+  FOCUS_SHARE_OFF,
+  nudgeFocusShare,
   readPrefs,
   type StorageLike,
   setFocusShare,
@@ -81,9 +83,53 @@ describe('the settings fields round-trip', () => {
     expect(readPrefs(fake(JSON.stringify({ focusViewportShare: 40 }))).focusViewportShare).toBe(
       FOCUS_SHARE_MAX,
     );
-    expect(readPrefs(fake(JSON.stringify({ focusViewportShare: 0 }))).focusViewportShare).toBe(
+    expect(readPrefs(fake(JSON.stringify({ focusViewportShare: 0.05 }))).focusViewportShare).toBe(
       FOCUS_SHARE_MIN,
     );
+  });
+
+  it('clamping one field does not touch the ones beside it', () => {
+    const back = readPrefs(
+      fake(JSON.stringify({ theme: 'light', focusViewportShare: 40, outFontSize: 15 })),
+    );
+    expect(back.focusViewportShare).toBe(FOCUS_SHARE_MAX);
+    expect(back.theme).toBe('light');
+    expect(back.outFontSize).toBe(15);
+  });
+
+  /**
+   * Zero is OFF, and not a very small share.
+   *
+   * The operator asked for the automatic framing to be removed once already,
+   * so the setting that brings it back has to be able to be turned off again
+   * without another round trip. Zero is the value that says so -- it reads
+   * literally as "the session takes none of the canvas", which is not a
+   * framing anyone could want and so is free to mean "do not frame".
+   *
+   * A stored 0 used to clamp up to the minimum; that assertion is now the
+   * 0.05 above, which is a genuinely out-of-range share rather than the
+   * sentinel.
+   */
+  it('keeps zero as the off value rather than clamping it up', () => {
+    expect(clampFocusShare(FOCUS_SHARE_OFF)).toBe(FOCUS_SHARE_OFF);
+    expect(readPrefs(fake(JSON.stringify({ focusViewportShare: 0 }))).focusViewportShare).toBe(
+      FOCUS_SHARE_OFF,
+    );
+    expect(setFocusShare(EMPTY_PREFS, 0).focusViewportShare).toBe(FOCUS_SHARE_OFF);
+  });
+
+  /**
+   * There is nothing between off and the smallest useful share, so a step into
+   * the gap crosses it. Without this the control would be a one-way door: the
+   * minus button at 30% would produce 25%, clamp back to 30%, and off would be
+   * reachable only by typing a zero.
+   */
+  it('steps across the gap between off and the smallest share, both ways', () => {
+    expect(nudgeFocusShare(FOCUS_SHARE_MIN, FOCUS_SHARE_MIN - 0.05)).toBe(FOCUS_SHARE_OFF);
+    expect(nudgeFocusShare(FOCUS_SHARE_OFF, 0.05)).toBe(FOCUS_SHARE_MIN);
+    // And a value in range is simply itself, clamped.
+    expect(nudgeFocusShare(FOCUS_SHARE_MIN, 0.75)).toBe(0.75);
+    expect(nudgeFocusShare(0.75, 40)).toBe(FOCUS_SHARE_MAX);
   });
 
   it('clamps totally — no input produces NaN, which would blank the canvas', () => {

@@ -14,6 +14,7 @@ import {
   orderedForCanvas,
   orderedSessions,
   STEP_SIZE,
+  sessionBounds,
   slotNodeId,
   stepNodeId,
 } from '../../src/renderer/canvas/layout.js';
@@ -437,5 +438,70 @@ describe('layoutCanvas: only the route to the current step is coloured', () => {
     const fan = built.fans.find((f) => f.sessionId === 's');
     expect(fan?.activeSlot).toBeNull();
     expect(fan?.branchStatuses).toEqual(['empty', 'empty', 'empty']);
+  });
+});
+
+/**
+ * The frame the canvas zooms to when focus arrives in a session.
+ *
+ * The operator's ask is the SESSION, "including its step nodes" -- not the
+ * root card, which is what an earlier framing used and what made the steps
+ * fall outside the view. So the assertions below are about containment: every
+ * one of the session's nodes has to sit inside the rectangle, and a step is
+ * the one that fails if the selection narrows back to the root.
+ *
+ * The selection asks each spec which session it belongs to rather than parsing
+ * `info:`/`step:` out of an id: the navigable specs carry the `SessionEntry`
+ * they were built from, and the scenery carries an explicit `sessionId`. Both
+ * are the domain fact; an id is a rendering detail this module happens to mint.
+ */
+describe('sessionBounds frames a whole session', () => {
+  const m = model(session('a', { decisions: [decision('d1'), decision('d2')] }), session('b'));
+  const laid = layoutCanvas(m);
+
+  it('contains every node of the session, steps included', () => {
+    const box = sessionBounds(laid, 'a');
+    expect(box).not.toBeNull();
+    if (box === null) return;
+    const mine = laid.nodes.filter((n) => n.entry.session.id === 'a');
+    // Two steps and a root, or the fixture stopped exercising the thing.
+    expect(mine.filter((n) => n.kind === 'step')).toHaveLength(2);
+    for (const node of mine) {
+      expect(node.position.x, node.id).toBeGreaterThanOrEqual(box.x);
+      expect(node.position.y, node.id).toBeGreaterThanOrEqual(box.y);
+      expect(node.position.x + node.size.width, node.id).toBeLessThanOrEqual(box.x + box.width);
+      expect(node.position.y + node.size.height, node.id).toBeLessThanOrEqual(box.y + box.height);
+    }
+  });
+
+  it('is wider than the root card alone, which is the whole point', () => {
+    const box = sessionBounds(laid, 'a');
+    expect(box?.width).toBeGreaterThan(INFO_SIZE.width);
+  });
+
+  it('excludes other sessions', () => {
+    const a = sessionBounds(laid, 'a');
+    const b = sessionBounds(laid, 'b');
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+    if (a === null || b === null) return;
+    // Cells are laid out side by side, so a frame that leaked into the
+    // neighbour would reach past its origin.
+    expect(a.x + a.width).toBeLessThanOrEqual(b.x);
+  });
+
+  it('is null for a session the layout does not hold', () => {
+    expect(sessionBounds(laid, 'nobody')).toBeNull();
+  });
+
+  it('reserves the empty slots too, so a one-step session frames like a three', () => {
+    // Otherwise walking from a session with three steps to one with a single
+    // step would rescale the canvas by the accident of how far that session
+    // has got, which is the "zoom fought me" complaint in another costume.
+    const one = layoutCanvas(model(session('c', { decisions: [decision('d1')] })));
+    const three = layoutCanvas(
+      model(session('c', { decisions: [decision('d1'), decision('d2'), decision('d3')] })),
+    );
+    expect(sessionBounds(one, 'c')).toEqual(sessionBounds(three, 'c'));
   });
 });

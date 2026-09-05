@@ -8,7 +8,7 @@
  * test can read is arithmetic that can be wrong loudly.
  */
 
-import { Bot, Columns3, Keyboard, type LucideIcon, Palette } from 'lucide-react';
+import { Bot, Columns3, Frame, Keyboard, type LucideIcon, Palette } from 'lucide-react';
 import {
   type BindingGroup,
   type BindingRow,
@@ -26,7 +26,7 @@ import {
   type LayoutName,
 } from '../prefs/panes.js';
 
-export type SectionId = 'appearance' | 'layout' | 'sessions' | 'keyboard';
+export type SectionId = 'appearance' | 'layout' | 'canvas' | 'sessions' | 'keyboard';
 
 /**
  * The order is hard-coded and never sorted: a nav that reorders under the
@@ -41,6 +41,12 @@ export const SECTIONS: readonly {
 }[] = [
   { id: 'appearance', label: 'Appearance', Icon: Palette },
   { id: 'layout', label: 'Layout', Icon: Columns3 },
+  // Back after a release away. It was retired when the framing it configured
+  // was removed and it had nothing left to hold; the operator then asked for
+  // framing again, by an amount of their choosing, so the section holds
+  // something again. This list is the reason adding it back is one edit: the
+  // nav and the panels both read it, so a section cannot exist in one alone.
+  { id: 'canvas', label: 'Canvas', Icon: Frame },
   // Before Keyboard rather than after it: Keyboard is the reference section
   // and the longest, and a list that ends in a reference reads as a list that
   // ended. Nothing else depends on the position.
