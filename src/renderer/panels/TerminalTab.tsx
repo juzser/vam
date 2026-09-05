@@ -626,11 +626,20 @@ export function TerminalTab({
             ? // vam declined to guess: no session of its own answers for this
               // project, or two do.
               'vam did not type that: it can no longer name one session of its own for this project.'
-            : // tmux would not deliver to a session vam DID name -- almost
-              // always one that ended between the listing and the send, which
-              // the next read draws as `gone`. Sending the operator after a
-              // pairing problem here would send them after nothing.
-              'vam did not type that: tmux would not deliver it, so the session may have just ended.'}
+            : refused === 'unavailable'
+              ? // vam could not ask tmux at all, so it has nothing to say
+                // about pairings -- and saying one failed sends the operator
+                // after a cause nothing here has evidence for.
+                'vam did not type that: it could not ask tmux, so it never looked for the session.'
+              : refused === 'mispaired'
+                ? // vam named a session and refused the one it named: the
+                  // pane this row published is not one vam can use here.
+                  'vam did not type that: this row is in a pane vam cannot use for this project.'
+                : // tmux would not deliver to a session vam DID name -- almost
+                  // always one that ended between the listing and the send, which
+                  // the next read draws as `gone`. Sending the operator after a
+                  // pairing problem here would send them after nothing.
+                  'vam did not type that: tmux would not deliver it, so the session may have just ended.'}
           {' Anything typed behind it was dropped rather than sent into the gap.'}
         </p>
       )}

@@ -60,6 +60,21 @@ export type AnswerRequest = { readonly steps: readonly AnswerStep[] };
 export type AnswerResult =
   | { readonly kind: 'sent'; readonly answer: string }
   | { readonly kind: 'unaimed' }
+  /**
+   * THE LISTING ITSELF FAILED -- tmux is not on `PATH`, the call timed out, or
+   * the failure did not classify. vam did not look, so it has no opinion about
+   * pairings; `unaimed` said it had one, and sent the operator after a
+   * duplicate or missing session that nothing had evidence for.
+   */
+  | { readonly kind: 'unavailable' }
+  /**
+   * The row published its own pane and vam rejected it. vam DID name a
+   * session -- it refused the one it named -- which is the opposite of what
+   * `unaimed` says. The read path has kept these apart since `PaneView` gained
+   * its own `mispaired` arm; this is the same distinction on the write path,
+   * in the same word.
+   */
+  | { readonly kind: 'mispaired' }
   | { readonly kind: 'refused' }
   | { readonly kind: 'unreadable' }
   | { readonly kind: 'no-picker' }

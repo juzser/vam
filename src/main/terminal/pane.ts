@@ -277,11 +277,15 @@ export async function sendSessionKey(
   panes?: ReadonlyMap<string, string>,
 ): Promise<PaneSendResult> {
   const listed = await listVamSessions(run);
-  // vam could not look, so it cannot claim a pairing problem either -- but it
-  // certainly did not deliver. `unaimed` is the honest half of that: nothing
-  // was aimed at anything.
-  if (listed.kind === 'unavailable') return 'unaimed';
+  // vam could not look, so it cannot claim a pairing problem either -- and
+  // `unaimed` was claiming one. This says what happened instead: the listing
+  // failed, nothing was aimed at anything, and there is no pairing to go and
+  // check.
+  if (listed.kind === 'unavailable') return 'unavailable';
   const match = targetSession(listed.sessions, projectId, rowId, panes);
+  // A row that published a pane vam rejected is not a row vam could not name
+  // a session for -- the read path keeps them apart and so does this.
+  if (match.kind === 'mispaired') return 'mispaired';
   if (match.kind !== 'one') return 'unaimed';
   return sendToPane(run, match.name, key);
 }

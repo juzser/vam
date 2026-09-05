@@ -198,6 +198,26 @@ describe('what Submit sends, and what it says afterwards', () => {
     expect(await said({ kind: 'unmatched', label: 'Viridian' })).toContain('Viridian');
   });
 
+  it('does not name a pairing failure for a tmux vam could not reach', async () => {
+    draw(QUESTION, { answer: answering({ kind: 'unavailable' }) });
+    fireEvent.click(all('[data-question-option]')[0] as HTMLElement);
+    fireEvent.click(submit() as HTMLElement);
+    await waitFor(() => expect(q('[data-question-outcome]')).not.toBeNull());
+    expect(text()).toContain('could not ask tmux');
+    // The sentence it used to draw. vam never looked, so it cannot report
+    // what it would have found.
+    expect(text()).not.toContain('could not name one session of its own');
+  });
+
+  it('does not say vam could not NAME a session for a pane it named and refused', async () => {
+    draw(QUESTION, { answer: answering({ kind: 'mispaired' }) });
+    fireEvent.click(all('[data-question-option]')[0] as HTMLElement);
+    fireEvent.click(submit() as HTMLElement);
+    await waitFor(() => expect(q('[data-question-outcome]')).not.toBeNull());
+    expect(text()).toContain('pane vam cannot use for this project');
+    expect(text()).not.toContain('could not name one session of its own');
+  });
+
   it('says nothing about the outcome before Submit is pressed', () => {
     draw(QUESTION, { answer: answering({ kind: 'sent', answer: 'Crimson' }) });
     fireEvent.click(all('[data-question-option]')[0] as HTMLElement);

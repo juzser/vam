@@ -100,7 +100,7 @@ describe('typing into the session vam started for a project', () => {
       listing(`${ATLAS}\tvam-atlas-a1b2c3\n${BEACON}\tvam-beacon-d4e5f6\n`),
     );
     const panes = new Map([[ATLAS, 'vam-beacon-d4e5f6']]);
-    expect(await sendSessionKey(run, ATLAS, { kind: 'back-tab' }, ATLAS, panes)).toBe('unaimed');
+    expect(await sendSessionKey(run, ATLAS, { kind: 'back-tab' }, ATLAS, panes)).toBe('mispaired');
     expect(verbs()).toEqual(['list-sessions']);
   });
 
@@ -147,9 +147,16 @@ describe('typing into the session vam started for a project', () => {
     expect(verbs()).toEqual(['list-sessions']);
   });
 
-  it('sends NOTHING when vam could not reach tmux at all', async () => {
-    const { run, verbs } = runner({ 'list-sessions': failed('no server running') });
-    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe('unaimed');
+  it('says vam could not LOOK, rather than claiming a pairing failure', async () => {
+    // The listing itself failed: tmux is not on PATH, or the call timed out.
+    // vam did not look, so it cannot report what it would have found -- and
+    // `unaimed` sends the operator after a duplicate or missing pairing that
+    // nothing here has any evidence for.
+    // NOT "no server running", which is an ANSWER -- no server means no
+    // sessions -- and resolves to an empty listing (`tmux/spawn.ts`). This is
+    // a failure that did not classify at all.
+    const { run, verbs } = runner({ 'list-sessions': failed('tmux: connection lost') });
+    expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe('unavailable');
     expect(verbs()).toEqual(['list-sessions']);
   });
 
@@ -183,8 +190,12 @@ describe('typing into the session vam started for a project', () => {
     // keystroke was typed into Beacon's running agent.
     const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
     const panes = new Map([[ATLAS, 'vam-beacon-d4e5f6']]);
+    // vam DID name a session and rejected the one it named. That is not "no
+    // session of mine answers for this project", which is what `unaimed`
+    // says, and the read path has kept the two apart since `PaneView` gained
+    // its own `mispaired` arm.
     expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(
-      'unaimed',
+      'mispaired',
     );
     expect(verbs()).toEqual(['list-sessions']);
   });
@@ -199,8 +210,12 @@ describe('typing into the session vam started for a project', () => {
       listing(`${ATLAS}\tvam-atlas-a1b2c3\n${BEACON}\tvam-beacon-d4e5f6\n`),
     );
     const panes = new Map([[ATLAS, 'vam-beacon-d4e5f6']]);
+    // vam DID name a session and rejected the one it named. That is not "no
+    // session of mine answers for this project", which is what `unaimed`
+    // says, and the read path has kept the two apart since `PaneView` gained
+    // its own `mispaired` arm.
     expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(
-      'unaimed',
+      'mispaired',
     );
     expect(verbs()).toEqual(['list-sessions']);
   });
@@ -235,11 +250,12 @@ describe('typing into the session vam started for a project', () => {
 
   it('ignores a published pane that is not in vam’s own listing', async () => {
     // A pane the OPERATOR started publishes into the same directory. It is
-    // never acted on: the fallback is the project tag, which does not name it.
+    // never acted on -- and it is `mispaired` rather than `unaimed`, because
+    // the row did name where it is and vam refused that name.
     const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
     const panes = new Map([[ATLAS, 'their-own-session']]);
     expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(
-      'unaimed',
+      'mispaired',
     );
     expect(verbs()).toEqual(['list-sessions']);
   });

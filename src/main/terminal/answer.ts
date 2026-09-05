@@ -127,12 +127,16 @@ export async function answerQuestion(
   panes?: ReadonlyMap<string, string>,
 ): Promise<AnswerResult> {
   const listed = await listVamSessions(run);
-  if (listed.kind === 'unavailable') return { kind: 'unaimed' };
+  // vam could not look. It therefore cannot report a pairing problem, which is
+  // what `unaimed` is drawn as -- see `AnswerResult`.
+  if (listed.kind === 'unavailable') return { kind: 'unavailable' };
   const match = targetSession(listed.sessions, projectId, rowId, panes);
-  // `none`, `ambiguous` and `mispaired` all end here, and the last is the one
-  // worth naming: a row that published a pane vam cannot use never falls
-  // through to the project tag, which would answer a question in a session
-  // this row was never in.
+  // A row that published a pane vam cannot use never falls through to the
+  // project tag, which would answer a question in a session this row was never
+  // in -- and it is reported as what it is rather than as `none`.
+  if (match.kind === 'mispaired') return { kind: 'mispaired' };
+  // `none` and `ambiguous`: no session of vam's answers for this project, or
+  // two do.
   if (match.kind !== 'one') return { kind: 'unaimed' };
   return deliver(run, match.name, request);
 }

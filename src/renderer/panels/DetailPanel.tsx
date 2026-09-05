@@ -1214,6 +1214,14 @@ function outcomeWording(result: AnswerResult): string {
       return `sent — the picker now reads ${result.answer}`;
     case 'unaimed':
       return 'not sent — vam could not name one session of its own for this project';
+    // NOT the sentence above, and the difference is where it sends a person:
+    // vam never got a listing, so there is no pairing to go and look at.
+    case 'unavailable':
+      return 'not sent — vam could not ask tmux, so it never looked for a session';
+    // vam named a session and refused it. Saying it could not name one is
+    // false in the way that costs an operator time.
+    case 'mispaired':
+      return 'not sent — this row is in a pane vam cannot use for this project';
     case 'refused':
       return 'not sent — tmux would not deliver to that session';
     case 'unreadable':
@@ -1246,6 +1254,10 @@ function cycleWording(result: PaneSendResult): string | null {
       return null;
     case 'unaimed':
       return 'not sent — vam could not name one session of its own for this row';
+    case 'unavailable':
+      return 'not sent — vam could not ask tmux, so it never looked for a session';
+    case 'mispaired':
+      return 'not sent — this row is in a pane vam cannot use for this project';
     default:
       return 'not sent — tmux would not deliver to that session';
   }

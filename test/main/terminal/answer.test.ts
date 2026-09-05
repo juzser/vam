@@ -142,10 +142,28 @@ describe('the pairing guard stands in front of every answer', () => {
   it('refuses on a published pane that disagrees, and never falls back to the tag', async () => {
     const { run, argvs } = runner([colours(0)]);
     const panes = new Map([['s1', 'vam-somebody-else']]);
+    // NOT `unaimed`: vam named a session -- the one this row published -- and
+    // rejected it. The read path has said `mispaired` for this since
+    // `PaneView` gained the arm, and a Submit that says "vam could not name
+    // one session of its own" over a name it just refused sends the operator
+    // looking for the wrong thing.
     expect(await answerQuestion(run, ATLAS, single(['Crimson']), 's1', panes)).toEqual({
-      kind: 'unaimed',
+      kind: 'mispaired',
     });
     expect(argvs.map((argv) => argv[0])).toEqual(['list-sessions']);
+  });
+
+  it('says vam could not LOOK when tmux itself could not be reached', async () => {
+    // `listVamSessions` failed outright. vam has no listing, so it has no
+    // opinion about pairings at all -- and claiming one is a cause the
+    // operator will go and look for.
+    // A failure that did not classify: "no server running" is an ANSWER (no
+    // server, no sessions) and resolves to an empty listing instead.
+    const run: TmuxRun = async (argv) =>
+      argv[0] === 'list-sessions' ? failed('tmux: connection lost') : ok('');
+    expect(await answerQuestion(run, ATLAS, single(['Crimson']))).toEqual({
+      kind: 'unavailable',
+    });
   });
 });
 
