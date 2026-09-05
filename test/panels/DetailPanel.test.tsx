@@ -691,6 +691,122 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
     expect(q('[data-mode-refusal]')).toBeNull();
   });
 
+  /**
+   * WHAT THE PRESS ITSELF SAYS, at the keystroke and at the answer.
+   *
+   * Every other channel that could report a mode cycle is absent by
+   * construction: the composer is drawn only while the tab is not Terminal, so
+   * the pane is not on screen, and the MODE pills read the draft rather than
+   * the pane. The caption is the whole of the feedback, and it used to go back
+   * to its resting text on success -- pixel-identical to a chord nothing was
+   * bound to.
+   *
+   * `deferred` is the point of these tests: a caption asserted only after the
+   * promise settles cannot tell an immediate indicator from a late one.
+   */
+  it('says the chord is in flight before the pane has answered', async () => {
+    let land: (result: PaneSendResult) => void = () => {};
+    withBridge(
+      () =>
+        new Promise<PaneSendResult>((resolve) => {
+          land = resolve;
+        }),
+    );
+    draw();
+    const resting = q<HTMLElement>('[data-mode-cycle]')?.textContent;
+    await press(true);
+    // NOT resolved yet: this is the state the operator sees while three tmux
+    // spawns at ten seconds apiece are still out.
+    const inFlight = q<HTMLElement>('[data-mode-cycle]');
+    expect(inFlight?.getAttribute('data-mode-cycle-state')).toBe('busy');
+    expect(inFlight?.textContent).not.toBe(resting);
+    expect(inFlight?.textContent).toContain('sending');
+    expect(q('[data-mode-refusal]')).toBeNull();
+    await act(async () => {
+      land('sent');
+      await Promise.resolve();
+    });
+  });
+
+  it('reports the delivery on success, and claims only what vam knows', async () => {
+    withBridge(async () => 'sent');
+    draw();
+    const resting = q<HTMLElement>('[data-mode-cycle]')?.textContent;
+    await press(true);
+    const said = q<HTMLElement>('[data-mode-cycle]');
+    expect(said?.getAttribute('data-mode-cycle-state')).toBe('sent');
+    expect(said?.textContent).not.toBe(resting);
+    expect(said?.textContent).toContain('sent');
+    // WHAT IT MAY NOT SAY: vam presses a key into the pane and never reads
+    // back which mode resulted, so the delivery is the only true claim here.
+    expect(said?.textContent).not.toContain('mode is');
+    expect(said?.textContent).toContain('does not read the mode back');
+  });
+
+  it('does not queue a second press into the agent while one is out', async () => {
+    let sends = 0;
+    let land: (result: PaneSendResult) => void = () => {};
+    withBridge(() => {
+      sends += 1;
+      return new Promise<PaneSendResult>((resolve) => {
+        land = resolve;
+      });
+    });
+    draw();
+    await press(true);
+    await press(true);
+    expect(sends).toBe(1);
+    // And the second press is not swallowed in silence: the caption raised by
+    // the first is still on screen saying the chord is out.
+    expect(q<HTMLElement>('[data-mode-cycle]')?.getAttribute('data-mode-cycle-state')).toBe('busy');
+    await act(async () => {
+      land('sent');
+      await Promise.resolve();
+    });
+  });
+
+  /**
+   * A REFUSAL BELONGS TO THE SESSION IT WAS RAISED FOR. `DetailPanel` is not
+   * remounted when `entry` changes, so A's amber "tmux would not deliver to
+   * that session", still drawn over B's mode row, is a statement about B that
+   * nothing ever made. `TerminalTab` holds the same three lines for the same
+   * reason, and this follows it rather than inventing a second pattern.
+   */
+  it('drops the note when the pane starts being about another session', async () => {
+    withBridge(async () => 'refused');
+    const { rerender } = drawFor();
+    await press(true);
+    expect(q('[data-mode-refusal]')).not.toBeNull();
+    act(() => {
+      rerender({ entry: { project: PROJECT, session: { ...SESSION, id: 's2', title: 'Other' } } });
+    });
+    const said = q<HTMLElement>('[data-mode-cycle]');
+    expect(said?.getAttribute('data-mode-cycle-state')).toBe('resting');
+    expect(said?.textContent).toContain('cycle mode');
+  });
+
+  it('does not land A’s late answer on the session that replaced it', async () => {
+    let land: (result: PaneSendResult) => void = () => {};
+    withBridge(
+      () =>
+        new Promise<PaneSendResult>((resolve) => {
+          land = resolve;
+        }),
+    );
+    const { rerender } = drawFor();
+    await press(true);
+    act(() => {
+      rerender({ entry: { project: PROJECT, session: { ...SESSION, id: 's2', title: 'Other' } } });
+    });
+    await act(async () => {
+      land('refused');
+      await Promise.resolve();
+    });
+    expect(q<HTMLElement>('[data-mode-cycle]')?.getAttribute('data-mode-cycle-state')).toBe(
+      'resting',
+    );
+  });
+
   it('says so when there is no bridge to press the key with', async () => {
     // The browser build has no `window.api`. The row is drawn from the
     // session's own facts, so this is the one case where it can be on screen
@@ -1030,6 +1146,104 @@ describe('the attachment button inlines a file into the text that gets recorded'
   it('reads nothing back out of a draft that merely mentions the words', () => {
     expect(readAttachedName('I attached: nothing at all')).toBeNull();
     expect(detachFromDraft('plain text')).toBe('plain text');
+  });
+});
+
+/**
+ * WHAT THE PICKER DOES BEFORE IT DECODES ANYTHING.
+ *
+ * `File.size` is known without reading the file, and `File.text()` on a file
+ * of any size decodes the WHOLE of it into one JS string -- past V8's string
+ * cap that rejects, past the machine's memory the renderer dies, and a dead
+ * renderer takes the composed draft with it. So the refusals that a name and
+ * a size already settle are settled here, before the read, and the read that
+ * does happen has somewhere to put a failure.
+ *
+ * Each test hands the picker a `text()` that never resolves or always
+ * rejects: a sentence drawn while the decode is still pending is the only
+ * proof that the size was tested first.
+ */
+describe('the attachment picker decides what it can before it reads the file', () => {
+  type PickedFile = {
+    readonly name: string;
+    readonly size: number;
+    readonly text: () => Promise<string>;
+  };
+
+  const picker = () => q<HTMLInputElement>('input[type="file"]') as HTMLInputElement;
+
+  const choose = (file: PickedFile) => {
+    const input = picker();
+    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+    fireEvent.change(input);
+  };
+
+  it('refuses an oversized file from its size alone, with nothing decoded', () => {
+    let decodes = 0;
+    draw();
+    act(() => {
+      choose({
+        name: 'huge.log',
+        size: ATTACH_LIMIT_BYTES + 1,
+        text: () => {
+          decodes += 1;
+          // Never resolves: if the guard moved back behind the decode, this
+          // is where the test would sit and the sentence below never appear.
+          return new Promise<string>(() => {});
+        },
+      });
+    });
+    expect(decodes).toBe(0);
+    const said = q<HTMLElement>('[data-attach-error]');
+    expect(said?.textContent).toContain('64 KB');
+    expect(said?.textContent).toContain('huge.log');
+  });
+
+  it('refuses a second file the same way, naming the one already in the draft', () => {
+    let decodes = 0;
+    draw({ draft: attachOk('ask', { name: 'plan.md', size: 4, text: 'x' }) });
+    act(() => {
+      choose({
+        name: 'other.txt',
+        size: 4,
+        text: () => {
+          decodes += 1;
+          return new Promise<string>(() => {});
+        },
+      });
+    });
+    expect(decodes).toBe(0);
+    expect(q<HTMLElement>('[data-attach-error]')?.textContent).toContain('plan.md');
+  });
+
+  it('says so when the read itself fails, rather than dropping the rejection', async () => {
+    draw();
+    await act(async () => {
+      choose({ name: 'gone.txt', size: 10, text: () => Promise.reject(new Error('ENOENT')) });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const said = q<HTMLElement>('[data-attach-error]');
+    expect(said?.textContent).toContain('gone.txt');
+    expect(said?.textContent).toContain('nothing was attached');
+  });
+
+  it('still inlines a file that is small enough to read', async () => {
+    let draft = 'ask';
+    draw({
+      draft,
+      onDraftChange: (value: string) => {
+        draft = value;
+      },
+    });
+    await act(async () => {
+      choose({ name: 'notes.md', size: 11, text: () => Promise.resolve('hello there') });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(draft).toContain('--- attached: notes.md ---');
+    expect(draft).toContain('hello there');
+    expect(q('[data-attach-error]')).toBeNull();
   });
 });
 

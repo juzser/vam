@@ -93,7 +93,7 @@ export function App() {
  * actually reaches anything is `canWriteTo`'s call at the point of the write,
  * not a decision made here.
  */
-function DesktopCanvas({ api }: { readonly api: DesktopSourceApi }) {
+export function DesktopCanvas({ api }: { readonly api: DesktopSourceApi }) {
   const [source, setSource] = useState<SessionSource | null>(null);
   const [assembleError, setAssembleError] = useState<string | null>(null);
 
@@ -121,14 +121,30 @@ function DesktopCanvas({ api }: { readonly api: DesktopSourceApi }) {
   const shown = assembleError ?? error;
 
   // Empty and saying why, never a fixture standing in for a source that failed.
+  //
+  // A COLUMN, not two siblings. `html`, `body` and `#root` are all
+  // `height: 100%` with no `overflow: hidden`, and the canvas' own root is
+  // `h-full`: a paragraph added above it therefore did not shrink it, it
+  // pushed it down, and what went off the bottom of the viewport was the
+  // status bar carrying the `N failures` button -- the only route into the
+  // error log, gone at the exact moment the operator needs it. Here the
+  // banner takes its own row out of the full height and the canvas gets the
+  // rest. `min-h-0` is load-bearing: without it a flex child will not go
+  // below its content height and the overflow comes straight back.
   return (
-    <>
-      {shown !== null && <p className="text-failed">● {shown}</p>}
-      <Canvas
-        model={model}
-        source={source === null ? undefined : { kind: 'session', source, onWrote: reload }}
-      />
-    </>
+    <div className="flex h-full min-h-0 flex-col">
+      {shown !== null && (
+        <p data-testid="source-failure" className="m-0 flex-none px-3 py-1 text-failed">
+          ● {shown}
+        </p>
+      )}
+      <div className="min-h-0 flex-1">
+        <Canvas
+          model={model}
+          source={source === null ? undefined : { kind: 'session', source, onWrote: reload }}
+        />
+      </div>
+    </div>
   );
 }
 

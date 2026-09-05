@@ -146,17 +146,34 @@ const ATTACH_BLOCK = /\n*^--- attached: (.+) ---$\n[\s\S]*?^--- end attached ---
  * string that gets recorded: the whole thing genuinely arrives, and nothing on
  * screen implies a transfer vam cannot perform.
  */
-export function attachIntoDraft(draft: string, file: AttachedFile): AttachResult {
+/**
+ * The refusals a NAME AND A SIZE already settle, decided before a byte is read.
+ *
+ * `File.size` costs nothing and `File.text()` decodes the whole file into one
+ * JS string: on a large one that is a frozen renderer at best and a dead one
+ * past V8's string cap, and a dead renderer takes the draft the operator was
+ * composing with it. Telling somebody afterwards that the file was too big is
+ * a sentence delivered to a window that is no longer there.
+ *
+ * Two call sites, and they need it for opposite reasons: the picker calls it
+ * FIRST, so the decode never starts, and `attachIntoDraft` calls it because it
+ * is also reachable with text already in hand.
+ */
+export function refuseUnreadFile(
+  draft: string,
+  file: { name: string; size: number },
+): string | null {
   const already = readAttachedName(draft);
-  if (already !== null) {
-    return { ok: false, message: `one file at a time — take ${already} off first` };
-  }
+  if (already !== null) return `one file at a time — take ${already} off first`;
   if (file.size > ATTACH_LIMIT_BYTES) {
-    return {
-      ok: false,
-      message: `${file.name} is larger than 64 KB — vam inlines the file's own text, so it refuses rather than sending half of it`,
-    };
+    return `${file.name} is larger than 64 KB — vam inlines the file's own text, so it refuses rather than sending half of it`;
   }
+  return null;
+}
+
+export function attachIntoDraft(draft: string, file: AttachedFile): AttachResult {
+  const unread = refuseUnreadFile(draft, file);
+  if (unread !== null) return { ok: false, message: unread };
   // The replacement character is what a UTF-8 decode leaves behind when the
   // bytes were never UTF-8, and a NUL is the other reliable sign of the same
   // thing. Either way what would be inlined is noise, not text.
@@ -1262,6 +1279,12 @@ function stopWording(result: Exclude<AnswerResult, { readonly kind: 'sent' }>): 
  * outcome to avoid: the chord is invisible once pressed, so silence reads as
  * "the mode changed" for an agent that was never put into it.
  */
+type CycleNote = {
+  /** `busy` while the keys are out, then one of the two answers. */
+  readonly kind: 'busy' | 'sent' | 'refused';
+  readonly text: string;
+};
+
 function cycleWording(result: PaneSendResult): string | null {
   switch (result) {
     case 'sent':
@@ -1746,13 +1769,35 @@ export function DetailPanel(props: DetailPanelProps) {
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /**
-   * Why the last Shift-Tab did not reach the pane, or `null` when it did.
+   * WHAT THE LAST SHIFT-TAB DID, in flight and afterwards, or `null` at rest.
+   *
+   * Three states rather than a refusal alone, because this caption is the
+   * whole of the feedback for the chord: the composer is drawn only while the
+   * tab is not Terminal, so the pane it presses into is by construction not on
+   * screen, and the MODE pills read the draft, which Shift-Tab does not touch.
+   * With `busy` and `sent` missing, a successful press put the resting text
+   * back and was pixel-identical to a key nothing was bound to.
    *
    * Component state because it is about ONE keypress in this pane and nothing
    * outside has an opinion about it -- the same reason the tab and the
    * progress region are held here.
    */
-  const [cycleRefusal, setCycleRefusal] = useState<string | null>(null);
+  const [cycleNote, setCycleNote] = useState<CycleNote | null>(null);
+  /**
+   * The note belongs to the session it was raised for.
+   *
+   * This pane is NOT remounted when `entry` changes, so A's amber "tmux would
+   * not deliver to that session", still on screen over B's mode row, is a
+   * claim about B that nothing ever made. The row is part of the identity
+   * because two sessions of one project are two different panes -- the same
+   * three lines, for the same reason, as `TerminalTab`'s `refusalFor`.
+   */
+  const cycleAbout = `${entry?.project.id ?? ''}|${entry?.session.id ?? ''}`;
+  const noteFor = useRef(cycleAbout);
+  if (noteFor.current !== cycleAbout) {
+    noteFor.current = cycleAbout;
+    if (cycleNote !== null) setCycleNote(null);
+  }
   /**
    * Whether a mode can ACTUALLY be chosen for the focused session -- the one
    * condition the row is drawn on: hidden where the factory has already
@@ -1778,14 +1823,35 @@ export function DetailPanel(props: DetailPanelProps) {
   const cycleMode = async () => {
     const send = globalThis.window?.api?.terminal?.send;
     if (entry === null) return;
+    // One chord at a time. Held down, this queued a `back-tab` per repeat into
+    // a live agent with nothing on screen counting them; the caption raised
+    // below is what answers the second press instead.
+    if (cycleNote?.kind === 'busy') return;
     if (send === undefined) {
-      setCycleRefusal('not sent — this build has no keyboard into a session’s pane');
+      setCycleNote({
+        kind: 'refused',
+        text: 'not sent — this build has no keyboard into a session’s pane',
+      });
       return;
     }
+    // BEFORE THE AWAIT: one to three tmux spawns follow, at ten seconds each.
+    setCycleNote({ kind: 'busy', text: '⇧Tab · sending…' });
+    const mine = cycleAbout;
     const landed = await send(entry.project.id, { kind: 'back-tab' }, entry.session.id).catch(
       (): PaneSendResult => 'refused',
     );
-    setCycleRefusal(cycleWording(landed));
+    // Thirty seconds is long enough to move on, and an answer about the
+    // session that was here then says nothing about the one that is here now.
+    if (noteFor.current !== mine) return;
+    const refusal = cycleWording(landed);
+    setCycleNote(
+      refusal === null
+        ? // THE DELIVERY, NOT THE MODE. vam presses the session's own chord
+          // into the pane and never reads back which mode the agent landed
+          // in, so naming one here would be a claim nothing checked.
+          { kind: 'sent', text: '⇧Tab sent — vam does not read the mode back' }
+        : { kind: 'refused', text: refusal },
+    );
   };
   /** The first option of the open question, when one is being asked. */
   const firstOptionRef = useRef<HTMLButtonElement>(null);
@@ -1939,11 +2005,26 @@ export function DetailPanel(props: DetailPanelProps) {
     // Cleared immediately, so choosing the same file twice still fires.
     input.value = '';
     if (file === undefined) return;
-    const result = attachIntoDraft(draft, {
-      name: file.name,
-      size: file.size,
-      text: await file.text(),
-    });
+    // BEFORE THE AWAIT, on the size the picker already handed over: the read
+    // that a refusal here prevents is the one that can take the renderer, and
+    // the draft, down with it. What survives the decode is bounded by the
+    // limit, so it is sub-frame and needs no in-flight indicator of its own.
+    const unread = refuseUnreadFile(draft, { name: file.name, size: file.size });
+    if (unread !== null) {
+      setAttachError(unread);
+      return;
+    }
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      // A file removed between the picker and the read, or one the shell
+      // cannot open. Uncaught this was an unhandled rejection and a silent
+      // paperclip -- the operator's only reading of which is that it worked.
+      setAttachError(`${file.name} could not be read — nothing was attached`);
+      return;
+    }
+    const result = attachIntoDraft(draft, { name: file.name, size: file.size, text });
     setAttachError(result.ok ? null : result.message);
     if (result.ok) onDraftChange(result.draft);
   };
@@ -2879,13 +2960,18 @@ export function DetailPanel(props: DetailPanelProps) {
                 binding may bring it back and the caption alone may not. */}
               <span
                 data-mode-cycle
-                data-mode-refusal={cycleRefusal === null ? undefined : 'true'}
+                data-mode-cycle-state={cycleNote?.kind ?? 'resting'}
+                data-mode-refusal={cycleNote?.kind === 'refused' ? 'true' : undefined}
                 className={[
                   'ml-auto flex-none whitespace-nowrap font-mono text-[9.5px]',
-                  cycleRefusal === null ? 'text-ink-faint' : 'text-waiting',
-                ].join(' ')}
+                  cycleNote === null ? 'text-ink-faint' : '',
+                  cycleNote?.kind === 'refused' ? 'text-waiting' : '',
+                  cycleNote !== null && cycleNote.kind !== 'refused' ? 'text-ink-dim' : '',
+                ]
+                  .filter((part) => part !== '')
+                  .join(' ')}
               >
-                {cycleRefusal ?? '⇧Tab · cycle mode'}
+                {cycleNote?.text ?? '⇧Tab · cycle mode'}
               </span>
             </div>
           )}
