@@ -349,3 +349,82 @@ describe('a Submit that got part of the way', () => {
     expect(submit()).toBeNull();
   });
 });
+
+/**
+ * Walking a step carries the cursor with it.
+ *
+ * The option cursor is DOM focus, so the button holding it unmounts when the
+ * step changes; without this the cursor was simply gone, and the next key
+ * belonged to the window rather than to the card. The labels below are
+ * DISTINCT per question deliberately: React reconciles options by label, so a
+ * shared label keeps the node alive and hides the bug.
+ */
+describe('the cursor follows the step it walked to', () => {
+  const APPLES: AgentQuestion = {
+    ...FRUIT,
+    options: [
+      { label: 'Apple', description: null },
+      { label: 'Pear', description: null },
+    ],
+  };
+
+  it('lands on the new step first option', () => {
+    draw([COLOUR, APPLES], { active: true });
+    expect(document.activeElement).toBe(options()[0]);
+    fireEvent.keyDown(listbox(), { key: 'l' });
+    expect(text()).toContain('Which fruit do you prefer?');
+    expect(document.activeElement).toBe(options()[0]);
+    expect(document.activeElement?.textContent).toContain('Apple');
+  });
+
+  it('lands on the TAB of a step that is already answered, which has no list', () => {
+    draw([COLOUR, { ...APPLES, answer: 'Apple' }], { active: true });
+    fireEvent.keyDown(listbox(), { key: 'l' });
+    // Nothing to walk into: the settled step shows its answer instead. The
+    // strip takes the horizontal keys, so the cursor must be on the strip.
+    expect(options()).toHaveLength(0);
+    expect(document.activeElement).toBe(steps()[1]);
+  });
+});
+
+/**
+ * Walking BACK onto a step the picker has already taken.
+ *
+ * A state that did not exist when the walk first carried the cursor: a step
+ * can now be open (the model still has no answer for it) and yet already
+ * inside the picker, because a stop reports what it committed and Submit
+ * carries only what is left. Its options are drawn and can still be clicked,
+ * and none of those marks can ever be sent -- so landing the cursor on them is
+ * landing it on a control that does nothing. It lands on the step's tab
+ * instead, which is what an answered step already does and for the same
+ * reason: there is nothing here to choose any more.
+ */
+describe('the cursor does not land in a list the picker has moved past', () => {
+  const APPLES: AgentQuestion = {
+    ...FRUIT,
+    options: [
+      { label: 'Apple', description: null },
+      { label: 'Pear', description: null },
+    ],
+  };
+
+  const partSent = () =>
+    vi.fn((_projectId: string, _request: AnswerRequest, _rowId?: string) =>
+      Promise.resolve({ kind: 'refused', committed: ['Crimson'] } as AnswerResult),
+    );
+
+  it('lands on the tab of a step already committed, not on its dead options', async () => {
+    draw([COLOUR, APPLES], { active: true, answer: partSent() });
+    fireEvent.click(options()[0] as HTMLElement);
+    fireEvent.keyDown(listbox(), { key: 'l' });
+    fireEvent.click(options()[0] as HTMLElement);
+    fireEvent.click(submit() as HTMLElement);
+    await waitFor(() => expect(q('[data-question-outcome]')).not.toBeNull());
+    // Question one went in; question two is what Submit still carries.
+    expect(steps()[0]?.getAttribute('data-sent')).toBe('true');
+
+    fireEvent.keyDown(listbox(), { key: 'h' });
+    expect(text()).toContain('Which colour do you prefer?');
+    expect(document.activeElement).toBe(steps()[0]);
+  });
+});

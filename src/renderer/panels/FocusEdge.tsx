@@ -1,16 +1,18 @@
 /**
- * The line at the top of the column that holds the keyboard.
+ * The line at the top of a column the current mode holds the keyboard for.
  *
- * One element, mounted only when the column is focused: no dimmed line and no
- * reserved 2px in the unfocused case, because a permanently drawn indicator
- * that changes shade is a thing to compare, and this has to be answerable at a
- * glance from the corner of the eye.
+ * One element, mounted only where the keyboard is: no dimmed line and no
+ * reserved 2px otherwise, because a permanently drawn indicator that changes
+ * shade is a thing to compare, and this has to be answerable at a glance from
+ * the corner of the eye. It is one line PER COLUMN and not one on screen --
+ * Select owns the sidebar and the canvas both, and draws over each.
  *
- * It is `aria-hidden` on purpose. The line is the THIRD signal, never the only
- * one: the status bar prints the mode as a word, the response pane's left
- * border grows from 1px to 2px (a shape change that survives a monochrome
- * render), and inside the mode the focused row or card draws its own ring. So
- * announcing it would repeat the word the status cell already carries.
+ * It is `aria-hidden` on purpose, and never the only signal: the status bar
+ * prints the mode as a word, and inside the mode the focused row or card draws
+ * its own ring. So announcing it would repeat the word the status cell already
+ * carries. (The response pane's left border was a third signal until it was
+ * removed in both states -- it is not one now, and the argument does not rest
+ * on it.)
  *
  * All three column roots are already `relative`, so this drops in as an
  * absolutely-positioned child with no layout change to any of them, and none of

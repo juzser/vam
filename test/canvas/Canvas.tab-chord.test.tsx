@@ -127,10 +127,17 @@ describe('Mod-<digit> is a position in whatever pane has the keyboard', () => {
     expect(selectedTab()).toBe('response');
   });
 
+  /**
+   * THE DIGIT COUNTS WHAT THE BAR DRAWS. This model's source declares no
+   * terminal, so the bar reads `Response · PRs · Agents` and Agents is
+   * visibly third. It used to be `Mod-4`, because the handler indexed the
+   * unfiltered constant: `Mod-3` resolved to the withdrawn Terminal tab and
+   * silently landed back on Response.
+   */
   it('switches TAB once the keyboard is in the response pane', () => {
     mountFocused();
     intoResponsePane();
-    digitChord(4);
+    digitChord(3);
     expect(selectedTab()).toBe('agents');
     digitChord(2);
     expect(selectedTab()).toBe('prs');
@@ -141,7 +148,7 @@ describe('Mod-<digit> is a position in whatever pane has the keyboard', () => {
   it('goes back to sessions when the keyboard goes back to the list', () => {
     mountFocused();
     intoResponsePane();
-    digitChord(4);
+    digitChord(3);
     expect(selectedTab()).toBe('agents');
     backToList();
     digitChord(2);
@@ -152,11 +159,15 @@ describe('Mod-<digit> is a position in whatever pane has the keyboard', () => {
   });
 
   /**
-   * There are four tabs, and `Mod-5`..`Mod-9` are bound. In the response pane
+   * `Mod-5`..`Mod-9` are bound and no tab answers them. In the response pane
    * they refuse OUT LOUD rather than falling through to the sidebar: a digit
    * that quietly moved the cursor in a pane the operator is not looking at is
    * the exact defect this arrangement exists to fix, and silence would leave
    * them pressing it again.
+   *
+   * The COUNT it refuses with is the drawn one. "only 4 tabs" over a bar
+   * showing three is the same handler-with-its-own-idea the position rule was
+   * written against.
    */
   it('refuses a digit past the last tab, and does not fall through to sessions', () => {
     mountFocused();
@@ -164,7 +175,20 @@ describe('Mod-<digit> is a position in whatever pane has the keyboard', () => {
     digitChord(7);
     expect(selectedTab()).toBe('response');
     expect(focusedTitle()).toBe('a1');
-    expect(statusBar()).toContain('only 4 tabs');
+    expect(statusBar()).toContain('only 3 tabs');
+  });
+
+  it('refuses the digit of a tab that was WITHDRAWN, rather than landing nowhere', () => {
+    mountFocused();
+    intoResponsePane();
+    // Position 4 exists in the constant (Agents was fourth of four) and does
+    // not exist on this bar. Asking for it must be refused, not accepted and
+    // silently reverted to Response.
+    digitChord(2);
+    expect(selectedTab()).toBe('prs');
+    digitChord(4);
+    expect(selectedTab()).toBe('prs');
+    expect(statusBar()).toContain('only 3 tabs');
   });
 
   it('the ninth is the LAST session while the sidebar has the keyboard', () => {
@@ -178,7 +202,7 @@ describe('Mod-<digit> is a position in whatever pane has the keyboard', () => {
     intoResponsePane();
     const box = container.querySelector('[aria-label="prompt to session"]') as HTMLTextAreaElement;
     box.focus();
-    digitChord(4, box);
+    digitChord(3, box);
     expect(selectedTab()).toBe('agents');
   });
 
@@ -228,6 +252,26 @@ describe('the generated key sheet tells the truth about the digits', () => {
       expect(keys(), `Mod-${digit}`).toContain(`Mod-${digit}`);
     }
     expect(keys()).not.toContain('Mod-0');
+  });
+
+  /**
+   * The sheet may not name a tab that cannot exist. `Mod-5`..`Mod-9` are bound
+   * and the pane holds four tabs at most, so the Insert caption for those five
+   * used to print "tab 5 in the response pane" through "tab 9" -- a binding
+   * that is real under a caption that is not, which is the one thing a
+   * generated sheet exists to make impossible.
+   */
+  it('names no tab past the last one the pane can hold', () => {
+    const insertLabels = rows()
+      .filter((row) => row.mode === 'insert' && row.keys.startsWith('Mod-'))
+      .map((row) => row.label);
+    expect(insertLabels.some((label) => label.includes('tab 4'))).toBe(true);
+    for (const digit of [5, 6, 7, 8, 9]) {
+      expect(
+        insertLabels.some((label) => label.includes(`tab ${digit}`)),
+        `tab ${digit}`,
+      ).toBe(false);
+    }
   });
 
   it('names NO Mod-Shift digit — macOS owns three of them', () => {

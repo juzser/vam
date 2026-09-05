@@ -107,6 +107,7 @@ import { Note } from './Note.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 import { TerminalTab } from './TerminalTab.js';
+import { TABS, type Tab, visibleTabs } from './tabs.js';
 
 /** The three things this pane needs to know about a file it was handed. */
 export type AttachedFile = {
@@ -409,11 +410,10 @@ export type DetailPanelProps = {
    * report a change back.
    *
    * A string rather than a `Tab` because the store it comes from must not know
-   * what the tabs are called: `TABS` lives here, beside the bar that draws it,
-   * and a `prefs.ts` that imported it would pull this whole component into a
-   * module whose job is `localStorage`. So the dependency runs the other way --
-   * the store keeps whatever it was handed, and the validating happens HERE,
-   * where the list is. Anything that is not a current tab name is the default,
+   * what the tabs are called, and a `prefs.ts` that imported them would gain a
+   * dependency on the pane's vocabulary. So the dependency runs the other way
+   * -- the store keeps whatever it was handed, and the validating happens
+   * HERE, against `TABS`. Anything that is not a current tab name is the default,
    * which makes renaming or withdrawing a tab cost one default tab rather than
    * a migration.
    *
@@ -437,15 +437,14 @@ export type DetailPanelProps = {
  * held no PTY, and the tmux provider is that source. Nothing in `TABS` is a
  * label any more, so the `data-placeholder` branch that drew the inert ones is
  * gone with it.
+ *
+ * The list itself now lives in `tabs.ts`, and re-exported rather than moved
+ * because `Mod-<digit>` counts POSITIONS in the DRAWN bar: the count had to
+ * become something the handler and the key sheet could read without importing
+ * this component, and a handler with its own idea of how many tabs there are
+ * is a fifth digit that opens nothing.
  */
-/** The tab bar, in order. Exported because `Mod-<digit>` counts POSITIONS in
- *  it and the count has to come from the bar itself: a handler with its own
- *  idea of how many tabs there are is a fifth digit that opens nothing. */
-export const TABS = ['Response', 'PRs', 'Terminal', 'Agents'] as const;
-
-/** Exported for the chord table alone, which names the tab its digit opens.
- *  A type-only import there, so nothing of this file reaches the grammar. */
-export type Tab = (typeof TABS)[number];
+export { TABS, type Tab } from './tabs.js';
 
 /**
  * The mockup's mode segments, and which one it draws as current. Presentation
@@ -1341,9 +1340,49 @@ function QuestionCard({
    * options is a ring -- there is no last one. A set of steps is a sequence
    * with a Submit at the end of it, and stepping past the last one back to the
    * first reads as progress that did not happen.
+   *
+   * IT ALSO CARRIES THE CURSOR. The option cursor is DOM focus rather than an
+   * index, so the button holding it unmounts when the step changes and focus
+   * falls back to `document.body` -- and from the body the keys are no longer
+   * this listbox's. React reconciles the options by label, so the cursor
+   * survived only when a label happened to recur in the next question (it
+   * does: `Cobalt` was measured in both questions of a real call), which made
+   * the same gesture work or fail depending on the call. `landing` is the step
+   * a walk asks the effect below to put the cursor on -- and a walk that the
+   * clamp turned into a no-op asks for nothing, because the cursor is already
+   * where the operator put it.
    */
-  const walk = (by: number) =>
-    setShowing((now) => Math.min(Math.max(now + by, 0), questions.length - 1));
+  const [landing, setLanding] = useState<number | null>(null);
+  const stepTabRef = useRef<HTMLButtonElement>(null);
+  const walk = (by: number) => {
+    const next = Math.min(Math.max(showing + by, 0), questions.length - 1);
+    if (next === showing) return;
+    setShowing(next);
+    setLanding(next);
+  };
+
+  /**
+   * The cursor lands on the new step's first option -- or on its TAB, in the
+   * two cases where the options are not something to choose between any more:
+   * a step already answered, which draws no list at all, and a step the picker
+   * has already taken in, whose list is still drawn and still clickable while
+   * Submit carries only what comes after it. Landing on marks that can never
+   * be sent is landing on a control that does nothing, which is the same
+   * failure as landing on the canvas.
+   *
+   * Only after a WALK: arriving at the card is `active`'s business one screen
+   * down, and stealing focus on every render would take it off whatever the
+   * operator clicked.
+   */
+  const showingTaken = question !== undefined && takenIds.has(question.id);
+  useEffect(() => {
+    if (landing === null) return;
+    setLanding(null);
+    const target = showingTaken
+      ? stepTabRef.current
+      : (firstOptionRef.current ?? stepTabRef.current);
+    target?.focus();
+  }, [landing, showingTaken, firstOptionRef]);
 
   const send = async () => {
     // The marks IN THE ORDER THEY ARE DRAWN, not the order they were clicked:
@@ -1528,6 +1567,7 @@ function QuestionCard({
               type="button"
               role="tab"
               aria-selected={index === showing}
+              ref={index === showing ? stepTabRef : undefined}
               data-question-step
               data-current={index === showing ? 'true' : undefined}
               data-answered={one.answer === null ? undefined : 'true'}
@@ -1764,7 +1804,7 @@ export function DetailPanel(props: DetailPanelProps) {
    * session left behind -- and it now survives a QUIT for the same reason,
    * seeded from what the caller remembered rather than owned by it.
    *
-   * The seed is validated against `TABS` here because this is where `TABS` is.
+   * The seed is validated against `TABS` here because this is where the bar is.
    * A name that is not on the bar (an older vam's tab, a hand-edited store) is
    * simply not a seed, so it costs the default tab and nothing else.
    */
@@ -1795,7 +1835,7 @@ export function DetailPanel(props: DetailPanelProps) {
   // the operator can be on Terminal when focus moves to a session from a
   // source without one, and a tab bar with nothing selected over a pane
   // drawing a tab that is no longer offered is the state this collapses.
-  const tabs = TABS.filter((name) => name !== 'Terminal' || terminal !== false);
+  const tabs = visibleTabs(terminal !== false);
   const current = tabs.includes(tab) ? tab : 'Response';
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 

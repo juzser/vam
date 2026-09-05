@@ -325,3 +325,46 @@ describe('removing a project, through Canvas', () => {
     });
   });
 });
+
+/**
+ * A removal reports what it DID, not what it meant to do — and a close that
+ * failed keeps the project on screen.
+ *
+ * The failure this pins is the worst shape a report can take: two closes
+ * refused, two sessions still running, the status line saying "ended 2
+ * sessions" and the rows that would have shown otherwise hidden. Hiding is
+ * what makes a still-running session unreachable, so a removal whose closes
+ * did not all succeed does not hide at all: the operator keeps the rows, the
+ * cards and the Remove item, and can try again once the source is reachable.
+ *
+ * `closeSession` swallows every failure into the status line by design (a
+ * refusal is rendered verbatim, not thrown), so the count cannot be read off
+ * an exception. It reports its outcome instead, and the removal counts those.
+ */
+describe('a removal that could not end a session says so, and hides nothing', () => {
+  it('keeps the project drawn, and names the sessions still running', async () => {
+    const source = sourceWith(async () => {
+      throw new Error('interactive sessions are yours to stop');
+    });
+    render(<Canvas model={MODEL} source={source} />);
+    await removeProject('p1');
+
+    // THE LOAD-BEARING ASSERTION: the session vam failed to close is still on
+    // screen. A hidden project is a running session with no row to reach it by.
+    expect(heading('p1')).not.toBeNull();
+    expect(canvasText()).toContain('alpha');
+    expect(stored()).not.toContain('p1');
+
+    // And the sentence is about what happened, not about the plan.
+    expect(statusFull()).not.toContain('ended 1 session');
+    expect(statusFull()).toContain('a1');
+    expect(statusFull()).toContain('still');
+  });
+
+  it('reports the number it really ended when the closes succeed', async () => {
+    render(<Canvas model={MODEL} source={sourceWith(async () => {})} />);
+    await removeProject('p1');
+    expect(heading('p1')).toBeNull();
+    expect(statusFull()).toContain('ended 1 session');
+  });
+});

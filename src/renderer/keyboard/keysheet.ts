@@ -14,6 +14,7 @@
  * read what a key does.
  */
 
+import { TABS } from '../panels/tabs.js';
 import type { LayoutName } from '../prefs/panes.js';
 import {
   activeBindings,
@@ -137,18 +138,29 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   //
   // Still generated: the label is a function of the action's own digit, so the
   // sheet lists precisely the digits the table binds and no others.
+  // The Insert half is capped by the number of tabs the pane can hold.
+  // `Mod-1`..`Mod-9` are all bound, so the sheet used to print "tab 5 in the
+  // response pane" through "tab 9" over a bar of at most four: the binding is
+  // real and the caption was not, which is the one thing a generated sheet
+  // exists to make impossible. Digits past the last tab say what they do
+  // instead, the way the digit-9 Select caption already did.
   position: {
     group: 'navigation',
     label: (a) =>
       a.digit === 9
         ? 'position 9 — the LAST session in the sidebar, whatever the count'
-        : `position ${a.digit} — session ${a.digit} in the sidebar, tab ${a.digit} in the response pane`,
+        : a.digit <= TABS.length
+          ? `position ${a.digit} — session ${a.digit} in the sidebar, tab ${a.digit} in the response pane`
+          : `position ${a.digit} — session ${a.digit} in the sidebar`,
     byMode: (a) => ({
       select:
         a.digit === 9
           ? 'the LAST session in the sidebar, whatever the count'
           : `session ${a.digit} in the sidebar`,
-      insert: `tab ${a.digit} in the response pane`,
+      insert:
+        a.digit <= TABS.length
+          ? `tab ${a.digit} in the response pane`
+          : `nothing — the response pane holds ${TABS.length} tabs at most`,
     }),
   },
   revealProject: { group: 'navigation', label: () => 'reveal this session’s project' },
