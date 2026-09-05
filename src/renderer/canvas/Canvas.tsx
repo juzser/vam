@@ -52,8 +52,15 @@ import {
   type UsageSnapshot,
   type UsageWindow,
 } from '../../shared/usage.js';
-import { composeGroups } from '../domain/grouping.js';
-import type { CanvasModel, Decision, Project, SessionStatus, SourceId } from '../domain/model.js';
+import { composeGroups, groupSource } from '../domain/grouping.js';
+import type {
+  CanvasModel,
+  Decision,
+  Group,
+  Project,
+  SessionStatus,
+  SourceId,
+} from '../domain/model.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { StatusFilter } from '../domain/session-filter.js';
@@ -91,11 +98,13 @@ import {
   DEFAULT_FOCUS_SHARE,
   type EffectiveTheme,
   FOCUS_SHARE_OFF,
+  isGroupCollapsed,
   isProjectHidden,
   type Prefs,
   paletteFor,
   readPrefs,
   setDetailTab,
+  setGroupCollapsed,
   setIcon,
   setLastFocus,
   setLayout,
@@ -824,6 +833,35 @@ function CanvasInner({
     }
     return ids;
   }, [allEntries, prefs, hiddenSourceless]);
+
+  /**
+   * The groups folded shut, flattened across sources for the sidebar.
+   *
+   * Flattened because a group id is minted locally and derived from nothing,
+   * so it collides with nothing -- unlike a project id, which is a cwd digest
+   * unique only within its source and therefore has to stay keyed (see
+   * `hiddenProjects` above).
+   */
+  const collapsedGroups = useMemo(
+    () => Object.values(prefs.collapsedGroups).flat(),
+    [prefs.collapsedGroups],
+  );
+
+  /**
+   * Fold one group, and remember it. The source comes from the store the
+   * group is written in -- a group carries no source of its own, and guessing
+   * one from its members would have nothing to guess from while it is empty.
+   */
+  const toggleGroupCollapse = useCallback(
+    (group: Group) => {
+      const source = groupSource(prefs.groups, group.id);
+      if (source === null) return;
+      savePrefs(
+        setGroupCollapsed(prefs, source, group.id, !isGroupCollapsed(prefs, source, group.id)),
+      );
+    },
+    [prefs, savePrefs],
+  );
 
   const entries = useMemo(() => {
     // FIRST, and not only in the sidebar. A removed project whose cards stayed
@@ -2325,6 +2363,12 @@ function CanvasInner({
           }}
           onAddInProject={(project) => void createSession(project.id, project.name)}
           pendingAction={pendingAction}
+          // The group layer. `model.groups` rather than the filtered model's,
+          // because the only thing this prop is for is a group holding no live
+          // project -- see the prop -- and a filter cannot narrow one further.
+          groups={model.groups ?? []}
+          collapsedGroups={collapsedGroups}
+          onToggleGroupCollapse={toggleGroupCollapse}
           hiddenProjects={hiddenProjects}
           // Restoring is the only thing the sidebar asks for by itself: it
           // ends nothing, so there is nothing to serialise or refuse.
