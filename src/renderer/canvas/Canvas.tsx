@@ -269,15 +269,18 @@ export function truncateStatus(text: string): string {
 export function StatusCell({ text }: { readonly text: string }) {
   return (
     <Note text={text}>
-      {/* The suppression that used to sit here is gone rather than kept: with
-          `role="status"` the span is no longer non-interactive, so
-          `noNoninteractiveTabindex` does not fire and biome fails an unused
-          `biome-ignore` as an error. The tab stop is still the feature it
-          always was -- see the comment above. */}
       <span
         data-status
         role="status"
         aria-live="polite"
+        // The suppression sits HERE, on the line directly above the attribute,
+        // rather than above the element: biome reports this one at `tabIndex`
+        // and suppresses by line, so when these attributes went multi-line for
+        // the live region the old comment stopped covering it -- and said so
+        // twice, as an unused suppression AND as the rule firing. It must also
+        // be the LAST comment line before the attribute, which is why the
+        // reason below is short and this explanation is above it.
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see the doc comment.
         tabIndex={0}
         className="min-w-0 truncate text-ink-dim"
       >
