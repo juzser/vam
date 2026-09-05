@@ -19,6 +19,7 @@
 
 import { resolveProvider } from '../../../shared/providers.js';
 import type { SourceError } from '../../ipc/channels.js';
+import { whyNotARepository } from '../repo.js';
 import { vamSessionName } from '../tmux/argv.js';
 import { createVamSession, type TmuxRun } from '../tmux/spawn.js';
 import type { LiveAgent } from './agents.js';
@@ -59,7 +60,13 @@ export async function createSessionInProject(input: {
       message: `vam cannot tell which directory project ${projectId} is, so it will not start a session in a guessed one`,
     };
   }
-  return createSessionInDirectory({
+  // NOT through `createSessionInDirectory`, and the difference is the
+  // repository check that one applies. This path's cwd was not chosen in a
+  // dialog: it is the directory a session is ALREADY running in, resolved by
+  // digest from the live agent list. Narrowing it to repositories would refuse
+  // a second session beside a first one vam is drawing at that very moment --
+  // a refusal about a directory the operator never picked.
+  return spawnSessionIn({
     cwd: match.cwd,
     title,
     run,
@@ -81,8 +88,27 @@ export async function createSessionInProject(input: {
  * Whether the directory exists is tmux's question, not this module's -- `-c`
  * on a missing directory fails the spawn and `createVamSession` classifies
  * it, which keeps one answer for "that path is gone" instead of two.
+ *
+ * WHETHER IT IS A REPOSITORY IS THIS MODULE'S QUESTION, and it is asked here
+ * rather than in the renderer for the reason main re-normalises the provider
+ * id: this channel is reachable without the dialog, so a check the renderer
+ * made is not a check main may rely on. `repo.ts` says why the narrowing is a
+ * validation and not a list of known repositories. The refusal returns BEFORE
+ * anything spawns, and carries the path, so the operator who picked their
+ * downloads folder reads what was wrong with it rather than nothing at all.
  */
 export async function createSessionInDirectory(input: {
+  cwd: string;
+  title: string;
+  run: TmuxRun;
+  name?: string;
+  provider?: string;
+}): Promise<SourceError | null> {
+  return whyNotARepository(input.cwd) ?? spawnSessionIn(input);
+}
+
+/** The spawn both paths share, once the directory is settled. */
+async function spawnSessionIn(input: {
   cwd: string;
   title: string;
   run: TmuxRun;
