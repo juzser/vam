@@ -296,8 +296,6 @@ describe('new project — feedback and the in-flight guard', () => {
     const picker = withDialog(() => gate.promise);
     render(<Canvas model={MODEL} source={source} />);
     await clickNewProject();
-    // The button is disabled, so drive the handler directly -- a guard that
-    // exists only as `disabled` is one keyboard path away from being absent.
     await act(async () => {
       control().dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -307,6 +305,45 @@ describe('new project — feedback and the in-flight guard', () => {
       gate.settle(CHOSEN);
     });
     expect(spawned).toEqual([[CHOSEN, 'orchard']]);
+  });
+
+  /**
+   * THE TEST ABOVE IS NOT THE ONE THAT PROVES THE GUARD, and it was written
+   * believing it was: deleting the `pendingAction` check from `newProject`
+   * leaves it green, because a disabled button does not dispatch a click at
+   * all and the handler is never reached. The disabled attribute is a real
+   * defence and it is asserted -- but it only covers the control that is
+   * ITSELF pending.
+   *
+   * This is the reachable second click. `pending()` matches on the id, so
+   * while a session is being created in a project the Projects `+` is a live,
+   * enabled button, and only the guard inside the handler stops it opening a
+   * picker and spawning into a second directory. Deleting the guard reddens
+   * this one.
+   */
+  it('is refused, out loud, while another action is in flight', async () => {
+    const { source, spawned } = sourceWith(true);
+    const gate = deferred<void>();
+    const inner = (source as { source: SessionSource }).source as unknown as {
+      write: { createSession: () => Promise<void> };
+    };
+    inner.write.createSession = () => gate.promise;
+    const picker = withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await act(async () => {
+      screen.getByLabelText('new session in alpha').click();
+    });
+    // The Projects `+` is not the pending control, so it is still live.
+    expect(control().disabled).toBe(false);
+
+    await clickNewProject();
+    expect(picker.count).toBe(0);
+    expect(spawned).toEqual([]);
+    expect(statusBar()).toMatch(/still running/i);
+
+    await act(async () => {
+      gate.settle();
+    });
   });
 
   it('says "starting…" before the spawn, and clears the busy state when it lands', async () => {
