@@ -283,11 +283,20 @@ export function PhoneShell({
           <span className="flex-none">
             {tally.running} running · {tally.waiting} waiting · {tally.done} done
           </span>
-          {statusCell !== null && (
-            <span data-phone-status className="min-w-0 flex-1 truncate">
-              {statusCell}
-            </span>
-          )}
+          {/* Drawn always, empty and out of layout when there is nothing to
+              say. Conditional PRESENCE made "vam has refused nothing" and
+              "this screen has no refusal channel" the same observation to
+              anything that looked -- including a test, which then waited for
+              an element that only appears when something has gone wrong. The
+              display is inline because a Tailwind display utility on the same
+              element would outrank `[hidden]`. */}
+          <span
+            data-phone-status
+            style={statusCell === null ? { display: 'none' } : undefined}
+            className="min-w-0 flex-1 truncate"
+          >
+            {statusCell}
+          </span>
           <span className="flex-1" />
           {/* The only route into the error log on a device with no keyboard,
               and the surface most wanted at the worst moment. */}
@@ -347,14 +356,13 @@ export function PhoneShell({
       {/* The same refusal channel the list screen has. A rename or a close
           that is declined says so here, rather than into a status bar that is
           not drawn at all on this device. */}
-      {statusCell !== null && (
-        <div
-          data-phone-status
-          className="flex min-h-[24px] flex-none items-center border-line border-b bg-panel px-3 font-mono text-[12px] text-ink-dim"
-        >
-          {statusCell}
-        </div>
-      )}
+      <div
+        data-phone-status
+        style={statusCell === null ? { display: 'none' } : undefined}
+        className="flex min-h-[24px] flex-none items-center border-line border-b bg-panel px-3 font-mono text-[12px] text-ink-dim"
+      >
+        {statusCell}
+      </div>
 
       {/* Out of the way while the keyboard is up: 44px of navigation the
           operator has already used, out of the ~400px the keyboard leaves. */}

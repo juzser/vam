@@ -33,7 +33,14 @@ const statusText = () => document.querySelector('[data-phone-status]')?.textCont
 describe('refusals at phone width', () => {
   it('says why an icon cannot be picked, on the screen that refused', () => {
     render(<Canvas model={NO_SOURCE} source={phoneSource()} />);
-    expect(document.querySelector('[data-phone-status]')).toBeNull();
+    // Present and empty, never absent: the channel's PRESENCE says nothing
+    // about whether there is a refusal, because "vam has refused nothing" and
+    // "this screen has no refusal channel" must not be the same observation.
+    // What says it is the text, and the fact that it is out of layout.
+    const before = document.querySelector('[data-phone-status]') as HTMLElement;
+    expect(before).not.toBeNull();
+    expect(before.textContent).toBe('');
+    expect(before.style.display).toBe('none');
 
     act(() => {
       fireEvent.click(document.querySelector('[data-project-icon]') as Element);

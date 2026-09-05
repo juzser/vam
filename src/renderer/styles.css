@@ -893,18 +893,31 @@ body {
 /* WCAG 2.2 SC 2.5.5 (AAA) and Apple's own HIG figure. The record button ships
    at 28px, which is under even the AA floor of 24.
  *
- * ENUMERATED, never `[data-phone-shell] button`. That form reached every
- * control in the markup the shell HOSTS, including a 15px project-icon button
- * inside a 21px heading row, which it inflated to 44 and burst the row. A hit
- * area is a decision per control, and the controls below are the ones the
- * phone shell is answerable for. */
-[data-phone-shell] > header button,
-[data-phone-shell] > footer button,
-[data-phone-shell] [data-avatar-bar] button,
-[data-phone-shell] [data-step-chip],
-[data-phone-shell] [data-remote-limits] summary,
-[data-phone-shell] [data-prompt-record],
-[data-phone-shell] [data-status-pill] {
+ * BROAD, with named exceptions -- and it earned that shape the hard way. The
+ * first form here enumerated seven controls, and every one of those seven did
+ * measure 44 at 390px while SEVENTEEN of the twenty-three on the list screen
+ * did not: a 15px project icon, a 17px collapse, a 17px row menu, a 19px
+ * per-project new-session, three 26px header actions, a 30px search and a 28px
+ * footer button. None of them were in the list because none of them are markup
+ * this shell writes -- they belong to the panels it HOSTS, and the shell is
+ * answerable for what it puts on a phone screen, not only for what it authors.
+ * An enumeration omits whatever is added next; a rule with carve-outs does not.
+ *
+ * The earlier form burst a 21px project-heading row, and that is still true --
+ * the row is now 44px tall on a phone, which is the size a finger needs and
+ * the size the row should have been. It is a layout cost, taken deliberately.
+ *
+ * The one carve-out is the kind of element for which 44px is wrong rather than
+ * merely inconvenient: the composer's file input is 0x0 BECAUSE the visible
+ * `data-attach` button is its proxy, and inflating it would put a second,
+ * invisible 44px control over the first. Links are not sized here: `min-*`
+ * does nothing to a non-replaced inline box, so a link that needed a hit area
+ * would need a display change, which is a decision per link. */
+[data-phone-shell] button,
+[data-phone-shell] summary,
+[data-phone-shell] [role='button'],
+[data-phone-shell] input:not([type='file']),
+[data-phone-shell] textarea {
   min-height: 44px;
   min-width: 44px;
 }
@@ -917,8 +930,17 @@ body {
  * tap meant to open a session could close it instead. `display: none` is what
  * makes it absent rather than merely unseen: gone from hit testing and gone
  * from the accessibility tree. Closing a session has a deliberate, visible
- * route on the session screen's app bar instead. */
-[data-phone-shell] [data-session-row] button[aria-label^='close '] {
+ * route on the session screen's app bar instead -- `data-phone-close`, which
+ * is why this rule has to exempt it: it carries a `close ...` label too.
+ *
+ * MATCHED AGAINST THE REAL TREE, not written from memory of it. The first
+ * version of this rule read `[data-phone-shell] [data-session-row] button[...]`
+ * and matched nothing at all -- the `x` is a SIBLING of `[data-session-row]`,
+ * both children of the row's `group/row` wrapper. A unit test asserting the
+ * rule's TEXT stayed green over that for a whole release; only a computed
+ * style on the rendered node, or a hit test at 390px, can tell a rule that
+ * applies from a rule that was merely typed. Both now exist. */
+[data-phone-shell] button[aria-label^='close ']:not([data-phone-close]) {
   display: none;
 }
 
@@ -977,4 +999,40 @@ body {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+/*
+ * The icon picker fills its sheet, and this is what settles the iOS caveat
+ * above rather than retiring it.
+ *
+ * MEASURED at 390x844: the picker's panel is 433px of content, so a
+ * bottom-anchored sheet put its top edge at 411px -- and the emoji grid keeps
+ * its OWN scroller below its search box and category nav, which started at
+ * 581px. An iOS keyboard of 336px leaves the top 508px of the layout viewport
+ * visible, so after every scroll the sheet allowed, the first emoji still sat
+ * at 621px: 113px under the fold with nothing left to scroll. `dvh` cannot
+ * help, because on iOS the LAYOUT viewport is what `dvh` tracks and the
+ * keyboard does not shrink it.
+ *
+ * The fix is geometric, not a `visualViewport` listener: give the picker the
+ * full 85dvh so its scroller STARTS above the fold. The sheet then spans
+ * 127-844px, the grid's scroller begins around 257px, and any emoji can be
+ * scrolled to the top of a band the keyboard cannot reach. This is also the
+ * general shape of the problem -- a sheet is safe when its scroller's top edge
+ * is above the fold, and unsafe when a nested scroller pushes it below -- and
+ * the icon picker is the one host here with a nested scroller.
+ *
+ * `flex: 1 1 0` is how the grid grows: `emoji-picker-react` writes its height
+ * as an INLINE style, and flex-basis outranks the height property for the main
+ * size of a flex item, so no `!important` is needed. Its width comes from the
+ * component's own prop, which a stylesheet could not have overridden.
+ */
+.vam-phone [data-overlay-host] > [data-icon-picker] {
+  height: 85dvh;
+  display: flex;
+  flex-direction: column;
+}
+.vam-phone [data-icon-picker] > .epr-main {
+  flex: 1 1 0;
+  min-height: 0;
 }
