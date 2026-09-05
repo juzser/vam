@@ -22,7 +22,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
-import type { Prefs } from '../../src/renderer/prefs/prefs.js';
+import { PALETTE_TOKENS, type Prefs } from '../../src/renderer/prefs/prefs.js';
 
 function session(id: string): Session {
   return {
@@ -47,6 +47,11 @@ const KEY = 'vam.prefs.v1';
 const seed = (payload: Partial<Prefs>) => localStorage.setItem(KEY, JSON.stringify(payload));
 const stored = (): Partial<Prefs> => JSON.parse(localStorage.getItem(KEY) ?? '{}');
 const isLight = () => document.documentElement.classList.contains('light');
+
+const TOKEN = PALETTE_TOKENS[0]?.token ?? '';
+const BLUE = `#${'2f6feb'}`;
+const AMBER = `#${'b45309'}`;
+const inForce = () => document.documentElement.style.getPropertyValue(TOKEN);
 
 /** The OS, as `matchMedia` reports it — mutable, and countable in listeners. */
 const os = {
@@ -105,6 +110,7 @@ afterEach(() => {
   os.light = false;
   os.listeners.clear();
   document.documentElement.classList.remove('light');
+  document.documentElement.style.removeProperty(TOKEN);
 });
 
 describe('the sun button reads the effective theme, not the stored one', () => {
@@ -191,5 +197,38 @@ describe('system keeps following the OS after mount', () => {
     fireEvent.click(screen.getByLabelText('switch to light theme'));
     expect(stored().theme).toBe('light');
     expect(os.listeners.size, 'an explicit theme keeps no OS listener').toBe(0);
+  });
+});
+
+/**
+ * The overrides are stored per theme, so "which theme is in force" decides
+ * which ones are on the document — and under `system` that answer changes
+ * without anything in `prefs` changing. The class and the colours have to move
+ * together or the operator sees a light theme wearing dark's canvas.
+ */
+describe('the palette in force follows the theme in force', () => {
+  it('applies the stored theme’s bucket at mount, not the other one', () => {
+    seed({ theme: 'light', palette: { dark: { [TOKEN]: BLUE }, light: { [TOKEN]: AMBER } } });
+    render(<Canvas model={MODEL} />);
+    expect(inForce()).toBe(AMBER);
+  });
+
+  it('swaps the overrides when the OS flips under system', () => {
+    seed({ theme: 'system', palette: { dark: { [TOKEN]: BLUE }, light: { [TOKEN]: AMBER } } });
+    render(<Canvas model={MODEL} />);
+    expect(inForce()).toBe(BLUE);
+    os.flip(true);
+    expect(isLight()).toBe(true);
+    expect(inForce(), 'the class moved; the colours must move with it').toBe(AMBER);
+  });
+
+  it('takes the override off the document for a theme that has none', () => {
+    // Half a payload on purpose: storage holds whatever the last version
+    // wrote, and `Prefs` is what comes OUT of the reader, not what goes in.
+    seed({ theme: 'system', palette: { dark: { [TOKEN]: BLUE } } as Prefs['palette'] });
+    render(<Canvas model={MODEL} />);
+    expect(inForce()).toBe(BLUE);
+    os.flip(true);
+    expect(inForce(), 'an unset token falls through to the stylesheet').toBe('');
   });
 });

@@ -15,6 +15,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import {
+  type EffectiveTheme,
   EMPTY_PREFS,
   OUT_FONT_SIZE_MAX,
   OUT_FONT_SIZE_MIN,
@@ -72,12 +73,26 @@ afterEach(() => {
   document.documentElement.style.cssText = '';
 });
 
-function open(prefs: Prefs = EMPTY_PREFS) {
+function open(prefs: Prefs = EMPTY_PREFS, theme: EffectiveTheme = 'dark') {
   const onChange = vi.fn();
   const onClose = vi.fn();
-  const view = render(<SettingsOverlay prefs={prefs} onChange={onChange} onClose={onClose} />);
+  const view = render(
+    <SettingsOverlay prefs={prefs} theme={theme} onChange={onChange} onClose={onClose} />,
+  );
   return { onChange, onClose, view };
 }
+
+/** The swatch for the first offered token, in the theme the overlay is
+ *  editing. The theme is part of the accessible name on purpose: "overridden"
+ *  is a per-theme fact, and a name that omitted it would describe two
+ *  different controls with one string. */
+const swatch = (theme: EffectiveTheme) => screen.getByLabelText(`${FIRST.label} colour, ${theme}`);
+const resetOne = (theme: EffectiveTheme) =>
+  screen.getByLabelText(`reset ${FIRST.label} colour, ${theme}`);
+const dark = (palette: Record<string, string>): Prefs => ({
+  ...EMPTY_PREFS,
+  palette: { dark: palette, light: {} },
+});
 
 /** The prefs one `onChange` call carried. A helper rather than an inline cast:
  *  a cast over an optional chain reads as a value that might not exist, and the
@@ -104,30 +119,73 @@ describe('the appearance section adjusts colours', () => {
 
   it('writes the picked colour into prefs as an override', () => {
     const { onChange } = open();
-    const input = screen.getByLabelText(`${FIRST.label} colour`);
-    fireEvent.change(input, { target: { value: BLUE } });
+    fireEvent.change(swatch('dark'), { target: { value: BLUE } });
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(changed(onChange, 0).palette[FIRST.token]).toBe(BLUE);
+    expect(changed(onChange, 0).palette.dark[FIRST.token]).toBe(BLUE);
   });
 
   it('resets one colour by clearing the override, not by writing a value back', () => {
-    const prefs: Prefs = { ...EMPTY_PREFS, palette: { [FIRST.token]: BLUE } };
-    const { onChange } = open(prefs);
-    fireEvent.click(screen.getByLabelText(`reset ${FIRST.label} colour`));
+    const { onChange } = open(dark({ [FIRST.token]: BLUE }));
+    fireEvent.click(resetOne('dark'));
     const next = onChange.mock.calls[0]?.[0] as Prefs;
-    expect(Object.hasOwn(next.palette, FIRST.token)).toBe(false);
+    expect(Object.hasOwn(next.palette.dark, FIRST.token)).toBe(false);
   });
 
   it('offers no per-colour reset for a colour that was never overridden', () => {
     open();
-    expect(screen.queryByLabelText(`reset ${FIRST.label} colour`)).toBeNull();
+    expect(screen.queryByLabelText(`reset ${FIRST.label} colour, dark`)).toBeNull();
   });
 
   it('resets every colour at once', () => {
-    const prefs: Prefs = { ...EMPTY_PREFS, palette: { [FIRST.token]: BLUE } };
-    const { onChange } = open(prefs);
-    fireEvent.click(screen.getByRole('button', { name: 'reset colours' }));
-    expect(changed(onChange, 0).palette).toEqual({});
+    const { onChange } = open(dark({ [FIRST.token]: BLUE }));
+    fireEvent.click(screen.getByRole('button', { name: 'reset dark colours' }));
+    expect(changed(onChange, 0).palette.dark).toEqual({});
+  });
+});
+
+/**
+ * The operator has to be able to tell which theme they are editing, and the
+ * overlay's answer is "the one you are looking at" — so every control on the
+ * row belongs to the theme in force, and none of them can be reached for the
+ * other one.
+ */
+describe('the colours section edits the theme in force', () => {
+  it('names the theme it is editing in the heading', () => {
+    open(EMPTY_PREFS, 'light');
+    expect(screen.getByText('colours — light')).toBeTruthy();
+  });
+
+  it('writes into the bucket for the theme on screen', () => {
+    const { onChange } = open(EMPTY_PREFS, 'light');
+    fireEvent.change(swatch('light'), { target: { value: BLUE } });
+    const next = changed(onChange, 0);
+    expect(next.palette.light[FIRST.token]).toBe(BLUE);
+    expect(next.palette.dark[FIRST.token], 'dark was not on screen').toBeUndefined();
+  });
+
+  it('shows the other theme’s override as neither set nor resettable', () => {
+    open(dark({ [FIRST.token]: BLUE }), 'light');
+    expect(screen.queryByLabelText(`reset ${FIRST.label} colour, light`)).toBeNull();
+    expect(swatch('light').className, 'the ring must not claim light is overridden').toContain(
+      'ring-1',
+    );
+  });
+
+  it('offers no bulk reset when only the other theme has colours', () => {
+    open(dark({ [FIRST.token]: BLUE }), 'light');
+    expect(screen.queryByRole('button', { name: /reset .* colours/ })).toBeNull();
+  });
+
+  it('resets one theme without touching the other', () => {
+    const both: Prefs = {
+      ...EMPTY_PREFS,
+      palette: { dark: { [FIRST.token]: BLUE }, light: { [FIRST.token]: BLUE } },
+    };
+    const { onChange } = open(both, 'dark');
+    fireEvent.click(screen.getByRole('button', { name: 'reset dark colours' }));
+    const next = changed(onChange, 0);
+    expect(next.palette.dark).toEqual({});
+    expect(next.palette.light[FIRST.token]).toBe(BLUE);
   });
 });
 
@@ -137,9 +195,9 @@ describe('the override reaches the document', () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
     });
-    fireEvent.change(screen.getByLabelText(`${FIRST.label} colour`), { target: { value: BLUE } });
+    fireEvent.change(swatch('dark'), { target: { value: BLUE } });
     expect(document.documentElement.style.getPropertyValue(FIRST.token)).toBe(BLUE);
-    fireEvent.click(screen.getByLabelText(`reset ${FIRST.label} colour`));
+    fireEvent.click(resetOne('dark'));
     expect(document.documentElement.style.getPropertyValue(FIRST.token)).toBe('');
   });
 });

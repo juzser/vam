@@ -20,7 +20,7 @@ afterEach(cleanup);
 
 function open(prefs: Prefs = EMPTY_PREFS) {
   const onChange = vi.fn();
-  render(<SettingsOverlay prefs={prefs} onChange={onChange} onClose={vi.fn()} />);
+  render(<SettingsOverlay prefs={prefs} theme="dark" onChange={onChange} onClose={vi.fn()} />);
   return { onChange };
 }
 
