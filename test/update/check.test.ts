@@ -156,7 +156,9 @@ describe('the URL a click will open', () => {
   const release = (html_url: unknown) => ({ ...RELEASE, tag_name: 'v9.9.9', html_url });
 
   it('offers an https release URL on the expected host', async () => {
-    const status = await checkForUpdate('0.1.0', { fetch: respond(200, release(RELEASE.html_url)) });
+    const status = await checkForUpdate('0.1.0', {
+      fetch: respond(200, release(RELEASE.html_url)),
+    });
     expect(status).toEqual({ kind: 'available', version: '9.9.9', url: RELEASE.html_url });
   });
 

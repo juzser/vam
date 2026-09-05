@@ -592,9 +592,7 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
           ? new Error(
               `the remote endpoint could not bind port ${options.port}: it is already in use`,
             )
-          : new Error(
-              `the remote endpoint could not bind port ${options.port}: ${error.message}`,
-            ),
+          : new Error(`the remote endpoint could not bind port ${options.port}: ${error.message}`),
       );
     });
     server.listen(options.port, LOOPBACK, resolve);

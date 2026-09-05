@@ -57,7 +57,8 @@ const ACT_FAILED: Record<ActName, string> = {
   approve: 'vam could not allow that device.',
   deny: 'vam could not turn that device away.',
   remove: 'vam could not remove that device: it is still paired, and its token still works.',
-  revokeAll: 'vam could not revoke these devices: they are still paired, and their tokens still work.',
+  revokeAll:
+    'vam could not revoke these devices: they are still paired, and their tokens still work.',
 };
 
 /** The registry's own trouble, which no surface said before. */
@@ -70,7 +71,7 @@ const REGISTRY_TROUBLE: Record<'unreadable' | 'write-failed', string> = {
 
 /** The same tail on every one: the endpoint answered, so it is not the cause. */
 const ACT_TAIL =
-  " The remote endpoint is running -- this failed inside vam, most often a device registry it could not write. The list below is the last state vam read.";
+  ' The remote endpoint is running -- this failed inside vam, most often a device registry it could not write. The list below is the last state vam read.';
 
 export function desktopRemoteApi(): RemoteApi | undefined {
   return (globalThis.window?.api as unknown as BridgeWithRemote | undefined)?.remote;
