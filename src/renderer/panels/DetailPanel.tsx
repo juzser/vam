@@ -2343,8 +2343,9 @@ export function DetailPanel(props: DetailPanelProps) {
         {/* Not on a phone -- MOVED, not removed. Operator instruction: the
             phone's session screen is the prompt screen, and a full-width strip
             of words between the app bar and the output is chrome it cannot
-            afford (this bar and the deleted step rail cost ~215px of an 844px
-            viewport between them). The same views are icon buttons in the app
+            afford (this bar, the deleted step rail and the bar's second line
+            cost 107px of an 844px viewport between them, measured). The same
+            views are icon buttons in the app
             bar; `phone/PhoneShell.tsx` draws them, drives this pane's tab
             through `tabRequest`, and carries the note about what that cost. */}
         {!phone && (

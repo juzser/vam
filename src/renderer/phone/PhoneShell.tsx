@@ -13,11 +13,13 @@
  *
  * WHAT SCREEN TWO IS FOR, AND WHAT THAT COST. It is the prompt screen: read
  * the newest output, reply. It is NOT for browsing a session. Two strips of
- * browsing chrome used to sit between the app bar and the output and took
- * ~215px of an 844px viewport between them -- a step rail built here, and the
- * view tab bar `DetailPanel` draws. Both are gone from between the bar and the
- * output, on the operator's instruction. The desktop keeps both. The price, so
- * that the next reader does not restore them as an obvious omission:
+ * browsing chrome used to sit between the app bar and the output -- a step
+ * rail built here, and the view tab bar `DetailPanel` draws -- above a bar
+ * that was two rows deep. All three are gone, on the operator's instruction,
+ * and the desktop keeps the tabs. MEASURED at 390x844 against the demo
+ * fixture: the session's first line moves from y=209 to y=102, so 107px of an
+ * 844px viewport came back. The price, so that the next reader does not
+ * restore any of it as an obvious omission:
  *   - The views are NOT lost: `Response / PRs / Agents` are icon buttons in
  *     the app bar below, driving the pane through its `tabRequest` seam. What
  *     is lost is the WORD on each one, which is why every icon carries an
@@ -46,6 +48,7 @@
  * `ShortcutTip.tsx` — a subscription — not in a note here.
  */
 
+import { Bot, GitPullRequest, type LucideIcon, MessageSquare, SquareTerminal } from 'lucide-react';
 import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react';
 import { DetailPanel } from '../panels/DetailPanel.js';
 import { SessionList } from '../panels/SessionList.js';
@@ -98,14 +101,15 @@ export type PhoneShellProps = {
 };
 
 /**
- * One glyph per view. Text, not an icon set: vam ships none, and a dependency
- * for four characters would be the wrong trade.
+ * One icon per view, from the set the settings screen already draws with. A
+ * text glyph was tried first and read as punctuation at 16px -- `⎇` in
+ * particular is a keyboard symbol, not a branch, in the fonts a phone has.
  */
-const VIEW_ICON: Record<Tab, string> = {
-  Response: '▤',
-  PRs: '⎇',
-  Terminal: '❯',
-  Agents: '◎',
+const VIEW_ICON: Record<Tab, LucideIcon> = {
+  Response: MessageSquare,
+  PRs: GitPullRequest,
+  Terminal: SquareTerminal,
+  Agents: Bot,
 };
 
 /**
@@ -148,6 +152,7 @@ function ViewIcons({
       {tabs.map((tab) => {
         const on = tab === current;
         const count = tab === 'Agents' && runningAgents > 0 ? runningAgents : null;
+        const Icon = VIEW_ICON[tab];
         return (
           <button
             key={tab}
@@ -172,11 +177,13 @@ function ViewIcons({
             <span
               data-tap-skin
               className={[
-                'flex h-[30px] w-[30px] items-center justify-center rounded-[8px] text-[16px]',
+                'flex h-[30px] w-[30px] items-center justify-center rounded-[8px]',
                 on ? 'bg-segment-on text-ink' : 'text-ink-dim active:bg-raised',
               ].join(' ')}
             >
-              <span aria-hidden="true">{VIEW_ICON[tab]}</span>
+              {/* 16 is the size orca's phone icons cluster hard at, and above
+                  the 14 its own comment calls "read as decoration". */}
+              <Icon size={16} aria-hidden="true" />
             </span>
             {count !== null && (
               <span className="absolute top-[7px] right-[4px] font-mono text-[9.5px] text-ink-dim">

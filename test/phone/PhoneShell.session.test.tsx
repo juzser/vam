@@ -120,8 +120,10 @@ describe('the phone session screen', () => {
       expect(skin.className).toContain('h-[30px]');
       expect(skin.className).toContain('w-[30px]');
       // Orca's dominant glyph size, and above the 14 its own comment calls
-      // "read as decoration".
-      expect(skin.className).toContain('text-[16px]');
+      // "read as decoration". Asserted on the drawn SVG, which is the one
+      // place a size that does not reach the glyph would show.
+      const glyph = skin.querySelector('svg');
+      expect(glyph?.getAttribute('width')).toBe('16');
     }
   });
 
