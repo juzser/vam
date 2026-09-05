@@ -191,7 +191,13 @@ export function readDeliverResult(stdout: string, sessionId: string): SourceErro
     return {
       kind: 'refused',
       code: 'delivery-failed',
-      message: `session ${sessionId} rejected the prompt: ${result}`,
+      // THE REMEDY IS PART OF THE REFUSAL. This module's header records, from
+      // measurement, that the CLI declines while the target session is
+      // RUNNING -- and a session waiting on a question is running, so this
+      // fires precisely when a human answer is wanted. The keystroke route
+      // does reach a running session, and it is a tab away; a decline that
+      // does not say so leaves the operator with nowhere to go.
+      message: `session ${sessionId} rejected the prompt: ${result} — the CLI declines while a session is running; the Terminal tab types into the pane of a session vam started`,
     };
   }
   const answered = typeof body['session_id'] === 'string' ? body['session_id'] : null;

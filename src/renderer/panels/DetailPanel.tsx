@@ -93,6 +93,7 @@ import type {
   SessionStatus,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import { questionKeys } from '../keyboard/question-keys.js';
 import { ShortcutTip } from '../keyboard/ShortcutTip.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import { FocusEdge } from './FocusEdge.js';
@@ -1345,6 +1346,56 @@ function cycleWording(result: PaneSendResult): string | null {
   }
 }
 
+/**
+ * What a session says it is waiting on, and whether vam can do anything about
+ * it.
+ *
+ * WHY THIS IS SEPARATE FROM THE QUESTION CARD. The card is drawn from
+ * `AskUserQuestion` records in the transcript. The commonest thing a session
+ * actually blocks on -- a tool-approval prompt -- has no transcript record
+ * while it is open, so `questions` is empty for it, no card is drawn, and the
+ * pane used to show NOTHING for a session that was stuck. This is drawn from
+ * the session's own per-process file, which is the only surface that says so
+ * (`waitingFor` in `model.ts`).
+ *
+ * THE ASYMMETRY IS STATED, NOT HIDDEN. vam can SEE any session waiting; it can
+ * only type into one it started. So the second line names which of the three
+ * cases this row is in, and the third state -- vam never got to ask tmux -- is
+ * kept apart from "vam did not start this", because a refusal that names the
+ * wrong cause sends the operator somewhere the answer is not.
+ */
+function WaitingNote({
+  waitingFor,
+  vamControlled,
+}: {
+  readonly waitingFor: string | null;
+  readonly vamControlled: boolean | undefined;
+}) {
+  const reach =
+    vamControlled === true ? 'answerable' : vamControlled === false ? 'unreachable' : 'unknown';
+  const remedy =
+    reach === 'answerable'
+      ? 'vam started this session — the Terminal tab types into its pane'
+      : reach === 'unreachable'
+        ? 'vam did not start this session, so it cannot type into it — answer it in the terminal it is running in'
+        : 'vam could not ask tmux which pane this is, so it cannot say whether it could reach it';
+  return (
+    <div
+      data-session-waiting
+      data-waiting-reach={reach}
+      className="flex flex-col gap-1 rounded-[10px] border border-waiting bg-panel px-2.5 py-2"
+    >
+      <p className="text-[11.5px] text-ink">
+        {/* The cause VERBATIM. The observed values are a sample of an open set,
+          so an unrecognised one is printed rather than swallowed -- a session
+          waiting on something vam has no word for is still waiting. */}
+        waiting on you — {waitingFor ?? 'the session did not say what for'}
+      </p>
+      <p className="text-[10.5px] text-ink-faint">{remedy}</p>
+    </div>
+  );
+}
+
 function QuestionCard({
   questions,
   firstOptionRef,
@@ -1373,6 +1424,15 @@ function QuestionCard({
 }) {
   /** Which step is showing, and what has been marked on EACH of them. */
   const [showing, setShowing] = useState(0);
+  /**
+   * The card's grammar, off the operator's own table rather than out of the
+   * literals that used to sit in the handler below. The sheet already promised
+   * the `move` binding walks these options; now it does. Every shape of card
+   * -- single, multi-select, and each step of a multi-question call -- reads
+   * this one value, because a picker driven by one grammar beside a prompt
+   * driven by another is what the operator asked to stop.
+   */
+  const keys = questionKeys();
   const [marks, setMarks] = useState<Readonly<Record<string, readonly string[]>>>({});
   /** What the last Submit came back with, and whether one is in flight. */
   const [outcome, setOutcome] = useState<AnswerResult | null>(null);
@@ -1520,7 +1580,7 @@ function QuestionCard({
     // keyboard is already in the options list -- which is where `i` puts it.
     // The entry itself is a button outside the list, reached by Tab or mouse
     // and activated by Enter, Space or a click, like any other.
-    if (event.key === 'c') {
+    if (keys.chat.includes(event.key)) {
       event.preventDefault();
       onChat();
       return;
@@ -1552,14 +1612,9 @@ function QuestionCard({
      * -- down the options, across the questions. `H` — capital, a different key — is still the way
      * back to Select, and Escape still leaves.
      */
-    if (
-      event.key === 'h' ||
-      event.key === 'l' ||
-      event.key === 'ArrowLeft' ||
-      event.key === 'ArrowRight'
-    ) {
+    if (keys.prev.includes(event.key) || keys.next.includes(event.key)) {
       event.preventDefault();
-      walk(event.key === 'l' || event.key === 'ArrowRight' ? 1 : -1);
+      walk(keys.next.includes(event.key) ? 1 : -1);
       return;
     }
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -1583,8 +1638,8 @@ function QuestionCard({
       toggle(option.label);
       return;
     }
-    const down = event.key === 'ArrowDown' || event.key === 'j';
-    const up = event.key === 'ArrowUp' || event.key === 'k';
+    const down = keys.down.includes(event.key);
+    const up = keys.up.includes(event.key);
     if (!down && !up) return;
     event.preventDefault();
     const step = down ? 1 : -1;
@@ -1645,7 +1700,11 @@ function QuestionCard({
               data-sent={takenIds.has(one.id) ? 'true' : undefined}
               onClick={() => setShowing(index)}
               className={[
-                'cursor-pointer rounded-[5px] border px-1.5 py-0.5 text-[10px]',
+                // `vam-tap` is how a control names itself a touch target
+                // (`styles.css`); the phone floor is 44 and these were 21 tall.
+                // The question surface reached a phone viewport for the first
+                // time when the demo fixture gained a question at all.
+                'vam-tap cursor-pointer rounded-[5px] border px-1.5 py-0.5 text-[10px]',
                 index === showing ? 'border-running text-ink' : 'border-line text-ink-faint',
               ].join(' ')}
             >
@@ -1699,7 +1758,7 @@ function QuestionCard({
                 data-picked={picked.includes(option.label) ? 'true' : undefined}
                 onClick={() => toggle(option.label)}
                 className={[
-                  'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                  'vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
                   picked.includes(option.label)
                     ? 'border-running bg-raised'
                     : 'border-line hover:bg-raised',
@@ -1718,6 +1777,18 @@ function QuestionCard({
                     {option.description}
                   </span>
                 )}
+                {/* WHAT PICKING IT WOULD PRODUCE, under the reason for picking
+                  it and set in mono because that is usually what it is -- a
+                  colour, a path, a line of the thing that would be written. It
+                  was in the record all along and drawn nowhere. */}
+                {(option.preview ?? null) !== null && (
+                  <span
+                    data-question-preview
+                    className="max-w-full truncate font-mono text-[10px] text-ink-faint"
+                  >
+                    {option.preview}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -1731,9 +1802,16 @@ function QuestionCard({
             data-question-chat
             data-question-synthetic="true"
             onClick={onChat}
-            className="flex cursor-pointer items-baseline gap-1.5 rounded-[6px] border border-line border-dashed px-1.5 py-1 text-left hover:bg-raised"
+            className="vam-tap flex cursor-pointer items-baseline gap-1.5 rounded-[6px] border border-line border-dashed px-1.5 py-1 text-left hover:bg-raised"
           >
-            <span className="text-[10px] text-ink-faint tabular-nums">c</span>
+            {/* THE HINT COMES OFF THE SAME TABLE THE HANDLER READS, and is
+              not printed at all when the key is not held -- a caption naming a
+              key that does nothing is the defect, not the absence of one. */}
+            {keys.chat[0] !== undefined && (
+              <span data-question-chat-key className="text-[10px] text-ink-faint tabular-nums">
+                {keys.chat[0]}
+              </span>
+            )}
             <span className="min-w-0 text-[11px] text-ink">Chat about this</span>
             <span className="min-w-0 text-[10.5px] text-ink-faint">
               — vam adds this one; it opens the box below
@@ -2163,6 +2241,17 @@ export function DetailPanel(props: DetailPanelProps) {
    * reads exactly like an empty one, which is no card at all.
    */
   const questions = entry?.session.questions ?? [];
+  /**
+   * WHAT THE SESSION ITSELF SAYS IT IS BLOCKED ON, which is a different fact
+   * from `questions` and mostly a disjoint one: a tool-approval prompt writes
+   * no transcript record, so the surface that names it is the session's own
+   * per-process file and there is never a question to go with it. ABSENT --
+   * not null -- is "nothing says anyone is waiting"; see `model.ts`.
+   */
+  const waitingFor =
+    entry === null || !('waitingFor' in entry.session)
+      ? undefined
+      : (entry.session.waitingFor ?? null);
   /**
    * THE SET, not the question. One `AskUserQuestion` call can carry several,
    * and drawing the newest open one put question TWO of a two-question call on
@@ -2651,7 +2740,7 @@ export function DetailPanel(props: DetailPanelProps) {
         off the composer's so the composer could stand down while a question is
         open, and a block that outlived its contents would be a doubled seam
         and 25px of dead height in the pane's most common state. */}
-      {current !== 'Terminal' && newestQuestion !== null && (
+      {current !== 'Terminal' && (newestQuestion !== null || waitingFor !== undefined) && (
         <div
           data-question-bar
           className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3"
@@ -2672,6 +2761,13 @@ export function DetailPanel(props: DetailPanelProps) {
             turn a pane into a queue. It answers nothing; see `QuestionCard`.
             A session that asked none, or asked outside the tail vam reads
             (`TAIL_BYTES`), draws nothing here rather than an empty box. */}
+          {/* Above the card, because it is the more general fact: the card is
+            one shape of ask, this is "somebody is blocked on you" whatever the
+            shape. A session can be both -- a question on screen IS a waiting
+            state -- and then the note says which pane can answer it. */}
+          {waitingFor !== undefined && (
+            <WaitingNote waitingFor={waitingFor} vamControlled={entry?.session.vamControlled} />
+          )}
           {newestQuestion !== null && (
             <QuestionCard
               key={setId}
@@ -2893,9 +2989,21 @@ export function DetailPanel(props: DetailPanelProps) {
                   data-attach
                   aria-label="attach a text file to this prompt"
                   onClick={() => fileRef.current?.click()}
-                  className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border border-line-strong text-ink-dim hover:bg-raised hover:text-ink"
+                  className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
                 >
-                  <Paperclip size={12} strokeWidth={1.7} />
+                  {/* HIT ON THE ELEMENT, PAINT ON THE SKIN -- the same shape
+                  the phone's other class-A controls take, and the last one
+                  still painting its border on the 44 box. The button keeps its
+                  box and centres; the border, the ground and the radius move
+                  inward, where the phone rule can shrink them to 30 without
+                  touching the touch target (`styles.css`). */}
+                  <span
+                    aria-hidden="true"
+                    data-tap-skin
+                    className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-panel hover:bg-raised"
+                  >
+                    <Paperclip size={12} strokeWidth={1.7} />
+                  </span>
                 </button>
               </Note>
               {attachedName !== null && (

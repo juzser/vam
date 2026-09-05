@@ -44,11 +44,21 @@ export type PickerRow = { readonly label: string; readonly checked: boolean | nu
 export type Picker = { readonly rows: readonly PickerRow[]; readonly cursor: number };
 
 /**
- * One rendered row: an optional cursor glyph, the CLI's own number, an
- * optional checkbox, and the label. Anchored at both ends so a sentence that
- * merely mentions a number cannot pass for a row.
+ * One rendered row: an optional box border, an optional cursor glyph, the
+ * CLI's own number, an optional checkbox, and the label. Anchored at both ends
+ * so a sentence that merely mentions a number cannot pass for a row.
+ *
+ * THE BORDER IS WHY A PERMISSION PROMPT USED TO READ AS NO PICKER AT ALL.
+ * `AskUserQuestion` draws its options at the left margin, which is the only
+ * shape this pattern was ever fed; the CLI's tool-approval prompt draws the
+ * same numbered grammar inside a rounded box, so every row arrives as
+ * `│ ❯ 1. Yes … │`. `^\s*` cannot cross the leading `│`, so no line matched, so
+ * `readPicker` returned null and the one machine vam already had for answering
+ * a picker refused the commonest thing a session waits on. The border is
+ * OPTIONAL and appears once at each end: it cannot make a line that is not a
+ * row into one, because the number, the dot and the anchors are untouched.
  */
-const ROW = /^\s*(❯)?\s+(\d+)\.\s+(?:\[(.)\]\s+)?(\S.*?)\s*$/;
+const ROW = /^\s*│?\s*(❯)?\s+(\d+)\.\s+(?:\[(.)\]\s+)?(\S.*?)\s*│?\s*$/;
 
 /**
  * The picker on a captured screen, or `null` when what is there is not one.

@@ -50,7 +50,7 @@ import {
 import { paneForRow, replyToSession } from './reply.js';
 import { createBranchLookup } from './repo-branch.js';
 import { readPublishedPanes } from './session-pane.js';
-import { defaultSessionsRoot, readStatusUpdatedAt } from './session-status.js';
+import { defaultSessionsRoot, readProcessFacts } from './session-status.js';
 import { stopSession, stopSessionViaCli } from './stop.js';
 import {
   compactAge,
@@ -206,8 +206,13 @@ export async function loadClaudeCodeProjects(
   for (const agent of agents) {
     const read = reads.get(agent.sessionId) ?? NO_TRANSCRIPT;
     // Per row, because a row is a process. See the age comment below.
-    const statusUpdatedAt =
-      agent.pid === null ? null : await readStatusUpdatedAt(sessionsRoot, agent.pid);
+    // Per row, because a row is a process: the age below and the waiting
+    // state come out of the same file and are read together.
+    const facts =
+      agent.pid === null
+        ? { statusUpdatedAt: null }
+        : await readProcessFacts(sessionsRoot, agent.pid);
+    const statusUpdatedAt = facts.statusUpdatedAt;
     // TRANSCRIPT FIRST, `.git/HEAD` AS FALLBACK. `read.facts.branch` is
     // `gitBranch` as Claude Code itself recorded it per turn -- the branch the
     // session actually ran on, and it costs nothing extra since the transcript
@@ -261,6 +266,12 @@ export async function loadClaudeCodeProjects(
       // asked and then produced 128 KB of output while still waiting) is the
       // one where the question is stale anyway.
       questions: read.facts.questions,
+      // WHAT THE SESSION SAYS IT IS BLOCKED ON, out of the same per-process
+      // file the age came from. A tool-approval prompt is a TUI state and
+      // writes no transcript record, so `questions` above is empty for it and
+      // this is the only surface that names it. Spread, so a row that is not
+      // waiting carries no key at all -- see `waitingFor` in `model.ts`.
+      ...('waitingFor' in facts ? { waitingFor: facts.waitingFor } : {}),
       source: 'claude-code',
       // An INTERACTIVE row is a terminal a person is sitting in front of, so
       // `human` is a fact there. A BACKGROUND row is not: measured against

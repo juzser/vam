@@ -44,6 +44,13 @@ export const DEMO_MODEL: CanvasModel = {
       source: 'black-smith',
       sessions: [
         {
+          // A SESSION BLOCKED WITH NOTHING TO DRAW A CARD FROM, which is the
+          // commonest case there is: a tool-approval prompt writes no
+          // transcript record while it is open, so `questions` is empty and
+          // only the session's own per-process file says it is stuck. vam
+          // started this one, so the note can offer the terminal.
+          waitingFor: 'permission prompt',
+          vamControlled: true,
           id: 'factory-sse-1',
           title: 'factory-sse-1',
           icon: '🔨',
@@ -181,6 +188,55 @@ export const DEMO_MODEL: CanvasModel = {
       source: 'orca',
       sessions: [
         {
+          // THE ASKING SHAPES, so that a screenshot and a Playwright run can
+          // see them at all. Until this landed, `questions` appeared nowhere in
+          // this fixture and nothing under `e2e/` mentioned one, so the entire
+          // question surface -- single-select, multi-select and the 42% of real
+          // calls that carry more than one question -- was invisible to every
+          // non-unit gate in the repo. One call, two questions, and the two
+          // shapes side by side.
+          questions: [
+            {
+              id: 'toolu_demo:0',
+              header: 'Transport',
+              question: 'How should the canvas receive updates while a run is live?',
+              multiSelect: false,
+              options: [
+                {
+                  label: 'Server-sent events',
+                  description: 'one long-lived GET, the server pushes',
+                  preview: 'GET /events  →  text/event-stream',
+                },
+                {
+                  label: 'Long poll',
+                  description: 'a request per change, simplest to serve',
+                  preview: 'GET /changes?since=41  →  200 after 0-30s',
+                },
+                {
+                  label: 'Web socket',
+                  description: 'two-way, and vam needs one way',
+                  preview: 'Upgrade: websocket',
+                },
+              ],
+              answer: null,
+            },
+            {
+              id: 'toolu_demo:1',
+              header: 'Retries',
+              question: 'Which drops should the client retry by itself?',
+              multiSelect: true,
+              options: [
+                { label: 'The server restarted', description: 'connection closed cleanly' },
+                { label: 'The browser cut it off', description: 'the five-second ceiling' },
+                { label: 'A proxy timed out', description: 'no bytes for a minute' },
+              ],
+              answer: null,
+            },
+          ],
+          // THE UNANSWERABLE HALF, drawn on purpose. vam did not start this
+          // session, so no Submit is offered over the card at all -- a control
+          // that could only ever come back refused is worse than none.
+          vamControlled: false,
           id: 'vam-build-1',
           title: 'vam-build-1',
           icon: '📐',

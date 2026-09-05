@@ -128,6 +128,38 @@ async function openFirstSession(page: Page): Promise<void> {
   await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
 }
 
+/**
+ * Every painted skin on the screen the page is currently showing, with the box
+ * that takes the tap beside it.
+ *
+ * A function rather than one `$$eval`, because the skins are spread over two
+ * screens and only one of them can be on the page at a time.
+ */
+async function readSkins(page: Page): Promise<
+  readonly {
+    label: string;
+    w: number;
+    h: number;
+    ownerW: number;
+    ownerH: number;
+  }[]
+> {
+  return page.$$eval('[data-phone-shell] [data-tap-skin]', (els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect();
+      const owner = el.closest('button, summary, [role="button"]');
+      const o = owner?.getBoundingClientRect() ?? new DOMRect();
+      return {
+        label: (owner?.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 30),
+        w: Math.round(r.width * 10) / 10,
+        h: Math.round(r.height * 10) / 10,
+        ownerW: Math.round(o.width * 10) / 10,
+        ownerH: Math.round(o.height * 10) / 10,
+      };
+    }),
+  );
+}
+
 test.describe('the phone shell at 390px', () => {
   test('the two screens navigate: list -> session -> back', async ({ page }) => {
     await openDemo(page);
@@ -281,37 +313,67 @@ test.describe('the phone shell at 390px', () => {
    */
   test('every painted skin is smaller than the box that takes the tap', async ({ page }) => {
     await openDemo(page);
-    const skins = await page.$$eval('[data-phone-shell] [data-tap-skin]', (els) =>
-      els.map((el) => {
-        const r = el.getBoundingClientRect();
-        const owner = el.closest('button, summary, [role="button"]');
-        const o = owner?.getBoundingClientRect() ?? new DOMRect();
-        return {
-          label: (owner?.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 30),
-          w: Math.round(r.width * 10) / 10,
-          h: Math.round(r.height * 10) / 10,
-          ownerW: Math.round(o.width * 10) / 10,
-          ownerH: Math.round(o.height * 10) / 10,
-        };
-      }),
-    );
+    // BOTH SCREENS, AND A FLOOR ON EACH, which is not the same guard as one
+    // floor over the sum. The list screen carries three skins and the session
+    // screen four -- the response tab strip and the composer's attach control,
+    // which was the last class-A control still painting its border on the 44
+    // box. A sweep of the list alone could not see it at all; a single floor
+    // over both screens could be satisfied by the list's three plus any one of
+    // the session's, so removing the attach skin again would leave the count
+    // green. Two floors are what make the number mean the thing it counts.
+    const listSkins = await readSkins(page);
+    await openFirstSession(page);
+    const sessionSkins = await readSkins(page);
+    const skins = [...listSkins, ...sessionSkins];
 
-    expect(skins.length, 'painted skins found on the list screen').toBeGreaterThanOrEqual(3);
+    expect(listSkins.length, 'painted skins on the LIST screen').toBeGreaterThanOrEqual(3);
+    expect(sessionSkins.length, 'painted skins on the SESSION screen').toBeGreaterThanOrEqual(4);
 
     const fmt = (s: (typeof skins)[number]) =>
       `"${s.label}" paints ${s.w}x${s.h} inside a ${s.ownerW}x${s.ownerH} hit box`;
     expect(
       skins.length === 0
-        ? ['no [data-tap-skin] on the list screen at all -- this guard measured nothing']
+        ? ['no [data-tap-skin] on either phone screen -- this guard measured nothing']
         : skins.filter((s) => s.w > SKIN_MAX_W || s.h > SKIN_MAX_H).map(fmt),
       `skins painting larger than ${SKIN_MAX_W}x${SKIN_MAX_H}`,
     ).toEqual([]);
     expect(
       skins.length === 0
-        ? ['no [data-tap-skin] on the list screen at all -- this guard measured nothing']
+        ? ['no [data-tap-skin] on either phone screen -- this guard measured nothing']
         : skins.filter((s) => s.ownerW < TOUCH_MIN || s.ownerH < TOUCH_MIN).map(fmt),
       'skins whose owner stopped being a 44px touch target',
     ).toEqual([]);
+  });
+
+  /**
+   * THE QUESTION CARD, at a phone viewport, for the first time.
+   *
+   * Until the demo fixture gained a question there was none to look at: the
+   * word `questions` appeared nowhere in it and nowhere under `e2e/`, so every
+   * "the card renders" verdict in this repo rested on happy-dom, where no
+   * stylesheet is loaded and every box is zero. The first run that did look
+   * found the step tabs 21px tall and the chat entry 26.8 -- half a touch
+   * target each, on the surface whose whole job is to be tapped.
+   */
+  test('the question card is made of touch targets too', async ({ page }) => {
+    await openDemo(page);
+    const asking = page.locator('[data-phone-shell] [data-session-row]', {
+      has: page.locator('text=vam-build-1'),
+    });
+    const box = await asking.first().boundingBox();
+    if (box === null) throw new Error('no session row asking a question');
+    await page.touchscreen.tap(box.x + 60, box.y + box.height / 2);
+    await expect(page.locator('[data-question]')).toBeVisible();
+
+    // The corpus, asserted before it is filtered: a card that failed to draw
+    // would otherwise pass this test loudest.
+    const steps = await page.locator('[data-question-step]').count();
+    expect(steps, 'step tabs on a two-question call').toBeGreaterThanOrEqual(2);
+    expect(await page.locator('[data-question-option]').count()).toBeGreaterThanOrEqual(3);
+
+    const inCard = (await controls(page)).filter((b) => b.hooks.includes('data-question'));
+    expect(inCard.length, 'controls measured inside the card').toBeGreaterThanOrEqual(6);
+    expect(undersized(inCard), 'question-card controls under 44x44').toEqual([]);
   });
 
   test('every interactive control on the SESSION screen is at least 44x44', async ({ page }) => {

@@ -194,6 +194,23 @@ export type PullRequestList =
 export type QuestionOption = {
   readonly label: string;
   readonly description: string | null;
+  /**
+   * What picking this option would PRODUCE, as the tool wrote it -- a colour,
+   * a path, a snippet of the thing that would be created. `null` when the
+   * record carried none.
+   *
+   * NOT the description. The description is why you would pick it; this is
+   * what you would get, and 127 of 917 options in real data carry one. It was
+   * dropped for as long as this type had two fields.
+   *
+   * OPTIONAL, and `null` and absent mean the same thing here -- the tool
+   * offered none. That is not the three-state shape `vamControlled` and
+   * `questions` use, and deliberately: those distinguish "vam looked and found
+   * nothing" from "vam could not look", a distinction one field of one option
+   * inside a record vam has already parsed cannot have. Optional keeps every
+   * fixture that predates the field valid, which is what it is worth.
+   */
+  readonly preview?: string | null;
 };
 
 /**
@@ -367,6 +384,28 @@ export type Session = {
    * "this session is not waiting on you".
    */
   readonly questions?: readonly AgentQuestion[];
+  /**
+   * What this session says it is WAITING ON, in its own words.
+   *
+   * WHY THIS IS NOT `status`. `status` is `waiting` for anything that is not
+   * running, which includes a session sitting idle at its prompt with nobody
+   * blocked on anything. This field is present only when the session itself
+   * reported that it is blocked on a person -- a tool-approval prompt, a
+   * question typed into the TUI -- and it is the ONLY surface that can say so:
+   * an approval prompt writes no transcript record, so `questions` above is
+   * empty for it and always will be.
+   *
+   * THREE STATES. ABSENT is "nothing says this session is waiting on anyone",
+   * which covers both a running session and a source with no such surface.
+   * PRESENT AND NULL is "waiting, cause unnamed". A STRING is the cause
+   * verbatim, and it is verbatim rather than an enum because the observed
+   * values are a sample of an open set (`session-status.ts`).
+   *
+   * A CAUSE IS NOT A CONTROL. Every source can produce this; only a session
+   * vam started can be answered. Anything drawn from it must say which of the
+   * two it is looking at rather than offering a control that will refuse.
+   */
+  readonly waitingFor?: string | null;
 };
 
 /**

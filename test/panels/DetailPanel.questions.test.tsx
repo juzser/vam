@@ -540,3 +540,20 @@ describe('the question block draws only when there is a question', () => {
     expect(composerBar()?.className).not.toContain('border-t');
   });
 });
+
+describe('an option that carries a preview', () => {
+  it('draws it under the description, and draws nothing when there is none', () => {
+    draw([
+      {
+        ...QUESTION,
+        options: [
+          { label: 'Crimson', description: 'a deep red', preview: 'rgb(143, 29, 44)' },
+          { label: 'Cobalt', description: null, preview: null },
+        ],
+      },
+    ]);
+    const previews = all('[data-question-preview]');
+    expect(previews).toHaveLength(1);
+    expect(previews[0]?.textContent).toBe('rgb(143, 29, 44)');
+  });
+});

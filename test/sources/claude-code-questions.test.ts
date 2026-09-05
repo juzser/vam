@@ -51,8 +51,8 @@ describe('AskUserQuestion, as the transcript records it', () => {
     expect(question?.header).toBe('Providers');
     expect(question?.multiSelect).toBe(true);
     expect(question?.options).toEqual([
-      { label: 'Codex CLI', description: 'a second CLI agent, read the same way' },
-      { label: 'Aider', description: 'a local editor agent' },
+      { label: 'Codex CLI', description: 'a second CLI agent, read the same way', preview: null },
+      { label: 'Aider', description: 'a local editor agent', preview: null },
     ]);
   });
 
@@ -111,7 +111,7 @@ describe('AskUserQuestion, malformed -- data we do not have, never a throw', () 
       options: [{ description: 'no label' }, { label: 'ok' }],
     };
     expect(facts(jsonl(ask('toolu_1', [ragged]))).questions[0]?.options).toEqual([
-      { label: 'ok', description: null },
+      { label: 'ok', description: null, preview: null },
     ]);
   });
 
@@ -133,5 +133,39 @@ describe('AskUserQuestion, malformed -- data we do not have, never a throw', () 
       [],
     );
     expect(facts('').questions).toEqual([]);
+  });
+});
+
+/**
+ * `preview` -- 127 of 917 options in the operator's own data carry one, and it
+ * was dropped on the floor: `readOption` kept `label` and `description` and
+ * `QuestionOption` had no third field. It is what picking the option would
+ * PRODUCE, which is a different thing from why you would pick it.
+ */
+describe('an option that carries a preview', () => {
+  const withPreview = (preview: unknown) =>
+    facts(
+      jsonl(
+        ask('toolu_p', [
+          {
+            question: 'Which colour?',
+            options: [{ label: 'Crimson', description: 'a deep red', preview }],
+          },
+        ]),
+      ),
+    ).questions[0]?.options[0];
+
+  it('keeps it beside the description rather than dropping it', () => {
+    expect(withPreview('rgb(143, 29, 44)')).toEqual({
+      label: 'Crimson',
+      description: 'a deep red',
+      preview: 'rgb(143, 29, 44)',
+    });
+  });
+
+  it('is null, not absent, for an option that carries none or carries junk', () => {
+    for (const value of [undefined, '', 42, { of: 'a thing' }]) {
+      expect(withPreview(value)?.preview).toBeNull();
+    }
   });
 });
