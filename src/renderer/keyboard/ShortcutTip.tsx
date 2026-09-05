@@ -14,7 +14,25 @@
  * silently is the same lie in a smaller font.
  *
  * `Note` is its sibling: same Radix machinery, same reason (a `title` never
- * opens on keyboard focus), for notes that name no action.
+ * opens on keyboard focus), for notes that name no action. The bindings come
+ * from `chords.ts`, the labels from `keysheet.ts` — `describeAction` lives in
+ * the second, not the first.
+ *
+ * TWO INVARIANTS IT DEPENDS ON AND DOES NOT ENFORCE.
+ *
+ * 1. `activeBindings()` is a module singleton, not React state, so a rebind
+ *    lands in the next OPEN rather than in an open tip. Nothing here would
+ *    notice; what makes that safe is that settings is a MODAL overlay, so no
+ *    tip can be open while the keys are being edited. A shell that ever puts
+ *    the keyboard editor and the chrome on screen together breaks it, and the
+ *    fix is a subscription here, not a note there.
+ * 2. `Tooltip.Trigger asChild` adds NO element: the trigger is the caller's own
+ *    button with a few attributes merged in. Wrapping is therefore invisible to
+ *    descendant selectors — `group-hover/row:` reveals, a `button` rule setting
+ *    a minimum touch target — which is what makes it safe to apply per button
+ *    in panels other people are editing. `test/keyboard/shortcut-tip.test.tsx`
+ *    holds that shape, so a change of primitive fails a test rather than
+ *    quietly restructuring somebody's panel.
  */
 
 import * as Tooltip from '@radix-ui/react-tooltip';

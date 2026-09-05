@@ -143,3 +143,23 @@ describe('the sidebar is wired to it', () => {
     expect(text).toContain('Q');
   });
 });
+
+describe('wrapping a button changes no DOM the panels around it depend on', () => {
+  it('adds no element: the trigger stays its parent’s own child, classes intact', () => {
+    render(
+      <div data-row="row" className="group/row">
+        <ShortcutTip label="Close this session" action={{ kind: 'close' }}>
+          <button type="button" className="opacity-0 group-hover/row:opacity-100">
+            ×
+          </button>
+        </ShortcutTip>
+      </div>,
+    );
+    const button = screen.getByRole('button');
+    // A wrapper span here would break every `group-hover/row:` reveal and any
+    // rule matching a row's direct children — the shape, not a count.
+    expect(button.parentElement?.getAttribute('data-row')).toBe('row');
+    expect(button.className).toBe('opacity-0 group-hover/row:opacity-100');
+    expect(button.tagName).toBe('BUTTON');
+  });
+});

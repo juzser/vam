@@ -55,6 +55,8 @@ import { revealScrollTop } from './reveal-row.js';
  *  every hint below reads the chord in force rather than a shipped default. */
 const SETTINGS_ACTION: KeyAction = { kind: 'settings' };
 const SEARCH_ACTION: KeyAction = { kind: 'search' };
+const FILTER_MENU_ACTION: KeyAction = { kind: 'filterMenu' };
+const CLOSE_ACTION: KeyAction = { kind: 'close' };
 const NEW_SESSION_ACTION: KeyAction = { kind: 'newSession' };
 
 /** The chord printed INSIDE a button, beside its name — and nothing at all
@@ -863,14 +865,17 @@ export function SessionList(props: SessionListProps) {
               <Settings size={14} strokeWidth={1.5} />
             </button>
           </ShortcutTip>
-          <button
-            type="button"
-            onClick={onToggleTheme}
-            aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
-            className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
-          >
-            <Sun size={14} strokeWidth={1.5} />
-          </button>
+          {/* No chord reaches the theme toggle, so the tip is its label. */}
+          <ShortcutTip label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
+              className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+            >
+              <Sun size={14} strokeWidth={1.5} />
+            </button>
+          </ShortcutTip>
         </div>
 
         <div className="flex items-center gap-2">
@@ -981,39 +986,41 @@ export function SessionList(props: SessionListProps) {
         </button>
         {/* Search answers "the one called permalink"; this answers "the ones
             that stopped" — two different questions, so two controls. */}
-        <button
-          type="button"
-          ref={menuButtonRef}
-          data-filter-toggle
-          aria-haspopup="dialog"
-          aria-expanded={filterMenuOpen}
-          aria-label="filter sessions"
-          onClick={() => onFilterMenuToggle(!filterMenuOpen)}
-          className={[
-            'relative flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border bg-panel',
-            filterMenuOpen || narrowing
-              ? 'border-line-loud text-ink'
-              : 'border-line text-ink-faint hover:border-line-strong',
-          ].join(' ')}
-        >
-          <Filter size={13} strokeWidth={1.6} />
-          {/* Absent at zero, not a zero. A badge reading "0" is a badge
-              claiming something is narrowed when nothing is, and the count
-              this draws is the count of rules actually excluding sessions.
-              A DEFAULT is not one of them: it is not a rule the operator
-              applied, so a fresh install would open showing a "1" for a
-              choice nobody made. The border above still reports it, and the
-              popover names it. The colour is `filter-badge`, which carries
-              waiting's amber under its own name — see `styles.css`. */}
-          {activeFilters > 0 && (
-            <span
-              data-filter-badge
-              className="-top-1 -right-1 absolute flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-filter-badge px-[3px] font-mono text-[8.5px] text-canvas"
-            >
-              {activeFilters}
-            </span>
-          )}
-        </button>
+        <ShortcutTip label="Filter sessions" action={FILTER_MENU_ACTION}>
+          <button
+            type="button"
+            ref={menuButtonRef}
+            data-filter-toggle
+            aria-haspopup="dialog"
+            aria-expanded={filterMenuOpen}
+            aria-label="filter sessions"
+            onClick={() => onFilterMenuToggle(!filterMenuOpen)}
+            className={[
+              'relative flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border bg-panel',
+              filterMenuOpen || narrowing
+                ? 'border-line-loud text-ink'
+                : 'border-line text-ink-faint hover:border-line-strong',
+            ].join(' ')}
+          >
+            <Filter size={13} strokeWidth={1.6} />
+            {/* Absent at zero, not a zero. A badge reading "0" is a badge
+                claiming something is narrowed when nothing is, and the count
+                this draws is the count of rules actually excluding sessions.
+                A DEFAULT is not one of them: it is not a rule the operator
+                applied, so a fresh install would open showing a "1" for a
+                choice nobody made. The border above still reports it, and the
+                popover names it. The colour is `filter-badge`, which carries
+                waiting's amber under its own name — see `styles.css`. */}
+            {activeFilters > 0 && (
+              <span
+                data-filter-badge
+                className="-top-1 -right-1 absolute flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-filter-badge px-[3px] font-mono text-[8.5px] text-canvas"
+              >
+                {activeFilters}
+              </span>
+            )}
+          </button>
+        </ShortcutTip>
 
         {filterMenuOpen && (
           <div
@@ -1747,18 +1754,20 @@ export function SessionList(props: SessionListProps) {
                               {/* Mouse route to the same thing `x` does. Hidden until the
                             row is hovered, so a list at rest is a list of names
                             rather than a row of buttons. */}
-                              <button
-                                type="button"
-                                onClick={() => onClose(session.id)}
-                                aria-label={`close ${session.title}`}
-                                {...pending(session.id, `Stopping ${session.title}…`)}
-                                className={[
-                                  'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
-                                  'opacity-0 hover:bg-panel hover:text-failed group-hover/row:opacity-100',
-                                ].join(' ')}
-                              >
-                                ×
-                              </button>
+                              <ShortcutTip label="Close this session" action={CLOSE_ACTION}>
+                                <button
+                                  type="button"
+                                  onClick={() => onClose(session.id)}
+                                  aria-label={`close ${session.title}`}
+                                  {...pending(session.id, `Stopping ${session.title}…`)}
+                                  className={[
+                                    'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
+                                    'opacity-0 hover:bg-panel hover:text-failed group-hover/row:opacity-100',
+                                  ].join(' ')}
+                                >
+                                  ×
+                                </button>
+                              </ShortcutTip>
 
                               {/* The indicator, over the row rather than beside
                                 it. Three channels for one fact, because one of
@@ -1861,25 +1870,27 @@ export function SessionList(props: SessionListProps) {
         {/* The footer names no project: it starts one in the FOCUSED session's,
             exactly as `o` does, so it is pending for that same project id and
             for no other. */}
-        <button
-          type="button"
-          onClick={onAdd}
-          aria-label="new session"
-          {...pending(
-            entries.find((candidate) => candidate.session.id === focusedSessionId)?.project.id ??
-              '',
-            'Starting a session…',
-          )}
-          className="flex h-7 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[8px] border border-ink-ghost text-[11.5px] text-ink-dim hover:border-ink-faint hover:text-ink"
-        >
-          <Plus size={13} strokeWidth={1.7} />
-          New session
-          {/* Read, not written: this cell used to spell `o`. */}
-          <InlineChord
-            action={NEW_SESSION_ACTION}
-            className="ml-0.5 font-mono text-[10px] text-ink-faint"
-          />
-        </button>
+        <ShortcutTip label="New session" action={NEW_SESSION_ACTION}>
+          <button
+            type="button"
+            onClick={onAdd}
+            aria-label="new session"
+            {...pending(
+              entries.find((candidate) => candidate.session.id === focusedSessionId)?.project.id ??
+                '',
+              'Starting a session…',
+            )}
+            className="flex h-7 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[8px] border border-ink-ghost text-[11.5px] text-ink-dim hover:border-ink-faint hover:text-ink"
+          >
+            <Plus size={13} strokeWidth={1.7} />
+            New session
+            {/* Read, not written: this cell used to spell `o`. */}
+            <InlineChord
+              action={NEW_SESSION_ACTION}
+              className="ml-0.5 font-mono text-[10px] text-ink-faint"
+            />
+          </button>
+        </ShortcutTip>
       </div>
     </aside>
   );

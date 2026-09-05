@@ -2722,25 +2722,29 @@ function CanvasInner({
             </span>
 
             <div className="flex h-[26px] shrink-0 items-center overflow-hidden rounded-[7px] border border-line text-ink-dim">
-              <button
-                type="button"
-                aria-label="zoom out"
-                onClick={() => zoomOut()}
-                className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
-              >
-                −
-              </button>
+              <ShortcutTip label="Zoom out">
+                <button
+                  type="button"
+                  aria-label="zoom out"
+                  onClick={() => zoomOut()}
+                  className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
+                >
+                  −
+                </button>
+              </ShortcutTip>
               <span className="flex h-full items-center border-line border-r border-l px-1.5 font-mono text-[10px] text-ink">
                 {zoomPct}%
               </span>
-              <button
-                type="button"
-                aria-label="zoom in"
-                onClick={() => zoomIn()}
-                className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
-              >
-                +
-              </button>
+              <ShortcutTip label="Zoom in">
+                <button
+                  type="button"
+                  aria-label="zoom in"
+                  onClick={() => zoomIn()}
+                  className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
+                >
+                  +
+                </button>
+              </ShortcutTip>
             </div>
 
             {/* No chord reaches it, so the tip is the label alone. */}
@@ -3067,14 +3071,16 @@ function CanvasInner({
               was whatever the operator managed to read. Hidden entirely while
               nothing has broken -- a permanent `0` is noise. */}
           {failureCount > 0 && (
-            <button
-              type="button"
-              data-error-log-button
-              onClick={() => setErrorLogOpen(true)}
-              className="rounded-[4px] border border-line-strong px-1.5 py-px text-failed"
-            >
-              {failureCount} {failureCount === 1 ? 'failure' : 'failures'}
-            </button>
+            <ShortcutTip label="Open the error log" action={{ kind: 'errorLog' }}>
+              <button
+                type="button"
+                data-error-log-button
+                onClick={() => setErrorLogOpen(true)}
+                className="rounded-[4px] border border-line-strong px-1.5 py-px text-failed"
+              >
+                {failureCount} {failureCount === 1 ? 'failure' : 'failures'}
+              </button>
+            </ShortcutTip>
           )}
 
           <span className="flex-1" />
