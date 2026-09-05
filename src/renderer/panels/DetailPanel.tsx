@@ -449,6 +449,17 @@ export type DetailPanelProps = {
    */
   readonly width?: number;
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
+  /**
+   * Is this pane the whole screen, with an app bar above it?
+   *
+   * The phone shell draws the session's title and its project in that bar, and
+   * this header block drew both again immediately below -- verbatim, ~48px of
+   * an 844px screen (UI spec D2). On phone the bar takes the epic and the agent
+   * count too, and `data-prompt-target` moves there with them, so the guarantee
+   * that hook carries -- SOMETHING on screen names the session about to be
+   * written to -- is kept rather than dropped with the block.
+   */
+  readonly phone?: boolean;
   readonly resizeHandle: ReactNode;
   /**
    * Can this source record a prompt at all? Optional, and `undefined` means
@@ -1797,6 +1808,7 @@ export function DetailPanel(props: DetailPanelProps) {
     width,
     resizeHandle,
     records,
+    phone = false,
   } = props;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -2265,7 +2277,10 @@ export function DetailPanel(props: DetailPanelProps) {
       */}
       {active && <FocusEdge />}
       {resizeHandle}
-      <div className="flex flex-col gap-2.5 border-line border-b px-3.5 pt-3">
+      <div
+        className={`flex flex-col gap-2.5 border-line border-b px-3.5 ${phone ? 'pt-2.5' : 'pt-3'}`}
+      >
+        {!phone && (
         <div className="flex items-start gap-2">
           <span
             data-pane-status={entry?.session.status ?? 'none'}
@@ -2313,6 +2328,7 @@ export function DetailPanel(props: DetailPanelProps) {
             </span>
           )}
         </div>
+        )}
 
         {/* The row that stood here carried the `x/y` step counter, its
             expandable note, and the session age. The operator found it did no
