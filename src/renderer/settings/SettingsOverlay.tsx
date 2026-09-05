@@ -37,6 +37,7 @@ import { ALL_VISIBLE, columnOrder, LAYOUTS, type LayoutName } from '../prefs/pan
 import {
   clearPalette,
   clearPaletteColor,
+  type EffectiveTheme,
   FOCUS_SHARE_MAX,
   FOCUS_SHARE_OFF,
   nudgeFocusShare,
@@ -44,6 +45,7 @@ import {
   OUT_FONT_SIZE_MIN,
   PALETTE_TOKENS,
   type Prefs,
+  paletteFor,
   paletteValue,
   setDefaultProvider,
   setFocusShare,
@@ -60,6 +62,16 @@ import { FULL, type LayoutChoice, SECTIONS, type SectionId, shortcutSections } f
 
 export type SettingsOverlayProps = {
   readonly prefs: Prefs;
+  /**
+   * The theme ON SCREEN, resolved — which is the theme whose colours this
+   * overlay edits. Passed in rather than derived from `prefs.theme` for the
+   * one case that makes the distinction real: under `system` the appearance
+   * changes with no write to `prefs`, and `Canvas.tsx` already holds the
+   * resolved value that the sidebar's label reads. A second resolution here
+   * would be a second idea of which theme is showing, and the two disagree the
+   * first time the OS flips with the overlay open.
+   */
+  readonly theme: EffectiveTheme;
   readonly onChange: (next: Prefs) => void;
   readonly onClose: () => void;
 };
@@ -153,7 +165,7 @@ function useWideNav(): boolean {
   return wide;
 }
 
-export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayProps) {
+export function SettingsOverlay({ prefs, theme, onChange, onClose }: SettingsOverlayProps) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
   const dialog = useRef<HTMLDivElement | null>(null);
   // Component state, not a pref: which pane you last had open is not a setting,
@@ -335,32 +347,43 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
             >
               <Block label="theme" hint="system follows what the operating system asks for">
                 <div className="flex gap-1">
-                  {THEMES.map((theme) => (
+                  {THEMES.map((choice) => (
                     <Choice
-                      key={theme}
-                      label={theme}
-                      selected={prefs.theme === theme}
-                      onPick={() => onChange(setTheme(prefs, theme))}
+                      key={choice}
+                      label={choice}
+                      selected={prefs.theme === choice}
+                      onPick={() => onChange(setTheme(prefs, choice))}
                     />
                   ))}
                 </div>
               </Block>
 
+              {/* ONE theme is editable here: the one on screen. The other two
+                  options were a picker for which theme you are editing, and
+                  both buckets side by side — and both lose the same thing. A
+                  swatch shows a colour, and the only place a colour can be
+                  judged is against the theme it will be worn in; editing the
+                  invisible theme means picking blind, and the ring below ("this
+                  token is overridden") would stop having one answer. Editing
+                  what you can see keeps every signal on this row about the
+                  screen in front of you, and switching theme above is how you
+                  reach the other set. The heading says which, so it is never
+                  read off the swatches. */}
               <Block
-                label="colours"
-                hint="unset follows the stylesheet, so each theme keeps its own"
+                label={`colours — ${theme}`}
+                hint={`unset follows the stylesheet, and ${theme === 'dark' ? 'light' : 'dark'} keeps its own`}
                 action={
-                  Object.keys(prefs.palette).length === 0 ? null : (
+                  Object.keys(paletteFor(prefs.palette, theme)).length === 0 ? null : (
                     <SmallButton
-                      label="reset colours"
-                      onPick={() => onChange(clearPalette(prefs))}
+                      label={`reset ${theme} colours`}
+                      onPick={() => onChange(clearPalette(prefs, theme))}
                     />
                   )
                 }
               >
                 <div className="grid grid-cols-2 gap-x-6 gap-y-[10px] sm:grid-cols-3">
                   {PALETTE_TOKENS.map(({ token, label }) => {
-                    const overridden = prefs.palette[token] !== undefined;
+                    const overridden = paletteFor(prefs.palette, theme)[token] !== undefined;
                     return (
                       <div key={token} className="flex items-center gap-[10px]">
                         {/* The fill here is operator data — an override of the
@@ -374,10 +397,10 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
                         <input
                           type="color"
                           data-palette-swatch={token}
-                          aria-label={`${label} colour`}
-                          value={paletteValue(prefs.palette, token)}
+                          aria-label={`${label} colour, ${theme}`}
+                          value={paletteValue(paletteFor(prefs.palette, theme), token)}
                           onChange={(event) =>
-                            onChange(setPaletteColor(prefs, token, event.target.value))
+                            onChange(setPaletteColor(prefs, theme, token, event.target.value))
                           }
                           className={`vam-swatch h-[22px] w-[22px] cursor-pointer rounded-full border-none bg-transparent p-0 ${FOCUS_RING} ${
                             overridden ? 'ring-2 ring-ink' : 'ring-1 ring-ink-faint'
@@ -387,8 +410,8 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
                         {overridden ? (
                           <button
                             type="button"
-                            aria-label={`reset ${label} colour`}
-                            onClick={() => onChange(clearPaletteColor(prefs, token))}
+                            aria-label={`reset ${label} colour, ${theme}`}
+                            onClick={() => onChange(clearPaletteColor(prefs, theme, token))}
                             className={`cursor-pointer text-ink-dim hover:text-ink ${FOCUS_RING}`}
                           >
                             {/* `×` reads as "remove this colour"; the action is

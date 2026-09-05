@@ -69,43 +69,54 @@ describe('the palette override layer', () => {
 
   it('reaches the document as a custom property on the root', () => {
     const root = fakeRoot();
-    applyPalette(setPaletteColor(EMPTY_PREFS, TOKEN, BLUE).palette, root.element);
+    applyPalette(setPaletteColor(EMPTY_PREFS, 'dark', TOKEN, BLUE).palette.dark, root.element);
     expect(root.read(TOKEN)).toBe(BLUE);
   });
 
   it('clears the override rather than writing the current value back', () => {
     const root = fakeRoot();
-    const set = setPaletteColor(EMPTY_PREFS, TOKEN, BLUE);
-    applyPalette(set.palette, root.element);
-    const cleared = clearPaletteColor(set, TOKEN);
-    expect(cleared.palette[TOKEN]).toBeUndefined();
-    applyPalette(cleared.palette, root.element);
+    const set = setPaletteColor(EMPTY_PREFS, 'dark', TOKEN, BLUE);
+    applyPalette(set.palette.dark, root.element);
+    const cleared = clearPaletteColor(set, 'dark', TOKEN);
+    expect(cleared.palette.dark[TOKEN]).toBeUndefined();
+    applyPalette(cleared.palette.dark, root.element);
     expect(root.read(TOKEN)).toBeNull();
     expect(root.removed).toContain(TOKEN);
   });
 
   it('clears every override at once', () => {
-    const both = setPaletteColor(setPaletteColor(EMPTY_PREFS, TOKEN, BLUE), '--vam-ink', BLUE);
-    expect(Object.keys(clearPalette(both).palette)).toEqual([]);
+    const both = setPaletteColor(
+      setPaletteColor(EMPTY_PREFS, 'dark', TOKEN, BLUE),
+      'dark',
+      '--vam-ink',
+      BLUE,
+    );
+    expect(Object.keys(clearPalette(both, 'dark').palette.dark)).toEqual([]);
   });
 
   it('refuses a value that is not a colour, and a token vam does not own', () => {
-    expect(setPaletteColor(EMPTY_PREFS, TOKEN, 'red; content: bad').palette[TOKEN]).toBeUndefined();
     expect(
-      setPaletteColor(EMPTY_PREFS, '--vam-not-a-token', BLUE).palette['--vam-not-a-token'],
+      setPaletteColor(EMPTY_PREFS, 'dark', TOKEN, 'red; content: bad').palette.dark[TOKEN],
+    ).toBeUndefined();
+    expect(
+      setPaletteColor(EMPTY_PREFS, 'dark', '--vam-not-a-token', BLUE).palette.dark[
+        '--vam-not-a-token'
+      ],
     ).toBeUndefined();
   });
 
   it('round-trips through storage', () => {
     const store = storage();
-    writePrefs(store, setPaletteColor(EMPTY_PREFS, TOKEN, BLUE));
-    expect(readPrefs(store).palette[TOKEN]).toBe(BLUE);
+    writePrefs(store, setPaletteColor(EMPTY_PREFS, 'dark', TOKEN, BLUE));
+    expect(readPrefs(store).palette.dark[TOKEN]).toBe(BLUE);
   });
 
   it('drops a garbage entry without dropping a good one', () => {
+    // A flat payload, which is what a browser upgraded from the pre-per-theme
+    // build still holds — it lands in both themes (`prefs.palette-theme`).
     const prefs = readPrefs(storage({ palette: { [TOKEN]: BLUE, '--vam-ink': 42 } }));
-    expect(prefs.palette[TOKEN]).toBe(BLUE);
-    expect(prefs.palette['--vam-ink']).toBeUndefined();
+    expect(prefs.palette.dark[TOKEN]).toBe(BLUE);
+    expect(prefs.palette.dark['--vam-ink']).toBeUndefined();
   });
 });
 
@@ -135,7 +146,7 @@ describe('a payload written before either field existed', () => {
       filters: { hideAgentStarted: false, onlyPrompted: true },
     };
     const prefs = readPrefs(storage(old));
-    expect(prefs.palette).toEqual({});
+    expect(prefs.palette).toEqual({ dark: {}, light: {} });
     expect(prefs.keyBindings).toEqual({});
     expect(prefs.theme).toBe('light');
     expect(prefs.focusViewportShare).toBe(0.45);
@@ -147,7 +158,7 @@ describe('a payload written before either field existed', () => {
 
   it('survives a garbage value in either field, per field', () => {
     const prefs = readPrefs(storage({ theme: 'light', palette: 7, keyBindings: 'no' }));
-    expect(prefs.palette).toEqual({});
+    expect(prefs.palette).toEqual({ dark: {}, light: {} });
     expect(prefs.keyBindings).toEqual({});
     expect(prefs.theme).toBe('light');
   });
@@ -155,7 +166,7 @@ describe('a payload written before either field existed', () => {
 
 describe('what the picker shows', () => {
   it('prefers the override, falls back to the stylesheet, and shows nothing else', () => {
-    const overridden = setPaletteColor(EMPTY_PREFS, TOKEN, BLUE).palette;
+    const overridden = setPaletteColor(EMPTY_PREFS, 'dark', TOKEN, BLUE).palette.dark;
     expect(paletteValue(overridden, TOKEN, () => `#${'000000'}`)).toBe(BLUE);
     expect(paletteValue({}, TOKEN, () => ` ${BLUE} `)).toBe(BLUE);
     expect(paletteValue({}, TOKEN, () => 'oklch(0.2 0 0)')).toBe('');

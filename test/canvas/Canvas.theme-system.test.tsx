@@ -223,7 +223,9 @@ describe('the palette in force follows the theme in force', () => {
   });
 
   it('takes the override off the document for a theme that has none', () => {
-    seed({ theme: 'system', palette: { dark: { [TOKEN]: BLUE } } });
+    // Half a payload on purpose: storage holds whatever the last version
+    // wrote, and `Prefs` is what comes OUT of the reader, not what goes in.
+    seed({ theme: 'system', palette: { dark: { [TOKEN]: BLUE } } as Prefs['palette'] });
     render(<Canvas model={MODEL} />);
     expect(inForce()).toBe(BLUE);
     os.flip(true);

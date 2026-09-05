@@ -90,9 +90,8 @@ import {
   type EffectiveTheme,
   FOCUS_SHARE_OFF,
   isProjectHidden,
-  paletteFor,
   type Prefs,
-  type Theme,
+  paletteFor,
   readPrefs,
   setDetailTab,
   setIcon,
@@ -105,6 +104,7 @@ import {
   setRename,
   setSessionFilters,
   setTheme,
+  type Theme,
   watchOsTheme,
   writePrefs,
 } from '../prefs/prefs.js';

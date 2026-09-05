@@ -21,7 +21,7 @@ afterEach(cleanup);
 
 function open(prefs: Prefs = EMPTY_PREFS) {
   const onChange = vi.fn();
-  render(<SettingsOverlay prefs={prefs} onChange={onChange} onClose={onClose} />);
+  render(<SettingsOverlay prefs={prefs} theme="dark" onChange={onChange} onClose={onClose} />);
   fireEvent.click(document.querySelector('[data-settings-nav-item="layout"]') as HTMLElement);
   return { onChange };
 }

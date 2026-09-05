@@ -299,7 +299,7 @@ export type Prefs = {
    *
    * Per theme because a colour is only ever chosen against the theme that was
    * on screen at the time. While this was one flat map, a canvas colour picked
-   * at night was pinned into the light theme too, where it could be
+   * at night was forced onto the light theme as well, where it could be
    * unreadable, and there was no way to say so.
    *
    * An OVERRIDE LAYER still, and per theme it is one twice over: an absent

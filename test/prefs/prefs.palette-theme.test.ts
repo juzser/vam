@@ -17,8 +17,8 @@ import {
   PALETTE_TOKENS,
   paletteFor,
   readPrefs,
-  setPaletteColor,
   type StorageLike,
+  setPaletteColor,
   writePrefs,
 } from '../../src/renderer/prefs/prefs.js';
 
@@ -70,7 +70,12 @@ describe('a colour chosen in one theme stays in that theme', () => {
   });
 
   it('swaps which overrides reach the document when the theme changes', () => {
-    const prefs = setPaletteColor(setPaletteColor(EMPTY_PREFS, 'dark', TOKEN, BLUE), 'light', TOKEN, AMBER);
+    const prefs = setPaletteColor(
+      setPaletteColor(EMPTY_PREFS, 'dark', TOKEN, BLUE),
+      'light',
+      TOKEN,
+      AMBER,
+    );
     const root = fakeRoot();
     applyPalette(paletteFor(prefs.palette, 'dark'), root.element);
     expect(root.read(TOKEN)).toBe(BLUE);
@@ -79,7 +84,12 @@ describe('a colour chosen in one theme stays in that theme', () => {
   });
 
   it('follows the RESOLVED appearance when the stored theme is system', () => {
-    const prefs = setPaletteColor(setPaletteColor(EMPTY_PREFS, 'dark', TOKEN, BLUE), 'light', TOKEN, AMBER);
+    const prefs = setPaletteColor(
+      setPaletteColor(EMPTY_PREFS, 'dark', TOKEN, BLUE),
+      'light',
+      TOKEN,
+      AMBER,
+    );
     let osLight = false;
     const resolved = () => effectiveTheme('system', () => osLight);
     const root = fakeRoot();
