@@ -26,6 +26,7 @@ import { SessionInfoNode } from '../../src/renderer/canvas/SessionInfoNode.js';
 import { StepNode } from '../../src/renderer/canvas/StepNode.js';
 import type { Decision, Project, Session, SourceId } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
+import { contrast } from '../support/contrast.js';
 
 afterEach(cleanup);
 
@@ -161,7 +162,7 @@ describe('the glow marks the keyboard cursor', () => {
     expect(CSS).not.toMatch(/\.vam-focus-ring\b/);
   });
 
-  it('builds the glow from the theme-stable cursor amber, not from --color-waiting', () => {
+  it('builds the glow from the cursor amber, not from --color-waiting', () => {
     const glow = ruleBody(CSS, '.vam-cursor-glow');
     expect(glow).toMatch(/box-shadow:/);
     expect(glow).toMatch(/var\(--color-cursor-ring\)/);
@@ -169,19 +170,48 @@ describe('the glow marks the keyboard cursor', () => {
     const frames = ruleBody(CSS, '@keyframes vam-cursor-glow');
     expect(frames.match(/box-shadow:/g)?.length).toBe(2);
     expect(frames).toMatch(/var\(--color-cursor-ring\)/);
-    // NOT --color-waiting: that token darkens in the light theme, and the
-    // mockup's light artboard keeps the identical amber in its halo. Binding
-    // the glow to the status hue would quietly change it with the theme.
+    // NOT --color-waiting: the halo says WHERE THE CURSOR IS and waiting says
+    // a session needs an answer, and one token for both is a status colour that
+    // has stopped meaning anything. The cursor amber now darkens in the light
+    // theme too (see below) — but under its own name and by its own
+    // measurement, not by following the status hue.
     expect(frames).not.toMatch(/var\(--color-waiting\)/);
   });
 
-  it('defines the cursor amber in both themes, with the same value', () => {
+  // REPLACES 'defines the cursor amber in both themes, with the same value'.
+  // That test was right about the mockup and wrong about the screen: the two
+  // artboards do keep one amber in the halo, and on the light artboard's white
+  // ground it measures 2.15:1 while being the only thing that says which node
+  // the cursor is on. The invariant is reversed deliberately, and kept here
+  // rather than deleted so the reversal stays visible. See issue 188.
+  it('gives the light theme its own cursor amber, and measures it', () => {
     const dark = ruleBody(CSS, ':root');
     const light = ruleBody(CSS, 'html.light');
-    const read = (block: string) => block.match(/--vam-cursor-ring:\s*([^;]+);/)?.[1]?.trim();
-    expect(read(dark), 'no cursor ring in the dark block').toBeDefined();
-    expect(read(light), 'no cursor ring in the light block').toBeDefined();
-    expect(read(light)).toBe(read(dark));
+    const read = (block: string, token: string) =>
+      block.match(new RegExp(`${token}:\\s*([^;]+);`))?.[1]?.trim();
+    const darkRing = read(dark, '--vam-cursor-ring');
+    const lightRing = read(light, '--vam-cursor-ring');
+    expect(darkRing, 'no cursor ring in the dark block').toBeDefined();
+    expect(lightRing, 'no cursor ring in the light block').toBeDefined();
+    expect(lightRing).not.toBe(darkRing);
+
+    const ground = read(light, '--vam-canvas');
+    expect(ground, 'no canvas fill in the light block').toBeDefined();
+    expect(contrast(lightRing as string, ground as string)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('paints the 1px ring at full strength in every frame it has', () => {
+    // The halo still breathes; the ring does not. At 60% alpha the light ring
+    // measured 1.59:1 for half of every cycle, which no token value can reach
+    // -- see the note above the keyframes. Only the halo's own percentages,
+    // which carry no signal, may be mixed down.
+    const rings = [ruleBody(CSS, '@keyframes vam-cursor-glow'), ruleBody(CSS, '.vam-cursor-glow')]
+      .flatMap((body) => body.match(/0 0 0 1px [^,;]+/g) ?? [])
+      .map((decl) => decl.trim());
+    expect(rings.length).toBe(3);
+    for (const ring of rings) {
+      expect(ring).toBe('0 0 0 1px var(--color-cursor-ring)');
+    }
   });
 });
 

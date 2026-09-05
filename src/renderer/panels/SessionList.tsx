@@ -1210,7 +1210,7 @@ export function SessionList(props: SessionListProps) {
                       aria-label={`${isGroupCollapsed ? 'expand' : 'collapse'} ${group.name}`}
                       onClick={() => toggleGroupCollapse(group)}
                       className={[
-                        'vam-tap flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
+                        'vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
                         revealed === group.id || isGroupCollapsed ? 'opacity-100' : 'opacity-0',
                       ].join(' ')}
                     >
@@ -1232,7 +1232,7 @@ export function SessionList(props: SessionListProps) {
                           setOpenGroupMenu((current) => (current === group.id ? null : group.id))
                         }
                         className={[
-                          'vam-tap flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
+                          'vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
                           revealed === group.id || openGroupMenu === group.id
                             ? 'opacity-100'
                             : 'opacity-0',
@@ -1256,7 +1256,7 @@ export function SessionList(props: SessionListProps) {
                         title={`Add a repo to ${group.name}`}
                         aria-label={`add a repo to ${group.name}`}
                         className={[
-                          'vam-tap flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                          'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
                           revealed === group.id ? 'opacity-100' : 'opacity-0',
                         ].join(' ')}
                       >
@@ -1384,7 +1384,7 @@ export function SessionList(props: SessionListProps) {
                       data-project-icon={section.project.id}
                       onClick={() => onPickIcon(section.project)}
                       aria-label={`change icon for ${section.project.name}`}
-                      className="vam-tap flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-[11px] leading-none text-ink-faint hover:text-ink-dim"
+                      className="vam-tap vam-hit-24 flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-[11px] leading-none text-ink-faint hover:text-ink-dim"
                     >
                       {section.project.icon ?? (
                         /* A monitor, not a middot. The glyph has to read as "this
@@ -1426,7 +1426,7 @@ export function SessionList(props: SessionListProps) {
                     aria-label={`${isCollapsed ? 'expand' : 'collapse'} ${section.project.name}`}
                     onClick={() => toggleCollapse(section.project)}
                     className={[
-                      'vam-tap flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
+                      'vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
                       isRevealed || isCollapsed ? 'opacity-100' : 'opacity-0',
                     ].join(' ')}
                   >
@@ -1456,7 +1456,7 @@ export function SessionList(props: SessionListProps) {
                       )
                     }
                     className={[
-                      'vam-tap flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
+                      'vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
                       isRevealed || openMenu === section.project.id ? 'opacity-100' : 'opacity-0',
                     ].join(' ')}
                   >
@@ -1506,7 +1506,7 @@ export function SessionList(props: SessionListProps) {
                     title={newSessionDecline ?? `New session in ${section.project.name}`}
                     aria-label={`new session in ${section.project.name}`}
                     className={[
-                      'vam-tap flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                      'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
                       isRevealed ||
                       section.items.some((entry) => entry.session.id === focusedSessionId)
                         ? 'opacity-100'
