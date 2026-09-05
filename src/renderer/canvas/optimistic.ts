@@ -104,10 +104,7 @@ function paint(session: Session, pending: PendingPrompt): Session {
 }
 
 /** The model with every pending prompt drawn as its session's newest turn. */
-export function withPending(
-  model: CanvasModel,
-  pending: readonly PendingPrompt[],
-): CanvasModel {
+export function withPending(model: CanvasModel, pending: readonly PendingPrompt[]): CanvasModel {
   if (pending.length === 0) {
     return model;
   }

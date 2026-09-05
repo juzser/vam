@@ -112,12 +112,7 @@ import { copyText } from './clipboard.js';
 import { KeySheet } from './KeySheet.js';
 import { infoNodeId, layoutCanvas, orderedSessions } from './layout.js';
 import { type FlowNodeLike, toNavNodes } from './nav-nodes.js';
-import {
-  countTurnsWithInput,
-  type PendingPrompt,
-  reconcile,
-  withPending,
-} from './optimistic.js';
+import { countTurnsWithInput, type PendingPrompt, reconcile, withPending } from './optimistic.js';
 import { PROVIDER_MARKS } from './provider-marks.js';
 import { SessionFanNode } from './SessionFanNode.js';
 import { SessionInfoNode } from './SessionInfoNode.js';

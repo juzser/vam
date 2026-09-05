@@ -82,16 +82,16 @@ describe('what a pending prompt is, and when the real turn has replaced it', () 
     const model = withPending(modelOf(session('a1', { decisions: [decision('d1', 'old')] })), [
       pendingOf(),
     ]);
-    const painted = model.projects[0].sessions[0];
-    expect(painted.decisions.map((d) => d.input)).toEqual(['ship it', 'old']);
-    expect(painted.decisions[0].output).toBeNull();
+    const painted = model.projects[0]?.sessions[0];
+    expect(painted?.decisions.map((d) => d.input)).toEqual(['ship it', 'old']);
+    expect(painted?.decisions[0]?.output).toBeNull();
   });
 
   it('paints the session running only where delivery is real', () => {
     const recorded = withPending(modelOf(session('a1')), [pendingOf({ live: false })]);
-    expect(recorded.projects[0].sessions[0].status).toBe('done');
+    expect(recorded.projects[0]?.sessions[0]?.status).toBe('done');
     const delivered = withPending(modelOf(session('a1')), [pendingOf({ live: true })]);
-    expect(delivered.projects[0].sessions[0].status).toBe('running');
+    expect(delivered.projects[0]?.sessions[0]?.status).toBe('running');
   });
 
   it('keeps the pending prompt while the model has no more of those words than before', () => {
@@ -104,7 +104,7 @@ describe('what a pending prompt is, and when the real turn has replaced it', () 
 
   it('drops it once one more turn with those words has arrived', () => {
     const before = modelOf(session('a1', { decisions: [decision('d1', 'ship it')] }));
-    const pending = [pendingOf({ seen: 1 })];
+    const pending = [pendingOf({ seen: countTurnsWithInput(before, 'a1', 'ship it') })];
     const after = modelOf(
       session('a1', { decisions: [decision('d2', 'ship it', null), decision('d1', 'ship it')] }),
     );
