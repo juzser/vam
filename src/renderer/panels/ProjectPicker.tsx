@@ -68,7 +68,10 @@ export function ProjectPicker({ groupName, choices, onToggle, onClose }: Project
   ];
 
   return (
-    <div className="absolute inset-0 z-30 flex items-start justify-center pt-[12vh]">
+    <div
+      data-overlay-host
+      className="absolute inset-0 z-30 flex items-start justify-center pt-[12vh]"
+    >
       <button
         type="button"
         aria-label="close the repo list"

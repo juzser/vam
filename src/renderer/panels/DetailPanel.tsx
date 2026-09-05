@@ -439,10 +439,22 @@ export type DetailPanelProps = {
    */
   readonly initialTab?: string | null;
   readonly onTabChange?: (tab: string) => void;
-  /** The current rendered width (task-1's `renderedWidth`), applied inline. */
-  readonly width: number;
+  /**
+   * The current rendered width (task-1's `renderedWidth`), applied inline.
+   *
+   * Optional, and ABSENT means full width: a missing width is already the true
+   * statement "nobody is sizing me", which is the phone shell's case, and a
+   * `'fill'` sentinel would be a second way to say it.
+   */
+  readonly width?: number;
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
   readonly resizeHandle: ReactNode;
+  /**
+   * Can this source record a prompt at all? Optional, and `undefined` means
+   * yes -- every existing caller is a shell whose source can. `false` withdraws
+   * the composer rather than drawing one that would be refused.
+   */
+  readonly records?: boolean;
 };
 
 /**
@@ -1765,6 +1777,7 @@ export function DetailPanel(props: DetailPanelProps) {
     sending = false,
     width,
     resizeHandle,
+    records,
   } = props;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -2139,7 +2152,12 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const openQuestion = newestQuestions.some((one) => one.answer === null);
   const [chattingAbout, setChattingAbout] = useState<string | null>(null);
-  const composerHidden = openQuestion && chattingAbout !== setId;
+  // `records === false` is a source that has no route to record a prompt at
+  // all -- a read-only server, where `/api/record-prompt` is not registered
+  // and 404s. The box is then not DRAWN, rather than drawn and refused on tap:
+  // a control that takes text it cannot deliver is worse than no control, and
+  // the source's own sentence for the refusal is carried in `declines`.
+  const composerHidden = records === false || (openQuestion && chattingAbout !== setId);
   const startChat = () => {
     if (newestQuestion !== null) setChattingAbout(setId);
     onCompose();
@@ -2203,12 +2221,15 @@ export function DetailPanel(props: DetailPanelProps) {
   return (
     <aside
       data-action-pane={active ? 'active' : 'idle'}
-      style={{ width }}
+      style={width === undefined ? undefined : { width }}
       className={[
         // `bg-sidebar` is the mockup's own pane fill. Measured off the
         // `width:408px` column of artboards 1a/1b, both values are exactly what
         // this token already holds, so no new colour was invented for it.
-        'relative flex h-full shrink-0 flex-col border-line border-l bg-sidebar',
+        'relative flex h-full min-w-0 flex-col border-line border-l bg-sidebar',
+        // No width given means nobody is sizing this pane -- the phone shell's
+        // case -- so it fills its host instead of refusing to shrink.
+        width === undefined ? 'w-full' : 'shrink-0',
       ].join(' ')}
     >
       {/*

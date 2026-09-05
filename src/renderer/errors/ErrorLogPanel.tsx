@@ -43,6 +43,7 @@ export function ErrorLogPanel({ onClose }: ErrorLogPanelProps) {
   return (
     <div
       data-error-log
+      data-overlay-host
       role="dialog"
       aria-label="error log"
       aria-modal="true"

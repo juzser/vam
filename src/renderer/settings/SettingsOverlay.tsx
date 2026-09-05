@@ -259,6 +259,7 @@ export function SettingsOverlay({ prefs, theme, onChange, onClose }: SettingsOve
   return (
     <div
       data-settings-overlay
+      data-overlay-host
       ref={dialog}
       role="dialog"
       // Not plain "settings": the sidebar's gear already owns that accessible

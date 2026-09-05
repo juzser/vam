@@ -79,6 +79,8 @@ import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { SessionList } from '../panels/SessionList.js';
 import { visibleTabs } from '../panels/tabs.js';
+import { PhoneShell } from '../phone/PhoneShell.js';
+import { usePhoneViewport } from '../phone/viewport.js';
 import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
 import {
   ALL_VISIBLE,
@@ -486,7 +488,37 @@ function Columns({ order, children }: { order: readonly ColumnId[]; children: Re
       child,
     ]),
   );
+  // An order naming no column is not an empty row of columns, it is no row at
+  // all -- which is what the phone shell asks for, and what leaves nothing of
+  // the desktop layout in the tree beside it.
+  if (order.length === 0) return null;
   return <div className="flex min-h-0 flex-1">{order.map((id) => byId.get(id))}</div>;
+}
+
+/**
+ * Where the rows came from, said out loud.
+ *
+ * Its own component because two shells draw it: the canvas top bar, and the
+ * phone shell's app bar, which has no canvas top bar to put it in. The one
+ * thing a dashboard must never do is look the same whether or not it is
+ * connected, so it is never dropped from either.
+ */
+function SourceReadout({ source }: { source: CanvasSource }) {
+  return (
+    <span data-source className="min-w-0 truncate font-mono text-[10px]">
+      {source.kind === 'demo' ? (
+        <span className="text-waiting">● {source.note}</span>
+      ) : source.kind === 'session' ? (
+        <span className="text-done">● {source.source.label}</span>
+      ) : source.status === 'error' ? (
+        <span className="text-failed">● {source.error}</span>
+      ) : source.status === 'loading' ? (
+        <span className="text-ink-faint">○ connecting to black-smith…</span>
+      ) : (
+        <span className="text-done">● black-smith</span>
+      )}
+    </span>
+  );
 }
 
 function CanvasInner({
@@ -548,6 +580,12 @@ function CanvasInner({
   // `prefs.paneVisibility` is untouched, so widening the window restores it.
   const visible = layoutForViewport(prefs.paneVisibility, viewportWidth);
   const order = columnOrder(visible);
+  /**
+   * Which shell this viewport gets. `false` wherever `matchMedia` is missing,
+   * so every environment without one -- jsdom, happy-dom, the tests -- keeps
+   * the columns it was written against.
+   */
+  const phone = usePhoneViewport();
   // The canvas is a strip exactly when it is drawn but is not the main column.
   const canvasStrip = visible.canvas && !canvasIsMain(visible);
   const { sidebar: sidebarWidth, detail: detailWidth } = layoutWidths(
@@ -1882,6 +1920,12 @@ function CanvasInner({
   );
 
   useEffect(() => {
+    // The chord layer is OFF on a phone, not simulated: `hjkl` moves a cursor
+    // that does not exist, `Mod-<digit>` resolves against panes that are not
+    // drawn, and a soft keyboard fires `keydown` for ordinary typing behind a
+    // focus guard already known to leak. An armed grammar there is how `x`
+    // closes a session nobody meant to close.
+    if (phone) return;
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target;
       const typing = target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName);
@@ -2367,6 +2411,7 @@ function CanvasInner({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
+    phone,
     focusedId,
     focusedEntry,
     focusedSessionId,
@@ -2409,154 +2454,239 @@ function CanvasInner({
   const zoom = useStore((state) => state.transform[2]);
   const zoomPct = Math.round(zoom * 100);
 
+  /**
+   * The two panels’ props, lifted out of the JSX.
+   *
+   * A mechanical extraction with no behaviour of its own: the phone shell
+   * (`PhoneShell`) is handed the SAME two objects the columns are built from,
+   * so there is one assembly of each panel’s props and not a second one that
+   * could drift from it.
+   */
+  const sidebarProps: ComponentProps<typeof SessionList> = {
+    // The line at this column's top edge, off the SAME `mode` the status
+    // bar's word reads. A hidden column is not rendered at all, so
+    // "every shown column Select is drawn in" needs no second test
+    // against `visible` here -- the slot already is that test.
+    keyboardHere: mode === 'select',
+    entries: entries,
+    // The UNFILTERED set, for the two things about removing a project
+    // that must not read a narrowed list -- see `allEntries` on
+    // `SessionListProps`. `entries` above has already been through
+    // search, the status pills and the origin rules.
+    allEntries: allEntries,
+    focusedSessionId: focusedEntry?.session.id ?? null,
+    workspace: 'black-smith',
+    theme: effective,
+    onToggleTheme: () => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark')),
+    onOpenFilter: () => {
+      searchOrigin.current = focusedId;
+      setFiltering(true);
+    },
+    filter: query,
+    filtering: filtering,
+    onFilterChange: (next) => {
+      setQuery(next);
+      // incsearch: the answer arrives while you type, not after you
+      // commit. Without it the list narrows under a focus ring that is
+      // still pointing at a row the filter just removed.
+      const first = searchMatches(allEntries, next)[0];
+      if (first !== undefined) {
+        focusSession(first);
+      }
+    },
+    statusFilter: statusFilter,
+    onStatusFilter: setStatusFilter,
+    statusTally: {
+      all: tally.all,
+      running: tally.running,
+      waiting: tally.waiting,
+      done: tally.done,
+      failed: tally.failed,
+    },
+    filterMenuOpen: filterMenuOpen,
+    onFilterMenuToggle: setFilterMenuOpen,
+    originFilters: prefs.filters,
+    onOriginFilters: (next) => savePrefs(setSessionFilters(prefs, next)),
+    hiddenCounts: hiddenCounts,
+    onFilterCommit: () => setFiltering(false),
+    onFilterCancel: () => {
+      setFiltering(false);
+      setQuery('');
+      setFocusedId(searchOrigin.current);
+    },
+    renamingId: renamingId,
+    renameDraft: renameDraft,
+    onRenameChange: setRenameDraft,
+    onRenameCommit: commitRename,
+    onRenameCancel: () => {
+      setRenamingId(null);
+      setRenameTarget(null);
+    },
+    onPick: (sessionId) => {
+      focusSession(sessionId);
+      setMode('select');
+    },
+    onClose: (sessionId) => {
+      // The row's title, not the id: the same sentence the keyboard
+      // path writes, about the same session.
+      const entry = allEntries.find((e) => e.session.id === sessionId);
+      void closeSession(sessionId, entry?.session.title ?? sessionId);
+    },
+    onAdd: () => {
+      // The footer strip names no project, so it uses the focused
+      // session's, exactly as `o` does — the two controls are one path.
+      if (focusedEntry === null) {
+        setStatus('pick a session first — a new one is started in its project');
+        return;
+      }
+      void createSession(focusedEntry.project.id, focusedEntry.project.name);
+    },
+    onAddInProject: (project) => void createSession(project.id, project.name),
+    pendingAction: pendingAction,
+    // The group layer. `model.groups` rather than the filtered model's,
+    // because the only thing this prop is for is a group holding no live
+    // project -- see the prop -- and a filter cannot narrow one further.
+    groups: model.groups ?? [],
+    collapsedGroups: collapsedGroups,
+    onToggleGroupCollapse: toggleGroupCollapse,
+    onCreateGroup: createNewGroup,
+    onRenameGroup: renameOneGroup,
+    onPickGroupIcon: (group) => {
+      const source = groupSource(prefs.groups, group.id);
+      if (source === null) return;
+      setPickingGroupIconFor((current) =>
+        current !== null && current.groupId === group.id
+          ? null
+          : { source, groupId: group.id, name: group.name },
+      );
+    },
+    onUngroup: ungroup,
+    onAddToGroup: (group) => {
+      const source = groupSource(prefs.groups, group.id);
+      if (source === null) return;
+      setPickingMembersFor({ source, groupId: group.id, name: group.name });
+    },
+    hiddenProjects: hiddenProjects,
+    // Restoring is the only thing the sidebar asks for by itself: it
+    // ends nothing, so there is nothing to serialise or refuse.
+    onHideProject: setProjectRemoved,
+    onRemoveProject: (project, plan) => void removeProject(project, plan),
+    revealRequest: revealRequest,
+    onNewProject: () => void newProject(),
+    newSessionDecline: newSessionDecline,
+    onPickIcon: (project: Project) => {
+      // Same refusal as the session picker (§ above): a project with no
+      // source has no bucket to store under, and guessing one would
+      // reintroduce the cross-source collision AC-1 removed.
+      if (project.source === undefined) {
+        setStatus('this project has no source — icon unavailable');
+        return;
+      }
+      const projectSource = project.source;
+      setPickingProjectIconFor((current) =>
+        current !== null && current.projectId === project.id && current.source === projectSource
+          ? null
+          : { source: projectSource, projectId: project.id, name: project.name },
+      );
+    },
+    onSettings: () => setSettingsOpen(true),
+    width: sidebarWidth,
+    resizeHandle: (
+      <PaneResizer
+        pane="sidebar"
+        ariaLabel="resize sessions panel"
+        layout={visible}
+        stored={{ sidebar: storedSidebar, detail: storedDetail }}
+        viewportWidth={viewportWidth}
+        onChange={onPaneChange}
+        onCommit={onPaneCommit}
+      />
+    ),
+  };
+
+  const detailProps: ComponentProps<typeof DetailPanel> = {
+    entry: focusedEntry,
+    decision: focusedDecision,
+    delivers: source.kind === 'session' && source.source.capabilities.deliverPrompt,
+    // The bridge the question card answers through. Passed beside
+    // `delivers` because the two are read together: a source that
+    // declares delivery and a shell that has no main process behind it
+    // are both reasons to draw no Submit at all. `undefined` in the
+    // browser build.
+    answer: globalThis.window?.api?.terminal?.answer,
+    // The flag the source declares, finally read. `false` withdraws the
+    // tab rather than mounting one that can only apologise.
+    terminal: terminalTab,
+    // The flag has guarded double-submit here since the composer was
+    // written; the pane never saw it, so a two-minute `claude --resume`
+    // looked like Enter doing nothing.
+    sending: writing,
+    tabRequest: tabRequest,
+    // Opaque both ways: the store never learns the tab names, and the
+    // guard keeps the pane's mount-time report from being a write.
+    initialTab: prefs.detailTab,
+    onTabChange: (next) => {
+      if (next !== prefs.detailTab) {
+        savePrefs(setDetailTab(prefs, next));
+      }
+    },
+    draft: draft,
+    onDraftChange: setDraft,
+    onSubmit: sendPrompt,
+    active: mode === 'insert',
+    actionIndex: actionIndex,
+    composing: composing,
+    // The mouse route into the box, and the same function the `i` route
+    // uses -- a focus that entered the composer without entering Insert
+    // is the divergence this call closes.
+    onCompose: beginComposing,
+    onStopComposing: () => {
+      setComposing(false);
+      setDraft('');
+      // Escape out of the composer returns the keyboard to the SIDEBAR,
+      // which is the pane the operator asked to get back to. Without
+      // this, a prompt opened with `I` leaves `mode === 'insert'`, so
+      // the blur hands the keys back to a window where `j`/`k` walk the
+      // detail pane's actions instead of the session list — the keys
+      // work, they just do the wrong thing, which is worse than being
+      // swallowed. The `i` path already sat on 'list' and was unaffected,
+      // which is why this only ever bit one of the two entry points.
+      setMode('select');
+    },
+    width: detailWidth,
+    /* Only where it would move something. The detail pane is a fixed
+       column with the leftover room beside it exactly while the canvas
+       is the main column; everywhere else its width is derived from the
+       sidebar and the canvas's reserve, so its own edge has nothing to
+       drag and the seam that does move is the sidebar's. A handle that
+       moves nothing is worse than no handle: it advertises a gesture the
+       layout cannot honour. */
+    resizeHandle: canvasIsMain(visible) ? (
+      <PaneResizer
+        pane="detail"
+        ariaLabel="resize detail panel"
+        layout={visible}
+        stored={{ sidebar: storedSidebar, detail: storedDetail }}
+        viewportWidth={viewportWidth}
+        onChange={onPaneChange}
+        onCommit={onPaneCommit}
+      />
+    ) : null,
+  };
+
   return (
-    <div className="relative flex h-full flex-col">
-      <Columns order={order}>
-        <SidebarSlot
-          key="sidebar"
-          show={visible.sidebar}
-          // The line at this column's top edge, off the SAME `mode` the status
-          // bar's word reads. A hidden column is not rendered at all, so
-          // "every shown column Select is drawn in" needs no second test
-          // against `visible` here -- the slot already is that test.
-          keyboardHere={mode === 'select'}
-          entries={entries}
-          // The UNFILTERED set, for the two things about removing a project
-          // that must not read a narrowed list -- see `allEntries` on
-          // `SessionListProps`. `entries` above has already been through
-          // search, the status pills and the origin rules.
-          allEntries={allEntries}
-          focusedSessionId={focusedEntry?.session.id ?? null}
-          workspace="black-smith"
-          theme={effective}
-          onToggleTheme={() => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark'))}
-          onOpenFilter={() => {
-            searchOrigin.current = focusedId;
-            setFiltering(true);
-          }}
-          filter={query}
-          filtering={filtering}
-          onFilterChange={(next) => {
-            setQuery(next);
-            // incsearch: the answer arrives while you type, not after you
-            // commit. Without it the list narrows under a focus ring that is
-            // still pointing at a row the filter just removed.
-            const first = searchMatches(allEntries, next)[0];
-            if (first !== undefined) {
-              focusSession(first);
-            }
-          }}
-          statusFilter={statusFilter}
-          onStatusFilter={setStatusFilter}
-          statusTally={{
-            all: tally.all,
-            running: tally.running,
-            waiting: tally.waiting,
-            done: tally.done,
-            failed: tally.failed,
-          }}
-          filterMenuOpen={filterMenuOpen}
-          onFilterMenuToggle={setFilterMenuOpen}
-          originFilters={prefs.filters}
-          onOriginFilters={(next) => savePrefs(setSessionFilters(prefs, next))}
-          hiddenCounts={hiddenCounts}
-          onFilterCommit={() => setFiltering(false)}
-          onFilterCancel={() => {
-            setFiltering(false);
-            setQuery('');
-            setFocusedId(searchOrigin.current);
-          }}
-          renamingId={renamingId}
-          renameDraft={renameDraft}
-          onRenameChange={setRenameDraft}
-          onRenameCommit={commitRename}
-          onRenameCancel={() => {
-            setRenamingId(null);
-            setRenameTarget(null);
-          }}
-          onPick={(sessionId) => {
-            focusSession(sessionId);
-            setMode('select');
-          }}
-          onClose={(sessionId) => {
-            // The row's title, not the id: the same sentence the keyboard
-            // path writes, about the same session.
-            const entry = allEntries.find((e) => e.session.id === sessionId);
-            void closeSession(sessionId, entry?.session.title ?? sessionId);
-          }}
-          onAdd={() => {
-            // The footer strip names no project, so it uses the focused
-            // session's, exactly as `o` does — the two controls are one path.
-            if (focusedEntry === null) {
-              setStatus('pick a session first — a new one is started in its project');
-              return;
-            }
-            void createSession(focusedEntry.project.id, focusedEntry.project.name);
-          }}
-          onAddInProject={(project) => void createSession(project.id, project.name)}
-          pendingAction={pendingAction}
-          // The group layer. `model.groups` rather than the filtered model's,
-          // because the only thing this prop is for is a group holding no live
-          // project -- see the prop -- and a filter cannot narrow one further.
-          groups={model.groups ?? []}
-          collapsedGroups={collapsedGroups}
-          onToggleGroupCollapse={toggleGroupCollapse}
-          onCreateGroup={createNewGroup}
-          onRenameGroup={renameOneGroup}
-          onPickGroupIcon={(group) => {
-            const source = groupSource(prefs.groups, group.id);
-            if (source === null) return;
-            setPickingGroupIconFor((current) =>
-              current !== null && current.groupId === group.id
-                ? null
-                : { source, groupId: group.id, name: group.name },
-            );
-          }}
-          onUngroup={ungroup}
-          onAddToGroup={(group) => {
-            const source = groupSource(prefs.groups, group.id);
-            if (source === null) return;
-            setPickingMembersFor({ source, groupId: group.id, name: group.name });
-          }}
-          hiddenProjects={hiddenProjects}
-          // Restoring is the only thing the sidebar asks for by itself: it
-          // ends nothing, so there is nothing to serialise or refuse.
-          onHideProject={setProjectRemoved}
-          onRemoveProject={(project, plan) => void removeProject(project, plan)}
-          revealRequest={revealRequest}
-          onNewProject={() => void newProject()}
-          newSessionDecline={newSessionDecline}
-          onPickIcon={(project: Project) => {
-            // Same refusal as the session picker (§ above): a project with no
-            // source has no bucket to store under, and guessing one would
-            // reintroduce the cross-source collision AC-1 removed.
-            if (project.source === undefined) {
-              setStatus('this project has no source — icon unavailable');
-              return;
-            }
-            const projectSource = project.source;
-            setPickingProjectIconFor((current) =>
-              current !== null &&
-              current.projectId === project.id &&
-              current.source === projectSource
-                ? null
-                : { source: projectSource, projectId: project.id, name: project.name },
-            );
-          }}
-          onSettings={() => setSettingsOpen(true)}
-          width={sidebarWidth}
-          resizeHandle={
-            <PaneResizer
-              pane="sidebar"
-              ariaLabel="resize sessions panel"
-              layout={visible}
-              stored={{ sidebar: storedSidebar, detail: storedDetail }}
-              viewportWidth={viewportWidth}
-              onChange={onPaneChange}
-              onCommit={onPaneCommit}
-            />
-          }
-        />
+    // `vam-phone` is the hook the OVERLAYS hang off: they are siblings of the
+    // shell rather than children of it, so `[data-phone-shell]` cannot reach
+    // them and this class on the common root can. It is set from the same
+    // derived breakpoint, never from a second media query with the number
+    // written out again.
+    <div className={`relative flex h-full flex-col ${phone ? 'vam-phone' : ''}`}>
+      {/* Named none of them on a phone: `Columns` renders by order, so a
+          column the order does not name is never created -- which is what
+          "unmounted" has to mean for a pane that is measured, focused and
+          queried. The phone shell below takes their place. */}
+      <Columns order={phone ? [] : order}>
+        <SidebarSlot key="sidebar" show={visible.sidebar} {...sidebarProps} />
 
         <CanvasColumn
           key="canvas"
@@ -2576,22 +2706,7 @@ function CanvasInner({
             <span className="shrink-0 font-medium text-[13px] text-ink">Canvas</span>
             <span className="mx-1 h-3.5 w-px shrink-0 bg-line-strong" />
 
-            {/* Where the rows came from, said out loud. The one thing a
-                dashboard must never do is look the same whether or not it is
-                connected — so this sits before the filters, not in a corner. */}
-            <span data-source className="min-w-0 truncate font-mono text-[10px]">
-              {source.kind === 'demo' ? (
-                <span className="text-waiting">● {source.note}</span>
-              ) : source.kind === 'session' ? (
-                <span className="text-done">● {source.source.label}</span>
-              ) : source.status === 'error' ? (
-                <span className="text-failed">● {source.error}</span>
-              ) : source.status === 'loading' ? (
-                <span className="text-ink-faint">○ connecting to black-smith…</span>
-              ) : (
-                <span className="text-done">● black-smith</span>
-              )}
-            </span>
+            <SourceReadout source={source} />
 
             <span className="flex-1" />
 
@@ -2717,80 +2832,28 @@ function CanvasInner({
           </div>
         </CanvasColumn>
 
-        <DetailSlot
-          key="detail"
-          show={visible.detail}
-          entry={focusedEntry}
-          decision={focusedDecision}
-          delivers={source.kind === 'session' && source.source.capabilities.deliverPrompt}
-          // The bridge the question card answers through. Passed beside
-          // `delivers` because the two are read together: a source that
-          // declares delivery and a shell that has no main process behind it
-          // are both reasons to draw no Submit at all. `undefined` in the
-          // browser build.
-          answer={globalThis.window?.api?.terminal?.answer}
-          // The flag the source declares, finally read. `false` withdraws the
-          // tab rather than mounting one that can only apologise.
-          terminal={terminalTab}
-          // The flag has guarded double-submit here since the composer was
-          // written; the pane never saw it, so a two-minute `claude --resume`
-          // looked like Enter doing nothing.
-          sending={writing}
-          tabRequest={tabRequest}
-          // Opaque both ways: the store never learns the tab names, and the
-          // guard keeps the pane's mount-time report from being a write.
-          initialTab={prefs.detailTab}
-          onTabChange={(next) => {
-            if (next !== prefs.detailTab) {
-              savePrefs(setDetailTab(prefs, next));
-            }
-          }}
-          draft={draft}
-          onDraftChange={setDraft}
-          onSubmit={sendPrompt}
-          active={mode === 'insert'}
-          actionIndex={actionIndex}
-          composing={composing}
-          // The mouse route into the box, and the same function the `i` route
-          // uses -- a focus that entered the composer without entering Insert
-          // is the divergence this call closes.
-          onCompose={beginComposing}
-          onStopComposing={() => {
-            setComposing(false);
-            setDraft('');
-            // Escape out of the composer returns the keyboard to the SIDEBAR,
-            // which is the pane the operator asked to get back to. Without
-            // this, a prompt opened with `I` leaves `mode === 'insert'`, so
-            // the blur hands the keys back to a window where `j`/`k` walk the
-            // detail pane's actions instead of the session list — the keys
-            // work, they just do the wrong thing, which is worse than being
-            // swallowed. The `i` path already sat on 'list' and was unaffected,
-            // which is why this only ever bit one of the two entry points.
-            setMode('select');
-          }}
-          width={detailWidth}
-          /* Only where it would move something. The detail pane is a fixed
-             column with the leftover room beside it exactly while the canvas
-             is the main column; everywhere else its width is derived from the
-             sidebar and the canvas's reserve, so its own edge has nothing to
-             drag and the seam that does move is the sidebar's. A handle that
-             moves nothing is worse than no handle: it advertises a gesture the
-             layout cannot honour. */
-          resizeHandle={
-            canvasIsMain(visible) ? (
-              <PaneResizer
-                pane="detail"
-                ariaLabel="resize detail panel"
-                layout={visible}
-                stored={{ sidebar: storedSidebar, detail: storedDetail }}
-                viewportWidth={viewportWidth}
-                onChange={onPaneChange}
-                onCommit={onPaneCommit}
-              />
-            ) : null
-          }
-        />
+        <DetailSlot key="detail" show={visible.detail} {...detailProps} />
       </Columns>
+
+      {phone && (
+        <PhoneShell
+          sidebar={sidebarProps}
+          detail={detailProps}
+          sourceReadout={<SourceReadout source={source} />}
+          // A read-only server registers no write routes at all, so the box is
+          // withdrawn rather than drawn and refused. Only a `session` source
+          // can say; the demo and live sources both record.
+          records={source.kind !== 'session' || source.source.capabilities.recordPrompt}
+          failureCount={failureCount}
+          onOpenErrorLog={() => setErrorLogOpen(true)}
+          // The SAME cell the desktop bar draws, not a second rendering of the
+          // same string: `StatusCell` shortens and carries the whole message
+          // on its tooltip, and a phone-only copy would drift from it.
+          statusCell={status === null ? null : <StatusCell text={status} />}
+          tally={tally}
+          declines={source.kind === 'session' ? source.source.declines : {}}
+        />
+      )}
 
       {/* Moved out of the canvas column when the canvas became hideable: the
           palette is a window overlay, not part of the graph, and left inside
@@ -2926,104 +2989,111 @@ function CanvasInner({
         />
       )}
 
+      {/* Not drawn on a phone. Its mode cell names Select/Insert, which do
+          not exist there, and its usage bars read a `window.api` a browser
+          does not have -- a bar that is always empty and a cell reporting a
+          state nothing can change. The phone shell draws its own bar with the
+          two things that survive. */}
       {/* Named cells, not positional ones. There are three `<footer>`s in this
           tree now and a query that counted on order would silently start
           reading the sidebar's. */}
-      <footer
-        data-status-bar
-        className="flex h-8 flex-none items-center gap-3 border-line border-t bg-sidebar px-3 font-mono text-[10px] text-ink-faint"
-      >
-        {/* The mode indicator is not in the mockup, and it stays: ADE is a
-            mouse-and-keyboard app, vam is a modal one, and a modal app that
-            does not say which mode it is in is the single worst thing a modal
-            app can be. */}
-        <span data-mode className="font-semibold text-ink">
-          {/* JUMP and FILTER are transient — a key is being awaited — so they
-              outrank the resting mode and keep their own names. Underneath
-              them there are exactly two, and they are the operator's words:
-              Select and Insert. `PROMPT` is gone as a third name because it
-              never was one: composing happens INSIDE Insert, and printing it
-              as a peer of the other two implied a mode the grammar has no
-              state for. */}
-          {jumping ? 'JUMP' : filtering ? 'FILTER' : MODE_TITLES[mode]}
-        </span>
-        {/* The `project/session` cell that used to sit here is gone at the
-            operator's request: the slash between a project and a session made
-            the pair read as a git ref, and the sidebar row, the canvas card
-            and the detail header all already say which session the keyboard
-            is on. The REAL branch displays -- the sidebar row's and the
-            card's -- are untouched; only this restatement is gone. */}
-        <SourceGlyph
-          source={
-            focusedEntry === null
-              ? null
-              : (focusedEntry.session.source ?? focusedEntry.project.source ?? null)
-          }
-        />
-
-        <span className="h-3 w-px bg-line" />
-        {usage.reason === null ? (
-          <span data-usage className={usage.highUsage ? 'text-failed' : undefined}>
-            {usage.text}
+      {!phone && (
+        <footer
+          data-status-bar
+          className="flex h-8 flex-none items-center gap-3 border-line border-t bg-sidebar px-3 font-mono text-[10px] text-ink-faint"
+        >
+          {/* The mode indicator is not in the mockup, and it stays: ADE is a
+              mouse-and-keyboard app, vam is a modal one, and a modal app that
+              does not say which mode it is in is the single worst thing a modal
+              app can be. */}
+          <span data-mode className="font-semibold text-ink">
+            {/* JUMP and FILTER are transient — a key is being awaited — so they
+                outrank the resting mode and keep their own names. Underneath
+                them there are exactly two, and they are the operator's words:
+                Select and Insert. `PROMPT` is gone as a third name because it
+                never was one: composing happens INSIDE Insert, and printing it
+                as a peer of the other two implied a mode the grammar has no
+                state for. */}
+            {jumping ? 'JUMP' : filtering ? 'FILTER' : MODE_TITLES[mode]}
           </span>
-        ) : (
-          <Note text={usage.reason}>
-            <span data-usage>{usage.text}</span>
-          </Note>
-        )}
-        {usage.windows !== null && (
-          <span className="flex items-center gap-2">
-            {/* Five hours first: it is the window that moves minute to minute. */}
-            <UsageBar label="5h" usageWindow={usage.windows.fiveHour} high={usage.highUsage} />
-            <UsageBar label="7d" usageWindow={usage.windows.sevenDay} high={usage.highUsage} />
+          {/* The `project/session` cell that used to sit here is gone at the
+              operator's request: the slash between a project and a session made
+              the pair read as a git ref, and the sidebar row, the canvas card
+              and the detail header all already say which session the keyboard
+              is on. The REAL branch displays -- the sidebar row's and the
+              card's -- are untouched; only this restatement is gone. */}
+          <SourceGlyph
+            source={
+              focusedEntry === null
+                ? null
+                : (focusedEntry.session.source ?? focusedEntry.project.source ?? null)
+            }
+          />
+
+          <span className="h-3 w-px bg-line" />
+          {usage.reason === null ? (
+            <span data-usage className={usage.highUsage ? 'text-failed' : undefined}>
+              {usage.text}
+            </span>
+          ) : (
+            <Note text={usage.reason}>
+              <span data-usage>{usage.text}</span>
+            </Note>
+          )}
+          {usage.windows !== null && (
+            <span className="flex items-center gap-2">
+              {/* Five hours first: it is the window that moves minute to minute. */}
+              <UsageBar label="5h" usageWindow={usage.windows.fiveHour} high={usage.highUsage} />
+              <UsageBar label="7d" usageWindow={usage.windows.sevenDay} high={usage.highUsage} />
+            </span>
+          )}
+
+          {/* The session tallies and the project count are gone at the
+              operator's request: "statusbar khong can list so session va
+              session status". Every one of those numbers is already on screen
+              as the thing it counts -- the sidebar's filter counts, the cards
+              on the canvas -- so the bar was restating a view of itself.
+              `tally` itself stays: the sidebar's filter counts read it. */}
+
+          {status !== null && <StatusCell text={status} />}
+
+          {/* The way back to a failure that has already scrolled past. A status
+              line lives until the next status replaces it, which in practice is
+              seconds; before this cell existed the only record of a `cli-failed`
+              was whatever the operator managed to read. Hidden entirely while
+              nothing has broken -- a permanent `0` is noise. */}
+          {failureCount > 0 && (
+            <button
+              type="button"
+              data-error-log-button
+              onClick={() => setErrorLogOpen(true)}
+              className="rounded-[4px] border border-line-strong px-1.5 py-px text-failed"
+            >
+              {failureCount} {failureCount === 1 ? 'failure' : 'failures'}
+            </button>
+          )}
+
+          <span className="flex-1" />
+          {/* The right-hand end is one cell wide, again at the operator's
+              request: "Phan ben phai status bar, chi de `?` keyboard shortcut
+              thoi". The budget cell that used to sit here went with the rest;
+              `?` is the `help` chord in BINDING_TABLES, so the one key still
+              printed is a key the grammar answers to. */}
+          <span className="flex items-center gap-1.5">
+            {/* A tag rather than loose text: `?` has to read as a key you press.
+                A bare glyph in a corner reads as punctuation, and the label
+                beside it is what makes the sheet discoverable to someone who
+                does not already know it is there. */}
+            <span
+              data-keysheet-hint
+              className="rounded-[4px] border border-line-strong px-1.5 py-px text-ink-dim"
+            >
+              ?
+            </span>
+            Keyboard shortcut
           </span>
-        )}
-
-        {/* The session tallies and the project count are gone at the
-            operator's request: "statusbar khong can list so session va
-            session status". Every one of those numbers is already on screen
-            as the thing it counts -- the sidebar's filter counts, the cards
-            on the canvas -- so the bar was restating a view of itself.
-            `tally` itself stays: the sidebar's filter counts read it. */}
-
-        {status !== null && <StatusCell text={status} />}
-
-        {/* The way back to a failure that has already scrolled past. A status
-            line lives until the next status replaces it, which in practice is
-            seconds; before this cell existed the only record of a `cli-failed`
-            was whatever the operator managed to read. Hidden entirely while
-            nothing has broken -- a permanent `0` is noise. */}
-        {failureCount > 0 && (
-          <button
-            type="button"
-            data-error-log-button
-            onClick={() => setErrorLogOpen(true)}
-            className="rounded-[4px] border border-line-strong px-1.5 py-px text-failed"
-          >
-            {failureCount} {failureCount === 1 ? 'failure' : 'failures'}
-          </button>
-        )}
-
-        <span className="flex-1" />
-        {/* The right-hand end is one cell wide, again at the operator's
-            request: "Phan ben phai status bar, chi de `?` keyboard shortcut
-            thoi". The budget cell that used to sit here went with the rest;
-            `?` is the `help` chord in BINDING_TABLES, so the one key still
-            printed is a key the grammar answers to. */}
-        <span className="flex items-center gap-1.5">
-          {/* A tag rather than loose text: `?` has to read as a key you press.
-              A bare glyph in a corner reads as punctuation, and the label
-              beside it is what makes the sheet discoverable to someone who
-              does not already know it is there. */}
-          <span
-            data-keysheet-hint
-            className="rounded-[4px] border border-line-strong px-1.5 py-px text-ink-dim"
-          >
-            ?
-          </span>
-          Keyboard shortcut
-        </span>
-      </footer>
+        </footer>
+      )}
     </div>
   );
 }
