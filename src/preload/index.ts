@@ -19,6 +19,7 @@ import {
   createRemoteApi,
   createStreamSubscribe,
   createTerminalApi,
+  createUpdateApi,
   createUsageApi,
 } from './api.js';
 
@@ -26,6 +27,9 @@ contextBridge.exposeInMainWorld('api', {
   ...createPreloadApi(ipcRenderer),
   subscribe: createStreamSubscribe(ipcRenderer),
   usage: createUsageApi(ipcRenderer),
+  // Reaches github.com, and only when something asks it to -- nothing on
+  // this bridge checks on its own.
+  update: createUpdateApi(ipcRenderer),
   clipboard: createClipboardApi(ipcRenderer),
   terminal: createTerminalApi(ipcRenderer),
   dialog: createDialogApi(ipcRenderer),

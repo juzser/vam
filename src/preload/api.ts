@@ -24,6 +24,7 @@ import type { Project } from '../renderer/domain/model.js';
 import type { AnswerRequest, AnswerResult } from '../shared/answer.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
 import type { PaneKey, PaneSendResult, PaneView } from '../shared/terminal.js';
+import type { UpdateStatus } from '../shared/update.js';
 import type { UsageSnapshot } from '../shared/usage.js';
 
 /** The slice of `ipcRenderer` used here, so this module is testable without electron. */
@@ -110,6 +111,23 @@ export type UsageApi = {
 export function createUsageApi(ipc: InvokerLike): UsageApi {
   return {
     get: () => ipc.invoke(CHANNELS.usageGet) as Promise<UsageSnapshot>,
+  };
+}
+
+/** The bridge's update member: one check, no argument, no write. */
+export type UpdateApi = {
+  check(): Promise<UpdateStatus>;
+};
+
+/**
+ * `update.check` forwards straight to `vam:update:check` -- no `unwrap`, that
+ * channel answers a bare `UpdateStatus` (see `src/main/update/ipc.ts`). It is
+ * a request the renderer makes and main throttles; the renderer cannot make
+ * vam contact GitHub more often by calling this more often.
+ */
+export function createUpdateApi(ipc: InvokerLike): UpdateApi {
+  return {
+    check: () => ipc.invoke(CHANNELS.updateCheck) as Promise<UpdateStatus>,
   };
 }
 

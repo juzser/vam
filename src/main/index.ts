@@ -28,6 +28,8 @@ import { createTmuxRunner } from './sources/tmux/spawn.js';
 import { createNodeEventSource } from './stream/event-source.js';
 import { registerStreamIpc } from './stream/register.js';
 import { registerTerminalIpc } from './terminal/ipc.js';
+import { checkForUpdate } from './update/check.js';
+import { registerUpdateIpc } from './update/ipc.js';
 import { registerUsageIpc } from './usage/ipc.js';
 import { readUsage } from './usage/reader.js';
 
@@ -297,6 +299,12 @@ void app.whenReady().then(() => {
   // module's -- main-process-only because a Keychain read is not a thing the
   // renderer, the least trusted process here, may ever perform.
   registerUsageIpc(ipcMain, () => readUsage());
+  // Contacts github.com, and ONLY when a surface asks -- there is no timer
+  // and no launch-time check, which is what makes an outbound call from a
+  // local-first tool opt-in rather than announced. It never downloads or
+  // installs anything: what comes back is a URL for the operator to decide
+  // about. See `./update/check.ts`.
+  registerUpdateIpc(ipcMain, () => checkForUpdate(app.getVersion()));
   // Electron's clipboard, not the page's: the permission policy above denies
   // `clipboard-sanitized-write`, so a renderer-side write is refused in the
   // packaged app. See `./clipboard/ipc.ts`.

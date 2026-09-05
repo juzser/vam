@@ -55,6 +55,13 @@ export const CHANNELS = {
    */
   clipboardWrite: 'vam:clipboard:write',
   /**
+   * The update check. Answers bare too -- an `UpdateStatus`, which carries
+   * its own four branches (`src/shared/update.ts`). It is the only channel
+   * that reaches a host outside this machine, and it does so unauthenticated,
+   * with no query and no body; see `src/main/update/check.ts`.
+   */
+  updateCheck: 'vam:update:check',
+  /**
    * The Terminal tab's read. Like the two above it answers bare -- a
    * `PaneView`, not an `IpcResult` -- because that type already carries its
    * own failure branch (see `src/main/terminal/ipc.ts`). It is invoked ONLY
