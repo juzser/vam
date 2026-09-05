@@ -1342,15 +1342,22 @@ function CanvasInner({
    * That refusal arrives here as a `SourceError` and is rendered verbatim —
    * the renderer never guesses at the distinction, and never reports a stop
    * it did not perform.
+   *
+   * IT REPORTS ITS OUTCOME, `true` only where the source confirmed the close.
+   * Nothing here throws — a refusal is a status line and a normal return, and
+   * that is deliberate — so a caller acting on several sessions has no
+   * exception to count and would otherwise have to count its own intentions
+   * instead. `removeProject` did exactly that, and told the operator it had
+   * ended sessions that were still running.
    */
   const closeSession = useCallback(
-    async (sessionId: string, title: string) => {
+    async (sessionId: string, title: string): Promise<boolean> => {
       if (pendingAction !== null) {
-        return;
+        return false;
       }
       if (source.kind !== 'session') {
         setStatus(`black-smith has no close-session command — "${title}" is still here`);
-        return;
+        return false;
       }
       const sessionSource = source.source;
       if (!canWriteTo(sessionSource) || sessionSource.write.closeSession === undefined) {
@@ -1359,7 +1366,7 @@ function CanvasInner({
             sessionSource.declines.closeSession ?? 'it advertises no way to'
           }; "${title}" is still here`,
         );
-        return;
+        return false;
       }
       setPendingAction(sessionId);
       setStatus(`stopping "${title}"…`);
@@ -1369,8 +1376,10 @@ function CanvasInner({
           `stopped "${title}" — the conversation is kept; resume it with \`claude attach\``,
         );
         source.onWrote();
+        return true;
       } catch (cause) {
         setStatus(noteFailure('close session', cause));
+        return false;
       } finally {
         // EVERY path, and that is the whole of this `finally`. A spinner still
         // spinning after a refusal turns a clear failure into an apparent
@@ -1436,6 +1445,15 @@ function CanvasInner({
    * confirm dialog disclosed and the operator agreed to. Recomputing it here
    * against a model that may have polled since would end sessions the sentence
    * they read did not mention.
+   *
+   * IT COUNTS OUTCOMES, NOT INTENTIONS, and a close that failed cancels the
+   * hide. `plan.end.length` is what `removalPlan` proposed before anything was
+   * attempted; reporting it as the number ended told the operator that two
+   * sessions had been stopped while both were still running -- and the hide
+   * had just taken away the rows that would have shown otherwise. So each
+   * close's own answer is counted, and where any of them said no the project
+   * is left drawn: the sessions stay reachable and Remove can be pressed again
+   * once the source is.
    */
   const removeProject = useCallback(
     async (project: Project, plan: RemovalPlan) => {
@@ -1445,15 +1463,37 @@ function CanvasInner({
         );
         return;
       }
+      const stillRunning: string[] = [];
+      let ended = 0;
       for (const sessionId of plan.end) {
         const entry = allEntries.find((e) => e.session.id === sessionId);
-        await closeSession(sessionId, entry?.session.title ?? sessionId);
+        const title = entry?.session.title ?? sessionId;
+        if (await closeSession(sessionId, title)) {
+          ended += 1;
+        } else {
+          stillRunning.push(title);
+        }
+      }
+      if (stillRunning.length > 0) {
+        // NOT HIDDEN, and that is the decision. Hiding is what would make
+        // these sessions unreachable: still running, with no row, no card and
+        // no Remove item to try again from. A removal that could not end what
+        // it disclosed it would end is a removal that did not happen, so the
+        // project stays exactly where it was and the sentence names the
+        // sessions the operator now has to deal with. The close's own refusal
+        // is one line above this one in the log; this is the summary of it.
+        setStatus(
+          `"${project.name}" was NOT removed — ${stillRunning.join(', ')} ${
+            stillRunning.length === 1 ? 'is' : 'are'
+          } still running${ended === 0 ? '' : ` (${ended} ended)`}; nothing was hidden, so you can try again`,
+        );
+        return;
       }
       setProjectRemoved(project, true);
       setStatus(
-        plan.end.length === 0
+        ended === 0
           ? `removed "${project.name}" from vam — nothing was ended, and nothing left this machine`
-          : `removed "${project.name}" from vam — ended ${plan.end.length} session${plan.end.length === 1 ? '' : 's'} vam started; nothing left this machine`,
+          : `removed "${project.name}" from vam — ended ${ended} session${ended === 1 ? '' : 's'} vam started; nothing left this machine`,
       );
     },
     [allEntries, closeSession, pendingAction, setProjectRemoved],
