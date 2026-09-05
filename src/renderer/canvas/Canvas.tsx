@@ -269,8 +269,11 @@ export function truncateStatus(text: string): string {
 export function StatusCell({ text }: { readonly text: string }) {
   return (
     <Note text={text}>
-      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the
-          feature -- see the comment above. */}
+      {/* The suppression that used to sit here is gone rather than kept: with
+          `role="status"` the span is no longer non-interactive, so
+          `noNoninteractiveTabindex` does not fire and biome fails an unused
+          `biome-ignore` as an error. The tab stop is still the feature it
+          always was -- see the comment above. */}
       <span
         data-status
         role="status"

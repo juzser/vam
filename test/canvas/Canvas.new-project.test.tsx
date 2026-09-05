@@ -356,7 +356,6 @@ describe('new project — feedback and the in-flight guard', () => {
         gate.settle();
       });
     });
-
   });
 
   it('says "starting…" before the spawn, and clears the busy state when it lands', async () => {
