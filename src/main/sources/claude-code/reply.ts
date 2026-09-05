@@ -49,6 +49,7 @@ import {
 import type { DeliverFn } from './deliver.js';
 import { sessionIdOf } from './deliver.js';
 import { projectIdOf } from './project-id.js';
+import { claimedPanes } from './session-pane.js';
 
 /** The part of a live row this module needs. `LiveAgent` satisfies it. */
 export type ReplyRow = {
@@ -80,14 +81,24 @@ export type ReplyRow = {
  * count vetoes every row and close refuses all three. Consulting it after a
  * pairing has been proven would keep that veto.
  *
- * THE TAG REMAINS, unchanged, for a session whose file carries no `tmux` field
- * -- one not under tmux, or an older Claude Code that did not publish it. Its
- * two conditions are the whole of the safety argument in that case: exactly
- * one tagged tmux session for this project, and exactly one live row in it --
- * and, per the paragraph above, it answers `null` for every row in a cwd that
- * holds more than one live session. That is correct (nothing in the project
- * scheme says which row is in the pane) and it is why this defect stayed
- * invisible: the pairing was not wrong, it was unanswerable.
+ * THE TAG REMAINS -- vetoed by one rule -- for a session whose file carries no
+ * `tmux` field: one not under tmux, or an older Claude Code that did not
+ * publish it. Its two conditions are the whole of the safety argument in that
+ * case: exactly one tagged tmux session for this project, and exactly one live
+ * row in it -- and, per the paragraph above, it answers `null` for every row
+ * in a cwd that holds more than one live session. That is correct (nothing in
+ * the project scheme says which row is in the pane) and it is why this defect
+ * stayed invisible: the pairing was not wrong, it was unanswerable.
+ *
+ * THE VETO: a tagged session that some row has PUBLISHED itself into belongs
+ * to that row, and handing it to a silent neighbour -- which is what happened,
+ * since most sessions publish nothing -- types into another agent. It is a
+ * veto and not a narrowing, and the distinction is load-bearing: the claim is
+ * applied AFTER the single-candidate count, so it can only ever turn an answer
+ * into `null`. Subtracting claimed sessions first and counting the remainder
+ * would answer confidently for a project holding two tagged sessions of which
+ * one is claimed -- inventing certainty out of the exact ambiguity the
+ * published field exists to resolve.
  *
  * Exported for the test that pins both: a routing rule that is only tested
  * through the spawn is a rule nobody can see.
@@ -125,9 +136,21 @@ export function paneForRow(
   }
   const here = agents.filter((agent) => projectIdOf(agent.cwd) === projectId);
   if (here.length !== 1) return null;
+  // A PANE ANOTHER ROW PUBLISHED IS SPOKEN FOR, and withholding it here is the
+  // same rule `targetSession` applies to the read and the resize -- shared as
+  // `claimedPanes` rather than written twice, because two copies of a pairing
+  // rule are two answers to "whose terminal is this". This row published
+  // nothing, so every claim in the set is somebody else's, and the tag may not
+  // hand it their session. An unclaimed one still answers, which is the whole
+  // point of keeping the fallback.
   const tagged = sessions.filter((session) => session.project === projectId);
   const [only] = tagged;
-  return tagged.length === 1 && only !== undefined ? only.name : null;
+  if (tagged.length !== 1 || only === undefined) return null;
+  // LAST, SO IT CAN ONLY VETO. Filtering the claims out before the count would
+  // let two tagged sessions minus one claim look like a single confident
+  // candidate; see the header, and `matchVamSession`, which orders it the same
+  // way for the same reason.
+  return claimedPanes(panes).has(only.name) ? null : only.name;
 }
 
 /**

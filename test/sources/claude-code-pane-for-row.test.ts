@@ -157,3 +157,38 @@ describe('paneForRow with three live sessions in one cwd', () => {
     for (const row of all) expect(paneForRow(one, all, row)).toBeNull();
   });
 });
+
+/**
+ * The same exclusive-claim rule as `targetSession`'s, on the keystroke and
+ * close side -- and it has to be here too, or Enter is still delivered into
+ * another row's running agent while the tab honestly draws nothing.
+ */
+describe('paneForRow and panes another row has claimed', () => {
+  const GAMMA = { key: 'sess-gamma#9', sessionId: 'sess-gamma', cwd: CWD };
+
+  it('is null when the project’s only session is the pane another row published', () => {
+    // GAMMA is the only row in the list, so the count condition does not save
+    // this one: the claim itself has to. The claimant is a session whose file
+    // publishes this pane and which is not among the rows here -- a session
+    // vam is not currently drawing, or one that has exited leaving its file.
+    // vam cannot tell those apart, and the pane is spoken for either way.
+    const panes = new Map([['sess-alpha', 'vam-atlas-aa11bb']]);
+    expect(paneForRow(one, [GAMMA], GAMMA, panes)).toBeNull();
+  });
+
+  it('still answers with a session nobody published -- the legacy fallback', () => {
+    expect(paneForRow(one, [GAMMA], GAMMA, new Map())).toBe('vam-atlas-aa11bb');
+  });
+
+  it('does not answer for two tagged sessions just because one is claimed', () => {
+    // The same ordering rule as `matchVamSession`'s: the claim is applied
+    // after the single-candidate count, so it can only ever veto. Subtracting
+    // first would leave one name here and type into it.
+    const panes = new Map([['sess-alpha', 'vam-atlas-aa11bb']]);
+    expect(paneForRow(two, [GAMMA], GAMMA, panes)).toBeNull();
+  });
+
+  it('does not guess between two unpublished rows over one unclaimed session', () => {
+    expect(paneForRow(one, [ALPHA, GAMMA], GAMMA, new Map())).toBeNull();
+  });
+});

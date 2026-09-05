@@ -28,6 +28,7 @@
 
 import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
 import { sessionIdOf } from '../sources/claude-code/deliver.js';
+import { claimedPanes } from '../sources/claude-code/session-pane.js';
 import {
   sendBackspaceArgv,
   sendBackTabArgv,
@@ -67,7 +68,19 @@ export type SessionMatch =
    */
   | { readonly kind: 'mispaired'; readonly published: string };
 
-export function matchVamSession(sessions: readonly TmuxSession[], projectId: string): SessionMatch {
+export function matchVamSession(
+  sessions: readonly TmuxSession[],
+  projectId: string,
+  /**
+   * Panes some row has published itself into (`claimedPanes`). A claimed pane
+   * belongs to the row that named it and is not a candidate for a guess made
+   * on behalf of a row that named nothing -- which is how another row's screen
+   * came to be drawn, and resized, under this one's name. Absent for a caller
+   * that has no claim set, and then this is the project-wide answer it always
+   * was.
+   */
+  claimed?: ReadonlySet<string>,
+): SessionMatch {
   // An empty id is what an UNSET option reads back as, so an empty id asking
   // would sweep up every session vam did not tag. It matches nothing.
   if (projectId === '') return { kind: 'none' };
@@ -77,7 +90,20 @@ export function matchVamSession(sessions: readonly TmuxSession[], projectId: str
     .sort();
   const [only] = mine;
   if (only === undefined) return { kind: 'none' };
-  return mine.length === 1 ? { kind: 'one', name: only } : { kind: 'ambiguous', names: mine };
+  // THE COUNT IS TAKEN BEFORE THE CLAIM IS APPLIED, AND THE ORDER IS THE
+  // WHOLE OF THE RULE: a claim may only ever REMOVE an answer, never create
+  // one. It turns `one` into `none`. It must never turn `ambiguous` into
+  // `one`.
+  //
+  // Subtracting first and counting the remainder manufactured certainty out
+  // of exactly the ambiguity the published field exists to resolve
+  // (`session-pane.ts`): two vam sessions in one project, one of them
+  // claimed, and every silent row resolved confidently onto the other. At
+  // most one of those rows is in it. Before, both got `ambiguous` -- no
+  // screen, `unaimed` on the keystroke, no resize -- which is a refusal, and
+  // a refusal is what more than one candidate is owed.
+  if (mine.length > 1) return { kind: 'ambiguous', names: mine };
+  return claimed?.has(only) === true ? { kind: 'none' } : { kind: 'one', name: only };
 }
 
 /**
@@ -125,7 +151,14 @@ export function targetSession(
       ? { kind: 'one', name: published }
       : { kind: 'mispaired', published };
   }
-  return matchVamSession(sessions, projectId);
+  // THE ROW PUBLISHED NOTHING, AND THAT IS NOT THE SAME AS NOBODY HAVING
+  // SPOKEN. The tag answers per PROJECT, so where one row publishes a pane and
+  // its neighbours publish none -- the common shape, since only sessions under
+  // a new enough Claude Code report the field -- the tag hands every silent
+  // row the pane the loud one is sitting in. Claimed panes are withheld from
+  // the guess; an unclaimed session still resolves, which is the case this
+  // fallback exists for (`session-pane.ts`).
+  return matchVamSession(sessions, projectId, claimedPanes(panes));
 }
 
 /**

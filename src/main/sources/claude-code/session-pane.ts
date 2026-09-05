@@ -106,3 +106,49 @@ export async function readPublishedPanes(
   }
   return panes;
 }
+
+/**
+ * The tmux sessions that some row has PUBLISHED itself into -- the claim set.
+ *
+ * A PUBLISHED PANE IS AN EXCLUSIVE CLAIM, and this is the one place that
+ * sentence is turned into a value, because both pairing rules need it and two
+ * copies of it would drift. `targetSession` (`terminal/pane.ts`) draws and
+ * resizes by it; `paneForRow` (`reply.ts`) types and closes by it.
+ *
+ * WHAT IT FIXES. The published branch of both rules already refuses a value
+ * that DISAGREES -- a disagreement is evidence of a corrupt pairing rather
+ * than absence of evidence. Absence itself was read as "nobody has an opinion,
+ * guess by project": measured on a real machine, three of four live sessions
+ * published no `tmux` field, and the tag found for each of them the single vam
+ * session in that project -- the one the FOURTH session had published. vam
+ * drew that screen under another row's name and had already reflowed it to
+ * fit another row's window.
+ *
+ * The tag path is NOT removed, and that is why this is a filter rather than a
+ * deletion: an UNCLAIMED vam session -- one whose Claude Code is too old to
+ * publish the field, or one not under tmux -- is exactly what the fallback
+ * exists for and still resolves through it.
+ *
+ * A CLAIM IS NOT CHECKED AGAINST LIVENESS, AND THAT IS A CHOICE, NOT A LIMIT.
+ * A pane claimed by a session that has exited leaving its file behind stays
+ * claimed. `targetSession` could not tell the difference if it wanted to -- it
+ * is given a project and a row id and no list of live sessions -- but
+ * `paneForRow` could: the live rows are a parameter there, and the CLI is what
+ * knows which processes are alive (`source.ts`). The rule is deliberately the
+ * same on both sides anyway, because one pairing rule with two answers is not
+ * one rule, and because a stale-claim check would have to decide what a
+ * MISSING row means -- not drawn yet, filtered out, or genuinely gone -- which
+ * is the guess this module exists to stop making.
+ *
+ * THE PRICE IS NOT AN EMPTY TAB. `paneForRow` is what `vamControlled` is
+ * computed from (`source.ts`), so a row vetoed by a stale claim cannot be
+ * closed and cannot be replied to through the pane -- the refusal is
+ * permanent, for as long as the dead session's file sits in the directory.
+ * That is still the right direction to be wrong in: the alternative is a
+ * keystroke delivered into somebody else's running agent, which is silent,
+ * irreversible and lands in their prompt. But it is a real cost, and a reader
+ * weighing this rule should weigh that one and not a blank screen.
+ */
+export function claimedPanes(panes: ReadonlyMap<string, string> | undefined): ReadonlySet<string> {
+  return new Set(panes === undefined ? [] : panes.values());
+}

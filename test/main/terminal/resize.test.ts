@@ -167,3 +167,35 @@ describe('the terminal resize channel', () => {
     expect(argvs).toEqual([]);
   });
 });
+
+/**
+ * THE SHARPEST CASE OF THE CLAIM RULE, and the one the operator saw. A row
+ * that published nothing shares a project with one vam session, and that
+ * session is the pane ANOTHER row published. Before the rule, the tag path
+ * answered with it and the resize landed: the session measured 130x57 rather
+ * than the 80x24 a detached session starts at, so a terminal belonging to a
+ * row that never asked had already been reflowed by the time anybody looked.
+ *
+ * A resize is where a display mistake becomes a change to somebody's session,
+ * so the assertion is that tmux is never asked at all beyond the listing.
+ */
+describe('a session another row claimed is not resized on this row’s behalf', () => {
+  it('lists, finds only a claimed session, and stops there', async () => {
+    const { run, verbs } = runner({
+      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'resize-window': ok(''),
+    });
+    const panes = new Map([['sess-alpha', 'vam-atlas-a1b2c3']]);
+    expect(await resizeSessionPane(run, ATLAS, SIZE, 'sess-gamma#9', panes)).toBe(false);
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
+  it('still resizes a session nobody claimed for a row that published nothing', async () => {
+    const { run, argvs } = runner({
+      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'resize-window': ok(''),
+    });
+    expect(await resizeSessionPane(run, ATLAS, SIZE, 'sess-gamma#9', new Map())).toBe(true);
+    expect(argvs[1]?.[2]).toBe('=vam-atlas-a1b2c3:');
+  });
+});
