@@ -1,14 +1,18 @@
 // @vitest-environment happy-dom
 
 /**
- * Screen two: the step rail, the output, and the two limits that must read as
+ * Screen two: the output, the composer, and the two limits that must read as
  * stated rather than as broken controls.
+ *
+ * The step rail and the view tabs USED to be asserted here. They are gone from
+ * the phone (see `PhoneShell.tsx` and `DetailPanel.tsx`), so the assertions
+ * below are their replacements rather than their deletion: the same questions,
+ * with the answer this screen now gives.
  */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import { VISIBLE_DECISION_COUNT } from '../../src/renderer/domain/selectors.js';
 import { chips, FIVE_STEPS, installPhoneGlobals, MODEL, phoneSource, rows } from './harness.js';
 
 beforeAll(installPhoneGlobals);
@@ -29,43 +33,28 @@ function openSession(): void {
 }
 
 describe('the phone session screen', () => {
-  it('draws one chip per decision, not the three a grid cell holds', () => {
+  it('draws no step rail and no step chips, on a session with five steps', () => {
     openSession();
-    expect(FIVE_STEPS.length).toBeGreaterThan(VISIBLE_DECISION_COUNT);
-    expect(chips()).toHaveLength(FIVE_STEPS.length);
-    // Oldest first, so the numbers on the chips are the numbers STEP n/N counts.
-    expect(chips()[0]?.textContent).toContain('researcher');
-    expect(document.querySelector('[data-step-rail]')?.textContent).toContain(
-      `STEP ${FIVE_STEPS.length}/${FIVE_STEPS.length}`,
-    );
+    expect(FIVE_STEPS.length).toBe(5);
+    // Was: one chip per decision, plus `STEP n/N`. The rail is session-BROWSING
+    // chrome and this screen is for reading the newest output and replying, so
+    // the count it drew has no strip left to sit in.
+    expect(document.querySelector('[data-step-rail]')).toBeNull();
+    expect(chips()).toHaveLength(0);
+    expect(document.body.textContent).not.toContain('STEP ');
   });
 
-  it('opens on the newest step, and a tap moves to another one', () => {
+  it('opens on the newest step, with no control that moves off it', () => {
     openSession();
     const pane = () => document.querySelector('[data-action-pane]')?.textContent ?? '';
     expect(pane()).toContain('the gate said yes');
-
-    const first = chips()[0];
-    if (first === undefined) throw new Error('no chip');
-    act(() => {
-      fireEvent.click(first);
-    });
-    expect(pane()).toContain('the researcher read');
-    // `aria-current`, not `aria-selected`: these are buttons moving a position
-    // in a chain, and the region they change is no `tabpanel` of theirs.
-    expect(first.getAttribute('aria-current')).toBe('step');
-    expect(first.getAttribute('role')).toBeNull();
+    // The oldest step's output, which a chip used to reach. Nothing on this
+    // screen reaches it now -- that is the cost, stated.
+    expect(pane()).not.toContain('the researcher read');
   });
 
   it('opens on the newest step again after a chevron and a second tap', () => {
     openSession();
-    const first = chips()[0];
-    if (first === undefined) throw new Error('no chip');
-    act(() => {
-      fireEvent.click(first);
-    });
-    expect(document.querySelector('[data-step-rail]')?.textContent).toContain('STEP 1/5');
-
     act(() => {
       fireEvent.click(document.querySelector('[data-phone-back]') as Element);
     });
@@ -73,19 +62,23 @@ describe('the phone session screen', () => {
     act(() => {
       fireEvent.click(row as Element);
     });
-    // Leaving the screen does not move `focusedId`, so a reset keyed on the
-    // session id would never fire for the session you just left.
-    expect(document.querySelector('[data-step-rail]')?.textContent).toContain('STEP 5/5');
+    // The decision this test has always held: a re-open of the SAME session
+    // shows what the session just did. It used to be at risk from a `step`
+    // state whose reset was keyed on the session id; the state is gone, and
+    // "newest" is now derived on every render, so the risk is structural.
     expect(document.querySelector('[data-action-pane]')?.textContent).toContain(
       'the gate said yes',
     );
   });
 
-  it('withdraws the Terminal tab structurally, rather than showing it disabled', () => {
+  it('offers no view tabs at all, so there is no tab to withdraw', () => {
     openSession();
-    const tabs = [...document.querySelectorAll('[data-tab]')].map((t) => t.textContent);
-    expect(tabs.some((t) => t?.includes('Terminal'))).toBe(false);
-    expect(tabs.some((t) => t?.includes('Response'))).toBe(true);
+    // Was: Terminal withdrawn, Response present. Terminal's structural
+    // withdrawal is still asserted where the bar still exists -- `test/panels/
+    // DetailPanel.test.tsx`, 'the Terminal tab is offered only by a source that
+    // has one'. Here the whole bar is gone, which takes PRs and Agents with it.
+    expect(document.querySelector('[data-view-tabs]')).toBeNull();
+    expect(document.querySelectorAll('[data-tab]')).toHaveLength(0);
   });
 
   it('draws the composer and no mode row', () => {

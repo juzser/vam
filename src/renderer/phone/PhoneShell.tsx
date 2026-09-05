@@ -1,16 +1,31 @@
 /**
  * vam on a phone: two screens in a stack, and no canvas.
  *
- * Screen one is the session list, screen two is one session -- its steps, its
- * output, its open question and its composer. The panels are RE-HOSTED, not
+ * Screen one is the session list, screen two is one session -- its output, its
+ * open question and its composer. The panels are RE-HOSTED, not
  * rewritten: `SessionList` and `DetailPanel` are handed the same prop objects
  * `Canvas` assembles for the columns, with the width left off so each fills
  * the screen. Every `data-` hook they carry is therefore still where the
  * desktop's tests expect it.
  *
  * One cell of one 580x290 canvas card does not fit in 390px, so the graph is
- * not drawn at all; the step rail below carries the decision chain the canvas
- * carried, and carries all of it rather than the three a grid cell holds.
+ * not drawn at all.
+ *
+ * WHAT SCREEN TWO IS FOR, AND WHAT THAT COST. It is the prompt screen: read
+ * the newest output, reply. It is NOT for browsing a session. Two strips of
+ * browsing chrome used to sit between the app bar and the output and took
+ * ~215px of an 844px viewport between them -- a step rail built here, and the
+ * view tab bar `DetailPanel` draws (`phone` suppresses it there). Both are
+ * gone from the phone, on the operator's instruction, and the desktop keeps
+ * both. The price, so that the next reader does not restore them as an obvious
+ * omission:
+ *   - PRs and Agents are UNREACHABLE on a phone. Nothing else routes to them.
+ *   - There is no step navigation. The screen always shows the NEWEST step
+ *     (`session.decisions[0]`, derived on every render), which is the step a
+ *     waiting session is waiting in and the one a reply answers.
+ * The `step` state that used to hold a chip selection was deleted with the
+ * rail rather than left as a prop nobody writes: an unwritten selector would
+ * have frozen the screen on whatever step it last held.
  *
  * ONE RULE ANY SHELL RE-HOSTING THESE PANELS INHERITS, INCLUDING THE NEXT ONE.
  * The panels' buttons carry `ShortcutTip`, which prints the chord in force by
@@ -25,7 +40,6 @@
  */
 
 import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react';
-import type { Decision } from '../domain/model.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
 import { SessionList } from '../panels/SessionList.js';
 import type { SourceDeclines } from '../sources/port.js';
@@ -74,88 +88,6 @@ export type PhoneShellProps = {
   /** The source's own words for every capability it lacks. Never this file's. */
   readonly declines: SourceDeclines;
 };
-
-/**
- * The step rail: the canvas's information, on one axis.
- *
- * Chips are drawn oldest-first so the numbers read 1..N, which is the order
- * `STEP n/N` has always counted in. The amber cursor ring is deliberately NOT
- * used for the waiting mark -- it measures 2.15:1 on the light canvas, which
- * fails even the 3:1 non-text threshold, and on a 36px chip it would be the
- * only channel.
- */
-function StepRail({
-  steps,
-  selected,
-  waiting,
-  onSelect,
-}: {
-  readonly steps: readonly Decision[];
-  readonly selected: number;
-  readonly waiting: boolean;
-  readonly onSelect: (index: number) => void;
-}) {
-  const rail = useRef<HTMLElement>(null);
-  useEffect(() => {
-    rail.current?.querySelector('[data-step-chip][aria-current="step"]')?.scrollIntoView({
-      inline: 'center',
-      block: 'nearest',
-    });
-  }, []);
-  if (steps.length === 0) return null;
-  return (
-    // A `nav`, which is what it is: the session screen's primary navigation,
-    // and an element that can carry a name. A bare `div` cannot -- and the
-    // `tablist` this used to claim to be needed a `tabpanel` it never had.
-    <nav
-      ref={rail}
-      data-step-rail
-      aria-label="steps"
-      className="flex h-[44px] flex-none select-none items-center gap-2 overflow-x-auto border-line border-b bg-panel px-2 vam-no-scrollbar"
-    >
-      {steps.map((step, index) => {
-        // The newest step is the one a waiting session is waiting in: it is
-        // the one `focusedDecision` opens on, and the only one still running.
-        const needsYou = waiting && index === steps.length - 1;
-        const on = index === selected;
-        return (
-          <button
-            key={step.id}
-            type="button"
-            data-step-chip
-            // NOT `role="tab"`. These chips were written as a tablist and are
-            // not one: the region they change is `DetailPanel`'s body, which
-            // is no `tabpanel` of theirs, and a tab without its panel fails
-            // `aria-required-parent` (WCAG 1.3.1/4.1.2, Level A) on the one
-            // platform where a screen reader is standard equipment. They are
-            // buttons that move a position in a chain, and `aria-current`
-            // says exactly that much and no more.
-            aria-current={on ? 'step' : undefined}
-            onClick={() => onSelect(index)}
-            className={[
-              'flex min-h-[44px] flex-none items-center gap-1.5 whitespace-nowrap rounded-[7px] border px-3 text-[12px]',
-              on ? 'border-line bg-segment-on text-ink' : 'border-line text-ink-dim',
-              needsYou ? 'border-waiting' : '',
-              FOCUS_RING,
-            ].join(' ')}
-          >
-            <span className="font-mono text-[11px]">{index + 1}</span>
-            {step.label}
-            {needsYou && <span className="text-waiting">needs you</span>}
-          </button>
-        );
-      })}
-      {/* Stuck to the rail's right edge, because it is a `flex-none` sibling
-          INSIDE the rail's own `overflow-x-auto`: on a session with more chips than fit, the only
-          element that says how many steps exist scrolled out of view with them.
-          `bg-panel` is the rail's own background, so the chips pass under it
-          rather than through it. */}
-      <span className="sticky right-0 flex-none bg-panel px-2 font-mono text-[11px] text-ink-dim">
-        STEP {selected + 1}/{steps.length}
-      </span>
-    </nav>
-  );
-}
 
 /**
  * What this connection cannot do, in the source's own words.
@@ -212,25 +144,18 @@ export function PhoneShell({
    * sized in `100dvh` and needs no listener to sit above the keyboard.
    */
   const [typing, setTyping] = useState(false);
-  /**
-   * Which step the rail is on, or `null` for "the newest".
-   *
-   * `null` rather than an index, because the reset is what was wrong: keying
-   * it on the session id skips every re-open of the SAME session -- leaving
-   * the screen does not move `focusedId` -- so opening a session, tapping
-   * chip 1, going back and opening it again reopened on step 1. A sentinel
-   * cannot go stale that way: the screen sets it on every push.
-   */
-  const [step, setStep] = useState<number | null>(null);
 
   const entry = detail.entry;
   const session = entry?.session ?? null;
-  // Oldest first, so the numbers on the chips are the numbers `STEP n/N`
-  // counts in. ALL of them: the canvas's three-card cap is a property of a
-  // 580x290 grid cell and this rail has no cell.
-  const steps: readonly Decision[] = session === null ? [] : [...session.decisions].reverse();
-  const newest = Math.max(steps.length - 1, 0);
-  const at = step === null ? newest : Math.min(step, newest);
+  /**
+   * The step this screen shows: the newest, always.
+   *
+   * `decisions` is newest-first, so this is `[0]` and not a stored index. That
+   * is the point -- with no rail there is no control to move it, and a piece of
+   * state nothing writes is exactly how a screen ends up stuck on a step the
+   * session left ten minutes ago.
+   */
+  const newest = session?.decisions[0] ?? null;
 
   useEffect(() => {
     const pop = (event: PopStateEvent) => {
@@ -248,9 +173,8 @@ export function PhoneShell({
   const show = () => {
     openSession(window.history);
     pushed.current = true;
-    // Every push opens on the newest step: arriving at a session is arriving
-    // at what it just did, whether or not it is the session you last read.
-    setStep(null);
+    // Every push opens on the newest step, because that is the only step this
+    // screen has: arriving at a session is arriving at what it just did.
     setOpen(true);
   };
   const back = () => {
@@ -391,16 +315,10 @@ export function PhoneShell({
         {statusCell}
       </div>
 
-      {/* Out of the way while the keyboard is up: 44px of navigation the
-          operator has already used, out of the ~400px the keyboard leaves. */}
-      {!typing && (
-        <StepRail
-          steps={steps}
-          selected={at}
-          waiting={session?.status === 'waiting'}
-          onSelect={setStep}
-        />
-      )}
+      {/* Out of the way while the keyboard is up: chrome the operator is not
+          reading, out of the ~400px the keyboard leaves. The step rail that
+          stood here is gone entirely -- see the note at the top of this file
+          for what that costs. */}
       {!typing && <RemoteLimits declines={declines} />}
 
       {/* The output takes every pixel the bands above and the composer below do
@@ -428,7 +346,7 @@ export function PhoneShell({
           phone
           // There is nothing else on screen to be active.
           active={true}
-          decision={steps[at] ?? detail.decision}
+          decision={newest ?? detail.decision}
           records={records}
         />
       </div>

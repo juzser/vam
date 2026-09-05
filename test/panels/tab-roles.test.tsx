@@ -14,10 +14,13 @@
  * the two that did not: buttons in a named `<nav>`, saying `aria-pressed`.
  *
  * MEASURED AGAINST THE TREE, not the source: every question below is a DOM
- * query on markup `DetailPanel` rendered. What it cannot see is the phone's
- * typing rule, which is keyed on `data-view-tabs` rather than on the role
- * precisely so this change could not silently switch it off --
- * `test/phone/touch-targets.test.tsx` asks the cascade about that.
+ * query on markup `DetailPanel` rendered -- at a DESKTOP width, which is now
+ * the only place the view bar exists at all. The phone draws neither strip's
+ * ancestor chrome: `DetailPanel` takes `phone` and omits the view bar, and the
+ * step rail is gone from `PhoneShell`. The typing rule that used to hide the
+ * bar at 390px went with it; `test/phone/touch-targets.test.tsx` now asks the
+ * cascade the one question left, which is that nothing hides the QUESTION
+ * strip while you are answering it.
  */
 
 import { cleanup, render } from '@testing-library/react';

@@ -532,11 +532,12 @@ function TabBar({
     // `phone/PhoneShell.tsx` reached the same conclusion first.
     <nav
       aria-label="views"
-      /* The hook `.vam-phone-typing` hides this bar by. That rule used to name
-         `[role='tablist']` and so took the QUESTION strip with it -- the
-         control for choosing WHICH question you are answering vanished the
-         moment you tapped the composer to answer one. It names this bar, which
-         is why the move off the role above could not silently switch it off. */
+      /* This bar is DESKTOP-ONLY now -- see the `phone` gate at its call site.
+         The rule that used to hide it while the phone keyboard was up
+         (`.vam-phone-typing [data-view-tabs]`) went with it: a phone that never
+         draws the bar makes that selector match nothing, and a rule matching
+         nothing is indistinguishable from a rule that works. The hook stays
+         because the desktop's own tests name it. */
       data-view-tabs
       className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px]"
     >
@@ -1946,7 +1947,11 @@ export function DetailPanel(props: DetailPanelProps) {
   // source without one, and a tab bar with nothing selected over a pane
   // drawing a tab that is no longer offered is the state this collapses.
   const tabs = visibleTabs(terminal !== false);
-  const current = tabs.includes(tab) ? tab : 'Response';
+  // On a phone the bar is not drawn (below), so no tab can be chosen and the
+  // pane must not be left showing one a previous desktop session remembered
+  // through `initialTab` -- with no bar, that would be an unreachable view with
+  // no way back. Response is the only view the prompt screen has.
+  const current = phone ? 'Response' : tabs.includes(tab) ? tab : 'Response';
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
   /**
@@ -2338,12 +2343,21 @@ export function DetailPanel(props: DetailPanelProps) {
             the `progress` section's own counter, and the age is on the session
             card in the sidebar and on the canvas. */}
 
-        <TabBar
-          tabs={tabs}
-          runningAgents={entry?.session.runningAgents ?? 0}
-          current={current}
-          onSelect={setTab}
-        />
+        {/* Not on a phone. Operator instruction: the phone's session screen is
+            the PROMPT screen -- read the newest output, reply -- and this bar
+            filters which view it shows, which is session-browsing chrome. It
+            and the step rail cost ~215px of an 844px viewport together.
+            THE COST, stated so nobody restores this as an obvious omission:
+            PRs and Agents become unreachable on a phone, because nothing else
+            routes to them. `phone/PhoneShell.tsx` carries the other half. */}
+        {!phone && (
+          <TabBar
+            tabs={tabs}
+            runningAgents={entry?.session.runningAgents ?? 0}
+            current={current}
+            onSelect={setTab}
+          />
+        )}
       </div>
 
       {/*

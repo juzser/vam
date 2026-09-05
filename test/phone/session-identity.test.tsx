@@ -67,18 +67,14 @@ describe('the phone session screen’s identity', () => {
     expect(header.textContent).toContain('3 agents');
   });
 
-  it('keeps the step count in view when the chips scroll past it', () => {
-    // The rail is `overflow-x-auto` and this counter was a `flex-none` sibling
-    // INSIDE it, so on a seven-step session the only element saying how many
-    // steps exist scrolled away with them. Asserted as a class rather than a
-    // computed position: Tailwind's utilities are generated at build time, so
-    // no cascade in this environment resolves one, and happy-dom lays nothing
-    // out to be measured. A real 390px scroll is Playwright's.
-    const rail = openSession().querySelector('[data-step-rail]') as HTMLElement;
-    const counter = [...rail.children].at(-1) as HTMLElement;
-    expect(counter.textContent).toBe('STEP 5/5');
-    expect(counter.className).toContain('sticky');
-    expect(counter.className).toContain('right-0');
+  it('draws no step counter, because the rail it was stuck to is gone', () => {
+    // Was: the `STEP 5/5` counter is `sticky right-0` so it survives the chips
+    // scrolling past it inside the rail's `overflow-x-auto`. Both the rail and
+    // the counter are off the phone now; the session's identity above is what
+    // is left, and it is asserted by the tests around this one.
+    const screen = openSession();
+    expect(screen.querySelector('[data-step-rail]')).toBeNull();
+    expect(screen.textContent).not.toContain('STEP ');
   });
 });
 
@@ -107,5 +103,34 @@ describe('the detail pane on a desktop, which shares this component', () => {
     expect(document.querySelector('[data-prompt-target]')?.textContent).toBe('factory-sse-1');
     expect(document.querySelector('[data-prompt-project]')?.textContent).toBe('black-smith');
     expect(document.querySelector('[data-pane-status]')).not.toBeNull();
+  });
+
+  it('keeps the view tab bar, which only the phone lost', () => {
+    const project: Project = { id: 'p1', name: 'black-smith', sessions: [SESSION] };
+    const entry: SessionEntry = { project, session: SESSION };
+    render(
+      <DetailPanel
+        entry={entry}
+        decision={SESSION.decisions[0] ?? null}
+        draft=""
+        onDraftChange={() => {}}
+        onSubmit={() => {}}
+        composing={false}
+        onCompose={() => {}}
+        onStopComposing={() => {}}
+        active={false}
+        actionIndex={0}
+        width={408}
+        resizeHandle={null}
+        delivers
+        answer={async () => ({ kind: 'sent', answer: 'x' })}
+      />,
+    );
+    // The removal is `phone`-gated, not a deletion: PRs and Agents are still
+    // one tap away wherever there is room for a canvas.
+    expect(document.querySelector('[data-view-tabs]')).not.toBeNull();
+    expect(
+      [...document.querySelectorAll('[data-tab]')].map((t) => t.getAttribute('data-tab')),
+    ).toContain('prs');
   });
 });
