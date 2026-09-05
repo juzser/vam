@@ -497,3 +497,71 @@ are now history — they describe `4c7188f`:
    satisfied by that change and a hit test is not: this is the same pairing
    that made the row's close `x` survive a green content scan, in the other
    direction.
+
+## Fourth pass (2026-09-05, against `be88c7d`) — on `main`, and green
+
+**The suite is on `main` now.** Every pass above ran because someone dispatched
+it by hand, off an unmerged branch, which means the guards that caught the
+invisible close button, the 17 undersized controls and the icon picker under
+an iOS keyboard were guarding nothing. Three defects, all real, none visible to
+jsdom. That is the change this pass is mostly about.
+
+Nothing in vam's gates runs it — `e2e/` is excluded from `vitest.config.ts`,
+`tsconfig*.json` and `biome.json`, by design and unchanged — so "on main" means
+reachable and green, not automatic. The re-run list at the end of the first
+section still applies.
+
+**17 of 17 pass.** Three things had moved under the suite since the third pass:
+
+1. **The step rail and the body tab strip are gone** (#205). The navigation
+   test asserted `[data-step-rail] [data-step-chip]`, which now matches
+   nothing — and a selector matching nothing is the exact failure this file
+   was written to catch, in `styles.css`'s row-close rule. Re-pointed at the
+   chrome the session screen has now: the back chevron, `data-prompt-target`,
+   and the view icons.
+2. **The 44px sweep measures five app-bar buttons where it measured two**, from
+   the same PR. Still 0 undersized on both screens.
+3. **`ProjectPicker` has a phone route** (#202), so the second of the two
+   findings left red by the third pass now passes on its own.
+
+### The filter popover: fixed, and the test now asserts reach
+
+The remaining red one. It kept `max-height: none` and `overflow-y: visible`
+because it is an anchored popover deliberately excluded from the phone sheet
+rules — turning it into a bottom sheet moves it away from the control it
+belongs to, and that exclusion stands. What it lacked was a cap, and the cap
+could not be a constant: CSS cannot say "as tall as the distance from here to
+the bottom of the viewport" for an absolutely positioned box, and any number
+that stood in for it would be tuned to one anchor position.
+
+`SessionList`'s `useFilterPopoverCap` measures the popover's own top edge —
+which is where its anchor put it — and caps it at the distance from there to
+the viewport foot, re-measured on `resize` (window, never `visualViewport`,
+which `styles.css` rules out for jitter). One constant survives, an 8px foot,
+and it is a margin rather than a position.
+
+The test changed shape with it, and the shape is the point: it asserts REACH,
+not position. The popover must fit its viewport, and every control in it must
+be on screen at some scroll offset of its own scroller — sampled at both
+extremes, because a cap without a scroller would clip exactly the controls the
+old layout pushed off the bottom, and a test that only looked at the top would
+not have seen the difference. Falsified: reverting the cap reddens it with
+`bottom 447 > viewport 331` at 375x667.
+
+### One test added: the paint, which the sweeps cannot see
+
+*every painted skin is smaller than the box that takes the tap.* The two 44px
+sweeps measure the ELEMENT box, so they stay green through the complaint that
+started this work — a `border-line` rectangle drawn AT 44 around a 13px glyph,
+which is what made the phone's bordered controls the heaviest objects on the
+screen. The rule is hit on the element, paint on a `[data-tap-skin]` child, so
+this test caps the skin at 32x36 and, in the same breath, requires its owner
+to still measure 44: the ceiling catches a border re-inflating onto the hit
+box, and the paired floor stops anyone satisfying the ceiling by shrinking the
+hit box instead.
+
+Three skins on the list screen today. The count is asserted twice — as a floor
+and inside the expression the assertion reads — because a filter over an empty
+list is empty, and a guard written the obvious way passes loudest at the moment
+the hook is renamed away. Falsified both ways: re-inflating the skin to 44
+names all three controls; renaming the hook fails on the count.
