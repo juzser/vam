@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
 import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
-import { registerTerminalIpc } from '../../../src/main/terminal/ipc.js';
+import { AIM_TTL_MS, registerTerminalIpc } from '../../../src/main/terminal/ipc.js';
 import { sendSessionKey } from '../../../src/main/terminal/pane.js';
 
 const ok = (stdout: string): TmuxRunResult => ({ failure: null, stdout, stderr: '' });
@@ -302,5 +302,159 @@ describe('the send channel refuses what the renderer may not ask', () => {
     const { send, argvs } = handler();
     expect(await send({}, ...args)).toBe('unaimed');
     expect(argvs).toHaveLength(0);
+  });
+});
+
+/**
+ * Proving the pairing once per typing RUN instead of once per character.
+ *
+ * The operator's report was "khi go delay kha nhieu" -- typing lags. Measured
+ * on a private `-L` server, idle, each key cost a `list-sessions` spawn
+ * (5.7ms), a `send-keys` spawn (5.4ms) and a `readdir` plus a `readFile` per
+ * published session file (0.3ms), and the renderer serializes the sends so
+ * that cost is the wait between characters, not a background cost.
+ *
+ * What is asserted here is the SPAWN COUNT, because that is the part of the
+ * latency vam controls and the part a test can hold still. The safety of
+ * reusing an aim is asserted beside it, in the same tests: what drops it.
+ */
+describe('a typing run proves its pane once, and re-proves it when it must', () => {
+  function typing(stdout = `${ATLAS}\tvam-atlas-a1b2c3\n`) {
+    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+    const { run, argvs, verbs } = runner({
+      'list-sessions': ok(stdout),
+      'send-keys': ok(''),
+      'capture-pane': ok('screen'),
+    });
+    let clock = 1_000;
+    registerTerminalIpc(
+      { handle: (channel, listener) => void handlers.set(channel, listener) },
+      run,
+      async () => new Map(),
+      () => clock,
+    );
+    const send = handlers.get(CHANNELS.terminalSend);
+    const read = handlers.get(CHANNELS.terminalRead);
+    if (send === undefined || read === undefined) throw new Error('channels not registered');
+    return {
+      argvs,
+      verbs,
+      send,
+      read,
+      tick: (ms: number) => {
+        clock += ms;
+      },
+      type: async (text: string) => {
+        for (const character of text) {
+          await send({}, ATLAS, { kind: 'text', text: character });
+        }
+      },
+    };
+  }
+
+  it('spawns twice for the first key and once for every key after it', async () => {
+    const t = typing();
+    await t.type('hello');
+    // Five characters: one listing, five sends. It was five listings before,
+    // which is the delay the operator felt.
+    expect(t.verbs()).toEqual([
+      'list-sessions',
+      'send-keys',
+      'send-keys',
+      'send-keys',
+      'send-keys',
+      'send-keys',
+    ]);
+    // Still the right pane, every time -- the reuse is of a PROVEN pairing.
+    for (const argv of t.argvs.filter((a) => a[0] === 'send-keys')) {
+      expect(argv[2]).toBe('=vam-atlas-a1b2c3:');
+    }
+  });
+
+  it('proves it again once the aim is older than its backstop', async () => {
+    const t = typing();
+    await t.type('a');
+    t.tick(AIM_TTL_MS + 1);
+    await t.type('b');
+    expect(t.verbs()).toEqual(['list-sessions', 'send-keys', 'list-sessions', 'send-keys']);
+  });
+
+  it('drops the aim when tmux refuses, so the next key proves one again', async () => {
+    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+    let answer = ok('');
+    const argvs: (readonly string[])[] = [];
+    const run: TmuxRun = async (argv) => {
+      argvs.push(argv);
+      return argv[0] === 'list-sessions' ? ok(`${ATLAS}\tvam-atlas-a1b2c3\n`) : answer;
+    };
+    registerTerminalIpc(
+      { handle: (channel, listener) => void handlers.set(channel, listener) },
+      run,
+      async () => new Map(),
+    );
+    const send = handlers.get(CHANNELS.terminalSend);
+    if (send === undefined) throw new Error('the send channel was never registered');
+
+    expect(await send({}, ATLAS, { kind: 'text', text: 'a' })).toBe('sent');
+    answer = failed("can't find pane");
+    // The session died under the run. tmux says so, which is the fail-safe
+    // half of the window this reuse widens.
+    expect(await send({}, ATLAS, { kind: 'text', text: 'b' })).toBe('refused');
+    answer = ok('');
+    await send({}, ATLAS, { kind: 'text', text: 'c' });
+    expect(argvs.map((argv) => argv[0])).toEqual([
+      'list-sessions',
+      'send-keys',
+      'send-keys',
+      'list-sessions',
+      'send-keys',
+    ]);
+  });
+
+  it('lets the once-a-second read re-prove the aim, and destroy it when it fails', async () => {
+    const t = typing();
+    await t.type('a');
+    // A read that still resolves keeps the run going without a listing of its
+    // own -- and refreshes the timestamp, which is why the backstop is a
+    // backstop rather than the mechanism.
+    t.tick(AIM_TTL_MS - 1);
+    await t.read({}, ATLAS);
+    t.tick(AIM_TTL_MS - 1);
+    await t.type('b');
+    const afterRefresh = t.verbs().filter((verb) => verb === 'list-sessions').length;
+    expect(afterRefresh).toBe(2); // the first key, and the read itself
+  });
+
+  it('destroys the aim when the read stops resolving the pane', async () => {
+    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+    let sessions = `${ATLAS}\tvam-atlas-a1b2c3\n`;
+    const argvs: (readonly string[])[] = [];
+    const run: TmuxRun = async (argv) => {
+      argvs.push(argv);
+      return argv[0] === 'list-sessions' ? ok(sessions) : ok('screen');
+    };
+    registerTerminalIpc(
+      { handle: (channel, listener) => void handlers.set(channel, listener) },
+      run,
+      async () => new Map(),
+    );
+    const send = handlers.get(CHANNELS.terminalSend);
+    const read = handlers.get(CHANNELS.terminalRead);
+    if (send === undefined || read === undefined) throw new Error('channels not registered');
+
+    await send({}, ATLAS, { kind: 'text', text: 'a' });
+    sessions = ''; // the session ended, and the tab's next read finds nothing
+    await read({}, ATLAS);
+    await send({}, ATLAS, { kind: 'text', text: 'b' });
+    // The second key did NOT ride the dead aim: it proved again, and refused.
+    expect(argvs.filter((argv) => argv[0] === 'list-sessions')).toHaveLength(3);
+    expect(argvs.filter((argv) => argv[0] === 'send-keys')).toHaveLength(1);
+  });
+
+  it('keeps one aim per row, so a second session in the project proves its own', async () => {
+    const t = typing(`${ATLAS}\tvam-atlas-a1b2c3\n`);
+    await t.send({}, ATLAS, { kind: 'text', text: 'a' }, 'row-one');
+    await t.send({}, ATLAS, { kind: 'text', text: 'b' }, 'row-two');
+    expect(t.verbs().filter((verb) => verb === 'list-sessions')).toHaveLength(2);
   });
 });

@@ -23,9 +23,9 @@ import { CHANNELS } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
 import { readPublishedPanes } from '../sources/claude-code/session-pane.js';
 import { defaultSessionsRoot } from '../sources/claude-code/session-status.js';
-import type { TmuxRun } from '../sources/tmux/spawn.js';
+import { listVamSessions, type TmuxRun } from '../sources/tmux/spawn.js';
 import { answerQuestion } from './answer.js';
-import { readSessionPane, resizeSessionPane, sendSessionKey } from './pane.js';
+import { readSessionPane, resizeSessionPane, sendToPane, targetSession } from './pane.js';
 
 /**
  * A project id is a digest (`sources/claude-code/project-id.ts`), and it
@@ -41,12 +41,61 @@ export const MAX_PROJECT_ID_LENGTH = 500;
  * never do that. It is what makes the tab's answer per SESSION rather than per
  * project -- see `terminal/pane.ts`.
  */
+/**
+ * How long a proven pairing may be reused without proving it again.
+ *
+ * THE PROBLEM IT SOLVES, measured. Every keystroke resolved the pane from
+ * scratch: a `readdir` plus a `readFile` per session file, then a
+ * `list-sessions` spawn, then the `send-keys` spawn -- and the renderer
+ * serializes the sends so a line cannot arrive out of order, which makes each
+ * key's cost the operator's wait. On a private `-L` server, idle: 5.7ms for
+ * the listing, 5.4ms for the send, 0.3ms for the files. Two thirds of that is
+ * proving, for the second time in a millisecond, what has not changed.
+ *
+ * WHAT IT COSTS, and it is a real cost, not a rounding one. The per-key
+ * resolution WAS the aiming check, and `sendSessionKey`'s own note explains
+ * the window it never closed: ownership is decided by one tmux call and the
+ * key is delivered by another, so a session that dies and has its exact name
+ * reused in between receives the keystroke. Reusing a pairing widens that
+ * window from milliseconds to this constant.
+ *
+ * WHY TWO SECONDS IS SAFE ENOUGH, in three parts. First, a pane that has
+ * merely DIED still fails safe: tmux answers `can't find pane` and the send
+ * reports `refused`, which drops the entry and stops the run. Only reuse of
+ * the exact name is dangerous, and a vam session name carries six base-36
+ * characters of randomness -- another process would have to create a session
+ * with that precise name inside the window. Second, the window is bounded in
+ * practice by something much shorter than this: the tab re-reads the pane
+ * every second and that read RE-PROVES the pairing (see below), so a live tab
+ * refreshes or clears this before the constant is ever reached. Third,
+ * typing only happens while that tab is open and its window visible, which is
+ * exactly when that one-second revalidation is running.
+ *
+ * It is a backstop, in other words, not the mechanism.
+ */
+export const AIM_TTL_MS = 2_000;
+
+/** A pairing proven for one row, and when it was proven. */
+type Aim = { readonly name: string; readonly at: number };
+
+/** `projectId|rowId` -- a project with two sessions has two aims. */
+const aimKey = (projectId: string, rowId?: string): string => `${projectId}|${rowId ?? ''}`;
+
 export function registerTerminalIpc(
   ipcMain: IpcMainLike,
   run: TmuxRun,
   readPanes: () => Promise<ReadonlyMap<string, string>> = () =>
     readPublishedPanes(defaultSessionsRoot()),
+  /** Injected so a test can hold time still rather than sleep through it. */
+  now: () => number = () => Date.now(),
 ): void {
+  /**
+   * The pairing proven for the row currently being typed into. One entry per
+   * row rather than one for the app: a project with two sessions has two
+   * panes, and an aim that outlived its row would be the wrong pane wearing
+   * the right one's name.
+   */
+  const aims = new Map<string, Aim>();
   ipcMain.handle(CHANNELS.terminalRead, async (_event, ...args: unknown[]): Promise<PaneView> => {
     const [projectId, rowId] = args;
     // The row is OPTIONAL: a caller that names only a project still gets the
@@ -71,12 +120,26 @@ export function registerTerminalIpc(
         },
       };
     }
-    return readSessionPane(
+    const view = await readSessionPane(
       run,
       projectId,
       rowId,
       rowId === undefined ? undefined : await readPanes(),
     );
+    /**
+     * THE READ IS THE REVALIDATION, and this is the line that makes reusing a
+     * pairing defensible. This handler runs once a second for as long as the
+     * tab is open, and it has just resolved the pane by the same
+     * `targetSession` rule the send uses. So an `ok` refreshes the aim, and
+     * every other answer -- gone, ambiguous, mispaired, unreachable --
+     * destroys it. A pairing that stops being true is therefore dropped
+     * within about a second, by work that was happening anyway, instead of
+     * being ridden to the end of `AIM_TTL_MS`.
+     */
+    const key = aimKey(projectId, rowId);
+    if (view.kind === 'ok') aims.set(key, { name: view.name, at: now() });
+    else aims.delete(key);
+    return view;
   });
 
   /**
@@ -148,13 +211,29 @@ export function registerTerminalIpc(
       ) {
         return 'unaimed';
       }
-      return sendSessionKey(
-        run,
-        projectId,
-        key,
-        rowId,
-        rowId === undefined ? undefined : await readPanes(),
-      );
+      const cacheKey = aimKey(projectId, rowId);
+      const aimed = aims.get(cacheKey);
+      if (aimed !== undefined && now() - aimed.at < AIM_TTL_MS) {
+        // The hot path, and the whole point: no `readdir`, no `list-sessions`,
+        // one spawn instead of two. The pairing behind it was proven either by
+        // the first key of this run or by the read a moment ago.
+        const result = await sendToPane(run, aimed.name, key);
+        // tmux declining is the fail-safe half of the window this reuse
+        // widens: the session it named is not there, so the aim is wrong and
+        // the next key must prove one again rather than push after it.
+        if (result !== 'sent') aims.delete(cacheKey);
+        return result;
+      }
+      const panes = rowId === undefined ? undefined : await readPanes();
+      const listed = await listVamSessions(run);
+      if (listed.kind === 'unavailable') return 'unaimed';
+      const match = targetSession(listed.sessions, projectId, rowId, panes);
+      if (match.kind !== 'one') return 'unaimed';
+      const result = await sendToPane(run, match.name, key);
+      // Remembered only once it has actually carried a key. An aim that has
+      // never delivered is a guess with a timestamp on it.
+      if (result === 'sent') aims.set(cacheKey, { name: match.name, at: now() });
+      return result;
     },
   );
 
