@@ -2409,154 +2409,230 @@ function CanvasInner({
   const zoom = useStore((state) => state.transform[2]);
   const zoomPct = Math.round(zoom * 100);
 
+  /**
+   * The two panels’ props, lifted out of the JSX.
+   *
+   * A mechanical extraction with no behaviour of its own: the phone shell
+   * (`PhoneShell`) is handed the SAME two objects the columns are built from,
+   * so there is one assembly of each panel’s props and not a second one that
+   * could drift from it.
+   */
+  const sidebarProps: ComponentProps<typeof SessionList> = {
+    // The line at this column's top edge, off the SAME `mode` the status
+    // bar's word reads. A hidden column is not rendered at all, so
+    // "every shown column Select is drawn in" needs no second test
+    // against `visible` here -- the slot already is that test.
+    keyboardHere: mode === 'select',
+    entries: entries,
+    // The UNFILTERED set, for the two things about removing a project
+    // that must not read a narrowed list -- see `allEntries` on
+    // `SessionListProps`. `entries` above has already been through
+    // search, the status pills and the origin rules.
+    allEntries: allEntries,
+    focusedSessionId: focusedEntry?.session.id ?? null,
+    workspace: 'black-smith',
+    theme: effective,
+    onToggleTheme: () => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark')),
+    onOpenFilter: () => {
+      searchOrigin.current = focusedId;
+      setFiltering(true);
+    },
+    filter: query,
+    filtering: filtering,
+    onFilterChange: (next) => {
+      setQuery(next);
+      // incsearch: the answer arrives while you type, not after you
+      // commit. Without it the list narrows under a focus ring that is
+      // still pointing at a row the filter just removed.
+      const first = searchMatches(allEntries, next)[0];
+      if (first !== undefined) {
+        focusSession(first);
+      }
+    },
+    statusFilter: statusFilter,
+    onStatusFilter: setStatusFilter,
+    statusTally: {
+      all: tally.all,
+      running: tally.running,
+      waiting: tally.waiting,
+      done: tally.done,
+      failed: tally.failed,
+    },
+    filterMenuOpen: filterMenuOpen,
+    onFilterMenuToggle: setFilterMenuOpen,
+    originFilters: prefs.filters,
+    onOriginFilters: (next) => savePrefs(setSessionFilters(prefs, next)),
+    hiddenCounts: hiddenCounts,
+    onFilterCommit: () => setFiltering(false),
+    onFilterCancel: () => {
+      setFiltering(false);
+      setQuery('');
+      setFocusedId(searchOrigin.current);
+    },
+    renamingId: renamingId,
+    renameDraft: renameDraft,
+    onRenameChange: setRenameDraft,
+    onRenameCommit: commitRename,
+    onRenameCancel: () => {
+      setRenamingId(null);
+      setRenameTarget(null);
+    },
+    onPick: (sessionId) => {
+      focusSession(sessionId);
+      setMode('select');
+    },
+    onClose: (sessionId) => {
+      // The row's title, not the id: the same sentence the keyboard
+      // path writes, about the same session.
+      const entry = allEntries.find((e) => e.session.id === sessionId);
+      void closeSession(sessionId, entry?.session.title ?? sessionId);
+    },
+    onAdd: () => {
+      // The footer strip names no project, so it uses the focused
+      // session's, exactly as `o` does — the two controls are one path.
+      if (focusedEntry === null) {
+        setStatus('pick a session first — a new one is started in its project');
+        return;
+      }
+      void createSession(focusedEntry.project.id, focusedEntry.project.name);
+    },
+    onAddInProject: (project) => void createSession(project.id, project.name),
+    pendingAction: pendingAction,
+    // The group layer. `model.groups` rather than the filtered model's,
+    // because the only thing this prop is for is a group holding no live
+    // project -- see the prop -- and a filter cannot narrow one further.
+    groups: model.groups ?? [],
+    collapsedGroups: collapsedGroups,
+    onToggleGroupCollapse: toggleGroupCollapse,
+    onCreateGroup: createNewGroup,
+    onRenameGroup: renameOneGroup,
+    onPickGroupIcon: (group) => {
+      const source = groupSource(prefs.groups, group.id);
+      if (source === null) return;
+      setPickingGroupIconFor((current) =>
+        current !== null && current.groupId === group.id
+          ? null
+          : { source, groupId: group.id, name: group.name },
+      );
+    },
+    onUngroup: ungroup,
+    onAddToGroup: (group) => {
+      const source = groupSource(prefs.groups, group.id);
+      if (source === null) return;
+      setPickingMembersFor({ source, groupId: group.id, name: group.name });
+    },
+    hiddenProjects: hiddenProjects,
+    // Restoring is the only thing the sidebar asks for by itself: it
+    // ends nothing, so there is nothing to serialise or refuse.
+    onHideProject: setProjectRemoved,
+    onRemoveProject: (project, plan) => void removeProject(project, plan),
+    revealRequest: revealRequest,
+    onNewProject: () => void newProject(),
+    newSessionDecline: newSessionDecline,
+    onPickIcon: (project: Project) => {
+      // Same refusal as the session picker (§ above): a project with no
+      // source has no bucket to store under, and guessing one would
+      // reintroduce the cross-source collision AC-1 removed.
+      if (project.source === undefined) {
+        setStatus('this project has no source — icon unavailable');
+        return;
+      }
+      const projectSource = project.source;
+      setPickingProjectIconFor((current) =>
+        current !== null && current.projectId === project.id && current.source === projectSource
+          ? null
+          : { source: projectSource, projectId: project.id, name: project.name },
+      );
+    },
+    onSettings: () => setSettingsOpen(true),
+    width: sidebarWidth,
+    resizeHandle: (
+      <PaneResizer
+        pane="sidebar"
+        ariaLabel="resize sessions panel"
+        layout={visible}
+        stored={{ sidebar: storedSidebar, detail: storedDetail }}
+        viewportWidth={viewportWidth}
+        onChange={onPaneChange}
+        onCommit={onPaneCommit}
+      />
+    ),
+  };
+
+  const detailProps: ComponentProps<typeof DetailPanel> = {
+    entry: focusedEntry,
+    decision: focusedDecision,
+    delivers: source.kind === 'session' && source.source.capabilities.deliverPrompt,
+    // The bridge the question card answers through. Passed beside
+    // `delivers` because the two are read together: a source that
+    // declares delivery and a shell that has no main process behind it
+    // are both reasons to draw no Submit at all. `undefined` in the
+    // browser build.
+    answer: globalThis.window?.api?.terminal?.answer,
+    // The flag the source declares, finally read. `false` withdraws the
+    // tab rather than mounting one that can only apologise.
+    terminal: terminalTab,
+    // The flag has guarded double-submit here since the composer was
+    // written; the pane never saw it, so a two-minute `claude --resume`
+    // looked like Enter doing nothing.
+    sending: writing,
+    tabRequest: tabRequest,
+    // Opaque both ways: the store never learns the tab names, and the
+    // guard keeps the pane's mount-time report from being a write.
+    initialTab: prefs.detailTab,
+    onTabChange: (next) => {
+      if (next !== prefs.detailTab) {
+        savePrefs(setDetailTab(prefs, next));
+      }
+    },
+    draft: draft,
+    onDraftChange: setDraft,
+    onSubmit: sendPrompt,
+    active: mode === 'insert',
+    actionIndex: actionIndex,
+    composing: composing,
+    // The mouse route into the box, and the same function the `i` route
+    // uses -- a focus that entered the composer without entering Insert
+    // is the divergence this call closes.
+    onCompose: beginComposing,
+    onStopComposing: () => {
+      setComposing(false);
+      setDraft('');
+      // Escape out of the composer returns the keyboard to the SIDEBAR,
+      // which is the pane the operator asked to get back to. Without
+      // this, a prompt opened with `I` leaves `mode === 'insert'`, so
+      // the blur hands the keys back to a window where `j`/`k` walk the
+      // detail pane's actions instead of the session list — the keys
+      // work, they just do the wrong thing, which is worse than being
+      // swallowed. The `i` path already sat on 'list' and was unaffected,
+      // which is why this only ever bit one of the two entry points.
+      setMode('select');
+    },
+    width: detailWidth,
+    /* Only where it would move something. The detail pane is a fixed
+       column with the leftover room beside it exactly while the canvas
+       is the main column; everywhere else its width is derived from the
+       sidebar and the canvas's reserve, so its own edge has nothing to
+       drag and the seam that does move is the sidebar's. A handle that
+       moves nothing is worse than no handle: it advertises a gesture the
+       layout cannot honour. */
+    resizeHandle: canvasIsMain(visible) ? (
+      <PaneResizer
+        pane="detail"
+        ariaLabel="resize detail panel"
+        layout={visible}
+        stored={{ sidebar: storedSidebar, detail: storedDetail }}
+        viewportWidth={viewportWidth}
+        onChange={onPaneChange}
+        onCommit={onPaneCommit}
+      />
+    ) : null,
+  };
+
   return (
     <div className="relative flex h-full flex-col">
       <Columns order={order}>
-        <SidebarSlot
-          key="sidebar"
-          show={visible.sidebar}
-          // The line at this column's top edge, off the SAME `mode` the status
-          // bar's word reads. A hidden column is not rendered at all, so
-          // "every shown column Select is drawn in" needs no second test
-          // against `visible` here -- the slot already is that test.
-          keyboardHere={mode === 'select'}
-          entries={entries}
-          // The UNFILTERED set, for the two things about removing a project
-          // that must not read a narrowed list -- see `allEntries` on
-          // `SessionListProps`. `entries` above has already been through
-          // search, the status pills and the origin rules.
-          allEntries={allEntries}
-          focusedSessionId={focusedEntry?.session.id ?? null}
-          workspace="black-smith"
-          theme={effective}
-          onToggleTheme={() => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark'))}
-          onOpenFilter={() => {
-            searchOrigin.current = focusedId;
-            setFiltering(true);
-          }}
-          filter={query}
-          filtering={filtering}
-          onFilterChange={(next) => {
-            setQuery(next);
-            // incsearch: the answer arrives while you type, not after you
-            // commit. Without it the list narrows under a focus ring that is
-            // still pointing at a row the filter just removed.
-            const first = searchMatches(allEntries, next)[0];
-            if (first !== undefined) {
-              focusSession(first);
-            }
-          }}
-          statusFilter={statusFilter}
-          onStatusFilter={setStatusFilter}
-          statusTally={{
-            all: tally.all,
-            running: tally.running,
-            waiting: tally.waiting,
-            done: tally.done,
-            failed: tally.failed,
-          }}
-          filterMenuOpen={filterMenuOpen}
-          onFilterMenuToggle={setFilterMenuOpen}
-          originFilters={prefs.filters}
-          onOriginFilters={(next) => savePrefs(setSessionFilters(prefs, next))}
-          hiddenCounts={hiddenCounts}
-          onFilterCommit={() => setFiltering(false)}
-          onFilterCancel={() => {
-            setFiltering(false);
-            setQuery('');
-            setFocusedId(searchOrigin.current);
-          }}
-          renamingId={renamingId}
-          renameDraft={renameDraft}
-          onRenameChange={setRenameDraft}
-          onRenameCommit={commitRename}
-          onRenameCancel={() => {
-            setRenamingId(null);
-            setRenameTarget(null);
-          }}
-          onPick={(sessionId) => {
-            focusSession(sessionId);
-            setMode('select');
-          }}
-          onClose={(sessionId) => {
-            // The row's title, not the id: the same sentence the keyboard
-            // path writes, about the same session.
-            const entry = allEntries.find((e) => e.session.id === sessionId);
-            void closeSession(sessionId, entry?.session.title ?? sessionId);
-          }}
-          onAdd={() => {
-            // The footer strip names no project, so it uses the focused
-            // session's, exactly as `o` does — the two controls are one path.
-            if (focusedEntry === null) {
-              setStatus('pick a session first — a new one is started in its project');
-              return;
-            }
-            void createSession(focusedEntry.project.id, focusedEntry.project.name);
-          }}
-          onAddInProject={(project) => void createSession(project.id, project.name)}
-          pendingAction={pendingAction}
-          // The group layer. `model.groups` rather than the filtered model's,
-          // because the only thing this prop is for is a group holding no live
-          // project -- see the prop -- and a filter cannot narrow one further.
-          groups={model.groups ?? []}
-          collapsedGroups={collapsedGroups}
-          onToggleGroupCollapse={toggleGroupCollapse}
-          onCreateGroup={createNewGroup}
-          onRenameGroup={renameOneGroup}
-          onPickGroupIcon={(group) => {
-            const source = groupSource(prefs.groups, group.id);
-            if (source === null) return;
-            setPickingGroupIconFor((current) =>
-              current !== null && current.groupId === group.id
-                ? null
-                : { source, groupId: group.id, name: group.name },
-            );
-          }}
-          onUngroup={ungroup}
-          onAddToGroup={(group) => {
-            const source = groupSource(prefs.groups, group.id);
-            if (source === null) return;
-            setPickingMembersFor({ source, groupId: group.id, name: group.name });
-          }}
-          hiddenProjects={hiddenProjects}
-          // Restoring is the only thing the sidebar asks for by itself: it
-          // ends nothing, so there is nothing to serialise or refuse.
-          onHideProject={setProjectRemoved}
-          onRemoveProject={(project, plan) => void removeProject(project, plan)}
-          revealRequest={revealRequest}
-          onNewProject={() => void newProject()}
-          newSessionDecline={newSessionDecline}
-          onPickIcon={(project: Project) => {
-            // Same refusal as the session picker (§ above): a project with no
-            // source has no bucket to store under, and guessing one would
-            // reintroduce the cross-source collision AC-1 removed.
-            if (project.source === undefined) {
-              setStatus('this project has no source — icon unavailable');
-              return;
-            }
-            const projectSource = project.source;
-            setPickingProjectIconFor((current) =>
-              current !== null &&
-              current.projectId === project.id &&
-              current.source === projectSource
-                ? null
-                : { source: projectSource, projectId: project.id, name: project.name },
-            );
-          }}
-          onSettings={() => setSettingsOpen(true)}
-          width={sidebarWidth}
-          resizeHandle={
-            <PaneResizer
-              pane="sidebar"
-              ariaLabel="resize sessions panel"
-              layout={visible}
-              stored={{ sidebar: storedSidebar, detail: storedDetail }}
-              viewportWidth={viewportWidth}
-              onChange={onPaneChange}
-              onCommit={onPaneCommit}
-            />
-          }
-        />
+        <SidebarSlot key="sidebar" show={visible.sidebar} {...sidebarProps} />
 
         <CanvasColumn
           key="canvas"
@@ -2717,79 +2793,7 @@ function CanvasInner({
           </div>
         </CanvasColumn>
 
-        <DetailSlot
-          key="detail"
-          show={visible.detail}
-          entry={focusedEntry}
-          decision={focusedDecision}
-          delivers={source.kind === 'session' && source.source.capabilities.deliverPrompt}
-          // The bridge the question card answers through. Passed beside
-          // `delivers` because the two are read together: a source that
-          // declares delivery and a shell that has no main process behind it
-          // are both reasons to draw no Submit at all. `undefined` in the
-          // browser build.
-          answer={globalThis.window?.api?.terminal?.answer}
-          // The flag the source declares, finally read. `false` withdraws the
-          // tab rather than mounting one that can only apologise.
-          terminal={terminalTab}
-          // The flag has guarded double-submit here since the composer was
-          // written; the pane never saw it, so a two-minute `claude --resume`
-          // looked like Enter doing nothing.
-          sending={writing}
-          tabRequest={tabRequest}
-          // Opaque both ways: the store never learns the tab names, and the
-          // guard keeps the pane's mount-time report from being a write.
-          initialTab={prefs.detailTab}
-          onTabChange={(next) => {
-            if (next !== prefs.detailTab) {
-              savePrefs(setDetailTab(prefs, next));
-            }
-          }}
-          draft={draft}
-          onDraftChange={setDraft}
-          onSubmit={sendPrompt}
-          active={mode === 'insert'}
-          actionIndex={actionIndex}
-          composing={composing}
-          // The mouse route into the box, and the same function the `i` route
-          // uses -- a focus that entered the composer without entering Insert
-          // is the divergence this call closes.
-          onCompose={beginComposing}
-          onStopComposing={() => {
-            setComposing(false);
-            setDraft('');
-            // Escape out of the composer returns the keyboard to the SIDEBAR,
-            // which is the pane the operator asked to get back to. Without
-            // this, a prompt opened with `I` leaves `mode === 'insert'`, so
-            // the blur hands the keys back to a window where `j`/`k` walk the
-            // detail pane's actions instead of the session list — the keys
-            // work, they just do the wrong thing, which is worse than being
-            // swallowed. The `i` path already sat on 'list' and was unaffected,
-            // which is why this only ever bit one of the two entry points.
-            setMode('select');
-          }}
-          width={detailWidth}
-          /* Only where it would move something. The detail pane is a fixed
-             column with the leftover room beside it exactly while the canvas
-             is the main column; everywhere else its width is derived from the
-             sidebar and the canvas's reserve, so its own edge has nothing to
-             drag and the seam that does move is the sidebar's. A handle that
-             moves nothing is worse than no handle: it advertises a gesture the
-             layout cannot honour. */
-          resizeHandle={
-            canvasIsMain(visible) ? (
-              <PaneResizer
-                pane="detail"
-                ariaLabel="resize detail panel"
-                layout={visible}
-                stored={{ sidebar: storedSidebar, detail: storedDetail }}
-                viewportWidth={viewportWidth}
-                onChange={onPaneChange}
-                onCommit={onPaneCommit}
-              />
-            ) : null
-          }
-        />
+        <DetailSlot key="detail" show={visible.detail} {...detailProps} />
       </Columns>
 
       {/* Moved out of the canvas column when the canvas became hideable: the
