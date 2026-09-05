@@ -20,8 +20,17 @@
  * reach tmux" is the exact conflation the provider was built to prevent.
  */
 
-import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Fragment,
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
+import { parseAnsi, spanClasses } from './terminal-ansi.js';
 import { fitPane, sameSize } from './terminal-size.js';
 
 /**
@@ -318,6 +327,16 @@ export function TerminalTab({
    * reflow a terminal belonging to work vam has nothing to do with.
    */
   const showing = view !== null && view.kind === 'ok';
+
+  /**
+   * The screen, parsed once per screen rather than once per render. The tab
+   * re-renders for focus, for a refusal and for every resize observation; the
+   * text only changes when a read answers, which is once a second.
+   */
+  const lines = useMemo(
+    () => parseAnsi(view !== null && view.kind === 'ok' ? view.text : ''),
+    [view],
+  );
 
   /**
    * Whether the pane itself has focus. It draws exactly one thing -- the hint
@@ -660,7 +679,33 @@ export function TerminalTab({
         >
           {RULER_TEXT}
         </span>
-        <pre className="whitespace-pre">{view.text}</pre>
+        {/* THE SCREEN, WITH THE AGENT'S OWN COLOURS. `capture-pane -e` keeps
+            the SGR sequences and `terminal-ansi.ts` turns them into spans
+            whose classes are theme tokens -- so an error line is red in both
+            themes without vam choosing a red twice, and a sequence vam does
+            not model is dropped rather than drawn.
+
+            The lines are joined by real newlines inside ONE `pre` rather than
+            wrapped in a block each: the pane's width is measured in
+            characters of this exact font (`measurePane`), and a per-line box
+            would be a second layout for tmux's own line breaks to disagree
+            with. An empty line stays an empty line for the same reason. */}
+        <pre className="whitespace-pre">
+          {lines.map((spans, index) => (
+            // The index IS the identity here: this is a screen, not a list,
+            // and line 3 is line 3 whatever it says this second.
+            // biome-ignore lint/suspicious/noArrayIndexKey: a screen line's identity is its position
+            <Fragment key={index}>
+              {spans.map((span, position) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: as above -- a run's identity is where it sits on the line
+                <span key={position} className={spanClasses(span)}>
+                  {span.text}
+                </span>
+              ))}
+              {index < lines.length - 1 ? '\n' : null}
+            </Fragment>
+          ))}
+        </pre>
         {/* THE WAY OUT, SAID WHERE IT IS NEEDED AND NOWHERE ELSE. Escape now
             belongs to the pane, so Tab is the only key that lets go, and an
             exit nobody can find is not an exit -- but the operator asked for

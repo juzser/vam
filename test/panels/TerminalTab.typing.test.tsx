@@ -307,6 +307,37 @@ describe('keys reach the pane in the order they were typed', () => {
   });
 });
 
+describe("the pane draws the agent's own colours", () => {
+  const ESC = '\u001b';
+
+  it('turns the captured escapes into spans wearing token classes', async () => {
+    // The bytes are the shape tmux really emits, taken from `capture-pane -e`
+    // on a private server: a colour opened, then closed with `39`.
+    await open(ok(ESC + '[31merror: it failed' + ESC + '[39m and then plain'));
+    const coloured = document.querySelector('[data-terminal-pane] .text-ansi-red');
+    expect(coloured?.textContent).toBe('error: it failed');
+    // The rest of the line is drawn, and drawn plain.
+    expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).toContain(' and then plain');
+  });
+
+  it('never draws an escape character, whatever the agent printed', async () => {
+    await open(ok(ESC + '[38;5;208mhalf a sequence follows' + ESC + '[38;5'));
+    expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).not.toContain(ESC);
+    expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).toContain(
+      'half a sequence follows',
+    );
+  });
+
+  it("keeps the screen's shape, so the measured columns still mean something", async () => {
+    // One `pre` with real newlines, not a box per line: the pane's width is
+    // measured in characters of this exact font, and a second layout for
+    // tmux's own line breaks would fight that measurement.
+    await open(ok('first\nsecond'));
+    const pre = document.querySelector('[data-terminal-pane] pre');
+    expect(pre?.textContent).toBe('first\nsecond');
+  });
+});
+
 describe('Escape belongs to the pane, and the way out is Tab', () => {
   it('sends Escape to tmux instead of using it to leave', async () => {
     // REVERSED ON THE OPERATOR'S WORDS. Escape was vam's exit; inside a

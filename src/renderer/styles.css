@@ -57,6 +57,30 @@
      gets a name rather than the nearest miss. */
   --color-segment-on: var(--vam-segment-on);
 
+  /* THE TERMINAL PALETTE. Sixteen tones, because a pane's own output is the
+     one place in vam where the colour is not vam's choice to make: the agent
+     said "red" and the tab has to say red back. They are named `ansi-*` and
+     not by meaning on purpose -- `--color-failed` is a SESSION STATE, and
+     borrowing it here would make a status colour mean two things.
+     `panels/terminal-ansi.ts` reduces 256-colour and 24-bit sequences onto
+     these sixteen; it never emits a value of its own. */
+  --color-ansi-black: var(--vam-ansi-black);
+  --color-ansi-red: var(--vam-ansi-red);
+  --color-ansi-green: var(--vam-ansi-green);
+  --color-ansi-yellow: var(--vam-ansi-yellow);
+  --color-ansi-blue: var(--vam-ansi-blue);
+  --color-ansi-magenta: var(--vam-ansi-magenta);
+  --color-ansi-cyan: var(--vam-ansi-cyan);
+  --color-ansi-white: var(--vam-ansi-white);
+  --color-ansi-bright-black: var(--vam-ansi-bright-black);
+  --color-ansi-bright-red: var(--vam-ansi-bright-red);
+  --color-ansi-bright-green: var(--vam-ansi-bright-green);
+  --color-ansi-bright-yellow: var(--vam-ansi-bright-yellow);
+  --color-ansi-bright-blue: var(--vam-ansi-bright-blue);
+  --color-ansi-bright-magenta: var(--vam-ansi-bright-magenta);
+  --color-ansi-bright-cyan: var(--vam-ansi-bright-cyan);
+  --color-ansi-bright-white: var(--vam-ansi-bright-white);
+
   --color-line: var(--vam-line);
   --color-line-strong: var(--vam-line-strong);
   --color-line-loud: var(--vam-line-loud);
@@ -182,6 +206,28 @@
   --vam-ink-faint: #6b6b6b;
   --vam-ink-ghost: #3f3f3f;
 
+  /* The terminal palette, dark. Drawn on `panel` (#141414), so ANSI black is
+     a grey that can be seen rather than the void it names -- a terminal that
+     renders black-on-black is a terminal with invisible text, which is why
+     every emulator does this. The rest are the mid-brightness ramp, one step
+     up for the bright half. */
+  --vam-ansi-black: #6b6b6b;
+  --vam-ansi-red: #f87171;
+  --vam-ansi-green: #4ade80;
+  --vam-ansi-yellow: #fbbf24;
+  --vam-ansi-blue: #60a5fa;
+  --vam-ansi-magenta: #e879f9;
+  --vam-ansi-cyan: #22d3ee;
+  --vam-ansi-white: #d4d4d4;
+  --vam-ansi-bright-black: #a3a3a3;
+  --vam-ansi-bright-red: #fca5a5;
+  --vam-ansi-bright-green: #86efac;
+  --vam-ansi-bright-yellow: #fde047;
+  --vam-ansi-bright-blue: #93c5fd;
+  --vam-ansi-bright-magenta: #f0abfc;
+  --vam-ansi-bright-cyan: #67e8f9;
+  --vam-ansi-bright-white: #fafafa;
+
   --vam-running: #4ade80;
   --vam-waiting: #f59e0b;
   --vam-done: #60a5fa;
@@ -271,6 +317,30 @@ html.light {
   --vam-ink-dim: #52525b;
   --vam-ink-faint: #8a8a8f;
   --vam-ink-ghost: #a8a8a3;
+
+  /* The terminal palette, light -- REMAPPED, not reproduced, and this is the
+     pair that shows why these had to be tokens at all. On a white panel the
+     dark ramp above is unreadable, so light takes the deep end of each hue;
+     and ANSI WHITE has to become a grey dark enough to read, because white
+     text on a white panel is not a colour choice, it is a blank line. The
+     bright half stays lighter than the base half so the two remain distinct
+     in the direction a terminal expects. */
+  --vam-ansi-black: #3f3f46;
+  --vam-ansi-red: #b91c1c;
+  --vam-ansi-green: #15803d;
+  --vam-ansi-yellow: #a16207;
+  --vam-ansi-blue: #1d4ed8;
+  --vam-ansi-magenta: #a21caf;
+  --vam-ansi-cyan: #0e7490;
+  --vam-ansi-white: #52525b;
+  --vam-ansi-bright-black: #71717a;
+  --vam-ansi-bright-red: #dc2626;
+  --vam-ansi-bright-green: #16a34a;
+  --vam-ansi-bright-yellow: #ca8a04;
+  --vam-ansi-bright-blue: #2563eb;
+  --vam-ansi-bright-magenta: #c026d3;
+  --vam-ansi-bright-cyan: #0891b2;
+  --vam-ansi-bright-white: #27272a;
 
   --vam-running: #15803d;
   --vam-waiting: #b45309;

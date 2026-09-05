@@ -107,7 +107,13 @@ describe('tmux argv', () => {
     // the fix: tmux would then resolve the name by prefix and then by fnmatch,
     // and `send-keys` reaching a session other than the one vam meant is the
     // thing the exactness is there to prevent.
-    expect(capturePaneArgv('vam-a1b2c3')).toEqual(['capture-pane', '-p', '-t', '=vam-a1b2c3:']);
+    expect(capturePaneArgv('vam-a1b2c3')).toEqual([
+      'capture-pane',
+      '-p',
+      '-e',
+      '-t',
+      '=vam-a1b2c3:',
+    ]);
     expect(sendTextArgv('vam-a1b2c3', 'hello')).toEqual([
       'send-keys',
       '-t',

@@ -155,14 +155,21 @@ export function hasSessionArgv(name: string): readonly string[] {
 /**
  * The RENDERED screen as plain text -- what the pane looks like right now.
  *
- * `-p` prints to stdout. Escape sequences are deliberately NOT requested
- * (`-e`): vam has no terminal renderer, so raw sequences would be shown as
- * garbage. The live streaming path (`pipe-pane -o`, which does carry the
- * escapes intact) is NOT built here -- it needs a renderer vam does not have,
- * and half of it would be worse than none.
+ * `-p` prints to stdout. `-e` asks tmux to keep the SGR sequences, which it
+ * did not used to: the operator's report was "tmux chua co color", and a
+ * transcript where the error line is the same grey as everything else is a
+ * transcript you have to read instead of scan.
+ *
+ * THE FLAG IS SAFE ONLY BECAUSE SOMETHING PARSES IT. The note that stood here
+ * was right for its time -- raw sequences shown as text are garbage -- so `-e`
+ * arrives together with `panels/terminal-ansi.ts`, which turns them into
+ * styled spans and drops everything it does not model, including a sequence
+ * the capture boundary cut in half. What is still NOT built is the live
+ * streaming path (`pipe-pane -o`): that needs a real emulator, and half of
+ * one is worse than none.
  */
 export function capturePaneArgv(name: string): readonly string[] {
-  return ['capture-pane', '-p', '-t', paneTarget(name)];
+  return ['capture-pane', '-p', '-e', '-t', paneTarget(name)];
 }
 
 /**

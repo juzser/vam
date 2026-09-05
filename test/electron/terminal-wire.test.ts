@@ -110,7 +110,7 @@ describe('the preload terminal bridge reaches the handlers it names', () => {
     const { api, argvs } = wire(TWO, new Map([[ATLAS, 'vam-atlas-g7h8i9']]));
     const view = await api.read(ATLAS, ATLAS);
     expect(view.kind === 'ok' ? view.name : view.kind).toBe('vam-atlas-g7h8i9');
-    expect(argvs[1]).toEqual(['capture-pane', '-p', '-t', '=vam-atlas-g7h8i9:']);
+    expect(argvs[1]).toEqual(['capture-pane', '-p', '-e', '-t', '=vam-atlas-g7h8i9:']);
   });
 
   it('answers `unaimed`, having sent nothing, when the renderer asks with rubbish', async () => {
