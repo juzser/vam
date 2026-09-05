@@ -29,7 +29,7 @@
  * is a refusal, and the tag path is never a fallback for one.
  */
 
-import type { AnswerRequest, AnswerResult } from '../../shared/answer.js';
+import type { AnswerRequest, AnswerResult, AnswerStep } from '../../shared/answer.js';
 import { sendDownArgv, sendEnterArgv, sendRightArgv } from '../sources/tmux/argv.js';
 import { listVamSessions, readPane, type TmuxRun } from '../sources/tmux/spawn.js';
 import { targetSession } from './pane.js';
@@ -50,27 +50,60 @@ const ROW = /^\s*(❯)?\s+(\d+)\.\s+(?:\[(.)\]\s+)?(\S.*?)\s*$/;
 /**
  * The picker on a captured screen, or `null` when what is there is not one.
  *
- * The block is found FROM THE CURSOR OUT, and the numbers must run from one:
- * a screen holding a session's own numbered prose above a real picker must
- * not have that prose read as options. Exactly one cursor, or this refuses --
- * two would mean vam cannot say which list it is about to answer.
+ * ROWS ARE FOUND BY THEIR NUMBERING, NOT BY BEING ADJACENT LINES, and that is
+ * the correction a real capture forced. What stood here walked outwards from
+ * the cursor while each neighbouring LINE parsed as a row -- and a real
+ * `AskUserQuestion` picker prints each option's description on its own line
+ * between the rows:
+ *
+ *     ❯ 1. Crimson
+ *          A deep, rich red.
+ *       2. Cobalt
+ *
+ * So the walk stopped at the first description and reported a ONE-ROW picker.
+ * With the cursor on row one that made every other option "not on the screen";
+ * with the cursor anywhere else the numbering check failed and the answer was
+ * "there is no picker here". Both refuse rather than misfire, which is why it
+ * was invisible -- and both mean the feature could not work against the thing
+ * it was built for. Measured, not reasoned: see `answer-live-screens.ts`.
+ *
+ * The group is therefore the run of rows numbered 1, 2, 3 ... in order, and
+ * the one containing the cursor is the picker. A screen holding a session's
+ * own numbered prose ABOVE a real picker still cannot merge with it: prose
+ * that restarts at 1 is its own run, and prose that does not is in no run at
+ * all. Exactly one cursor, or this refuses -- two would mean vam cannot say
+ * which list it is about to answer.
  */
 export function readPicker(text: string): Picker | null {
   const parsed = text.split('\n').map((line) => ROW.exec(line));
   const cursors = parsed.flatMap((row, at) => (row?.[1] === undefined ? [] : [at]));
   const [head] = cursors;
   if (head === undefined || cursors.length !== 1) return null;
-  let from = head;
-  while (parsed[from - 1] != null) from -= 1;
-  let to = head;
-  while (parsed[to + 1] != null) to += 1;
-  const rows = parsed.slice(from, to + 1);
-  if (!rows.every((row, at) => row?.[2] === String(at + 1))) return null;
+  /** Every run of rows numbered from one, in the order they are drawn. */
+  const runs: RegExpExecArray[][] = [];
+  let holdsCursor = false;
+  let found: RegExpExecArray[] | null = null;
+  for (const [at, row] of parsed.entries()) {
+    if (row === null) continue;
+    const run = runs.at(-1);
+    if (run !== undefined && row[2] === String(run.length + 1)) {
+      run.push(row);
+    } else if (row[2] === '1') {
+      if (holdsCursor) found = runs.at(-1) ?? null;
+      holdsCursor = false;
+      runs.push([row]);
+    } else {
+      continue;
+    }
+    if (at === head) holdsCursor = true;
+  }
+  const picker = found ?? (holdsCursor ? (runs.at(-1) ?? null) : null);
+  if (picker === null) return null;
   return {
-    cursor: head - from,
-    rows: rows.map((row) => ({
-      label: row?.[4] ?? '',
-      checked: row?.[3] === undefined ? null : row[3].trim() !== '',
+    cursor: picker.findIndex((row) => row[1] !== undefined),
+    rows: picker.map((row) => ({
+      label: row[4] ?? '',
+      checked: row[3] === undefined ? null : row[3].trim() !== '',
     })),
   };
 }
@@ -110,100 +143,170 @@ async function deliver(run: TmuxRun, name: string, request: AnswerRequest): Prom
     const pane = await readPane(run, name);
     return pane.kind === 'ok' ? pane.text : null;
   };
-  /** The picker on the screen, or the outcome that stops the flow. */
-  const look = async (): Promise<Picker | AnswerResult> => {
-    const text = await read();
-    if (text === null) return { kind: 'unreadable' };
-    return readPicker(text) ?? { kind: 'no-picker' };
-  };
   const press = async (argv: readonly string[]): Promise<boolean> =>
     (await run(argv)).failure === null;
 
-  const first = await look();
-  if (!('rows' in first)) return first;
-  // BEFORE ANYTHING IS PRESSED: every label the operator chose has to be on
-  // the screen vam just read. A label that is not there is a question this is
-  // not the picker for, and there is no arrow that would fix that.
-  const labels = first.rows.map((row) => row.label);
-  const missing = request.labels.find((label) => !labels.includes(label));
-  if (missing !== undefined) return { kind: 'unmatched', label: missing };
+  /**
+   * THE ONE READ EVERY STEP OF THE LOOP GOES THROUGH, and the reason a set is
+   * no more dangerous than a single question.
+   *
+   * It answers "the picker for THIS step", or the reason there is none -- so
+   * the question text is re-checked after EVERY keystroke, not once per step.
+   * The CLI advances itself when a question is answered, which means the
+   * screen can become another question's between two arrows of vam's own walk;
+   * matching a label there is precisely the failure the label matching exists
+   * to prevent, and a loop gives it more chances. Measured, in a real
+   * two-question call: `Cobalt` was an option in both questions, so the wrong
+   * screen would have answered confidently.
+   */
+  const see = async (step: AnswerStep): Promise<Picker | AnswerResult> => {
+    const text = await read();
+    if (text === null) return { kind: 'unreadable' };
+    const lines = text.split('\n');
+    // NAMED ABOVE THE ROWS, not merely present. The CLI prints the question
+    // over its options -- measured -- and it also ECHOES every question of the
+    // set on its review screen and again in the transcript once the call is
+    // answered. So `includes` alone is satisfied by screens that are talking
+    // ABOUT the question rather than asking it, and the review's own
+    // Submit/Cancel rows would then be searched for the operator's option.
+    const asked = lines.findIndex((line) => line.includes(step.question));
+    const firstRow = lines.findIndex((line) => ROW.test(line));
+    if (asked === -1 || (firstRow !== -1 && asked > firstRow)) {
+      return { kind: 'wrong-question', question: step.question };
+    }
+    const picker = readPicker(text);
+    if (picker === null) return { kind: 'no-picker' };
+    // THE REVIEW IS NOT A QUESTION, and it names every question of the set
+    // above its own rows -- so the rule above does not catch it. Walked as if
+    // it were question two, it is a real picker on a real screen offering
+    // `Submit answers` and `Cancel`, and the step would be searching those two
+    // for the operator's option. It is the LAST screen of the set and vam
+    // reaches it deliberately, in the tail; meeting it with a step still
+    // outstanding means the walk lost its place.
+    if (picker.rows.some((row) => /^submit answers$/i.test(row.label))) {
+      return { kind: 'wrong-question', question: step.question };
+    }
+    return picker;
+  };
 
-  // THE PROBE. One arrow, then read again: a picker whose cursor does not move
-  // is not taking keys, and a Return into that state commits the row the
-  // cursor was already on -- which is the Crimson failure exactly.
-  if (!(await press(sendDownArgv(name)))) return { kind: 'refused' };
-  const probe = await look();
-  if (!('rows' in probe)) return probe;
-  if (probe.cursor === first.cursor && cursorLabel(probe) === cursorLabel(first)) {
-    return { kind: 'not-live' };
-  }
-
-  /** Walk the cursor onto `label`, re-reading after every single step. */
-  const stepTo = async (label: string, from: Picker): Promise<Picker | AnswerResult> => {
+  /** Walk the cursor onto `label`, re-reading -- and re-checking -- every step. */
+  const stepTo = async (
+    step: AnswerStep,
+    label: string,
+    from: Picker,
+  ): Promise<Picker | AnswerResult> => {
     let view = from;
     // One pass of the list at most: it wraps, so every row is reachable, and a
     // bound is what stops a picker that answers oddly from being walked
     // forever.
-    for (let step = 0; step <= view.rows.length; step += 1) {
+    for (let at = 0; at <= view.rows.length; at += 1) {
       if (cursorLabel(view) === label) return view;
       if (!(await press(sendDownArgv(name)))) return { kind: 'refused' };
-      const next = await look();
+      const next = await see(step);
       if (!('rows' in next)) return next;
       view = next;
     }
     return { kind: 'unmatched', label };
   };
 
-  if (!request.multiSelect) {
-    const label = request.labels[0] ?? '';
-    const at = await stepTo(label, probe);
-    if (!('rows' in at)) return at;
-    if (!(await press(sendEnterArgv(name)))) return { kind: 'refused' };
-    // THE READ-BACK, and it is what the word "sent" is allowed to mean. The
-    // same picker still standing is the Return not having been taken --
-    // reported, never swallowed.
-    const back = await read();
-    if (back === null) return { kind: 'unconfirmed', label };
-    const after = readPicker(back);
-    if (after !== null && shape(after) === shape(at)) return { kind: 'unconfirmed', label };
-    return { kind: 'sent', answer: label };
+  const answers: string[] = [];
+  for (const step of request.steps) {
+    // WHERE DID THE CLI LAND. Before a single label is matched against it.
+    const first = await see(step);
+    if (!('rows' in first)) return first;
+    // And every label the operator marked has to be ON that screen. A label
+    // that is not there is a question this is not the picker for, and there is
+    // no arrow that would fix that.
+    const labels = first.rows.map((row) => row.label);
+    const missing = step.labels.find((label) => !labels.includes(label));
+    if (missing !== undefined) return { kind: 'unmatched', label: missing };
+
+    // THE PROBE. One arrow, then read again: a picker whose cursor does not
+    // move is not taking keys, and a Return into that state commits the row the
+    // cursor was already on -- which is the Crimson failure exactly.
+    if (!(await press(sendDownArgv(name)))) return { kind: 'refused' };
+    const probe = await see(step);
+    if (!('rows' in probe)) return probe;
+    if (probe.cursor === first.cursor && cursorLabel(probe) === cursorLabel(first)) {
+      return { kind: 'not-live' };
+    }
+
+    if (!step.multiSelect) {
+      const label = step.labels[0] ?? '';
+      const at = await stepTo(step, label, probe);
+      if (!('rows' in at)) return at;
+      // Return here both ANSWERS and ADVANCES -- measured: the strip flips to
+      // a tick, the text becomes the next question and the cursor resets to
+      // row one. So nothing is read after it HERE: where it landed is the
+      // first thing the next turn of the loop asks, and the tail asks it for
+      // the last step.
+      if (!(await press(sendEnterArgv(name)))) return { kind: 'refused' };
+      answers.push(label);
+      continue;
+    }
+
+    // MULTI-SELECT. Return TICKS a row rather than answering, so each toggle is
+    // verified against the box the pane draws before the next one is aimed, and
+    // the question is still checked every time.
+    let view = probe;
+    for (const label of step.labels) {
+      const at = await stepTo(step, label, view);
+      if (!('rows' in at)) return at;
+      if (!(await press(sendEnterArgv(name)))) return { kind: 'refused' };
+      const ticked = await see(step);
+      if (!('rows' in ticked)) return ticked;
+      if (ticked.rows[ticked.cursor]?.checked !== true) {
+        return { kind: 'unconfirmed', label };
+      }
+      view = ticked;
+    }
+    // A ticked question is not an answered one: Right is what leaves it, for
+    // the next question or for the review.
+    if (!(await press(sendRightArgv(name)))) return { kind: 'refused' };
+    answers.push(step.labels.join(', '));
   }
 
-  // MULTI-SELECT. Return TICKS a row rather than committing, so each toggle is
-  // verified against the box the pane draws before the next one is aimed.
-  let view = probe;
-  for (const label of request.labels) {
-    const at = await stepTo(label, view);
-    if (!('rows' in at)) return at;
-    if (!(await press(sendEnterArgv(name)))) return { kind: 'refused' };
-    const ticked = await look();
-    if (!('rows' in ticked)) return ticked;
-    if (ticked.rows[ticked.cursor]?.checked !== true) return { kind: 'unconfirmed', label };
-    view = ticked;
-  }
-
-  // The CLI names the whole answer in prose before it commits anything. That
-  // review screen is a verification surface vam gets for free, and it is read
-  // rather than skipped past: an answer it does not name is an answer vam will
-  // not commit.
-  if (!(await press(sendRightArgv(name)))) return { kind: 'refused' };
+  const answer = answers.join(', ');
+  const chosen = request.steps.flatMap((step) => step.labels);
+  /**
+   * THE REVIEW IS EXPECTED EXCEPT IN ONE CASE, and the split is measured
+   * rather than reasoned. A set of several questions ends on the CLI's own
+   * review screen, and so does a multi-select one. A SINGLE single-select
+   * question does not: its Return answers the call outright and the picker is
+   * simply gone. So an empty screen is confirmation for that one shape and a
+   * missing review for every other.
+   */
+  const reviewed = request.steps.length > 1 || request.steps.some((step) => step.multiSelect);
+  const last = chosen.at(-1) ?? '';
+  /**
+   * WHETHER THE LAST KEY WAS AN ANSWER OR NOT, which is what an unreadable
+   * screen here means. A single-select step ends on a Return that ANSWERS, so
+   * vam has already written and cannot confirm it -- `unconfirmed`. A
+   * multi-select step ends on a Right, which only moves, so nothing has been
+   * committed and the honest word is that vam could not look.
+   */
+  const answered = request.steps.at(-1)?.multiSelect === false;
   const text = await read();
-  if (text === null) return { kind: 'unreadable' };
-  const unnamed = request.labels.find((label) => !text.includes(label));
-  if (unnamed !== undefined) return { kind: 'unconfirmed', label: unnamed };
+  if (text === null)
+    return answered ? { kind: 'unconfirmed', label: last } : { kind: 'unreadable' };
   const panel = readPicker(text);
-  const chosen = request.labels[0] ?? '';
-  // And the cursor has to be on the row that SUBMITS. Anywhere else, this
-  // Return means something vam did not read.
-  if (panel === null || !/submit/i.test(cursorLabel(panel))) {
-    return { kind: 'unconfirmed', label: chosen };
+  if (panel === null) {
+    return reviewed ? { kind: 'unconfirmed', label: last } : { kind: 'sent', answer };
   }
+  // The cursor has to be on the row that SUBMITS. Anywhere else, this Return
+  // would mean something vam did not read.
+  if (!/submit/i.test(cursorLabel(panel))) return { kind: 'unconfirmed', label: last };
+  // And the review has to NAME the whole answer. It prints every question and
+  // what it will send for each, which is a verification surface vam gets for
+  // free -- an answer it does not name is an answer vam will not commit.
+  const unnamed = chosen.find((label) => !text.includes(label));
+  if (unnamed !== undefined) return { kind: 'unconfirmed', label: unnamed };
   if (!(await press(sendEnterArgv(name)))) return { kind: 'refused' };
   const back = await read();
-  if (back === null) return { kind: 'unconfirmed', label: chosen };
+  if (back === null) return { kind: 'unconfirmed', label: last };
   const after = readPicker(back);
   if (after !== null && shape(after) === shape(panel)) {
-    return { kind: 'unconfirmed', label: chosen };
+    return { kind: 'unconfirmed', label: last };
   }
-  return { kind: 'sent', answer: request.labels.join(', ') };
+  return { kind: 'sent', answer };
 }

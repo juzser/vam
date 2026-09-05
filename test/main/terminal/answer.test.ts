@@ -35,19 +35,31 @@ const BEACON = 'claude-code:beacon-22222222';
 const NAME = 'vam-atlas-a1b2c3';
 const TARGET = `=${NAME}:`;
 
-/** The colour picker from the probe, with the cursor on `row`. */
+/**
+ * The colour picker from the probe, with the cursor on `row`.
+ *
+ * It carries the QUESTION TEXT above the rows because a real one does: the CLI
+ * prints it there, and every read vam makes inside a step checks for it before
+ * matching anything (`see` in `answer.ts`).
+ */
+const COLOUR_Q = 'Which colour do you prefer?';
 const colours = (row: number, labels = ['Crimson', 'Cobalt', 'Emerald']) =>
   [
+    COLOUR_Q,
+    '',
     ...labels.map((label, at) => `${at === row ? '❯' : ' '} ${at + 1}. ${label}`),
     'Enter to select · ↑/↓ to navigate · Esc to cancel',
   ].join('\n');
 
 /** The fruits picker, with the cursor on `row` and `ticked` checked. */
+const FRUIT_Q = 'Which fruits do you like?';
 const fruits = (row: number, ticked: readonly number[]) =>
-  ['Apple', 'Banana', 'Cherry']
-    .map(
-      (label, at) =>
-        `${at === row ? '❯' : ' '} ${at + 1}. [${ticked.includes(at) ? '✔' : ' '}] ${label}`,
+  [FRUIT_Q, '']
+    .concat(
+      ['Apple', 'Banana', 'Cherry'].map(
+        (label, at) =>
+          `${at === row ? '❯' : ' '} ${at + 1}. [${ticked.includes(at) ? '✔' : ' '}] ${label}`,
+      ),
     )
     .join('\n');
 
@@ -85,7 +97,10 @@ function runner(captures: readonly string[], listed = `${ATLAS}\t${NAME}\n`) {
   };
 }
 
-const single = (labels: readonly string[]) => ({ labels, multiSelect: false });
+/** A one-question set -- what every call was before a set could have two. */
+const single = (labels: readonly string[]) => ({
+  steps: [{ question: COLOUR_Q, labels, multiSelect: false }],
+});
 
 describe('reading the picker off the screen', () => {
   it('finds the rows and the cursor tmux actually rendered', () => {
@@ -135,8 +150,20 @@ describe('the pairing guard stands in front of every answer', () => {
 });
 
 describe('refusing rather than guessing', () => {
-  it('sends nothing when the screen holds no picker', async () => {
+  it('sends nothing when the screen is not the one this question is asked on', async () => {
+    // The resolved screen does not carry the question text, so vam does not get
+    // as far as asking whether there are rows on it. Both answers refuse; this
+    // one is the more precise, and it is the check the loop leans on.
     const { run, sends } = runner([RESOLVED]);
+    expect(await answerQuestion(run, ATLAS, single(['Crimson']))).toEqual({
+      kind: 'wrong-question',
+      question: COLOUR_Q,
+    });
+    expect(sends()).toEqual([]);
+  });
+
+  it('sends nothing when the question is on screen but its picker is not', async () => {
+    const { run, sends } = runner([`${COLOUR_Q}\n\nthinking...`]);
     expect(await answerQuestion(run, ATLAS, single(['Crimson']))).toEqual({ kind: 'no-picker' });
     expect(sends()).toEqual([]);
   });
@@ -261,7 +288,7 @@ describe('the verified route, step by step', () => {
 });
 
 describe('multi-select toggles exactly what was chosen, and reviews it before committing', () => {
-  const both = { labels: ['Apple', 'Cherry'], multiSelect: true };
+  const both = { steps: [{ question: FRUIT_Q, labels: ['Apple', 'Cherry'], multiSelect: true }] };
 
   it('ticks each chosen row, uses the CLI own review, and answers what it read there', async () => {
     const { run, keys } = runner([
@@ -350,6 +377,8 @@ describe('multi-select toggles exactly what was chosen, and reviews it before co
  * leaves the answer uncommitted or says so, and none of them claims `sent`.
  */
 describe('when the pane stops cooperating part way through', () => {
+  const oneFruit = { steps: [{ question: FRUIT_Q, labels: ['Apple'], multiSelect: true }] };
+
   /** A runner whose Nth `send-keys` fails, everything before it succeeding. */
   function flaky(captures: readonly string[], failAt: number) {
     const queue = [...captures];
@@ -392,7 +421,7 @@ describe('when the pane stops cooperating part way through', () => {
     ];
     // The sixth send-keys is the Return that commits the review.
     const { run, keys } = flaky(screens, 6);
-    expect(await answerQuestion(run, ATLAS, { labels: ['Apple'], multiSelect: true })).toEqual({
+    expect(await answerQuestion(run, ATLAS, oneFruit)).toEqual({
       kind: 'refused',
     });
     expect(keys().at(-1)).toBe('Enter');
@@ -402,15 +431,16 @@ describe('when the pane stops cooperating part way through', () => {
     // Before the Right: vam cannot see the review, so it does not commit.
     const blind = [fruits(0, []), fruits(1, []), fruits(2, []), fruits(0, []), fruits(0, [0])];
     const { run } = flaky(blind, 0);
-    expect(await answerQuestion(run, ATLAS, { labels: ['Apple'], multiSelect: true })).toEqual({
+    expect(await answerQuestion(run, ATLAS, oneFruit)).toEqual({
       kind: 'unreadable',
     });
     // And after it: the keys went in and vam cannot say what happened, which is
     // `unconfirmed` -- never `sent`.
     const short = flaky([...blind, REVIEW], 0);
-    expect(
-      await answerQuestion(short.run, ATLAS, { labels: ['Apple'], multiSelect: true }),
-    ).toEqual({ kind: 'unconfirmed', label: 'Apple' });
+    expect(await answerQuestion(short.run, ATLAS, oneFruit)).toEqual({
+      kind: 'unconfirmed',
+      label: 'Apple',
+    });
   });
 
   it('will not call an unreadable screen a confirmation for a single answer either', async () => {
@@ -446,12 +476,7 @@ describe('against real capture-pane bytes', () => {
     expect(readPicker(LIVE[3] ?? '')).toBeNull();
   });
 
-  it('answers Emerald across those four screens, in two arrows and one Return', async () => {
-    const { run, keys } = runner(LIVE);
-    expect(await answerQuestion(run, ATLAS, single(['Emerald']))).toEqual({
-      kind: 'sent',
-      answer: 'Emerald',
-    });
-    expect(keys()).toEqual(['Down', 'Down', 'Enter']);
-  });
+  // The end-to-end walk across these screens moved to `answer-steps.test.ts`,
+  // where the fixtures are a real TWO-question call captured from Claude Code
+  // itself -- strictly better bytes for the same claim.
 });

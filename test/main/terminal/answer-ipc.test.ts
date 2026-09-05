@@ -14,29 +14,50 @@ import { CHANNELS } from '../../../src/main/ipc/channels.js';
 import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
 import { registerTerminalIpc } from '../../../src/main/terminal/ipc.js';
 import { createTerminalApi } from '../../../src/preload/api.js';
-import { isAnswerRequest, MAX_ANSWER_LABELS } from '../../../src/shared/answer.js';
+import {
+  isAnswerRequest,
+  MAX_ANSWER_LABELS,
+  MAX_ANSWER_STEPS,
+} from '../../../src/shared/answer.js';
 
 const ok = (stdout: string): TmuxRunResult => ({ failure: null, stdout, stderr: '' });
 const ATLAS = 'claude-code:atlas-11111111';
 
+const step = (over: Record<string, unknown> = {}) => ({
+  question: 'Which colour do you prefer?',
+  labels: ['Crimson'],
+  multiSelect: false,
+  ...over,
+});
+
 describe('what the bridge will accept as an answer', () => {
-  it('takes a single-select ask with exactly one label', () => {
-    expect(isAnswerRequest({ labels: ['Crimson'], multiSelect: false })).toBe(true);
+  it('takes a one-question set, and a set of several', () => {
+    expect(isAnswerRequest({ steps: [step()] })).toBe(true);
+    expect(isAnswerRequest({ steps: [step(), step({ question: 'And a fruit?' })] })).toBe(true);
   });
 
-  it('refuses a single-select ask carrying two labels', () => {
+  it('refuses a single-select step carrying two labels', () => {
     // Two labels would step the picker twice and commit the second, silently.
-    expect(isAnswerRequest({ labels: ['Crimson', 'Cobalt'], multiSelect: false })).toBe(false);
+    expect(isAnswerRequest({ steps: [step({ labels: ['Crimson', 'Cobalt'] })] })).toBe(false);
   });
 
-  it('refuses an empty ask, an unbounded one, and anything that is not labels', () => {
-    expect(isAnswerRequest({ labels: [], multiSelect: true })).toBe(false);
+  it('refuses a step with no question text, which is the whole identity check', () => {
+    expect(isAnswerRequest({ steps: [step({ question: '' })] })).toBe(false);
+    expect(isAnswerRequest({ steps: [step({ question: 7 })] })).toBe(false);
+    expect(isAnswerRequest({ steps: [step({ question: 'x'.repeat(401) })] })).toBe(false);
+  });
+
+  it('refuses an empty set, an unbounded one, and anything that is not steps', () => {
+    expect(isAnswerRequest({ steps: [] })).toBe(false);
+    expect(isAnswerRequest({ steps: Array(MAX_ANSWER_STEPS + 1).fill(step()) })).toBe(false);
+    expect(isAnswerRequest({ steps: [step({ labels: [] })] })).toBe(false);
     expect(
-      isAnswerRequest({ labels: Array(MAX_ANSWER_LABELS + 1).fill('x'), multiSelect: true }),
+      isAnswerRequest({ steps: [step({ labels: Array(MAX_ANSWER_LABELS + 1).fill('x') })] }),
     ).toBe(false);
-    expect(isAnswerRequest({ labels: [''], multiSelect: false })).toBe(false);
-    expect(isAnswerRequest({ labels: [7], multiSelect: false })).toBe(false);
-    expect(isAnswerRequest({ labels: ['a'] })).toBe(false);
+    expect(isAnswerRequest({ steps: [step({ labels: [''] })] })).toBe(false);
+    expect(isAnswerRequest({ steps: [step({ labels: [7] })] })).toBe(false);
+    expect(isAnswerRequest({ steps: [step({ multiSelect: undefined })] })).toBe(false);
+    expect(isAnswerRequest({ labels: ['a'], multiSelect: false })).toBe(false);
     expect(isAnswerRequest(null)).toBe(false);
   });
 });
@@ -66,10 +87,10 @@ describe('the answer handler', () => {
       argvs.push(argv);
       return ok('');
     });
-    expect(await answer(null, ATLAS, { labels: [], multiSelect: true })).toEqual({
+    expect(await answer(null, ATLAS, { steps: [] })).toEqual({
       kind: 'unaimed',
     });
-    expect(await answer(null, 7, { labels: ['a'], multiSelect: false })).toEqual({
+    expect(await answer(null, 7, { steps: [step()] })).toEqual({
       kind: 'unaimed',
     });
     expect(await answer(null, ATLAS)).toEqual({ kind: 'unaimed' });
@@ -82,7 +103,7 @@ describe('the answer handler', () => {
       argvs.push(argv);
       return ok('');
     });
-    expect(await answer(null, ATLAS, { labels: ['Crimson'], multiSelect: false })).toEqual({
+    expect(await answer(null, ATLAS, { steps: [step()] })).toEqual({
       kind: 'unaimed',
     });
     // It got as far as looking, which the malformed asks above never did.
@@ -99,7 +120,7 @@ describe('the preload member', () => {
         return { kind: 'sent', answer: 'Crimson' };
       },
     });
-    const request = { labels: ['Crimson'], multiSelect: false };
+    const request = { steps: [step()] };
     expect(await api.answer(ATLAS, request)).toEqual({ kind: 'sent', answer: 'Crimson' });
     await api.answer(ATLAS, request, 's1');
     expect(calls).toEqual([

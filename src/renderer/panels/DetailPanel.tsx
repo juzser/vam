@@ -104,6 +104,7 @@ import {
   tokenizeCode,
 } from './highlight.js';
 import { Note } from './Note.js';
+import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 import { TerminalTab } from './TerminalTab.js';
 
@@ -1223,6 +1224,11 @@ function outcomeWording(result: AnswerResult): string {
       return 'not sent — the picker did not answer the probe arrow';
     case 'unmatched':
       return `not sent — ${result.label} is not on the screen`;
+    case 'wrong-question':
+      // The set is walked one question at a time and the CLI moves itself
+      // between them, so "vam looked and it was not this one" is a real answer
+      // and a different one from every refusal above it.
+      return `not sent — the session is not showing ${result.question}`;
     default:
       return `unconfirmed — the keys went in and the screen does not agree about ${result.label}`;
   }
@@ -1246,12 +1252,21 @@ function cycleWording(result: PaneSendResult): string | null {
 }
 
 function QuestionCard({
-  question,
+  questions,
   firstOptionRef,
   onChat,
   onAnswer,
 }: {
-  readonly question: AgentQuestion;
+  /**
+   * THE WHOLE SET asked by one `AskUserQuestion` call, in asking order.
+   *
+   * It was one question, and that was a hole rather than a simplification: a
+   * call carrying two put the newest -- the SECOND -- on screen and the first
+   * nowhere at all. The tool has always modelled a set
+   * (`panels/question-set.ts`); this draws it as steps, one at a time, which
+   * is also how the CLI itself walks it.
+   */
+  readonly questions: readonly AgentQuestion[];
   readonly firstOptionRef: RefObject<HTMLButtonElement | null>;
   /** "Chat about this" — the one entry that does something rather than mark. */
   readonly onChat: () => void;
@@ -1262,36 +1277,70 @@ function QuestionCard({
    */
   readonly onAnswer: ((request: AnswerRequest) => Promise<AnswerResult>) | null;
 }) {
-  const [picked, setPicked] = useState<readonly string[]>([]);
+  /** Which step is showing, and what has been marked on EACH of them. */
+  const [showing, setShowing] = useState(0);
+  const [marks, setMarks] = useState<Readonly<Record<string, readonly string[]>>>({});
   /** What the last Submit came back with, and whether one is in flight. */
   const [outcome, setOutcome] = useState<AnswerResult | null>(null);
   const [sending, setSending] = useState(false);
-  const open = question.answer === null;
+
+  // One `tool_result` closes a whole call, so a part-answered set is not
+  // something Claude Code produces -- but the model permits it, and a step
+  // that is settled shows its answer and stands aside rather than blocking the
+  // rest. The card is drawn while ANY step is open.
+  const question = questions[Math.min(showing, questions.length - 1)];
+  const openSteps = questions.filter((one) => one.answer === null);
+  const open = openSteps.length > 0;
+  const picked = question === undefined ? [] : (marks[question.id] ?? []);
+  /** The open steps still waiting for a mark -- what Submit is short of. */
+  const unmarked = openSteps.filter((one) => (marks[one.id] ?? []).length === 0);
+
+  /**
+   * Steps CLAMP where options wrap, and the difference is deliberate. A list of
+   * options is a ring -- there is no last one. A set of steps is a sequence
+   * with a Submit at the end of it, and stepping past the last one back to the
+   * first reads as progress that did not happen.
+   */
+  const walk = (by: number) =>
+    setShowing((now) => Math.min(Math.max(now + by, 0), questions.length - 1));
 
   const send = async () => {
     // The marks IN THE ORDER THEY ARE DRAWN, not the order they were clicked:
     // the review screen on the other side names them in the picker's own
     // order, and an answer that reads back in a different one would look like
     // a disagreement.
-    const labels = question.options
-      .map((option) => option.label)
-      .filter((label) => picked.includes(label));
-    if (onAnswer === null || labels.length === 0 || sending) return;
+    // EVERY OPEN STEP, in asking order, each carrying its own question TEXT --
+    // which is what lets the other side check which question it is looking at
+    // before it matches a label against it (`main/terminal/answer.ts`). An
+    // answered step is not re-answered.
+    const steps = openSteps.map((one) => ({
+      question: one.question,
+      labels: one.options
+        .map((option) => option.label)
+        .filter((label) => (marks[one.id] ?? []).includes(label)),
+      multiSelect: one.multiSelect,
+    }));
+    if (onAnswer === null || sending || steps.some((one) => one.labels.length === 0)) return;
     setSending(true);
-    setOutcome(await onAnswer({ labels, multiSelect: question.multiSelect }));
+    setOutcome(await onAnswer({ steps }));
     setSending(false);
   };
 
   const toggle = (label: string) =>
-    setPicked((current) =>
-      question.multiSelect
-        ? current.includes(label)
-          ? current.filter((one) => one !== label)
-          : [...current, label]
-        : current.includes(label)
-          ? []
-          : [label],
-    );
+    setMarks((current) => {
+      if (question === undefined) return current;
+      const held = current[question.id] ?? [];
+      return {
+        ...current,
+        [question.id]: question.multiSelect
+          ? held.includes(label)
+            ? held.filter((one) => one !== label)
+            : [...held, label]
+          : held.includes(label)
+            ? []
+            : [label],
+      };
+    });
 
   // The list walks with the arrows, and jumps with the numbers; every option is
   // a real button, so Enter and Space already mark one and Tab already leaves.
@@ -1327,13 +1376,36 @@ function QuestionCard({
     ];
     if (/^[1-9]$/.test(event.key)) {
       const at = Number(event.key) - 1;
-      const option = question.options[at];
+      const option = question?.options[at];
       if (option === undefined) return;
       event.preventDefault();
       toggle(option.label);
       // The keyboard follows the mark, so the arrows walk on from where you
       // landed rather than from wherever you were.
       buttons[at]?.focus();
+      return;
+    }
+    /**
+     * `j`/`k` walk the options and `h`/`l` walk the STEPS — the Insert half of
+     * the operator's table, with both axes meaning something now.
+     *
+     * The horizontal pair used to do nothing at all, deliberately: unhandled,
+     * it falls through to the canvas grammar and walks the node graph under a
+     * pane the operator is reading, which is the same "the keys work, they
+     * just do the wrong thing" failure the mode naming exists to end. It is
+     * still stopped from reaching the canvas; a set of questions simply gives
+     * it the meaning the vertical pair always had, and it is the obvious one
+     * -- down the options, across the questions. `H` — capital, a different key — is still the way
+     * back to Select, and Escape still leaves.
+     */
+    if (
+      event.key === 'h' ||
+      event.key === 'l' ||
+      event.key === 'ArrowLeft' ||
+      event.key === 'ArrowRight'
+    ) {
+      event.preventDefault();
+      walk(event.key === 'l' || event.key === 'ArrowRight' ? 1 : -1);
       return;
     }
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -1351,25 +1423,10 @@ function QuestionCard({
      * aside for a key that has already been answered.
      */
     if (event.key === 'Enter' || event.key === ' ') {
-      const option = question.options[at];
+      const option = question?.options[at];
       if (option === undefined) return;
       event.preventDefault();
       toggle(option.label);
-      return;
-    }
-    /**
-     * `j`/`k` walk the list and `h`/`l` are SWALLOWED — the Insert half of the
-     * operator's table, where `hjkl` chooses an option rather than a session.
-     *
-     * The horizontal pair does nothing rather than being left alone, and that
-     * is the point: unhandled, they fall through to the canvas grammar and
-     * walk the node graph under a pane the operator is reading, which is the
-     * same "the keys work, they just do the wrong thing" failure the mode
-     * naming exists to end. `H` — capital, a different key — is still the way
-     * back to Select, and Escape still leaves.
-     */
-    if (event.key === 'h' || event.key === 'l') {
-      event.preventDefault();
       return;
     }
     const down = event.key === 'ArrowDown' || event.key === 'j';
@@ -1380,6 +1437,8 @@ function QuestionCard({
     buttons[(at + step + buttons.length) % buttons.length]?.focus();
   };
 
+  if (question === undefined) return null;
+
   return (
     <div
       data-question
@@ -1387,6 +1446,60 @@ function QuestionCard({
       data-question-select={question.multiSelect ? 'multi' : 'single'}
       className="flex flex-col gap-1.5 rounded-[10px] border border-line-strong bg-panel px-2.5 py-2"
     >
+      {/* The strip, and ONLY when there is more than one question: a step
+          counter over a single question is furniture that says nothing. It
+          names each step by its own header where the tool gave one, marks the
+          ones already settled and the ones already marked, and says where in
+          the sequence the operator is -- because a card that shows one
+          question at a time and does not say so is the hole this replaces
+          wearing a different shape. */}
+      {questions.length > 1 && (
+        <div
+          // A TABLIST, which is what it is: one question of the call showing at
+          // a time, walked with the horizontal keys. The role is also what
+          // makes the handler legitimate on this element rather than a
+          // keystroke bolted to a plain box.
+          role="tablist"
+          aria-label="the questions this call asked"
+          data-question-steps
+          // THE STRIP TAKES THE HORIZONTAL KEYS TOO, and not for symmetry: the
+          // options list carries them, and a step whose question is already
+          // answered HAS no options list. Without this the keyboard reaches
+          // that step and cannot leave it.
+          onKeyDown={(event) => {
+            if (event.metaKey || event.ctrlKey || event.altKey) return;
+            const forward = event.key === 'l' || event.key === 'ArrowRight';
+            if (!forward && event.key !== 'h' && event.key !== 'ArrowLeft') return;
+            event.preventDefault();
+            walk(forward ? 1 : -1);
+          }}
+          className="flex flex-wrap items-center gap-1 border-line border-b pb-1.5"
+        >
+          {questions.map((one, index) => (
+            <button
+              key={one.id}
+              type="button"
+              role="tab"
+              aria-selected={index === showing}
+              data-question-step
+              data-current={index === showing ? 'true' : undefined}
+              data-answered={one.answer === null ? undefined : 'true'}
+              data-marked={(marks[one.id] ?? []).length > 0 ? 'true' : undefined}
+              onClick={() => setShowing(index)}
+              className={[
+                'cursor-pointer rounded-[5px] border px-1.5 py-0.5 text-[10px]',
+                index === showing ? 'border-running text-ink' : 'border-line text-ink-faint',
+              ].join(' ')}
+            >
+              {one.header ?? `${index + 1}`}
+              {one.answer !== null || (marks[one.id] ?? []).length > 0 ? ' ✓' : ''}
+            </button>
+          ))}
+          <span data-question-position className="ml-auto text-[10px] text-ink-faint">
+            step {showing + 1} of {questions.length}
+          </span>
+        </div>
+      )}
       <div className="flex min-w-0 flex-col gap-0.5">
         {question.header !== null && (
           <span data-question-header className="text-[10px] text-ink-faint uppercase tracking-wide">
@@ -1397,7 +1510,14 @@ function QuestionCard({
           {question.question}
         </span>
       </div>
-      {open ? (
+      {question.answer !== null ? (
+        // THIS step is settled while others may not be. It shows what was
+        // answered and offers nothing to mark; the set's Submit below is for
+        // whatever is still open.
+        <span data-question-answer className="text-[10.5px] text-ink-dim">
+          resolved — {question.answer}
+        </span>
+      ) : (
         <>
           {/* A listbox, not a form control: nothing here is submitted, and
               `aria-multiselectable` is the one honest way to say that several
@@ -1461,47 +1581,53 @@ function QuestionCard({
               — vam adds this one; it opens the box below
             </span>
           </button>
-          {onAnswer !== null && (
-            <button
-              type="button"
-              data-question-submit
-              disabled={picked.length === 0 || sending}
-              onClick={() => void send()}
-              className={[
-                'rounded-[6px] border px-1.5 py-1 text-[11px]',
-                picked.length === 0 || sending
-                  ? 'cursor-default border-line text-ink-faint'
-                  : 'cursor-pointer border-running text-ink hover:bg-raised',
-              ].join(' ')}
-            >
-              {sending ? 'Submitting…' : 'Submit'}
-            </button>
-          )}
-          {outcome !== null && (
-            <p
-              data-question-outcome
-              data-outcome={outcome.kind}
-              className="text-[10px] text-ink-dim"
-            >
-              {outcomeWording(outcome)}
-            </p>
-          )}
-          <p data-question-note className="text-[10px] text-ink-faint">
-            {onAnswer === null
-              ? // Still exactly true where there is no delivery: nothing here
-                // can reach the tool call, and a control that implied
-                // otherwise would be the lie this sentence was written against.
-                'vam cannot answer this for you — a pick is only a mark, and nothing goes back to the session; type your choice in the box below.'
-              : // And still true where there is: picking sends nothing. Submit
-                // is the thing that sends, and it says so rather than leaving
-                // the operator to guess when the answer left.
-                'a pick is only a mark until you press Submit — Submit walks the session own picker onto what you marked, and says what it read back.'}
-          </p>
         </>
-      ) : (
-        <span data-question-answer className="text-[10.5px] text-ink-dim">
-          resolved — {question.answer}
-        </span>
+      )}
+      {/* SUBMIT BELONGS TO THE SET, not to the step. The agent is waiting on
+          the call, not on its first question, and a control inside a step
+          would read as though that step could be sent on its own -- so it sits
+          below all of them, and it waits until every OPEN step carries a mark.
+          An already-answered step is not one of those. */}
+      {open && onAnswer !== null && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            data-question-submit
+            disabled={unmarked.length > 0 || sending}
+            onClick={() => void send()}
+            className={[
+              'rounded-[6px] border px-1.5 py-1 text-[11px]',
+              unmarked.length > 0 || sending
+                ? 'cursor-default border-line text-ink-faint'
+                : 'cursor-pointer border-running text-ink hover:bg-raised',
+            ].join(' ')}
+          >
+            {sending ? 'Submitting…' : 'Submit'}
+          </button>
+          {questions.length > 1 && (
+            <span data-question-progress className="text-[10px] text-ink-faint">
+              {openSteps.length - unmarked.length} of {openSteps.length} marked
+            </span>
+          )}
+        </div>
+      )}
+      {outcome !== null && (
+        <p data-question-outcome data-outcome={outcome.kind} className="text-[10px] text-ink-dim">
+          {outcomeWording(outcome)}
+        </p>
+      )}
+      {open && (
+        <p data-question-note className="text-[10px] text-ink-faint">
+          {onAnswer === null
+            ? // Still exactly true where there is no delivery: nothing here can
+              // reach the tool call, and a control that implied otherwise would
+              // be the lie this sentence was written against.
+              'vam cannot answer this for you — a pick is only a mark, and nothing goes back to the session; type your choice in the box below.'
+            : // And still true where there is: picking sends nothing. Submit is
+              // the thing that sends, and it sends the whole set at once, the
+              // way the call was asked.
+              'a pick is only a mark until you press Submit — Submit walks the session own picker through every step and says what it read back.'}
+        </p>
       )}
     </div>
   );
@@ -1819,8 +1945,15 @@ export function DetailPanel(props: DetailPanelProps) {
    * reads exactly like an empty one, which is no card at all.
    */
   const questions = entry?.session.questions ?? [];
-  const newestQuestion =
-    [...questions].reverse().find((one) => one.answer === null) ?? questions.at(-1) ?? null;
+  /**
+   * THE SET, not the question. One `AskUserQuestion` call can carry several,
+   * and drawing the newest open one put question TWO of a two-question call on
+   * screen with question one nowhere (`panels/question-set.ts`).
+   */
+  const newestQuestions = newestSet(questions);
+  const newestQuestion = newestQuestions[0] ?? null;
+  /** The card is keyed by the CALL, so walking its steps does not remount it. */
+  const setId = newestQuestion === null ? '' : toolUseOf(newestQuestion.id);
   /**
    * While a question is open the options are the interaction, so the composer
    * stands down: an operator was reading a list of choices above a box that
@@ -1832,11 +1965,11 @@ export function DetailPanel(props: DetailPanelProps) {
    * over the box when a question is open, `I` + Enter sets `composing`, which
    * lands in the same place, and Esc still does the one thing it did.
    */
-  const openQuestion = newestQuestion !== null && newestQuestion.answer === null;
+  const openQuestion = newestQuestions.some((one) => one.answer === null);
   const [chattingAbout, setChattingAbout] = useState<string | null>(null);
-  const composerHidden = openQuestion && chattingAbout !== newestQuestion?.id;
+  const composerHidden = openQuestion && chattingAbout !== setId;
   const startChat = () => {
-    if (newestQuestion !== null) setChattingAbout(newestQuestion.id);
+    if (newestQuestion !== null) setChattingAbout(setId);
     onCompose();
   };
   useEffect(() => {
@@ -2301,8 +2434,8 @@ export function DetailPanel(props: DetailPanelProps) {
             (`TAIL_BYTES`), draws nothing here rather than an empty box. */}
           {newestQuestion !== null && (
             <QuestionCard
-              key={newestQuestion.id}
-              question={newestQuestion}
+              key={setId}
+              questions={newestQuestions}
               firstOptionRef={firstOptionRef}
               onChat={startChat}
               /* THREE THINGS HAVE TO BE TRUE before a Submit is drawn: the
