@@ -36,7 +36,6 @@ import {
   Trash2,
 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { SessionIcon } from '../canvas/session-icon.js';
 import type { Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
@@ -1118,8 +1117,7 @@ export function SessionList(props: SessionListProps) {
                   data-project-rows={group.project.id}
                   className="flex flex-col gap-[5px] pl-1.5"
                 >
-                  {group.items.map((entry) => {
-                    const { session } = entry;
+                  {group.items.map(({ session }) => {
                     const isFocused = session.id === focusedSessionId;
                     const needsYou = session.status === 'waiting';
                     // The SAME notion the close button already wears, applied
@@ -1134,9 +1132,6 @@ export function SessionList(props: SessionListProps) {
                       <div key={session.id}>
                         {renamingId === session.id ? (
                           <div className="flex items-center gap-1.5 rounded-[9px] border border-line-loud bg-raised px-2.5 py-2.5">
-                            <span className="text-[11px] text-ink-faint">
-                              <SessionIcon entry={entry} size={11} />
-                            </span>
                             <input
                               ref={renameRef}
                               value={renameDraft}
@@ -1213,19 +1208,15 @@ export function SessionList(props: SessionListProps) {
                                     needsYou || session.status === 'running' ? 'vam-breathe' : '',
                                   ].join(' ')}
                                 />
-                                {/* Always drawn, never conditional, and never
-                                    its own opinion: `SessionIcon` states the
-                                    chain -- session glyph, else project glyph,
-                                    else the same Monitor the project heading
-                                    above draws -- and the canvas root node
-                                    renders the same component, so the two
-                                    surfaces cannot answer differently. */}
-                                <span
-                                  data-row-icon={session.id}
-                                  className="text-[11px] leading-none"
-                                >
-                                  <SessionIcon entry={entry} size={11} />
-                                </span>
+                                {/* No session icon here. The row drew one --
+                                    the shared chain, always occupying its slot
+                                    -- and the operator removed it: an icon per
+                                    project heading groups the list, and a
+                                    second one on every row under it repeated
+                                    the same mark down a narrow column and took
+                                    width from the title. The canvas root node
+                                    is now the only surface that draws it, and
+                                    the `s` chord still picks it. */}
                                 <span
                                   className={`truncate text-[13px] ${isFocused ? 'font-medium text-ink' : 'text-ink-dim'}`}
                                 >

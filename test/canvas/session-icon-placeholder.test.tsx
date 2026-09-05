@@ -6,13 +6,16 @@
  * The chain used to end in a middot drawn at 11px in a dim colour, which is
  * indistinguishable from an empty slot -- the operator reported it as "no
  * icon for sessions in the sidebar", and the icon was there the whole time.
- * The project heading in the same file had already answered this case with a
- * real glyph, so the session row now answers it the same way.
+ * The answer was a real glyph, the same one the project heading draws.
  *
- * The two surfaces are asserted to agree by construction rather than by two
- * literals that can drift: the same entry is rendered into the sidebar row
- * and into the canvas root node, and the markup of the two icon slots is
- * compared to itself.
+ * This file was written when TWO surfaces drew a session icon: it rendered one
+ * entry into the sidebar row and into the canvas root node and compared the
+ * two icon slots to each other, so drift failed rather than passing twice.
+ * The sidebar's display has since been removed at the operator's request, so
+ * the comparison has one side left and the agreement cases below assert what
+ * the remaining surface draws for each link of the chain -- same four inputs,
+ * same four expectations, one reader instead of two. The sidebar's side is not
+ * unasserted: `test/panels/SessionList.icon.test.tsx` now pins its absence.
  */
 
 import { cleanup, render } from '@testing-library/react';
@@ -21,8 +24,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { SessionInfoNode } from '../../src/renderer/canvas/SessionInfoNode.js';
 import type { Project, Session, SourceId } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
-import { SessionList } from '../../src/renderer/panels/SessionList.js';
-import { baseProps } from '../panels/session-list-props.js';
 
 afterEach(cleanup);
 
@@ -64,14 +65,6 @@ const FLOW_PROPS = {
   positionAbsoluteY: 0,
 } as const;
 
-/** The sidebar row's icon slot, for one entry rendered alone. */
-function rowSlot(entry: SessionEntry): HTMLElement {
-  const { container } = render(<SessionList {...baseProps([entry])} />);
-  const slot = container.querySelector<HTMLElement>('[data-row-icon="s1"]');
-  expect(slot, 'the sidebar drew no icon slot; every assertion here is vacuous').not.toBe(null);
-  return slot as HTMLElement;
-}
-
 /** The canvas root node's icon control, for one entry rendered alone. */
 function nodeSlot(entry: SessionEntry): HTMLElement {
   const { container } = render(
@@ -90,29 +83,21 @@ function nodeSlot(entry: SessionEntry): HTMLElement {
   return slot as HTMLElement;
 }
 
-/** What the slot draws, normalised so the two surfaces are comparable. */
+/** What the slot draws: a resolved glyph, or the drawn placeholder. */
 function drawn(slot: HTMLElement): string {
   const placeholder = slot.querySelector('[data-session-icon-placeholder]');
   return placeholder === null ? `glyph:${slot.textContent}` : 'placeholder';
 }
 
 describe('a session with no glyph anywhere', () => {
-  const bare = entryOf(null, null);
-
-  it('draws a visible placeholder in the sidebar, not an invisible mark', () => {
-    const slot = rowSlot(bare);
-    expect(slot.querySelector('svg'), 'the row drew no placeholder glyph').not.toBe(null);
-    expect(slot.textContent).toBe('');
-  });
-
-  it('draws the same visible placeholder on the canvas root node', () => {
-    const slot = nodeSlot(bare);
+  it('draws a visible placeholder on the canvas root node, not an invisible mark', () => {
+    const slot = nodeSlot(entryOf(null, null));
     expect(slot.querySelector('svg'), 'the root node drew no placeholder glyph').not.toBe(null);
     expect(slot.textContent).toBe('');
   });
 });
 
-describe('the two surfaces answer the chain identically', () => {
+describe('the canvas root node answers every link of the chain', () => {
   const cases: ReadonlyArray<readonly [string, SessionEntry, string]> = [
     ['neither the session nor its project has one', entryOf(null, null), 'placeholder'],
     ['the session has its own', entryOf('🦀', null), 'glyph:🦀'],
@@ -121,11 +106,8 @@ describe('the two surfaces answer the chain identically', () => {
   ];
 
   for (const [label, entry, expected] of cases) {
-    it(`agrees when ${label}`, () => {
-      const row = drawn(rowSlot(entry));
-      const node = drawn(nodeSlot(entry));
-      expect(row).toBe(node);
-      expect(row).toBe(expected);
+    it(`draws ${expected} when ${label}`, () => {
+      expect(drawn(nodeSlot(entry))).toBe(expected);
     });
   }
 });
