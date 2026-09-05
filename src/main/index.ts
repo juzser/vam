@@ -255,9 +255,15 @@ function startRemoteTransport(): void {
       source: DESKTOP_SOURCE,
       subscribe,
     });
-  })().catch((error) => {
-    console.error(`[vam] remote transport refused to start: ${String(error)}`);
-    app.exit(1);
+  })().catch((error: unknown) => {
+    // THE APP OUTLIVES ITS OPTIONAL SURFACE. A port that is already taken, or
+    // a registry this process cannot open, means there is no remote endpoint
+    // -- it does not mean the operator loses every tmux session vam is
+    // driving, which is what `app.exit(1)` did here. Nothing was bound and no
+    // route was registered on this path, so continuing serves nothing over
+    // the network; the desktop simply keeps working, and the refusal says
+    // which port and why.
+    console.error(`[vam] the remote endpoint did not start: ${String(error)}`);
   });
 }
 

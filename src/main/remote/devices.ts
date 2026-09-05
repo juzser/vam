@@ -24,6 +24,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { constantTimeEquals, type DeviceDirectory, type Identity } from './auth.js';
+import type { RegistryTrouble } from './state.js';
 
 /** 32 bytes: 256 bits, base64url, never in a URL, hash or query string. */
 const TOKEN_BYTES = 32;
@@ -44,6 +45,8 @@ export type Grant = { readonly identity: Identity; readonly token: string };
 
 export type DeviceRegistry = DeviceDirectory & {
   list(): readonly PairedDevice[];
+  /** What is wrong with the file, when "no devices" is not the whole story. */
+  trouble(): RegistryTrouble | null;
   grant(name: string): Promise<Grant>;
   remove(deviceId: string): Promise<void>;
   removeAll(): Promise<void>;
@@ -72,15 +75,23 @@ const isDevice = (value: unknown): value is StoredDevice => {
   );
 };
 
-async function read(path: string): Promise<StoredDevice[]> {
+/**
+ * TWO DECISIONS, NOT ONE. A file we cannot read is NO DEVICES, never "every
+ * device" -- the safe direction refuses requests rather than admitting them.
+ * That is authentication, and it stays. It is NOT a licence to overwrite the
+ * file: a truncated or unreadable registry that reads as empty and is then
+ * replaced by the next grant destroys every other pairing silently. So the
+ * caller is told which of the two it got, and only ENOENT is "no devices".
+ */
+async function read(path: string): Promise<{ devices: StoredDevice[]; unreadable: boolean }> {
   try {
     const parsed: unknown = JSON.parse(await readFile(path, 'utf8'));
     const rows = (parsed as { devices?: unknown }).devices;
-    // A file we cannot read is NO DEVICES, never "every device": the safe
-    // direction is the one that refuses requests rather than admitting them.
-    return Array.isArray(rows) ? rows.filter(isDevice) : [];
-  } catch {
-    return [];
+    if (!Array.isArray(rows)) return { devices: [], unreadable: true };
+    return { devices: rows.filter(isDevice), unreadable: false };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return { devices: [], unreadable: code !== 'ENOENT' };
   }
 }
 
@@ -127,7 +138,30 @@ export async function openDeviceRegistry(options: RegistryOptions): Promise<Devi
   // at the moment the operator tries to use it.
   await mkdir(dirname(options.path), { recursive: true, mode: DIR_MODE });
   await chmod(dirname(options.path), DIR_MODE);
-  let devices = await read(options.path);
+  const opened = await read(options.path);
+  let devices = opened.devices;
+  let problem: RegistryTrouble | null = opened.unreadable ? 'unreadable' : null;
+
+  /**
+   * Every durable write goes through here, and it will not run over a file
+   * this process could not read. The failure is remembered because the
+   * desktop is where the human is: a grant that did not persist otherwise
+   * reaches no surface at all (`ipc.ts` reads this into `RemoteState`).
+   */
+  const durable = async (next: readonly StoredDevice[]): Promise<void> => {
+    if (problem === 'unreadable') {
+      throw new Error(
+        `the device registry at ${options.path} could not be read, so vam will not overwrite it`,
+      );
+    }
+    try {
+      await persist(options.path, next);
+    } catch (error) {
+      problem = 'write-failed';
+      throw error;
+    }
+    problem = null;
+  };
 
   const identityOf = (device: StoredDevice): Identity => ({
     deviceId: device.deviceId,
@@ -171,6 +205,10 @@ export async function openDeviceRegistry(options: RegistryOptions): Promise<Devi
       return devices.map(({ token: _token, ...rest }) => rest);
     },
 
+    trouble(): RegistryTrouble | null {
+      return problem;
+    },
+
     async grant(name: string): Promise<Grant> {
       return await serialised(async () => {
         const at = now();
@@ -186,7 +224,7 @@ export async function openDeviceRegistry(options: RegistryOptions): Promise<Devi
         const next = [...devices, device];
         // Persist FIRST. A token this machine would forget is worse than a
         // pairing that visibly failed.
-        await persist(options.path, next);
+        await durable(next);
         devices = next;
         return { identity: identityOf(device), token: device.token };
       });
@@ -198,7 +236,7 @@ export async function openDeviceRegistry(options: RegistryOptions): Promise<Devi
         if (next.length === devices.length) {
           return;
         }
-        await persist(options.path, next);
+        await durable(next);
         devices = next;
         // Announced only after the durable write and the swap both succeeded:
         // dropping a device's streams while its token still works is the
@@ -210,7 +248,7 @@ export async function openDeviceRegistry(options: RegistryOptions): Promise<Devi
     async removeAll(): Promise<void> {
       await serialised(async () => {
         const revoked = devices.map((device) => device.deviceId);
-        await persist(options.path, []);
+        await durable([]);
         devices = [];
         for (const deviceId of revoked) {
           options.onRevoked?.(deviceId);

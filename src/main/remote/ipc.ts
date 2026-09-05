@@ -112,6 +112,10 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
       devices: options.devices.list(),
       address: await address(),
       allowWrites: options.allowWrites,
+      // The failure path's only desktop surface. A grant that did not persist
+      // and a registry vam refused to overwrite are both known here and were
+      // said nowhere -- the phone was the only side told.
+      registry: options.devices.trouble(),
       nowMs: now(),
     };
   };

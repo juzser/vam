@@ -60,6 +60,29 @@ function asRelease(body: unknown): LatestRelease | null {
   };
 }
 
+/**
+ * The one destination a click on this notice may open.
+ *
+ * `shell.openExternal` honours `file:` and every scheme the OS has a handler
+ * for, and this channel takes no argument from the renderer precisely so it
+ * cannot become a navigate-anywhere capability. A `html_url` from the network
+ * is that capability by another door -- a spoofed or rewritten response
+ * chooses the destination -- so it is checked to be what it claims to be: an
+ * https release page on GitHub. Anything else is not narrowed, it is refused.
+ */
+function releaseUrl(value: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  const host = parsed.hostname;
+  if (parsed.protocol !== 'https:') return null;
+  if (host !== 'github.com' && !host.endsWith('.github.com')) return null;
+  return parsed.href;
+}
+
 export async function checkForUpdate(
   currentVersion: string,
   deps: UpdateCheckDeps = DEFAULT_UPDATE_DEPS,
@@ -108,9 +131,14 @@ export async function checkForUpdate(
   if (latest === null || current === null) return { kind: 'up-to-date' };
   if (compareVersions(latest, current) <= 0) return { kind: 'up-to-date' };
 
+  const url = releaseUrl(release.html_url);
+  // A newer release vam cannot safely send the operator to is an answer it
+  // does not understand, not an offer with a caveat.
+  if (url === null) return { kind: 'unknown', reason: 'malformed' };
+
   return {
     kind: 'available',
     version: `${latest.major}.${latest.minor}.${latest.patch}`,
-    url: release.html_url,
+    url,
   };
 }

@@ -579,6 +579,23 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
     });
   });
 
-  await new Promise<void>((resolve) => server.listen(options.port, LOOPBACK, resolve));
+  // A BIND THAT FAILS IS A REFUSAL, NOT A CRASH. Without an `'error'`
+  // listener a `listen` failure is an uncaught exception in the main process,
+  // and this promise never settles -- so the caller's catch, which exists to
+  // report exactly this, never runs and the whole desktop app goes down
+  // because one optional surface could not have a port. Listened for once,
+  // before `listen`, and named in the operator's terms: which port, and why.
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', (error: NodeJS.ErrnoException) => {
+      reject(
+        error.code === 'EADDRINUSE'
+          ? new Error(
+              `the remote endpoint could not bind port ${options.port}: it is already in use`,
+            )
+          : new Error(`the remote endpoint could not bind port ${options.port}: ${error.message}`),
+      );
+    });
+    server.listen(options.port, LOOPBACK, resolve);
+  });
   return server;
 }

@@ -226,8 +226,16 @@ export function registerTerminalIpc(
       }
       const panes = rowId === undefined ? undefined : await readPanes();
       const listed = await listVamSessions(run);
-      if (listed.kind === 'unavailable') return 'unaimed';
+      // The three causes stay three. vam could not ASK tmux, so it cannot
+      // claim a pairing problem either -- `pane.ts:sendSessionKey` makes
+      // exactly this mapping and the aiming re-implemented here dropped it,
+      // which is the same collapse `shared/terminal.ts` records having been
+      // fixed once already.
+      if (listed.kind === 'unavailable') return 'unavailable';
       const match = targetSession(listed.sessions, projectId, rowId, panes);
+      // A row sitting in a pane vam rejected is not a row vam could not name
+      // a session for: the read path keeps them apart, and so does this.
+      if (match.kind === 'mispaired') return 'mispaired';
       if (match.kind !== 'one') return 'unaimed';
       const result = await sendToPane(run, match.name, key);
       // Remembered only once it has actually carried a key. An aim that has

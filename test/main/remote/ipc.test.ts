@@ -150,6 +150,7 @@ describe('the pairing channel', () => {
     const full: DeviceRegistry = {
       find: () => null,
       list: () => [],
+      trouble: () => 'write-failed',
       grant: async () => {
         throw new Error('ENOSPC: no space left on device');
       },
@@ -163,6 +164,9 @@ describe('the pairing channel', () => {
     await state(CHANNELS.pairingApprove);
 
     await expect(outcome).rejects.toThrow(/ENOSPC/);
+    // ...and the desktop, which is where the human is, is told: before this
+    // the failure reached the phone alone and the prompt just disappeared.
+    expect((await state(CHANNELS.remoteState)).registry).toBe('write-failed');
     const after = await state(CHANNELS.remoteState);
     // The two surfaces agree, and they agree on the true answer: the operator
     // is told nothing paired, rather than reading "Paired: a phone" beside an

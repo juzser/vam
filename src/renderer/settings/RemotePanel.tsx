@@ -44,6 +44,35 @@ const NO_ADDRESS: Record<string, string> = {
  */
 type BridgeWithRemote = { readonly remote?: RemoteApi };
 
+/** Every control on the panel, so a failure can be said in its own terms. */
+type ActName = 'open' | 'approve' | 'deny' | 'remove' | 'revokeAll';
+
+/**
+ * What failed, and -- for the two that revoke access -- what is still true
+ * afterwards. An operator removing a device needs to know whether it actually
+ * happened, and the answer here is that it did not.
+ */
+const ACT_FAILED: Record<ActName, string> = {
+  open: 'vam could not mint a pairing code.',
+  approve: 'vam could not allow that device.',
+  deny: 'vam could not turn that device away.',
+  remove: 'vam could not remove that device: it is still paired, and its token still works.',
+  revokeAll:
+    'vam could not revoke these devices: they are still paired, and their tokens still work.',
+};
+
+/** The registry's own trouble, which no surface said before. */
+const REGISTRY_TROUBLE: Record<'unreadable' | 'write-failed', string> = {
+  unreadable:
+    'vam could not read its device registry, so it is admitting no phone at all. It has NOT overwritten the file -- pairing a device would, so vam refuses until the file is readable again.',
+  'write-failed':
+    'The last pairing change could not be written to disk, so it did not take effect: a device you allowed is not paired, and one you removed may still be.',
+};
+
+/** The same tail on every one: the endpoint answered, so it is not the cause. */
+const ACT_TAIL =
+  ' The remote endpoint is running -- this failed inside vam, most often a device registry it could not write. The list below is the last state vam read.';
+
 export function desktopRemoteApi(): RemoteApi | undefined {
   return (globalThis.window?.api as unknown as BridgeWithRemote | undefined)?.remote;
 }
@@ -61,17 +90,28 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
   const [state, setState] = useState<RemoteState | null>(null);
   /** True once a read has failed: main registered no handler, so pairing is off. */
   const [off, setOff] = useState(api === undefined);
+  /** The last act that rejected, if the operator has not acted since. */
+  const [failed, setFailed] = useState<ActName | null>(null);
 
   useEffect(() => {
     if (api === undefined || !active) return;
     let live = true;
+    // Whether main has EVER answered this section. Kept in the effect rather
+    // than in state so a re-render cannot restart the poll under a state it
+    // just produced.
+    let answered = false;
     const read = () => {
       api.state().then(
         (next) => {
+          answered = true;
           if (live) setState(next);
         },
         () => {
-          if (live) setOff(true);
+          // A read that failed having NEVER succeeded is the one case that
+          // means main registered no handler. After a good one the endpoint
+          // demonstrably exists, so a later failure is not a reason to take
+          // the pairing screen away.
+          if (live && !answered) setOff(true);
         },
       );
     };
@@ -85,11 +125,23 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
 
   /**
    * An act answers with the state it produced, so the panel is truthful the
-   * moment the operator presses something rather than at the next poll. A
-   * rejection means the same thing a failed read does: there is no endpoint.
+   * moment the operator presses something rather than at the next poll.
+   *
+   * A REJECTION HERE IS NOT "THERE IS NO ENDPOINT". Main answered; the work
+   * inside it failed -- a registry write on a full or read-only volume is the
+   * ordinary way. Saying "the endpoint is not running" for that sends the
+   * operator to restart vam over a disk, and it took the device list off
+   * screen with it, which is the one surface that shows whether a revocation
+   * happened. So the act names ITS OWN failure and the panel stays.
    */
-  const act = useCallback((run: () => Promise<RemoteState>) => {
-    run().then(setState, () => setOff(true));
+  const act = useCallback((name: ActName, run: () => Promise<RemoteState>) => {
+    run().then(
+      (next) => {
+        setFailed(null);
+        setState(next);
+      },
+      () => setFailed(name),
+    );
   }, []);
 
   if (api === undefined || off) {
@@ -114,15 +166,26 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
         url={url}
         allowWrites={state.allowWrites}
         nowMs={state.nowMs}
-        onRegenerate={() => act(() => api.open())}
-        onApprove={() => act(() => api.approve())}
-        onDeny={() => act(() => api.deny())}
+        onRegenerate={() => act('open', () => api.open())}
+        onApprove={() => act('approve', () => api.approve())}
+        onDeny={() => act('deny', () => api.deny())}
         onCopyUrl={() => {
           if (url !== null && copyText !== undefined) void copyText(url);
         }}
-        onRemove={(deviceId) => act(() => api.remove(deviceId))}
-        onRevokeAll={() => act(() => api.revokeAll())}
+        onRemove={(deviceId) => act('remove', () => api.remove(deviceId))}
+        onRevokeAll={() => act('revokeAll', () => api.revokeAll())}
       />
+      {state.registry !== null ? (
+        <p data-testid="remote-registry" role="alert">
+          {REGISTRY_TROUBLE[state.registry]}
+        </p>
+      ) : null}
+      {failed !== null ? (
+        <p data-testid="remote-act-failed" role="alert">
+          {ACT_FAILED[failed]}
+          {ACT_TAIL}
+        </p>
+      ) : null}
       {state.address.kind === 'unavailable' ? (
         <p data-testid="remote-address-state">{NO_ADDRESS[state.address.reason]}</p>
       ) : null}

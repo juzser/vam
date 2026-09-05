@@ -32,6 +32,7 @@ const IDLE: RemoteState = {
   devices: [],
   address: { kind: 'unavailable', reason: 'no-cli' },
   allowWrites: false,
+  registry: null,
   nowMs: NOW,
 };
 
