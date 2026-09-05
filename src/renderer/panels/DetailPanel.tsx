@@ -1362,17 +1362,27 @@ function QuestionCard({
   };
 
   /**
-   * The cursor lands on the new step's first option -- or on its tab, for a
-   * step already answered, which has no options list to land in. Only after a
-   * WALK: arriving at the card is `active`'s business one screen down, and
-   * stealing focus on every render would take it off whatever the operator
-   * clicked.
+   * The cursor lands on the new step's first option -- or on its TAB, in the
+   * two cases where the options are not something to choose between any more:
+   * a step already answered, which draws no list at all, and a step the picker
+   * has already taken in, whose list is still drawn and still clickable while
+   * Submit carries only what comes after it. Landing on marks that can never
+   * be sent is landing on a control that does nothing, which is the same
+   * failure as landing on the canvas.
+   *
+   * Only after a WALK: arriving at the card is `active`'s business one screen
+   * down, and stealing focus on every render would take it off whatever the
+   * operator clicked.
    */
+  const showingTaken = question !== undefined && takenIds.has(question.id);
   useEffect(() => {
     if (landing === null) return;
     setLanding(null);
-    (firstOptionRef.current ?? stepTabRef.current)?.focus();
-  }, [landing, firstOptionRef]);
+    const target = showingTaken
+      ? stepTabRef.current
+      : (firstOptionRef.current ?? stepTabRef.current);
+    target?.focus();
+  }, [landing, showingTaken, firstOptionRef]);
 
   const send = async () => {
     // The marks IN THE ORDER THEY ARE DRAWN, not the order they were clicked:

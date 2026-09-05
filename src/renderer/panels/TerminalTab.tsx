@@ -654,9 +654,11 @@ export function TerminalTab({
           activates nothing": it activates something on someone else's
           machine. It is therefore focused deliberately on arrival, and left by
           TAB -- Escape is not an exit here, it is one of the keys sent into
-          the agent, which is the point of the pane. Tab is the way out, and a
-          surface that eats every key with no way out is the trap the sentence
-          that stood here promised this was not. */}
+          the agent, which is the point of the pane. Tab is the way out, and it
+          is said on the surface while the pane holds focus, by the corner
+          badge below rather than by a row of chrome above: a surface that eats
+          every key with no way out is the trap the sentence that stood here
+          promised this was not. */}
       {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region
           is the one case where WCAG 2.1.1 requires exactly this, and this one
           now also takes text. It is a named <section> and not a textbox role:
