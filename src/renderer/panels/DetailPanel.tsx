@@ -81,7 +81,7 @@ import {
 } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { AnswerRequest, AnswerResult } from '../../shared/answer.js';
+import type { AnswerRequest, AnswerResult, PanePrompt, PromptView } from '../../shared/answer.js';
 import type { PaneSendResult } from '../../shared/terminal.js';
 import type {
   AgentQuestion,
@@ -108,8 +108,21 @@ import {
 import { Note } from './Note.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
+
 import { TerminalTab } from './TerminalTab.js';
 import { TABS, type Tab, visibleTabs } from './tabs.js';
+
+/**
+ * How often the pane is re-read while a row says it is waiting.
+ *
+ * A prompt is a SCREEN, not a record: it appears when the agent asks and
+ * vanishes when it is answered -- from vam, from the terminal, or from another
+ * window -- and nothing tells vam either way. The Terminal tab already reads
+ * its pane once a second; this is slower because it is drawn as a decision
+ * rather than as a live screen, and it runs only for a row that is waiting and
+ * that vam started.
+ */
+const PROMPT_POLL_MS = 2_000;
 
 /** The three things this pane needs to know about a file it was handed. */
 export type AttachedFile = {
@@ -391,6 +404,18 @@ export type DetailPanelProps = {
     request: AnswerRequest,
     rowId?: string,
   ) => Promise<AnswerResult>;
+  /**
+   * The bridge that READS the question a session is asking that nothing wrote
+   * down -- a tool-approval prompt, which has no transcript record while it is
+   * open and so can never become an `AgentQuestion`.
+   *
+   * Beside `answer` because it is the other half of one act: what this returns
+   * is what the card offers, and the labels it offers are matched back against
+   * the same screen. `undefined` in the browser build, and the card is then
+   * simply not drawn for that shape -- structural absence, not a control that
+   * refuses when pressed.
+   */
+  readonly prompt?: (projectId: string, rowId?: string) => Promise<PromptView>;
   /**
    * Whether the focused session's source has a terminal surface --
    * `capabilities.terminal`, passed down exactly as `delivers` is.
@@ -1883,6 +1908,7 @@ export function DetailPanel(props: DetailPanelProps) {
     actionIndex,
     delivers,
     answer,
+    prompt,
     terminal,
     sending = false,
     width,
@@ -2257,7 +2283,73 @@ export function DetailPanel(props: DetailPanelProps) {
    * and drawing the newest open one put question TWO of a two-question call on
    * screen with question one nowhere (`panels/question-set.ts`).
    */
-  const newestQuestions = newestSet(questions);
+  const recorded = newestSet(questions);
+  /**
+   * THE PROMPT ON THE PANE, for the shapes that leave no record.
+   *
+   * READ ONLY FOR A SESSION VAM STARTED, and `=== true` rather than truthy
+   * because `vamControlled` is three-state: absent means control could not be
+   * established, which is not permission. So for every other row nothing is
+   * read at all -- vam does not look into a pane it may not act in -- and the
+   * waiting note above stays the whole of what is offered.
+   */
+  const readable =
+    prompt !== undefined &&
+    entry !== null &&
+    waitingFor !== undefined &&
+    recorded.length === 0 &&
+    entry.session.vamControlled === true;
+  const [paneAsk, setPaneAsk] = useState<PanePrompt | null>(null);
+  const projectId = entry?.project.id ?? '';
+  const rowId = entry?.session.id ?? '';
+  useEffect(() => {
+    if (!readable || prompt === undefined) {
+      setPaneAsk(null);
+      return;
+    }
+    let live = true;
+    const look = async () => {
+      const view = await prompt(projectId, rowId);
+      // ONLY A PROMPT IS DRAWN. Every other answer -- no picker, an
+      // unreadable pane, a pairing vam refused -- leaves the card absent and
+      // the waiting note standing, which already names the reach state. A
+      // card built out of a refusal would be a control that cannot act.
+      if (live) setPaneAsk(view.kind === 'prompt' ? view.prompt : null);
+    };
+    void look();
+    // The prompt is a SCREEN, not a record: it appears and disappears without
+    // anything telling vam, so it is re-read while the row is waiting.
+    const timer = setInterval(() => void look(), PROMPT_POLL_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [readable, prompt, projectId, rowId]);
+  /**
+   * THE RECORD WINS. A transcript question carries the tool's own
+   * `multiSelect`, its descriptions and its previews; a screen carries none of
+   * those. The pane read is the fallback for the shapes that have no record,
+   * never a second opinion about one that does.
+   */
+  const newestQuestions: readonly AgentQuestion[] =
+    recorded.length > 0 || paneAsk === null
+      ? recorded
+      : [
+          {
+            // Keyed by the row and the title so a NEW prompt remounts the
+            // card: an option marked on the last one must not survive into
+            // the next, which is a different decision entirely.
+            id: `pane:${rowId}:${paneAsk.title}`,
+            header: null,
+            question: paneAsk.title,
+            // Single-select, because that is what the CLI draws for these and
+            // vam may not infer otherwise: a wrong multiSelect would tick a
+            // row where it meant to answer.
+            multiSelect: false,
+            options: paneAsk.options.map((label) => ({ label, description: null })),
+            answer: null,
+          },
+        ];
   const newestQuestion = newestQuestions[0] ?? null;
   /** The card is keyed by the CALL, so walking its steps does not remount it. */
   const setId = newestQuestion === null ? '' : toolUseOf(newestQuestion.id);

@@ -106,6 +106,22 @@ export const CHANNELS = {
    */
   terminalAnswer: 'vam:terminal:answer',
   /**
+   * The QUESTION a session is asking that nothing wrote down -- read off its
+   * pane rather than out of a transcript.
+   *
+   * It exists because the commonest thing a session blocks on, a tool-approval
+   * prompt, leaves no record at all while it is open: `questions` is empty for
+   * it and always will be. So the card that answers it has nowhere to get the
+   * title and the labels from except the screen, and this is that read.
+   *
+   * Distinct from `terminalRead`, which hands over a whole screen for the
+   * Terminal tab to draw. This hands over a title and a list of options, which
+   * go straight back down `terminalAnswer` -- so the two channels together are
+   * the read and the write of one act, and the labels the operator sees are
+   * the labels vam will match on the pane.
+   */
+  terminalPrompt: 'vam:terminal:prompt',
+  /**
    * The directory picker. Answers BARE -- a path or `null` -- never an
    * `IpcResult`: "which directory" has exactly two answers and a cancelled
    * dialog is one of them, not a failure to report in a source's words. There
