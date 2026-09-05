@@ -122,6 +122,9 @@ const headings = () =>
   [...document.querySelectorAll('[data-project-heading]')].map((el) => el.textContent ?? '');
 const rowText = (id: string) =>
   document.querySelector(`[data-session-row="${id}"]`)?.textContent ?? '';
+/** What the canvas root node draws for a session -- the one icon display left. */
+const nodeIcon = (id: string) =>
+  document.querySelector(`[data-session-icon="${id}"]`)?.textContent ?? null;
 // A <textarea>, not an <input>: the composer is multiline, so a prompt is
 // prose rather than the tail of one line.
 const promptInput = () =>
@@ -886,14 +889,18 @@ describe('renaming, icons and closing', () => {
 
   it('shows an icon you chose on a previous visit', () => {
     // The read half of the store, end to end: what localStorage holds reaches
-    // the row without the sidebar knowing an icon is a local preference.
+    // the canvas root node without the canvas knowing an icon is a local
+    // preference. This used to read the SIDEBAR row (`rowText('a1')` contains
+    // the glyph, `rowText('a2')` does not); the sidebar no longer draws a
+    // session icon, so the same end-to-end path is asserted on the surface
+    // that still displays it -- the assertion moved, it was not dropped.
     localStorage.setItem(
       'vam.prefs.v1',
       JSON.stringify({ icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
     );
     render(<Canvas model={MODEL} />);
-    expect(rowText('a1')).toContain('🛠');
-    expect(rowText('a2')).not.toContain('🛠');
+    expect(nodeIcon('a1')).toBe('🛠');
+    expect(rowText('a1')).not.toContain('🛠');
   });
 
   it('clearing the icon says where it was kept, and forgets it', () => {
@@ -914,7 +921,9 @@ describe('renaming, icons and closing', () => {
     // the event log.
     expect(screen.getByText(/on this machine/)).toBeTruthy();
     expect(iconPicker()).toBeNull();
-    expect(rowText('a1')).not.toContain('🛠');
+    // Also moved off the sidebar row: it asserted `rowText('a1')` no longer
+    // contained the cleared glyph, and now asserts the canvas node does not.
+    expect(nodeIcon('a1')).not.toBe('🛠');
     expect(JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}').icons).toEqual({});
   });
 

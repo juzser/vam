@@ -4,10 +4,13 @@
  * The root node's icon: one fallback chain, one picker.
  *
  * The chain is session glyph -> project glyph -> a drawn placeholder, and it
- * lives in exactly one module because two call sites already draw a session's
- * icon. The tests below pin the chain itself, the two ways a session's own
- * choice can go away (cleared by hand, pruned by the TTL), and the fact that
- * the node's icon is a control that opens the picker the `s` chord opens.
+ * lives in one module because it states what a session's glyph IS. It was
+ * adopted by two call sites; the sidebar's was removed at the operator's
+ * request, so this node is the only surface that draws it and these tests are
+ * the only place the drawn end of the chain is asserted. They pin the chain
+ * itself, the two ways a session's own choice can go away (cleared by hand,
+ * pruned by the TTL), and the fact that the node's icon is a control that
+ * opens the picker the `s` chord opens.
  */
 
 import { cleanup, fireEvent, render } from '@testing-library/react';
