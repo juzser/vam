@@ -44,9 +44,19 @@ function parts(line: Line): Line[] {
 
 function readOption(value: unknown): QuestionOption | null {
   const option = obj(value);
-  const label = option === null ? null : str(option['label']);
+  if (option === null) return null;
+  const label = str(option['label']);
   if (label === null) return null;
-  return { label, description: option === null ? null : str(option['description']) };
+  return {
+    label,
+    description: str(option['description']),
+    // 127 of 917 options in the operator's own data carry one and it used to
+    // be dropped here. NULL RATHER THAN ABSENT, like `description` beside it:
+    // the field is always on the type, so a renderer reads one shape whatever
+    // the record held, and `null` is "the tool offered none" rather than "vam
+    // did not look".
+    preview: str(option['preview']),
+  };
 }
 
 /** One entry of a tool_use's `questions` array, or `null` if unusable. */

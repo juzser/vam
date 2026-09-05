@@ -1773,6 +1773,18 @@ function QuestionCard({
                     {option.description}
                   </span>
                 )}
+                {/* WHAT PICKING IT WOULD PRODUCE, under the reason for picking
+                  it and set in mono because that is usually what it is -- a
+                  colour, a path, a line of the thing that would be written. It
+                  was in the record all along and drawn nowhere. */}
+                {(option.preview ?? null) !== null && (
+                  <span
+                    data-question-preview
+                    className="max-w-full truncate font-mono text-[10px] text-ink-faint"
+                  >
+                    {option.preview}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -1792,10 +1804,7 @@ function QuestionCard({
               not printed at all when the key is not held -- a caption naming a
               key that does nothing is the defect, not the absence of one. */}
             {keys.chat[0] !== undefined && (
-              <span
-                data-question-chat-key
-                className="text-[10px] text-ink-faint tabular-nums"
-              >
+              <span data-question-chat-key className="text-[10px] text-ink-faint tabular-nums">
                 {keys.chat[0]}
               </span>
             )}
@@ -2236,7 +2245,9 @@ export function DetailPanel(props: DetailPanelProps) {
    * not null -- is "nothing says anyone is waiting"; see `model.ts`.
    */
   const waitingFor =
-    entry === null || !('waitingFor' in entry.session) ? undefined : (entry.session.waitingFor ?? null);
+    entry === null || !('waitingFor' in entry.session)
+      ? undefined
+      : (entry.session.waitingFor ?? null);
   /**
    * THE SET, not the question. One `AskUserQuestion` call can carry several,
    * and drawing the newest open one put question TWO of a two-question call on

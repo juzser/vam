@@ -209,7 +209,9 @@ export async function loadClaudeCodeProjects(
     // Per row, because a row is a process: the age below and the waiting
     // state come out of the same file and are read together.
     const facts =
-      agent.pid === null ? { statusUpdatedAt: null } : await readProcessFacts(sessionsRoot, agent.pid);
+      agent.pid === null
+        ? { statusUpdatedAt: null }
+        : await readProcessFacts(sessionsRoot, agent.pid);
     const statusUpdatedAt = facts.statusUpdatedAt;
     // TRANSCRIPT FIRST, `.git/HEAD` AS FALLBACK. `read.facts.branch` is
     // `gitBranch` as Claude Code itself recorded it per turn -- the branch the

@@ -119,9 +119,7 @@ describe('the waiting state', () => {
     // Two values were observed on one machine. That is a sample, not the set:
     // an unknown one means the session is still waiting, and the operator is
     // better served by the CLI's own word than by silence.
-    const facts = parseProcessFacts(
-      statusFile({ status: 'waiting', waitingFor: 'plan approval' }),
-    );
+    const facts = parseProcessFacts(statusFile({ status: 'waiting', waitingFor: 'plan approval' }));
     expect(facts.waitingFor).toBe('plan approval');
   });
 

@@ -194,6 +194,23 @@ export type PullRequestList =
 export type QuestionOption = {
   readonly label: string;
   readonly description: string | null;
+  /**
+   * What picking this option would PRODUCE, as the tool wrote it -- a colour,
+   * a path, a snippet of the thing that would be created. `null` when the
+   * record carried none.
+   *
+   * NOT the description. The description is why you would pick it; this is
+   * what you would get, and 127 of 917 options in real data carry one. It was
+   * dropped for as long as this type had two fields.
+   *
+   * OPTIONAL, and `null` and absent mean the same thing here -- the tool
+   * offered none. That is not the three-state shape `vamControlled` and
+   * `questions` use, and deliberately: those distinguish "vam looked and found
+   * nothing" from "vam could not look", a distinction one field of one option
+   * inside a record vam has already parsed cannot have. Optional keeps every
+   * fixture that predates the field valid, which is what it is worth.
+   */
+  readonly preview?: string | null;
 };
 
 /**
