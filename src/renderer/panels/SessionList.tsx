@@ -42,12 +42,33 @@ import type { Group, Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filter.js';
+import type { KeyAction } from '../keyboard/chords.js';
+import { ShortcutTip, shortcutLines } from '../keyboard/ShortcutTip.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { FocusEdge } from './FocusEdge.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { type RemovalPlan, removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
+
+/** The actions the sidebar's controls stand for — actions, never keys, so
+ *  every hint below reads the chord in force rather than a shipped default. */
+const SETTINGS_ACTION: KeyAction = { kind: 'settings' };
+const SEARCH_ACTION: KeyAction = { kind: 'search' };
+const NEW_SESSION_ACTION: KeyAction = { kind: 'newSession' };
+
+/** The chord printed INSIDE a button, beside its name — and nothing at all
+ *  when the action is unbound. Two of these were literals (`/` and `o`). */
+function InlineChord({
+  action,
+  className,
+}: {
+  readonly action: KeyAction;
+  readonly className: string;
+}) {
+  const keys = shortcutLines(action, undefined)[0]?.keys ?? null;
+  return keys === null ? null : <span className={className}>{keys}</span>;
+}
 
 const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   running: 'bg-running',
@@ -832,14 +853,16 @@ export function SessionList(props: SessionListProps) {
             {workspace.slice(0, 1).toUpperCase()}
           </span>
           <span className="flex-1" />
-          <button
-            type="button"
-            onClick={onSettings}
-            aria-label="settings"
-            className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
-          >
-            <Settings size={14} strokeWidth={1.5} />
-          </button>
+          <ShortcutTip label="Settings" action={SETTINGS_ACTION}>
+            <button
+              type="button"
+              onClick={onSettings}
+              aria-label="settings"
+              className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+            >
+              <Settings size={14} strokeWidth={1.5} />
+            </button>
+          </ShortcutTip>
           <button
             type="button"
             onClick={onToggleTheme}
@@ -875,18 +898,21 @@ export function SessionList(props: SessionListProps) {
                 <span className="font-mono text-[10px] text-ink-faint">{entries.length}</span>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={onOpenFilter}
-                aria-label="search sessions"
-                className="flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5 text-ink-faint hover:border-line-strong"
-              >
-                <Search size={14} strokeWidth={1.6} />
-                <span className="flex-1 text-left text-[12px]">Search sessions</span>
-                <span className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-[9.5px]">
-                  /
-                </span>
-              </button>
+              <ShortcutTip label="Search sessions" action={SEARCH_ACTION}>
+                <button
+                  type="button"
+                  onClick={onOpenFilter}
+                  aria-label="search sessions"
+                  className="flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5 text-ink-faint hover:border-line-strong"
+                >
+                  <Search size={14} strokeWidth={1.6} />
+                  <span className="flex-1 text-left text-[12px]">Search sessions</span>
+                  <InlineChord
+                    action={SEARCH_ACTION}
+                    className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-[9.5px]"
+                  />
+                </button>
+              </ShortcutTip>
             )}
           </div>
         </div>
@@ -1848,7 +1874,11 @@ export function SessionList(props: SessionListProps) {
         >
           <Plus size={13} strokeWidth={1.7} />
           New session
-          <span className="ml-0.5 font-mono text-[10px] text-ink-faint">o</span>
+          {/* Read, not written: this cell used to spell `o`. */}
+          <InlineChord
+            action={NEW_SESSION_ACTION}
+            className="ml-0.5 font-mono text-[10px] text-ink-faint"
+          />
         </button>
       </div>
     </aside>

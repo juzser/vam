@@ -93,6 +93,7 @@ import type {
   SessionStatus,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import { ShortcutTip } from '../keyboard/ShortcutTip.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import { FocusEdge } from './FocusEdge.js';
 import {
@@ -516,7 +517,7 @@ function TabBar({
       role="tablist"
       className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px]"
     >
-      {tabs.map((tab) => {
+      {tabs.map((tab, index) => {
         const selected = tab === current;
         const badge = tab === 'Agents' && runningAgents > 0 ? runningAgents : null;
         const shape = [
@@ -539,17 +540,25 @@ function TabBar({
           </>
         );
         return (
-          <button
+          // `position` selects a session in Select and a tab in Insert; a
+          // pill IS the Insert reading, so it says which one it means.
+          <ShortcutTip
             key={tab}
-            type="button"
-            role="tab"
-            data-tab={tab.toLowerCase()}
-            aria-selected={selected}
-            onClick={() => onSelect(tab)}
-            className={`${shape} cursor-pointer ${selected ? '' : 'hover:bg-raised hover:text-ink'}`}
+            label={tab}
+            action={{ kind: 'position', digit: index + 1 }}
+            mode="insert"
           >
-            {label}
-          </button>
+            <button
+              type="button"
+              role="tab"
+              data-tab={tab.toLowerCase()}
+              aria-selected={selected}
+              onClick={() => onSelect(tab)}
+              className={`${shape} cursor-pointer ${selected ? '' : 'hover:bg-raised hover:text-ink'}`}
+            >
+              {label}
+            </button>
+          </ShortcutTip>
         );
       })}
     </div>

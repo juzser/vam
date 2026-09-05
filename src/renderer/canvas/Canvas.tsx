@@ -69,6 +69,7 @@ import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
+import { ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
 import { nextNode } from '../keyboard/spatial-nav.js';
 import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
 import { FocusEdge } from '../panels/FocusEdge.js';
@@ -2742,14 +2743,17 @@ function CanvasInner({
               </button>
             </div>
 
-            <button
-              type="button"
-              aria-label="fit view"
-              onClick={() => fitView()}
-              className="flex h-[26px] shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim hover:text-ink"
-            >
-              <Maximize size={13} strokeWidth={1.6} aria-hidden="true" />
-            </button>
+            {/* No chord reaches it, so the tip is the label alone. */}
+            <ShortcutTip label="Fit the whole canvas in view">
+              <button
+                type="button"
+                aria-label="fit view"
+                onClick={() => fitView()}
+                className="flex h-[26px] shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim hover:text-ink"
+              >
+                <Maximize size={13} strokeWidth={1.6} aria-hidden="true" />
+              </button>
+            </ShortcutTip>
           </div>
 
           <div className="relative min-h-0 flex-1">
@@ -3237,7 +3241,11 @@ export function Canvas({
 }) {
   return (
     <ReactFlowProvider>
-      <CanvasInner model={model} source={source} />
+      {/* One tooltip group for the whole chrome: once one is open, the button
+          beside it opens with no second delay. */}
+      <TipProvider>
+        <CanvasInner model={model} source={source} />
+      </TipProvider>
     </ReactFlowProvider>
   );
 }
