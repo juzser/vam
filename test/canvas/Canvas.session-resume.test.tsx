@@ -70,7 +70,7 @@ function stored(): Record<string, unknown> {
 const focused = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
 
 const currentTab = () =>
-  document.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('data-tab') ?? null;
+  document.querySelector('[data-tab][aria-pressed="true"]')?.getAttribute('data-tab') ?? null;
 
 function press(key: string) {
   act(() => {
@@ -202,7 +202,7 @@ describe('the detail tab, across a relaunch', () => {
     render(<Canvas model={MODEL} />);
     expect(currentTab()).toBe('response');
     act(() => {
-      fireEvent.click(document.querySelector('[role="tab"][data-tab="agents"]') as HTMLElement);
+      fireEvent.click(document.querySelector('[data-tab="agents"]') as HTMLElement);
     });
     expect(currentTab()).toBe('agents');
     expect(stored().detailTab).toBe('Agents');

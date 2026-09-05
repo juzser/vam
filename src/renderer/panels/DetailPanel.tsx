@@ -494,7 +494,7 @@ const MODES = ['Auto', 'Manual', 'Plan'] as const;
  * pane exists to avoid.
  *
  * EVERY PILL IS A REAL <button> NOW — Tab reaches it, Enter and Space activate
- * it, `role="tab"` and `aria-selected` say which one is showing. The three
+ * it, and `aria-pressed` says which one is showing. The three
  * that were plain labels became buttons as each got something behind it; the
  * rule that made them labels stands unchanged for any future one, because a
  * focus stop that activates nothing and explains nothing is a keyboard trap
@@ -513,13 +513,19 @@ function TabBar({
   readonly onSelect: (tab: Tab) => void;
 }) {
   return (
-    <div
-      role="tablist"
+    // A `nav`, not a `tablist`. The role was an orphan: switching a body it
+    // does not own, this bar never had a `tabpanel` and there is none anywhere
+    // in this file, so `aria-required-children` failed (WCAG 1.3.1, Level A)
+    // on the one platform where a screen reader is standard equipment. It is a
+    // segmented control, `aria-pressed` is what one says, and `StepRail` in
+    // `phone/PhoneShell.tsx` reached the same conclusion first.
+    <nav
+      aria-label="views"
       /* The hook `.vam-phone-typing` hides this bar by. That rule used to name
          `[role='tablist']` and so took the QUESTION strip with it -- the
          control for choosing WHICH question you are answering vanished the
-         moment you tapped the composer to answer one. It names this bar now,
-         and survives the move off the tablist role that the UI spec proposes. */
+         moment you tapped the composer to answer one. It names this bar, which
+         is why the move off the role above could not silently switch it off. */
       data-view-tabs
       className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px]"
     >
@@ -556,9 +562,8 @@ function TabBar({
           >
             <button
               type="button"
-              role="tab"
               data-tab={tab.toLowerCase()}
-              aria-selected={selected}
+              aria-pressed={selected}
               onClick={() => onSelect(tab)}
               className={`${shape} cursor-pointer ${selected ? '' : 'hover:bg-raised hover:text-ink'}`}
             >
@@ -567,7 +572,7 @@ function TabBar({
           </ShortcutTip>
         );
       })}
-    </div>
+    </nav>
   );
 }
 
@@ -1590,12 +1595,12 @@ function QuestionCard({
           question at a time and does not say so is the hole this replaces
           wearing a different shape. */}
       {questions.length > 1 && (
-        <div
-          // A TABLIST, which is what it is: one question of the call showing at
-          // a time, walked with the horizontal keys. The role is also what
-          // makes the handler legitimate on this element rather than a
-          // keystroke bolted to a plain box.
-          role="tablist"
+        <nav
+          // NOT a tablist, for the reason `TabBar` above is not one: the
+          // region a step changes is the card below, which is no `tabpanel` of
+          // theirs and never was. A `nav` is what this is -- navigation within
+          // one call -- and a `nav` can carry the name a bare box cannot, which
+          // is what legitimises the horizontal keys landing here.
           aria-label="the questions this call asked"
           data-question-steps
           // THE STRIP TAKES THE HORIZONTAL KEYS TOO, and not for symmetry: the
@@ -1615,8 +1620,7 @@ function QuestionCard({
             <button
               key={one.id}
               type="button"
-              role="tab"
-              aria-selected={index === showing}
+              aria-pressed={index === showing}
               ref={index === showing ? stepTabRef : undefined}
               data-question-step
               data-current={index === showing ? 'true' : undefined}
@@ -1639,7 +1643,7 @@ function QuestionCard({
           <span data-question-position className="ml-auto text-[10px] text-ink-faint">
             step {showing + 1} of {questions.length}
           </span>
-        </div>
+        </nav>
       )}
       <div className="flex min-w-0 flex-col gap-0.5">
         {question.header !== null && (

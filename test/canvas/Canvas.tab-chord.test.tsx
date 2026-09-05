@@ -49,7 +49,7 @@ const MODEL: CanvasModel = {
 const focusedTitle = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
 const selectedTab = () =>
-  document.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('data-tab') ?? null;
+  document.querySelector('[data-tab][aria-pressed="true"]')?.getAttribute('data-tab') ?? null;
 const sheet = () => document.querySelector('[data-key-sheet]');
 const revealed = (project: string) =>
   document
