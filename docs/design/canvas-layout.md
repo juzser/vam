@@ -107,7 +107,7 @@ a diagram. Design scale: **3–5 repos × 1–3 sessions**.
 │  ║ └─────────────────────────────────┘      ║                              │
 │  ╚═════════════════════════════════════════╝                              │
 ├───────────────────────────────────────────────────────────────────────────┤
-│ NORMAL   black-smith/D-257   ⏸ 2 waiting on you   hjkl f / gt  yy  ^K     │
+│ Select   black-smith/D-257   ⏸ 2 waiting on you   hjkl f / gt  yy  ^K     │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -124,37 +124,33 @@ a diagram. Design scale: **3–5 repos × 1–3 sessions**.
 
 ### Ordering
 
-Default auto-layout (priority: waiting-on-you → running → newest),
-**draggable and remembers position**. Position is saved per user, and does
-not go into the event log.
+Default auto-layout (priority: waiting-on-you → running → newest).
 
-**A pin is what you dragged, not every node.** Only a node you actually
-dragged gets written to `localStorage` (`src/prefs/prefs.ts`); every other
-node keeps receiving a fresh position from auto-layout on every model change.
-The two sound alike but are not: the former keeps every node's *current*
-position, which would freeze auto-layout at the first render — a session that
-flips to waiting-on-you while you are looking would never rise to the top of
-the frame. The ordering in §3 only means anything if it can still happen
-after the page is already open, which is the only time anyone is watching.
+**Nodes are not moved by hand.** Dragging and the stored positions it wrote
+were removed: a saved position freezes a node where it was left, and the
+ordering above only means anything if it can still happen after the page is
+open, which is the only time anyone is watching. The canvas sets
+`nodesDraggable={false}` and every node is built with `draggable: false`.
 
-Which comes with an exit: `gr` clears every pin. A pin that survives a reload
-with no way to undo it is a trap — one wrong drag and that card is wrong
-forever, with nothing on screen explaining why it will not sort with the
-rest.
-
-**The icon lives here too, for the same reason.** black-smith has no route to
-store an icon, and that is not the answer — nobody asked black-smith. An icon
+**The icon is stored per user, for a reason of its own.** black-smith has no
+route to store an icon, and that is not the answer — nobody asked it. An icon
 is about how you like to look at the work, not a fact about the work; it
 belongs to the browser, and §3 already said it: saved per user, **and does
 not go into the event log**.
 
 ## 4. Keyboard
 
-No real modes. A handful of vim-style chords plus a command palette.
+**Two named cursor modes** -- Select and Insert -- plus vim-style chords and a
+command palette. The mode decides what `hjkl` and `Mod+<digit>` mean, and the
+status bar names the one in force (`CursorMode` in
+`src/renderer/keyboard/keysheet.ts`). Select is what this document once called
+NORMAL; Insert is the resting state of the response pane.
 
 | key | action |
 |---|---|
-| `h j k l` | move between nodes — **computed geometrically at press time**, so drag-and-drop doesn't break it |
+| `j` `k` (Select) | up and down the SESSION LIST, in the order the sidebar prints |
+| `h` `l` (Select) | left and right across the canvas — **computed geometrically at press time** |
+| `h j k l` (Insert) | the options of an open question; `h` alone returns to Select |
 | `f` | shows a jump label on every node, type the label to land there |
 | `/` `n` `N` | search by session/task name |
 | `gt` `gT` | move to next / previous project |
@@ -163,17 +159,18 @@ No real modes. A handful of vim-style chords plus a command palette.
 | `yy` | **copies the command you need to run by hand to the clipboard** |
 | `Ctrl-K` | command palette |
 | `Esc` | closes the topmost layer |
-| `I` | enters the **action pane** (approval queue + prompt) |
-| `i` | opens the input for whatever the cursor is on — a waiver's reason, a lesson's note, or the prompt |
-| `H` | leaves the action pane, back to the session list |
-| `gr` | clears every pinned position, returns the canvas to auto-layout |
+| `I` | enters the **response pane** — Insert |
+| `i` | opens the prompt for the session the cursor is on |
+| `H` | leaves the response pane, back to the session list — Select |
 | `o` `Mod-n` | starts a session — the vim gesture, and the chord every application spells "new" |
 | `Mod-1` … `Mod-9` | a **position**, in whichever pane has the keyboard: a session in the sidebar, a tab in the response pane (`Mod-9` = the LAST session) |
 | `1` … `9` (in an open question) | marks the option beside that number |
 
-`hjkl` must be computed from real coordinates at press time, **not** from a
-fixed index — that is the condition that lets drag-and-drop and keyboard
-navigation coexist.
+**Vertical is the LIST; horizontal is the canvas.** `j`/`k` walk the sidebar's
+own order, so the cursor moves through the sessions in the order they are
+printed rather than through whatever happens to be geometrically below.
+`h`/`l` stay geometric, computed from real coordinates at press time and not
+from a fixed index, because across a row there is no list to follow.
 
 **The digit row means a position, in whatever the keyboard is pointed at.**
 That is the rule; the table above is only today's reading of it. Two earlier
@@ -181,17 +178,17 @@ arrangements enumerated meanings instead — sessions on the bare row with tabs
 under Shift, then the reverse — and both were wrong the same way: a digit that
 means one fixed thing sends half an operator's presses to the pane they are
 not looking at. `Cmd+2` now switches session when the cursor is in the sidebar
-and shows the PRs tab when it is in the response pane, off `pane` in
+and shows the PRs tab when it is in the response pane, off `mode` in
 `Canvas.tsx` — the same state the status-bar mode cell reads, deliberately not
 a second notion of where focus is.
 
 Consequences worth stating:
 
-- **The focus indicator is load-bearing.** Until now `pane` only changed what
+- **The focus indicator is load-bearing.** Until now the mode only changed what
   the arrow keys did. It now changes what `Cmd+1` does, so which pane holds
   the keyboard has to be visible without being hunted for.
-- **`Mod-5`..`Mod-9` in the response pane refuse out loud** (`only 4 tabs`)
-  rather than falling through to the sidebar. Falling through would move a
+- **A digit past the last DRAWN tab refuses out loud** (`only 3 tabs` where the
+  source has no terminal to show) rather than falling through to the sidebar. Falling through would move a
   cursor in the pane the operator is not looking at, which is the defect the
   rule exists to remove; silence would leave them pressing it again.
 - **Nothing is bound under Shift, and nothing can be.** macOS captures
@@ -211,9 +208,10 @@ layout whose digit row is shifted (AZERTY) an unshifted `Cmd+1` arrives as `&`.
 Reading the position is what keeps the family alive there, and it is not an
 implementation detail to simplify away.
 
-The generated key sheet names both meanings in one row — `position 2 — session
-2 in the sidebar, tab 2 in the response pane` — because a sheet that said
-"session 2" would be wrong half the time.
+The generated key sheet names both meanings, one row PER MODE — `Select ·
+session 2 in the sidebar` and `Insert · tab 2 in the response pane` — because a
+sheet that said "session 2" alone would be wrong half the time, and one row
+naming both hid that the two belong to two named modes.
 
 The option digits are BARE, and safe by two rules rather than by luck. Scope:
 they are handled by the question listbox itself, so they can only fire while
@@ -249,6 +247,12 @@ not dependent on any data source, so they can be built and tested right
 away — ahead of both black-smith epics in §5.
 
 ### 4.2 Action pane: one stop per button
+
+**Not shipped, and kept as the argument rather than the description.** The
+governance queue was removed: `buildActions()` returns one entry, the prompt,
+and `I` enters a response pane with no verdict buttons in it. What follows is
+the reasoning that would apply to a queue of destructive buttons, held here
+for the day one exists.
 
 The approval queue is where vam writes to the permanent record — a waiver
 accepts a defect, an approved lesson gets spliced into every future dispatch.

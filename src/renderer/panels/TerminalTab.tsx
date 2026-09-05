@@ -1,13 +1,13 @@
 /**
  * The Terminal tab: the screen of the tmux session vam started for this one.
  *
- * WHAT IS DRAWN, exactly. `tmux capture-pane -p` returns the ALREADY-COMPOSED
- * screen as plain text -- what the pane looks like right now, with every
- * escape sequence already applied by tmux and none requested back. This is
- * therefore not a terminal emulator and not a stream: no cursor is placed, no
- * colour is interpreted, nothing is fed through a parser. vam has no terminal
- * renderer and cannot add one, and a snapshot drawn honestly beats a stream
- * drawn as garbage (`sources/tmux/argv.ts`).
+ * WHAT IS DRAWN, exactly. `tmux capture-pane -e` returns the ALREADY-COMPOSED
+ * screen -- what the pane looks like right now, with every escape sequence
+ * already applied by tmux -- and `-e` asks for the surviving SGR sequences
+ * back with it, which `terminal-ansi.ts` turns into spans. So the agent's own
+ * colours are drawn, and nothing else is: this is still not a terminal
+ * emulator and not a stream, no cursor is placed, and a snapshot drawn
+ * honestly beats a stream drawn as garbage (`sources/tmux/argv.ts`).
  *
  * WHAT IT COSTS WHEN CLOSED: nothing. The operator asked for a tab that loads
  * only when opened, so the whole of this component is mounted by the tab
@@ -652,8 +652,9 @@ export function TerminalTab({
           What changed is that printable keys and Return are bound, and are
           typed into a running agent. So this is no longer "a focus stop that
           activates nothing": it activates something on someone else's
-          machine. It is therefore focused deliberately on arrival, captioned
-          above with where the keys go, and left by Escape or by Tab -- a
+          machine. It is therefore focused deliberately on arrival, and left by
+          TAB -- Escape is not an exit here, it is one of the keys sent into
+          the agent, which is the point of the pane. Tab is the way out, and a
           surface that eats every key with no way out is the trap the sentence
           that stood here promised this was not. */}
       {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region
