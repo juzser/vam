@@ -307,14 +307,80 @@ describe('keys reach the pane in the order they were typed', () => {
   });
 });
 
-describe('there is a way out that does not need a mouse', () => {
-  it('Escape leaves the pane instead of being typed into it', async () => {
+describe("the pane draws the agent's own colours", () => {
+  const ESC = '\u001b';
+
+  it('turns the captured escapes into spans wearing token classes', async () => {
+    // The bytes are the shape tmux really emits, taken from `capture-pane -e`
+    // on a private server: a colour opened, then closed with `39`.
+    await open(ok(ESC + '[31merror: it failed' + ESC + '[39m and then plain'));
+    const coloured = document.querySelector('[data-terminal-pane] .text-ansi-red');
+    expect(coloured?.textContent).toBe('error: it failed');
+    // The rest of the line is drawn, and drawn plain.
+    expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).toContain(' and then plain');
+  });
+
+  it('never draws an escape character, whatever the agent printed', async () => {
+    await open(ok(ESC + '[38;5;208mhalf a sequence follows' + ESC + '[38;5'));
+    expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).not.toContain(ESC);
+    expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).toContain(
+      'half a sequence follows',
+    );
+  });
+
+  it("keeps the screen's shape, so the measured columns still mean something", async () => {
+    // One `pre` with real newlines, not a box per line: the pane's width is
+    // measured in characters of this exact font, and a second layout for
+    // tmux's own line breaks would fight that measurement.
+    await open(ok('first\nsecond'));
+    const pre = document.querySelector('[data-terminal-pane] pre');
+    expect(pre?.textContent).toBe('first\nsecond');
+  });
+});
+
+describe('Escape belongs to the pane, and the way out is Tab', () => {
+  it('sends Escape to tmux instead of using it to leave', async () => {
+    // REVERSED ON THE OPERATOR'S WORDS. Escape was vam's exit; inside a
+    // terminal it has to be the key that cancels the picker, leaves insert
+    // mode, dismisses the prompt. Keeping it as an exit made the pane the one
+    // place in their tools where Escape did not mean escape.
     const send = await open();
     expect(document.activeElement).toBe(pane());
-    fireEvent.keyDown(pane() as HTMLElement, { key: 'Escape' });
+    expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Escape' })).toBe(false);
+    await settle();
+    expect(keys(send)).toEqual([{ kind: 'escape' }]);
+    // And it did NOT let go: the pane still has focus, so the next key is
+    // still the pane's.
+    expect(document.activeElement).toBe(pane());
+  });
+
+  it('still lets go on Tab, which is now the only key that does', async () => {
+    const send = await open();
+    // Not prevented: the default IS the focus move, and it is the whole exit
+    // now that Escape is the pane's. The trade is that Tab no longer reaches
+    // the shell for completion.
+    expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Tab' })).toBe(true);
     await settle();
     expect(send).not.toHaveBeenCalled();
-    expect(document.activeElement).not.toBe(pane());
+  });
+
+  it('says where the exit is, but only while the pane has focus', async () => {
+    // An exit nobody can find is not an exit, and the operator asked for the
+    // two lines above the pane back -- so the hint costs no row: it is
+    // absolutely positioned inside the pane and exists only while focused.
+    await open();
+    const hint = q('[data-terminal-exit-hint]');
+    expect(hint?.textContent).toContain('Tab');
+    expect(hint?.getAttribute('class')).toContain('absolute');
+
+    fireEvent.blur(pane() as HTMLElement);
+    await settle();
+    expect(q('[data-terminal-exit-hint]')).toBeNull();
+  });
+
+  it('names the exit in the accessible name too, for a reader that cannot see a corner', async () => {
+    await open();
+    expect(pane()?.getAttribute('aria-label')).toContain('Tab');
   });
 });
 
@@ -333,7 +399,9 @@ describe('the way out stays out', () => {
     await settle();
     expect(document.activeElement).toBe(pane());
 
-    fireEvent.keyDown(pane() as HTMLElement, { key: 'Escape' });
+    // Leaving is Tab now, and happy-dom does not move focus for a synthetic
+    // Tab, so the blur it would cause is what is simulated.
+    (pane() as HTMLElement).blur();
     await settle();
     expect(document.activeElement).not.toBe(pane());
 
@@ -422,9 +490,16 @@ describe('a pairing vam cannot use is said as that, not as an absence', () => {
 });
 
 describe('the pane says whether what is typed is going anywhere', () => {
-  it('says where the keys go while it can send them', async () => {
+  it('draws no chrome above the pane at all, which is the space the operator asked for', async () => {
     await open();
-    expect(q('[data-terminal-typing]')?.textContent).toContain('vam-atlas-a1b2c3');
+    // The two lines that stood here: the session's name, and a caption saying
+    // where the keys went. On a tab whose content is a screenful of someone's
+    // terminal, two rows of chrome is two rows of their work not shown.
+    expect(q('[data-terminal-name]')).toBeNull();
+    expect(q('[data-terminal-typing]')).toBeNull();
+    // What replaced the caption is behaviour, not text, and the pane itself
+    // still says whose screen it is.
+    expect(pane()?.getAttribute('aria-label')).toContain('vam-atlas-a1b2c3');
   });
 
   it('says so when vam refused, rather than swallowing the keystroke', async () => {
@@ -470,7 +545,7 @@ describe('the pane says whether what is typed is going anywhere', () => {
     expect(q('[data-terminal-refused]')).toBeNull();
   });
 
-  it('says the keys go nowhere when there is no send path at all', async () => {
+  it('eats nothing when there is no send path at all', async () => {
     render(
       <TerminalTab
         projectId={ATLAS}
@@ -488,6 +563,8 @@ describe('the pane says whether what is typed is going anywhere', () => {
     expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Enter' })).toBe(true);
     expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Backspace' })).toBe(true);
     await settle();
-    expect(q('[data-terminal-typing]')?.textContent?.toLowerCase()).toContain('cannot');
+    // No caption says so any more -- the honesty is in the behaviour above:
+    // nothing was consumed, so every one of those keys is still vam's.
+    expect(q('[data-terminal-typing]')).toBeNull();
   });
 });

@@ -208,7 +208,7 @@ describe('readPane', () => {
       kind: 'ok',
       text: '> hello\nworking...\n',
     });
-    expect(run.calls).toEqual([['capture-pane', '-p', '-t', '=vam-demo-a1b2c3:']]);
+    expect(run.calls).toEqual([['capture-pane', '-p', '-e', '-t', '=vam-demo-a1b2c3:']]);
   });
 
   it('distinguishes a session that is gone from a tmux that is gone', async () => {

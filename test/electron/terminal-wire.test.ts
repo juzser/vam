@@ -70,7 +70,12 @@ describe('the preload terminal bridge reaches the handlers it names', () => {
     await api.send(ATLAS, { kind: 'enter' }, ATLAS);
     await api.send(ATLAS, { kind: 'backspace' }, ATLAS);
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'Enter']);
-    expect(argvs[3]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'BSpace']);
+    // The SECOND key costs one spawn, not two: the pairing proven for the
+    // first is reused for the rest of the run (`AIM_TTL_MS`). This index
+    // moving from 3 to 2 is the latency fix, seen from the far side of the
+    // bridge.
+    expect(argvs[2]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'BSpace']);
+    expect(argvs.map((argv) => argv[0])).toEqual(['list-sessions', 'send-keys', 'send-keys']);
   });
 
   it('sends without a row too, where the project alone can answer', async () => {
@@ -105,7 +110,7 @@ describe('the preload terminal bridge reaches the handlers it names', () => {
     const { api, argvs } = wire(TWO, new Map([[ATLAS, 'vam-atlas-g7h8i9']]));
     const view = await api.read(ATLAS, ATLAS);
     expect(view.kind === 'ok' ? view.name : view.kind).toBe('vam-atlas-g7h8i9');
-    expect(argvs[1]).toEqual(['capture-pane', '-p', '-t', '=vam-atlas-g7h8i9:']);
+    expect(argvs[1]).toEqual(['capture-pane', '-p', '-e', '-t', '=vam-atlas-g7h8i9:']);
   });
 
   it('answers `unaimed`, having sent nothing, when the renderer asks with rubbish', async () => {

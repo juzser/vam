@@ -24,6 +24,7 @@ import {
   sendBackspaceArgv,
   sendBackTabArgv,
   sendEnterArgv,
+  sendEscapeArgv,
   sendTextArgv,
   tagSessionArgv,
   VAM_PROJECT_OPTION,
@@ -106,7 +107,13 @@ describe('tmux argv', () => {
     // the fix: tmux would then resolve the name by prefix and then by fnmatch,
     // and `send-keys` reaching a session other than the one vam meant is the
     // thing the exactness is there to prevent.
-    expect(capturePaneArgv('vam-a1b2c3')).toEqual(['capture-pane', '-p', '-t', '=vam-a1b2c3:']);
+    expect(capturePaneArgv('vam-a1b2c3')).toEqual([
+      'capture-pane',
+      '-p',
+      '-e',
+      '-t',
+      '=vam-a1b2c3:',
+    ]);
     expect(sendTextArgv('vam-a1b2c3', 'hello')).toEqual([
       'send-keys',
       '-t',
@@ -116,6 +123,11 @@ describe('tmux argv', () => {
       'hello',
     ]);
     expect(sendEnterArgv('vam-a1b2c3')).toEqual(['send-keys', '-t', '=vam-a1b2c3:', 'Enter']);
+    // Escape, INTERPRETED. The same measurement that justifies `-l` for text
+    // is what justifies its absence here: `send-keys 'Escape'` delivers `^[`
+    // to the pane, `send-keys -l -- 'Escape'` types the six letters.
+    expect(sendEscapeArgv('vam-a1b2c3')).toEqual(['send-keys', '-t', '=vam-a1b2c3:', 'Escape']);
+    expect(sendEscapeArgv('vam-a1b2c3')).not.toContain('-l');
     // The third INTERPRETED key, and the reason it cannot be the literal one:
     // measured on tmux 3.7b over a private `-L` socket, `send-keys 'BSpace'`
     // deleted the character before the cursor, while `send-keys -l -- 'BSpace'`

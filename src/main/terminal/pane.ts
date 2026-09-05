@@ -32,6 +32,7 @@ import {
   sendBackspaceArgv,
   sendBackTabArgv,
   sendEnterArgv,
+  sendEscapeArgv,
   sendTextArgv,
 } from '../sources/tmux/argv.js';
 import {
@@ -233,6 +234,15 @@ export async function resizeSessionPane(
  * answers `can't find pane` and this returns false -- but if its exact name
  * is taken by a new session in that window, the keystroke lands there.
  *
+ * AND IT IS WIDER THAN IT LOOKS SINCE THE LATENCY FIX. A typing run proves
+ * its pairing once and reuses it (`terminal/ipc.ts`, `AIM_TTL_MS`), so the
+ * gap between the proof and a given keystroke is no longer the milliseconds
+ * between two spawns; it is up to a second in practice and two at the
+ * backstop. That trade was made deliberately and the reasoning is written
+ * where the constant is, including the two things that keep it bounded: tmux
+ * failing loudly for a name that no longer exists, and the tab's once-a-second
+ * read re-proving the same pairing for free.
+ *
  * WHY THAT IS IMPROBABLE AND NOT IMPOSSIBLE. A vam session name carries six
  * base-36 characters of randomness (`vamSessionName`), about 2.2e9 values, so
  * the collision is not something a fresh vam session stumbles into: it takes
@@ -273,6 +283,24 @@ export async function sendSessionKey(
   if (listed.kind === 'unavailable') return 'unaimed';
   const match = targetSession(listed.sessions, projectId, rowId, panes);
   if (match.kind !== 'one') return 'unaimed';
+  return sendToPane(run, match.name, key);
+}
+
+/**
+ * Deliver one key to a pane that has ALREADY been proven to be this row's.
+ *
+ * Split out so a typing RUN can prove the pairing once instead of once per
+ * character (`terminal/ipc.ts`). It takes a name and not a project on
+ * purpose: everything that decides WHICH session may be typed into lives in
+ * `targetSession`, and a second function that could resolve one would be a
+ * second opinion about whose terminal this is.
+ */
+export async function sendToPane(
+  run: TmuxRun,
+  name: string,
+  key: PaneKey,
+): Promise<PaneSendResult> {
+  const match = { name } as const;
   // The builders are kept apart in `tmux/argv.ts` for the one reason that
   // matters here: `-l` types, and Return, Backspace and Shift-Tab have to be
   // PRESSED. There is deliberately no builder that takes a key name, so
@@ -288,6 +316,11 @@ export async function sendSessionKey(
           ? // Aimed by the SAME guard as a character: a mode changed in the
             // wrong agent changes how somebody else's running work behaves.
             sendBackTabArgv(match.name)
-          : sendTextArgv(match.name, key.text);
+          : key.kind === 'escape'
+            ? // The operator's cancel, delivered as the KEY it is. Typed
+              // literally it would put the six letters of `Escape` into a
+              // prompt that was waiting to be dismissed.
+              sendEscapeArgv(match.name)
+            : sendTextArgv(match.name, key.text);
   return (await run(argv)).failure === null ? 'sent' : 'refused';
 }
