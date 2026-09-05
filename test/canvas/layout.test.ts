@@ -13,8 +13,8 @@ import {
   layoutCanvas,
   orderedForCanvas,
   orderedSessions,
-  sessionBounds,
   STEP_SIZE,
+  sessionBounds,
   slotNodeId,
   stepNodeId,
 } from '../../src/renderer/canvas/layout.js';
