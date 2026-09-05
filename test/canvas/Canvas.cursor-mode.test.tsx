@@ -20,7 +20,7 @@
  * `DetailPanel` already draws.
  */
 
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { AgentQuestion, CanvasModel, Session } from '../../src/renderer/domain/model.js';
@@ -247,6 +247,34 @@ describe('Insert with nothing being asked: the composer owns its keys', () => {
     expect(options()).toHaveLength(0);
     press('j');
     // Insert has never moved the sidebar, and still does not.
+    expect(focusedSession()).toBe('a1');
+  });
+});
+
+describe('the mouse reaches the composer by the same route the keyboard does', () => {
+  const composer = () =>
+    document.querySelector<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
+
+  it('is in Insert after CLICKING into the prompt box, not only after i', () => {
+    render(<Canvas model={QUIET} />);
+    const box = composer();
+    expect(box).not.toBeNull();
+    act(() => {
+      fireEvent.focus(box as HTMLTextAreaElement);
+    });
+    // The bar said Select to an operator typing a prompt, and `Mod+<digit>` --
+    // which reads the mode and is let through the typing guard on purpose --
+    // moved a session instead of switching a tab.
+    expect(mode()).toBe('Insert');
+  });
+
+  it('leaves Mod+digit meaning a TAB from inside the clicked box', () => {
+    render(<Canvas model={QUIET} />);
+    act(() => {
+      fireEvent.focus(composer() as HTMLTextAreaElement);
+    });
+    press('2', { metaKey: true });
+    // The sidebar cursor did not move: the digit went to the response pane.
     expect(focusedSession()).toBe('a1');
   });
 });

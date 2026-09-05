@@ -1391,6 +1391,22 @@ function CanvasInner({
   );
 
   /**
+   * The ONE way into the composer, from the keyboard and from the mouse alike.
+   *
+   * Composing happens INSIDE Insert; there was never a third mode. It was
+   * entered from two places that could disagree, and they did: `i` set both
+   * the mode and the flag, while the textarea's own `onFocus` set the flag
+   * alone -- so clicking into the box left the bar reading Select to an
+   * operator typing a prompt, and `Mod+<digit>`, which reads the mode and is
+   * let through the typing guard on purpose, moved a session instead of
+   * switching a tab. One function, three callers, nothing left to diverge.
+   */
+  const beginComposing = useCallback(() => {
+    setMode('insert');
+    setComposing(true);
+  }, []);
+
+  /**
    * Store the removal -- or, when there is nowhere to store it, keep it for
    * this run and let the project come back.
    *
@@ -2089,9 +2105,9 @@ function CanvasInner({
           // Select, so the bar said Select to an operator typing a prompt —
           // and `Mod+<digit>`, which reads the mode and is designed to work
           // from inside the box, moved a session instead of switching a tab.
-          // Composing happens INSIDE Insert; there was never a third mode.
-          setMode('insert');
-          setComposing(true);
+          // Composing happens INSIDE Insert; there was never a third mode,
+          // and `beginComposing` is the one place that says so.
+          beginComposing();
           return;
         }
         case 'open': {
@@ -2103,7 +2119,7 @@ function CanvasInner({
           // opens the composer. It was a switch over the action kinds while a
           // command row was one of them.
           if (actions[clampIndex(actionIndex, actions.length)] !== undefined) {
-            setComposing(true);
+            beginComposing();
           }
           return;
         }
@@ -2149,6 +2165,7 @@ function CanvasInner({
     matches,
     query,
     copyAllCommands,
+    beginComposing,
     closeSession,
     createSession,
     stepSession,
@@ -2496,7 +2513,10 @@ function CanvasInner({
           active={mode === 'insert'}
           actionIndex={actionIndex}
           composing={composing}
-          onCompose={() => setComposing(true)}
+          // The mouse route into the box, and the same function the `i` route
+          // uses -- a focus that entered the composer without entering Insert
+          // is the divergence this call closes.
+          onCompose={beginComposing}
           onStopComposing={() => {
             setComposing(false);
             setDraft('');
