@@ -260,23 +260,24 @@ describe('DetailPanel active-pane signal survives with the handle mounted (AC-6 
     };
   }
 
-  // The token moved from `waiting` to `focus-edge` when the focus indicator
-  // landed: the amber means "a session is waiting on your answer" everywhere
-  // else, and this pane was spending it on "the keyboard is here". The
-  // assertion this file cares about is unchanged -- the signal, whatever its
-  // colour, survives the handle being mounted -- so only the name moved.
-  it('carries border-l-2 and the focus token when active, with the handle present', () => {
+  // What this file is about has not changed -- the active-pane signal survives
+  // the resize handle being mounted beside it -- but the signal has. It was a
+  // left border (amber, then `focus-edge`); it is now the line along the top
+  // edge and nothing else, so the assertion follows it to `[data-focus-edge]`
+  // and holds the border to being absent, which is the operator's correction.
+  it('carries the top line when active, with the handle present', () => {
     const { container } = render(<DetailPanel {...detailPanelProps(true)} />);
     const aside = container.querySelector('[data-action-pane="active"]');
     expect(aside).not.toBeNull();
-    expect(aside?.className).toMatch(/border-l-2/);
-    expect(aside?.className).toMatch(/border-focus-edge/);
+    expect(aside?.querySelector('[data-focus-edge]')).not.toBeNull();
+    expect(aside?.className).not.toMatch(/border-l-2/);
     expect(container.querySelector('[data-pane-resize-handle="detail"]')).not.toBeNull();
   });
 
   it('does not carry the active signal when idle', () => {
     const { container } = render(<DetailPanel {...detailPanelProps(false)} />);
     const aside = container.querySelector('[data-action-pane="idle"]');
+    expect(aside?.querySelector('[data-focus-edge]')).toBeNull();
     expect(aside?.className).not.toMatch(/border-l-2/);
   });
 });

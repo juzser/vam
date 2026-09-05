@@ -141,14 +141,36 @@ describe('reduced motion loses the sweep, not the indicator', () => {
   });
 });
 
-describe('the waiting amber goes back to meaning one thing', () => {
-  it('does not paint the active response pane in the waiting token', () => {
+describe('the top line is the ONLY thing the response pane says it with', () => {
+  // It shipped saying so twice: a left border AND the line. The operator's
+  // word for the border was that it is wrong, and two indicators for one fact
+  // is how they come to disagree -- so the border is gone in both states and
+  // the pane keeps its ordinary 1px `line`, the same one every other column
+  // draws. The amber this border wore before `focus-edge` is doubly gone.
+  it('draws no left-border signal in either state, only the line', () => {
     render(<Canvas model={MODEL} />);
+    const idle = document.querySelector('[data-action-pane]');
+    expect(idle?.className).toContain('border-line');
+    expect(idle?.className).not.toContain('border-l-2');
+
     press('I');
     const pane = document.querySelector('[data-action-pane="active"]');
     expect(pane).not.toBeNull();
+    expect(pane?.className).not.toContain('border-l-2');
+    expect(pane?.className).not.toContain('border-focus-edge');
     expect(pane?.className).not.toContain('border-waiting');
-    expect(pane?.className).toContain('border-focus-edge');
+    // And with the border gone the line is now the whole signal, so it had
+    // better be there.
+    expect(pane?.querySelector('[data-focus-edge]')).not.toBeNull();
+  });
+
+  it('does not restate the mode as a tag in a second vocabulary', () => {
+    render(<Canvas model={MODEL} />);
+    press('I');
+    // The pane wore an `ACTION` chip from before the modes were named. The
+    // status bar says `Insert`, once; a tag saying `ACTION` beside it is the
+    // same fact in a word the rest of the app stopped using.
+    expect(document.querySelector('[data-action-pane]')?.textContent ?? '').not.toContain('ACTION');
   });
 
   it('keeps the two values the pane attribute has always reported', () => {

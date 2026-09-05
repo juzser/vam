@@ -1903,20 +1903,21 @@ export function DetailPanel(props: DetailPanelProps) {
         // `bg-sidebar` is the mockup's own pane fill. Measured off the
         // `width:408px` column of artboards 1a/1b, both values are exactly what
         // this token already holds, so no new colour was invented for it.
-        'relative flex h-full shrink-0 flex-col border-l bg-sidebar',
-        // The pane says out loud when it holds the keyboard. Without it, `I` and
-        // `H` become a mode you have to remember being in, which is the failure
-        // every modal interface is judged on.
-        //
-        // In `focus-edge` and no longer in `waiting`: the amber shipped here
-        // means "a session is waiting on your answer" everywhere else in the
-        // app, so wearing it for "the keyboard is here" was the one hue that
-        // means something spent on a second thing. Both panes now wear one
-        // focus colour, and the border-WIDTH change carries this for a reader
-        // who cannot see either of them.
-        active ? 'border-l-2 border-focus-edge' : 'border-line',
+        'relative flex h-full shrink-0 flex-col border-line border-l bg-sidebar',
       ].join(' ')}
     >
+      {/*
+        The pane says out loud when it holds the keyboard, and says it ONCE.
+
+        It used to say it twice: this border grew to `border-l-2` in a colour
+        as well, first `waiting` -- the amber that means "a session is waiting
+        on your answer" everywhere else -- and then `focus-edge`. The operator
+        called the border wrong, and two indicators for one fact is how they
+        come to disagree. So the border is gone in both states and the pane
+        keeps the ordinary 1px `line` every other column draws; the line along
+        the top edge is the whole signal, the same one the sidebar wears, which
+        is what was asked for.
+      */}
       {active && <FocusEdge />}
       {resizeHandle}
       <div className="flex flex-col gap-2.5 border-line border-b px-3.5 pt-3">
@@ -1958,11 +1959,6 @@ export function DetailPanel(props: DetailPanelProps) {
               </span>
             </div>
           </div>
-          {active && (
-            <span className="flex-none rounded-[6px] bg-waiting px-1.5 py-1 font-mono font-semibold text-[9px] text-canvas">
-              ACTION
-            </span>
-          )}
           {/* Which step the panel is expanding. The mockup puts it at the far
               right of the title row, where the eye lands last — it names the
               thing you are reading, not the thing you are choosing. */}
