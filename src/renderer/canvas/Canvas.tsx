@@ -1588,6 +1588,14 @@ function CanvasInner({
   const closeSession = useCallback(
     async (sessionId: string, title: string): Promise<boolean> => {
       if (pendingAction !== null) {
+        // NAMED, and named for the session the operator just clicked: only
+        // the pending control is disabled, so this click landed on a `×` that
+        // looked pressable, and silence there is indistinguishable from a
+        // dead button. `removeProject` has always said this; these two did
+        // not. The sentence stays in one form across all three.
+        setStatus(
+          `something else is still running — "${title}" was not closed; try again in a moment`,
+        );
         return false;
       }
       if (source.kind !== 'session') {
@@ -1769,6 +1777,9 @@ function CanvasInner({
   const createSession = useCallback(
     async (projectId: string, projectName: string) => {
       if (pendingAction !== null) {
+        setStatus(
+          `something else is still running — no new session in ${projectName}; try again in a moment`,
+        );
         return;
       }
       const route = newSessionRoute(source);
