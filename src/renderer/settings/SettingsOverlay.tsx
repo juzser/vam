@@ -391,11 +391,17 @@ export function SettingsOverlay({ prefs, theme, onChange, onClose }: SettingsOve
                         {/* The fill here is operator data — an override of the
                             panel's own colour paints a disc invisible against
                             the surface it sits on — so the EDGE identifies the
-                            control, and owes 3:1. `ink-faint` is the only kit
-                            token that clears it in both themes.
+                            control, and owes 3:1. Its ground is `panel`, the
+                            surface outside the disc, where `ink-faint` now
+                            measures 4.99 dark / 5.38 light — it was 3.46 / 3.44
+                            and cleared 3:1 with little to spare (issue 188).
                             Overridden reads as weight and lightness (1px faint
                             to 2px ink), never as hue, and the reset button
-                            beside it carries the same state as a shape. */}
+                            beside it carries the same state as a shape.
+                            24 square, not 22: this is a replaced element, so a
+                            `::after` hit area does not render on it and its
+                            visual size IS its target. Two pixels are invisible
+                            against the 13px label and the grid's pitch. */}
                         <input
                           type="color"
                           data-palette-swatch={token}
@@ -404,7 +410,7 @@ export function SettingsOverlay({ prefs, theme, onChange, onClose }: SettingsOve
                           onChange={(event) =>
                             onChange(setPaletteColor(prefs, theme, token, event.target.value))
                           }
-                          className={`vam-swatch h-[22px] w-[22px] cursor-pointer rounded-full border-none bg-transparent p-0 ${FOCUS_RING} ${
+                          className={`vam-swatch h-[24px] w-[24px] cursor-pointer rounded-full border-none bg-transparent p-0 ${FOCUS_RING} ${
                             overridden ? 'ring-2 ring-ink' : 'ring-1 ring-ink-faint'
                           }`}
                         />
@@ -414,7 +420,7 @@ export function SettingsOverlay({ prefs, theme, onChange, onClose }: SettingsOve
                             type="button"
                             aria-label={`reset ${label} colour, ${theme}`}
                             onClick={() => onChange(clearPaletteColor(prefs, theme, token))}
-                            className={`cursor-pointer text-ink-dim hover:text-ink ${FOCUS_RING}`}
+                            className={`vam-hit-24 cursor-pointer text-ink-dim hover:text-ink ${FOCUS_RING}`}
                           >
                             {/* `×` reads as "remove this colour"; the action is
                                 "go back to the stylesheet's". */}
@@ -1006,8 +1012,14 @@ const STEP_BUTTON =
  * The pill's border is `ink-faint` rather than a `line-*` token because `well`
  * on `panel` is 1.03:1 — the fill does not draw the control at all, so the
  * border is its sole identifier and owes 1.4.11 its 3:1. `line-loudest` is 2.08
- * in dark and fails that; `ink-faint` (3.46 / 3.44) is the only token in the kit
- * that clears it in both themes. See the refinement spec before substituting.
+ * in dark and fails that; `ink-faint` is the one kit token that clears it in
+ * both themes. THE GROUND IS `well`, the fill this border encloses, not the
+ * `panel` an earlier version of this note measured against: at 3.46 / 3.44 on
+ * `panel` it read as a pass while measuring 3.57 / 2.91 on `well`, and the
+ * light figure was under 3:1 the whole time. `ink-faint` was raised for that
+ * and for the text it carries, and the border now measures 5.16 / 4.56 on the
+ * ground it actually has (issue 188). See the refinement spec before
+ * substituting.
  */
 function Stepper({
   name,

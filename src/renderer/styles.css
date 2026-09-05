@@ -203,7 +203,7 @@
 
   --vam-ink: #ededed;
   --vam-ink-dim: #a1a1a1;
-  --vam-ink-faint: #6b6b6b;
+  --vam-ink-faint: #858585;
   --vam-ink-ghost: #3f3f3f;
 
   /* The terminal palette, dark. Drawn on `panel` (#141414), so ANSI black is
@@ -252,10 +252,19 @@
   --vam-waiting-tint: #3f2f12;
   --vam-waiting-wash: #161208;
 
-  /* The cursor halo's amber. Deliberately the SAME value in both themes, and
-     that is a measurement, not an oversight: the mockup's light artboard keeps
-     the identical amber in its glow even though its waiting TEXT darkens. So
-     this cannot be `--vam-waiting`, which does darken. */
+  /* The cursor halo's amber. It was the SAME value in both themes, read
+     straight off the artboards: the light artboard keeps the identical amber
+     in its glow even where its waiting TEXT darkens. That reading was accurate
+     and it does not survive a measurement. On the light artboard's white
+     ground the amber is 2.15:1, and this ring is the only thing that says
+     where the cursor is -- no card border varies with focus, and the sidebar
+     highlights the focused SESSION rather than the focused node -- so it owes
+     the 3:1 that WCAG asks of a non-text indicator with no companion channel.
+     Light therefore takes the next rung down the same amber ladder, 5.02 on
+     white, under its own name; dark keeps the artboard's value at 9.22. The
+     pairing with `--vam-waiting` is by role, never by borrowing: waiting moved
+     a rung further (see issue 188), so the two are no longer the same colour
+     in either theme. */
   --vam-cursor-ring: #f59e0b;
   --vam-done-tint: #24354d;
 
@@ -315,7 +324,7 @@ html.light {
 
   --vam-ink: #18181b;
   --vam-ink-dim: #52525b;
-  --vam-ink-faint: #8a8a8f;
+  --vam-ink-faint: #6a6a6f;
   --vam-ink-ghost: #a8a8a3;
 
   /* The terminal palette, light -- REMAPPED, not reproduced, and this is the
@@ -342,14 +351,17 @@ html.light {
   --vam-ansi-bright-cyan: #0891b2;
   --vam-ansi-bright-white: #27272a;
 
-  --vam-running: #15803d;
-  --vam-waiting: #b45309;
+  --vam-running: #166534;
+  --vam-waiting: #92400e;
   --vam-done: #1d4ed8;
   --vam-failed: #b91c1c;
 
   /* Waiting's light value, again by coincidence of role and not by sharing —
-     see the note in the dark block. */
-  --vam-filter-badge: #b45309;
+     see the note in the dark block. It moved down a rung with waiting (issue
+     188): the coincidence is the POINT of the pairing, so the badge follows
+     the status it echoes rather than being left behind at a value waiting no
+     longer holds. */
+  --vam-filter-badge: #92400e;
 
   /* Darker than the dark theme's for contrast on a light panel, and still a
      step off `--vam-failed` here -- see the note there. */
@@ -362,8 +374,8 @@ html.light {
   --vam-waiting-tint: #f6dcae;
   --vam-waiting-wash: #fdf6e8;
 
-  /* Same amber as dark — see the note there. */
-  --vam-cursor-ring: #f59e0b;
+  /* Its own amber, one rung down from dark's — see the note there. */
+  --vam-cursor-ring: #b45309;
   --vam-done-tint: #c0d3f4;
 
   /* A card sits above white by a hairline and a whisper, not by the 40% black
@@ -706,6 +718,17 @@ body {
  *
  * The halo is the mockup's own amber `omGlow`, moved from needs-you to focus.
  *
+ * ONE DEPARTURE FROM `omGlow`, and it is measured: the 1px ring no longer
+ * breathes with the halo. The mockup pulses both, which paints the ring at 60%
+ * of its colour for half of every cycle -- 1.59:1 against the light canvas,
+ * where the token itself reads 5.02. No value of the token fixes that; an amber
+ * dark enough to clear 3:1 through 60% alpha on white collapses the dark
+ * theme's own 60% state to 1.69. So the ring, which is the part carrying the
+ * signal, is at full strength at every instant, and the halo keeps the whole
+ * animation: 18px at 10% -> 34px at 26% and back. The pulse is still what you
+ * see; what changed is that the thing saying WHERE stopped fading out. See
+ * issue 188.
+ *
  * An earlier version made it achromatic, reasoning that colour belongs to
  * states that cost a person something and focus is not one. The operator
  * overruled it: the amber halo is the mockup's signature and it should follow
@@ -717,7 +740,7 @@ body {
   0%,
   100% {
     box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--color-cursor-ring) 60%, transparent),
+      0 0 0 1px var(--color-cursor-ring),
       0 0 18px color-mix(in srgb, var(--color-cursor-ring) 10%, transparent);
   }
   50% {
@@ -731,7 +754,7 @@ body {
   /* The resting frame, spelled out: a node rendered before its animation
      starts, or with animations off for any reason, still wears the ring. */
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--color-cursor-ring) 60%, transparent),
+    0 0 0 1px var(--color-cursor-ring),
     0 0 18px color-mix(in srgb, var(--color-cursor-ring) 10%, transparent);
   animation: vam-cursor-glow 2.4s ease-in-out infinite;
 }
@@ -859,6 +882,41 @@ body {
 }
 .vam-no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/*
+ * A control smaller than the AA target floor, given a 24x24 hit area without
+ * changing what it looks like or what it does to the row it sits in.
+ *
+ * WCAG 2.2 SC 2.5.8 asks 24x24, and the sidebar's heading controls are 15, 17
+ * and 19px boxes. They conform today only through the undersized-target
+ * exception -- and the fold/menu pair clears it by exactly 0.0px, since at
+ * `gap-[7px]` two 17px controls sit 24.0px apart centre to centre. That is
+ * conformance by tangency: one pixel off the gap and it is gone, silently.
+ * A real 24x24 area makes it a guarantee instead of an accident.
+ *
+ * Centred on the control, so the same arithmetic that made the exception hold
+ * makes the areas safe: neighbours 24.0px apart end up exactly adjacent and
+ * neither steals the other's clicks, and the menu/add pair at 25.0px leaves a
+ * pixel between. The pseudo-element is part of the button, so it inherits the
+ * button's own pointer behaviour and nothing has to be wired up. See issue 188.
+ *
+ * Not the phone floor: `.vam-phone .vam-tap` sizes touch targets to 44px, which
+ * is a different criterion for a different pointer. This one is the desktop AA
+ * minimum and applies in both shells.
+ */
+.vam-hit-24 {
+  position: relative;
+}
+
+.vam-hit-24::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
 }
 
 /*

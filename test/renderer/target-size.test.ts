@@ -14,8 +14,7 @@
  * 44px through `.vam-phone .vam-tap`, a different rule with a different floor.
  */
 
-import { readFileSync } from 'node:fs';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 

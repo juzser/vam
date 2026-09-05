@@ -31,6 +31,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { contrast } from '../support/contrast.js';
 
 const CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
 
@@ -61,28 +62,6 @@ function tokens(block: string): Map<string, string> {
     out.set(m[1] as string, (m[2] as string).trim());
   }
   return out;
-}
-
-function channel(v: number): number {
-  const s = v / 255;
-  return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-}
-
-function luminance(hex: string): number {
-  const m = /^#([0-9a-f]{6})$/i.exec(hex);
-  if (!m) throw new Error(`not a six-digit hex colour: ${hex}`);
-  const n = Number.parseInt(m[1] as string, 16);
-  return (
-    0.2126 * channel((n >> 16) & 0xff) +
-    0.7152 * channel((n >> 8) & 0xff) +
-    0.0722 * channel(n & 0xff)
-  );
-}
-
-export function contrast(a: string, b: string): number {
-  const [x, y] = [luminance(a), luminance(b)];
-  const [hi, lo] = x > y ? [x, y] : [y, x];
-  return (hi + 0.05) / (lo + 0.05);
 }
 
 const THEMES = [
