@@ -64,6 +64,17 @@ export const VAM_SESSION_PREFIX = 'vam-';
  * assumed: a user option round-trips through `list-sessions -F`, an option
  * nobody set formats as the EMPTY STRING rather than an error, and the value
  * survives a `rename-session`.
+ *
+ * VOCABULARY, and it is the reason this key is frozen by literal value in
+ * `test/sources/tmux-argv.test.ts`. "project" here is the CODE's project --
+ * one working directory, `projectIdOf(cwd)` -- which the UI now labels
+ * "repo", because the UI's word "project" was given to the grouping layer
+ * above it (see the vocabulary table in `renderer/domain/model.ts`). The
+ * strings on screen moved; this identifier did not, and must not. Nothing
+ * re-tags a live session, so renaming this key or repointing its value orphans
+ * every session the operator has running: an option nobody set formats as the
+ * empty string, `paneForRow` reads the disagreement as a corrupt pairing, and
+ * Close and Enter both refuse on a session vam itself started.
  */
 export const VAM_PROJECT_OPTION = '@vam-project';
 

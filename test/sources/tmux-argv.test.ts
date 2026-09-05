@@ -209,3 +209,41 @@ describe('killSessionArgv', () => {
     expect(killSessionArgv('vam-a1')).not.toContain('vam-a1');
   });
 });
+
+/**
+ * THE VOCABULARY BOUNDARY, frozen by value.
+ *
+ * A grouping layer above today's project makes "project" mean the OUTER thing
+ * in the UI and the INNER thing in the code, and that inversion is exactly
+ * what makes renaming the inner one look like a tidy-up. It is not. The tmux
+ * option below is a contract with sessions that are RUNNING RIGHT NOW on the
+ * operator's own tmux server, and nothing re-tags a live session.
+ *
+ * WHAT A REPOINT ACTUALLY COSTS, because "it just would not match" understates
+ * it by a lot. An option nobody set formats as the EMPTY STRING rather than an
+ * error, so a renamed key reads back as a session vam tagged with nothing --
+ * and `paneForRow` treats a published-pane/tag disagreement as evidence of a
+ * CORRUPT PAIRING and returns `null` without falling through. The operator's
+ * live session then reports `vamControlled: false`, its Terminal tab reads
+ * `mispaired`, and Close and Enter both refuse on a session vam did start.
+ * Renaming the key and repointing its value are the same bug.
+ *
+ * So the assertion is on the literal, not on the exported name: a rename that
+ * carries every reference along with it still goes red here, which is the
+ * whole point.
+ */
+describe('the @vam-project boundary', () => {
+  it('is the literal `@vam-project`, and may not be renamed with the new group layer', () => {
+    expect(VAM_PROJECT_OPTION).toBe('@vam-project');
+  });
+
+  it('tags a session with exactly that option and nothing else', () => {
+    expect(tagSessionArgv('vam-a1b2c3', 'claude-code:demo-11111111')).toEqual([
+      'set-option',
+      '-t',
+      'vam-a1b2c3',
+      '@vam-project',
+      'claude-code:demo-11111111',
+    ]);
+  });
+});

@@ -592,3 +592,46 @@ describe('AC-2(c): clamping is render-time only, never a write', () => {
     expect(setItem).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * THE VOCABULARY BOUNDARY, frozen by literal key name.
+ *
+ * A grouping layer above today's project makes "project" mean the OUTER thing
+ * in the UI and the INNER thing in the code. That inversion is what makes
+ * renaming the inner one look like a tidy-up, and these three keys are the
+ * reason it is not: they are already sitting in `localStorage` on the
+ * operator's disk under exactly these names. Rename a field and every existing
+ * store reads the new key as absent -- which is not a crash and not a warning,
+ * it is every project icon, every fold and every removal silently reverting to
+ * a fresh install on the next launch.
+ *
+ * So the assertion is on the SERIALISED JSON, spelled out, rather than on the
+ * `Prefs` type: a rename that carries its type and all its call sites along
+ * with it still goes red here.
+ */
+describe('the stored project buckets are named, and stay named', () => {
+  it('round-trips projectIcons, collapsedProjects and hiddenProjects by literal key', () => {
+    const store = fake();
+    const saved: typeof EMPTY_PREFS = {
+      ...EMPTY_PREFS,
+      projectIcons: { 'black-smith': { p1: { icon: '🎯', at: NOW.toISOString() } } },
+      collapsedProjects: { 'black-smith': ['p1'] },
+      hiddenProjects: { 'black-smith': ['p2'] },
+    };
+    writePrefs(store, saved);
+
+    // The bytes, not the object: this is what a store written by today's vam
+    // and read by tomorrow's actually contains.
+    const stored = JSON.parse(store.value ?? '{}') as Record<string, unknown>;
+    expect(Object.keys(stored)).toEqual(
+      expect.arrayContaining(['projectIcons', 'collapsedProjects', 'hiddenProjects']),
+    );
+    expect(stored.collapsedProjects).toEqual({ 'black-smith': ['p1'] });
+    expect(stored.hiddenProjects).toEqual({ 'black-smith': ['p2'] });
+
+    const back = readPrefs(store, NOW);
+    expect(back.projectIcons['black-smith']?.p1?.icon).toBe('🎯');
+    expect(back.collapsedProjects['black-smith']).toEqual(['p1']);
+    expect(back.hiddenProjects['black-smith']).toEqual(['p2']);
+  });
+});

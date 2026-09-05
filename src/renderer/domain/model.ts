@@ -369,6 +369,37 @@ export type Session = {
   readonly questions?: readonly AgentQuestion[];
 };
 
+/**
+ * VOCABULARY: the code's word and the UI's word for the same two layers, and
+ * they do not match. Read this before renaming anything below.
+ *
+ *   code `Project`  =  UI "repo"     =  one working directory
+ *                   =  the value of the `@vam-project` tmux option
+ *                   =  the key of three prefs buckets already on disk
+ *                      (`projectIcons`, `collapsedProjects`, `hiddenProjects`)
+ *   code `Group`    =  UI "project"  =  the layer ABOVE, added later, stored
+ *                      as a list of member `Project` ids and nothing else
+ *
+ * WHY THEY DIFFER, since the mismatch is deliberate and permanent. The
+ * operator's word for a checkout is "repo" and their word for the thing above
+ * it is "project", so the STRINGS on screen say that. The identifier cannot
+ * follow: `Project` here is a contract with a tmux user option set on sessions
+ * that are running right now, with three keys inside a store already written
+ * to the operator's disk, and with `revealProject`, `projectIdOf` and
+ * `MAX_PROJECT_ID_LENGTH`. A UI label is a string; those are a promise to data
+ * that already exists.
+ *
+ * THE HAZARD THAT CREATES, stated because it is this design's whole risk:
+ * after the group layer ships, "project" means the OUTER thing in the UI and
+ * the INNER thing in the code, and that inversion makes renaming `Project`
+ * look like a tidy-up someone forgot. It is not a tidy-up, it is the bug --
+ * repointing the tmux option makes the operator's live sessions read
+ * `mispaired` and refuse both Close and Enter, and renaming a prefs key
+ * silently reverts every icon, fold and removal they saved. Both are frozen by
+ * literal value in `test/sources/tmux-argv.test.ts` and
+ * `test/prefs/prefs.test.ts`; if you are here because one of those went red,
+ * the test is right.
+ */
 export type Project = {
   readonly id: string;
   readonly name: string;
