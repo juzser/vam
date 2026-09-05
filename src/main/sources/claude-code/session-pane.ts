@@ -106,3 +106,35 @@ export async function readPublishedPanes(
   }
   return panes;
 }
+
+/**
+ * The tmux sessions that some row has PUBLISHED itself into -- the claim set.
+ *
+ * A PUBLISHED PANE IS AN EXCLUSIVE CLAIM, and this is the one place that
+ * sentence is turned into a value, because both pairing rules need it and two
+ * copies of it would drift. `targetSession` (`terminal/pane.ts`) draws and
+ * resizes by it; `paneForRow` (`reply.ts`) types and closes by it.
+ *
+ * WHAT IT FIXES. The published branch of both rules already refuses a value
+ * that DISAGREES -- a disagreement is evidence of a corrupt pairing rather
+ * than absence of evidence. Absence itself was read as "nobody has an opinion,
+ * guess by project": measured on a real machine, three of four live sessions
+ * published no `tmux` field, and the tag found for each of them the single vam
+ * session in that project -- the one the FOURTH session had published. vam
+ * drew that screen under another row's name and had already reflowed it to
+ * fit another row's window.
+ *
+ * The tag path is NOT removed, and that is why this is a filter rather than a
+ * deletion: an UNCLAIMED vam session -- one whose Claude Code is too old to
+ * publish the field, or one not under tmux -- is exactly what the fallback
+ * exists for and still resolves through it.
+ *
+ * A claim is not checked against liveness. A pane claimed by a session that
+ * has exited leaving its file behind stays claimed, because nothing here can
+ * tell that apart from a session vam simply is not drawing -- and the cost of
+ * being wrong in the safe direction is an empty tab, against a keystroke in
+ * somebody else's agent.
+ */
+export function claimedPanes(panes: ReadonlyMap<string, string> | undefined): ReadonlySet<string> {
+  return new Set(panes === undefined ? [] : panes.values());
+}

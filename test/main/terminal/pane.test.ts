@@ -21,7 +21,11 @@ import { describe, expect, it } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
 import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
 import { registerTerminalIpc } from '../../../src/main/terminal/ipc.js';
-import { matchVamSession, readSessionPane, targetSession } from '../../../src/main/terminal/pane.js';
+import {
+  matchVamSession,
+  readSessionPane,
+  targetSession,
+} from '../../../src/main/terminal/pane.js';
 
 const ok = (stdout: string): TmuxRunResult => ({ failure: null, stdout, stderr: '' });
 const failed = (stderr: string): TmuxRunResult => ({

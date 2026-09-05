@@ -49,6 +49,7 @@ import {
 import type { DeliverFn } from './deliver.js';
 import { sessionIdOf } from './deliver.js';
 import { projectIdOf } from './project-id.js';
+import { claimedPanes } from './session-pane.js';
 
 /** The part of a live row this module needs. `LiveAgent` satisfies it. */
 export type ReplyRow = {
@@ -80,12 +81,16 @@ export type ReplyRow = {
  * count vetoes every row and close refuses all three. Consulting it after a
  * pairing has been proven would keep that veto.
  *
- * THE TAG REMAINS, unchanged, for a session whose file carries no `tmux` field
+ * THE TAG REMAINS -- narrowed by one rule -- for a session whose file carries
+ * no `tmux` field
  * -- one not under tmux, or an older Claude Code that did not publish it. Its
  * two conditions are the whole of the safety argument in that case: exactly
  * one tagged tmux session for this project, and exactly one live row in it --
  * and, per the paragraph above, it answers `null` for every row in a cwd that
- * holds more than one live session. That is correct (nothing in the project
+ * holds more than one live session. The narrowing: a tagged session that some
+ * row has PUBLISHED itself into is not a candidate for this path at all. It
+ * belongs to that row, and handing it to a silent neighbour -- which is what
+ * happened, since most sessions publish nothing -- types into another agent. That is correct (nothing in the project
  * scheme says which row is in the pane) and it is why this defect stayed
  * invisible: the pairing was not wrong, it was unanswerable.
  *
@@ -125,7 +130,17 @@ export function paneForRow(
   }
   const here = agents.filter((agent) => projectIdOf(agent.cwd) === projectId);
   if (here.length !== 1) return null;
-  const tagged = sessions.filter((session) => session.project === projectId);
+  // A PANE ANOTHER ROW PUBLISHED IS SPOKEN FOR, and withholding it here is the
+  // same rule `targetSession` applies to the read and the resize -- shared as
+  // `claimedPanes` rather than written twice, because two copies of a pairing
+  // rule are two answers to "whose terminal is this". This row published
+  // nothing, so every claim in the set is somebody else's, and the tag may not
+  // hand it their session. An unclaimed one still answers, which is the whole
+  // point of keeping the fallback.
+  const claimed = claimedPanes(panes);
+  const tagged = sessions.filter(
+    (session) => session.project === projectId && !claimed.has(session.name),
+  );
   const [only] = tagged;
   return tagged.length === 1 && only !== undefined ? only.name : null;
 }
