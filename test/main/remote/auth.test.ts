@@ -113,7 +113,10 @@ describe('verifyAccessToken', () => {
   });
 
   it('refuses a token that is not three parts, and anything empty', async () => {
-    expect(await verifyAccessToken('not-a-token', auth)).toEqual({ ok: false, reason: 'malformed' });
+    expect(await verifyAccessToken('not-a-token', auth)).toEqual({
+      ok: false,
+      reason: 'malformed',
+    });
     expect(await verifyAccessToken('', auth)).toEqual({ ok: false, reason: 'malformed' });
   });
 

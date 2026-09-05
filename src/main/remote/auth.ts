@@ -15,7 +15,13 @@
  * team's own key set be presented as the shared secret it is not.
  */
 
-import { createPublicKey, createVerify, timingSafeEqual } from 'node:crypto';
+import { createPublicKey, createVerify, timingSafeEqual, type webcrypto } from 'node:crypto';
+
+/**
+ * Node's own JWK type, not the DOM's: `tsconfig.node.json` has no DOM lib, and
+ * the global `JsonWebKey` this file first used exists only there.
+ */
+type JsonWebKey = webcrypto.JsonWebKey;
 
 /** One key from a team's `/cdn-cgi/access/certs` set, in JWK form. */
 export type AccessJwk = JsonWebKey & { readonly kid?: string };
@@ -101,7 +107,12 @@ export async function verifyAccessToken(
   if (parts.length !== 3) {
     return deny('malformed');
   }
-  const [rawHeader, rawPayload, rawSignature] = parts;
+  // Indexed with a fallback rather than destructured: under
+  // `noUncheckedIndexedAccess` the length check above does not narrow, and an
+  // empty string fails every check below anyway.
+  const rawHeader = parts[0] ?? '';
+  const rawPayload = parts[1] ?? '';
+  const rawSignature = parts[2] ?? '';
   const header = decodeJson(rawHeader);
   if (header === null) {
     return deny('malformed');

@@ -103,7 +103,12 @@ const get = (base: string, path: string, jwt: string | null = token()): Promise<
     headers: jwt === null ? {} : { 'cf-access-jwt-assertion': jwt },
   });
 
-const post = (base: string, path: string, body: unknown, jwt: string = token()): Promise<Response> =>
+const post = (
+  base: string,
+  path: string,
+  body: unknown,
+  jwt: string = token(),
+): Promise<Response> =>
   fetch(`${base}${path}`, {
     method: 'POST',
     headers: { 'cf-access-jwt-assertion': jwt, 'content-type': 'application/json' },
@@ -113,7 +118,9 @@ const post = (base: string, path: string, body: unknown, jwt: string = token()):
 afterEach(async () => {
   listeners.clear();
   await Promise.all(
-    servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
+    servers
+      .splice(0)
+      .map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
   );
 });
 
@@ -238,9 +245,7 @@ describe('write routes', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, value: null });
     expect(closeSession).toHaveBeenCalledWith('session-1');
-    expect(audit).toHaveBeenCalledWith(
-      expect.stringContaining('operator@example.test'),
-    );
+    expect(audit).toHaveBeenCalledWith(expect.stringContaining('operator@example.test'));
   });
 
   it("forwards the source's own refusal, whole", async () => {

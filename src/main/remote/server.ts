@@ -113,7 +113,9 @@ function readBody(request: IncomingMessage): Promise<Record<string, unknown> | n
       }
       try {
         const value: unknown = JSON.parse(raw);
-        resolve(typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null);
+        resolve(
+          typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null,
+        );
       } catch {
         resolve(null);
       }
@@ -163,7 +165,11 @@ function write(
       return;
     }
     const failure = result.value as SourceError | null;
-    send(response, 200, failure === null ? { ok: true, value: null } : { ok: false, error: failure });
+    send(
+      response,
+      200,
+      failure === null ? { ok: true, value: null } : { ok: false, error: failure },
+    );
   };
 }
 
@@ -187,7 +193,12 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     return table;
   }
 
-  const writes: [string, string, (b: Record<string, unknown>) => boolean, (s: MainSource, b: Record<string, unknown>) => Promise<SourceError | null> | null][] = [
+  const writes: [
+    string,
+    string,
+    (b: Record<string, unknown>) => boolean,
+    (s: MainSource, b: Record<string, unknown>) => Promise<SourceError | null> | null,
+  ][] = [
     [
       '/api/record-prompt',
       'recordPrompt',
@@ -205,8 +216,11 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
       'createSession',
       (b) => isText(b.projectId) && isText(b.title) && isOptionalText(b.provider),
       (s, b) =>
-        s.createSession?.(b.projectId as string, b.title as string, b.provider as string | undefined) ??
-        null,
+        s.createSession?.(
+          b.projectId as string,
+          b.title as string,
+          b.provider as string | undefined,
+        ) ?? null,
     ],
     [
       '/api/create-session-in',
