@@ -33,6 +33,7 @@ const PAIRED: RemoteState = {
   devices: [{ deviceId: 'device-1', name: 'a paired phone', pairedAt: NOW, lastSeenAt: NOW }],
   address: { kind: 'unavailable', reason: 'no-cli' },
   allowWrites: false,
+  registry: null,
   nowMs: NOW,
 };
 
@@ -92,5 +93,21 @@ describe('an act that fails while the endpoint is running', () => {
     await waitFor(() => expect(state.mock.calls.length).toBeGreaterThan(1), { timeout: 3_000 });
     expect(screen.queryByTestId('remote-off')).toBeNull();
     expect(screen.getByTestId('paired-device-device-1')).toBeTruthy();
+  });
+});
+
+describe('a registry the desktop must be told about', () => {
+  it('says a failed write did not take effect', async () => {
+    const state: RemoteState = { ...PAIRED, registry: 'write-failed' };
+    render(<RemotePanel api={api({ state: vi.fn(async () => state) })} active />);
+    const said = await screen.findByTestId('remote-registry');
+    expect(said.textContent).toContain('did not take effect');
+  });
+
+  it('says an unreadable registry is refusing everyone and overwriting nothing', async () => {
+    const state: RemoteState = { ...PAIRED, registry: 'unreadable' };
+    render(<RemotePanel api={api({ state: vi.fn(async () => state) })} active />);
+    const said = await screen.findByTestId('remote-registry');
+    expect(said.textContent).toContain('NOT overwritten');
   });
 });

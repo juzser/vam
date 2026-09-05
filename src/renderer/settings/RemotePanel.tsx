@@ -60,6 +60,14 @@ const ACT_FAILED: Record<ActName, string> = {
   revokeAll: 'vam could not revoke these devices: they are still paired, and their tokens still work.',
 };
 
+/** The registry's own trouble, which no surface said before. */
+const REGISTRY_TROUBLE: Record<'unreadable' | 'write-failed', string> = {
+  unreadable:
+    'vam could not read its device registry, so it is admitting no phone at all. It has NOT overwritten the file -- pairing a device would, so vam refuses until the file is readable again.',
+  'write-failed':
+    'The last pairing change could not be written to disk, so it did not take effect: a device you allowed is not paired, and one you removed may still be.',
+};
+
 /** The same tail on every one: the endpoint answered, so it is not the cause. */
 const ACT_TAIL =
   " The remote endpoint is running -- this failed inside vam, most often a device registry it could not write. The list below is the last state vam read.";
@@ -166,6 +174,11 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
         onRemove={(deviceId) => act('remove', () => api.remove(deviceId))}
         onRevokeAll={() => act('revokeAll', () => api.revokeAll())}
       />
+      {state.registry !== null ? (
+        <p data-testid="remote-registry" role="alert">
+          {REGISTRY_TROUBLE[state.registry]}
+        </p>
+      ) : null}
       {failed !== null ? (
         <p data-testid="remote-act-failed" role="alert">
           {ACT_FAILED[failed]}

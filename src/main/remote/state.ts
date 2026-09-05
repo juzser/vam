@@ -23,6 +23,14 @@ export type PairingStateView = {
   readonly pairedName: string | null;
 };
 
+/**
+ * What is wrong with the device registry, when "no devices" is not the whole
+ * story: a file vam could not read (and will not overwrite), or a durable
+ * write that failed. Declared here rather than in `devices.ts` because the
+ * pairing panel renders it and the web compile has no node types.
+ */
+export type RegistryTrouble = 'unreadable' | 'write-failed';
+
 export type RemoteDeviceView = {
   readonly deviceId: string;
   readonly name: string;
@@ -35,6 +43,8 @@ export type RemoteState = {
   readonly devices: readonly RemoteDeviceView[];
   readonly address: ServeAddress;
   readonly allowWrites: boolean;
+  /** Null when the registry is simply fine, which is the ordinary case. */
+  readonly registry: RegistryTrouble | null;
   /** MAIN's clock, so the panel's countdown is not drawn against a second one. */
   readonly nowMs: number;
 };

@@ -143,3 +143,35 @@ describe('checkForUpdate', () => {
     });
   });
 });
+
+describe('the URL a click will open', () => {
+  /**
+   * `shell.openExternal` honours `file:` and every OS-handled scheme, and the
+   * update channel was deliberately built to take NO argument from the
+   * renderer so it could not become a navigate-anywhere capability. A URL
+   * taken from a remote response is the same capability by another door, so
+   * it is constrained to what it is for rather than trusted for being a
+   * string. Nothing here makes a request.
+   */
+  const release = (html_url: unknown) => ({ ...RELEASE, tag_name: 'v9.9.9', html_url });
+
+  it('offers an https release URL on the expected host', async () => {
+    const status = await checkForUpdate('0.1.0', { fetch: respond(200, release(RELEASE.html_url)) });
+    expect(status).toEqual({ kind: 'available', version: '9.9.9', url: RELEASE.html_url });
+  });
+
+  it('refuses a scheme the shell would hand to the operating system', async () => {
+    for (const url of [
+      'file:///etc/passwd',
+      'http://github.com/juzser/vam/releases/tag/v9.9.9',
+      'https://github.example.invalid/juzser/vam/releases',
+      'javascript:alert(1)',
+      'not a url at all',
+    ]) {
+      const status = await checkForUpdate('0.1.0', { fetch: respond(200, release(url)) });
+      // Reported as a malformed answer, which is what it is: there is nothing
+      // to offer, and no click that could open it.
+      expect(status).toEqual({ kind: 'unknown', reason: 'malformed' });
+    }
+  });
+});
