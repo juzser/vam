@@ -439,8 +439,14 @@ export type DetailPanelProps = {
    */
   readonly initialTab?: string | null;
   readonly onTabChange?: (tab: string) => void;
-  /** The current rendered width (task-1's `renderedWidth`), applied inline. */
-  readonly width: number;
+  /**
+   * The current rendered width (task-1's `renderedWidth`), applied inline.
+   *
+   * Optional, and ABSENT means full width: a missing width is already the true
+   * statement "nobody is sizing me", which is the phone shell's case, and a
+   * `'fill'` sentinel would be a second way to say it.
+   */
+  readonly width?: number;
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
   readonly resizeHandle: ReactNode;
 };
@@ -2203,12 +2209,15 @@ export function DetailPanel(props: DetailPanelProps) {
   return (
     <aside
       data-action-pane={active ? 'active' : 'idle'}
-      style={{ width }}
+      style={width === undefined ? undefined : { width }}
       className={[
         // `bg-sidebar` is the mockup's own pane fill. Measured off the
         // `width:408px` column of artboards 1a/1b, both values are exactly what
         // this token already holds, so no new colour was invented for it.
-        'relative flex h-full shrink-0 flex-col border-line border-l bg-sidebar',
+        'relative flex h-full min-w-0 flex-col border-line border-l bg-sidebar',
+        // No width given means nobody is sizing this pane -- the phone shell's
+        // case -- so it fills its host instead of refusing to shrink.
+        width === undefined ? 'w-full' : 'shrink-0',
       ].join(' ')}
     >
       {/*

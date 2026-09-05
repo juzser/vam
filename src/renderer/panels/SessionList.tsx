@@ -300,8 +300,14 @@ export type SessionListProps = {
    */
   readonly theme: EffectiveTheme;
   readonly onToggleTheme: () => void;
-  /** The current rendered width (task-1's `renderedWidth`), applied inline. */
-  readonly width: number;
+  /**
+   * The current rendered width (task-1's `renderedWidth`), applied inline.
+   *
+   * Optional, and ABSENT means full width: a missing width is already the true
+   * statement "nobody is sizing me", which is the phone shell's case, and a
+   * `'fill'` sentinel would be a second way to say it.
+   */
+  readonly width?: number;
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
   readonly resizeHandle: ReactNode;
 };
@@ -671,7 +677,13 @@ export function SessionList(props: SessionListProps) {
   const narrowing =
     activeFilters > 0 || originFilters.hideAgentStarted || originFilters.onlyPrompted;
 
-  const popoverWidth = Math.min(FILTER_POPOVER_WIDTH, width - FILTER_POPOVER_GUTTER);
+  // Sized against the column when there is one. With no width the pane fills
+  // its host, and the popover opens at its full 288 -- which still clears the
+  // gutter on the narrowest phone this shell is drawn on.
+  const popoverWidth =
+    width === undefined
+      ? FILTER_POPOVER_WIDTH
+      : Math.min(FILTER_POPOVER_WIDTH, width - FILTER_POPOVER_GUTTER);
 
   // `entries` arrives project-major (see the file doc comment), so one pass
   // collapsing consecutive same-project runs is a grouping, not a sort. Each
@@ -799,8 +811,12 @@ export function SessionList(props: SessionListProps) {
   return (
     <aside
       data-sidebar-pane
-      className="relative flex h-full shrink-0 flex-col border-line border-r bg-sidebar"
-      style={{ width }}
+      // No width given means nobody is sizing this pane, so it takes the room
+      // it is in rather than a number it was never handed -- and `shrink-0`
+      // goes with the number, since a fixed column is the only thing that has
+      // to refuse to shrink.
+      className={`relative flex h-full min-w-0 flex-col border-line border-r bg-sidebar ${width === undefined ? 'w-full' : 'shrink-0'}`}
+      style={width === undefined ? undefined : { width }}
     >
       {keyboardHere && <FocusEdge />}
       {resizeHandle}
