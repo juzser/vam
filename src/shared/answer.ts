@@ -15,13 +15,35 @@
  * verified navigation, and it lives on its own channel with its own outcomes.
  */
 
-/** What the operator chose, on its way to the picker. */
-export type AnswerRequest = {
-  /** The option LABELS, exactly as the tool recorded them. Never positions. */
+/**
+ * ONE question of the set, on its way to its own picker.
+ *
+ * `question` IS THE IDENTITY CHECK, and it is why a step carries the text and
+ * not just the marks. One `AskUserQuestion` call can hold several questions,
+ * and the CLI walks them one at a time -- so a Submit for the set is a LOOP,
+ * and a loop is exactly where a label can be matched against the wrong
+ * question. Measured, in a real two-question call: `Cobalt` was an option in
+ * BOTH questions. Nothing may be matched on a screen that has not first been
+ * shown to be the screen for this step.
+ */
+export type AnswerStep = {
+  /** The tool's own question text, as it is printed above the options. */
+  readonly question: string;
+  /** The option LABELS the operator marked, in the order the card draws them. */
   readonly labels: readonly string[];
-  /** The tool's own `multiSelect`: it decides the shape of the delivery. */
+  /** The tool's own `multiSelect` for THIS question, not for the call. */
   readonly multiSelect: boolean;
 };
+
+/**
+ * The whole set, answered in one go.
+ *
+ * A SET RATHER THAN A QUESTION, because that is what the tool call is and what
+ * the CLI presents: a strip of tabs, one question at a time, and a single
+ * review at the end. Submitting them one at a time is not on offer -- the
+ * agent is waiting on the call, not on its first question.
+ */
+export type AnswerRequest = { readonly steps: readonly AnswerStep[] };
 
 /**
  * What happened. SEVEN ANSWERS, and every one but `sent` means the picker was
@@ -43,6 +65,12 @@ export type AnswerResult =
   | { readonly kind: 'no-picker' }
   | { readonly kind: 'not-live' }
   | { readonly kind: 'unmatched'; readonly label: string }
+  /**
+   * The screen is not showing the question this step is about. The reason the
+   * loop is safe: after each answer the CLI advances itself, and vam checks
+   * WHERE IT LANDED before matching anything against it.
+   */
+  | { readonly kind: 'wrong-question'; readonly question: string }
   | { readonly kind: 'unconfirmed'; readonly label: string };
 
 /**
@@ -52,18 +80,43 @@ export type AnswerResult =
  */
 export const MAX_ANSWER_LABELS = 12;
 
+/** And the most questions one call may hold, bounding the loop for the same reason. */
+export const MAX_ANSWER_STEPS = 8;
+
+/**
+ * The longest question text vam will carry across the bridge. It is used as a
+ * `String.includes` needle against a captured screen, so it is bounded like
+ * any other untrusted string that reaches a comparison.
+ */
+export const MAX_QUESTION_TEXT = 400;
+
+/** Whether one step is one vam will attempt. */
+function isAnswerStep(value: unknown): value is AnswerStep {
+  if (typeof value !== 'object' || value === null) return false;
+  const step = value as { question?: unknown; labels?: unknown; multiSelect?: unknown };
+  return (
+    typeof step.question === 'string' &&
+    step.question.length > 0 &&
+    step.question.length <= MAX_QUESTION_TEXT &&
+    typeof step.multiSelect === 'boolean' &&
+    Array.isArray(step.labels) &&
+    step.labels.length > 0 &&
+    step.labels.length <= MAX_ANSWER_LABELS &&
+    step.labels.every((label) => typeof label === 'string' && label.length > 0) &&
+    // A single-select question has exactly one answer. Sending two would step
+    // the picker twice and commit the second, silently.
+    (step.multiSelect || step.labels.length === 1)
+  );
+}
+
 /** Whether a value off the bridge is an answer vam will attempt. */
 export function isAnswerRequest(value: unknown): value is AnswerRequest {
   if (typeof value !== 'object' || value === null) return false;
-  const request = value as { labels?: unknown; multiSelect?: unknown };
+  const request = value as { steps?: unknown };
   return (
-    typeof request.multiSelect === 'boolean' &&
-    Array.isArray(request.labels) &&
-    request.labels.length > 0 &&
-    request.labels.length <= MAX_ANSWER_LABELS &&
-    request.labels.every((label) => typeof label === 'string' && label.length > 0) &&
-    // A single-select question has exactly one answer. Sending two would step
-    // the picker twice and commit the second, silently.
-    (request.multiSelect || request.labels.length === 1)
+    Array.isArray(request.steps) &&
+    request.steps.length > 0 &&
+    request.steps.length <= MAX_ANSWER_STEPS &&
+    request.steps.every(isAnswerStep)
   );
 }
