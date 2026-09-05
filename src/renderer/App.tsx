@@ -235,7 +235,16 @@ function SourceCanvas({
       <div className="min-h-0 flex-1">
         <Canvas
           model={model}
-          source={source === null ? undefined : { kind: 'session', source, onWrote: reload }}
+          source={
+            source === null
+              ? // Not the default `READ_ONLY_SOURCE`: it says "no write route
+                // — this canvas is read-only", which is a claim about a source
+                // that has not answered yet and, here, is usually wrong. With
+                // `shown` set there is no source and there will not be one, so
+                // the cell says that instead of connecting forever.
+                { kind: 'connecting', error: shown }
+              : { kind: 'session', source, error: shown, onWrote: reload }
+          }
         />
       </div>
     </div>

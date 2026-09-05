@@ -345,6 +345,9 @@ type NewSessionRoute =
   | { readonly ok: false; readonly decline: string };
 
 function newSessionRoute(source: CanvasSource): NewSessionRoute {
+  if (source.kind === 'connecting') {
+    return { ok: false, decline: 'still connecting to the source — nothing can start yet' };
+  }
   if (source.kind !== 'session') {
     return { ok: false, decline: 'black-smith has no new-session command' };
   }
@@ -509,8 +512,26 @@ function SourceReadout({ source }: { source: CanvasSource }) {
     <span data-source className="min-w-0 truncate font-mono text-[10px]">
       {source.kind === 'demo' ? (
         <span className="text-waiting">● {source.note}</span>
+      ) : source.kind === 'connecting' ? (
+        // Not `text-ink-faint`, which the browser arm below still uses: it
+        // measures 3.27:1 dark and 3.01:1 light (#188). Not a status token
+        // either -- "connecting" is not one of the four session states, and
+        // the hollow glyph is what carries "not yet".
+        source.error === undefined || source.error === null ? (
+          <span className="text-ink-dim">○ connecting to the source…</span>
+        ) : (
+          <span className="text-failed">● {source.error}</span>
+        )
       ) : source.kind === 'session' ? (
-        <span className="text-done">● {source.source.label}</span>
+        // The error is the WHOLE claim of this cell, so it is what colours it.
+        // A green dot next to a source whose every poll is failing is the
+        // defect this arm exists to prevent, and the failure badge in the
+        // status bar was the only surface saying otherwise.
+        source.error === undefined || source.error === null ? (
+          <span className="text-done">● {source.source.label}</span>
+        ) : (
+          <span className="text-failed">● {source.error}</span>
+        )
       ) : source.status === 'error' ? (
         <span className="text-failed">● {source.error}</span>
       ) : source.status === 'loading' ? (

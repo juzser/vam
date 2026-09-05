@@ -29,8 +29,38 @@ export type CanvasSource =
       readonly kind: 'session';
       /** The assembled port source — capabilities and, when present, `write`. */
       readonly source: SessionSource;
+      /**
+       * What the last read of this source failed with, or `null`/absent while
+       * it is answering. The canvas draws the source cell from it: a cell that
+       * shows a green dot and a name while every poll is failing says the one
+       * thing a dashboard must never say, and the failure badge beside it was
+       * left contradicting itself.
+       */
+      readonly error?: string | null;
       /** Called after a successful write so the next load is not waited for. */
       readonly onWrote: () => void;
+    }
+  | {
+      /**
+       * No source yet, and not a claim that there will not be one.
+       *
+       * The shell assembles its source over IPC and then reads it, which is a
+       * visible window (`claude agents --json --all` is 0.20-0.41 s before
+       * transcripts). With no state for it, that window rendered as
+       * `READ_ONLY_SOURCE` — an amber "no write route — this canvas is
+       * read-only" beside an empty sidebar, both false about a source that had
+       * not answered yet. Writes are refused here exactly as they are for a
+       * demo: there is nothing to write through.
+       */
+      readonly kind: 'connecting';
+      /**
+       * Why there is still no source, when that is already known — assembling
+       * one can fail outright, and then `connecting` never ends. Without this
+       * the cell would sit at "connecting…" underneath a banner saying it had
+       * failed: two surfaces, two different claims, which is the same defect
+       * one state along.
+       */
+      readonly error?: string | null;
     };
 
 /**
