@@ -42,12 +42,22 @@ import type { Group, Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filter.js';
+import type { KeyAction } from '../keyboard/chords.js';
+import { InlineChord, ShortcutTip } from '../keyboard/ShortcutTip.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { FocusEdge } from './FocusEdge.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { type RemovalPlan, removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
+
+/** The actions the sidebar's controls stand for — actions, never keys, so
+ *  every hint below reads the chord in force rather than a shipped default. */
+const SETTINGS_ACTION: KeyAction = { kind: 'settings' };
+const SEARCH_ACTION: KeyAction = { kind: 'search' };
+const FILTER_MENU_ACTION: KeyAction = { kind: 'filterMenu' };
+const CLOSE_ACTION: KeyAction = { kind: 'close' };
+const NEW_SESSION_ACTION: KeyAction = { kind: 'newSession' };
 
 const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   running: 'bg-running',
@@ -832,22 +842,27 @@ export function SessionList(props: SessionListProps) {
             {workspace.slice(0, 1).toUpperCase()}
           </span>
           <span className="flex-1" />
-          <button
-            type="button"
-            onClick={onSettings}
-            aria-label="settings"
-            className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
-          >
-            <Settings size={14} strokeWidth={1.5} />
-          </button>
-          <button
-            type="button"
-            onClick={onToggleTheme}
-            aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
-            className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
-          >
-            <Sun size={14} strokeWidth={1.5} />
-          </button>
+          <ShortcutTip label="Settings" action={SETTINGS_ACTION}>
+            <button
+              type="button"
+              onClick={onSettings}
+              aria-label="settings"
+              className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+            >
+              <Settings size={14} strokeWidth={1.5} />
+            </button>
+          </ShortcutTip>
+          {/* No chord reaches the theme toggle, so the tip is its label. */}
+          <ShortcutTip label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
+              className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+            >
+              <Sun size={14} strokeWidth={1.5} />
+            </button>
+          </ShortcutTip>
         </div>
 
         <div className="flex items-center gap-2">
@@ -875,18 +890,21 @@ export function SessionList(props: SessionListProps) {
                 <span className="font-mono text-[10px] text-ink-faint">{entries.length}</span>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={onOpenFilter}
-                aria-label="search sessions"
-                className="flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5 text-ink-faint hover:border-line-strong"
-              >
-                <Search size={14} strokeWidth={1.6} />
-                <span className="flex-1 text-left text-[12px]">Search sessions</span>
-                <span className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-[9.5px]">
-                  /
-                </span>
-              </button>
+              <ShortcutTip label="Search sessions" action={SEARCH_ACTION}>
+                <button
+                  type="button"
+                  onClick={onOpenFilter}
+                  aria-label="search sessions"
+                  className="flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5 text-ink-faint hover:border-line-strong"
+                >
+                  <Search size={14} strokeWidth={1.6} />
+                  <span className="flex-1 text-left text-[12px]">Search sessions</span>
+                  <InlineChord
+                    action={SEARCH_ACTION}
+                    className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-[9.5px]"
+                  />
+                </button>
+              </ShortcutTip>
             )}
           </div>
         </div>
@@ -955,39 +973,41 @@ export function SessionList(props: SessionListProps) {
         </button>
         {/* Search answers "the one called permalink"; this answers "the ones
             that stopped" — two different questions, so two controls. */}
-        <button
-          type="button"
-          ref={menuButtonRef}
-          data-filter-toggle
-          aria-haspopup="dialog"
-          aria-expanded={filterMenuOpen}
-          aria-label="filter sessions"
-          onClick={() => onFilterMenuToggle(!filterMenuOpen)}
-          className={[
-            'relative flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border bg-panel',
-            filterMenuOpen || narrowing
-              ? 'border-line-loud text-ink'
-              : 'border-line text-ink-faint hover:border-line-strong',
-          ].join(' ')}
-        >
-          <Filter size={13} strokeWidth={1.6} />
-          {/* Absent at zero, not a zero. A badge reading "0" is a badge
-              claiming something is narrowed when nothing is, and the count
-              this draws is the count of rules actually excluding sessions.
-              A DEFAULT is not one of them: it is not a rule the operator
-              applied, so a fresh install would open showing a "1" for a
-              choice nobody made. The border above still reports it, and the
-              popover names it. The colour is `filter-badge`, which carries
-              waiting's amber under its own name — see `styles.css`. */}
-          {activeFilters > 0 && (
-            <span
-              data-filter-badge
-              className="-top-1 -right-1 absolute flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-filter-badge px-[3px] font-mono text-[8.5px] text-canvas"
-            >
-              {activeFilters}
-            </span>
-          )}
-        </button>
+        <ShortcutTip label="Filter sessions" action={FILTER_MENU_ACTION}>
+          <button
+            type="button"
+            ref={menuButtonRef}
+            data-filter-toggle
+            aria-haspopup="dialog"
+            aria-expanded={filterMenuOpen}
+            aria-label="filter sessions"
+            onClick={() => onFilterMenuToggle(!filterMenuOpen)}
+            className={[
+              'relative flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border bg-panel',
+              filterMenuOpen || narrowing
+                ? 'border-line-loud text-ink'
+                : 'border-line text-ink-faint hover:border-line-strong',
+            ].join(' ')}
+          >
+            <Filter size={13} strokeWidth={1.6} />
+            {/* Absent at zero, not a zero. A badge reading "0" is a badge
+                claiming something is narrowed when nothing is, and the count
+                this draws is the count of rules actually excluding sessions.
+                A DEFAULT is not one of them: it is not a rule the operator
+                applied, so a fresh install would open showing a "1" for a
+                choice nobody made. The border above still reports it, and the
+                popover names it. The colour is `filter-badge`, which carries
+                waiting's amber under its own name — see `styles.css`. */}
+            {activeFilters > 0 && (
+              <span
+                data-filter-badge
+                className="-top-1 -right-1 absolute flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-filter-badge px-[3px] font-mono text-[8.5px] text-canvas"
+              >
+                {activeFilters}
+              </span>
+            )}
+          </button>
+        </ShortcutTip>
 
         {filterMenuOpen && (
           <div
@@ -1330,24 +1350,29 @@ export function SessionList(props: SessionListProps) {
                   }
                   className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5"
                 >
-                  <button
-                    type="button"
-                    data-project-icon={section.project.id}
-                    onClick={() => onPickIcon(section.project)}
-                    aria-label={`change icon for ${section.project.name}`}
-                    title="change project icon"
-                    className="flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-[11px] leading-none text-ink-faint hover:text-ink-dim"
-                  >
-                    {section.project.icon ?? (
-                      /* A monitor, not a middot. The glyph has to read as "this
-                       is a machine you can name" — the middot read as a bullet
-                       and gave a clickable control no affordance at all. It is
-                       a placeholder in the literal sense: the picker replaces
-                       it with whatever emoji you choose, and choosing nothing
-                       leaves something that still looks deliberate. */
-                      <Monitor data-project-icon-placeholder size={11} strokeWidth={1.7} />
-                    )}
-                  </button>
+                  {/* No chord picks a PROJECT icon — `icon` (`s`) picks the
+                      focused SESSION's, which is a different subject — so the
+                      tip is the label alone. It replaces a native `title`,
+                      which no browser opens on keyboard focus. */}
+                  <ShortcutTip label="Change project icon">
+                    <button
+                      type="button"
+                      data-project-icon={section.project.id}
+                      onClick={() => onPickIcon(section.project)}
+                      aria-label={`change icon for ${section.project.name}`}
+                      className="flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-[11px] leading-none text-ink-faint hover:text-ink-dim"
+                    >
+                      {section.project.icon ?? (
+                        /* A monitor, not a middot. The glyph has to read as "this
+                         is a machine you can name" — the middot read as a bullet
+                         and gave a clickable control no affordance at all. It is
+                         a placeholder in the literal sense: the picker replaces
+                         it with whatever emoji you choose, and choosing nothing
+                         leaves something that still looks deliberate. */
+                        <Monitor data-project-icon-placeholder size={11} strokeWidth={1.7} />
+                      )}
+                    </button>
+                  </ShortcutTip>
                   <span className="truncate font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
                     {section.project.name}
                   </span>
@@ -1721,18 +1746,20 @@ export function SessionList(props: SessionListProps) {
                               {/* Mouse route to the same thing `x` does. Hidden until the
                             row is hovered, so a list at rest is a list of names
                             rather than a row of buttons. */}
-                              <button
-                                type="button"
-                                onClick={() => onClose(session.id)}
-                                aria-label={`close ${session.title}`}
-                                {...pending(session.id, `Stopping ${session.title}…`)}
-                                className={[
-                                  'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
-                                  'opacity-0 hover:bg-panel hover:text-failed group-hover/row:opacity-100',
-                                ].join(' ')}
-                              >
-                                ×
-                              </button>
+                              <ShortcutTip label="Close this session" action={CLOSE_ACTION}>
+                                <button
+                                  type="button"
+                                  onClick={() => onClose(session.id)}
+                                  aria-label={`close ${session.title}`}
+                                  {...pending(session.id, `Stopping ${session.title}…`)}
+                                  className={[
+                                    'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
+                                    'opacity-0 hover:bg-panel hover:text-failed group-hover/row:opacity-100',
+                                  ].join(' ')}
+                                >
+                                  ×
+                                </button>
+                              </ShortcutTip>
 
                               {/* The indicator, over the row rather than beside
                                 it. Three channels for one fact, because one of
@@ -1835,21 +1862,27 @@ export function SessionList(props: SessionListProps) {
         {/* The footer names no project: it starts one in the FOCUSED session's,
             exactly as `o` does, so it is pending for that same project id and
             for no other. */}
-        <button
-          type="button"
-          onClick={onAdd}
-          aria-label="new session"
-          {...pending(
-            entries.find((candidate) => candidate.session.id === focusedSessionId)?.project.id ??
-              '',
-            'Starting a session…',
-          )}
-          className="flex h-7 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[8px] border border-ink-ghost text-[11.5px] text-ink-dim hover:border-ink-faint hover:text-ink"
-        >
-          <Plus size={13} strokeWidth={1.7} />
-          New session
-          <span className="ml-0.5 font-mono text-[10px] text-ink-faint">o</span>
-        </button>
+        <ShortcutTip label="New session" action={NEW_SESSION_ACTION}>
+          <button
+            type="button"
+            onClick={onAdd}
+            aria-label="new session"
+            {...pending(
+              entries.find((candidate) => candidate.session.id === focusedSessionId)?.project.id ??
+                '',
+              'Starting a session…',
+            )}
+            className="flex h-7 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[8px] border border-ink-ghost text-[11.5px] text-ink-dim hover:border-ink-faint hover:text-ink"
+          >
+            <Plus size={13} strokeWidth={1.7} />
+            New session
+            {/* Read, not written: this cell used to spell `o`. */}
+            <InlineChord
+              action={NEW_SESSION_ACTION}
+              className="ml-0.5 font-mono text-[10px] text-ink-faint"
+            />
+          </button>
+        </ShortcutTip>
       </div>
     </aside>
   );

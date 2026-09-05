@@ -11,6 +11,17 @@
  * One cell of one 580x290 canvas card does not fit in 390px, so the graph is
  * not drawn at all; the step rail below carries the decision chain the canvas
  * carried, and carries all of it rather than the three a grid cell holds.
+ *
+ * ONE RULE ANY SHELL RE-HOSTING THESE PANELS INHERITS, INCLUDING THE NEXT ONE.
+ * The panels' buttons carry `ShortcutTip`, which prints the chord in force by
+ * reading `activeBindings()` — a module singleton, not React state — when a
+ * tip OPENS. A rebind therefore lands in the next open, and what makes that
+ * safe is that the keyboard editor is MODAL: the settings overlay's scrim
+ * covers the viewport, so no tip can be open while the keys are being edited.
+ * This shell keeps that (the overlays are siblings of the shell, and the phone
+ * rule only re-anchors the panel beneath them). A shell that ever shows the
+ * editor and the chrome at once breaks it, and the fix then belongs in
+ * `ShortcutTip.tsx` — a subscription — not in a note here.
  */
 
 import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react';

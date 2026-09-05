@@ -69,6 +69,7 @@ import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
+import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
 import { nextNode } from '../keyboard/spatial-nav.js';
 import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
 import { FocusEdge } from '../panels/FocusEdge.js';
@@ -2674,6 +2675,10 @@ function CanvasInner({
     ) : null,
   };
 
+  // Read once per render, from the bindings in force. `null` means the
+  // operator unbound `help`, and the status bar then prints no key at all.
+  const helpChord = primaryChord({ kind: 'help' });
+
   return (
     // `vam-phone` is the hook the OVERLAYS hang off: they are siblings of the
     // shell rather than children of it, so `[data-phone-shell]` cannot reach
@@ -2721,35 +2726,43 @@ function CanvasInner({
             </span>
 
             <div className="flex h-[26px] shrink-0 items-center overflow-hidden rounded-[7px] border border-line text-ink-dim">
-              <button
-                type="button"
-                aria-label="zoom out"
-                onClick={() => zoomOut()}
-                className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
-              >
-                −
-              </button>
+              {/* Zoom and fit take no `action`: the grammar has no zoom
+                  chord, and a tip must not invent one. */}
+              <ShortcutTip label="Zoom out">
+                <button
+                  type="button"
+                  aria-label="zoom out"
+                  onClick={() => zoomOut()}
+                  className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
+                >
+                  −
+                </button>
+              </ShortcutTip>
               <span className="flex h-full items-center border-line border-r border-l px-1.5 font-mono text-[10px] text-ink">
                 {zoomPct}%
               </span>
-              <button
-                type="button"
-                aria-label="zoom in"
-                onClick={() => zoomIn()}
-                className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
-              >
-                +
-              </button>
+              <ShortcutTip label="Zoom in">
+                <button
+                  type="button"
+                  aria-label="zoom in"
+                  onClick={() => zoomIn()}
+                  className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
+                >
+                  +
+                </button>
+              </ShortcutTip>
             </div>
 
-            <button
-              type="button"
-              aria-label="fit view"
-              onClick={() => fitView()}
-              className="flex h-[26px] shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim hover:text-ink"
-            >
-              <Maximize size={13} strokeWidth={1.6} aria-hidden="true" />
-            </button>
+            <ShortcutTip label="Fit the whole canvas in view">
+              <button
+                type="button"
+                aria-label="fit view"
+                onClick={() => fitView()}
+                className="flex h-[26px] shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim hover:text-ink"
+              >
+                <Maximize size={13} strokeWidth={1.6} aria-hidden="true" />
+              </button>
+            </ShortcutTip>
           </div>
 
           <div className="relative min-h-0 flex-1">
@@ -3063,33 +3076,43 @@ function CanvasInner({
               was whatever the operator managed to read. Hidden entirely while
               nothing has broken -- a permanent `0` is noise. */}
           {failureCount > 0 && (
-            <button
-              type="button"
-              data-error-log-button
-              onClick={() => setErrorLogOpen(true)}
-              className="rounded-[4px] border border-line-strong px-1.5 py-px text-failed"
-            >
-              {failureCount} {failureCount === 1 ? 'failure' : 'failures'}
-            </button>
+            <ShortcutTip label="Open the error log" action={{ kind: 'errorLog' }}>
+              <button
+                type="button"
+                data-error-log-button
+                onClick={() => setErrorLogOpen(true)}
+                className="rounded-[4px] border border-line-strong px-1.5 py-px text-failed"
+              >
+                {failureCount} {failureCount === 1 ? 'failure' : 'failures'}
+              </button>
+            </ShortcutTip>
           )}
 
           <span className="flex-1" />
           {/* The right-hand end is one cell wide, again at the operator's
               request: "Phan ben phai status bar, chi de `?` keyboard shortcut
-              thoi". The budget cell that used to sit here went with the rest;
-              `?` is the `help` chord in BINDING_TABLES, so the one key still
-              printed is a key the grammar answers to. */}
+              thoi". The budget cell that used to sit here went with the rest.
+              The key itself is READ from the bindings in force, not printed:
+              `?` is only the shipped default for `help`, and an operator who
+              moves it would otherwise be left staring at the most prominent
+              hint in the chrome naming a key bound to nothing. Gone entirely
+              when they unbind it, because a caption for no key is worse. */}
           <span className="flex items-center gap-1.5">
-            {/* A tag rather than loose text: `?` has to read as a key you press.
-                A bare glyph in a corner reads as punctuation, and the label
-                beside it is what makes the sheet discoverable to someone who
-                does not already know it is there. */}
-            <span
-              data-keysheet-hint
-              className="rounded-[4px] border border-line-strong px-1.5 py-px text-ink-dim"
-            >
-              ?
-            </span>
+            {/* A tag rather than loose text: the key has to read as something
+                you press, which is what a bordered cap does and a bare glyph
+                does not. The label beside it makes the sheet discoverable to
+                someone who does not already know it is there.
+                `primaryChord` rather than `InlineChord` for one reason: this
+                cell carries `data-keysheet-hint`, which the status-bar tests
+                query, and the chip component takes no marker. */}
+            {helpChord !== null && (
+              <span
+                data-keysheet-hint
+                className="rounded-[4px] border border-line-strong px-1.5 py-px text-ink-dim"
+              >
+                {helpChord}
+              </span>
+            )}
             Keyboard shortcut
           </span>
         </footer>
@@ -3237,7 +3260,11 @@ export function Canvas({
 }) {
   return (
     <ReactFlowProvider>
-      <CanvasInner model={model} source={source} />
+      {/* One tooltip group for the whole chrome: once one is open, the button
+          beside it opens with no second delay. */}
+      <TipProvider>
+        <CanvasInner model={model} source={source} />
+      </TipProvider>
     </ReactFlowProvider>
   );
 }
