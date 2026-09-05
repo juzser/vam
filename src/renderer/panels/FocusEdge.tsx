@@ -4,8 +4,17 @@
  * One element, mounted only where the keyboard is: no dimmed line and no
  * reserved 2px otherwise, because a permanently drawn indicator that changes
  * shade is a thing to compare, and this has to be answerable at a glance from
- * the corner of the eye. It is one line PER COLUMN and not one on screen --
- * Select owns the sidebar and the canvas both, and draws over each.
+ * the corner of the eye.
+ *
+ * There is exactly ONE on screen, and the canvas column never wears it. This
+ * file used to argue the opposite -- that Select is one cursor drawn in two
+ * columns, so the sidebar and the canvas should both carry the line -- and the
+ * operator overturned it: the line marks where the KEYBOARD is, and the canvas
+ * is a view of what the cursor landed on rather than a place the keyboard
+ * goes. Select types into the sidebar's list, Insert into the response pane,
+ * and a line on the canvas answers "where do my keys go" with a column that
+ * never takes any. So the two mounts are `SessionList` and `DetailPanel`; if
+ * you are here because the canvas looks like it is missing one, it is not.
  *
  * It is `aria-hidden` on purpose, and never the only signal: the status bar
  * prints the mode as a word, and inside the mode the focused row or card draws
@@ -14,9 +23,9 @@
  * removed in both states -- it is not one now, and the argument does not rest
  * on it.)
  *
- * All three column roots are already `relative`, so this drops in as an
- * absolutely-positioned child with no layout change to any of them, and none of
- * them has a `border-t` for it to double.
+ * Both mounting column roots are already `relative`, so this drops in as an
+ * absolutely-positioned child with no layout change to either of them, and
+ * neither has a `border-t` for it to double.
  */
 export function FocusEdge() {
   return (
