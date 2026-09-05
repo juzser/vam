@@ -891,12 +891,35 @@ body {
 }
 
 /* WCAG 2.2 SC 2.5.5 (AAA) and Apple's own HIG figure. The record button ships
-   at 28px, which is under even the AA floor of 24. */
-[data-phone-shell] button,
-[data-phone-shell] [role='button'],
-[data-phone-shell] summary {
+   at 28px, which is under even the AA floor of 24.
+ *
+ * ENUMERATED, never `[data-phone-shell] button`. That form reached every
+ * control in the markup the shell HOSTS, including a 15px project-icon button
+ * inside a 21px heading row, which it inflated to 44 and burst the row. A hit
+ * area is a decision per control, and the controls below are the ones the
+ * phone shell is answerable for. */
+[data-phone-shell] > header button,
+[data-phone-shell] > footer button,
+[data-phone-shell] [data-avatar-bar] button,
+[data-phone-shell] [data-step-chip],
+[data-phone-shell] [data-remote-limits] summary,
+[data-phone-shell] [data-prompt-record],
+[data-phone-shell] [data-status-pill] {
   min-height: 44px;
   min-width: 44px;
+}
+
+/* A control a finger can never reveal, and therefore must not be able to hit.
+ *
+ * The row's close `x` is `opacity-0` until `group-hover/row`, which a coarse
+ * pointer cannot satisfy -- but `opacity: 0` removes no pointer events, so at
+ * the top-right of the row it sat INVISIBLE over the row's own tap area and a
+ * tap meant to open a session could close it instead. `display: none` is what
+ * makes it absent rather than merely unseen: gone from hit testing and gone
+ * from the accessibility tree. Closing a session has a deliberate, visible
+ * route on the session screen's app bar instead. */
+[data-phone-shell] [data-session-row] button[aria-label^='close '] {
+  display: none;
 }
 
 /* Without `viewport-fit=cover` in index.html this resolves to 0 and the

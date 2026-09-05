@@ -44,6 +44,16 @@ export type PhoneShellProps = {
   readonly records: boolean;
   readonly failureCount: number;
   readonly onOpenErrorLog: () => void;
+  /**
+   * The renderer's one refusal channel, drawn by `Canvas`'s `StatusCell`.
+   *
+   * Passed as a node rather than a string so it is the SAME cell the desktop
+   * bar draws -- shortening, tooltip and all. Without it every refusal vam
+   * writes ('pick a session first', 'this project has no source', the
+   * source's own decline for a new session) landed in state and rendered
+   * nowhere, which is the one thing this shell is careful not to do.
+   */
+  readonly statusCell: ReactNode;
   readonly tally: {
     readonly running: number;
     readonly waiting: number;
@@ -74,18 +84,22 @@ function StepRail({
   readonly waiting: boolean;
   readonly onSelect: (index: number) => void;
 }) {
-  const rail = useRef<HTMLDivElement>(null);
+  const rail = useRef<HTMLElement>(null);
   useEffect(() => {
-    rail.current?.querySelector('[data-step-chip][aria-selected="true"]')?.scrollIntoView({
+    rail.current?.querySelector('[data-step-chip][aria-current="step"]')?.scrollIntoView({
       inline: 'center',
       block: 'nearest',
     });
   }, []);
   if (steps.length === 0) return null;
   return (
-    <div
+    // A `nav`, which is what it is: the session screen's primary navigation,
+    // and an element that can carry a name. A bare `div` cannot -- and the
+    // `tablist` this used to claim to be needed a `tabpanel` it never had.
+    <nav
       ref={rail}
       data-step-rail
+      aria-label="steps"
       className="flex h-[44px] flex-none select-none items-center gap-2 overflow-x-auto border-line border-b bg-panel px-2 vam-no-scrollbar"
     >
       {steps.map((step, index) => {
@@ -98,11 +112,17 @@ function StepRail({
             key={step.id}
             type="button"
             data-step-chip
-            role="tab"
-            aria-selected={on}
+            // NOT `role="tab"`. These chips were written as a tablist and are
+            // not one: the region they change is `DetailPanel`'s body, which
+            // is no `tabpanel` of theirs, and a tab without its panel fails
+            // `aria-required-parent` (WCAG 1.3.1/4.1.2, Level A) on the one
+            // platform where a screen reader is standard equipment. They are
+            // buttons that move a position in a chain, and `aria-current`
+            // says exactly that much and no more.
+            aria-current={on ? 'step' : undefined}
             onClick={() => onSelect(index)}
             className={[
-              'flex h-[36px] min-h-[44px] flex-none items-center gap-1.5 whitespace-nowrap rounded-[7px] border px-3 text-[12px]',
+              'flex min-h-[44px] flex-none items-center gap-1.5 whitespace-nowrap rounded-[7px] border px-3 text-[12px]',
               on ? 'border-line bg-segment-on text-ink' : 'border-line text-ink-dim',
               needsYou ? 'border-waiting' : '',
               FOCUS_RING,
@@ -117,7 +137,7 @@ function StepRail({
       <span className="flex-none px-2 font-mono text-[11px] text-ink-dim">
         STEP {selected + 1}/{steps.length}
       </span>
-    </div>
+    </nav>
   );
 }
 
@@ -160,6 +180,7 @@ export function PhoneShell({
   records,
   failureCount,
   onOpenErrorLog,
+  statusCell,
   tally,
   declines,
 }: PhoneShellProps) {
@@ -175,7 +196,16 @@ export function PhoneShell({
    * sized in `100dvh` and needs no listener to sit above the keyboard.
    */
   const [typing, setTyping] = useState(false);
-  const [step, setStep] = useState(0);
+  /**
+   * Which step the rail is on, or `null` for "the newest".
+   *
+   * `null` rather than an index, because the reset is what was wrong: keying
+   * it on the session id skips every re-open of the SAME session -- leaving
+   * the screen does not move `focusedId` -- so opening a session, tapping
+   * chip 1, going back and opening it again reopened on step 1. A sentinel
+   * cannot go stale that way: the screen sets it on every push.
+   */
+  const [step, setStep] = useState<number | null>(null);
 
   const entry = detail.entry;
   const session = entry?.session ?? null;
@@ -183,18 +213,8 @@ export function PhoneShell({
   // counts in. ALL of them: the canvas's three-card cap is a property of a
   // 580x290 grid cell and this rail has no cell.
   const steps: readonly Decision[] = session === null ? [] : [...session.decisions].reverse();
-  const at = Math.min(step, Math.max(steps.length - 1, 0));
-
-  // The step rail resets with the session: a chip index is a position in one
-  // session's chain and means nothing in the next one's.
-  const sessionId = session?.id ?? null;
-  const lastSession = useRef(sessionId);
-  useEffect(() => {
-    if (lastSession.current !== sessionId) {
-      lastSession.current = sessionId;
-      setStep(Math.max((session?.decisions.length ?? 1) - 1, 0));
-    }
-  }, [sessionId, session]);
+  const newest = Math.max(steps.length - 1, 0);
+  const at = step === null ? newest : Math.min(step, newest);
 
   useEffect(() => {
     const pop = (event: PopStateEvent) => {
@@ -212,6 +232,9 @@ export function PhoneShell({
   const show = () => {
     openSession(window.history);
     pushed.current = true;
+    // Every push opens on the newest step: arriving at a session is arriving
+    // at what it just did, whether or not it is the session you last read.
+    setStep(null);
     setOpen(true);
   };
   const back = () => {
@@ -246,9 +269,14 @@ export function PhoneShell({
           data-phone-status-bar
           className="flex h-[44px] flex-none items-center gap-3 border-line border-t bg-panel px-3 font-mono text-[12px] text-ink-dim"
         >
-          <span>
+          <span className="flex-none">
             {tally.running} running · {tally.waiting} waiting · {tally.done} done
           </span>
+          {statusCell !== null && (
+            <span data-phone-status className="min-w-0 flex-1 truncate">
+              {statusCell}
+            </span>
+          )}
           <span className="flex-1" />
           {/* The only route into the error log on a device with no keyboard,
               and the surface most wanted at the worst moment. */}
@@ -283,11 +311,39 @@ export function PhoneShell({
         >
           ‹
         </button>
-        <span className="flex min-w-0 flex-col">
+        <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-[15px] text-ink">{session?.title}</span>
           <span className="truncate text-[12px] text-ink-dim">{entry.project.name}</span>
         </span>
+        {/* Closing a session, drawn where it can be seen and read.
+            The list row's own `x` is revealed by hover and a finger has no
+            hover, so on a phone it is not a control at all (styles.css) -- and
+            it sat over the row's primary tap, which is the worst place for one.
+            Here it is visible, it is eight pixels clear of the back chevron at
+            the other end of the bar, and it goes through the same confirm the
+            `x` chord does. */}
+        <button
+          type="button"
+          data-phone-close
+          aria-label="close session"
+          onClick={() => sidebar.onClose(entry.session.id)}
+          className={`${TOUCH} ${FOCUS_RING} flex-none rounded-[7px] text-[16px] text-ink-dim`}
+        >
+          ×
+        </button>
       </header>
+
+      {/* The same refusal channel the list screen has. A rename or a close
+          that is declined says so here, rather than into a status bar that is
+          not drawn at all on this device. */}
+      {statusCell !== null && (
+        <div
+          data-phone-status
+          className="flex min-h-[24px] flex-none items-center border-line border-b bg-panel px-3 font-mono text-[12px] text-ink-dim"
+        >
+          {statusCell}
+        </div>
+      )}
 
       {/* Out of the way while the keyboard is up: 44px of navigation the
           operator has already used, out of the ~400px the keyboard leaves. */}

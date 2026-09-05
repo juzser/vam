@@ -57,7 +57,12 @@ export const MODEL: CanvasModel = {
 
 /** A `session` source, with whatever capabilities and words the test needs. */
 export function phoneSource(
-  over: { capabilities?: Record<string, boolean>; declines?: SourceDeclines } = {},
+  over: {
+    capabilities?: Record<string, boolean>;
+    declines?: SourceDeclines;
+    /** Present makes the source able to close, and records what it was asked. */
+    closeSession?: (sessionId: string) => Promise<void>;
+  } = {},
 ): CanvasSource {
   const inner = {
     id: 'claude-code',
@@ -69,7 +74,7 @@ export function phoneSource(
       promptAttachments: false,
       slashCommands: false,
       renameSession: false,
-      closeSession: false,
+      closeSession: over.closeSession !== undefined,
       createSession: false,
       governance: false,
       pullRequests: false,
@@ -80,7 +85,10 @@ export function phoneSource(
     declines: over.declines ?? {},
     viewerScope: { kind: 'connection', note: 'one local process' },
     load: async () => [],
-    write: { recordPrompt: async () => {} },
+    write: {
+      recordPrompt: async () => {},
+      ...(over.closeSession === undefined ? {} : { closeSession: over.closeSession }),
+    },
   };
   return { kind: 'session', source: inner as unknown as SessionSource, onWrote: () => {} };
 }

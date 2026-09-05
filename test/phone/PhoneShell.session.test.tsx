@@ -51,7 +51,34 @@ describe('the phone session screen', () => {
       fireEvent.click(first);
     });
     expect(pane()).toContain('the researcher read');
-    expect(first.getAttribute('aria-selected')).toBe('true');
+    // `aria-current`, not `aria-selected`: these are buttons moving a position
+    // in a chain, and the region they change is no `tabpanel` of theirs.
+    expect(first.getAttribute('aria-current')).toBe('step');
+    expect(first.getAttribute('role')).toBeNull();
+  });
+
+  it('opens on the newest step again after a chevron and a second tap', () => {
+    openSession();
+    const first = chips()[0];
+    if (first === undefined) throw new Error('no chip');
+    act(() => {
+      fireEvent.click(first);
+    });
+    expect(document.querySelector('[data-step-rail]')?.textContent).toContain('STEP 1/5');
+
+    act(() => {
+      fireEvent.click(document.querySelector('[data-phone-back]') as Element);
+    });
+    const row = rows()[0];
+    act(() => {
+      fireEvent.click(row as Element);
+    });
+    // Leaving the screen does not move `focusedId`, so a reset keyed on the
+    // session id would never fire for the session you just left.
+    expect(document.querySelector('[data-step-rail]')?.textContent).toContain('STEP 5/5');
+    expect(document.querySelector('[data-action-pane]')?.textContent).toContain(
+      'the gate said yes',
+    );
   });
 
   it('withdraws the Terminal tab structurally, rather than showing it disabled', () => {
@@ -65,6 +92,35 @@ describe('the phone session screen', () => {
     openSession();
     expect(document.querySelector('[data-prompt-record]')).not.toBeNull();
     expect(document.querySelector('[data-mode-row]')).toBeNull();
+  });
+
+  it('carries closing a session where it can be seen, and only there', async () => {
+    const closed: string[] = [];
+    render(
+      <Canvas
+        model={MODEL}
+        source={phoneSource({
+          closeSession: async (id) => {
+            closed.push(id);
+          },
+        })}
+      />,
+    );
+    act(() => {
+      fireEvent.click(rows()[0] as Element);
+    });
+    const control = document.querySelector('[data-phone-close]');
+    expect(control?.getAttribute('aria-label')).toBe('close session');
+    // At the trailing edge of the app bar -- a whole screen away from the row
+    // whose top-right corner the hover-revealed `x` sat invisibly over.
+    expect(control?.closest('header')).not.toBeNull();
+    expect(control?.closest('[data-session-row]')).toBeNull();
+    await act(async () => {
+      fireEvent.click(control as Element);
+    });
+    // The same seam the `x` chord goes through, so this is one route with two
+    // entrances rather than a phone-only way to end a session.
+    expect(closed).toEqual(['a1']);
   });
 
   it('renders no Submit: a pick cannot travel from a browser', () => {

@@ -488,6 +488,10 @@ function Columns({ order, children }: { order: readonly ColumnId[]; children: Re
       child,
     ]),
   );
+  // An order naming no column is not an empty row of columns, it is no row at
+  // all -- which is what the phone shell asks for, and what leaves nothing of
+  // the desktop layout in the tree beside it.
+  if (order.length === 0) return null;
   return <div className="flex min-h-0 flex-1">{order.map((id) => byId.get(id))}</div>;
 }
 
@@ -2837,6 +2841,10 @@ function CanvasInner({
           records={source.kind !== 'session' || source.source.capabilities.recordPrompt}
           failureCount={failureCount}
           onOpenErrorLog={() => setErrorLogOpen(true)}
+          // The SAME cell the desktop bar draws, not a second rendering of the
+          // same string: `StatusCell` shortens and carries the whole message
+          // on its tooltip, and a phone-only copy would drift from it.
+          statusCell={status === null ? null : <StatusCell text={status} />}
           tally={tally}
           declines={source.kind === 'session' ? source.source.declines : {}}
         />

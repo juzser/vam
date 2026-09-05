@@ -101,7 +101,10 @@ beforeAll(() => {
         void (query.includes('scheme') && os.listeners.add(fn)),
       removeEventListener: (_type: string, fn: (event: MediaQueryListEvent) => void) =>
         void os.listeners.delete(fn),
-      addListener: (fn: (event: MediaQueryListEvent) => void) => void os.listeners.add(fn),
+      // Narrowed with its modern twin above, and for the same reason: a width
+      // listener is not a listener on this OS's colour scheme.
+      addListener: (fn: (event: MediaQueryListEvent) => void) =>
+        void (query.includes('scheme') && os.listeners.add(fn)),
       removeListener: (fn: (event: MediaQueryListEvent) => void) => void os.listeners.delete(fn),
       dispatchEvent: () => false,
       onchange: null,
