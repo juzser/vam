@@ -306,11 +306,11 @@ export async function sendToPane(
 ): Promise<PaneSendResult> {
   const match = { name } as const;
   // The builders are kept apart in `tmux/argv.ts` for the one reason that
-  // matters here: `-l` types, and Return, Backspace and Shift-Tab have to be
-  // PRESSED. There is deliberately no builder that takes a key name, so
+  // matters here: `-l` types, and Return, Backspace, Shift-Tab and Escape have
+  // to be PRESSED. There is deliberately no builder that takes a key name, so
   // nothing here can turn the operator's text into a keypress by accident --
   // and this switch is where that holds: a `kind` off the bridge selects one
-  // of three fixed argvs, and only `text` carries anything the operator wrote.
+  // of four fixed argvs, and only `text` carries anything the operator wrote.
   const argv =
     key.kind === 'enter'
       ? sendEnterArgv(match.name)
