@@ -36,6 +36,9 @@ const QUESTION: AgentQuestion = {
 };
 
 const SESSION: Session = {
+  // vam started this one, which is what lets it press a key in the pane at
+  // all -- and what Submit is drawn on.
+  vamControlled: true,
   id: 's1',
   title: 'Colour study',
   icon: null,
@@ -48,8 +51,12 @@ const SESSION: Session = {
   decisions: [{ id: 'd1', label: 'plan', input: 'ask me', output: 'asked', commands: [] }],
 };
 
-function draw(question: AgentQuestion, over: Partial<DetailPanelProps> = {}) {
-  const session: Session = { ...SESSION, questions: [question] };
+function draw(
+  question: AgentQuestion,
+  over: Partial<DetailPanelProps> & { readonly entrySession?: Partial<Session> } = {},
+) {
+  const { entrySession, ...props } = over;
+  const session: Session = { ...SESSION, questions: [question], ...entrySession };
   const project: Project = { id: 'p1', name: 'atlas', sessions: [session] };
   const entry: SessionEntry = { project, session };
   render(
@@ -67,7 +74,7 @@ function draw(question: AgentQuestion, over: Partial<DetailPanelProps> = {}) {
       width={408}
       resizeHandle={null}
       delivers
-      {...over}
+      {...props}
     />,
   );
 }
@@ -92,6 +99,28 @@ describe('Submit is offered only where delivery is real', () => {
 
   it('draws no Submit when the source says nothing about delivering', () => {
     draw(QUESTION, { delivers: undefined });
+    expect(submit()).toBeNull();
+  });
+
+  it('draws no Submit for a session vam did not start', () => {
+    // `vamControlled` is the necessary fact: vam can press a key only in a
+    // pane it started, because no process may take over another's controlling
+    // TTY. The mode row over this same pane already tests it and disappears;
+    // Submit was drawn, enabled, and could only ever refuse.
+    draw(QUESTION, {
+      answer: answering({ kind: 'unaimed' }),
+      entrySession: { vamControlled: false },
+    });
+    expect(submit()).toBeNull();
+  });
+
+  it('draws no Submit when nothing said whether vam started the session', () => {
+    // Absent is "nobody established this", not a fact to draw a write control
+    // on -- the same reading the mode row takes.
+    draw(QUESTION, {
+      answer: answering({ kind: 'unaimed' }),
+      entrySession: { vamControlled: undefined },
+    });
     expect(submit()).toBeNull();
   });
 
@@ -196,6 +225,26 @@ describe('what Submit sends, and what it says afterwards', () => {
     expect(await said({ kind: 'no-picker' })).toContain('not on the screen');
     expect(await said({ kind: 'not-live' })).toContain('did not answer the probe arrow');
     expect(await said({ kind: 'unmatched', label: 'Viridian' })).toContain('Viridian');
+  });
+
+  it('does not name a pairing failure for a tmux vam could not reach', async () => {
+    draw(QUESTION, { answer: answering({ kind: 'unavailable' }) });
+    fireEvent.click(all('[data-question-option]')[0] as HTMLElement);
+    fireEvent.click(submit() as HTMLElement);
+    await waitFor(() => expect(q('[data-question-outcome]')).not.toBeNull());
+    expect(text()).toContain('could not ask tmux');
+    // The sentence it used to draw. vam never looked, so it cannot report
+    // what it would have found.
+    expect(text()).not.toContain('could not name one session of its own');
+  });
+
+  it('does not say vam could not NAME a session for a pane it named and refused', async () => {
+    draw(QUESTION, { answer: answering({ kind: 'mispaired' }) });
+    fireEvent.click(all('[data-question-option]')[0] as HTMLElement);
+    fireEvent.click(submit() as HTMLElement);
+    await waitFor(() => expect(q('[data-question-outcome]')).not.toBeNull());
+    expect(text()).toContain('pane vam cannot use for this project');
+    expect(text()).not.toContain('could not name one session of its own');
   });
 
   it('says nothing about the outcome before Submit is pressed', () => {

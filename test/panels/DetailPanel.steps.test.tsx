@@ -18,7 +18,7 @@
  *    aside rather than blocking the rest.
  */
 
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentQuestion, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
@@ -49,6 +49,9 @@ const FRUIT: AgentQuestion = {
 };
 
 const SESSION: Session = {
+  // vam started this one: Submit is drawn only over a pane vam can press a
+  // key in, which is the same test the mode row makes.
+  vamControlled: true,
   id: 's1',
   title: 'Colour study',
   icon: null,
@@ -262,6 +265,87 @@ describe('a step whose question is already answered', () => {
       { ...COLOUR, answer: 'Crimson' },
       { ...FRUIT, answer: 'Apple' },
     ]);
+    expect(submit()).toBeNull();
+  });
+});
+
+/**
+ * A SET THAT WAS PART-DELIVERED, which is the one outcome the card used to
+ * deny outright.
+ *
+ * The CLI commits each single-select question as it is answered -- the Return
+ * that picks the option also advances the set -- so a failure on step two of
+ * two is not "nothing was sent". It said so anyway, and the operator's obvious
+ * response, pressing Submit again, re-sent question one into a screen that had
+ * moved on: `wrong-question`, forever, with no way to finish the set from the
+ * UI at all.
+ */
+describe('a Submit that got part of the way', () => {
+  const partly = (results: readonly AnswerResult[]) => {
+    const queue = [...results];
+    return vi.fn((_projectId: string, _request: AnswerRequest, _rowId?: string) =>
+      Promise.resolve(queue.shift() ?? { kind: 'refused' as const }),
+    );
+  };
+
+  const markBoth = () => {
+    fireEvent.click(options()[0] as HTMLElement);
+    fireEvent.keyDown(listbox(), { key: 'l' });
+    fireEvent.click(options()[0] as HTMLElement);
+  };
+
+  it('does not say nothing was sent when question one went in', async () => {
+    const answer = partly([{ kind: 'refused', committed: ['Crimson'] }]);
+    draw([COLOUR, FRUIT], { answer });
+    markBoth();
+    fireEvent.click(submit() as HTMLElement);
+    await waitFor(() => expect(q('[data-question-outcome]')).not.toBeNull());
+    // The denial, in the words it used to be drawn in.
+    expect(text()).not.toContain('not sent —');
+    // What actually happened, both halves of it.
+    expect(text()).toContain('Crimson');
+    expect(text()).toContain('tmux would not deliver');
+  });
+
+  it('resumes at the step that did NOT go in, rather than re-sending the set', async () => {
+    const answer = partly([
+      { kind: 'refused', committed: ['Crimson'] },
+      { kind: 'sent', answer: 'Apple' },
+    ]);
+    draw([COLOUR, FRUIT], { answer });
+    markBoth();
+    fireEvent.click(submit() as HTMLElement);
+    await waitFor(() => expect(q('[data-question-outcome]')).not.toBeNull());
+    fireEvent.click(submit() as HTMLElement);
+    await waitFor(() => expect(answer.mock.calls).toHaveLength(2));
+    // The first attempt carried the whole set; the second carries only what
+    // the agent is still waiting on. Re-sending question one would be matched
+    // against a screen that has already moved to question two.
+    expect(answer.mock.calls[0]?.[1].steps.map((step) => step.question)).toEqual([
+      'Which colour do you prefer?',
+      'Which fruit do you prefer?',
+    ]);
+    expect(answer.mock.calls[1]?.[1].steps.map((step) => step.question)).toEqual([
+      'Which fruit do you prefer?',
+    ]);
+    // And the step itself says so, rather than the outcome line being the only
+    // record of it -- the next Submit replaces that line.
+    expect(steps()[0]?.getAttribute('data-sent')).toBe('true');
+    expect(steps()[1]?.getAttribute('data-sent')).toBeNull();
+    await waitFor(() => expect(q('[data-question-outcome]')?.textContent).toContain('Apple'));
+  });
+
+  it('offers no Submit once every step has gone in', async () => {
+    // Both questions committed and the CLI own review is what failed. There is
+    // nothing left to send, and a button that would send an empty set is a
+    // button that refuses.
+    const answer = partly([
+      { kind: 'unconfirmed', label: 'Apple', committed: ['Crimson', 'Apple'] },
+    ]);
+    draw([COLOUR, FRUIT], { answer });
+    markBoth();
+    fireEvent.click(submit() as HTMLElement);
+    await waitFor(() => expect(q('[data-question-outcome]')).not.toBeNull());
     expect(submit()).toBeNull();
   });
 });

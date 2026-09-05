@@ -116,7 +116,7 @@ export type PaneKey =
 export const MAX_KEY_TEXT = 16;
 
 /**
- * What became of one keystroke. THREE ANSWERS, and the split exists because a
+ * What became of one keystroke. FIVE ANSWERS, and the split exists because a
  * boolean made the tab lie.
  *
  * `unaimed` is vam declining to guess: no session of its own answers for this
@@ -126,8 +126,18 @@ export const MAX_KEY_TEXT = 16;
  * They are different sentences to a person: one sends them looking for a
  * pairing problem, the other tells them their agent exited. A single `false`
  * said the first for both.
+ *
+ * `unavailable` and `mispaired` ARE THE READ PATH'S OWN WORDS, and they are
+ * here because `unaimed` was being said for both of them -- the same
+ * conflation `PaneView` was given a `mispaired` arm to end. `unavailable` is
+ * the listing itself failing: vam did not look, so it cannot claim a pairing
+ * problem either. `mispaired` is a row that published its pane and had it
+ * rejected: vam named a session and refused the one it named, which is the
+ * opposite of not being able to name one. Two surfaces describing one state
+ * in different words is its own defect, so the write path spells them as the
+ * read path does.
  */
-export type PaneSendResult = 'sent' | 'unaimed' | 'refused';
+export type PaneSendResult = 'sent' | 'unaimed' | 'unavailable' | 'mispaired' | 'refused';
 
 /** Whether a value off the bridge is a keystroke vam will send. */
 export function isPaneKey(value: unknown): value is PaneKey {

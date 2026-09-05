@@ -35,6 +35,9 @@ import { listVamSessions, readPane, type TmuxRun } from '../sources/tmux/spawn.j
 import { targetSession } from './pane.js';
 
 /** One row of the picker. `checked` is null when the row carries no box at all. */
+/** Every answer but `sent`: a stop, before `deliver` says how far it got. */
+type Stop = Exclude<AnswerResult, { readonly kind: 'sent' }>;
+
 export type PickerRow = { readonly label: string; readonly checked: boolean | null };
 
 /** The picker on screen: its rows, and which one the cursor is on. */
@@ -127,17 +130,40 @@ export async function answerQuestion(
   panes?: ReadonlyMap<string, string>,
 ): Promise<AnswerResult> {
   const listed = await listVamSessions(run);
-  if (listed.kind === 'unavailable') return { kind: 'unaimed' };
+  // vam could not look. It therefore cannot report a pairing problem, which is
+  // what `unaimed` is drawn as -- see `AnswerResult`.
+  if (listed.kind === 'unavailable') return { kind: 'unavailable' };
   const match = targetSession(listed.sessions, projectId, rowId, panes);
-  // `none`, `ambiguous` and `mispaired` all end here, and the last is the one
-  // worth naming: a row that published a pane vam cannot use never falls
-  // through to the project tag, which would answer a question in a session
-  // this row was never in.
+  // A row that published a pane vam cannot use never falls through to the
+  // project tag, which would answer a question in a session this row was never
+  // in -- and it is reported as what it is rather than as `none`.
+  if (match.kind === 'mispaired') return { kind: 'mispaired' };
+  // `none` and `ambiguous`: no session of vam's answers for this project, or
+  // two do.
   if (match.kind !== 'one') return { kind: 'unaimed' };
   return deliver(run, match.name, request);
 }
 
 async function deliver(run: TmuxRun, name: string, request: AnswerRequest): Promise<AnswerResult> {
+  /** What has been pressed on a row, in asking order. An INTENTION, until: */
+  const answers: string[] = [];
+  /**
+   * HOW MANY OF THEM THE PICKER IS PROVEN TO HAVE TAKEN IN, and the proof is
+   * the CLI's own: a single-select Return both answers and advances, so a
+   * screen showing question N is proof that questions 1..N-1 went in, and a
+   * review naming every chosen option is proof for the whole set. Nothing is
+   * counted on the strength of vam having pressed the key -- that is the
+   * overclaim this whole module exists against, and it would be the same lie
+   * as "not sent" wearing the other face.
+   */
+  let landed = 0;
+  /**
+   * A stop, told with how far the set got. `committed` is left ABSENT while
+   * nothing is proven, so "not sent" stays the wording for the common case
+   * and is impossible for the case where it would deny a delivery.
+   */
+  const stop = (result: Stop): AnswerResult =>
+    landed === 0 ? result : { ...result, committed: answers.slice(0, landed) };
   /** The screen, or `null` when vam could not read it. Never a guess. */
   const read = async (): Promise<string | null> => {
     const pane = await readPane(run, name);
@@ -159,7 +185,7 @@ async function deliver(run: TmuxRun, name: string, request: AnswerRequest): Prom
    * two-question call: `Cobalt` was an option in both questions, so the wrong
    * screen would have answered confidently.
    */
-  const see = async (step: AnswerStep): Promise<Picker | AnswerResult> => {
+  const see = async (step: AnswerStep): Promise<Picker | Stop> => {
     const text = await read();
     if (text === null) return { kind: 'unreadable' };
     const lines = text.split('\n');
@@ -190,11 +216,7 @@ async function deliver(run: TmuxRun, name: string, request: AnswerRequest): Prom
   };
 
   /** Walk the cursor onto `label`, re-reading -- and re-checking -- every step. */
-  const stepTo = async (
-    step: AnswerStep,
-    label: string,
-    from: Picker,
-  ): Promise<Picker | AnswerResult> => {
+  const stepTo = async (step: AnswerStep, label: string, from: Picker): Promise<Picker | Stop> => {
     let view = from;
     // One pass of the list at most: it wraps, so every row is reachable, and a
     // bound is what stops a picker that answers oddly from being walked
@@ -209,38 +231,40 @@ async function deliver(run: TmuxRun, name: string, request: AnswerRequest): Prom
     return { kind: 'unmatched', label };
   };
 
-  const answers: string[] = [];
   for (const step of request.steps) {
     // WHERE DID THE CLI LAND. Before a single label is matched against it.
     const first = await see(step);
-    if (!('rows' in first)) return first;
+    if (!('rows' in first)) return stop(first);
+    // THE SCREEN IS THIS STEP'S OWN QUESTION, which is exactly the proof that
+    // every step before it was taken in: the CLI is the thing that advanced.
+    landed = answers.length;
     // And every label the operator marked has to be ON that screen. A label
     // that is not there is a question this is not the picker for, and there is
     // no arrow that would fix that.
     const labels = first.rows.map((row) => row.label);
     const missing = step.labels.find((label) => !labels.includes(label));
-    if (missing !== undefined) return { kind: 'unmatched', label: missing };
+    if (missing !== undefined) return stop({ kind: 'unmatched', label: missing });
 
     // THE PROBE. One arrow, then read again: a picker whose cursor does not
     // move is not taking keys, and a Return into that state commits the row the
     // cursor was already on -- which is the Crimson failure exactly.
-    if (!(await press(sendDownArgv(name)))) return { kind: 'refused' };
+    if (!(await press(sendDownArgv(name)))) return stop({ kind: 'refused' });
     const probe = await see(step);
-    if (!('rows' in probe)) return probe;
+    if (!('rows' in probe)) return stop(probe);
     if (probe.cursor === first.cursor && cursorLabel(probe) === cursorLabel(first)) {
-      return { kind: 'not-live' };
+      return stop({ kind: 'not-live' });
     }
 
     if (!step.multiSelect) {
       const label = step.labels[0] ?? '';
       const at = await stepTo(step, label, probe);
-      if (!('rows' in at)) return at;
+      if (!('rows' in at)) return stop(at);
       // Return here both ANSWERS and ADVANCES -- measured: the strip flips to
       // a tick, the text becomes the next question and the cursor resets to
       // row one. So nothing is read after it HERE: where it landed is the
       // first thing the next turn of the loop asks, and the tail asks it for
       // the last step.
-      if (!(await press(sendEnterArgv(name)))) return { kind: 'refused' };
+      if (!(await press(sendEnterArgv(name)))) return stop({ kind: 'refused' });
       answers.push(label);
       continue;
     }
@@ -251,18 +275,18 @@ async function deliver(run: TmuxRun, name: string, request: AnswerRequest): Prom
     let view = probe;
     for (const label of step.labels) {
       const at = await stepTo(step, label, view);
-      if (!('rows' in at)) return at;
-      if (!(await press(sendEnterArgv(name)))) return { kind: 'refused' };
+      if (!('rows' in at)) return stop(at);
+      if (!(await press(sendEnterArgv(name)))) return stop({ kind: 'refused' });
       const ticked = await see(step);
-      if (!('rows' in ticked)) return ticked;
+      if (!('rows' in ticked)) return stop(ticked);
       if (ticked.rows[ticked.cursor]?.checked !== true) {
-        return { kind: 'unconfirmed', label };
+        return stop({ kind: 'unconfirmed', label });
       }
       view = ticked;
     }
     // A ticked question is not an answered one: Right is what leaves it, for
     // the next question or for the review.
-    if (!(await press(sendRightArgv(name)))) return { kind: 'refused' };
+    if (!(await press(sendRightArgv(name)))) return stop({ kind: 'refused' });
     answers.push(step.labels.join(', '));
   }
 
@@ -288,25 +312,28 @@ async function deliver(run: TmuxRun, name: string, request: AnswerRequest): Prom
   const answered = request.steps.at(-1)?.multiSelect === false;
   const text = await read();
   if (text === null)
-    return answered ? { kind: 'unconfirmed', label: last } : { kind: 'unreadable' };
+    return answered ? stop({ kind: 'unconfirmed', label: last }) : stop({ kind: 'unreadable' });
   const panel = readPicker(text);
   if (panel === null) {
-    return reviewed ? { kind: 'unconfirmed', label: last } : { kind: 'sent', answer };
+    return reviewed ? stop({ kind: 'unconfirmed', label: last }) : { kind: 'sent', answer };
   }
   // The cursor has to be on the row that SUBMITS. Anywhere else, this Return
   // would mean something vam did not read.
-  if (!/submit/i.test(cursorLabel(panel))) return { kind: 'unconfirmed', label: last };
+  if (!/submit/i.test(cursorLabel(panel))) return stop({ kind: 'unconfirmed', label: last });
   // And the review has to NAME the whole answer. It prints every question and
   // what it will send for each, which is a verification surface vam gets for
   // free -- an answer it does not name is an answer vam will not commit.
   const unnamed = chosen.find((label) => !text.includes(label));
-  if (unnamed !== undefined) return { kind: 'unconfirmed', label: unnamed };
-  if (!(await press(sendEnterArgv(name)))) return { kind: 'refused' };
+  if (unnamed !== undefined) return stop({ kind: 'unconfirmed', label: unnamed });
+  // The review names every one of them, which is the CLI saying it took the
+  // last step in too. Nothing after this point may re-send any of the set.
+  landed = answers.length;
+  if (!(await press(sendEnterArgv(name)))) return stop({ kind: 'refused' });
   const back = await read();
-  if (back === null) return { kind: 'unconfirmed', label: last };
+  if (back === null) return stop({ kind: 'unconfirmed', label: last });
   const after = readPicker(back);
   if (after !== null && shape(after) === shape(panel)) {
-    return { kind: 'unconfirmed', label: last };
+    return stop({ kind: 'unconfirmed', label: last });
   }
   return { kind: 'sent', answer };
 }

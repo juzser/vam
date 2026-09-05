@@ -104,6 +104,9 @@ describe('the real two-question call, walked end to end', () => {
     expect(await answerQuestion(run, ATLAS, SET)).toEqual({
       kind: 'unconfirmed',
       label: 'Cherry',
+      // Question one is not in doubt: the CLI advanced past it, which is the
+      // proof `committed` is built on. Only the last step is unconfirmed.
+      committed: ['Emerald'],
     });
     // Two answers went in, and the commit did not.
     expect(keys().filter((key) => key === 'Enter')).toHaveLength(2);
@@ -138,6 +141,9 @@ describe('the check that makes a loop no more dangerous than one question', () =
     expect(await answerQuestion(run, ATLAS, { steps: [COLOUR, FRUIT_COBALT] })).toEqual({
       kind: 'wrong-question',
       question: 'Which fruit do you prefer?',
+      // AND NOTHING IS CLAIMED AS DELIVERED. The screen is still question one,
+      // so the Return vam pressed is not proven to have gone in -- `committed`
+      // counts what the CLI advanced past, never what vam pressed.
     });
     /**
      * ONE Return, and the second one is what the check exists to prevent.
@@ -198,6 +204,8 @@ describe('the check that makes a loop no more dangerous than one question', () =
     expect(await answerQuestion(run, ATLAS, { steps: [COLOUR, missing] })).toEqual({
       kind: 'unmatched',
       label: 'Emerald',
+      // The screen is question two's, so question one went in.
+      committed: ['Emerald'],
     });
     // Emerald IS on question one's screen. It is not on question two's, and
     // that is the screen this step is answered against.
@@ -213,6 +221,9 @@ describe('the tail, and what the word sent is allowed to mean', () => {
     expect(await answerQuestion(run, ATLAS, SET)).toEqual({
       kind: 'unconfirmed',
       label: 'Cherry',
+      // Question one is not in doubt: the CLI advanced past it, which is the
+      // proof `committed` is built on. Only the last step is unconfirmed.
+      committed: ['Emerald'],
     });
   });
 
@@ -225,6 +236,9 @@ describe('the tail, and what the word sent is allowed to mean', () => {
     expect(await answerQuestion(run, ATLAS, SET)).toEqual({
       kind: 'unconfirmed',
       label: 'Cherry',
+      // Question one is not in doubt: the CLI advanced past it, which is the
+      // proof `committed` is built on. Only the last step is unconfirmed.
+      committed: ['Emerald'],
     });
     expect(keys().filter((key) => key === 'Enter')).toHaveLength(2);
   });
@@ -234,6 +248,57 @@ describe('the tail, and what the word sent is allowed to mean', () => {
     expect(await answerQuestion(run, ATLAS, SET)).toEqual({
       kind: 'unconfirmed',
       label: 'Cherry',
+      // BOTH, here: the review named both answers back before vam pressed
+      // Return on it, so the picker has taken the whole set in and a retry
+      // must re-send none of it. What is unconfirmed is the commit.
+      committed: ['Emerald', 'Cherry'],
     });
+  });
+});
+
+/**
+ * HOW FAR THE SET GOT, carried on the refusal itself.
+ *
+ * Every `return` in the loop was a whole-request failure, and the renderer
+ * drew all of them as "not sent". For a set of one that is true. For a set of
+ * two it denies an answer that is already inside the running agent -- and
+ * `shared/answer.ts` said so in words: "every one but `sent` means the picker
+ * was left as it was found".
+ */
+describe('a refusal after part of the set has been committed', () => {
+  /** A runner whose send-keys start failing from the `nth` one on. */
+  function failing(captures: readonly string[], nth: number) {
+    const argvs: (readonly string[])[] = [];
+    const queue = [...captures];
+    let sends = 0;
+    const run: TmuxRun = async (argv) => {
+      argvs.push(argv);
+      if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t${NAME}\n`);
+      if (argv[0] === 'capture-pane') return ok(queue.shift() ?? '');
+      sends += 1;
+      return sends >= nth
+        ? { failure: { message: 'tmux failed' }, stdout: '', stderr: "can't find pane" }
+        : ok('');
+    };
+    return { run, argvs };
+  }
+
+  it('names the answer question one already committed, and does not deny it', async () => {
+    // Three keys go in for question one -- probe, walk, Return -- and the
+    // Return ANSWERS it. The probe arrow for question two is the fourth, and
+    // tmux refuses it: the session ended in between.
+    const { run } = failing(REAL, 4);
+    expect(await answerQuestion(run, ATLAS, SET)).toEqual({
+      kind: 'refused',
+      committed: ['Emerald'],
+    });
+  });
+
+  it('carries nothing for a set that failed before anything was committed', async () => {
+    // The very first probe arrow fails. Nothing was pressed on a row, so
+    // there is no partial answer to report -- and the field is absent rather
+    // than an empty list, so "nothing was sent" stays the honest wording.
+    const { run } = failing(REAL, 1);
+    expect(await answerQuestion(run, ATLAS, SET)).toEqual({ kind: 'refused' });
   });
 });
