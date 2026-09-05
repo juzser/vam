@@ -133,7 +133,15 @@ describe('what Submit sends, and what it says afterwards', () => {
     // By value: the project, the labels the operator marked, and the session
     // id -- which is what makes the pairing per session rather than per
     // project on the other side.
-    expect(answer.mock.calls[0]).toEqual(['p1', { labels: ['Cobalt'], multiSelect: false }, 's1']);
+    expect(answer.mock.calls[0]).toEqual([
+      'p1',
+      {
+        steps: [
+          { question: 'Which colour do you prefer?', labels: ['Cobalt'], multiSelect: false },
+        ],
+      },
+      's1',
+    ]);
   });
 
   it('carries every mark of a multi-select question, in the order they are drawn', async () => {
@@ -144,8 +152,13 @@ describe('what Submit sends, and what it says afterwards', () => {
     fireEvent.click(submit() as HTMLElement);
     await waitFor(() => expect(answer).toHaveBeenCalledTimes(1));
     expect(answer.mock.calls[0]?.[1]).toEqual({
-      labels: ['Crimson', 'Cobalt'],
-      multiSelect: true,
+      steps: [
+        {
+          question: 'Which colour do you prefer?',
+          labels: ['Crimson', 'Cobalt'],
+          multiSelect: true,
+        },
+      ],
     });
   });
 
