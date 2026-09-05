@@ -45,9 +45,19 @@ export function allSessions(model: CanvasModel): SessionEntry[] {
   for (const project of model.projects) {
     for (const session of project.sessions) {
       // Ungrouped: this reads the model's flat `projects`, which is the level
-      // that has no group by definition. Composing the grouped level is a
-      // separate step above this one.
+      // that has no group by definition.
       entries.push({ project, session, group: null });
+    }
+  }
+  // The grouped level, after the ungrouped one. Order here is not display
+  // order -- `orderedSessions` in `canvas/layout.ts` is -- so appending is
+  // enough, and it keeps the ungrouped path (every store that exists) walking
+  // exactly the loop it walked before groups were a thing.
+  for (const group of model.groups ?? []) {
+    for (const project of group.projects) {
+      for (const session of project.sessions) {
+        entries.push({ project, session, group });
+      }
     }
   }
   return entries;

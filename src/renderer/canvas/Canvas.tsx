@@ -52,6 +52,7 @@ import {
   type UsageSnapshot,
   type UsageWindow,
 } from '../../shared/usage.js';
+import { composeGroups } from '../domain/grouping.js';
 import type { CanvasModel, Decision, Project, SessionStatus, SourceId } from '../domain/model.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
@@ -611,7 +612,20 @@ function CanvasInner({
       return next.length === current.length ? current : next;
     });
   }, [sourceModel]);
-  const model = useMemo(() => withPending(sourceModel, pending), [sourceModel, pending]);
+  /**
+   * The drawn model: the source's, plus the optimistic paint, plus the
+   * operator's grouping resolved on top.
+   *
+   * COMPOSING RUNS LAST, downstream of `withPending`, because `withPending`
+   * spreads the model and rewrites `projects` -- composing first would have it
+   * rebuild the top level out of the ungrouped half alone. With nothing in
+   * `prefs.groups`, which is every store that exists, `composeGroups` hands
+   * back the very object it was given and this line costs nothing.
+   */
+  const model = useMemo(
+    () => composeGroups(withPending(sourceModel, pending), prefs.groups),
+    [sourceModel, pending, prefs.groups],
+  );
 
   const allEntries = useMemo(() => orderedSessions(model), [model]);
 
@@ -873,14 +887,19 @@ function CanvasInner({
     if (kept.size === allEntries.length) {
       return model;
     }
-    return {
-      projects: model.projects
+    const narrow = (projects: readonly Project[]) =>
+      projects
         .map((project) => ({
           ...project,
           sessions: project.sessions.filter((s) => kept.has(s.id)),
         }))
-        .filter((project) => project.sessions.length > 0),
-    };
+        .filter((project) => project.sessions.length > 0);
+    // The grouped half is narrowed the same way and by the same set. Dropping
+    // it here instead would make a filter delete every grouped card from the
+    // canvas -- the "drawn but unreachable" defect this memo's own comment
+    // describes, in reverse.
+    const groups = model.groups?.map((group) => ({ ...group, projects: narrow(group.projects) }));
+    return { projects: narrow(model.projects), ...(groups === undefined ? {} : { groups }) };
   }, [model, entries, allEntries]);
 
   const layout = useMemo(() => layoutCanvas(visibleModel), [visibleModel]);

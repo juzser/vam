@@ -17,7 +17,7 @@
  * not measure.
  */
 
-import type { CanvasModel, Decision, Project, Session } from '../domain/model.js';
+import type { CanvasModel, Decision, Group, Project, Session } from '../domain/model.js';
 import { allSessions, type SessionEntry, visibleDecisions } from '../domain/selectors.js';
 import {
   CELL,
@@ -172,6 +172,50 @@ export function orderedProjects(model: CanvasModel): Project[] {
   return [...model.projects].sort((a, b) => projectRank(a) - projectRank(b));
 }
 
+/** A group's rank is its most urgent member's. An empty group ranks last. */
+function groupRank(group: Group): number {
+  return group.projects.reduce(
+    (best, project) => Math.min(best, projectRank(project)),
+    Number.POSITIVE_INFINITY,
+  );
+}
+
+/**
+ * The top level in display order: the ungrouped projects and the groups, one
+ * sequence, each ranked by its most urgent session.
+ *
+ * Ranking them TOGETHER is what keeps "what needs you rises" true across both
+ * levels -- a group holding the only waiting session has to beat an ungrouped
+ * project of done ones, or the operator learns to distrust the top of the
+ * list. Contiguity is the same payment `orderedProjects` already documents,
+ * one level up: a group's members stay together whatever their own ranks.
+ *
+ * With no groups this is `orderedProjects` and nothing else, which is the
+ * state of every store in existence.
+ */
+export function orderedTopLevel(model: CanvasModel): (Project | Group)[] {
+  const groups = model.groups ?? [];
+  if (groups.length === 0) {
+    return orderedProjects(model);
+  }
+  const tops: { readonly top: Project | Group; readonly rank: number }[] = [
+    ...model.projects.map((project) => ({
+      top: project as Project | Group,
+      rank: projectRank(project),
+    })),
+    ...groups.map((group) => ({ top: group as Project | Group, rank: groupRank(group) })),
+  ];
+  // Stable, so equal ranks keep ungrouped-then-grouped and, within each, the
+  // order the adapter and the store produced.
+  return tops.sort((a, b) => a.rank - b.rank).map(({ top }) => top);
+}
+
+/** The members of one group, most urgent project first -- `orderedProjects`
+ *  applied to the level below a group heading. */
+export function orderedInGroup(group: Group): Project[] {
+  return [...group.projects].sort((a, b) => projectRank(a) - projectRank(b));
+}
+
 /** The sessions of one project, most urgent first. */
 export function orderedInProject(project: Project): Session[] {
   return [...project.sessions].sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status]);
@@ -193,11 +237,20 @@ export function orderedInProject(project: Project): Session[] {
 export function orderedSessions(model: CanvasModel): SessionEntry[] {
   const byId = new Map(allSessions(model).map((entry) => [entry.session.id, entry]));
   const ordered: SessionEntry[] = [];
-  for (const project of orderedProjects(model)) {
+  const push = (project: Project) => {
     for (const session of orderedInProject(project)) {
       const entry = byId.get(session.id);
       if (entry !== undefined) {
         ordered.push(entry);
+      }
+    }
+  };
+  for (const top of orderedTopLevel(model)) {
+    if ('sessions' in top) {
+      push(top);
+    } else {
+      for (const project of orderedInGroup(top)) {
+        push(project);
       }
     }
   }
