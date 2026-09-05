@@ -25,7 +25,7 @@
  *   5. The username, standalone, wherever it appears outside a path -- taken
  *      from the home directory and from any `/Users/<name>` in the text, so
  *      the browser build (which has no `homedir`) is covered by shape alone.
-  *   6. Pids. A number that means nothing off the machine it was taken on.
+ *   6. Pids. A number that means nothing off the machine it was taken on.
  *   7. tmux session names vam minted -- `vam-<project slug>-<tail>`. vam's
  *      own messages carry them UNQUOTED, so rule 3 never sees them, and the
  *      slug is the project label.

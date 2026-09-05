@@ -67,7 +67,7 @@ const clip = (text: string): string =>
  */
 export type SpawnFailure = {
   readonly message: string;
-  readonly code?: string | number | undefined;
+  readonly code?: string | number | null | undefined;
   readonly killed?: boolean | undefined;
   readonly signal?: string | undefined;
 };

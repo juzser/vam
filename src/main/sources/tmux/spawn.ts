@@ -77,7 +77,7 @@ const NO_WORDS = 'the process exited without saying why';
 
 export type SpawnFailure = {
   readonly message: string;
-  readonly code?: string | number | undefined;
+  readonly code?: string | number | null | undefined;
   readonly killed?: boolean | undefined;
   /** Which signal ended it, when one did. `execFile` reports this beside `killed`. */
   readonly signal?: string | undefined;

@@ -30,6 +30,15 @@ const SECRET_PROMPT =
  * measured: `{code: null, killed: false, signal: 'SIGKILL'}`, with the argv
  * inside `message`. `killed` is true only when node itself killed the child.
  */
+/**
+ * A plain non-zero exit with the argv in `message` -- what the CLI produces
+ * when it complains on stdout, or exits without a word. This is the shape
+ * that reaches the `cli-failed` fallback, and it is the one that leaked.
+ */
+function exitedQuietly(argv: readonly string[]): Error & { code: number } {
+  return Object.assign(new Error(`Command failed: claude ${argv.join(' ')}\n`), { code: 2 });
+}
+
 function externallyKilled(argv: readonly string[]): Error & {
   code: number | null;
   killed: boolean;
@@ -47,30 +56,41 @@ describe('the prompt never reaches a composed report', () => {
     clearEvents();
   });
 
-  it('keeps the delivered prompt out of the classified failure, the log and the issue body', () => {
-    const failure = externallyKilled(deliverArgv(SESSION, SECRET_PROMPT));
-    const error = classifyDeliverFailure({ failure, stderr: '', sessionId: SESSION });
+  it.each([
+    ['a quiet non-zero exit', exitedQuietly],
+    ['a kill from outside vam', externallyKilled],
+  ])(
+    'keeps the delivered prompt out of the failure, the log and the issue body (%s)',
+    (_name, shape) => {
+      const error = classifyDeliverFailure({
+        failure: shape(deliverArgv(SESSION, SECRET_PROMPT)),
+        stderr: '',
+        sessionId: SESSION,
+      });
 
-    expect(error.message).not.toContain('sk-live-DO-NOT-SHARE');
-    expect(error.message).not.toContain('acme-corp');
-    expect(error.message).not.toContain('Command failed');
+      expect(error.message).not.toContain('sk-live-DO-NOT-SHARE');
+      expect(error.message).not.toContain('acme-corp');
+      expect(error.message).not.toContain('Command failed');
 
-    const event = recordFailure('send prompt', error);
-    const report = composeReport(event, HOME);
-    for (const secret of ['sk-live-DO-NOT-SHARE', 'acme-corp', 'billing secret rotation']) {
-      expect(report.body).not.toContain(secret);
-      expect(decodeURIComponent(report.url)).not.toContain(secret);
-    }
-  });
+      const event = recordFailure('send prompt', error);
+      const report = composeReport(event, HOME);
+      for (const secret of ['sk-live-DO-NOT-SHARE', 'acme-corp', 'billing secret rotation']) {
+        expect(report.body).not.toContain(secret);
+        expect(decodeURIComponent(report.url)).not.toContain(secret);
+      }
+    },
+  );
 
   it('bounds the body: a one-million-character prompt cannot become a one-million-character issue', () => {
     // MAX_PROMPT_LENGTH is 1,000,000 and the fallback branch applied no clip.
     const huge = 'x'.repeat(1_000_000);
-    const failure = externallyKilled(deliverArgv(SESSION, huge));
+    const failure = exitedQuietly(deliverArgv(SESSION, huge));
     const error = classifyDeliverFailure({ failure, stderr: '', sessionId: SESSION });
     expect(error.message.length).toBeLessThan(2_000);
-    expect(composeReport(error === null ? never() : recordFailure('send prompt', error), HOME).body
-      .length).toBeLessThan(4_000);
+    expect(
+      composeReport(error === null ? never() : recordFailure('send prompt', error), HOME).body
+        .length,
+    ).toBeLessThan(4_000);
   });
 
   it('still says which session failed, so the report stays diagnosable', () => {
