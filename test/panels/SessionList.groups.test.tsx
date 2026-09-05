@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Group } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { SessionList } from '../../src/renderer/panels/SessionList.js';
-import { baseProps, makeProject, makeSession } from './session-list-props.js';
+import { baseProps, makeProject, makeSession, noop } from './session-list-props.js';
 
 afterEach(cleanup);
 
@@ -143,5 +143,137 @@ describe('the group heading', () => {
       container.querySelector(`[data-project-id="${id}"]`)?.closest('li') as HTMLElement;
     expect(li('p1').getAttribute('data-in-group')).toBe('group:1');
     expect(li('p3').getAttribute('data-in-group')).toBe(null);
+  });
+});
+
+describe('the group lifecycle', () => {
+  it('offers "New project" to the left of the directory picker, which is untouched', () => {
+    const { container } = render(<SessionList {...baseProps(ungrouped())} onCreateGroup={noop} />);
+    const header = container.querySelector('[data-projects-header]') as HTMLElement;
+    expect(header.querySelector('[data-new-group]')).toBeTruthy();
+    // The one accessible name the directory picker has always answered to
+    // stays with the directory picker; the new control qualifies its own.
+    expect(header.querySelector('[data-new-project]')?.getAttribute('aria-label')).toBe(
+      'new project',
+    );
+    expect(header.querySelector('[data-new-group]')?.getAttribute('aria-label')).not.toBe(
+      'new project',
+    );
+    const controls = [...header.querySelectorAll('button')].map((el) =>
+      el.hasAttribute('data-new-group')
+        ? 'new-group'
+        : el.hasAttribute('data-new-project')
+          ? 'new-project'
+          : 'other',
+    );
+    expect(controls.indexOf('new-group')).toBeLessThan(controls.indexOf('new-project'));
+    expect(header.querySelector('[data-new-group]')?.getAttribute('title')).toBe('New project');
+    // The only route to a repository vam has never seen keeps its own title.
+    expect(header.querySelector('[data-new-project]')?.getAttribute('title')).toBe(
+      'Choose a directory and start a session in it',
+    );
+  });
+
+  it('draws no "New project" control for a caller with nowhere to store one', () => {
+    const { container } = render(<SessionList {...baseProps(ungrouped())} />);
+    expect(container.querySelector('[data-new-group]')).toBeNull();
+  });
+
+  it('creates a group from an inline row, not an overlay', () => {
+    const onCreateGroup = vi.fn();
+    const { container } = render(
+      <SessionList {...baseProps(ungrouped())} onCreateGroup={onCreateGroup} />,
+    );
+    fireEvent.click(container.querySelector('[data-new-group]') as Element);
+    const input = container.querySelector('[data-group-draft]') as HTMLInputElement;
+    expect(input).toBeTruthy();
+    // No overlay: naming a group discloses nothing, so it adds no click.
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    fireEvent.change(input, { target: { value: 'the-monorepo' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onCreateGroup).toHaveBeenCalledWith('the-monorepo');
+    expect(container.querySelector('[data-group-draft]')).toBeNull();
+  });
+
+  it('creates nothing from an empty name, and nothing on Escape', () => {
+    const onCreateGroup = vi.fn();
+    const { container } = render(
+      <SessionList {...baseProps(ungrouped())} onCreateGroup={onCreateGroup} />,
+    );
+    fireEvent.click(container.querySelector('[data-new-group]') as Element);
+    fireEvent.keyDown(container.querySelector('[data-group-draft]') as Element, { key: 'Enter' });
+    expect(onCreateGroup).not.toHaveBeenCalled();
+
+    fireEvent.click(container.querySelector('[data-new-group]') as Element);
+    const input = container.querySelector('[data-group-draft]') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'abandoned' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(onCreateGroup).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-group-draft]')).toBeNull();
+  });
+
+  it('renames a group in place, through the same editor', () => {
+    const onRenameGroup = vi.fn();
+    const { container } = render(
+      <SessionList
+        {...baseProps(grouped())}
+        groups={[GROUP]}
+        collapsedGroups={[]}
+        onRenameGroup={onRenameGroup}
+      />,
+    );
+    fireEvent.click(container.querySelector('[data-group-menu="group:1"]') as Element);
+    fireEvent.click(container.querySelector('[data-group-menu-item="rename"]') as Element);
+    const input = container.querySelector('[data-group-draft]') as HTMLInputElement;
+    expect(input.value).toBe('the-monorepo');
+    fireEvent.change(input, { target: { value: 'renamed' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onRenameGroup).toHaveBeenCalledWith(GROUP, 'renamed');
+  });
+
+  it('asks the caller for the icon picker, as the project heading does', () => {
+    const onPickGroupIcon = vi.fn();
+    const { container } = render(
+      <SessionList
+        {...baseProps(grouped())}
+        groups={[GROUP]}
+        collapsedGroups={[]}
+        onPickGroupIcon={onPickGroupIcon}
+      />,
+    );
+    fireEvent.click(container.querySelector('[data-group-menu="group:1"]') as Element);
+    fireEvent.click(container.querySelector('[data-group-menu-item="icon"]') as Element);
+    expect(onPickGroupIcon).toHaveBeenCalledWith(GROUP);
+  });
+
+  /**
+   * The disclosure test. `ConfirmRemoveProject` exists "to make a disclosure,
+   * not to add a click", and its disclosure is two session counts; ungrouping
+   * has none, ends nothing, and its whole outcome is on screen the instant it
+   * happens. So it is a plain item, and the red is left where the consequence
+   * is -- on "Remove project", which is still exactly where it was.
+   */
+  it('ungroups with no confirm and no red', () => {
+    const onUngroup = vi.fn();
+    const { container } = render(
+      <SessionList
+        {...baseProps(grouped())}
+        groups={[GROUP]}
+        collapsedGroups={[]}
+        onUngroup={onUngroup}
+      />,
+    );
+    fireEvent.click(container.querySelector('[data-group-menu="group:1"]') as Element);
+    const ungroup = container.querySelector('[data-group-menu-item="ungroup"]') as HTMLElement;
+    expect(ungroup.className).not.toContain('danger');
+    expect(ungroup.querySelector('svg')).toBeNull();
+    fireEvent.click(ungroup);
+    expect(onUngroup).toHaveBeenCalledWith(GROUP);
+    expect(container.querySelector('[data-confirm-remove]')).toBeNull();
+
+    // And the destructive one is untouched, still red, still on the project.
+    fireEvent.click(container.querySelector('[data-project-menu="p1"]') as Element);
+    const remove = container.querySelector('[data-project-menu-item="remove"]') as HTMLElement;
+    expect(remove.className).toContain('text-danger');
   });
 });

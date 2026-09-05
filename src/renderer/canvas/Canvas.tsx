@@ -95,7 +95,9 @@ import {
   applyRenames,
   applyTheme,
   browserStorage,
+  createGroup,
   DEFAULT_FOCUS_SHARE,
+  deleteGroup,
   type EffectiveTheme,
   FOCUS_SHARE_OFF,
   isGroupCollapsed,
@@ -103,8 +105,10 @@ import {
   type Prefs,
   paletteFor,
   readPrefs,
+  renameGroup,
   setDetailTab,
   setGroupCollapsed,
+  setGroupIcon,
   setIcon,
   setLastFocus,
   setLayout,
@@ -705,6 +709,13 @@ function CanvasInner({
   const [renameTarget, setRenameTarget] = useState<IconTarget | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [pickingIconFor, setPickingIconFor] = useState<IconTarget | null>(null);
+  /** The group whose glyph is being picked, captured when the picker opens --
+   *  the reasoning `ProjectIconTarget` records, one level up again. */
+  const [pickingGroupIconFor, setPickingGroupIconFor] = useState<{
+    readonly source: SourceId;
+    readonly groupId: string;
+    readonly name: string;
+  } | null>(null);
   const [pickingProjectIconFor, setPickingProjectIconFor] = useState<ProjectIconTarget | null>(
     null,
   );
@@ -852,6 +863,80 @@ function CanvasInner({
    * group is written in -- a group carries no source of its own, and guessing
    * one from its members would have nothing to guess from while it is empty.
    */
+  /**
+   * Which source a NEW group is written under.
+   *
+   * A group has no cwd, so it has no source of its own; membership, on the
+   * other hand, is matched within a source, because a project id is a cwd
+   * digest unique only there. So a group has to be filed under one, and the
+   * only honest candidate is the source the drawn projects come from: the
+   * first one that names one, which with vam's one live source is the only
+   * one there is. A model whose projects name none has nowhere to file a
+   * group, and the control says so rather than guessing -- the same refusal
+   * the project icon picker already makes, for the same reason.
+   *
+   * KNOWN AND STATED: with two sources on screen, a group made here is filed
+   * under the first and can therefore never hold the second's projects, since
+   * membership is matched within a source. Nothing in vam draws two sources
+   * at once today; the day something does, this is where the operator has to
+   * be asked which.
+   */
+  const groupHomeSource = useCallback((): SourceId | null => {
+    for (const project of model.projects) {
+      if (project.source !== undefined) return project.source;
+    }
+    for (const group of model.groups ?? []) {
+      for (const project of group.projects) {
+        if (project.source !== undefined) return project.source;
+      }
+    }
+    return null;
+  }, [model]);
+
+  const createNewGroup = useCallback(
+    (name: string) => {
+      const source = groupHomeSource();
+      if (source === null) {
+        setStatus('no source to file a project under — nothing was created');
+        return;
+      }
+      // Minted locally and derived from nothing: a group has no cwd to
+      // digest, must survive a rename, and must exist while it is empty.
+      const id = `group:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      savePrefs(createGroup(prefs, source, id, name));
+      setStatus(`${name} — a project kept on this machine, never in the event log`);
+    },
+    [groupHomeSource, prefs, savePrefs],
+  );
+
+  const renameOneGroup = useCallback(
+    (group: Group, name: string) => {
+      const source = groupSource(prefs.groups, group.id);
+      if (source === null) return;
+      savePrefs(renameGroup(prefs, source, group.id, name));
+    },
+    [prefs, savePrefs],
+  );
+
+  /**
+   * Dissolve a group. NO CONFIRM, and that is the decision rather than an
+   * omission: no session ends, nothing is hidden, `hiddenProjects` is not
+   * touched, and there is no source call to serialise behind `pendingAction`.
+   * What is lost is a name and a glyph; every project and every session stays
+   * on screen, one level up. The status line is the whole disclosure, and it
+   * is enough because the outcome is already visible.
+   */
+  const ungroup = useCallback(
+    (group: Group) => {
+      const source = groupSource(prefs.groups, group.id);
+      if (source === null) return;
+      const moved = group.projects.length;
+      savePrefs(deleteGroup(prefs, source, group.id));
+      setStatus(`${group.name} ungrouped — ${moved} ${moved === 1 ? 'repo' : 'repos'} moved up`);
+    },
+    [prefs, savePrefs],
+  );
+
   const toggleGroupCollapse = useCallback(
     (group: Group) => {
       const source = groupSource(prefs.groups, group.id);
@@ -2369,6 +2454,18 @@ function CanvasInner({
           groups={model.groups ?? []}
           collapsedGroups={collapsedGroups}
           onToggleGroupCollapse={toggleGroupCollapse}
+          onCreateGroup={createNewGroup}
+          onRenameGroup={renameOneGroup}
+          onPickGroupIcon={(group) => {
+            const source = groupSource(prefs.groups, group.id);
+            if (source === null) return;
+            setPickingGroupIconFor((current) =>
+              current !== null && current.groupId === group.id
+                ? null
+                : { source, groupId: group.id, name: group.name },
+            );
+          }}
+          onUngroup={ungroup}
           hiddenProjects={hiddenProjects}
           // Restoring is the only thing the sidebar asks for by itself: it
           // ends nothing, so there is nothing to serialise or refuse.
@@ -2697,6 +2794,24 @@ function CanvasInner({
             setPickingIconFor(null);
           }}
           onClose={() => setPickingIconFor(null)}
+        />
+      )}
+
+      {pickingGroupIconFor !== null && (
+        <IconPicker
+          title={pickingGroupIconFor.name}
+          onPick={(icon) => {
+            savePrefs(
+              setGroupIcon(prefs, pickingGroupIconFor.source, pickingGroupIconFor.groupId, icon),
+            );
+            setStatus(
+              icon === ''
+                ? 'icon cleared — kept on this machine, never in the event log'
+                : `${icon} — kept on this machine, never in the event log`,
+            );
+            setPickingGroupIconFor(null);
+          }}
+          onClose={() => setPickingGroupIconFor(null)}
         />
       )}
 

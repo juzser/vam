@@ -115,3 +115,74 @@ describe('groups, from the store to the sidebar', () => {
     expect(storedPrefs().collapsedGroups).toEqual({ 'black-smith': ['group:1'] });
   });
 });
+
+describe('the group lifecycle, stored', () => {
+  const newGroup = () => document.querySelector<HTMLButtonElement>('[data-new-group]');
+  const draft = () => document.querySelector<HTMLInputElement>('[data-group-draft]');
+  const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
+  const storedGroups = () =>
+    (storedPrefs().groups ?? {}) as Record<string, { id: string; name: string }[]>;
+
+  function type(input: HTMLInputElement, value: string) {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  it('creates a named group under the source it will hold projects from', () => {
+    render(<Canvas model={MODEL} />);
+    act(() => newGroup()?.click());
+    const input = draft() as HTMLInputElement;
+    act(() => type(input, 'the-monorepo'));
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    const stored = storedGroups()['black-smith'] ?? [];
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.name).toBe('the-monorepo');
+    expect(stored[0]?.id).toMatch(/^group:/);
+    expect(heading(stored[0]?.id ?? '')?.textContent).toContain('the-monorepo');
+  });
+
+  it('ungroups with no dialog, returning the members to the top level', () => {
+    seed({
+      groups: { 'black-smith': [{ id: 'group:1', name: 'work', projects: ['p1', 'p2'] }] },
+    });
+    render(<Canvas model={MODEL} />);
+    act(() => document.querySelector<HTMLButtonElement>('[data-group-menu="group:1"]')?.click());
+    act(() =>
+      document.querySelector<HTMLButtonElement>('[data-group-menu-item="ungroup"]')?.click(),
+    );
+    expect(document.querySelector('[data-confirm-remove]')).toBeNull();
+    expect(document.querySelectorAll('[data-group-heading]')).toHaveLength(0);
+    expect(document.querySelectorAll('[data-project-heading]')).toHaveLength(2);
+    expect(rows()).toBe(2);
+    expect(storedGroups()['black-smith']).toBeUndefined();
+    // The status line names what happened, since nothing else does.
+    expect(statusBar()).toContain('work');
+    expect(statusBar()).toContain('2');
+  });
+
+  it('renames a group in the store', () => {
+    seed({ groups: { 'black-smith': [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
+    render(<Canvas model={MODEL} />);
+    act(() => document.querySelector<HTMLButtonElement>('[data-group-menu="group:1"]')?.click());
+    act(() =>
+      document.querySelector<HTMLButtonElement>('[data-group-menu-item="rename"]')?.click(),
+    );
+    const input = draft() as HTMLInputElement;
+    act(() => type(input, 'renamed'));
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(storedGroups()['black-smith']?.[0]?.name).toBe('renamed');
+  });
+
+  it('opens the icon picker for a group and stores what was picked', () => {
+    seed({ groups: { 'black-smith': [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
+    render(<Canvas model={MODEL} />);
+    act(() => document.querySelector<HTMLButtonElement>('[data-group-menu="group:1"]')?.click());
+    act(() => document.querySelector<HTMLButtonElement>('[data-group-menu-item="icon"]')?.click());
+    expect(document.querySelector('[data-icon-picker]')?.textContent).toContain('work');
+  });
+});

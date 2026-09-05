@@ -25,6 +25,7 @@ import {
   ChevronRight,
   Filter,
   Folder,
+  FolderPlus,
   GitBranch,
   LoaderCircle,
   Monitor,
@@ -232,6 +233,20 @@ export type SessionListProps = {
   readonly collapsedGroups?: readonly string[];
   readonly onToggleGroupCollapse?: (group: Group) => void;
   /**
+   * The group lifecycle: make one, rename it, give it a glyph, dissolve it.
+   *
+   * Every one of them is a prefs write and nothing else -- no session ends, no
+   * project is hidden, no source is asked anything -- which is why none of
+   * them is serialised behind `pendingAction` and why `onUngroup` needs no
+   * confirm. Optional, and a control whose handler is absent is not drawn: a
+   * caller that has nowhere to store a group must not be given a button that
+   * silently does nothing.
+   */
+  readonly onCreateGroup?: (name: string) => void;
+  readonly onRenameGroup?: (group: Group, name: string) => void;
+  readonly onPickGroupIcon?: (group: Group) => void;
+  readonly onUngroup?: (group: Group) => void;
+  /**
    * Removing a project, and bringing one back. ALL THREE ARE REQUIRED, and
    * that is the decision -- read on before making them optional again.
    *
@@ -325,6 +340,10 @@ export function SessionList(props: SessionListProps) {
     groups = [],
     collapsedGroups,
     onToggleGroupCollapse,
+    onCreateGroup,
+    onRenameGroup,
+    onPickGroupIcon,
+    onUngroup,
     hiddenProjects,
     onHideProject,
     onRemoveProject,
@@ -442,6 +461,21 @@ export function SessionList(props: SessionListProps) {
   /** The same fallback for the group fold. See `collapsedGroups` on the props. */
   const [localGroupCollapsed, setLocalGroupCollapsed] = useState<readonly string[]>([]);
   const groupCollapsed = collapsedGroups ?? localGroupCollapsed;
+  /**
+   * The one group name being typed, and what it is for: a group about to
+   * exist, or one being renamed. ONE piece of state, because one editor is
+   * open at a time and two would need a rule about which wins.
+   *
+   * The idiom is the session rename's, deliberately -- a row that turns into
+   * a field, Enter commits, Escape cancels -- and NOT an overlay:
+   * `ConfirmRemoveProject`'s header states vam's overlay idiom exists to make
+   * a disclosure, and naming a group discloses nothing.
+   */
+  const [groupDraft, setGroupDraft] = useState<
+    { readonly kind: 'new' } | { readonly kind: 'rename'; readonly group: Group } | null
+  >(null);
+  const [groupDraftName, setGroupDraftName] = useState('');
+  const [openGroupMenu, setOpenGroupMenu] = useState<string | null>(null);
   /** Never `entries`. See `allEntries` on the props for what reads this. */
   const allEntries = unfiltered ?? entries;
   const hidden = hiddenProjects;
@@ -469,6 +503,25 @@ export function SessionList(props: SessionListProps) {
     },
     [onToggleCollapse],
   );
+
+  const cancelGroupDraft = useCallback(() => {
+    setGroupDraft(null);
+    setGroupDraftName('');
+  }, []);
+
+  /** An empty name creates nothing and renames nothing -- it just closes. */
+  const commitGroupDraft = useCallback(() => {
+    const name = groupDraftName.trim();
+    if (groupDraft !== null && name !== '') {
+      if (groupDraft.kind === 'new') {
+        onCreateGroup?.(name);
+      } else {
+        onRenameGroup?.(groupDraft.group, name);
+      }
+    }
+    setGroupDraft(null);
+    setGroupDraftName('');
+  }, [groupDraft, groupDraftName, onCreateGroup, onRenameGroup]);
 
   const toggleGroupCollapse = useCallback(
     (group: Group) => {
@@ -671,6 +724,41 @@ export function SessionList(props: SessionListProps) {
    * project has no entry to appear beside, so it is appended: an empty group
    * ranks last there too.
    */
+  /**
+   * The one name editor, used by both routes. Rendered at most once: a new
+   * group's row sits at the top of the list, a rename replaces the heading's
+   * own name, and `groupDraft` says which.
+   */
+  /** Nothing to open a menu for when the caller wired no group action. */
+  const hasGroupMenu =
+    onRenameGroup !== undefined || onPickGroupIcon !== undefined || onUngroup !== undefined;
+
+  const groupEditor = (
+    <input
+      data-group-draft
+      value={groupDraftName}
+      placeholder="project name"
+      aria-label="project name"
+      ref={(node) => {
+        if (node !== null && document.activeElement !== node) {
+          node.focus();
+        }
+      }}
+      onChange={(event) => setGroupDraftName(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          commitGroupDraft();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          cancelGroupDraft();
+        }
+      }}
+      onBlur={cancelGroupDraft}
+      className="min-w-0 flex-1 rounded-[5px] border border-line-strong bg-panel px-1 py-0.5 font-mono text-[10px] text-ink outline-none"
+    />
+  );
+
   const drawn: (
     | { readonly kind: 'group'; readonly group: Group; readonly count: number }
     | { readonly kind: 'section'; readonly section: (typeof folded)[number] }
@@ -796,6 +884,36 @@ export function SessionList(props: SessionListProps) {
           Projects
         </span>
         <span className="flex-1" />
+        {/* The layer above: a group of the projects vam already knows, named
+            "project" because that is the operator's word for it (see the
+            vocabulary table in `domain/model.ts`). LEFT of the directory
+            picker, which is untouched and unmoved: that one is the only route
+            to a repository vam has never seen, and this one cannot reach a
+            directory at all. Both are the same 26px square, in the row that
+            already held two.
+
+            THE ACCESSIBLE NAME IS QUALIFIED AND THE VISIBLE TITLE IS NOT.
+            "new project" is the name the control beside this one has answered
+            to since before the group layer existed, and two squares in one row
+            answering to one name is worse for a screen reader than a longer
+            phrase is for anyone. The tooltip a person reads is the operator's
+            word, unqualified; see the note in the plan -- this pairing is the
+            one open UI question and it is theirs to settle. */}
+        {onCreateGroup !== undefined && (
+          <button
+            type="button"
+            data-new-group
+            aria-label="new project (a group of repos)"
+            onClick={() => {
+              setGroupDraftName('');
+              setGroupDraft({ kind: 'new' });
+            }}
+            title="New project"
+            className="flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border border-line bg-panel text-ink-faint hover:border-line-strong"
+          >
+            <FolderPlus size={13} strokeWidth={1.6} />
+          </button>
+        )}
         {/* Choose a directory, start a session in it. That is the ONLY thing
             "new project" can mean here: a project is derived from the cwd of
             a live session, so there is nothing to create and nothing to
@@ -963,6 +1081,14 @@ export function SessionList(props: SessionListProps) {
         }}
       >
         <ul className="flex flex-col gap-3.5">
+          {groupDraft?.kind === 'new' && (
+            <li className="flex items-center gap-[7px] px-1 pb-0.5">
+              <span className="flex h-[15px] w-[15px] flex-none items-center justify-center text-ink-faint">
+                <Folder size={11} strokeWidth={1.7} />
+              </span>
+              {groupEditor}
+            </li>
+          )}
           {drawn.map((item) => {
             if (item.kind === 'group') {
               const { group, count } = item;
@@ -992,9 +1118,13 @@ export function SessionList(props: SessionListProps) {
                     >
                       {group.icon ?? <Folder size={11} strokeWidth={1.7} />}
                     </span>
-                    <span className="truncate font-mono text-[10px] text-ink uppercase tracking-[0.12em]">
-                      {group.name}
-                    </span>
+                    {groupDraft?.kind === 'rename' && groupDraft.group.id === group.id ? (
+                      groupEditor
+                    ) : (
+                      <span className="truncate font-mono text-[10px] text-ink uppercase tracking-[0.12em]">
+                        {group.name}
+                      </span>
+                    )}
                     {/* Summed over every member, because that is what the
                         heading is over. A count of one member's sessions under
                         a caption naming several would be a number about
@@ -1023,6 +1153,99 @@ export function SessionList(props: SessionListProps) {
                         <ChevronDown size={12} strokeWidth={1.8} />
                       )}
                     </button>
+
+                    {hasGroupMenu && (
+                      <button
+                        type="button"
+                        data-group-menu={group.id}
+                        aria-haspopup="menu"
+                        aria-expanded={openGroupMenu === group.id}
+                        aria-label={`more actions for ${group.name}`}
+                        onClick={() =>
+                          setOpenGroupMenu((current) => (current === group.id ? null : group.id))
+                        }
+                        className={[
+                          'flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
+                          revealed === group.id || openGroupMenu === group.id
+                            ? 'opacity-100'
+                            : 'opacity-0',
+                        ].join(' ')}
+                      >
+                        <MoreHorizontal size={12} strokeWidth={1.8} />
+                      </button>
+                    )}
+
+                    {openGroupMenu === group.id && (
+                      <div
+                        data-group-menu-panel={group.id}
+                        role="menu"
+                        aria-label={`${group.name} actions`}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            setOpenGroupMenu(null);
+                          }
+                        }}
+                        className="absolute top-[19px] right-0 z-20 flex w-[168px] flex-col rounded-[9px] border border-line-strong bg-panel p-1 shadow-lg"
+                      >
+                        {onRenameGroup !== undefined && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            data-group-menu-item="rename"
+                            onClick={() => {
+                              setGroupDraftName(group.name);
+                              setGroupDraft({ kind: 'rename', group });
+                              setOpenGroupMenu(null);
+                            }}
+                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                          >
+                            Rename project
+                          </button>
+                        )}
+                        {onPickGroupIcon !== undefined && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            data-group-menu-item="icon"
+                            onClick={() => {
+                              onPickGroupIcon(group);
+                              setOpenGroupMenu(null);
+                            }}
+                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                          >
+                            Change project icon
+                          </button>
+                        )}
+                        {/* PLAIN, and last only because it is the one that
+                            ends the group. It is not red and it opens no
+                            modal: `ConfirmRemoveProject`'s own header says the
+                            overlay idiom is there to make a disclosure rather
+                            than to add a click, and its disclosure is two
+                            session counts. Ungrouping has no counts -- no
+                            session ends, nothing is hidden, `hiddenProjects`
+                            is not touched -- and its entire outcome is on
+                            screen the instant it happens: the heading goes and
+                            its members reappear one level up. The red stays
+                            where the consequence is, on the project heading's
+                            "Remove project", so weight goes on keeping matching
+                            consequence. */}
+                        {onUngroup !== undefined && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            data-group-menu-item="ungroup"
+                            onClick={() => {
+                              onUngroup(group);
+                              setOpenGroupMenu(null);
+                            }}
+                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                          >
+                            Ungroup
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </li>
               );
