@@ -16,6 +16,7 @@ import {
   createClipboardApi,
   createDialogApi,
   createPreloadApi,
+  createRemoteApi,
   createStreamSubscribe,
   createTerminalApi,
   createUsageApi,
@@ -28,4 +29,8 @@ contextBridge.exposeInMainWorld('api', {
   clipboard: createClipboardApi(ipcRenderer),
   terminal: createTerminalApi(ipcRenderer),
   dialog: createDialogApi(ipcRenderer),
+  // The pairing screen's own channels. Exposed unconditionally like every
+  // other member -- whether main registered them is runtime state, and the
+  // bridge's shape may not depend on runtime state.
+  remote: createRemoteApi(ipcRenderer),
 });
