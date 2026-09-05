@@ -441,6 +441,10 @@ describe('when the pane stops cooperating part way through', () => {
     const { run, keys } = flaky(screens, 6);
     expect(await answerQuestion(run, ATLAS, oneFruit)).toEqual({
       kind: 'refused',
+      // The review named Apple back, which is the CLI saying it took the tick
+      // in. The commit did not go through -- but "nothing was sent" would be
+      // the wrong sentence for a picker sitting on the operator's own answer.
+      committed: ['Apple'],
     });
     expect(keys().at(-1)).toBe('Enter');
   });
@@ -458,6 +462,7 @@ describe('when the pane stops cooperating part way through', () => {
     expect(await answerQuestion(short.run, ATLAS, oneFruit)).toEqual({
       kind: 'unconfirmed',
       label: 'Apple',
+      committed: ['Apple'],
     });
   });
 

@@ -46,8 +46,16 @@ export type AnswerStep = {
 export type AnswerRequest = { readonly steps: readonly AnswerStep[] };
 
 /**
- * What happened. SEVEN ANSWERS, and every one but `sent` means the picker was
- * left as it was found -- no Return was pressed on a row vam could not name.
+ * What happened. ELEVEN ANSWERS: `sent`, and ten ways of stopping.
+ *
+ * WHAT STOPPING MEANS, and the sentence that stood here was false for any set
+ * of more than one question: "every one but `sent` means the picker was left
+ * as it was found". It is not. A single-select Return both ANSWERS and
+ * ADVANCES, so a set walked as far as question two has already committed
+ * question one into the running agent, and a refusal there is not "nothing was
+ * sent" -- it is "this much was sent, and then it stopped". Every stop
+ * therefore carries `committed`, and the surfaces read it rather than denying
+ * a delivery that happened (`AnswerStop`).
  *
  * `sent` carries the answer AS CONFIRMED BY A READ-BACK, not as intended:
  * vam presses Return, reads the screen again and only then says the word.
@@ -57,8 +65,7 @@ export type AnswerRequest = { readonly steps: readonly AnswerStep[] };
  * `not-live` is a picker that did not respond to the probe arrow, which is
  * exactly the state where a blind Return answers the wrong row.
  */
-export type AnswerResult =
-  | { readonly kind: 'sent'; readonly answer: string }
+type AnswerStop =
   | { readonly kind: 'unaimed' }
   /**
    * THE LISTING ITSELF FAILED -- tmux is not on `PATH`, the call timed out, or
@@ -87,6 +94,20 @@ export type AnswerResult =
    */
   | { readonly kind: 'wrong-question'; readonly question: string }
   | { readonly kind: 'unconfirmed'; readonly label: string };
+
+/**
+ * `sent` for the whole set, or a stop that says how far it got.
+ *
+ * `committed` IS ABSENT RATHER THAN EMPTY when nothing went in, because the
+ * two readings are different sentences and the absent one is the older,
+ * commoner and simpler of them: nothing was sent. It holds the answers already
+ * inside the agent, in asking order, one entry per question -- so its LENGTH
+ * is the number of steps a retry must skip, which is what makes a part-sent
+ * set finishable instead of a dead end.
+ */
+export type AnswerResult =
+  | { readonly kind: 'sent'; readonly answer: string }
+  | (AnswerStop & { readonly committed?: readonly string[] });
 
 /**
  * The most options one answer may carry. A tool call offers a handful; the

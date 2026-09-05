@@ -1209,36 +1209,51 @@ const NUMBERED_OPTIONS: readonly (string | undefined)[] = Array.from({ length: 9
  * word is honest here.
  */
 function outcomeWording(result: AnswerResult): string {
+  if (result.kind === 'sent') return `sent — the picker now reads ${result.answer}`;
+  const cause = stopWording(result);
+  const committed = result.committed ?? [];
+  // A PART-SENT SET IS NOT A DENIAL. A single-select Return answers its
+  // question and advances, so a stop on step two of two leaves question one
+  // inside the picker -- and "not sent" is then the one sentence that is
+  // false. It names what went in and stops there: whether anything is still
+  // open is the card's fact, not this sentence's, and Submit says it by
+  // being drawn for exactly what is left.
+  if (committed.length > 0) return `${committed.join(', ')} went in — then it stopped: ${cause}`;
+  // `unconfirmed` never took the "not sent" prefix and still must not: the
+  // keys DID go in, and denying them is the whole failure this file guards.
+  return result.kind === 'unconfirmed' ? `unconfirmed — ${cause}` : `not sent — ${cause}`;
+}
+
+/** Why it stopped, as a clause the sentence above puts a subject in front of. */
+function stopWording(result: Exclude<AnswerResult, { readonly kind: 'sent' }>): string {
   switch (result.kind) {
-    case 'sent':
-      return `sent — the picker now reads ${result.answer}`;
     case 'unaimed':
-      return 'not sent — vam could not name one session of its own for this project';
+      return 'vam could not name one session of its own for this project';
     // NOT the sentence above, and the difference is where it sends a person:
     // vam never got a listing, so there is no pairing to go and look at.
     case 'unavailable':
-      return 'not sent — vam could not ask tmux, so it never looked for a session';
+      return 'vam could not ask tmux, so it never looked for a session';
     // vam named a session and refused it. Saying it could not name one is
     // false in the way that costs an operator time.
     case 'mispaired':
-      return 'not sent — this row is in a pane vam cannot use for this project';
+      return 'this row is in a pane vam cannot use for this project';
     case 'refused':
-      return 'not sent — tmux would not deliver to that session';
+      return 'tmux would not deliver to that session';
     case 'unreadable':
-      return 'not sent — vam could not read the screen';
+      return 'vam could not read the screen';
     case 'no-picker':
-      return 'not sent — that picker is not on the screen';
+      return 'that picker is not on the screen';
     case 'not-live':
-      return 'not sent — the picker did not answer the probe arrow';
+      return 'the picker did not answer the probe arrow';
     case 'unmatched':
-      return `not sent — ${result.label} is not on the screen`;
+      return `${result.label} is not on the screen`;
     case 'wrong-question':
       // The set is walked one question at a time and the CLI moves itself
       // between them, so "vam looked and it was not this one" is a real answer
       // and a different one from every refusal above it.
-      return `not sent — the session is not showing ${result.question}`;
+      return `the session is not showing ${result.question}`;
     default:
-      return `unconfirmed — the keys went in and the screen does not agree about ${result.label}`;
+      return `the keys went in and the screen does not agree about ${result.label}`;
   }
 }
 
@@ -1295,6 +1310,17 @@ function QuestionCard({
   /** What the last Submit came back with, and whether one is in flight. */
   const [outcome, setOutcome] = useState<AnswerResult | null>(null);
   const [sending, setSending] = useState(false);
+  /**
+   * WHAT A PREVIOUS SUBMIT ALREADY GOT INTO THE PICKER, in asking order.
+   *
+   * The set is walked one question at a time and each single-select answer
+   * advances the CLI, so an attempt that stopped half way left the screen on a
+   * later question. Re-sending the whole set from there is matched against a
+   * screen that has moved on -- `wrong-question`, every time, which is how a
+   * part-delivered set became one the operator could not finish from the UI at
+   * all. Submit resumes at the first step the picker has not taken.
+   */
+  const [taken, setTaken] = useState<readonly string[]>([]);
 
   // One `tool_result` closes a whole call, so a part-answered set is not
   // something Claude Code produces -- but the model permits it, and a step
@@ -1304,8 +1330,11 @@ function QuestionCard({
   const openSteps = questions.filter((one) => one.answer === null);
   const open = openSteps.length > 0;
   const picked = question === undefined ? [] : (marks[question.id] ?? []);
-  /** The open steps still waiting for a mark -- what Submit is short of. */
-  const unmarked = openSteps.filter((one) => (marks[one.id] ?? []).length === 0);
+  /** What is left to send: every open step the picker has not already taken. */
+  const pending = openSteps.slice(taken.length);
+  /** The pending steps still waiting for a mark -- what Submit is short of. */
+  const unmarked = pending.filter((one) => (marks[one.id] ?? []).length === 0);
+  const takenIds = new Set(openSteps.slice(0, taken.length).map((one) => one.id));
 
   /**
    * Steps CLAMP where options wrap, and the difference is deliberate. A list of
@@ -1325,16 +1354,22 @@ function QuestionCard({
     // which is what lets the other side check which question it is looking at
     // before it matches a label against it (`main/terminal/answer.ts`). An
     // answered step is not re-answered.
-    const steps = openSteps.map((one) => ({
+    const steps = pending.map((one) => ({
       question: one.question,
       labels: one.options
         .map((option) => option.label)
         .filter((label) => (marks[one.id] ?? []).includes(label)),
       multiSelect: one.multiSelect,
     }));
-    if (onAnswer === null || sending || steps.some((one) => one.labels.length === 0)) return;
+    if (onAnswer === null || sending || steps.length === 0) return;
+    if (steps.some((one) => one.labels.length === 0)) return;
     setSending(true);
-    setOutcome(await onAnswer({ steps }));
+    const result = await onAnswer({ steps });
+    setOutcome(result);
+    // What the picker took in before it stopped is not offered again: those
+    // questions are behind the CLI's own cursor now.
+    const got = result.kind === 'sent' ? undefined : result.committed;
+    if (got !== undefined) setTaken((already) => [...already, ...got]);
     setSending(false);
   };
 
@@ -1497,6 +1532,10 @@ function QuestionCard({
               data-current={index === showing ? 'true' : undefined}
               data-answered={one.answer === null ? undefined : 'true'}
               data-marked={(marks[one.id] ?? []).length > 0 ? 'true' : undefined}
+              // The picker has taken this one in, so Submit no longer carries
+              // it -- said on the step itself rather than only in the outcome
+              // line, which the next Submit replaces.
+              data-sent={takenIds.has(one.id) ? 'true' : undefined}
               onClick={() => setShowing(index)}
               className={[
                 'cursor-pointer rounded-[5px] border px-1.5 py-0.5 text-[10px]',
@@ -1600,7 +1639,7 @@ function QuestionCard({
           would read as though that step could be sent on its own -- so it sits
           below all of them, and it waits until every OPEN step carries a mark.
           An already-answered step is not one of those. */}
-      {open && onAnswer !== null && (
+      {open && pending.length > 0 && onAnswer !== null && (
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
@@ -1618,7 +1657,7 @@ function QuestionCard({
           </button>
           {questions.length > 1 && (
             <span data-question-progress className="text-[10px] text-ink-faint">
-              {openSteps.length - unmarked.length} of {openSteps.length} marked
+              {pending.length - unmarked.length} of {pending.length} marked
             </span>
           )}
         </div>
