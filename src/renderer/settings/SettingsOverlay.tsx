@@ -37,12 +37,16 @@ import { ALL_VISIBLE, columnOrder, LAYOUTS, type LayoutName } from '../prefs/pan
 import {
   clearPalette,
   clearPaletteColor,
+  FOCUS_SHARE_MAX,
+  FOCUS_SHARE_OFF,
+  nudgeFocusShare,
   OUT_FONT_SIZE_MAX,
   OUT_FONT_SIZE_MIN,
   PALETTE_TOKENS,
   type Prefs,
   paletteValue,
   setDefaultProvider,
+  setFocusShare,
   setKeyBindings,
   setLayout,
   setOutFontSize,
@@ -437,6 +441,42 @@ export function SettingsOverlay({ prefs, onChange, onClose }: SettingsOverlayPro
                   )
                 }
               />
+            </Panel>
+
+            <Panel
+              id="canvas"
+              active={section === 'canvas'}
+              hint="how the canvas itself behaves — not a colour, and not chrome"
+            >
+              <Block
+                label="session zoom"
+                hint="how much of the canvas width a session fills when focus arrives in it"
+              >
+                <Stepper
+                  name="session zoom share"
+                  // Percent, because that is the unit the operator asked in and
+                  // the one the field reads back; the store keeps the fraction.
+                  min={FOCUS_SHARE_OFF * 100}
+                  max={FOCUS_SHARE_MAX * 100}
+                  step={5}
+                  value={Math.round(prefs.focusViewportShare * 100)}
+                  unit="%"
+                  // `nudgeFocusShare` and not the raw value: off and the
+                  // smallest useful share are adjacent, and it is the thing
+                  // that knows a step into the gap between them crosses it
+                  // rather than clamping back.
+                  onCommit={(next) =>
+                    onChange(
+                      setFocusShare(prefs, nudgeFocusShare(prefs.focusViewportShare, next / 100)),
+                    )
+                  }
+                />
+                <p className="mt-3 text-[12px] text-ink-dim">
+                  {prefs.focusViewportShare === FOCUS_SHARE_OFF
+                    ? 'Off: the canvas follows focus without ever changing the zoom.'
+                    : 'Moving within a session never rescales — only arriving in one does.'}
+                </p>
+              </Block>
             </Panel>
 
             <Panel
