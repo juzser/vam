@@ -16,6 +16,8 @@ import { registerDialogIpc } from './dialog/ipc.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { releaseCloseAccelerator } from './menu.js';
 import { isSameOrigin } from './origin.js';
+import { remoteConfigFromEnv } from './remote/launch.js';
+import { startRemoteServer } from './remote/server.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
 import { createTmuxRunner } from './sources/tmux/spawn.js';
 import { createNodeEventSource } from './stream/event-source.js';
@@ -167,6 +169,52 @@ function createWindow(): void {
   }
 }
 
+/**
+ * The browser transport, off unless the environment asks for it.
+ *
+ * It listens on loopback and is meant to be reached through `cloudflared`,
+ * which dials out from this machine: no inbound port is opened here. A
+ * misconfiguration is fatal ON PURPOSE -- vam would rather not start than
+ * start with a port nobody has to authenticate to, because the write routes
+ * can type into a running agent.
+ */
+function startRemoteTransport(): void {
+  let config: ReturnType<typeof remoteConfigFromEnv>;
+  try {
+    config = remoteConfigFromEnv(process.env);
+  } catch (error) {
+    console.error(`[vam] remote transport refused to start: ${String(error)}`);
+    app.exit(1);
+    return;
+  }
+  if (config === null) {
+    return;
+  }
+  // Payload-free, exactly like the `stream` IPC channel: a tick means "ask
+  // again". With no backend configured there is nothing to open, and the SSE
+  // route simply never ticks -- it does not pretend to.
+  //
+  // The fan-out set is not decoration: `MinimalEventSource` has an
+  // `addEventListener` and no way to take one off again, so subscribing each
+  // browser connection directly would leak a listener per reload.
+  const browsers = new Set<() => void>();
+  if (streamUrl !== '') {
+    createNodeEventSource(streamUrl).addEventListener('change', () => {
+      for (const listener of browsers) {
+        listener();
+      }
+    });
+  }
+  const subscribe = (onChange: () => void): (() => void) => {
+    browsers.add(onChange);
+    return () => browsers.delete(onChange);
+  };
+  void startRemoteServer({ ...config, source: DESKTOP_SOURCE, subscribe }).catch((error) => {
+    console.error(`[vam] remote transport refused to start: ${String(error)}`);
+    app.exit(1);
+  });
+}
+
 void app.whenReady().then(() => {
   registerPermissionPolicy();
   registerContentSecurityPolicy();
@@ -198,6 +246,7 @@ void app.whenReady().then(() => {
   // call is what this channel means -- a modeless picker, not one owned by a
   // window that may already be closing.
   registerDialogIpc(ipcMain, { showOpenDialog: (options) => dialog.showOpenDialog(options) });
+  startRemoteTransport();
   createWindow();
 });
 
