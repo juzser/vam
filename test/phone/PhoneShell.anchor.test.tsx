@@ -16,7 +16,7 @@
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import { chips as stepChips, installPhoneGlobals, MODEL, phoneSource, rows } from './harness.js';
+import { installPhoneGlobals, MODEL, phoneSource, rows, chips as stepChips } from './harness.js';
 
 beforeAll(installPhoneGlobals);
 beforeEach(() => localStorage.clear());

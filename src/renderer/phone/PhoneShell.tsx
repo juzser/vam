@@ -15,14 +15,21 @@
  * the newest output, reply. It is NOT for browsing a session. Two strips of
  * browsing chrome used to sit between the app bar and the output and took
  * ~215px of an 844px viewport between them -- a step rail built here, and the
- * view tab bar `DetailPanel` draws (`phone` suppresses it there). Both are
- * gone from the phone, on the operator's instruction, and the desktop keeps
- * both. The price, so that the next reader does not restore them as an obvious
- * omission:
- *   - PRs and Agents are UNREACHABLE on a phone. Nothing else routes to them.
- *   - There is no step navigation. The screen always shows the NEWEST step
- *     (`session.decisions[0]`, derived on every render), which is the step a
- *     waiting session is waiting in and the one a reply answers.
+ * view tab bar `DetailPanel` draws. Both are gone from between the bar and the
+ * output, on the operator's instruction. The desktop keeps both. The price, so
+ * that the next reader does not restore them as an obvious omission:
+ *   - The views are NOT lost: `Response / PRs / Agents` are icon buttons in
+ *     the app bar below, driving the pane through its `tabRequest` seam. What
+ *     is lost is the WORD on each one, which is why every icon carries an
+ *     `aria-label` and the selected one is marked by a shape, not a hue.
+ *   - There is no step navigation at all. The screen always shows the NEWEST
+ *     step (`session.decisions[0]`, derived on every render), which is the
+ *     step a waiting session is waiting in and the one a reply answers. Older
+ *     steps are unreachable from a phone.
+ *   - The bar's SECOND LINE is gone with it -- one row, as asked -- and the
+ *     project and the epic went with that line. The session's name stays (a
+ *     screen that cannot say which session you are in is not a prompt screen)
+ *     and the agent count stays as the Agents icon's badge.
  * The `step` state that used to hold a chip selection was deleted with the
  * rail rather than left as a prop nobody writes: an unwritten selector would
  * have frozen the screen on whatever step it last held.
@@ -42,6 +49,7 @@
 import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react';
 import { DetailPanel } from '../panels/DetailPanel.js';
 import { SessionList } from '../panels/SessionList.js';
+import { type Tab, visibleTabs } from '../panels/tabs.js';
 import type { SourceDeclines } from '../sources/port.js';
 import { closeSession, isSessionEntry, openSession } from './history.js';
 
@@ -88,6 +96,105 @@ export type PhoneShellProps = {
   /** The source's own words for every capability it lacks. Never this file's. */
   readonly declines: SourceDeclines;
 };
+
+/**
+ * One glyph per view. Text, not an icon set: vam ships none, and a dependency
+ * for four characters would be the wrong trade.
+ */
+const VIEW_ICON: Record<Tab, string> = {
+  Response: '▤',
+  PRs: '⎇',
+  Terminal: '❯',
+  Agents: '◎',
+};
+
+/**
+ * The views, as icon buttons in the app bar.
+ *
+ * They are the same views `DetailPanel`'s word strip offers -- `visibleTabs`
+ * is the one derivation, so a source with no terminal withdraws it here too --
+ * and they drive the pane through `tabRequest`, the seam `Mod-<digit>` already
+ * uses. The tab itself stays the pane's state; this is a request, which is why
+ * asking twice for the same view is still an ask.
+ *
+ * SIZED TO THE PAINT, NOT THE HIT: the 44 box takes the tap, a 30x30 skin
+ * takes the border, the ground and the 16px glyph. The reason is inside.
+ *
+ * A glyph alone is mystery meat, so each carries `aria-label`, and `Agents`
+ * puts its count in the label as well as beside the glyph -- the strip's
+ * `Agents 3` badge, kept. WHICH ONE IS ON is said three ways and only one of
+ * them is colour: `aria-pressed` for a screen reader, a filled ground, and the
+ * 2px mark below the glyph. Colour alone is a WCAG 1.4.1 Level A failure and
+ * this codebase has shipped one before.
+ *
+ * The hook is `data-phone-view`, deliberately NOT `data-view-tabs`: a rule
+ * written for the desktop bar must not be able to collect this row by
+ * accident, which is how `.vam-phone-typing [role='tablist']` once hid the
+ * control for choosing which question you were answering.
+ */
+function ViewIcons({
+  tabs,
+  current,
+  runningAgents,
+  onSelect,
+}: {
+  readonly tabs: readonly Tab[];
+  readonly current: Tab;
+  readonly runningAgents: number;
+  readonly onSelect: (tab: Tab) => void;
+}) {
+  return (
+    <nav aria-label="views" data-phone-views className="flex flex-none items-center">
+      {tabs.map((tab) => {
+        const on = tab === current;
+        const count = tab === 'Agents' && runningAgents > 0 ? runningAgents : null;
+        return (
+          <button
+            key={tab}
+            type="button"
+            data-phone-view={tab.toLowerCase()}
+            aria-label={count === null ? tab : `${tab}, ${count} running`}
+            aria-pressed={on}
+            onClick={() => onSelect(tab)}
+            className={`${TOUCH} ${FOCUS_RING} relative flex-none`}
+          >
+            {/* THE HIT IS 44, THE PAINT IS 30. A border or a resting ground
+                drawn ON the 44 box is what makes a phone control read as too
+                big -- measured on the shipped screenshots, where the bordered
+                44 buttons are the heaviest objects on the screen and the
+                unpainted 44 beside them reads correctly sized (UI spec
+                `vam-phone-controls`, 2.1). So the box stays 44 and centres
+                only, and this skin carries everything visible. Not the
+                desktop's `vam-hit-24` inversion: that hangs the hit area off a
+                `::after`, and the phone guard reads `getBoundingClientRect()`
+                on the element, which cannot see one. Adjacent icons then show
+                14px between painted edges with a container gap of 0. */}
+            <span
+              data-tap-skin
+              className={[
+                'flex h-[30px] w-[30px] items-center justify-center rounded-[8px] text-[16px]',
+                on ? 'bg-segment-on text-ink' : 'text-ink-dim active:bg-raised',
+              ].join(' ')}
+            >
+              <span aria-hidden="true">{VIEW_ICON[tab]}</span>
+            </span>
+            {count !== null && (
+              <span className="absolute top-[7px] right-[4px] font-mono text-[9.5px] text-ink-dim">
+                {count}
+              </span>
+            )}
+            {on && (
+              <span
+                data-phone-view-mark
+                className="-translate-x-1/2 absolute bottom-[5px] left-1/2 h-[2px] w-[16px] rounded-full bg-ink"
+              />
+            )}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
 
 /**
  * What this connection cannot do, in the source's own words.
@@ -144,6 +251,16 @@ export function PhoneShell({
    * sized in `100dvh` and needs no listener to sit above the keyboard.
    */
   const [typing, setTyping] = useState(false);
+  /**
+   * Which view the icon row shows as on, and the request that puts the pane
+   * there. Two pieces because they say different things: the pane owns its tab
+   * and is ASKED to move (a fresh object per tap keeps a second ask an ask),
+   * while the row has to draw a selection without reaching into the pane.
+   * They start together because `initialTab` below is fixed at Response: a
+   * remembered desktop tab would arrive in the pane and not in this row.
+   */
+  const [view, setView] = useState<Tab>('Response');
+  const [viewRequest, setViewRequest] = useState<{ readonly tab: Tab } | null>(null);
 
   const entry = detail.entry;
   const session = entry?.session ?? null;
@@ -156,6 +273,7 @@ export function PhoneShell({
    * session left ten minutes ago.
    */
   const newest = session?.decisions[0] ?? null;
+  const views = visibleTabs(detail.terminal !== false);
 
   useEffect(() => {
     const pop = (event: PopStateEvent) => {
@@ -264,28 +382,26 @@ export function PhoneShell({
         >
           ‹
         </button>
-        {/* The session's whole identity, once. `DetailPanel`'s header block
-            printed the title and the project again immediately below this,
-            verbatim -- ~48px of an 844px screen on which chrome already reaches
-            a third before a word of the session. So the block is not drawn here
-            (UI spec D2) and its two remaining facts, the epic and the agent
-            count, join this line. `data-prompt-target` comes with them: that
-            hook's job is to name the session about to be written to, and one
-            composer serving many sessions is the easiest way to send the right
-            words to the wrong agent. */}
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span data-prompt-target className="truncate text-[15px] text-ink">
-            {session?.title}
-          </span>
-          <span className="truncate font-mono text-[11px] text-ink-dim">
-            <span data-prompt-project>{entry.project.name}</span>
-            {session?.epic !== null && session !== null && <> · {session.epic}</>}
-            {' · '}
-            {session === null || session.runningAgents === 0
-              ? 'no agent'
-              : `${session.runningAgents} agents`}
-          </span>
+        {/* ONE ROW: back, the session's name, the views, close. This bar used
+            to carry a second line (`project · epic · N agents`); the operator
+            asked for the header block to go, so it did, and the project and
+            the epic are not shown on a phone any more. The NAME stays and
+            keeps `data-prompt-target` -- that hook's job is to name the
+            session about to be written to, and one composer serving many
+            sessions is the easiest way to send the right words to the wrong
+            agent. The agent count is on the Agents icon beside it. */}
+        <span data-prompt-target className="min-w-0 flex-1 truncate text-[15px] text-ink">
+          {session?.title}
         </span>
+        <ViewIcons
+          tabs={views}
+          current={view}
+          runningAgents={session?.runningAgents ?? 0}
+          onSelect={(tab) => {
+            setView(tab);
+            setViewRequest({ tab });
+          }}
+        />
         {/* Closing a session, drawn where it can be seen and read.
             The list row's own `x` is revealed by hover and a finger has no
             hover, so on a phone it is not a control at all (styles.css) -- and
@@ -347,6 +463,11 @@ export function PhoneShell({
           // There is nothing else on screen to be active.
           active={true}
           decision={newest ?? detail.decision}
+          // Fixed, so the icon row and the pane cannot start on different
+          // views: `detail.initialTab` is a remembered DESKTOP choice, and the
+          // row has no way to learn it.
+          initialTab="Response"
+          tabRequest={viewRequest}
           records={records}
         />
       </div>

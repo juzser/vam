@@ -13,7 +13,15 @@
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import { chips, FIVE_STEPS, installPhoneGlobals, MODEL, phoneSource, rows } from './harness.js';
+import {
+  chips,
+  FIVE_STEPS,
+  installPhoneGlobals,
+  MODEL,
+  phoneSource,
+  rows,
+  views,
+} from './harness.js';
 
 beforeAll(installPhoneGlobals);
 beforeEach(() => localStorage.clear());
@@ -71,14 +79,61 @@ describe('the phone session screen', () => {
     );
   });
 
-  it('offers no view tabs at all, so there is no tab to withdraw', () => {
+  it('draws no tab strip in the body: the views moved to the topbar', () => {
     openSession();
-    // Was: Terminal withdrawn, Response present. Terminal's structural
-    // withdrawal is still asserted where the bar still exists -- `test/panels/
-    // DetailPanel.test.tsx`, 'the Terminal tab is offered only by a source that
-    // has one'. Here the whole bar is gone, which takes PRs and Agents with it.
+    // Was: Terminal withdrawn from the body strip, Response present. The strip
+    // is not drawn on a phone at all; the same views are icon buttons in the
+    // app bar (below). Terminal's structural withdrawal is still asserted where
+    // the strip still exists -- `test/panels/DetailPanel.test.tsx`, 'the
+    // Terminal tab is offered only by a source that has one' -- and the
+    // withdrawal reaches the topbar because both read `visibleTabs`.
     expect(document.querySelector('[data-view-tabs]')).toBeNull();
     expect(document.querySelectorAll('[data-tab]')).toHaveLength(0);
+    expect(views().map((b) => b.getAttribute('data-phone-view'))).toEqual([
+      'response',
+      'prs',
+      'agents',
+    ]);
+  });
+
+  it('says which view is on by more than colour', () => {
+    openSession();
+    expect(views().map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false']);
+    // The second channel, which is a shape and not a hue: only the selected
+    // control draws the underline mark. WCAG 1.4.1 -- this codebase has
+    // shipped a Level A colour-alone failure before.
+    expect(document.querySelectorAll('[data-phone-view-mark]')).toHaveLength(1);
+    expect(views()[0]?.querySelector('[data-phone-view-mark]')).not.toBeNull();
+  });
+
+  it('takes the tap on the 44 box and paints on a 30 skin inside it', () => {
+    openSession();
+    // The complaint the shipped screenshots explain: a control reads as too
+    // big when the BORDER is drawn at 44, not when the hit is. Asserted as
+    // classes because Tailwind's utilities are generated at build time and
+    // happy-dom lays nothing out -- a real 390px measurement is Playwright's.
+    for (const button of views()) {
+      expect(button.className, 'the hit box keeps the 44 floor').toContain('min-h-[44px]');
+      expect(button.className, 'and paints nothing itself').not.toContain('border-line');
+      const skin = button.querySelector('[data-tap-skin]') as HTMLElement;
+      expect(skin, 'the painted skin').not.toBeNull();
+      expect(skin.className).toContain('h-[30px]');
+      expect(skin.className).toContain('w-[30px]');
+      // Orca's dominant glyph size, and above the 14 its own comment calls
+      // "read as decoration".
+      expect(skin.className).toContain('text-[16px]');
+    }
+  });
+
+  it('switches the body when a view icon is tapped', () => {
+    openSession();
+    expect(document.querySelector('[data-action-pane]')).not.toBeNull();
+    act(() => {
+      fireEvent.click(views()[1] as Element);
+    });
+    expect(document.querySelector('[data-prs]'), 'the PRs view').not.toBeNull();
+    expect(views().map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'true', 'false']);
+    expect(views()[1]?.querySelector('[data-phone-view-mark]')).not.toBeNull();
   });
 
   it('draws the composer and no mode row', () => {

@@ -56,15 +56,31 @@ describe('the phone session screen’s identity', () => {
     expect(targets.length, 'one prompt target, not two and not none').toBe(1);
     expect(targets[0]?.textContent).toBe('factory-sse-1');
     expect(targets[0]?.closest('header'), 'it belongs to the app bar now').not.toBeNull();
-    // The card that repeated it is gone, not restyled.
-    expect(screen.querySelectorAll('[data-prompt-project]').length).toBe(1);
+    // The card that repeated it is gone, not restyled -- and so is the app
+    // bar's own second line, which is where the project name used to be.
+    expect(screen.querySelectorAll('[data-prompt-project]').length).toBe(0);
     expect(screen.querySelector('[data-pane-status]'), 'the card’s status dot').toBeNull();
   });
 
-  it('folds the two facts the card held that the bar did not into that bar', () => {
+  it('drops the bar’s second line, keeping the count on the Agents control', () => {
+    // Was: the epic and the agent count, folded out of the deleted header card
+    // into a SECOND line on the app bar reading `black-smith · ui-server-sse ·
+    // 3 agents`. The operator asked for one row, so that line is gone. The
+    // count is not lost with it -- it moved to the Agents view icon, in the
+    // label and beside the glyph. The epic IS lost on the phone, which is the
+    // price of the row and is stated in `PhoneShell.tsx`.
     const header = openSession().querySelector('header') as HTMLElement;
-    expect(header.textContent).toContain('ui-server-sse');
-    expect(header.textContent).toContain('3 agents');
+    expect(header.querySelector('[data-prompt-project]')).toBeNull();
+    expect(header.textContent).not.toContain('ui-server-sse');
+    expect(header.querySelector('[data-prompt-target]')?.textContent).toBe('factory-sse-1');
+    const agents = header.querySelector('[data-phone-view="agents"]') as HTMLElement;
+    expect(agents.getAttribute('aria-label')).toBe('Agents, 3 running');
+    // Three unlabelled glyphs where three labelled words were would be a real
+    // loss; every one of them says what it is.
+    expect(
+      [...header.querySelectorAll('[data-phone-view]')].map((b) => b.getAttribute('aria-label')),
+    ).toEqual(['Response', 'PRs', 'Agents, 3 running']);
+    expect(agents.textContent, 'the count, still a digit on screen').toContain('3');
   });
 
   it('draws no step counter, because the rail it was stuck to is gone', () => {

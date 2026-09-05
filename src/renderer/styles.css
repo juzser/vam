@@ -1068,7 +1068,14 @@ body {
    element, `data-question-steps`, the strip for choosing WHICH question of a
    multi-question call you are answering. Whatever replaces this must never
    hide that strip: typing is exactly when it is needed.
-   `test/phone/touch-targets.test.tsx` holds that. */
+   `test/phone/touch-targets.test.tsx` holds that.
+ *
+ * The views did not disappear, they moved into the app bar as icon buttons
+ * (`data-phone-views`), and that row is NOT hidden while typing: it is one row
+ * that also carries back, the session name and close, and hiding it would take
+ * the screen's only navigation away at the moment the operator is using the
+ * screen. It wears its own hook for the same reason this rule was re-pointed
+ * once already -- so nothing written for the desktop bar can collect it. */
 
 
 /*
