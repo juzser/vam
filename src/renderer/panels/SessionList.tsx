@@ -51,6 +51,18 @@ import { OverlayScroll } from './OverlayScroll.js';
 import { type RemovalPlan, removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
 
+/**
+ * What `pendingAction` holds while "new project" is running.
+ *
+ * `pendingAction` is otherwise a project id, and "new project" has no project
+ * yet -- that is the whole point of it -- so it needs a value of its own to
+ * put in the same field. The `/` is what makes it collision-proof rather than
+ * merely unlikely: a project id is derived from a directory's last segment,
+ * and a POSIX basename cannot contain one, so no real project can ever answer
+ * to this and wear another control's spinner.
+ */
+export const NEW_PROJECT_PENDING = 'vam/new-project';
+
 /** The actions the sidebar's controls stand for — actions, never keys, so
  *  every hint below reads the chord in force rather than a shipped default. */
 const SETTINGS_ACTION: KeyAction = { kind: 'settings' };
@@ -968,6 +980,7 @@ export function SessionList(props: SessionListProps) {
           onClick={onNewProject}
           title={newSessionDecline ?? 'Choose a directory and start a session in it'}
           className="vam-tap flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] border border-line bg-panel text-ink-faint hover:border-line-strong"
+          {...pending(NEW_PROJECT_PENDING, 'Starting a session in the chosen directory…')}
         >
           <Plus size={13} strokeWidth={1.6} />
         </button>

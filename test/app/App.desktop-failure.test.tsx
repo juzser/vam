@@ -23,7 +23,17 @@ import type { DesktopSourceApi } from '../../src/preload/api.js';
 
 vi.mock('../../src/renderer/canvas/Canvas.js', () => ({
   // The real canvas' own root, which is what the banner used to displace.
-  Canvas: () => <div data-test-canvas className="h-full" />,
+  // The source it is handed is written out too: which source the shell passes
+  // is the second thing this file has to hold, and the cell that draws it is
+  // asserted for itself in `test/canvas/Canvas.source-cell.test.tsx`.
+  Canvas: ({ source }: { readonly source?: { kind: string; error?: string | null } }) => (
+    <div
+      data-test-canvas
+      className="h-full"
+      data-source-kind={source?.kind ?? 'none'}
+      data-source-error={source?.error ?? ''}
+    />
+  ),
 }));
 
 const { DesktopCanvas } = await import('../../src/renderer/App.js');
@@ -68,5 +78,33 @@ describe('the desktop failure banner does not push the status bar off screen', (
     const { container } = render(<DesktopCanvas api={quietApi} />);
     expect(container.querySelector('[data-testid="source-failure"]')).toBeNull();
     expect(container.querySelector('[data-test-canvas]')).not.toBeNull();
+  });
+});
+
+/**
+ * WHICH SOURCE THE SHELL HANDS THE CANVAS BEFORE IT HAS ONE (F-6).
+ *
+ * `source === null` used to pass no source at all, which means the canvas'
+ * own default: `READ_ONLY_SOURCE`, whose note is "no write route — this
+ * canvas is read-only". So the opening window asserted, in amber, that a
+ * source still being assembled -- and about to turn out writable -- could not
+ * be written to, beside a sidebar reading "No sessions yet". Two false
+ * statements and no loading state anywhere.
+ */
+describe('the shell says it is still connecting, rather than that it is read-only', () => {
+  const canvas = (container: HTMLElement) =>
+    container.querySelector('[data-test-canvas]') as HTMLElement;
+
+  it('hands the canvas a connecting source while the source is being assembled', () => {
+    const quietApi = { describe: () => new Promise(() => {}) } as unknown as DesktopSourceApi;
+    const { container } = render(<DesktopCanvas api={quietApi} />);
+    expect(canvas(container).getAttribute('data-source-kind')).toBe('connecting');
+    expect(canvas(container).getAttribute('data-source-error')).toBe('');
+  });
+
+  it('carries the failure into the source itself, not only into the banner', async () => {
+    const { container } = render(<DesktopCanvas api={brokenApi} />);
+    await screen.findByTestId('source-failure');
+    expect(canvas(container).getAttribute('data-source-error')).toContain('no route to a source');
   });
 });

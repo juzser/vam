@@ -241,3 +241,159 @@ describe('new project', () => {
     expect(wrote.count).toBe(0);
   });
 });
+
+/**
+ * FEEDBACK, and the guard that comes with it (F-1).
+ *
+ * `newProject` was the one create path that set neither `pendingAction` nor a
+ * status, so between the directory dialog closing and `createSessionIn`
+ * resolving -- two tmux spawns at a 10 s timeout each -- nothing on screen
+ * changed and the `+` stayed live. The second-order half is the one that costs
+ * something: with no pending state there was no guard either, so a second
+ * click opened a second dialog and started a SECOND session in the directory.
+ *
+ * Both halves are asserted against the seams, never performed: `picker.count`
+ * is how many dialogs were opened and `spawned` is how many sessions were
+ * started. A test that read only the status bar would pass against an
+ * implementation that starts two sessions and describes one.
+ */
+describe('new project — feedback and the in-flight guard', () => {
+  /** A promise the test resolves by hand, so "while it runs" is a real moment. */
+  function deferred<T>() {
+    let settle!: (value: T) => void;
+    const promise = new Promise<T>((resolve) => {
+      settle = resolve;
+    });
+    return { promise, settle };
+  }
+
+  const control = () => screen.getByLabelText('new project') as HTMLButtonElement;
+
+  it('goes busy and says so before the picker has answered', async () => {
+    const { source, spawned } = sourceWith(true);
+    const gate = deferred<string | null>();
+    withDialog(() => gate.promise);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+
+    // BEFORE the await resolves: the control is already wearing the action.
+    expect(control().getAttribute('data-pending')).toBe('true');
+    expect(control().getAttribute('aria-busy')).toBe('true');
+    expect(control().disabled).toBe(true);
+    expect(statusBar()).toMatch(/choosing a directory/i);
+    expect(spawned).toEqual([]);
+
+    await act(async () => {
+      gate.settle(CHOSEN);
+    });
+    expect(control().getAttribute('data-pending')).toBeNull();
+    expect(statusBar()).toContain('orchard');
+  });
+
+  /**
+   * THESE TWO TESTS ARE A PAIR, and the nesting is what says so.
+   *
+   * One of them is a tautology and is kept deliberately, as the record of a
+   * guard that was falsified and found untested. That only works while a
+   * reader meets them together: the explanation used to sit between them, so
+   * moving, extracting or reordering either test would have silently left the
+   * tautology looking like the proof. A `describe` cannot be split by an edit
+   * that does not notice it.
+   */
+  describe('a second click, and which test actually proves it is refused', () => {
+    it('a second click while the picker is open opens no second dialog and starts no second session', async () => {
+      const { source, spawned } = sourceWith(true);
+      const gate = deferred<string | null>();
+      const picker = withDialog(() => gate.promise);
+      render(<Canvas model={MODEL} source={source} />);
+      await clickNewProject();
+      await act(async () => {
+        control().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(picker.count).toBe(1);
+
+      await act(async () => {
+        gate.settle(CHOSEN);
+      });
+      expect(spawned).toEqual([[CHOSEN, 'orchard']]);
+    });
+
+    /**
+     * THE SECOND TEST IS THE ONE THAT PROVES THE GUARD. The first was written
+     * believing it did, and does not: deleting the `pendingAction` check from
+     * `newProject` leaves it green, because a disabled button does not dispatch
+     * a click at all and the handler is never reached. The disabled attribute
+     * is a real defence and is asserted for itself -- but it only covers the
+     * control that is ITSELF pending.
+     *
+     * The second is the reachable second click. `pending()` matches on the id, so
+     * while a session is being created in a project the Projects `+` is a live,
+     * enabled button, and only the guard inside the handler stops it opening a
+     * picker and spawning into a second directory. Deleting the guard reddens
+     * this one.
+     */
+    it('is refused, out loud, while another action is in flight', async () => {
+      const { source, spawned } = sourceWith(true);
+      const gate = deferred<void>();
+      const inner = (source as { source: SessionSource }).source as unknown as {
+        write: { createSession: () => Promise<void> };
+      };
+      inner.write.createSession = () => gate.promise;
+      const picker = withDialog(async () => CHOSEN);
+      render(<Canvas model={MODEL} source={source} />);
+      await act(async () => {
+        screen.getByLabelText('new session in alpha').click();
+      });
+      // The Projects `+` is not the pending control, so it is still live.
+      expect(control().disabled).toBe(false);
+
+      await clickNewProject();
+      expect(picker.count).toBe(0);
+      expect(spawned).toEqual([]);
+      expect(statusBar()).toMatch(/still running/i);
+
+      await act(async () => {
+        gate.settle();
+      });
+    });
+  });
+
+  it('says "starting…" before the spawn, and clears the busy state when it lands', async () => {
+    const { source } = sourceWith(true);
+    const gate = deferred<void>();
+    const inner = (source as { source: SessionSource }).source as unknown as {
+      write: { createSessionIn: () => Promise<void> };
+    };
+    inner.write.createSessionIn = () => gate.promise;
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+
+    expect(statusBar()).toContain('starting a new session in orchard');
+    expect(control().disabled).toBe(true);
+
+    await act(async () => {
+      gate.settle();
+    });
+    expect(control().getAttribute('data-pending')).toBeNull();
+    expect(control().disabled).toBe(false);
+  });
+
+  it.each([
+    ['cancelling', async () => null],
+    ['a failed spawn', async () => CHOSEN],
+  ])('clears the busy state after %s', async (_label, choose) => {
+    const { source } = sourceWith(true);
+    const inner = (source as { source: SessionSource }).source as unknown as {
+      write: { createSessionIn: () => Promise<void> };
+    };
+    inner.write.createSessionIn = async () => {
+      throw { kind: 'refused', code: 'tmux-missing', message: 'the `tmux` command was not found' };
+    };
+    withDialog(choose);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(control().getAttribute('data-pending')).toBeNull();
+    expect(control().disabled).toBe(false);
+  });
+});

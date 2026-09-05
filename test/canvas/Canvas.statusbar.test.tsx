@@ -161,6 +161,31 @@ describe('the status cell with a long failure in it', () => {
 
   const cell = () => document.querySelector('[data-status]');
 
+  /**
+   * ANNOUNCED, not merely drawn (WCAG 2.1 SC 4.1.3, Level AA).
+   *
+   * This cell is the renderer's one refusal channel, and a refusal is the
+   * case where NOTHING ELSE ON SCREEN CHANGES: no row dims, no button goes
+   * busy, the sentence is the entire outcome. Without a live region an
+   * assistive-technology user gets exactly what the silent guards used to
+   * give everyone -- a click indistinguishable from a dead control -- so the
+   * fixes that speak here would have been sighted-only.
+   *
+   * The pattern is the one already shipping in `SettingsOverlay` (:322):
+   * `role="status"` with `aria-live="polite"`. Polite, because the status bar
+   * is the outcome of a key the operator just pressed and must not interrupt
+   * what they are reading; `role="status"` carries the same politeness for
+   * ATs that map role rather than the attribute, which is why both are on it.
+   * Asserted on `StatusCell` itself: it is the one component both shells draw
+   * this through, and they draw it exclusively, so there is never a second
+   * live region racing this one.
+   */
+  it('is a polite live region, so a refusal is announced and not only drawn', () => {
+    render(<StatusCell text={REFUSAL} />);
+    expect(cell()?.getAttribute('aria-live')).toBe('polite');
+    expect(cell()?.getAttribute('role')).toBe('status');
+  });
+
   it('renders it shorter than it is', () => {
     render(<StatusCell text={REFUSAL} />);
     const shown = cell()?.textContent ?? '';

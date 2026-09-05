@@ -269,3 +269,58 @@ describe('pending without motion', () => {
     });
   });
 });
+
+/**
+ * A REFUSED SECOND ACTION NAMES ITS CAUSE (F-4).
+ *
+ * Both guards returned in silence while `removeProject`, one screen down in
+ * the same file, already said `something else is still running — …`. Only the
+ * PENDING control is disabled; every other row's `×` and every other
+ * project's `+` stay live, so the operator's click landed on a button that
+ * looked pressable and did nothing at all.
+ *
+ * Each test drives the refusal through a control that is NOT the pending one,
+ * because the pending one is disabled and its click never reaches the guard.
+ */
+describe('a second action while one is in flight', () => {
+  const TWO: CanvasModel = {
+    projects: [
+      {
+        id: 'p1',
+        name: 'alpha',
+        source: 'claude-code',
+        sessions: [session('a1', 'nightly sweep'), session('a2', 'the other one')],
+      },
+    ],
+  };
+
+  it('says why a second close was refused, and closes nothing', async () => {
+    const gate = deferred<void>();
+    const { source, calls } = sourceWith(() => gate.promise);
+    render(<Canvas model={TWO} source={source} />);
+    await click('close nightly sweep');
+    await click('close the other one');
+    expect(calls.close).toEqual(['a1']);
+    expect(statusBar()).toMatch(/still running/i);
+    // By name: "something is running" leaves the operator guessing which of
+    // the two clicks was the one that did not happen.
+    expect(statusFull()).toContain('the other one');
+    await act(async () => {
+      gate.settle();
+    });
+  });
+
+  it('says why a second create was refused, and creates nothing', async () => {
+    const gate = deferred<void>();
+    const { source, calls } = sourceWith(() => gate.promise);
+    render(<Canvas model={TWO} source={source} />);
+    await click('close nightly sweep');
+    await click('new session in alpha');
+    expect(calls.create).toEqual([]);
+    expect(statusBar()).toMatch(/still running/i);
+    expect(statusFull()).toContain('alpha');
+    await act(async () => {
+      gate.settle();
+    });
+  });
+});

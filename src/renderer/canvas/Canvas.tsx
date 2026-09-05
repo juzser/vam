@@ -78,7 +78,7 @@ import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
 import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
-import { SessionList } from '../panels/SessionList.js';
+import { NEW_PROJECT_PENDING, SessionList } from '../panels/SessionList.js';
 import { visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
@@ -243,6 +243,21 @@ export function truncateStatus(text: string): string {
 /**
  * The status bar's message cell.
  *
+ * ANNOUNCED, not merely drawn. This is the renderer's one refusal channel,
+ * and on a refusal nothing else on screen changes -- no row dims, no control
+ * goes busy -- so without a live region an assistive-technology user gets
+ * exactly what the silent in-flight guards used to give everyone: a click
+ * indistinguishable from a dead control. `polite` because the bar is the
+ * outcome of a key the operator just pressed and must not interrupt what they
+ * are reading (WCAG 2.1 SC 4.1.3; same pattern as `SettingsOverlay`). Both
+ * shells draw their bar through this one component and they draw it
+ * exclusively, so this is one live region, never two racing.
+ *
+ * What is announced is the SHORTENED text, because that is what this element
+ * contains -- the tail past 72 characters is reachable by focus, through the
+ * tooltip below, and the cut is at the tail on purpose so the code that names
+ * which failure this is always survives it.
+ *
  * The tooltip is `Note` (Radix) rather than a `title` attribute, and the
  * difference is not cosmetic: no browser opens a `title` on keyboard focus, so
  * on a modal keyboard-first app whose status bar sits beside a `?` shortcut
@@ -254,9 +269,21 @@ export function truncateStatus(text: string): string {
 export function StatusCell({ text }: { readonly text: string }) {
   return (
     <Note text={text}>
-      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the
-          feature -- see the comment above. */}
-      <span data-status tabIndex={0} className="min-w-0 truncate text-ink-dim">
+      <span
+        data-status
+        role="status"
+        aria-live="polite"
+        // The suppression sits HERE, on the line directly above the attribute,
+        // rather than above the element: biome reports this one at `tabIndex`
+        // and suppresses by line, so when these attributes went multi-line for
+        // the live region the old comment stopped covering it -- and said so
+        // twice, as an unused suppression AND as the rule firing. It must also
+        // be the LAST comment line before the attribute, which is why the
+        // reason below is short and this explanation is above it.
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see the doc comment.
+        tabIndex={0}
+        className="min-w-0 truncate text-ink-dim"
+      >
         {truncateStatus(text)}
       </span>
     </Note>
@@ -345,6 +372,20 @@ type NewSessionRoute =
   | { readonly ok: false; readonly decline: string };
 
 function newSessionRoute(source: CanvasSource): NewSessionRoute {
+  if (source.kind === 'connecting') {
+    // The SAME sentence the source cell is showing. `error` set means the
+    // source answered and refused, or could not be assembled at all: the
+    // connection is over, not in progress, and a caption still saying
+    // "connecting" would be this canvas making two claims about one source --
+    // the thing `source.error` exists to prevent (`source.ts`).
+    return {
+      ok: false,
+      decline:
+        source.error === undefined || source.error === null
+          ? 'still connecting to the source — nothing can start yet'
+          : `no source to start one in — ${source.error}`,
+    };
+  }
   if (source.kind !== 'session') {
     return { ok: false, decline: 'black-smith has no new-session command' };
   }
@@ -509,8 +550,26 @@ function SourceReadout({ source }: { source: CanvasSource }) {
     <span data-source className="min-w-0 truncate font-mono text-[10px]">
       {source.kind === 'demo' ? (
         <span className="text-waiting">● {source.note}</span>
+      ) : source.kind === 'connecting' ? (
+        // Not `text-ink-faint`, which the browser arm below still uses: it
+        // measures 3.27:1 dark and 3.01:1 light (issue 188). Not a status token
+        // either -- "connecting" is not one of the four session states, and
+        // the hollow glyph is what carries "not yet".
+        source.error === undefined || source.error === null ? (
+          <span className="text-ink-dim">○ connecting to the source…</span>
+        ) : (
+          <span className="text-failed">● {source.error}</span>
+        )
       ) : source.kind === 'session' ? (
-        <span className="text-done">● {source.source.label}</span>
+        // The error is the WHOLE claim of this cell, so it is what colours it.
+        // A green dot next to a source whose every poll is failing is the
+        // defect this arm exists to prevent, and the failure badge in the
+        // status bar was the only surface saying otherwise.
+        source.error === undefined || source.error === null ? (
+          <span className="text-done">● {source.source.label}</span>
+        ) : (
+          <span className="text-failed">● {source.error}</span>
+        )
       ) : source.status === 'error' ? (
         <span className="text-failed">● {source.error}</span>
       ) : source.status === 'loading' ? (
@@ -1491,6 +1550,14 @@ function CanvasInner({
       setStatus(source.note);
       return;
     }
+    // TOTALITY, not a reachable path: with no source there is no model, so
+    // there is no focused entry and the guard above has already returned. It
+    // refuses rather than falling through to the browser branch, which would
+    // read `client` off a source that has none.
+    if (source.kind === 'connecting') {
+      setStatus('still connecting to the source — there is nothing to send to yet');
+      return;
+    }
     if (writing) {
       return;
     }
@@ -1588,6 +1655,14 @@ function CanvasInner({
   const closeSession = useCallback(
     async (sessionId: string, title: string): Promise<boolean> => {
       if (pendingAction !== null) {
+        // NAMED, and named for the session the operator just clicked: only
+        // the pending control is disabled, so this click landed on a `×` that
+        // looked pressable, and silence there is indistinguishable from a
+        // dead button. `removeProject` has always said this; these two did
+        // not. The sentence stays in one form across all three.
+        setStatus(
+          `something else is still running — "${title}" was not closed; try again in a moment`,
+        );
         return false;
       }
       if (source.kind !== 'session') {
@@ -1769,6 +1844,9 @@ function CanvasInner({
   const createSession = useCallback(
     async (projectId: string, projectName: string) => {
       if (pendingAction !== null) {
+        setStatus(
+          `something else is still running — no new session in ${projectName}; try again in a moment`,
+        );
         return;
       }
       const route = newSessionRoute(source);
@@ -1818,6 +1896,12 @@ function CanvasInner({
    * failure). Only past all three does anything spawn.
    */
   const newProject = useCallback(async () => {
+    if (pendingAction !== null) {
+      // OUT LOUD, like `removeProject` one screen up. A refused click that
+      // says nothing is indistinguishable from a dead control.
+      setStatus('something else is still running — nothing was started; try again in a moment');
+      return;
+    }
     const route = newSessionRoute(source);
     if (!route.ok) {
       // A refusal vam INTENDED. Recorded, because an operator who cannot see
@@ -1831,26 +1915,48 @@ function CanvasInner({
       setStatus('choosing a directory needs the desktop app — the browser build has no picker');
       return;
     }
-    let cwd: string | null;
+    const createSessionIn = route.write.createSessionIn;
+    // THE PENDING STATE STARTS AT THE DIALOG, not after it. The dialog is the
+    // first await on this path, and it is the window a second click used to
+    // land in: with nothing set, the guard above was false and the operator
+    // got a second picker and a SECOND session in the same directory. It also
+    // makes the `+` wear the action, which is the only thing on screen that
+    // does -- a native dialog is the OS's feedback, not vam's, and it is gone
+    // for the ~10s of spawning that follows it.
+    setPendingAction(NEW_PROJECT_PENDING);
+    setStatus('choosing a directory for a new session…');
     try {
-      cwd = await choose();
-    } catch (cause) {
-      setStatus(noteFailure('choose a directory', cause));
-      return;
+      let cwd: string | null;
+      try {
+        cwd = await choose();
+      } catch (cause) {
+        setStatus(noteFailure('choose a directory', cause));
+        return;
+      }
+      if (cwd === null) {
+        setStatus('no directory chosen — nothing started');
+        return;
+      }
+      const name = directoryName(cwd);
+      // The first half of one sentence, exactly as `createSession` says it:
+      // "starting…" here, "started … it may take a moment to appear" below.
+      setStatus(`starting a new session in ${name}…`);
+      try {
+        await createSessionIn(cwd, name);
+        setStatus(`started a new session in ${name} — it may take a moment to appear`);
+        if (source.kind === 'session') source.onWrote();
+      } catch (cause) {
+        setStatus(noteFailure('new project', cause));
+      }
+    } finally {
+      // Every path THIS `try` HAS -- the cancel, the picker's own failure,
+      // the failed spawn and the success. The three refusals above return
+      // before it and set no pending state to clear, which is why they are
+      // above it rather than inside. A spinner still spinning after a failure
+      // turns a clear one into an apparent hang.
+      setPendingAction(null);
     }
-    if (cwd === null) {
-      setStatus('no directory chosen — nothing started');
-      return;
-    }
-    const name = directoryName(cwd);
-    try {
-      await route.write.createSessionIn(cwd, name);
-      setStatus(`started a new session in ${name} — it may take a moment to appear`);
-      if (source.kind === 'session') source.onWrote();
-    } catch (cause) {
-      setStatus(noteFailure('new project', cause));
-    }
-  }, [source]);
+  }, [source, pendingAction]);
 
   /** The caption both `+` controls wear: the refusal, or nothing to say. */
   const newSessionDecline = useMemo(() => {
