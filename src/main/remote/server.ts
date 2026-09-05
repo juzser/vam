@@ -23,8 +23,12 @@
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { resolve } from 'node:path';
+import type { SourceCapabilities } from '../../renderer/sources/port.js';
+import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
 import type { MainSource } from '../sources/source.js';
+import { serveAsset } from './assets.js';
 import { type AccessAuth, type Identity, verifyAccessToken } from './auth.js';
 
 /** The one address this server may ever bind. */
@@ -47,6 +51,12 @@ export type RemoteServerOptions = {
   readonly subscribe: (onChange: () => void) => () => void;
   /** One line per write that reached a source. Defaults to the process log. */
   readonly audit?: (line: string) => void;
+  /**
+   * The directory holding the browser build (`dist-web`). Absent means this
+   * server answers JSON and nothing else -- serving a page is a decision, not
+   * a default, and an absent build must 404 rather than half-load.
+   */
+  readonly webRoot?: string;
 };
 
 type Envelope = { ok: true; value: unknown } | { ok: false; error: SourceError };
@@ -173,6 +183,65 @@ function write(
   };
 }
 
+/**
+ * Capabilities whose renderer member reaches for a route this server does not
+ * carry -- with the server's own words for why, because a decline is written
+ * by whoever lacks the thing.
+ */
+const UNSERVED: Partial<Record<keyof SourceCapabilities, string>> = {
+  renameSession: 'the remote endpoint carries no rename route',
+  governance: 'the remote endpoint carries no waiver or lesson routes',
+  terminal:
+    'the remote endpoint does not expose the terminal surface: read, send, answer ' +
+    'and resize type into a running agent and need their own rate limit and decision',
+};
+
+/** The capabilities that live behind the write routes, registered or not. */
+const WRITE_CAPABILITIES = [
+  'recordPrompt',
+  'deliverPrompt',
+  'closeSession',
+  'createSession',
+] as const;
+
+/**
+ * The descriptor as THIS SERVER can honour it.
+ *
+ * Main's descriptor describes what the desktop source can do; over HTTP a
+ * subset of those members has no route, and in read-only mode the writes have
+ * none either. Answering the unprojected descriptor would hand a browser
+ * affordances that 404 on use -- present-and-failing, which is exactly what
+ * the port's absent-means-absent rule exists to prevent. A capability already
+ * false keeps the SOURCE's own decline; only one this server turns off gets
+ * the server's.
+ */
+export function servedDescriptor(
+  descriptor: SourceDescriptor,
+  allowWrites: boolean,
+): SourceDescriptor {
+  const capabilities: Record<string, boolean> = { ...descriptor.capabilities };
+  const declines: Record<string, string> = { ...descriptor.declines };
+  const off = (key: string, why: string): void => {
+    if (capabilities[key] === true) {
+      capabilities[key] = false;
+      declines[key] = why;
+    }
+  };
+  for (const [key, why] of Object.entries(UNSERVED)) {
+    off(key, why);
+  }
+  if (!allowWrites) {
+    for (const key of WRITE_CAPABILITIES) {
+      off(key, 'this server was started read-only; the write routes are not registered');
+    }
+  }
+  return {
+    ...descriptor,
+    capabilities: capabilities as unknown as SourceCapabilities,
+    declines,
+  };
+}
+
 function routesFor(options: RemoteServerOptions): Map<string, { method: string; route: Route }> {
   const table = new Map<string, { method: string; route: Route }>();
   const read = (path: string, produce: () => Promise<unknown>): void => {
@@ -184,7 +253,7 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     });
   };
 
-  read('/api/describe', async () => options.source.descriptor);
+  read('/api/describe', async () => servedDescriptor(options.source.descriptor, options.allowWrites));
   read('/api/load', async () => await options.source.load());
 
   table.set('/api/stream', { method: 'GET', route: stream(options) });
@@ -283,6 +352,7 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
   }
 
   const table = routesFor(options);
+  const webRoot = options.webRoot === undefined ? null : resolve(options.webRoot);
 
   const server = createServer((request, response) => {
     void (async () => {
@@ -299,6 +369,18 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
       const path = new URL(request.url ?? '/', `http://${LOOPBACK}`).pathname;
       const entry = table.get(path);
       if (entry === undefined) {
+        // AFTER the identity check and only after it: a static file must not
+        // be reachable by someone `/api/load` would refuse. `/api/*` never
+        // falls through to a file, so no upload or stray name under the web
+        // root can shadow a route or answer where JSON is expected.
+        if (
+          webRoot !== null &&
+          request.method === 'GET' &&
+          !path.startsWith('/api/') &&
+          (await serveAsset(webRoot, path, response))
+        ) {
+          return;
+        }
         // `unreachable`, deliberately, not `refused`: in read-only mode this
         // is the answer a write path gets, and it must not read as a
         // capability decline -- there is no route here to decline anything.
