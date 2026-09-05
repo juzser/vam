@@ -612,17 +612,29 @@ test.describe('the phone search route', () => {
 
   /**
    * The unconditional property, which is where the popover's real exposure
-   * lives: it is excluded from the sheet rules, so it has `max-height: none`,
-   * `overflow-y: visible` and no scroller of its own. Its usable height is
-   * therefore fixed by where it is anchored, and any viewport shorter than its
-   * own bottom edge puts content out of reach with nothing to scroll.
+   * lived: it is excluded from the phone sheet rules by a documented decision
+   * -- an anchored popover turned into a bottom sheet is a popover somewhere
+   * else -- and that exclusion left it with `max-height: none`,
+   * `overflow-y: visible` and no scroller. Its usable height was then whatever
+   * the viewport happened to leave below its anchor, and a viewport shorter
+   * than its own bottom edge put controls out of reach with nothing to bring
+   * them back. Measured here at 375x667 (iPhone SE portrait, a size that still
+   * ships) with the viewport shrunk by a keyboard: two controls sat at 383 and
+   * 422 in a 331px viewport.
    *
-   * Measured at 375x667 (iPhone SE portrait, a size that still ships) with the
-   * viewport shrunk by a keyboard -- the ANDROID case, reproduced exactly,
-   * where the layout viewport really does shrink. On iOS the same two controls
-   * are not off-screen but covered, at the same coordinates.
+   * The fix keeps it anchored and caps it from its own measured geometry
+   * (`useFilterPopoverCap`), so what this test asserts is REACH, not position:
+   * the popover fits the viewport, and every control in it is on screen at
+   * some scroll offset of its own scroller. Both ends are checked, because a
+   * cap without a scroller would clip the same controls the old layout pushed
+   * off the bottom -- silently, and this test would not have seen the
+   * difference if it only looked at the top.
+   *
+   * THE ANDROID CASE, reproduced exactly: there the layout viewport really
+   * does shrink. On iOS the same controls are covered rather than off-screen,
+   * at the same coordinates, and the same scroller is what lifts them.
    */
-  test('the filter popover has no scroller, so a short viewport puts its controls out of reach', async ({
+  test('the filter popover caps itself to the viewport and scrolls, so nothing is out of reach', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 375, height: 667 });
@@ -633,6 +645,19 @@ test.describe('the phone search route', () => {
 
     await page.setViewportSize({ width: 375, height: 667 - IOS_KEYBOARD_CSS_PX });
     const seen = await menu.evaluate((el) => {
+      const read = () =>
+        [...el.querySelectorAll('button, input')].map((c) => {
+          const b = c.getBoundingClientRect();
+          return {
+            label: (c.getAttribute('aria-label') ?? c.textContent ?? '').trim().slice(0, 30),
+            top: Math.round(b.top),
+            bottom: Math.round(b.bottom),
+          };
+        });
+      const atTop = read();
+      el.scrollTop = el.scrollHeight;
+      const atBottom = read();
+      el.scrollTop = 0;
       const r = el.getBoundingClientRect();
       return {
         viewport: window.innerHeight,
@@ -640,21 +665,40 @@ test.describe('the phone search route', () => {
         maxHeight: getComputedStyle(el).maxHeight,
         overflowY: getComputedStyle(el).overflowY,
         scrolls: el.scrollHeight > el.clientHeight + 2,
-        offScreen: [...el.querySelectorAll('button, input')]
-          .map((c) => ({
-            label: (c.getAttribute('aria-label') ?? c.textContent ?? '').trim().slice(0, 30),
-            bottom: Math.round(c.getBoundingClientRect().bottom),
-          }))
-          .filter((c) => c.bottom > window.innerHeight),
+        controls: atTop.length,
+        // A control is reachable when SOME scroll offset puts it fully on
+        // screen. Only the two extremes are sampled, which is enough: the
+        // popover is one column, so a control the bottom cannot reach is
+        // taller than the scroller or outside it.
+        unreachable: atTop
+          .map((c, i) => ({ c, end: atBottom[i] }))
+          .filter(
+            ({ c, end }) =>
+              !(c.top >= 0 && c.bottom <= window.innerHeight) &&
+              !(
+                end !== undefined &&
+                end.top >= 0 &&
+                end.bottom <= window.innerHeight
+              ),
+          )
+          .map(({ c, end }) => `${c.label} @ ${c.bottom} (at full scroll: ${end?.bottom ?? '?'})`),
       };
     });
 
-    expect(
-      seen.offScreen.map((c) => `${c.label} @ ${c.bottom}`),
+    const where =
       `the popover spans ${JSON.stringify(seen.rect)} in a ${seen.viewport}px viewport with ` +
-        `max-height: ${seen.maxHeight}, overflow-y: ${seen.overflowY} and scrollable: ${seen.scrolls}. ` +
-        `Nothing can bring these back. The sheet rules give the other four hosts a cap and a ` +
-        `scroller for exactly this; this popover is excluded from them by design.`,
+      `max-height: ${seen.maxHeight}, overflow-y: ${seen.overflowY}, scrollable: ${seen.scrolls}`;
+
+    // The corpus, asserted: a popover that rendered none of its controls would
+    // satisfy every list-shaped check below by having nothing in the list.
+    expect(seen.controls, `controls found inside the popover -- ${where}`).toBeGreaterThan(4);
+    expect(
+      seen.rect.bottom <= seen.viewport ? [] : [`bottom ${seen.rect.bottom} > viewport ${seen.viewport}`],
+      `the popover must cap itself to the viewport it is in -- ${where}`,
+    ).toEqual([]);
+    expect(
+      seen.unreachable,
+      `controls no scroll offset can bring on screen -- ${where}`,
     ).toEqual([]);
   });
 });
