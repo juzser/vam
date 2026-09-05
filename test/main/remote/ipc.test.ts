@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
+import type { DeviceRegistry } from '../../../src/main/remote/devices.js';
 import { openDeviceRegistry } from '../../../src/main/remote/devices.js';
 import type { ServeAddress } from '../../../src/main/remote/hostname.js';
 import { type RemoteState, registerRemoteIpc } from '../../../src/main/remote/ipc.js';
@@ -42,13 +43,14 @@ function fakeIpcMain() {
   };
 }
 
-async function wire(over: { address?: ServeAddress; allowWrites?: boolean } = {}) {
+async function wire(
+  over: { address?: ServeAddress; allowWrites?: boolean; devices?: DeviceRegistry } = {},
+) {
   const path = join(await mkdtemp(join(tmpdir(), 'vam-remote-ipc-')), 'devices.json');
   const streams = createStreamRegistry();
-  const devices = await openDeviceRegistry({
-    path,
-    onRevoked: (deviceId) => streams.closeFor(deviceId),
-  });
+  const devices =
+    over.devices ??
+    (await openDeviceRegistry({ path, onRevoked: (deviceId) => streams.closeFor(deviceId) }));
   const pairing = createPairing({ grant: (name) => devices.grant(name) });
   const ipcMain = fakeIpcMain();
   registerRemoteIpc(ipcMain, {
@@ -139,6 +141,34 @@ describe('the pairing channel', () => {
     expect(after.devices.map((device) => device.name)).toEqual(['a tablet']);
     expect(closedPhone).toHaveBeenCalledTimes(1);
     expect(closedTablet).not.toHaveBeenCalled();
+  });
+
+  it('claims no pairing when the durable write failed, because the registry holds none', async () => {
+    // A registry whose disk is full. `grant` persists BEFORE it returns a
+    // token, so this is what a failed write looks like from above it: no
+    // entry, no token, and nothing the status line may claim.
+    const full: DeviceRegistry = {
+      find: () => null,
+      list: () => [],
+      grant: async () => {
+        throw new Error('ENOSPC: no space left on device');
+      },
+      remove: async () => {},
+      removeAll: async () => {},
+    };
+    const { pairing, state } = await wire({ devices: full });
+
+    const opened = await state(CHANNELS.pairingOpen);
+    const outcome = pairing.submit(opened.view.code ?? '', 'a phone', '127.0.0.1');
+    await state(CHANNELS.pairingApprove);
+
+    await expect(outcome).rejects.toThrow(/ENOSPC/);
+    const after = await state(CHANNELS.remoteState);
+    // The two surfaces agree, and they agree on the true answer: the operator
+    // is told nothing paired, rather than reading "Paired: a phone" beside an
+    // empty list.
+    expect(after.view.pairedName).toBeNull();
+    expect(after.devices).toEqual([]);
   });
 
   it('refuses a device id that is not one, without touching the list', async () => {

@@ -24,7 +24,7 @@ import type { IpcMainLike } from '../ipc/handlers.js';
 import type { DeviceRegistry } from './devices.js';
 import type { ServeAddress } from './hostname.js';
 import type { Pairing } from './pairing.js';
-import type { RemoteState } from './state.js';
+import type { RemoteDeviceView, RemoteState } from './state.js';
 
 export type { RemoteState };
 
@@ -54,11 +54,11 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
   const now = options.now ?? (() => Date.now());
   let cached: { at: number; address: ServeAddress } | null = null;
   /**
-   * The name of the device the operator allowed since the screen was opened,
-   * which is the only thing the panel's "Paired: ..." line can truthfully
-   * say. Cleared by `open`, because a new code is a new question.
+   * When the operator last opened the screen, or null while it has never been
+   * open. The status line is derived against this rather than remembered: see
+   * `pairedSince` below.
    */
-  let pairedName: string | null = null;
+  let openedAt: number | null = null;
 
   const address = async (): Promise<ServeAddress> => {
     if (cached !== null && now() - cached.at < ADDRESS_CACHE_MS) {
@@ -67,6 +67,35 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
     const read = await options.readAddress();
     cached = { at: now(), address: read };
     return read;
+  };
+
+  /**
+   * The device this screen actually paired, READ BACK FROM THE REGISTRY.
+   *
+   * It is not remembered at the moment the operator presses Allow, and that is
+   * the whole point. `devices.grant` persists before it returns -- a
+   * credential is not valid until its durable write succeeds -- so a full disk
+   * means no entry, no token, and no pairing. A `pairedName` captured from the
+   * prompt would go on saying "Paired: a phone" beside a device list that
+   * correctly showed nothing, and the more prominent of the two surfaces would
+   * be the one lying. Derived from the registry, the two cannot disagree.
+   *
+   * Scoped to the current screen by `pairedAt`, so a device paired last week
+   * is not announced as the answer to the code minted a minute ago.
+   */
+  const pairedSince = (): string | null => {
+    const since = openedAt;
+    if (since === null) {
+      return null;
+    }
+    const newest = options.devices
+      .list()
+      .filter((device) => device.pairedAt >= since)
+      .reduce<RemoteDeviceView | null>(
+        (best, device) => (best === null || device.pairedAt >= best.pairedAt ? device : best),
+        null,
+      );
+    return newest?.name ?? null;
   };
 
   const snapshot = async (): Promise<RemoteState> => {
@@ -78,7 +107,7 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
         burned: state.burned,
         throttledUntilMs: state.throttledUntil,
         awaiting: state.awaiting,
-        pairedName,
+        pairedName: pairedSince(),
       },
       devices: options.devices.list(),
       address: await address(),
@@ -90,15 +119,17 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
   ipcMain.handle(CHANNELS.remoteState, snapshot);
 
   ipcMain.handle(CHANNELS.pairingOpen, async (): Promise<RemoteState> => {
-    pairedName = null;
+    // Recorded BEFORE the mint, so a grant that lands in the same millisecond
+    // is inside this screen's window rather than just outside it.
+    openedAt = now();
     options.pairing.open();
     return await snapshot();
   });
 
   ipcMain.handle(CHANNELS.pairingApprove, async (): Promise<RemoteState> => {
-    // Read BEFORE approving: settling clears `awaiting`, and the name the
-    // operator saw on the prompt is the name the status line must show.
-    pairedName = options.pairing.state().awaiting?.name ?? pairedName;
+    // Nothing is remembered here. Approving releases the waiting request; what
+    // it produced is whatever the registry durably holds, which `pairedSince`
+    // reads back -- including "nothing", when the write failed.
     options.pairing.approve();
     return await snapshot();
   });
