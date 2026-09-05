@@ -243,6 +243,21 @@ export function truncateStatus(text: string): string {
 /**
  * The status bar's message cell.
  *
+ * ANNOUNCED, not merely drawn. This is the renderer's one refusal channel,
+ * and on a refusal nothing else on screen changes -- no row dims, no control
+ * goes busy -- so without a live region an assistive-technology user gets
+ * exactly what the silent in-flight guards used to give everyone: a click
+ * indistinguishable from a dead control. `polite` because the bar is the
+ * outcome of a key the operator just pressed and must not interrupt what they
+ * are reading (WCAG 2.1 SC 4.1.3; same pattern as `SettingsOverlay`). Both
+ * shells draw their bar through this one component and they draw it
+ * exclusively, so this is one live region, never two racing.
+ *
+ * What is announced is the SHORTENED text, because that is what this element
+ * contains -- the tail past 72 characters is reachable by focus, through the
+ * tooltip below, and the cut is at the tail on purpose so the code that names
+ * which failure this is always survives it.
+ *
  * The tooltip is `Note` (Radix) rather than a `title` attribute, and the
  * difference is not cosmetic: no browser opens a `title` on keyboard focus, so
  * on a modal keyboard-first app whose status bar sits beside a `?` shortcut
@@ -256,7 +271,13 @@ export function StatusCell({ text }: { readonly text: string }) {
     <Note text={text}>
       {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the
           feature -- see the comment above. */}
-      <span data-status tabIndex={0} className="min-w-0 truncate text-ink-dim">
+      <span
+        data-status
+        role="status"
+        aria-live="polite"
+        tabIndex={0}
+        className="min-w-0 truncate text-ink-dim"
+      >
         {truncateStatus(text)}
       </span>
     </Note>
@@ -346,7 +367,18 @@ type NewSessionRoute =
 
 function newSessionRoute(source: CanvasSource): NewSessionRoute {
   if (source.kind === 'connecting') {
-    return { ok: false, decline: 'still connecting to the source — nothing can start yet' };
+    // The SAME sentence the source cell is showing. `error` set means the
+    // source answered and refused, or could not be assembled at all: the
+    // connection is over, not in progress, and a caption still saying
+    // "connecting" would be this canvas making two claims about one source --
+    // the thing `source.error` exists to prevent (`source.ts`).
+    return {
+      ok: false,
+      decline:
+        source.error === undefined || source.error === null
+          ? 'still connecting to the source — nothing can start yet'
+          : `no source to start one in — ${source.error}`,
+    };
   }
   if (source.kind !== 'session') {
     return { ok: false, decline: 'black-smith has no new-session command' };
@@ -1911,8 +1943,11 @@ function CanvasInner({
         setStatus(noteFailure('new project', cause));
       }
     } finally {
-      // EVERY path -- refusal, cancel and failure included. A spinner still
-      // spinning after a refusal turns a clear failure into an apparent hang.
+      // Every path THIS `try` HAS -- the cancel, the picker's own failure,
+      // the failed spawn and the success. The three refusals above return
+      // before it and set no pending state to clear, which is why they are
+      // above it rather than inside. A spinner still spinning after a failure
+      // turns a clear one into an apparent hang.
       setPendingAction(null);
     }
   }, [source, pendingAction]);

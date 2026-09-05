@@ -290,60 +290,73 @@ describe('new project — feedback and the in-flight guard', () => {
     expect(statusBar()).toContain('orchard');
   });
 
-  it('a second click while the picker is open opens no second dialog and starts no second session', async () => {
-    const { source, spawned } = sourceWith(true);
-    const gate = deferred<string | null>();
-    const picker = withDialog(() => gate.promise);
-    render(<Canvas model={MODEL} source={source} />);
-    await clickNewProject();
-    await act(async () => {
-      control().dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(picker.count).toBe(1);
-
-    await act(async () => {
-      gate.settle(CHOSEN);
-    });
-    expect(spawned).toEqual([[CHOSEN, 'orchard']]);
-  });
-
   /**
-   * THE TEST ABOVE IS NOT THE ONE THAT PROVES THE GUARD, and it was written
-   * believing it was: deleting the `pendingAction` check from `newProject`
-   * leaves it green, because a disabled button does not dispatch a click at
-   * all and the handler is never reached. The disabled attribute is a real
-   * defence and it is asserted -- but it only covers the control that is
-   * ITSELF pending.
+   * THESE TWO TESTS ARE A PAIR, and the nesting is what says so.
    *
-   * This is the reachable second click. `pending()` matches on the id, so
-   * while a session is being created in a project the Projects `+` is a live,
-   * enabled button, and only the guard inside the handler stops it opening a
-   * picker and spawning into a second directory. Deleting the guard reddens
-   * this one.
+   * One of them is a tautology and is kept deliberately, as the record of a
+   * guard that was falsified and found untested. That only works while a
+   * reader meets them together: the explanation used to sit between them, so
+   * moving, extracting or reordering either test would have silently left the
+   * tautology looking like the proof. A `describe` cannot be split by an edit
+   * that does not notice it.
    */
-  it('is refused, out loud, while another action is in flight', async () => {
-    const { source, spawned } = sourceWith(true);
-    const gate = deferred<void>();
-    const inner = (source as { source: SessionSource }).source as unknown as {
-      write: { createSession: () => Promise<void> };
-    };
-    inner.write.createSession = () => gate.promise;
-    const picker = withDialog(async () => CHOSEN);
-    render(<Canvas model={MODEL} source={source} />);
-    await act(async () => {
-      screen.getByLabelText('new session in alpha').click();
-    });
-    // The Projects `+` is not the pending control, so it is still live.
-    expect(control().disabled).toBe(false);
+  describe('a second click, and which test actually proves it is refused', () => {
+    it('a second click while the picker is open opens no second dialog and starts no second session', async () => {
+      const { source, spawned } = sourceWith(true);
+      const gate = deferred<string | null>();
+      const picker = withDialog(() => gate.promise);
+      render(<Canvas model={MODEL} source={source} />);
+      await clickNewProject();
+      await act(async () => {
+        control().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(picker.count).toBe(1);
 
-    await clickNewProject();
-    expect(picker.count).toBe(0);
-    expect(spawned).toEqual([]);
-    expect(statusBar()).toMatch(/still running/i);
-
-    await act(async () => {
-      gate.settle();
+      await act(async () => {
+        gate.settle(CHOSEN);
+      });
+      expect(spawned).toEqual([[CHOSEN, 'orchard']]);
     });
+
+    /**
+     * THE SECOND TEST IS THE ONE THAT PROVES THE GUARD. The first was written
+     * believing it did, and does not: deleting the `pendingAction` check from
+     * `newProject` leaves it green, because a disabled button does not dispatch
+     * a click at all and the handler is never reached. The disabled attribute
+     * is a real defence and is asserted for itself -- but it only covers the
+     * control that is ITSELF pending.
+     *
+     * The second is the reachable second click. `pending()` matches on the id, so
+     * while a session is being created in a project the Projects `+` is a live,
+     * enabled button, and only the guard inside the handler stops it opening a
+     * picker and spawning into a second directory. Deleting the guard reddens
+     * this one.
+     */
+    it('is refused, out loud, while another action is in flight', async () => {
+      const { source, spawned } = sourceWith(true);
+      const gate = deferred<void>();
+      const inner = (source as { source: SessionSource }).source as unknown as {
+        write: { createSession: () => Promise<void> };
+      };
+      inner.write.createSession = () => gate.promise;
+      const picker = withDialog(async () => CHOSEN);
+      render(<Canvas model={MODEL} source={source} />);
+      await act(async () => {
+        screen.getByLabelText('new session in alpha').click();
+      });
+      // The Projects `+` is not the pending control, so it is still live.
+      expect(control().disabled).toBe(false);
+
+      await clickNewProject();
+      expect(picker.count).toBe(0);
+      expect(spawned).toEqual([]);
+      expect(statusBar()).toMatch(/still running/i);
+
+      await act(async () => {
+        gate.settle();
+      });
+    });
+
   });
 
   it('says "starting…" before the spawn, and clears the busy state when it lands', async () => {

@@ -18,7 +18,7 @@
  * and it was the green dot beside it that contradicted it.
  */
 
-import { cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasSource } from '../../src/renderer/canvas/source.js';
@@ -113,6 +113,42 @@ describe('the source cell', () => {
     expect(dot().className).not.toContain('text-done');
     // Not `ink-faint`: 3.27:1 dark, 3.01:1 light (issue 188).
     expect(dot().className).not.toContain('ink-faint');
+  });
+
+  /**
+   * ONE SOURCE, ONE CLAIM ABOUT IT.
+   *
+   * The cell reads the failure off `source.error`; `newSessionRoute` did not,
+   * so with a source that had answered and refused permanently the cell said
+   * so in red while the `+` tooltip and the status bar on click both said
+   * "still connecting" -- an in-progress connection that had already ended.
+   * `source.ts` says this field exists to stop exactly that.
+   */
+  it('the + refuses in the same words the cell is showing, not "still connecting"', async () => {
+    const failed = 'the endpoint refused: unauthenticated';
+    render(<Canvas model={MODEL} source={{ kind: 'connecting', error: failed }} />);
+    expect(cell().textContent).toContain(failed);
+
+    const plus = screen.getByLabelText('new project') as HTMLButtonElement;
+    expect(plus.title).toContain(failed);
+    expect(plus.title).not.toMatch(/still connecting/i);
+
+    await act(async () => {
+      plus.click();
+    });
+    const bar = document.querySelector('[data-status-bar]')?.textContent ?? '';
+    expect(bar).toContain('unauthenticated');
+    expect(bar).not.toMatch(/still connecting/i);
+  });
+
+  it('still says "connecting" while it genuinely is', async () => {
+    render(<Canvas model={MODEL} source={{ kind: 'connecting' }} />);
+    const plus = screen.getByLabelText('new project') as HTMLButtonElement;
+    await act(async () => {
+      plus.click();
+    });
+    const bar = document.querySelector('[data-status-bar]')?.textContent ?? '';
+    expect(bar).toMatch(/still connecting/i);
   });
 
   it('a source that could not be assembled at all says so rather than connecting forever', () => {
