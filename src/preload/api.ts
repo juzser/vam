@@ -21,7 +21,7 @@
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
 import type { RemoteState } from '../main/remote/state.js';
 import type { Project } from '../renderer/domain/model.js';
-import type { AnswerRequest, AnswerResult } from '../shared/answer.js';
+import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
 import type { PaneKey, PaneSendResult, PaneView } from '../shared/terminal.js';
 import type { UpdateStatus } from '../shared/update.js';
@@ -202,6 +202,13 @@ export type TerminalApi = {
    * no way to express an answer as a keystroke on this bridge.
    */
   answer(projectId: string, request: AnswerRequest, rowId?: string): Promise<AnswerResult>;
+  /**
+   * The question the session's PANE is asking, for the shapes nothing wrote
+   * down. Beside `answer` because the two are one act: what this returns is
+   * what the card offers, and what the card sends back is matched against the
+   * same screen.
+   */
+  prompt(projectId: string, rowId?: string): Promise<PromptView>;
 };
 
 /**
@@ -228,6 +235,10 @@ export function createTerminalApi(ipc: InvokerLike): TerminalApi {
       (rowId === undefined
         ? ipc.invoke(CHANNELS.terminalAnswer, projectId, request)
         : ipc.invoke(CHANNELS.terminalAnswer, projectId, request, rowId)) as Promise<AnswerResult>,
+    prompt: (projectId, rowId) =>
+      (rowId === undefined
+        ? ipc.invoke(CHANNELS.terminalPrompt, projectId)
+        : ipc.invoke(CHANNELS.terminalPrompt, projectId, rowId)) as Promise<PromptView>,
   };
 }
 

@@ -12,7 +12,7 @@
  * requirement for this tab, and the reason main holds no timer of its own.
  */
 
-import { type AnswerResult, isAnswerRequest } from '../../shared/answer.js';
+import { type AnswerResult, isAnswerRequest, type PromptView } from '../../shared/answer.js';
 import {
   isPaneKey,
   isPaneSize,
@@ -24,7 +24,7 @@ import type { IpcMainLike } from '../ipc/handlers.js';
 import { readPublishedPanes } from '../sources/claude-code/session-pane.js';
 import { defaultSessionsRoot } from '../sources/claude-code/session-status.js';
 import { listVamSessions, type TmuxRun } from '../sources/tmux/spawn.js';
-import { answerQuestion } from './answer.js';
+import { answerQuestion, readSessionPrompt } from './answer.js';
 import { readSessionPane, resizeSessionPane, sendToPane, targetSession } from './pane.js';
 
 /**
@@ -275,6 +275,35 @@ export function registerTerminalIpc(
         run,
         projectId,
         request,
+        rowId,
+        rowId === undefined ? undefined : await readPanes(),
+      );
+    },
+  );
+
+  /**
+   * The prompt on the pane. A READ, so it is safe to poll -- nothing here
+   * presses a key -- but it is the read the ANSWER is built out of, so it is
+   * aimed by exactly the same rule and its refusals are kept apart in exactly
+   * the same words. A card drawn from a prompt vam read in the wrong pane
+   * would be answered in the wrong pane.
+   */
+  ipcMain.handle(
+    CHANNELS.terminalPrompt,
+    async (_event, ...args: unknown[]): Promise<PromptView> => {
+      const [projectId, rowId] = args;
+      if (
+        args.length < 1 ||
+        args.length > 2 ||
+        typeof projectId !== 'string' ||
+        projectId.length > MAX_PROJECT_ID_LENGTH ||
+        (rowId !== undefined && (typeof rowId !== 'string' || rowId.length > MAX_PROJECT_ID_LENGTH))
+      ) {
+        return { kind: 'unaimed' };
+      }
+      return readSessionPrompt(
+        run,
+        projectId,
         rowId,
         rowId === undefined ? undefined : await readPanes(),
       );
