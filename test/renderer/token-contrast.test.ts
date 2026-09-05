@@ -99,24 +99,42 @@ describe('token contrast, per theme', () => {
       return v as string;
     };
 
+    /**
+     * Every pair this guard looked at, and which of them fell short.
+     *
+     * Shaped as one object so the count and the verdict are asserted in a
+     * single expectation. A guard that reports "nothing failed" over a corpus
+     * of zero passes for the wrong reason -- a sibling guard on another branch
+     * did exactly that, asking its question of a caption its fixture never drew
+     * -- so the number of comparisons is part of the expected value and a
+     * shortened token or ground list reddens this file.
+     */
+    const measure = (pairs: readonly (readonly [string, string])[], floor: number) => ({
+      pairs: pairs.length,
+      failing: pairs
+        .filter(([token, ground]) => contrast(hex(token), hex(ground)) < floor)
+        .map(([token, ground]) => `${token} on ${ground}`),
+    });
+
     describe(theme.name, () => {
       it('carries text at 4.5:1 or better on every surface it is painted on', () => {
-        for (const token of TEXT_TOKENS) {
-          for (const ground of TEXT_GROUNDS) {
-            const ratio = contrast(hex(token), hex(ground));
-            expect(ratio, `${token} on ${ground}`).toBeGreaterThanOrEqual(4.5);
-          }
-        }
+        const pairs = TEXT_TOKENS.flatMap((token) =>
+          TEXT_GROUNDS.map((ground) => [token, ground] as const),
+        );
+        // 7 tokens x 5 grounds. The literal is the point: it is what makes
+        // deleting a row from either list a failure rather than a quieter pass.
+        expect(measure(pairs, 4.5)).toEqual({ pairs: 35, failing: [] });
       });
 
       it('reads the waiting amber against its own tint and wash', () => {
         // `StepNode` paints `bg-waiting-tint text-waiting`, and the wash is the
         // same pairing one step quieter. A status colour that fails against the
         // fill its own design pairs it with is the worst case, not a corner one.
-        for (const ground of ['--vam-waiting-tint', '--vam-waiting-wash'] as const) {
-          const ratio = contrast(hex('--vam-waiting'), hex(ground));
-          expect(ratio, `--vam-waiting on ${ground}`).toBeGreaterThanOrEqual(4.5);
-        }
+        const pairs = [
+          ['--vam-waiting', '--vam-waiting-tint'],
+          ['--vam-waiting', '--vam-waiting-wash'],
+        ] as const;
+        expect(measure(pairs, 4.5)).toEqual({ pairs: 2, failing: [] });
       });
 
       it('marks the cursor at 3:1 against the canvas and against a grid dot', () => {
@@ -124,18 +142,21 @@ describe('token contrast, per theme', () => {
         // thing that says which node the cursor is on — the card border does not
         // vary with focus and the sidebar highlights the SESSION. The grid dot
         // is in here because the ring is 1px and is drawn across the dots.
-        for (const ground of ['--vam-canvas', '--vam-dots'] as const) {
-          const ratio = contrast(hex('--vam-cursor-ring'), hex(ground));
-          expect(ratio, `--vam-cursor-ring on ${ground}`).toBeGreaterThanOrEqual(3);
-        }
+        const pairs = [
+          ['--vam-cursor-ring', '--vam-canvas'],
+          ['--vam-cursor-ring', '--vam-dots'],
+        ] as const;
+        expect(measure(pairs, 3)).toEqual({ pairs: 2, failing: [] });
       });
 
       it('draws the segmented control border at 3:1 against the fill it encloses', () => {
         // `SettingsOverlay` draws `border-ink-faint` around a `bg-well` fill.
         // The ground is `well`, not `panel` — a comment there once measured the
         // wrong one and recorded a pass the border did not have.
-        const ratio = contrast(hex('--vam-ink-faint'), hex('--vam-well'));
-        expect(ratio, '--vam-ink-faint on --vam-well').toBeGreaterThanOrEqual(3);
+        expect(measure([['--vam-ink-faint', '--vam-well']], 3)).toEqual({
+          pairs: 1,
+          failing: [],
+        });
       });
     });
   }
