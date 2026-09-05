@@ -36,6 +36,12 @@ export type PhoneShellProps = {
    * factory look identical without it.
    */
   readonly sourceReadout: ReactNode;
+  /**
+   * Can this source record a prompt? `false` is a read-only server, whose
+   * write routes are not registered at all, and the composer is then not drawn
+   * -- the reason is in `declines`, in the source's words.
+   */
+  readonly records: boolean;
   readonly failureCount: number;
   readonly onOpenErrorLog: () => void;
   readonly tally: {
@@ -142,10 +148,16 @@ function RemoteLimits({ declines }: { readonly declines: SourceDeclines }) {
   );
 }
 
+/** Is the soft keyboard up because THIS element took focus? */
+function isTyping(target: EventTarget | null): boolean {
+  return target instanceof Element && /^(INPUT|TEXTAREA)$/.test(target.tagName);
+}
+
 export function PhoneShell({
   sidebar,
   detail,
   sourceReadout,
+  records,
   failureCount,
   onOpenErrorLog,
   tally,
@@ -297,11 +309,14 @@ export function PhoneShell({
           to the bottom every time they tap the box. */}
       <div
         className="flex min-h-0 flex-1 flex-col"
+        // By tag name, not `instanceof`: this has to be true for the composer
+        // and for the rename box and false for everything else, and a tag name
+        // is the same fact in every realm a renderer can be mounted in.
         onFocusCapture={(event) => {
-          if (event.target instanceof HTMLTextAreaElement) setTyping(true);
+          if (isTyping(event.target)) setTyping(true);
         }}
         onBlurCapture={(event) => {
-          if (event.target instanceof HTMLTextAreaElement) setTyping(false);
+          if (isTyping(event.target)) setTyping(false);
         }}
       >
         <DetailPanel
@@ -311,6 +326,7 @@ export function PhoneShell({
           // There is nothing else on screen to be active.
           active={true}
           decision={steps[at] ?? detail.decision}
+          records={records}
         />
       </div>
     </div>

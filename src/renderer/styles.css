@@ -871,3 +871,44 @@ body {
   border: none;
   border-radius: 9999px;
 }
+
+/*
+ * The phone shell's four geometry rules.
+ *
+ * They live here rather than in `PhoneShell.tsx` because each of them applies
+ * to markup the shell HOSTS rather than owns -- `SessionList` and
+ * `DetailPanel` are re-hosted, not rewritten, so the phone changes their
+ * geometry from outside and leaves every `data-` hook where the desktop's
+ * tests expect it. No colour is set here; all four are sizes.
+ */
+
+/* 16px, because iOS Safari zooms the page when a focused control is smaller,
+   and does not undo that zoom cleanly -- the operator ends up panning a
+   zoomed layout after every prompt. */
+[data-phone-shell] input,
+[data-phone-shell] textarea {
+  font-size: 16px;
+}
+
+/* WCAG 2.2 SC 2.5.5 (AAA) and Apple's own HIG figure. The record button ships
+   at 28px, which is under even the AA floor of 24. */
+[data-phone-shell] button,
+[data-phone-shell] [role='button'],
+[data-phone-shell] summary {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Without `viewport-fit=cover` in index.html this resolves to 0 and the
+   record button sits under the iOS home indicator. */
+[data-phone-shell] [data-composer-bar] {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+/* While the soft keyboard is up it owns roughly half the viewport, and 44px
+   of tab bar out of the ~400px left is chrome spent on a control the operator
+   has already used to get here. It returns the moment the composer blurs.
+   `prefers-reduced-motion` has nothing to remove: there is no transition. */
+.vam-phone-typing [role='tablist'] {
+  display: none;
+}

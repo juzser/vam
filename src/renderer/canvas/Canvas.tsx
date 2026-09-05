@@ -2831,6 +2831,10 @@ function CanvasInner({
           sidebar={sidebarProps}
           detail={detailProps}
           sourceReadout={<SourceReadout source={source} />}
+          // A read-only server registers no write routes at all, so the box is
+          // withdrawn rather than drawn and refused. Only a `session` source
+          // can say; the demo and live sources both record.
+          records={source.kind !== 'session' || source.source.capabilities.recordPrompt}
           failureCount={failureCount}
           onOpenErrorLog={() => setErrorLogOpen(true)}
           tally={tally}

@@ -449,6 +449,12 @@ export type DetailPanelProps = {
   readonly width?: number;
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
   readonly resizeHandle: ReactNode;
+  /**
+   * Can this source record a prompt at all? Optional, and `undefined` means
+   * yes -- every existing caller is a shell whose source can. `false` withdraws
+   * the composer rather than drawing one that would be refused.
+   */
+  readonly records?: boolean;
 };
 
 /**
@@ -1771,6 +1777,7 @@ export function DetailPanel(props: DetailPanelProps) {
     sending = false,
     width,
     resizeHandle,
+    records,
   } = props;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -2145,7 +2152,12 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const openQuestion = newestQuestions.some((one) => one.answer === null);
   const [chattingAbout, setChattingAbout] = useState<string | null>(null);
-  const composerHidden = openQuestion && chattingAbout !== setId;
+  // `records === false` is a source that has no route to record a prompt at
+  // all -- a read-only server, where `/api/record-prompt` is not registered
+  // and 404s. The box is then not DRAWN, rather than drawn and refused on tap:
+  // a control that takes text it cannot deliver is worse than no control, and
+  // the source's own sentence for the refusal is carried in `declines`.
+  const composerHidden = records === false || (openQuestion && chattingAbout !== setId);
   const startChat = () => {
     if (newestQuestion !== null) setChattingAbout(setId);
     onCompose();
