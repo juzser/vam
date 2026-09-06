@@ -153,12 +153,21 @@ which source it is looking at.
 
 The desktop app can serve the same canvas to a phone. The server
 (`src/main/remote/server.ts`) binds **loopback only** — it is never directly
-reachable from another machine. Today, reaching it from a phone means
-running `tailscale serve` on the desktop machine yourself; that proxies the
+reachable from another machine. Settings → Remote has an **Enable phone
+access** button that runs `tailscale serve` for you; that proxies the
 loopback server from your tailnet and terminates TLS, so the phone gets a
 real `https://<something>.ts.net` origin rather than a bare local address.
-(Automating that step is in progress — described here as it stands, not as
-intended.)
+The same panel turns it off again, and it is off until you ask — exposing a
+port to your whole tailnet should not be a side effect of opening a screen.
+
+One thing that catches people out: **Serve is disabled by default on a
+tailnet**, and switching it on is a web action an admin takes in the
+Tailscale console, not something any app can do for you. When that is the
+situation, vam says so and shows you the link rather than reporting a
+generic failure. Without Tailscale installed at all, the panel explains why
+and links the download; it does not offer a plaintext fallback over the
+local network, because a bare `http://` origin is not a secure context and
+would quietly disqualify browser notifications later.
 
 Pairing is by a short code shown on the desktop (Settings → Remote), typed
 into the phone once; each paired device can be revoked individually, or all
