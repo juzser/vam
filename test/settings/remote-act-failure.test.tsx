@@ -34,7 +34,7 @@ const PAIRED: RemoteState = {
   address: { kind: 'unavailable', reason: 'no-cli' },
   allowWrites: false,
   registry: null,
-  serve: { enabled: false, lastError: null, timedOut: false },
+  serve: { enabled: false, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
   nowMs: NOW,
 };
 

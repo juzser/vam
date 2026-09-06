@@ -221,7 +221,12 @@ describe('the serve toggle channel', () => {
 
     for (let read = 0; read < 5; read += 1) {
       const snapshot = await state(CHANNELS.remoteState);
-      expect(snapshot.serve).toEqual({ enabled: false, lastError: null, timedOut: false });
+      expect(snapshot.serve).toEqual({
+        enabled: false,
+        lastError: null,
+        timedOut: false,
+        tailnetServeDisabledUrl: null,
+      });
     }
 
     expect(enableServe).not.toHaveBeenCalled();
@@ -234,7 +239,12 @@ describe('the serve toggle channel', () => {
     const after = await state(CHANNELS.serveEnable);
 
     expect(enableServe).toHaveBeenCalledTimes(1);
-    expect(after.serve).toEqual({ enabled: true, lastError: null, timedOut: false });
+    expect(after.serve).toEqual({
+      enabled: true,
+      lastError: null,
+      timedOut: false,
+      tailnetServeDisabledUrl: null,
+    });
   });
 
   it('disabling reverses it', async () => {
@@ -243,7 +253,12 @@ describe('the serve toggle channel', () => {
 
     const after = await state(CHANNELS.serveDisable);
 
-    expect(after.serve).toEqual({ enabled: false, lastError: null, timedOut: false });
+    expect(after.serve).toEqual({
+      enabled: false,
+      lastError: null,
+      timedOut: false,
+      tailnetServeDisabledUrl: null,
+    });
   });
 
   it('surfaces a refusal in its own real words, and leaves enabled honest', async () => {
@@ -261,6 +276,7 @@ describe('the serve toggle channel', () => {
       enabled: false,
       lastError: 'access denied: reauthenticate to use Serve',
       timedOut: false,
+      tailnetServeDisabledUrl: null,
     });
   });
 
@@ -280,6 +296,7 @@ describe('the serve toggle channel', () => {
       enabled: true,
       lastError: 'ENOSPC: reset failed',
       timedOut: false,
+      tailnetServeDisabledUrl: null,
     });
   });
 
@@ -293,7 +310,12 @@ describe('the serve toggle channel', () => {
     await state(CHANNELS.serveEnable);
     const after = await state(CHANNELS.serveEnable);
 
-    expect(after.serve).toEqual({ enabled: true, lastError: null, timedOut: false });
+    expect(after.serve).toEqual({
+      enabled: true,
+      lastError: null,
+      timedOut: false,
+      tailnetServeDisabledUrl: null,
+    });
   });
 
   it('surfaces a timeout as its own honest state, distinct from a refusal', async () => {
@@ -302,7 +324,12 @@ describe('the serve toggle channel', () => {
 
     const after = await state(CHANNELS.serveEnable);
 
-    expect(after.serve).toEqual({ enabled: false, lastError: null, timedOut: true });
+    expect(after.serve).toEqual({
+      enabled: false,
+      lastError: null,
+      timedOut: true,
+      tailnetServeDisabledUrl: null,
+    });
   });
 
   it('a timed-out disable keeps enabled true, same as a refused one', async () => {
@@ -312,7 +339,12 @@ describe('the serve toggle channel', () => {
 
     const after = await state(CHANNELS.serveDisable);
 
-    expect(after.serve).toEqual({ enabled: true, lastError: null, timedOut: true });
+    expect(after.serve).toEqual({
+      enabled: true,
+      lastError: null,
+      timedOut: true,
+      tailnetServeDisabledUrl: null,
+    });
   });
 
   it('clears a stale timeout once a later attempt succeeds', async () => {
@@ -325,7 +357,77 @@ describe('the serve toggle channel', () => {
     await state(CHANNELS.serveEnable);
     const after = await state(CHANNELS.serveEnable);
 
-    expect(after.serve).toEqual({ enabled: true, lastError: null, timedOut: false });
+    expect(after.serve).toEqual({
+      enabled: true,
+      lastError: null,
+      timedOut: false,
+      tailnetServeDisabledUrl: null,
+    });
+  });
+
+  /**
+   * `INVENTED_URL` below is exactly that -- invented. A real one embeds a
+   * node identifier that names the operator's machine and must never appear
+   * in a committed fixture.
+   */
+  it('surfaces tailnet-Serve-disabled as its own honest state, with the real link', async () => {
+    const INVENTED_URL = 'https://login.tailscale.com/f/serve?node=invented-node-id-0000';
+    const enableServe = vi.fn(
+      async (): Promise<ServeToggleResult> => ({
+        kind: 'tailnet-serve-disabled',
+        url: INVENTED_URL,
+      }),
+    );
+    const { state } = await wire({ enableServe });
+
+    const after = await state(CHANNELS.serveEnable);
+
+    expect(after.serve).toEqual({
+      enabled: false,
+      lastError: null,
+      timedOut: false,
+      tailnetServeDisabledUrl: INVENTED_URL,
+    });
+  });
+
+  it('a tailnet-Serve-disabled disable keeps enabled true, same as a refused one', async () => {
+    const INVENTED_URL = 'https://login.tailscale.com/f/serve?node=invented-node-id-0001';
+    const disableServe = vi.fn(
+      async (): Promise<ServeToggleResult> => ({
+        kind: 'tailnet-serve-disabled',
+        url: INVENTED_URL,
+      }),
+    );
+    const { state } = await wire({ disableServe });
+    await state(CHANNELS.serveEnable);
+
+    const after = await state(CHANNELS.serveDisable);
+
+    expect(after.serve).toEqual({
+      enabled: true,
+      lastError: null,
+      timedOut: false,
+      tailnetServeDisabledUrl: INVENTED_URL,
+    });
+  });
+
+  it('clears a stale tailnet-Serve-disabled link once a later attempt succeeds', async () => {
+    const INVENTED_URL = 'https://login.tailscale.com/f/serve?node=invented-node-id-0002';
+    const enableServe = vi
+      .fn<() => Promise<ServeToggleResult>>()
+      .mockResolvedValueOnce({ kind: 'tailnet-serve-disabled', url: INVENTED_URL })
+      .mockResolvedValueOnce(OK);
+    const { state } = await wire({ enableServe });
+
+    await state(CHANNELS.serveEnable);
+    const after = await state(CHANNELS.serveEnable);
+
+    expect(after.serve).toEqual({
+      enabled: true,
+      lastError: null,
+      timedOut: false,
+      tailnetServeDisabledUrl: null,
+    });
   });
 });
 

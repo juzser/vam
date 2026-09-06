@@ -61,20 +61,33 @@ export type ServeState = {
    * rather than folded into `lastError`: there are no CLI words to carry, so
    * inventing an English sentence for it here would be main making up prose
    * that belongs to the renderer -- see `PairingPanel.tsx`. Mutually
-   * exclusive with a non-null `lastError`.
+   * exclusive with a non-null `lastError` and a non-null
+   * `tailnetServeDisabledUrl`.
    */
   readonly timedOut: boolean;
+  /**
+   * Serve is administratively OFF FOR THE WHOLE TAILNET -- measured against a
+   * real Tailscale (1.102.2): on a tailnet with Serve disabled (the FIRST-RUN
+   * state for essentially every new user), `tailscale serve --bg` prints this
+   * exact enable link to stdout and then hangs, never exiting.
+   * `remote/serve.ts` parses it off the live process rather than main
+   * constructing one -- it embeds a node id, which identifies the operator's
+   * machine, so it is never invented and never appears in a fixture as a real
+   * value. Null once nothing has surfaced it, or once a later attempt
+   * succeeds. Mutually exclusive with a non-null `lastError` and `timedOut`.
+   */
+  readonly tailnetServeDisabledUrl: string | null;
 };
 
 /**
- * WHICH ACTION A LINGERING `lastError`/`timedOut` CAME FROM IS `enabled`
- * ITSELF, never a fourth field. The panel only ever exposes an Enable button
- * while `enabled` is false and a Disable button while it is true, so a
- * failure recorded while `enabled` is true can only be a failed DISABLE
- * (a failed enable leaves `enabled` false), and one recorded while `enabled`
- * is false can only be a failed ENABLE. `PairingPanel.tsx` reads this
- * invariant directly rather than main inventing a `lastFailedAction` to say
- * the same thing a second way.
+ * WHICH ACTION A LINGERING `lastError`/`timedOut`/`tailnetServeDisabledUrl`
+ * CAME FROM IS `enabled` ITSELF, never a fourth field. The panel only ever
+ * exposes an Enable button while `enabled` is false and a Disable button
+ * while it is true, so a failure recorded while `enabled` is true can only be
+ * a failed DISABLE (a failed enable leaves `enabled` false), and one recorded
+ * while `enabled` is false can only be a failed ENABLE. `PairingPanel.tsx`
+ * reads this invariant directly rather than main inventing a
+ * `lastFailedAction` to say the same thing a second way.
  */
 
 export type RemoteState = {

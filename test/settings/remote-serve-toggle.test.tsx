@@ -32,7 +32,7 @@ const BASE: RemoteState = {
   address: { kind: 'found', url: 'https://example-machine.example-tailnet.ts.net' },
   allowWrites: false,
   registry: null,
-  serve: { enabled: false, lastError: null, timedOut: false },
+  serve: { enabled: false, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
   nowMs: NOW,
 };
 
@@ -47,11 +47,11 @@ function fakeApi(over: Partial<RemoteState> = {}): RemoteApi {
     revokeAll: vi.fn(async () => idle),
     enableServe: vi.fn(async () => ({
       ...idle,
-      serve: { enabled: true, lastError: null, timedOut: false },
+      serve: { enabled: true, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
     })),
     disableServe: vi.fn(async () => ({
       ...idle,
-      serve: { enabled: false, lastError: null, timedOut: false },
+      serve: { enabled: false, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
     })),
   };
 }
@@ -92,7 +92,9 @@ describe('RemotePanel: phone access', () => {
   });
 
   it('disables on a click and flips the panel back off', async () => {
-    const api = fakeApi({ serve: { enabled: true, lastError: null, timedOut: false } });
+    const api = fakeApi({
+      serve: { enabled: true, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
+    });
     render(<RemotePanel api={api} active />);
     const disable = await screen.findByRole('button', { name: /turn off phone access/i });
 
@@ -110,6 +112,7 @@ describe('RemotePanel: phone access', () => {
         enabled: false,
         lastError: 'access denied: reauthenticate to use Serve',
         timedOut: false,
+        tailnetServeDisabledUrl: null,
       },
     }));
     render(<RemotePanel api={api} active />);
@@ -146,7 +149,10 @@ describe('RemotePanel: phone access', () => {
     expect(pending.hasAttribute('disabled')).toBe(true);
     expect(api.enableServe).toHaveBeenCalledTimes(1);
 
-    deferred.resolve?.({ ...BASE, serve: { enabled: true, lastError: null, timedOut: false } });
+    deferred.resolve?.({
+      ...BASE,
+      serve: { enabled: true, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
+    });
 
     expect(await screen.findByRole('button', { name: /turn off phone access/i })).toBeTruthy();
   });

@@ -219,6 +219,7 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
           enabled: state.serve.enabled,
           lastError: state.serve.lastError,
           timedOut: state.serve.timedOut,
+          tailnetServeDisabledUrl: state.serve.tailnetServeDisabledUrl,
           pending: servePending,
         }}
         onRegenerate={() => act('open', () => api.open())}

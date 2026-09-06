@@ -63,6 +63,17 @@ export type ServeAccessView = {
   readonly lastError: string | null;
   /** The most recent attempt gave up waiting rather than getting an answer. */
   readonly timedOut: boolean;
+  /**
+   * Serve is administratively off for the WHOLE TAILNET -- measured against a
+   * real Tailscale (1.102.2): `tailscale serve --bg` prints exactly this
+   * enable link to stdout and then hangs, on a tailnet where Serve has never
+   * been turned on (the first-run state for essentially every new user). The
+   * one case where this panel points at something the operator can actually
+   * go and do, so it is drawn as its own actionable state, never folded into
+   * `lastError`'s alert box. Mutually exclusive with a non-null `lastError`
+   * and a true `timedOut`.
+   */
+  readonly tailnetServeDisabledUrl: string | null;
   /** An enable/disable round trip is in flight -- see `RemotePanel.tsx`. */
   readonly pending: boolean;
 };
@@ -231,7 +242,28 @@ export function PairingPanel(props: PairingPanelProps) {
             </button>
           </>
         )}
-        {serve.lastError === null && !serve.timedOut ? null : (
+        {serve.tailnetServeDisabledUrl !== null ? (
+          // THE ONE ACTIONABLE STATE: not an error box, because it is not an
+          // error -- Serve being off tailnet-wide is the ordinary state of a
+          // fresh tailnet, and the one thing on screen worth pointing at.
+          <div
+            data-testid="serve-tailnet-disabled"
+            className="mt-2 rounded-md border border-line-loud bg-well p-3"
+          >
+            <p className={HINT}>
+              Serve is turned off for your whole tailnet. A tailnet admin needs to turn it on here,
+              then Enable phone access can be pressed again:
+            </p>
+            <a
+              href={serve.tailnetServeDisabledUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-block break-all font-mono text-[12px] text-ink underline underline-offset-2 hover:text-ink-dim"
+            >
+              {serve.tailnetServeDisabledUrl}
+            </a>
+          </div>
+        ) : serve.lastError === null && !serve.timedOut ? null : (
           <p data-testid="serve-error" role="alert" className={`mt-2 ${ALERT_BOX}`}>
             {serve.timedOut ? TIMED_OUT_MESSAGE : serve.lastError}
             {failedToDisable ? (

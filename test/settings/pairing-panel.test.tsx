@@ -18,6 +18,7 @@ import {
   PairingPanel,
   type PairingPanelProps,
   type PairingView,
+  type ServeAccessView,
 } from '../../src/renderer/settings/PairingPanel.js';
 
 afterEach(cleanup);
@@ -35,17 +36,38 @@ const IDLE: PairingView = {
 
 const LIVE: PairingView = { ...IDLE, code: 'ABCD2345', expiresAtMs: NOW + 95_000 };
 
-function draw(over: Partial<PairingPanelProps> = {}) {
+/**
+ * Serve already ON, by default: most of the tests in this file are about the
+ * pairing code, not phone access, and depend on `url` being drawn
+ * unconditionally the way it always was before phone access existed.
+ */
+const SERVE_DEFAULT: ServeAccessView = {
+  cliMissing: false,
+  enabled: true,
+  lastError: null,
+  timedOut: false,
+  pending: false,
+  tailnetServeDisabledUrl: null,
+};
+
+/**
+ * `draw({ serve: { enabled: false } })` merges onto `SERVE_DEFAULT` rather
+ * than replacing it wholesale -- `serve` has grown a field on every one of
+ * three separate rounds of feedback so far, and a shallow `{ ...over }`
+ * merge on `PairingPanelProps` made every existing call site that touched
+ * `serve` at all responsible for re-stating every OTHER field, unrelated to
+ * what it was actually testing, every time.
+ */
+function draw(
+  over: Omit<Partial<PairingPanelProps>, 'serve'> & { serve?: Partial<ServeAccessView> } = {},
+) {
+  const { serve: serveOver, ...rest } = over;
   const props: PairingPanelProps = {
     view: LIVE,
     devices: [],
     url: 'https://example-machine.example-tailnet.ts.net',
     allowWrites: false,
     nowMs: NOW,
-    // Serve already on, by default: most of the tests in this file are about
-    // the pairing code, not phone access, and depend on `url` being drawn
-    // unconditionally the way it always was before phone access existed.
-    serve: { cliMissing: false, enabled: true, lastError: null, timedOut: false, pending: false },
     onRegenerate: vi.fn(),
     onApprove: vi.fn(),
     onDeny: vi.fn(),
@@ -54,7 +76,8 @@ function draw(over: Partial<PairingPanelProps> = {}) {
     onCopyUrl: vi.fn(),
     onEnableServe: vi.fn(),
     onDisableServe: vi.fn(),
-    ...over,
+    ...rest,
+    serve: { ...SERVE_DEFAULT, ...serveOver },
   };
   render(<PairingPanel {...props} />);
   return props;
@@ -175,9 +198,7 @@ describe('the second gate', () => {
 
 describe('phone access -- vam setting up tailscale serve itself', () => {
   it('explains and links to Tailscale, offering nothing, when there is no CLI', () => {
-    draw({
-      serve: { cliMissing: true, enabled: false, lastError: null, timedOut: false, pending: false },
-    });
+    draw({ serve: { cliMissing: true, enabled: false } });
 
     expect(screen.getByTestId('serve-no-cli')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /enable phone access/i })).toBeNull();
@@ -187,15 +208,7 @@ describe('phone access -- vam setting up tailscale serve itself', () => {
   });
 
   it('states what turning it on exposes, and offers to enable it, while off', () => {
-    const props = draw({
-      serve: {
-        cliMissing: false,
-        enabled: false,
-        lastError: null,
-        timedOut: false,
-        pending: false,
-      },
-    });
+    const props = draw({ serve: { enabled: false } });
 
     expect(document.body.textContent ?? '').toMatch(/tailscale serve/i);
     expect(document.body.textContent ?? '').toMatch(/whole tailnet|every laptop/i);
@@ -204,22 +217,12 @@ describe('phone access -- vam setting up tailscale serve itself', () => {
   });
 
   it('never runs serve as a side effect of merely being drawn, while off', () => {
-    const props = draw({
-      serve: {
-        cliMissing: false,
-        enabled: false,
-        lastError: null,
-        timedOut: false,
-        pending: false,
-      },
-    });
+    const props = draw({ serve: { enabled: false } });
     expect(props.onEnableServe).not.toHaveBeenCalled();
   });
 
   it('offers an equally easy way back off, while on', () => {
-    const props = draw({
-      serve: { cliMissing: false, enabled: true, lastError: null, timedOut: false, pending: false },
-    });
+    const props = draw({ serve: { enabled: true } });
 
     expect(screen.queryByRole('button', { name: /enable phone access/i })).toBeNull();
     const off = screen.getByRole('button', { name: /turn off phone access/i });
@@ -229,7 +232,7 @@ describe('phone access -- vam setting up tailscale serve itself', () => {
 
   it('shows the resulting address while on', () => {
     draw({
-      serve: { cliMissing: false, enabled: true, lastError: null, timedOut: false, pending: false },
+      serve: { enabled: true },
       url: 'https://example-machine.example-tailnet.ts.net',
     });
 
@@ -237,23 +240,14 @@ describe('phone access -- vam setting up tailscale serve itself', () => {
   });
 
   it('says the address cannot be read rather than guessing one, while on', () => {
-    draw({
-      serve: { cliMissing: false, enabled: true, lastError: null, timedOut: false, pending: false },
-      url: null,
-    });
+    draw({ serve: { enabled: true }, url: null });
 
     expect(screen.queryByTestId('pairing-url')).toBeNull();
   });
 
   it("surfaces a refusal in the CLI's own real words, not a generic error", () => {
     draw({
-      serve: {
-        cliMissing: false,
-        enabled: false,
-        lastError: 'access denied: reauthenticate to use Serve',
-        timedOut: false,
-        pending: false,
-      },
+      serve: { enabled: false, lastError: 'access denied: reauthenticate to use Serve' },
     });
 
     const said = screen.getByTestId('serve-error');
@@ -262,9 +256,7 @@ describe('phone access -- vam setting up tailscale serve itself', () => {
   });
 
   it('says the enable/disable round trip is in progress rather than looking frozen', () => {
-    const props = draw({
-      serve: { cliMissing: false, enabled: false, lastError: null, timedOut: false, pending: true },
-    });
+    const props = draw({ serve: { enabled: false, pending: true } });
 
     // Not the same accessible name as the idle button -- a poll or a second
     // click landing on "Enable phone access" while a request is already in
@@ -277,9 +269,7 @@ describe('phone access -- vam setting up tailscale serve itself', () => {
   });
 
   it('shows the same pending state disabling, not just enabling', () => {
-    draw({
-      serve: { cliMissing: false, enabled: true, lastError: null, timedOut: false, pending: true },
-    });
+    draw({ serve: { enabled: true, pending: true } });
 
     expect(screen.queryByRole('button', { name: /^turn off phone access$/i })).toBeNull();
     const pending = screen.getByRole('button', { name: /turning off/i });
@@ -287,9 +277,7 @@ describe('phone access -- vam setting up tailscale serve itself', () => {
   });
 
   it('reports a timeout as its own honest state, not a made-up CLI refusal', () => {
-    draw({
-      serve: { cliMissing: false, enabled: false, lastError: null, timedOut: true, pending: false },
-    });
+    draw({ serve: { enabled: false, timedOut: true } });
 
     const said = screen.getByTestId('serve-error');
     expect(said.textContent).toMatch(/did not answer in time/i);
@@ -299,31 +287,49 @@ describe('phone access -- vam setting up tailscale serve itself', () => {
     // enabled: true here can only mean the failure was a disable attempt --
     // a failed enable would have left `enabled` false (ServeState's own
     // invariant, see src/main/remote/state.ts).
-    draw({
-      serve: {
-        cliMissing: false,
-        enabled: true,
-        lastError: 'ENOSPC: no space left on device',
-        timedOut: false,
-        pending: false,
-      },
-    });
+    draw({ serve: { enabled: true, lastError: 'ENOSPC: no space left on device' } });
 
     expect(screen.getByTestId('serve-error').textContent).toMatch(/tailscale serve reset/i);
   });
 
   it('never suggests the manual reset for a failed ENABLE', () => {
-    draw({
-      serve: {
-        cliMissing: false,
-        enabled: false,
-        lastError: 'ENOSPC: no space left on device',
-        timedOut: false,
-        pending: false,
-      },
-    });
+    draw({ serve: { enabled: false, lastError: 'ENOSPC: no space left on device' } });
 
     expect(screen.getByTestId('serve-error').textContent).not.toMatch(/tailscale serve reset/i);
+  });
+
+  /**
+   * THE FIRST-RUN CASE, measured against a real Tailscale (1.102.2): Serve is
+   * off by default for a tailnet, and `tailscale serve --bg` prints the exact
+   * enable link to stdout rather than exiting. The node id in this URL is
+   * INVENTED -- a real one identifies the operator's machine and must never
+   * appear in a committed fixture.
+   */
+  it('offers the tailnet-admin enable link as an actionable state, not a generic error', () => {
+    const url = 'https://login.tailscale.com/f/serve?node=invented-node-id-0000';
+    draw({ serve: { enabled: false, tailnetServeDisabledUrl: url } });
+
+    expect(screen.queryByTestId('serve-error')).toBeNull();
+    const said = screen.getByTestId('serve-tailnet-disabled');
+    expect(said.textContent).toMatch(/tailnet/i);
+    const link = screen.getByRole('link', { name: url });
+    expect(link.getAttribute('href')).toBe(url);
+  });
+
+  it('still offers a retry once the tailnet admin enables Serve', () => {
+    const url = 'https://login.tailscale.com/f/serve?node=invented-node-id-0000';
+    draw({ serve: { enabled: false, tailnetServeDisabledUrl: url } });
+
+    // The button stays: the operator (or their admin) fixes this elsewhere
+    // and comes back to click Enable again, rather than the panel dead-ending.
+    expect(screen.getByRole('button', { name: /enable phone access/i })).toBeTruthy();
+  });
+
+  it('never shows a made-up URL: draws exactly the one it was given, verbatim', () => {
+    const url = 'https://login.tailscale.com/f/serve?node=invented-node-id-9999';
+    draw({ serve: { enabled: false, tailnetServeDisabledUrl: url } });
+
+    expect(screen.getByRole('link', { name: url }).getAttribute('href')).toBe(url);
   });
 });
 

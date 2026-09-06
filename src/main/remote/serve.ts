@@ -12,115 +12,194 @@
  * Tailscale would lose it to a click on vam's Disable button. vam did not
  * create that configuration and has no business destroying it. THE EXACT
  * ARGV FOR THE TARGETED OFF IS UNVERIFIED: confirming it would have meant
- * mutating a real tailnet's serve config beyond the one read-only probe the
- * operator was willing to run. `--https=443` matches `enableServe`'s own
- * default (`serve --bg` publishes on 443), and `off` is the documented verb
- * for removing one mapping; the flag order is a guess. If the targeted off is
- * itself refused, the caller gets the real refusal back and nothing else --
- * see `RemotePanel.tsx`/`PairingPanel.tsx` for the manual `tailscale serve
- * reset` escape hatch this offers the OPERATOR. A failed narrow command must
- * NEVER silently escalate to a destructive wide one, which is why this module
- * does not retry at all on a refusal.
+ * mutating a real tailnet's serve config beyond the probes actually run.
+ * `--https=443` matches `enableServe`'s own default (`serve --bg` publishes
+ * on 443), and `off` is the documented verb for removing one mapping; the
+ * flag order is a guess. If the targeted off is itself refused, the caller
+ * gets the real refusal back and nothing else -- see `RemotePanel.tsx`/
+ * `PairingPanel.tsx` for the manual `tailscale serve reset` escape hatch
+ * this offers the OPERATOR. A failed narrow command must NEVER silently
+ * escalate to a destructive wide one, which is why this module does not
+ * retry at all on a refusal.
  *
- * HANGS ARE A MEASURED FAILURE MODE, NOT A HYPOTHETICAL ONE. Verified against
- * a real, logged-in Tailscale node (1.102.2) with a healthy tailnet:
- * `tailscale serve --bg --yes 39999` produced no output, never returned, and
- * configured nothing -- `tailscale serve status` still read "No serve config"
- * two minutes later. There is no error to report as a value here, because
- * there is no return AT ALL, so this module cannot rely on the injected
- * runner ever settling. `--yes` answers Serve's own confirmation prompt
- * unconditionally, which is one known cause and must never be the reason for
- * a hang; `ATTEMPT_TIMEOUT_MS` bounds every OTHER reason by racing the runner
- * against a timer and reporting `timed-out` -- A VALUE, same as `ok` and
- * `refused`, never a promise a caller is left waiting on forever.
+ * HANGS ARE A MEASURED FAILURE MODE, NOT A HYPOTHETICAL ONE -- verified
+ * against a real, logged-in Tailscale node (1.102.2), TWICE, in two
+ * different ways:
  *
- * NO DIAGNOSIS IS INVENTED for any refusal. Missing CLI, not logged in,
+ * 1. On a healthy tailnet, `tailscale serve --bg --yes 39999` produced no
+ *    output, never returned, and configured nothing -- `tailscale serve
+ *    status` still read "No serve config" two minutes later.
+ * 2. On a tailnet with Serve turned off -- which is the FIRST-RUN STATE for
+ *    essentially every new user, since Serve is off by default and enabling
+ *    it is a web action a tailnet admin takes in the admin console -- the
+ *    same command printed the one actionable thing on screen to STDOUT and
+ *    then blocked indefinitely:
+ *
+ *      Serve is not enabled on your tailnet.
+ *      To enable, visit:
+ *               https://login.tailscale.com/f/serve?node=<node id>
+ *
+ *    reproduced twice, killed both times. There is no exit code to read this
+ *    from, because the process never exits -- the only way to see it is to
+ *    watch stdout WHILE the process is still running, which is why this
+ *    module's runner contract hands stdout to the caller as it arrives
+ *    rather than as one Promise for the whole invocation. Hiding this behind
+ *    a flat 20-second timeout would replace the one thing the operator can
+ *    actually go and do with "timed out" -- so it is its own outcome,
+ *    detected from live output, never from the process finishing.
+ *
+ * `--yes` answers Serve's own confirmation prompt unconditionally, which is
+ * one known hang cause and must never be the reason for one; `ATTEMPT_TIMEOUT_MS`
+ * remains the backstop for every OTHER reason a process might never settle.
+ * EVERY exit from `attempt()` -- ok, refused, timed-out or
+ * tailnet-serve-disabled -- kills the underlying process: a process this
+ * module has stopped waiting on and left running is a leak, not a success.
+ *
+ * NO DIAGNOSIS IS INVENTED for a refusal. Missing CLI, not logged in,
  * refused for permissions, HTTPS not enabled on the tailnet -- this module
  * cannot verify against a real binary what Tailscale's exact wording is for
  * every one of those, on every platform, so it does not guess which one
  * happened. It reads whatever the injected runner actually said,
  * `readServeAddress`'s own discipline, and hands that back verbatim.
- *
- * Injected runner, same shape as `hostname.ts`'s `TailscaleRun`, so a test
- * never spawns anything real -- see `hostname.ts` and `hostname.test.ts`.
  */
-
-import type { TailscaleRun } from './hostname.js';
 
 export type ServeToggleResult =
   | { readonly kind: 'ok' }
   | { readonly kind: 'refused'; readonly message: string }
   /**
-   * The runner never answered within `ATTEMPT_TIMEOUT_MS`. Its OWN kind
+   * The process never answered within `ATTEMPT_TIMEOUT_MS`. Its OWN kind
    * rather than folded into `refused`: there is no CLI text to show, because
    * nothing came back to show it from.
    */
-  | { readonly kind: 'timed-out' };
+  | { readonly kind: 'timed-out' }
+  /**
+   * Serve is administratively off for the WHOLE TAILNET -- not a machine
+   * problem, not something vam or the operator can fix from this dialog.
+   * `url` is the exact enable link the CLI printed, PARSED out of its
+   * stdout, never constructed: it embeds a node identifier that identifies
+   * the operator's machine, so it is read off the live process, not
+   * assembled from parts vam already knows.
+   */
+  | { readonly kind: 'tailnet-serve-disabled'; readonly url: string };
 
 /**
- * How long `attempt()` waits for the runner before giving up and reporting
- * `timed-out`. Deliberately generous and UNVERIFIED against real `tailscale
- * serve` latency -- a first run that has to provision a certificate could
- * plausibly take longer than this, and there was no way to measure that
- * without mutating a real tailnet's config. It is also deliberately far
- * longer than `runTailscale`'s own 3-second `execFile` timeout in
- * `src/main/index.ts`: THAT is expected to fire first against the real CLI
- * (and already reclaims the child process when it does), so this timer is a
- * backstop for any OTHER `TailscaleRun` implementation -- including the
- * fake runner a test injects -- rather than the layer meant to win the race
- * in ordinary operation.
+ * The serve-specific runner. UNLIKE `hostname.ts`'s `TailscaleRun` (one
+ * request, one response -- correct for `tailscale status`), `tailscale
+ * serve` can print the one thing worth showing to STDOUT and then never
+ * exit at all (see the module comment's two measured hangs), so a runner
+ * that hands back a single Promise for the whole invocation cannot surface
+ * that -- there is nothing for the Promise to ever resolve or reject with.
+ * This one hands stdout to the caller AS IT ARRIVES via `onStdout`, and a
+ * `kill` so `attempt()` can stop waiting on a process once it has enough to
+ * answer with, rather than leaving it running.
+ */
+export type TailscaleServeRun = (
+  args: readonly string[],
+  onStdout: (chunk: string) => void,
+) => {
+  readonly exit: Promise<{ readonly code: number; readonly stdout: string }>;
+  readonly kill: () => void;
+};
+
+/**
+ * How long `attempt()` waits for the process before giving up and reporting
+ * `timed-out`. This is the BACKSTOP for a hang this module has never seen
+ * before -- both hangs it HAS seen (a bare hang, and tailnet-Serve-disabled)
+ * are already handled without waiting this long, one by the process actually
+ * exiting and the other by watching stdout. Deliberately generous and
+ * UNVERIFIED against real `tailscale serve` latency for anything else -- a
+ * first run that has to provision a certificate could plausibly take longer
+ * than this, and there was no way to measure that without mutating a real
+ * tailnet's config further than the probes actually run.
  */
 export const ATTEMPT_TIMEOUT_MS = 20_000;
 
-/** Distinguishes "the timer won the race" from any real value or error `run` could produce. */
-const TIMED_OUT = Symbol('vam:remote:serve-attempt-timed-out');
+/**
+ * Verified once against a real Tailscale (1.102.2) and reproduced twice; the
+ * exact charset Tailscale uses for a node id is otherwise unverified, so this
+ * matches up to the next whitespace rather than a specific charset.
+ */
+const TAILNET_SERVE_DISABLED_URL = /https:\/\/login\.tailscale\.com\/f\/serve\?node=\S+/;
 
-function withTimeout<T>(pending: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(TIMED_OUT), ms);
-    pending.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
+function tailnetServeDisabledUrl(stdout: string): string | null {
+  const match = TAILNET_SERVE_DISABLED_URL.exec(stdout);
+  return match === null ? null : match[0];
 }
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function attempt(run: TailscaleRun, args: readonly string[]): Promise<ServeToggleResult> {
-  let answered: { code: number; stdout: string };
-  try {
-    answered = await withTimeout(run(args), ATTEMPT_TIMEOUT_MS);
-  } catch (error) {
-    if (error === TIMED_OUT) return { kind: 'timed-out' };
-    return { kind: 'refused', message: messageOf(error) };
-  }
-  if (answered.code !== 0) {
-    const said = answered.stdout.trim();
-    return {
-      kind: 'refused',
-      message: said.length > 0 ? said : `tailscale exited with code ${answered.code}`,
+async function attempt(
+  run: TailscaleServeRun,
+  args: readonly string[],
+): Promise<ServeToggleResult> {
+  return new Promise<ServeToggleResult>((resolve) => {
+    let settled = false;
+    let capturedStdout = '';
+    // The process may report a chunk BEFORE `run()` returns its handle (a
+    // real `child_process.spawn` never does this synchronously, but nothing
+    // stops a different `TailscaleServeRun` from doing so) -- `killRequested`
+    // makes that ordering safe rather than losing the kill.
+    let kill: (() => void) | null = null;
+    let killRequested = false;
+
+    const finish = (result: ServeToggleResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (kill !== null) {
+        kill();
+      } else {
+        killRequested = true;
+      }
+      resolve(result);
     };
-  }
-  return { kind: 'ok' };
+
+    const timer = setTimeout(() => finish({ kind: 'timed-out' }), ATTEMPT_TIMEOUT_MS);
+
+    let handle: ReturnType<TailscaleServeRun>;
+    try {
+      handle = run(args, (chunk) => {
+        capturedStdout += chunk;
+        const url = tailnetServeDisabledUrl(capturedStdout);
+        if (url !== null) {
+          finish({ kind: 'tailnet-serve-disabled', url });
+        }
+      });
+    } catch (error) {
+      finish({ kind: 'refused', message: messageOf(error) });
+      return;
+    }
+    kill = handle.kill;
+    if (killRequested) kill();
+
+    handle.exit.then(
+      ({ code, stdout }) => {
+        if (code !== 0) {
+          const said = stdout.trim();
+          finish({
+            kind: 'refused',
+            message: said.length > 0 ? said : `tailscale exited with code ${code}`,
+          });
+        } else {
+          finish({ kind: 'ok' });
+        }
+      },
+      (error: unknown) => finish({ kind: 'refused', message: messageOf(error) }),
+    );
+  });
 }
 
 /**
  * `tailscale serve --bg --yes <port>`: HTTPS on the tailnet side, proxied to
  * this machine's own loopback port -- the half `launch.ts` binds and assumes
  * something else exposes. `--yes` answers Serve's own confirmation prompt so
- * a headless invocation can never block on it -- a second, distinct cause of
- * the same measured hang `ATTEMPT_TIMEOUT_MS` guards against.
+ * a headless invocation can never block on it -- a distinct, measured cause
+ * of the same class of hang `ATTEMPT_TIMEOUT_MS` and tailnet-serve-disabled
+ * detection guard against.
  */
-export function enableServe(run: TailscaleRun, port: number): Promise<ServeToggleResult> {
+export function enableServe(run: TailscaleServeRun, port: number): Promise<ServeToggleResult> {
   return attempt(run, ['serve', '--bg', '--yes', String(port)]);
 }
 
@@ -130,6 +209,6 @@ export function enableServe(run: TailscaleRun, port: number): Promise<ServeToggl
  * module comment for why, and for what the caller owes the operator when
  * this is refused.
  */
-export function disableServe(run: TailscaleRun): Promise<ServeToggleResult> {
+export function disableServe(run: TailscaleServeRun): Promise<ServeToggleResult> {
   return attempt(run, ['serve', '--https=443', '--yes', 'off']);
 }

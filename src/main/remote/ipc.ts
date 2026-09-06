@@ -75,7 +75,12 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
    * `serveEnable`/`serveDisable` below ever changes it: `snapshot` below only
    * READS this variable, so polling `remoteState` can never flip it.
    */
-  let serve: ServeState = { enabled: false, lastError: null, timedOut: false };
+  let serve: ServeState = {
+    enabled: false,
+    lastError: null,
+    timedOut: false,
+    tailnetServeDisabledUrl: null,
+  };
 
   const address = async (): Promise<ServeAddress> => {
     if (cached !== null && now() - cached.at < ADDRESS_CACHE_MS) {
@@ -194,12 +199,35 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
    */
   const nextServeState = (result: ServeToggleResult, wasEnabling: boolean): ServeState => {
     if (result.kind === 'ok') {
-      return { enabled: wasEnabling, lastError: null, timedOut: false };
+      return {
+        enabled: wasEnabling,
+        lastError: null,
+        timedOut: false,
+        tailnetServeDisabledUrl: null,
+      };
     }
     if (result.kind === 'timed-out') {
-      return { enabled: serve.enabled, lastError: null, timedOut: true };
+      return {
+        enabled: serve.enabled,
+        lastError: null,
+        timedOut: true,
+        tailnetServeDisabledUrl: null,
+      };
     }
-    return { enabled: serve.enabled, lastError: result.message, timedOut: false };
+    if (result.kind === 'tailnet-serve-disabled') {
+      return {
+        enabled: serve.enabled,
+        lastError: null,
+        timedOut: false,
+        tailnetServeDisabledUrl: result.url,
+      };
+    }
+    return {
+      enabled: serve.enabled,
+      lastError: result.message,
+      timedOut: false,
+      tailnetServeDisabledUrl: null,
+    };
   };
 
   ipcMain.handle(CHANNELS.serveEnable, async (): Promise<RemoteState> => {
