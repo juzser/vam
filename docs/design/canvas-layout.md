@@ -6,73 +6,48 @@ Constraint number one: **keyboard-driven control, mouse kept to a minimum.**
 
 ## 1. Where vam sits
 
-A separate app, **not a fork of orca**. Orca (MIT, 19,146 files, `packages: []`
-— not a modularized monorepo) already has a second client, `mobile/`, that
-talks to the backend over RPC; vam is a third client on that same path.
+A separate, independent app — not a fork of orca, and not a client of orca's
+backend. Orca was read during design as prior art for being CLI-agnostic and
+keyboard-first, and its keybinding vocabulary shaped the naming in
+`src/renderer/keyboard/chords.ts` (§4.1) — that is the whole of what it
+contributes. vam implements its own session model, its own adapters and its
+own remote control end to end; nothing in vam calls orca's backend or ships
+any of its code.
 
 ```
 vam (web · Vite + React + ReactFlow)
- ├─ adapter black-smith → http://127.0.0.1:4680/api/*   (already exists, both read and write)
- └─ adapter orca        → http://127.0.0.1:6768 RPC     (orchestration.* · terminal.*)
+ └─ adapter factory → http://127.0.0.1:4680/api/*   (read and write)
 ```
 
 Web first, Electron later ⇒ **the data-access layer must be separated from
 components from the very first commit**, or wrapping it in Electron later will
 mean rewriting the UI.
 
-### 1.1 Stack deviation — recorded with justification (required)
+### 1.1 Stack
 
-black-smith's `docs/standards/stack.md` mandates **Vue 3 + Vite**,
-**`@vue-flow/core`**, and **HDS**, and allows deviation *only with a written
-justification*. Vam deviates on two points. Operator decision, 2026-08-27:
+**React 19 + Vite**, **`@xyflow/react`** (ReactFlow) for the canvas, and
+**Tailwind CSS v4** with vam's own tokens (`src/styles.css`) — no pre-built
+component library. Chosen for a canvas-heavy, keyboard-first UI on their own
+merits: ReactFlow is a maintained node/edge renderer with pan, zoom and a
+minimap already built in, and Tailwind's utility classes keep hand-written
+components fast to iterate on without a design-system dependency.
 
-| point | standard | vam | reason |
-|---|---|---|---|
-| framework | Vue 3 | **React 19** | vam's UI references orca directly, and orca is a React app. Same framework means patterns carry straight over; a different framework means everything referenced has to be translated by hand. |
-| canvas | `@vue-flow/core` | **ReactFlow** | A consequence of the row above. Same rendering paradigm, just a different port. Orca **does not** use any canvas library — vam brings this part on its own, so there is nothing to inherit from orca here. |
-| styling | HDS + Tailwind v4 | **Tailwind v4 + shadcn/radix, no HDS** | Same reason: taken straight from orca. |
+Other libraries in `package.json`: **`cmdk`** for the command palette (§4,
+`Mod-k`), **`zustand`** for state, **`lucide-react`** for icons, **`clsx`** +
+**`tailwind-merge`** for composing class names, and **`emoji-picker-react`**
+for the icon grid (a lazy chunk, ~307kB). No `shadcn`, `radix-ui`,
+`class-variance-authority` or similar component layer — every component here
+is hand-written on vam's own tokens.
 
-What is lost, stated plainly so nobody later mistakes it for an oversight: the
-HDS tokens and the 57 `.vue` files in `black-smith/ui/src` **cannot** be
-reused, including the CSS already written for the `.vue-flow__` class. Vam is
-the first repo in the family to deviate from the standard stack.
+## 2. A shared model, read for comparison
 
-What is gained: orca (MIT) gives vam a real, running reference for exactly the
-hardest parts — see §4.1.
+Not invented — the idea that a session can reach a point where it is
+genuinely waiting on a person, not just running, is not unique to vam. Two
+other systems were read for how they name it, purely as a comparison; neither
+is a dependency, and only the `factory` row describes something vam actually
+talks to:
 
-### 1.2 Stack, as locked
-
-> **Fixed 2026-08-28.** This section used to be an INTENDED LIST copied from
-> orca's `package.json` on 2026-08-27, but written as though it had already
-> been installed. Four items were never installed — `shadcn`, `radix-ui`,
-> `class-variance-authority`, `sonner` — and one real item went unmentioned. A
-> different session read this section, trusted it, and nearly wrote "React +
-> ReactFlow + shadcn/radix" into black-smith's registry as vam's official
-> justification. Below is what `package.json` actually declares, checked
-> against it on 2026-08-28.
-
-Actually installed:
-
-- **React 19 + Vite** · **Tailwind CSS v4** — no HDS, its own tokens
-  (`src/styles.css`, read from the ADE mockup; see `docs/ade-redesign.md`)
-- **`@xyflow/react`** for the canvas — the only part with no counterpart in orca
-- **`cmdk`** for the command palette (`Ctrl-K` in §4) — orca uses this exact
-  library in `QuickOpen.tsx` and `WorktreeJumpPalette.tsx`
-- **`zustand`** for state · **`lucide-react`** for icons
-- **`clsx`** + **`tailwind-merge`** for classes
-- **`emoji-picker-react`** for the icon grid (§4, lazy chunk 307kB)
-- **Vitest** for unit tests (kept as is, matches the standard)
-
-Taken from orca's lead but **not** taken: `shadcn`, `radix-ui`,
-`class-variance-authority`, `sonner`. vam does not yet need any pre-built
-component layer — every component is hand-written on its own tokens.
-
-## 2. A shared model for two sources
-
-Not invented — both sides already treat "a decision waiting on a person" as
-first-class:
-
-| shared concept | orca | black-smith |
+| shared concept | orca (read for comparison only) | factory (implemented) |
 |---|---|---|
 | project | `worktree-catalog`, `repo`, `folder-workspace` | `tasks` + worktree |
 | session | `orchestration.runList` / `runShow` | `sessions`, `epics` |
@@ -88,8 +63,8 @@ a diagram. Design scale: **3–5 repos × 1–3 sessions**.
 ```
 ┌─ VAM ─────────────────────────────────────────────────────── ⣾ 4 agents ─┐
 │                                                                           │
-│  ╔═ black-smith ═══════════════════════════╗  ╔═ vam ═════════════════╗   │
-│  ║ ┌─ D-257 · epic-2 ─────────── ●3 ─┐     ║  ║ ┌─ epic-1 ──── ●1 ─┐  ║   │
+│  ╔═ factory ═══════════════════════════════╗  ╔═ vam ═════════════════╗   │
+│  ║ ┌─ task-1 · epic-2 ─────────── ●3 ─┐    ║  ║ ┌─ epic-1 ──── ●1 ─┐  ║   │
 │  ║ │ ⣾ coder · round 2 · sonnet · 4m │     ║  ║ │ ⣾ planner · 1m   │  ║   │
 │  ║ ├─────────────────────────────────┤     ║  ║ ├──────────────────┤  ║   │
 │  ║ │ ▸ reviewer                      │     ║  ║ │ ▸ plan draft     │  ║   │
@@ -102,20 +77,21 @@ a diagram. Design scale: **3–5 repos × 1–3 sessions**.
 │  ║ │   in : 1 S2 not fixed           │     ║  ║ │   in : plan-v2   │  ║   │
 │  ║ │   out: — waiting on you —       │     ║  ║ │   out: — waiting —│  ║   │
 │  ║ └─────────────────────────────────┘     ║  ║ └──────────────────┘  ║   │
-│  ║ ┌─ D-263 ─────────────────── ●0 ─┐      ║  ╚═══════════════════════╝   │
+│  ║ ┌─ task-2 ─────────────────── ●0 ─┐     ║  ╚═══════════════════════╝   │
 │  ║ │ ✓ merged · 2h ago               │      ║                              │
 │  ║ └─────────────────────────────────┘      ║                              │
 │  ╚═════════════════════════════════════════╝                              │
 ├───────────────────────────────────────────────────────────────────────────┤
-│ Select   black-smith/D-257   ⏸ 2 waiting on you   hjkl f / gt  yy  ^K     │
+│ Select   factory/task-1   ⏸ 2 waiting on you   hjkl f / gt  yy  ^K        │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Session node
 
 - **Header**: id · epic · `●N` agents running.
-- **Activity line** (1 line, truncated, spinner when live). Source:
-  black-smith's worker heartbeat (see §5).
+- **Activity line** (1 line, truncated, spinner when live). Source: a
+  per-worker heartbeat event on the factory's side (see §5.1 for the
+  measured SSE path this rides on).
 - **Exactly the 3 most recent decisions**, each with its own `in:` / `out:`
   pair of lines. A step = **a decision point**, not every agent turn, not
   every phase.
@@ -132,7 +108,7 @@ ordering above only means anything if it can still happen after the page is
 open, which is the only time anyone is watching. The canvas sets
 `nodesDraggable={false}` and every node is built with `draggable: false`.
 
-**The icon is stored per user, for a reason of its own.** black-smith has no
+**The icon is stored per user, for a reason of its own.** The factory has no
 route to store an icon, and that is not the answer — nobody asked it. An icon
 is about how you like to look at the work, not a fact about the work; it
 belongs to the browser, and §3 already said it: saved per user, **and does
@@ -224,27 +200,25 @@ way to the chord layer, which matters more now that `Cmd+<digit>` is the
 focus-sensitive family. Marking by number is still marking — vam
 has no channel that could deliver an answer, and the card says so.
 
-### 4.1 What orca gives the keyboard layer (read on 2026-08-27)
+### 4.1 Orca, read as a keyboard-vocabulary reference
 
-**Orca has no vim mode** — searching all of `src/renderer` turns up no such
-file. So vam's vim-chord layer is new; there is nothing to copy from there.
-What orca does give is the *scaffolding* around it, in
-`src/shared/keybindings.ts` (2,432 lines) and
-`app-shell/use-global-keybindings.ts`:
+**Orca has no vim mode** — searching all of its `src/renderer` turns up no
+such file — so vam's vim-chord grammar (`src/renderer/keyboard/chords.ts`) is
+original: there was nothing to copy. What orca's own keybinding layer
+(`src/shared/keybindings.ts`, `app-shell/use-global-keybindings.ts`) supplied
+was vocabulary for problems any keyboard-first UI eventually hits — a
+registry keyed by action id rather than scattered `onKeyDown` handlers,
+conflict detection between bindings, a double-tap concept (`gg`/`yy`'s
+shape), gating a binding by which layer is focused, and arbitrating who gets
+a keystroke when a terminal is present. vam's own implementation of each of
+those (`resolveChord`, `bindingConflict`, `PREFIXES`, the mode read in
+`Canvas.tsx`) is independent code, written for vam's own data shapes; reading
+orca only fixed the names for problems vam had to solve anyway.
 
-| what orca already has | what vam needs it for |
-|---|---|
-| `KeybindingDefinition` registry — action id ↔ binding | A single place to declare keys, instead of scattering `onKeyDown` across components |
-| `KeybindingOverrides` + validate + diagnostics | Users can rebind keys without touching code |
-| `findKeybindingConflicts` | `gt` and `g` cannot coexist unless something detects the conflict |
-| `isDoubleTapBinding` | Exactly the mechanism `gg` / `yy` need |
-| `keybindingIsActiveInContext` — `app` / `terminal` / `browser` | Gates by layer: with detail open, `j` must not fall through to the canvas |
-| `TerminalShortcutPolicy` = `orca-first` \| `terminal-first` | The "who gets the keystroke" arbitration problem when a terminal is present — vam will hit the exact same thing in the detail layer |
-
-Two things vam **does not** take from orca because orca does not have them:
+Two things have no orca counterpart at all because orca does not have them:
 the vim chord set, and geometry-based `hjkl` navigation. Both are pure logic,
-not dependent on any data source, so they can be built and tested right
-away — ahead of both black-smith epics in §5.
+not dependent on any data source, so they could be built and tested well
+ahead of the factory-side work §5.1 covers.
 
 ### 4.2 Action pane: one stop per button
 
@@ -286,7 +260,7 @@ The remaining three details are all guards against a slip of the hand:
 
 ### `yy` — doing away with mouse-copy entirely
 
-black-smith **deliberately** returns commands as structured data instead of
+The factory **deliberately** returns commands as structured data instead of
 running them itself (guardrails: only the operator creates a remote, pushes,
 or sends anything out). A real example from `smith new vam`:
 
@@ -301,128 +275,75 @@ So the command waiting for you to run is **a field**, not text buried in
 prose that has to be dug out. `yy` copies that field. Vam **never runs it
 itself** — the nod of approval is still yours.
 
-## 5. Reverse dependency on black-smith
-
-> **Fixed 2026-08-28.** Epic A below used to be listed as a **pending**
-> dependency ("vam epic 1 should wait on them rather than build a polling
-> layer just to throw it away") — true when this section was written, now
-> false for epic A: it has landed via epic `vam-sse-canvas` (measured detail
-> in §6.1 below). Epic B (worker heartbeat) has not changed — unchanged for
-> that part.
-
-One remaining piece of work (epic B) sits in black-smith, **not** in vam, and
-vam epic 1 should wait on it rather than build a polling layer just to throw
-it away — epic A has already landed, see the fix above:
-
-- **epic A — SSE for `ui/server`**: **landed** (2026-08-28). `GET
-  /api/stream` sends `hello`/`change` frames; vam reads them through
-  `src/adapter/stream.ts` (framework-free, separated from React so it can be
-  tested early — epic.md §5.2) and wires it into the canvas through
-  `src/adapter/useCanvas.ts`. The 4-second poll has been dropped.
-- **epic B — worker heartbeat**: black-smith deliberately forbids workers
-  from returning prose (`{status, severity_counts, artifact_path}`) to keep
-  the orchestrator's context from flooding. So today there is *no* "what the
-  agent is doing" text. A heartbeat is a new event carrying one short
-  description line — it touches return discipline, so it has to be its own
-  black-smith epic, with a proper spec review.
-
-```
-black-smith epic A (SSE, landed)    ─┐
-black-smith epic B (heartbeat)      ─┤→ vam epic 1: canvas read-only, one source
-                                     ┘
-```
-
-## 6. Scope
+## 5. Scope
 
 The end goal is **full control** (approve gates, create/stop sessions, spawn
-agents, send prompts). But writing into two systems with different
-consistency models — black-smith requires every write to carry the
+agents, send prompts). The factory requires every write to carry a
 `--session/--plan-version/--causal-parent` envelope and refuses it if
-missing; orca's `gateResolve` is an internal RPC with no stability guarantee.
-A bad write into the event log corrupts the factory's memory, it is not a UI
-bug.
+missing, so a bad write into the event log corrupts the factory's memory —
+it is not a UI bug, and the write path is staged carefully rather than
+wired up all at once.
 
-**Epic 1 stops at: canvas read-only, one black-smith source.** Nothing is
-written yet, so nothing can be corrupted yet, and the layout gets looked at
-with real eyes before it is wired to the write path.
+**Epic 1 stopped at: canvas read-only, one factory source.** Nothing was
+written yet, so nothing could be corrupted yet, and the layout got looked at
+with real eyes before it was wired to the write path.
 
-### 6.1 Epic 2 — write path wired up (2026-08-27)
+### 5.1 Epic 2 — write path wired up
 
 Reads **do not** wait on SSE. `GET /api/overview` was already returning
-`runningSessions[]` before this, so the adapter can build real rows right
-away; §5 epic A only changes how the data *arrives* (poll → push), not
+`runningSessions[]` before SSE landed, so the adapter can build real rows
+right away; SSE only changes how the data *arrives* (poll → push), not
 whether there is data at all.
 
-> **Fixed 2026-08-28.** The next sentence here used to say "Today it's a 4s
-> poll (`useCanvas`), and when SSE lands exactly one file changes" — true
-> when written (2026-08-27), false now. SSE has landed (epic
-> `vam-sse-canvas`, task-1 + task-2) and the 4-second poll has been dropped.
-> **Two** files changed, not one: `src/adapter/stream.ts` (a new file —
-> reads `hello`/`change` frames, no React dependency) and
-> `src/adapter/useCanvas.ts` (wires that stream into the React lifecycle:
-> calls `load()` on mount, on `hello`, and on a valid `change`). Reason for
-> splitting into two, epic.md §5.2: the frame reader has no React dependency
-> so it can be tested right away and land a wave ahead, instead of bundling
-> it into one file that has to wait on `useCanvas.ts` changing before it is
-> testable.
+SSE landed as two files, not one: `src/adapter/stream.ts` (reads
+`hello`/`change` frames, no React dependency) and `src/adapter/useCanvas.ts`
+(wires that stream into the React lifecycle: calls `load()` on mount, on
+`hello`, and on a valid `change`). Split into two because the frame reader
+has no React dependency, so it could be tested and land ahead of
+`useCanvas.ts` changing to use it.
 
-**Three things measured at the browser layer** (measured, epic.md §3.3):
+**Three things measured at the browser layer, end to end through vam's own
+vite dev proxy against a real factory server:**
 
 1. The server does not send a `retry:` field; the browser's default
    reconnect mechanism handles it on its own, measured at a **constant
    3.00s**, no backoff (measured intervals 3010 / 3004 / 3004 ms).
-2. **Fixed 2026-08-30.** This point used to say "A server dying mid-stream
-   surfaces at the `EventSource` layer as `error` then `open`, `readyState`
-   0 (CONNECTING), **never** 2 (CLOSED) — the browser recovers on its own,
-   no client-side code needed" — true when only one path had been measured,
-   false when stated as a general rule. Measured all three cases:
-   - **Connected straight to black-smith, no proxy in between (this is
+2. A server dying mid-stream is not one behaviour but three, depending on
+   where the death is observed:
+   - **Connected straight to the factory, no proxy in between (this is
      PRODUCTION, unaffected):** the server dying is a TCP error, and the
      HTML spec does NOT treat a TCP error as fatal; `EventSource` retries
      indefinitely on its own, measured at a constant 3.00s, no backoff.
    - **Through vam's vite dev proxy, server comes back before the first
-     retry (~3s):** a real recovery — this epic's committed transcript
-     witnesses it (`open` then `hello` at the same moment, `change` right
-     after).
+     retry (~3s):** a real recovery, witnessed end to end (`open` then
+     `hello` at the same moment, `change` right after) and recorded in the
+     committed transcript `e2e/acg1-transcript.json`.
    - **Through the vite dev proxy, the server is still dead at that exact
      retry:** vite answers `GET /api/stream` with `HTTP/1.1 502 Bad
      Gateway`, `Content-Type: text/plain`. The HTML spec treats a non-200,
      non-`text/event-stream` response as fatal, so `readyState` moves to 2
      (CLOSED) and no further retry happens. **`readyState` 2 CAN happen** —
-     measured by this epic's own committed negative control
-     (`state/artifacts/vam-sse-canvas/task-4-acg1-e2e/falsification-no-restart.txt`,
-     `{"event":"error","readyState":0,"tMs":696}` then
-     `{"event":"error","readyState":2,"tMs":3704}`).
+     measured directly: `{"event":"error","readyState":0,"tMs":696}` then
+     `{"event":"error","readyState":2,"tMs":3704}`.
 
    The source of that "give up" is the vite dev proxy sitting between the
    browser and the server, not vam's client: `src/adapter/stream.ts` is
-   correct as written, and this epic raised no finding against that file.
+   correct as written.
 3. `heartbeatMs` and `floorMs` — carried in the `hello` frame — are **not
    observable** from the browser: keep-alive is an SSE comment, and
    `EventSource` never exposes comments to JS in any form. What's more,
    `floorMs` (10000) is **smaller** than `heartbeatMs` (15000), so the two
    numbers cannot be combined into a meaningful threshold. **Forbidden: do
    not build a liveness timeout, watchdog, or staleness check on either of
-   these two numbers** (finding `f-ui-server-sse/task-3-sse-handler-2fcd3eca`).
+   these two numbers.**
 
-`AC-G1` — end-to-end verification through a real server — is still
-**gated**: waiting on `GET /api/stream` landing on black-smith's `main`. The
-three measurements above were taken by a vam session on a branch, not yet
-re-measured on `main`.
-
-> **Fixed 2026-08-30.** The paragraph directly above was true when written,
-> false as of `161ffc7 feat(ui-server): GET /api/stream` landing on
-> black-smith's `main`. `AC-G1` is **now discharged, no longer gated**: it
-> ran for real, end-to-end, through vam's actual vite dev proxy, and this
-> epic's committed transcript — `e2e/acg1-transcript.json` — is the
-> evidence: `open`/`hello`, one `change`, then `error` when the server was
-> killed, then `open`/`hello` again and a `change` once the server came
-> back, plus one final canvas read. The three measurements in §3.3 are
-> therefore no longer "measured on a branch, not yet re-measured": they were
-> measured through the real path. Source:
-> `f-vam-sse-canvas/integration-fc8c5787` (S2-major) and
-> `f-vam-sse-canvas/integration-595388f1`. Full record: black-smith
-> `factory/specs/active/vam-sse-canvas/epic.md`, AC-G1.
+`AC-G1` — end-to-end verification through a real server — is discharged: it
+ran for real, end to end, through vam's actual vite dev proxy, and the
+committed transcript `e2e/acg1-transcript.json` is the evidence — `open` /
+`hello`, one `change`, then `error` when the server was killed, then
+`open`/`hello` again and a `change` once the server came back, plus one
+final canvas read. All three measurements above were taken through that
+real path, not on a branch awaiting re-measurement.
 
 A write **requires** a read before it: `resolveContext` demands a real
 `sessionId` and chains `causalParent` from that log's last event on its own.
@@ -436,7 +357,7 @@ Three writes are wired up, and only three:
 | waiver S3/S4 | `POST /api/waivers/apply-batch` | by fingerprint, a reason is required |
 | lesson candidate | `POST /api/lessons/:id/approve\|reject` | never sets `acceptDuplicate` on its own |
 
-**A prompt is recorded, not sent.** black-smith has no channel into a
+**A prompt is recorded, not sent.** The factory has no channel into a
 running Claude Code session. What it has is `user_prompt` — saved verbatim so
 that a later `dispatch_decision` can hook `parent_prompt_id` into it, and the
 timeline reads out as "this happened because a person asked for it". The UI

@@ -9,7 +9,7 @@ import { defineConfig } from 'vite';
 const SMITH_URL = process.env.VAM_SMITH_URL ?? 'http://127.0.0.1:4680';
 
 /**
- * The proxy is not a convenience — it is what keeps black-smith unchanged.
+ * The proxy is not a convenience — it is what keeps the factory unchanged.
  *
  * vam on :5273 talking to a factory on :4680 is cross-origin, and `ui/server`
  * sends no CORS headers. The alternatives were to add some or to serve vam from
@@ -51,9 +51,9 @@ export default defineConfig({
   build: { outDir: '../../dist', emptyOutDir: true },
   plugins: [react(), tailwindcss()],
   server: {
-    // 127.0.0.1 only, like every service this tool talks to. Vam reads a local
-    // factory's event log and a local orca; there is nothing here that should
-    // be reachable from another machine, and binding wider is how a dev server
+    // 127.0.0.1 only, like every service this tool talks to. Vam reads a
+    // local factory's event log; there is nothing here that should be
+    // reachable from another machine, and binding wider is how a dev server
     // ends up serving one.
     host: '127.0.0.1',
     port: 5273,
