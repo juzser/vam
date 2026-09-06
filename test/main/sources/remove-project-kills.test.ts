@@ -112,7 +112,7 @@ describe('the main-side ownership guard', () => {
   it('REFUSES a vam pane tagged for a different project than the row', async () => {
     const { calls, run } = runner();
     // The row lives in alpha; the pane it published belongs to beta.
-    const stray = new Map([['mine', BETA_PANE]]);
+    const stray = new Map([['mine#1', BETA_PANE]]);
     const error = await stopSession(
       [agent('mine')],
       'mine#1',
@@ -126,7 +126,7 @@ describe('the main-side ownership guard', () => {
 
   it('still kills the pane tagged for the row’s own project', async () => {
     const { calls, run } = runner();
-    const panes = new Map([['mine', OWNED_PANE]]);
+    const panes = new Map([['mine#1', OWNED_PANE]]);
     await expect(
       stopSession(
         [agent('mine')],

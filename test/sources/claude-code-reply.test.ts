@@ -205,8 +205,8 @@ describe('replyToSession with published panes', () => {
       run: tmux.run,
       deliver: noDeliver,
       panes: new Map([
-        ['sess-alpha', 'vam-atlas-aa11bb'],
-        ['sess-beta', 'vam-atlas-cc22dd'],
+        ['sess-alpha#7', 'vam-atlas-aa11bb'],
+        ['sess-beta#8', 'vam-atlas-cc22dd'],
       ]),
     });
 

@@ -252,7 +252,7 @@ describe('the terminal channel', () => {
       'list-sessions': ok(`${ATLAS}\tvam-atlas-aa11bb\n${ATLAS}\tvam-atlas-cc22dd\n`),
       'capture-pane': ok('beta screen'),
     });
-    const panes = new Map([['sess-beta', 'vam-atlas-cc22dd']]);
+    const panes = new Map([['sess-beta#8', 'vam-atlas-cc22dd']]);
     expect(await harness(run, panes)(ATLAS, 'sess-beta#8')).toEqual({
       kind: 'ok',
       name: 'vam-atlas-cc22dd',
@@ -276,8 +276,8 @@ describe('reading the pane a session published', () => {
   it('captures the pane this row published, where the project alone is ambiguous', async () => {
     const { run, argvs } = runner({ 'list-sessions': listing, 'capture-pane': ok('beta screen') });
     const panes = new Map([
-      ['sess-alpha', 'vam-atlas-aa11bb'],
-      ['sess-beta', 'vam-atlas-cc22dd'],
+      ['sess-alpha#7', 'vam-atlas-aa11bb'],
+      ['sess-beta#8', 'vam-atlas-cc22dd'],
     ]);
     await expect(readSessionPane(run, ATLAS, 'sess-beta#8', panes)).resolves.toEqual({
       kind: 'ok',
@@ -315,7 +315,7 @@ describe('reading the pane a session published', () => {
       run,
       ATLAS,
       'sess-alpha#7',
-      new Map([['sess-alpha', 'notes']]),
+      new Map([['sess-alpha#7', 'notes']]),
     );
     expect(view).toEqual({ kind: 'mispaired', published: 'notes' });
   });
@@ -332,7 +332,7 @@ describe('reading the pane a session published', () => {
       run,
       ATLAS,
       'sess-alpha#7',
-      new Map([['sess-alpha', 'vam-atlas-zz99zz']]),
+      new Map([['sess-alpha#7', 'vam-atlas-zz99zz']]),
     );
     expect(view).toEqual({ kind: 'mispaired', published: 'vam-atlas-zz99zz' });
   });
@@ -375,7 +375,7 @@ describe('a pane another row published is not available to the project tag', () 
 
   it('answers none for a row whose project holds only a session another row claims', () => {
     const sessions = [{ project: ATLAS, name: ALPHA_PANE }];
-    const panes = new Map([['sess-alpha', ALPHA_PANE]]);
+    const panes = new Map([['sess-alpha#7', ALPHA_PANE]]);
     expect(targetSession(sessions, ATLAS, 'sess-gamma#9', panes)).toEqual({ kind: 'none' });
   });
 
@@ -401,7 +401,7 @@ describe('a pane another row published is not available to the project tag', () 
       { project: ATLAS, name: ALPHA_PANE },
       { project: ATLAS, name: 'vam-atlas-cc22dd' },
     ];
-    const panes = new Map([['sess-alpha', ALPHA_PANE]]);
+    const panes = new Map([['sess-alpha#7', ALPHA_PANE]]);
     const ambiguous = { kind: 'ambiguous', names: [ALPHA_PANE, 'vam-atlas-cc22dd'] };
     expect(targetSession(sessions, ATLAS, 'sess-bravo#8', panes)).toEqual(ambiguous);
     expect(targetSession(sessions, ATLAS, 'sess-charlie#9', panes)).toEqual(ambiguous);
@@ -409,7 +409,7 @@ describe('a pane another row published is not available to the project tag', () 
 
   it('leaves the claimant itself resolving to its own pane', () => {
     const sessions = [{ project: ATLAS, name: ALPHA_PANE }];
-    const panes = new Map([['sess-alpha', ALPHA_PANE]]);
+    const panes = new Map([['sess-alpha#7', ALPHA_PANE]]);
     expect(targetSession(sessions, ATLAS, 'sess-alpha#7', panes)).toEqual({
       kind: 'one',
       name: ALPHA_PANE,
@@ -417,11 +417,11 @@ describe('a pane another row published is not available to the project tag', () 
   });
 
   it('leaves a published pane in the wrong project mispaired, with no fall-through', () => {
-    // #176's guarantee, re-pinned beside the new rule: the row said where it
-    // is, it is somewhere vam must not act on, and the tag does not get a
-    // second try at answering for it.
+    // Pull request 176's guarantee, re-pinned beside the new rule: the row
+    // said where it is, it is somewhere vam must not act on, and the tag does
+    // not get a second try at answering for it.
     const sessions = [{ project: BEACON, name: 'vam-beacon-b2c3d4' }];
-    const panes = new Map([['sess-alpha', 'vam-beacon-b2c3d4']]);
+    const panes = new Map([['sess-alpha#7', 'vam-beacon-b2c3d4']]);
     expect(targetSession(sessions, ATLAS, 'sess-alpha#7', panes)).toEqual({
       kind: 'mispaired',
       published: 'vam-beacon-b2c3d4',

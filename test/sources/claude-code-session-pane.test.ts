@@ -79,17 +79,17 @@ describe('readPublishedPanes', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('maps every session id in the directory to its own tmux session', async () => {
+  it('maps every row (session id and pid) in the directory to its own tmux session', async () => {
     writeFileSync(join(root, '4242.json'), sessionFile());
     writeFileSync(
       join(root, '4243.json'),
       sessionFile({ pid: 4243, sessionId: 'sess-beta', tmux: 'vam-alpha-cc22dd:@0.%0' }),
     );
     const panes = await readPublishedPanes(root);
-    expect(panes.get('sess-alpha')).toBe('vam-alpha-aa11bb');
+    expect(panes.get('sess-alpha#4242')).toBe('vam-alpha-aa11bb');
     // Two sessions in ONE project, each pointing at its own pane. This is the
     // case the project-tag pairing collapses into `ambiguous`.
-    expect(panes.get('sess-beta')).toBe('vam-alpha-cc22dd');
+    expect(panes.get('sess-beta#4243')).toBe('vam-alpha-cc22dd');
   });
 
   it('skips a session with no tmux field instead of recording an empty pane', async () => {
@@ -103,7 +103,7 @@ describe('readPublishedPanes', () => {
     writeFileSync(join(root, '4242.abc123.key'), 'not-json-secret-material');
     writeFileSync(join(root, '4242.json'), sessionFile());
     await expect(readPublishedPanes(root)).resolves.toEqual(
-      new Map([['sess-alpha', 'vam-alpha-aa11bb']]),
+      new Map([['sess-alpha#4242', 'vam-alpha-aa11bb']]),
     );
   });
 
@@ -111,11 +111,31 @@ describe('readPublishedPanes', () => {
     writeFileSync(join(root, '4242.json'), 'not json at all');
     writeFileSync(join(root, '4243.json'), sessionFile({ pid: 4243, sessionId: 'sess-beta' }));
     await expect(readPublishedPanes(root)).resolves.toEqual(
-      new Map([['sess-beta', 'vam-alpha-aa11bb']]),
+      new Map([['sess-beta#4243', 'vam-alpha-aa11bb']]),
     );
   });
 
   it('is an empty map for a directory that is not there, never a throw', async () => {
     await expect(readPublishedPanes(join(root, 'absent'))).resolves.toEqual(new Map());
+  });
+
+  it('keys by the PROCESS, not the session id, when two pids resume one session', async () => {
+    // Measured on a real machine (`agents.ts`): two processes can resume the
+    // same Claude Code session, each with its own pid and its own pane. A map
+    // keyed by `sessionId` alone can hold only one of them -- whichever
+    // `readdir` returns last -- and silently drops the other's claim.
+    writeFileSync(
+      join(root, '100.json'),
+      sessionFile({ pid: 100, sessionId: 'sess-shared', tmux: 'vam-alpha-aa11bb:@0.%0' }),
+    );
+    writeFileSync(
+      join(root, '200.json'),
+      sessionFile({ pid: 200, sessionId: 'sess-shared', tmux: 'vam-beta-cc22dd:@0.%0' }),
+    );
+    const panes = await readPublishedPanes(root);
+    // Both claims must survive, addressable by the process that made them.
+    expect(panes.get('sess-shared#100')).toBe('vam-alpha-aa11bb');
+    expect(panes.get('sess-shared#200')).toBe('vam-beta-cc22dd');
+    expect(panes.size).toBe(2);
   });
 });

@@ -325,8 +325,8 @@ describe('stopSession with published panes', () => {
   it('kills the pane the row itself published, not the other one', async () => {
     const { calls, run } = runner();
     const panes = new Map([
-      ['sess-alpha', 'vam-alpha-aa11bb'],
-      ['sess-beta', 'vam-alpha-cc22dd'],
+      ['sess-alpha#12', 'vam-alpha-aa11bb'],
+      ['sess-beta#13', 'vam-alpha-cc22dd'],
     ]);
     await expect(
       stopSession(
@@ -339,5 +339,71 @@ describe('stopSession with published panes', () => {
     ).resolves.toBeNull();
     expect(calls).toContainEqual(['kill-session', '-t', '=vam-alpha-cc22dd']);
     expect(calls).not.toContainEqual(['kill-session', '-t', '=vam-alpha-aa11bb']);
+  });
+
+  /**
+   * THE EXACT SHAPE `agents.ts` MEASURED: two PROCESSES resuming ONE session
+   * id, each with its own pid, kind, name and published pane. Closing the row
+   * for one pid must kill that pid's own pane, never the other pid's -- and a
+   * map keyed by session id alone cannot tell the two rows apart at all.
+   */
+  it('kills the row named by its own pid, not the other process resuming the same session', async () => {
+    const { calls, run } = runner();
+    const pidOneHundred: StoppableAgent = {
+      ...alpha,
+      key: 'sess-shared#100',
+      sessionId: 'sess-shared',
+    };
+    const pidTwoHundred: StoppableAgent = {
+      ...alpha,
+      key: 'sess-shared#200',
+      sessionId: 'sess-shared',
+    };
+    const panes = new Map([
+      ['sess-shared#100', 'vam-alpha-aa11bb'],
+      ['sess-shared#200', 'vam-alpha-cc22dd'],
+    ]);
+    await expect(
+      stopSession(
+        [pidOneHundred, pidTwoHundred],
+        'sess-shared#100',
+        vi.fn(async () => null),
+        run,
+        panes,
+      ),
+    ).resolves.toBeNull();
+    expect(calls).toContainEqual(['kill-session', '-t', '=vam-alpha-aa11bb']);
+    expect(calls).not.toContainEqual(['kill-session', '-t', '=vam-alpha-cc22dd']);
+  });
+
+  /**
+   * THE WORST CONSEQUENCE, PINNED DIRECTLY. When a row's pane cannot be proved
+   * -- here, neither pid published anything and the project tags two vam
+   * sessions, so the tag path is ambiguous too -- the answer is the refusal
+   * `stopSession` already gives an interactive row, and NOTHING is killed. A
+   * row that cannot be resolved must never fall through to killing the wrong
+   * tmux session and reporting success.
+   */
+  it('kills nothing and refuses when the row cannot be uniquely resolved', async () => {
+    const { calls, run } = runner();
+    const pidOneHundred: StoppableAgent = {
+      ...alpha,
+      key: 'sess-shared#100',
+      sessionId: 'sess-shared',
+    };
+    const pidTwoHundred: StoppableAgent = {
+      ...alpha,
+      key: 'sess-shared#200',
+      sessionId: 'sess-shared',
+    };
+    const error = await stopSession(
+      [pidOneHundred, pidTwoHundred],
+      'sess-shared#100',
+      vi.fn(async () => null),
+      run,
+      new Map(),
+    );
+    expect(error?.code).toBe('interactive-session');
+    expect(calls.filter((argv) => argv[0] === 'kill-session')).toEqual([]);
   });
 });

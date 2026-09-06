@@ -69,7 +69,7 @@ describe('resizing the session vam started for a project', () => {
       'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-d4e5f6\n`),
       'resize-window': ok(''),
     });
-    const panes = new Map([['sess-beta', 'vam-atlas-d4e5f6']]);
+    const panes = new Map([['sess-beta#8', 'vam-atlas-d4e5f6']]);
     expect(await resizeSessionPane(run, ATLAS, SIZE, 'sess-beta#8', panes)).toBe(true);
     expect(argvs[1]?.[2]).toBe('=vam-atlas-d4e5f6:');
   });
@@ -83,7 +83,7 @@ describe('resizing the session vam started for a project', () => {
       'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
       'resize-window': ok(''),
     });
-    const panes = new Map([['sess-beta', 'notes']]);
+    const panes = new Map([['sess-beta#8', 'notes']]);
     await resizeSessionPane(run, BEACON, SIZE, 'sess-beta#8', panes);
     expect(verbs()).toEqual(['list-sessions']);
   });
