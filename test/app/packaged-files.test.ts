@@ -70,3 +70,35 @@ describe('packaged files cover what the main process resolves', () => {
     expect(packedRoots()).toContain(entryRoot);
   });
 });
+
+/**
+ * The config file above is only worth anything if the build actually reads it.
+ *
+ * electron-builder does NOT auto-discover `electron-builder.config.cjs`.
+ * Invoked bare it silently falls back to its own defaults, and the difference
+ * is not subtle: a build without the config packed `src/`, `test/`, `e2e/`,
+ * `docs/` and every tsconfig into the shipped asar -- the whole repository,
+ * handed to every user -- put its output in `dist/` instead of `dist-app/`,
+ * and searched the build machine's keychain for a signing identity instead of
+ * honouring `identity: null`. Measured, not theorised.
+ *
+ * The tests above read the config FILE, so they pass whether or not the build
+ * ever loads it. That is the gap this closes: it asserts the packaging command
+ * names the config explicitly, which is the only thing that makes the rest of
+ * this file mean anything about a real artifact.
+ */
+describe('the packaging command actually loads the config', () => {
+  it('passes the config file to electron-builder explicitly', () => {
+    const pkg = JSON.parse(readFileSync(PKG, 'utf8')) as {
+      readonly scripts: Readonly<Record<string, string>>;
+    };
+    const dist = pkg.scripts.dist;
+    expect(dist, 'a `dist` script is what produces a downloadable build').toBeDefined();
+    expect(dist).toContain('electron-builder');
+    // The filename, not merely `--config`: pointing the flag at the wrong file
+    // is the same failure with a longer command line.
+    expect(dist, 'electron-builder does not auto-discover this file').toContain(
+      '--config electron-builder.config.cjs',
+    );
+  });
+});
