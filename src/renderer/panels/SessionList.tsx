@@ -1368,7 +1368,7 @@ export function SessionList(props: SessionListProps) {
                         title={`Add a repo to ${group.name}`}
                         aria-label={`add a repo to ${group.name}`}
                         className={[
-                          'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                          'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-quiet hover:border-line-strong hover:text-ink-dim focus:opacity-100',
                           revealed === group.id ? 'opacity-100' : 'opacity-0',
                         ].join(' ')}
                       >
@@ -1618,7 +1618,7 @@ export function SessionList(props: SessionListProps) {
                     title={newSessionDecline ?? `New session in ${section.project.name}`}
                     aria-label={`new session in ${section.project.name}`}
                     className={[
-                      'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-ghost hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                      'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-quiet hover:border-line-strong hover:text-ink-dim focus:opacity-100',
                       isRevealed ||
                       section.items.some((entry) => entry.session.id === focusedSessionId)
                         ? 'opacity-100'
@@ -2101,7 +2101,7 @@ export function SessionList(props: SessionListProps) {
                 '',
               'Starting a session…',
             )}
-            className="vam-tap flex h-7 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[8px] border border-ink-ghost text-[11.5px] text-ink-dim hover:border-ink-faint hover:text-ink"
+            className="vam-tap flex h-7 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[8px] border border-ink-quiet text-[11.5px] text-ink-dim hover:border-ink-faint hover:text-ink"
           >
             <Plus size={13} strokeWidth={1.7} />
             New session

@@ -157,7 +157,7 @@ export function StepNode({ data }: NodeProps & { data: StepNodeData }) {
             em dash the eye skips, rather than a number nobody measured. */}
         <span
           data-step-duration
-          className={`flex-none font-mono text-[9.5px] ${asking ? 'text-waiting' : 'text-ink-ghost'}`}
+          className={`flex-none font-mono text-[9.5px] ${asking ? 'text-waiting' : 'text-ink-quiet'}`}
         >
           {asking ? 'waiting' : '—'}
         </span>

@@ -1132,6 +1132,10 @@ export const OUT_MARKDOWN: Components = {
       {children}
     </ol>
   ),
+  // The bullet, not the item: `list-disc` and the item spacing already carry
+  // the list's structure, so a barely-visible marker loses nothing the
+  // `text-ink-dim` item text and the semantic `<ul>` do not already say.
+  // Genuinely decorative -- stays on `ink-ghost` (issue 201).
   li: ({ children }) => <li className="marker:text-ink-ghost">{children}</li>,
   strong: ({ children }) => <strong className="font-medium text-ink">{children}</strong>,
   em: ({ children }) => <em className="text-ink-dim italic">{children}</em>,
@@ -2720,7 +2724,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 <ul className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-0.5 font-mono text-[10px] text-ink-faint">
                   {visibleTurns.map((d) => (
                     <li key={d.id} data-progress-turn className="flex items-center gap-2">
-                      <span className={d.output === null ? 'text-waiting' : 'text-ink-ghost'}>
+                      <span className={d.output === null ? 'text-waiting' : 'text-ink-quiet'}>
                         {d.output === null ? '◌' : '✓'}
                       </span>
                       <span className={`truncate ${d.id === decision.id ? 'text-ink-dim' : ''}`}>
@@ -3157,7 +3161,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
                   placeholder="model"
                   aria-label="model requested in this prompt"
-                  className="vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[10px] text-ink-dim outline-none placeholder:text-ink-ghost focus:text-ink"
+                  className="vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[10px] text-ink-dim outline-none placeholder:text-ink-quiet focus:text-ink"
                 />
               </Note>
               {/* The way OUT, shown only while you are in — the moment it is the
