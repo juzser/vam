@@ -92,6 +92,15 @@ export type SourceWrites = {
    * the cwd of a live session, so it begins existing only once this returns).
    */
   createSessionIn?(cwd: string, title: string): Promise<void>;
+  /**
+   * Opens a picker for one image, scoped to and validated against the
+   * session's own working directory, and answers the resolved path -- or
+   * `null` on cancel. Gated by `promptAttachments`, not by `recordPrompt`
+   * alone: a source can deliver text without being able to name a directory
+   * to scope a picker to. Rejects with the port's own `SourceError` when the
+   * picked file was refused (outside the directory, or not really an image).
+   */
+  pickImageAttachment?(sessionId: string): Promise<string | null>;
 };
 
 /** The waiver ledger and lesson pipeline, present only when `governance` is true. */

@@ -66,6 +66,7 @@ import {
   ChevronsUp,
   CircleSlash,
   GitCommitVertical,
+  Image as ImageIcon,
   Paperclip,
   User,
   X,
@@ -95,6 +96,8 @@ import type {
 import type { SessionEntry } from '../domain/selectors.js';
 import { questionKeys } from '../keyboard/question-keys.js';
 import { ShortcutTip } from '../keyboard/ShortcutTip.js';
+import { describeFailure } from '../sources/port.js';
+import { appendImagePath, removeImagePath } from './attach-image-path.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import { FocusEdge } from './FocusEdge.js';
 import {
@@ -428,6 +431,17 @@ export type DetailPanelProps = {
    * gives its own absence.
    */
   readonly terminal?: boolean;
+  /**
+   * Opens the native image picker for the focused session, scoped to and
+   * validated against its own working directory -- present only when
+   * `SourceCapabilities.promptAttachments` is true AND this shell can reach
+   * main (`sources/port.ts`'s `SourceWrites.pickImageAttachment`). Absent
+   * means absent, per the port's own rule: the attach-image button is drawn
+   * only when this is a function, never drawn-but-disabled. `undefined` in
+   * the browser build, where there is no filesystem to pick from at all, and
+   * for any source that has not written a delivery for it.
+   */
+  readonly pickImageAttachment?: (sessionId: string) => Promise<string | null>;
   /**
    * True while a write is in flight.
    *
@@ -1980,6 +1994,7 @@ export function DetailPanel(props: DetailPanelProps) {
     answer,
     prompt,
     terminal,
+    pickImageAttachment,
     sending = false,
     width,
     resizeHandle,
@@ -2264,6 +2279,34 @@ export function DetailPanel(props: DetailPanelProps) {
     const result = attachIntoDraft(draft, { name: file.name, size: file.size, text });
     setAttachError(result.ok ? null : result.message);
     if (result.ok) onDraftChange(result.draft);
+  };
+
+  /**
+   * The image path last appended, so the chip can be shown and taken back
+   * off, mirroring `attachedName` for a text attach. Cleared with the draft,
+   * same as `images` above -- an emptied box is what a sent or cleared
+   * prompt looks like from here.
+   */
+  const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  useEffect(() => {
+    if (draft === '') setAttachedImage(null);
+  }, [draft]);
+  const pickImage = async () => {
+    if (pickImageAttachment === undefined || entry === null) return;
+    let path: string | null;
+    try {
+      path = await pickImageAttachment(entry.session.id);
+    } catch (error) {
+      // Refused BEFORE anything was sent: outside the session's own
+      // directory, or content that is not really an image
+      // (`main/dialog/attach-image.ts`). Nothing here changes the draft.
+      setAttachError(describeFailure(error));
+      return;
+    }
+    if (path === null) return; // Cancelled -- one of two normal answers.
+    setAttachError(null);
+    setAttachedImage(path);
+    onDraftChange(appendImagePath(draft, path));
   };
 
   // Grow with the text instead of scrolling a one-line slot. Measured from the
@@ -3266,6 +3309,51 @@ export function DetailPanel(props: DetailPanelProps) {
                     onClick={() => {
                       setAttachError(null);
                       onDraftChange(detachFromDraft(draft));
+                    }}
+                    className="flex flex-none cursor-pointer items-center text-ink-faint hover:text-ink"
+                  >
+                    <X size={11} strokeWidth={2} />
+                  </button>
+                </span>
+              )}
+              {/* ABSENT, NOT DISABLED: drawn only when this shell can actually
+              open a native dialog and validate the answer against the
+              session's own directory (`pickImageAttachment`). A path is put
+              on its own line in the prompt text -- Claude Code reads the
+              bytes itself off that path; vam still uploads nothing. See
+              `state/artifacts/vam-image-attach/findings.md`. */}
+              {pickImageAttachment !== undefined && entry !== null && (
+                <Note text="opens a file picker, checks the file is really an image inside this session's own directory, and puts its path on its own line in the prompt text — vam uploads nothing">
+                  <button
+                    type="button"
+                    data-attach-image
+                    aria-label="attach an image to this prompt"
+                    onClick={() => void pickImage()}
+                    className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
+                  >
+                    <span
+                      aria-hidden="true"
+                      data-tap-skin
+                      className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-panel hover:bg-raised"
+                    >
+                      <ImageIcon size={12} strokeWidth={1.7} />
+                    </span>
+                  </button>
+                </Note>
+              )}
+              {attachedImage !== null && (
+                <span
+                  data-attach-image-chip
+                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[10px] text-ink-dim"
+                >
+                  <span className="truncate">{attachedImage}</span>
+                  <button
+                    type="button"
+                    data-attach-image-remove
+                    aria-label={`remove ${attachedImage}`}
+                    onClick={() => {
+                      onDraftChange(removeImagePath(draft, attachedImage));
+                      setAttachedImage(null);
                     }}
                     className="flex flex-none cursor-pointer items-center text-ink-faint hover:text-ink"
                   >

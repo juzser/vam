@@ -2826,6 +2826,13 @@ function CanvasInner({
     entry: focusedEntry,
     decision: focusedDecision,
     delivers: source.kind === 'session' && source.source.capabilities.deliverPrompt,
+    // Present only for a source whose `write` surface actually carries it --
+    // `promptAttachments`, read the same way `delivers` reads its own flag.
+    // Absent in the browser build (no `'session'` source there at all: no
+    // `window.api`, so nothing to open a native dialog with) and absent for
+    // any source that has not written a delivery for it.
+    pickImageAttachment:
+      source.kind === 'session' ? source.source.write?.pickImageAttachment : undefined,
     // The bridge the question card answers through. Passed beside
     // `delivers` because the two are read together: a source that
     // declares delivery and a shell that has no main process behind it

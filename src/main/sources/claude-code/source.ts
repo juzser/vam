@@ -340,7 +340,14 @@ const DESCRIPTOR: SourceDescriptor = {
     // are one operation, and the weaker word is the one that is misleading.
     recordPrompt: true,
     deliverPrompt: true,
-    promptAttachments: false,
+    // `deliverPromptViaCli` already carries the arbitrary text of a prompt
+    // (`deliver.ts`); a path reference is just another line of that same
+    // string, and Claude Code reads the bytes itself on the other end
+    // (`state/artifacts/vam-image-attach/findings.md`). The picking and the
+    // two checks that matter -- inside the session's own directory, really an
+    // image by content -- happen in main before the draft ever changes
+    // (`main/dialog/attach-image.ts`).
+    promptAttachments: true,
     slashCommands: false,
     renameSession: false,
     // `claude stop <id>` is real. It stops BACKGROUND sessions only, and an
@@ -373,9 +380,9 @@ const DESCRIPTOR: SourceDescriptor = {
     // without one gives the canvas a badge no event ever arrives at.
     liveUpdates:
       'this source re-reads on demand; nothing watches the session list or the transcripts yet',
-    // No entry for recordPrompt or deliverPrompt: a decline is written only
-    // for a capability that is false, and both are now true.
-    promptAttachments: NOT_YET_WRITTEN,
+    // No entry for recordPrompt, deliverPrompt or promptAttachments: a
+    // decline is written only for a capability that is false, and all three
+    // are now true.
     slashCommands: NOT_YET_WRITTEN,
     renameSession: NO_SURFACE,
     // No entry for closeSession: a decline is written only for a capability
