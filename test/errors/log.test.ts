@@ -117,11 +117,16 @@ describe('subscribeEvents', () => {
 
 describe('persistence', () => {
   it('is deliberately absent -- the log is memory only', () => {
+    // A spy on the write path, not a check that `localStorage` is absent from
+    // the global: `localStorage` always exists in a real renderer, so an
+    // environment where it happens not to (a plain Node vitest environment on
+    // some Node majors, never on others) proves nothing about production.
+    // What this guards is that recordFailure/noteFailure never call it --
+    // persisting would put operator paths on disk, which is the exact hazard
+    // the scrubber exists to contain on the one path that leaves.
+    const setItem = vi.spyOn(globalThis.localStorage, 'setItem');
     recordFailure('a', 'one');
-    // Nothing here writes: no storage bridge is touched, and a reload starts
-    // empty. Persisting would put operator paths on disk, which is the exact
-    // hazard the scrubber exists to contain on the one path that leaves.
-    expect(globalThis.localStorage).toBeUndefined();
+    expect(setItem).not.toHaveBeenCalled();
   });
 });
 
