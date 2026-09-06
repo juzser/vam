@@ -11,8 +11,8 @@ not design content; nothing here derives from it.
 
 The mockup is for **ADE**, a different product with a different vocabulary
 (worktrees, Claude Code / Codex per session, per-step durations, approvals, PRs,
-a daily token and spend cap). vam draws black-smith. Where the two agree, this
-implements the mockup exactly. Where black-smith cannot answer, the slot is
+a daily token and spend cap). vam draws the factory. Where the two agree, this
+implements the mockup exactly. Where the factory cannot answer, the slot is
 DRAWN and says it has nothing — `—`, or a `data-placeholder` element with a
 `title` naming the gap. Nothing invents a number.
 
@@ -54,14 +54,14 @@ DRAWN and says it has nothing — `—`, or a `data-placeholder` element with a
 | Slot | Where | Needs |
 |---|---|---|
 | `+` per project | sidebar caption | a create-session route; today it is `smith event append session-start` |
-| agent badge (`CC`/`CX`) | sidebar row | provider per SESSION; black-smith reports it per dispatch |
-| worktree line | session card | black-smith does not report a worktree per session |
+| agent badge (`CC`/`CX`) | sidebar row | provider per SESSION; the factory reports it per dispatch |
+| worktree line | session card | the factory does not report a worktree per session |
 | tokens / spend | session card footer | per-session cost; `/api/overview` has `tokensByEpic` only |
-| per-step duration | step card, right | black-smith times a session, not a step |
+| per-step duration | step card, right | the factory times a session, not a step |
 | step verbs (`READ`/`EDIT`/`RUN`) | step card | an event KIND on the timeline entry. `stepKind()` derives only what is knowable (ask / run / done) rather than guessing from label text |
 | `PRs` / `Terminal` / `Agents` tabs | right panel | a PR index, a terminal attach, a per-session agent roster |
 | attach, model picker | composer | the prompt route takes `(sessionId, text)`; the model is the factory's choice |
-| `/diff` `/tests` `/handoff` | composer | a command route in black-smith |
+| `/diff` `/tests` `/handoff` | composer | a command route in the factory |
 | daily token / spend cap | status bar | wire `budgetUsedPct` + `tokensByEpic` through the adapter — the data EXISTS, only the adapter is missing. Cheapest real win on this list |
 
 ## Not started

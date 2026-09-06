@@ -1,9 +1,11 @@
 # vam — VIM Agent Management
 
-vam is a keyboard-first ADE (agent development environment) for managing
-agent sessions from any CLI: one screen that lays out every running session
-as a node, colours it by whether it needs you, and lets you navigate and act
-on it with vim-style keys instead of a mouse.
+vam is a keyboard-first canvas ADE (agent development environment) for
+watching and steering coding-agent sessions: one screen that lays out every
+running session as a node, colours it by whether it needs you, and lets you
+navigate and act on it with vim-style keys instead of a mouse. vam runs on
+its own — it ships with a real, built-in source (your own Claude Code
+sessions) and does not require any other project to be installed or running.
 
 ![vam canvas, dark theme](docs/images/canvas-dark.png)
 
@@ -16,99 +18,159 @@ project, coloured `running` / `waiting` / `done` / `failed` — and to make the
 `waiting` state impossible to miss, so getting from "something needs me" to
 looking at it and answering it takes as few keystrokes as possible.
 
-vam is source-agnostic by design: it draws its canvas from a domain model
-that any CLI's session log can be translated into, not from one factory's
-internals. black-smith — the project that builds vam — is the first CLI
-wired up this way, because dogfooding vam on its own build process is the
-fastest way to find its rough edges. See "Relationship to orca" and "Adding
-a source" below for how that seam is meant to grow.
+vam is source-agnostic by design: the canvas, the keyboard layer and the
+domain model (`src/renderer/domain/model.ts`) know nothing about any one
+backend. What a source can do — read live, deliver a prompt, open a
+terminal, and so on — travels as data (`SourceCapabilities`,
+`src/renderer/sources/port.ts`), and the UI only ever draws what the active
+source actually declares. Three sources ship today: your own Claude Code
+sessions (desktop only), a small bundled sample (fictional data, for a
+first look with no setup), and an HTTP adapter for a compatible backend —
+see [Sources](#sources) below.
 
-vam does not run agents and does not orchestrate anything. It is a read/write
-window onto a session log that must already exist somewhere.
+vam does not run agents and does not orchestrate anything. It is a
+read/write window onto a session log that must already exist somewhere.
 
 ## Screenshots
 
+`Mod-k` opens a command palette (`cmdk`) with a jump list of every session,
+grouped into "needs you" and "all sessions":
+
 ![Command palette open](docs/images/palette.png)
 
-`Mod-k` opens a command palette (`cmdk`) with a jump list of every session,
-grouped into "needs you" and "all sessions".
+A session's Terminal tab shows the screen of the tmux pane vam started for
+it — a snapshot with the agent's own colours, not a live stream:
 
-![vam canvas, light theme](docs/images/canvas-light.png)
+![Terminal tab showing a captured pane](docs/images/terminal.png)
 
-The same canvas in light theme, toggled from the sidebar footer.
+The composer can attach a text file (read locally, folded into the prompt)
+or an image (validated against the session's own directory, its path put on
+its own line); vam uploads nothing in either case:
 
-The canvas itself (dark screenshot above) has: a left sidebar of sessions
-grouped by project with a search box; status filter chips (All / Running /
-Needs you / Done) with live counts; the node canvas with auto-layout, zoom
-controls and a minimap; a right detail panel with Response / PRs / Terminal /
-Agents tabs, a step progress bar and a prompt composer; a bottom status line
-showing the current vim-style mode (`NORMAL`), the focused session, and
-session counts.
+![Composer with an image attached](docs/images/image-attach.png)
+
+## Install
+
+**The v0.1.0 binaries are not code-signed yet**, so the OS will interrupt the
+first launch:
+
+- **macOS** blocks the app outright ("*.app* is damaged and can't be
+  opened" or similar). Right-click the app → **Open**, or clear the
+  quarantine flag yourself: `xattr -cr /path/to/vam.app`.
+- **Windows** SmartScreen shows "Windows protected your PC". Click
+  **More info**, then **Run anyway**.
+- **Linux** AppImage needs the executable bit set first:
+  `chmod +x vam-*.AppImage`, then run it.
+
+None of this means the build is untrusted in some deeper sense — it means
+nobody has paid a certificate authority yet. If that is not acceptable, build
+from source instead:
+
+```bash
+pnpm install
+pnpm run dist   # electron-vite build + the web build + electron-builder
+```
 
 ## Quick start
 
-Requires Node >=22.
+Requires Node >=22 (`.nvmrc` pins the exact version CI uses).
 
-### Demo mode — no backend needed
+### Demo mode — no backend, no setup
 
 ```bash
 pnpm run dev
 # open http://127.0.0.1:5273/?demo=1
 ```
 
-Demo mode renders a fixed fixture (`src/renderer/fixtures/demo.ts`). It needs no
-running black-smith. Every write is refused before it reaches any server, and
-the canvas shows a banner saying so — this mode is for looking, not for
-recording anything.
+Demo mode renders a fixed fixture (`src/renderer/fixtures/demo.ts`) — fictional
+sessions, not a connection to anything. Every write is refused before it
+reaches any server, and the canvas shows a banner saying so. This is for
+looking at the interaction model, not for recording anything real.
 
 ### Desktop mode — against your own Claude Code sessions
 
 ```bash
-pnpm run dev:app                # hot-reloading Electron shell
-# or, for the packaged build:
-pnpm run build:app
+pnpm run dev:app     # hot-reloading Electron shell
+# or, once you have built with `pnpm run dist` / `pnpm run build:app`:
 node_modules/.bin/electron .
 ```
 
-**This is the only mode that shows your own sessions.** The two browser modes
-above read a black-smith factory; the desktop shell reads Claude Code directly —
-`claude agents --json --all` for the live session list, and each session's own
-transcript for its timeline. Open vam in a browser and you will see the
-factory's rows no matter what you are working on, which is a confusing first
-impression rather than a bug.
+**This is the only mode that shows your own sessions**, and the only one
+that can *deliver* a prompt rather than just record one. The desktop shell
+reads Claude Code directly — `claude agents --json --all` for the live
+session list, and each session's own transcript for its timeline — with no
+server of any kind in front of it.
 
-Desktop mode is also the only one that can **deliver** a prompt. The composer
-says "send prompt" here and "record prompt" in the browser, and the difference
-is real: `claude --resume <id> -p` hands your words to the running session,
-which answers them, while black-smith's `/api/prompt` appends to a log for the
-agent to find on its own next step. The wording follows the source's declared
-capability rather than being chosen per screen, so it cannot drift out of step
-with what the button does.
+Desktop mode delivers a prompt with `claude --resume <sessionId> -p "<prompt>"
+--output-format json`. Two things it deliberately never does: it never passes
+`--fork-session`, so a prompt reaches the session you aimed at or none, never
+a branched copy of it; and it checks the `session_id` the CLI hands back
+against the one it addressed, refusing to report delivery if they differ.
 
-Two things it deliberately will not do. It never passes `--fork-session`, so a
-prompt goes to the session you aimed at or to none, never to a branched copy of
-it. And it checks the `session_id` that comes back against the one addressed,
-refusing to report delivery if they differ.
+The one requirement is the `claude` CLI on `PATH` — nothing here is gated on
+an operating system.
 
-The one requirement is the `claude` CLI on `PATH` — nothing here is gated on an
-operating system.
+## Sources
 
-### Live mode — against a running black-smith
+Every source implements one contract (`SessionSource`,
+`src/renderer/sources/port.ts`) and describes itself with twelve booleans —
+`liveUpdates`, `recordPrompt`, `deliverPrompt`, `terminal`, and so on — plus a
+plain-English reason for every one that is `false`. The UI reads that
+descriptor rather than asking "which source is this," so a capability that
+does not exist is simply absent, never a button that apologises when
+clicked.
 
-```bash
-smith ui serve   # from your black-smith checkout; defaults to :4680
-pnpm run dev
-# open http://127.0.0.1:5273/
-```
+That is why the prompt composer sometimes says **"send prompt"** and
+sometimes **"record prompt"**: it reads `capabilities.deliverPrompt` off the
+active source, not which screen it is drawn in. Claude Code declares
+`deliverPrompt: true` (see Desktop mode above); a source with no channel into
+a running agent declares `recordPrompt` only, and the composer's wording
+follows that declaration exactly.
 
-Live mode is the default (no `?demo=1`). The dev server proxies `/api/*` to
-black-smith's `ui/server`. If black-smith isn't reachable, live mode shows
-nothing and says why — it never falls back to fake data.
+Three sources exist in this repo:
+
+- **`claude-code`** — your own sessions, desktop-only (`src/main/sources/claude-code/`).
+- **`bundled-sample`** — fictional data with every capability `false`, used
+  as `test/electron/launch.test.ts`'s fixture and as a safe first screen
+  before Claude Code is wired up (`src/main/sources/fixture-source.ts`).
+- **`factory`** — an HTTP adapter (`src/renderer/sources/http-factory.ts`)
+  for a remote backend that speaks five routes (`GET /api/describe`,
+  `GET /api/load`, `GET /api/stream` for live updates, `POST
+  /api/record-prompt`, and so on, gated by the same capability flags). This
+  is the shape vam's own maintainers dogfood it against; the server on the
+  other end is not part of this repository and is not published. Demo mode
+  above renders the same shape from a static fixture instead of a real one,
+  which is the closest a fresh clone gets to seeing it without standing up a
+  server of your own.
+
+Adding a fourth source means implementing `SessionSource` (or, from the
+Electron main process, the smaller `MainSource` in
+`src/main/sources/source.ts`) and declaring its own capabilities — nothing
+elsewhere needs to change, because nothing elsewhere is allowed to assume
+which source it is looking at.
+
+## Mobile
+
+The desktop app can serve the same canvas to a phone. The server
+(`src/main/remote/server.ts`) binds **loopback only** — it is never directly
+reachable from another machine. Today, reaching it from a phone means
+running `tailscale serve` on the desktop machine yourself; that proxies the
+loopback server from your tailnet and terminates TLS, so the phone gets a
+real `https://<something>.ts.net` origin rather than a bare local address.
+(Automating that step is in progress — described here as it stands, not as
+intended.)
+
+Pairing is by a short code shown on the desktop (Settings → Remote), typed
+into the phone once; each paired device can be revoked individually, or all
+at once. The phone client itself ships **inside** the packaged desktop
+app — nothing extra to build or serve.
 
 ## Keyboard reference
 
-Bindings are defined in `src/renderer/keyboard/chords.ts`. `hjkl` move the focused
-node on the canvas the way they always do.
+Bindings are defined in `src/renderer/keyboard/chords.ts`, and the table
+below is generated from that file, not hand-maintained — the in-app `?`
+sheet is built from the same source. `hjkl` move the focused node the way
+they always do; `Mod` means Ctrl or Cmd, whichever your platform uses.
 
 | Key | Action |
 |---|---|
@@ -118,15 +180,23 @@ node on the canvas the way they always do.
 | `H` | Move keyboard control back to the session list |
 | `r` | Rename the focused session |
 | `s` | Pick the focused session's icon |
-| `x` | Close the focused session |
-| `o` | Start a new session |
+| `x` / `Mod-w` | Close the focused session |
+| `o` / `Mod-n` | Start a new session |
 | `,` | Open settings |
-| `f` | Jump (open the jump list) |
+| `.` | Open Remote — pair a phone, approve or deny it, unpair one, or revoke every device |
+| `E` | Open the error log and the report vam can compose from it |
+| `f` | Jump (open the jump-label overlay) |
+| `F` | Open the sidebar's filter popover |
 | `G` | Jump to the last session |
-| `/` | Search |
+| `/` | Search sessions |
 | `n` / `N` | Next / previous search match |
-| `Enter` | Open the focused session |
+| `p` | Reveal the focused session's project in the sidebar |
+| `Enter` | Open the focused step |
 | `Mod-k` | Open the command palette |
+| `Mod-1` … `Mod-9` | Jump to a position — a session in the sidebar, or a tab in the response pane, whichever pane has the keyboard (`Mod-9` is always the last one) |
+| `<` / `>` | Narrow / widen the focused side pane |
+| `+` / `-` | Zoom the canvas in / out |
+| `Z` | Fit the whole canvas in view |
 | `Escape` | Cancel whatever is half-typed |
 
 Chord prefixes — press the first key, then the second:
@@ -134,85 +204,12 @@ Chord prefixes — press the first key, then the second:
 | Chord | Action |
 |---|---|
 | `gg` | Jump to the first session |
-| `gt` | Next project |
-| `gT` | Previous project |
-| `yy` | Copy (the focused session's reference) |
-
-`Mod` means Ctrl or Cmd, whichever your platform uses.
-
-## The black-smith adapter
-
-The only source wired up today is black-smith, so this section describes how
-that one adapter connects — not how vam works in general. Adding another
-source means adding another section like this one.
-
-vam's own dev server (Vite) proxies every request to `/api/*` on its own
-origin to black-smith's `ui/server`, which defaults to
-`http://127.0.0.1:4680`. This is deliberate, not incidental: `ui/server`
-sends no CORS headers, so a direct cross-origin request from the browser
-would need black-smith to open itself up. Proxying instead keeps black-smith
-exactly as closed as it already is.
-
-Two environment variables control the target, and they are not
-interchangeable:
-
-- `VAM_SMITH_URL` — read by `vite.config.ts` when the dev/preview server
-  starts. Points the proxy at a black-smith running somewhere other than
-  `127.0.0.1:4680`.
-- `VITE_SMITH_URL` — a build-time override baked into the client bundle,
-  for the case where vam itself is served from behind something that
-  already fronts a factory (so no proxy is needed at all).
-
-vam **reads** `/api/stream` (an SSE feed), `/api/overview`, `/api/timeline`,
-`/api/kanban`, `/api/tasks/:id`, and `/api/lessons`.
-
-vam **writes** to `/api/prompt`, `/api/waivers/apply-batch`, and
-`/api/lessons/:id/:to`.
-
-The prompt box is labelled "Write a prompt — it is recorded, not sent", and
-on success the status line says the prompt was recorded into the session's
-log. This is not a UI shortcoming: black-smith has no channel into a running
-agent session, so `/api/prompt` records what you typed into the event log for
-the agent to pick up on its own next step. vam cannot make an idle agent act
-on your prompt any faster than the agent already checks its log.
-
-## Relationship to orca
-
-orca is the model for being CLI-agnostic — an ADE that isn't tied to any one
-source — and vam builds on orca's core rather than reimplementing it. The
-parts orca has already solved — connecting to the CLI, session handling,
-provider login, remote control — are taken from there, which keeps this repo
-focused on the canvas and the keyboard layer sitting on top of them. The
-intent is for vam to become independent of orca over time; for now, orca's
-core is the foundation.
-
-What is *wired today* is narrower than that intent, and worth stating plainly
-so the code doesn't surprise you. The vocabulary is already borrowed:
-`src/renderer/keyboard/chords.ts` takes orca's keybinding conventions, and the model
-treats "a decision waiting for a person" as first-class the way orca does.
-`SourceId` in `src/renderer/domain/model.ts` already has an `'orca'` case. But the
-adapter that would populate it (`src/renderer/adapter/to-canvas.ts`) only ever sets
-`source: 'black-smith'` — its comment says "orca is a second adapter's job",
-and that adapter is not written yet. Every session in the screenshots above
-came out of black-smith.
-
-## Adding a source
-
-`src/renderer/adapter/` is the seam a new source plugs into: `to-canvas.ts` translates
-a CLI's own API shapes into the source-agnostic domain model in
-`src/renderer/domain/model.ts`, which is all the canvas ever renders. That seam exists
-today, but it is not finished — three concrete things still couple the rest
-of the code to black-smith specifically:
-
-- `SourceId` in `src/renderer/domain/model.ts` is a closed union of exactly
-  `'black-smith' | 'orca'`, not an open source type.
-- `src/renderer/canvas/source.ts` and `src/renderer/canvas/Canvas.tsx` import `SmithClient` /
-  `SmithApiError` concretely, so the canvas layer is still coupled to the
-  black-smith client type, not just the domain model.
-- `src/renderer/adapter/to-canvas.ts` hardcodes `source: 'black-smith'` on every
-  project it builds.
-
-A second adapter needs all three loosened before it can drop in cleanly.
+| `gt` / `gT` | Next / previous project |
+| `yy` | Copy the focused step's commands |
+| `z0` | Reset both side panes to their default layout |
+| `zc` | Hide the canvas |
+| `zC` | Response pane only |
+| `zf` | Response pane in the middle, canvas as a strip |
 
 ## Development
 
@@ -222,6 +219,7 @@ pnpm run build           # production build
 pnpm run preview         # serve the production build on :5274
 pnpm run dev:app         # Electron shell with hot reload
 pnpm run build:app       # build main/preload/renderer into out/
+pnpm run dist            # the packaged, distributable build
 pnpm run test:app        # boot the packaged app and assert it opens a window
 pnpm run typecheck       # tsc --noEmit
 pnpm run typecheck:test  # typecheck the test sources
@@ -237,26 +235,28 @@ Tests use Vitest; run a single file directly with
 
 The Playwright suites in `e2e/` need a one-time manual setup and are **not**
 covered by `pnpm install`: there is deliberately no `e2e/package.json`, so a
-fresh clone has no `e2e/node_modules` and the scripts below will not run until
-you create one. `e2e/README.md` has the steps and explains why the layout is
-this way.
+fresh clone has no `e2e/node_modules` and the scripts below will not run
+until you create one. `e2e/README.md` has the steps and explains why the
+layout is this way.
 
 Once the harness exists:
 
 ```bash
 pnpm run test:e2e            # the canvas suite
 pnpm run test:e2e:reconnect  # the SSE drop/reconnect suite
+pnpm run test:e2e:phone      # the phone shell suite
+pnpm run test:e2e:electron   # the packaged-app launch suite
 ```
 
-Neither runs in CI, for the same reason — plus one suite needs a sibling
-repository that is not public. `.github/workflows/ci.yml` says so in its header
-rather than leaving the gap unexplained.
+None of these run in CI — they are hand-run only, by design: `e2e/` is
+excluded from every automated gate, and `.github/workflows/ci.yml` says so in
+its header rather than leaving the gap unexplained.
 
 ## Project status
 
-Early: `package.json` is still at `0.0.0`. It is marked `private` so it can't
-be published to npm by accident — vam is an application, not a library — which
-is separate from the licence.
+`package.json` is at `0.1.0` and marked `private` so it can't be published to
+npm by accident — vam is an application, not a library, which is separate
+from the licence below.
 
 ## Licence
 
