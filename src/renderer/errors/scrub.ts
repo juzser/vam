@@ -13,8 +13,9 @@
  * WHAT IS REMOVED, and why each one is here rather than merely plausible:
  *
  *   1. Email addresses. `git`/`gh` errors name committers.
- *   2. Session ids: UUIDs and long hex runs. They identify a conversation and
- *      are useless to a maintainer who cannot open it.
+ *   2. Session ids: UUIDs and hex runs of 12 or more, bounded by "not a hex
+ *      digit" rather than by `\b` -- see NOT_HEX_BEFORE. They identify a
+ *      conversation and are useless to a maintainer who cannot open it.
  *   3. Quoted names -- `"..."`, `'...'`, `` `...` ``. Every operator-supplied
  *      string in vam's failure vocabulary arrives quoted: session titles,
  *      tmux session names, branch names, shell remedies. Redacting the quote
@@ -31,9 +32,12 @@
  *      slug is the project label.
  *
  * WHAT IS NOT REMOVED, and the footer must not claim otherwise: an absolute
- * path outside `/Users` and `/home` (`/Volumes/clients/acme/payroll`), and an
- * unquoted project or branch name arriving in free prose. The report is shown
- * to the operator before they submit it for exactly that reason.
+ * path outside `/Users` and `/home` (`/Volumes/clients/acme/payroll`, and the
+ * `/var` socket paths a session record carries), and an unquoted project or
+ * branch name arriving in free prose. Widening the path rule to every
+ * absolute path was considered and refused: it would swallow the prose the
+ * report exists to carry. The report is shown to the operator before they
+ * submit it for exactly that reason.
  *
  * WHAT IS KEPT: the failure code, the surrounding prose, and plain counts --
  * "pairing refused, 3 live sessions share this cwd, 1 vam pane" survives
@@ -50,8 +54,19 @@
 export const REDACTED = '<redacted>';
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-const UUID = /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g;
-const LONG_HEX = /\b[0-9a-fA-F]{12,}\b/g;
+/**
+ * `\b` is the wrong boundary for an id: `_` is a word character, so a run of
+ * hex abutting one gets no break and the whole id survives -- and the session
+ * records vam reads carry exactly that shape (a short hex run, `_`, a long
+ * one). The boundary that belongs here is "not another hex digit".
+ */
+const NOT_HEX_BEFORE = '(?<![0-9a-fA-F])';
+const NOT_HEX_AFTER = '(?![0-9a-fA-F])';
+const UUID = new RegExp(
+  `${NOT_HEX_BEFORE}[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}${NOT_HEX_AFTER}`,
+  'g',
+);
+const LONG_HEX = new RegExp(`${NOT_HEX_BEFORE}[0-9a-fA-F]{12,}${NOT_HEX_AFTER}`, 'g');
 const DOUBLE_QUOTED = /"[^"]*"/g;
 /** The leading group keeps an apostrophe in prose (`don't`) from opening a quote. */
 const SINGLE_QUOTED = /(^|[\s([:=])'[^']+'/g;
@@ -63,7 +78,10 @@ const PID = /\bpid[\s=:]+\d+/gi;
  * (`tmux/argv.ts`), and vam's OWN failure messages interpolate it bare --
  * `creating session vam-acme-corp-payroll-a1b2c3` -- so the quoted-name rule
  * never sees it and the project label went out whole. Redacting by prefix
- * needs no vocabulary: every name of this shape is one vam minted.
+ * needs no vocabulary, and it is deliberately generous rather than exact:
+ * `vam-cli` written in prose goes too. Over-redacting a word a maintainer
+ * could have guessed costs a sentence; under-redacting costs the project
+ * label, permanently and in public.
  */
 const VAM_SESSION = /\bvam-[A-Za-z0-9_-]+/g;
 
