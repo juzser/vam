@@ -33,7 +33,7 @@ const IDLE: RemoteState = {
   address: { kind: 'unavailable', reason: 'no-cli' },
   allowWrites: false,
   registry: null,
-  serve: { enabled: false, lastError: null },
+  serve: { enabled: false, lastError: null, timedOut: false },
   nowMs: NOW,
 };
 
@@ -72,7 +72,7 @@ describe('RemotePanel', () => {
       address: { kind: 'found', url: 'https://example-machine.example-tailnet.ts.net' },
       // The address is only WORTH drawing once phone access is actually on --
       // otherwise it names a port nothing is proxying to yet.
-      serve: { enabled: true, lastError: null },
+      serve: { enabled: true, lastError: null, timedOut: false },
     });
     render(<RemotePanel api={api} active />);
 
@@ -113,7 +113,7 @@ describe('RemotePanel', () => {
     const copyText = vi.fn(async () => true);
     const api = fakeApi({
       address: { kind: 'found', url: 'https://example-machine.example-tailnet.ts.net' },
-      serve: { enabled: true, lastError: null },
+      serve: { enabled: true, lastError: null, timedOut: false },
     });
     render(<RemotePanel api={api} copyText={copyText} active />);
 

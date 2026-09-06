@@ -221,7 +221,7 @@ describe('the serve toggle channel', () => {
 
     for (let read = 0; read < 5; read += 1) {
       const snapshot = await state(CHANNELS.remoteState);
-      expect(snapshot.serve).toEqual({ enabled: false, lastError: null });
+      expect(snapshot.serve).toEqual({ enabled: false, lastError: null, timedOut: false });
     }
 
     expect(enableServe).not.toHaveBeenCalled();
@@ -234,7 +234,7 @@ describe('the serve toggle channel', () => {
     const after = await state(CHANNELS.serveEnable);
 
     expect(enableServe).toHaveBeenCalledTimes(1);
-    expect(after.serve).toEqual({ enabled: true, lastError: null });
+    expect(after.serve).toEqual({ enabled: true, lastError: null, timedOut: false });
   });
 
   it('disabling reverses it', async () => {
@@ -243,7 +243,7 @@ describe('the serve toggle channel', () => {
 
     const after = await state(CHANNELS.serveDisable);
 
-    expect(after.serve).toEqual({ enabled: false, lastError: null });
+    expect(after.serve).toEqual({ enabled: false, lastError: null, timedOut: false });
   });
 
   it('surfaces a refusal in its own real words, and leaves enabled honest', async () => {
@@ -260,6 +260,7 @@ describe('the serve toggle channel', () => {
     expect(after.serve).toEqual({
       enabled: false,
       lastError: 'access denied: reauthenticate to use Serve',
+      timedOut: false,
     });
   });
 
@@ -275,7 +276,11 @@ describe('the serve toggle channel', () => {
 
     const after = await state(CHANNELS.serveDisable);
 
-    expect(after.serve).toEqual({ enabled: true, lastError: 'ENOSPC: reset failed' });
+    expect(after.serve).toEqual({
+      enabled: true,
+      lastError: 'ENOSPC: reset failed',
+      timedOut: false,
+    });
   });
 
   it('clears a stale refusal once a later attempt succeeds', async () => {
@@ -288,7 +293,39 @@ describe('the serve toggle channel', () => {
     await state(CHANNELS.serveEnable);
     const after = await state(CHANNELS.serveEnable);
 
-    expect(after.serve).toEqual({ enabled: true, lastError: null });
+    expect(after.serve).toEqual({ enabled: true, lastError: null, timedOut: false });
+  });
+
+  it('surfaces a timeout as its own honest state, distinct from a refusal', async () => {
+    const enableServe = vi.fn(async (): Promise<ServeToggleResult> => ({ kind: 'timed-out' }));
+    const { state } = await wire({ enableServe });
+
+    const after = await state(CHANNELS.serveEnable);
+
+    expect(after.serve).toEqual({ enabled: false, lastError: null, timedOut: true });
+  });
+
+  it('a timed-out disable keeps enabled true, same as a refused one', async () => {
+    const disableServe = vi.fn(async (): Promise<ServeToggleResult> => ({ kind: 'timed-out' }));
+    const { state } = await wire({ disableServe });
+    await state(CHANNELS.serveEnable);
+
+    const after = await state(CHANNELS.serveDisable);
+
+    expect(after.serve).toEqual({ enabled: true, lastError: null, timedOut: true });
+  });
+
+  it('clears a stale timeout once a later attempt succeeds', async () => {
+    const enableServe = vi
+      .fn<() => Promise<ServeToggleResult>>()
+      .mockResolvedValueOnce({ kind: 'timed-out' })
+      .mockResolvedValueOnce(OK);
+    const { state } = await wire({ enableServe });
+
+    await state(CHANNELS.serveEnable);
+    const after = await state(CHANNELS.serveEnable);
+
+    expect(after.serve).toEqual({ enabled: true, lastError: null, timedOut: false });
   });
 });
 

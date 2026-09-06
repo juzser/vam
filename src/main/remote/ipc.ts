@@ -40,7 +40,7 @@ export type RemoteIpcOptions = {
    * closing over it there keeps that number out of the pairing bridge.
    */
   readonly enableServe: () => Promise<ServeToggleResult>;
-  /** Runs `tailscale serve reset`. See `remote/serve.ts` for what that undoes. */
+  /** Runs the TARGETED off, never `tailscale serve reset` -- see `remote/serve.ts`. */
   readonly disableServe: () => Promise<ServeToggleResult>;
   readonly now?: () => number;
 };
@@ -75,7 +75,7 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
    * `serveEnable`/`serveDisable` below ever changes it: `snapshot` below only
    * READS this variable, so polling `remoteState` can never flip it.
    */
-  let serve: ServeState = { enabled: false, lastError: null };
+  let serve: ServeState = { enabled: false, lastError: null, timedOut: false };
 
   const address = async (): Promise<ServeAddress> => {
     if (cached !== null && now() - cached.at < ADDRESS_CACHE_MS) {
@@ -185,26 +185,30 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
   });
 
   /**
-   * Both toggle handlers keep the LAST attempt's own words on a refusal, and
-   * clear them the moment a later attempt succeeds -- never flattened into a
-   * generic "could not enable/disable". `enabled` only ever becomes true from
-   * a `kind: 'ok'` result here; nothing else in this module can set it.
+   * Folds a toggle attempt's result into the next `ServeState`. `wasEnabling`
+   * is what `enabled` becomes on `ok`; on any failure `enabled` is left
+   * UNCHANGED, because neither a refusal nor a timeout tells vam the standing
+   * configuration actually moved. `lastError`/`timedOut` keep the LAST
+   * attempt's own words (or its own honest silence) and clear on the next
+   * success -- never flattened into a generic "could not enable/disable".
    */
+  const nextServeState = (result: ServeToggleResult, wasEnabling: boolean): ServeState => {
+    if (result.kind === 'ok') {
+      return { enabled: wasEnabling, lastError: null, timedOut: false };
+    }
+    if (result.kind === 'timed-out') {
+      return { enabled: serve.enabled, lastError: null, timedOut: true };
+    }
+    return { enabled: serve.enabled, lastError: result.message, timedOut: false };
+  };
+
   ipcMain.handle(CHANNELS.serveEnable, async (): Promise<RemoteState> => {
-    const result = await options.enableServe();
-    serve =
-      result.kind === 'ok'
-        ? { enabled: true, lastError: null }
-        : { enabled: serve.enabled, lastError: result.message };
+    serve = nextServeState(await options.enableServe(), true);
     return await snapshot();
   });
 
   ipcMain.handle(CHANNELS.serveDisable, async (): Promise<RemoteState> => {
-    const result = await options.disableServe();
-    serve =
-      result.kind === 'ok'
-        ? { enabled: false, lastError: null }
-        : { enabled: serve.enabled, lastError: result.message };
+    serve = nextServeState(await options.disableServe(), false);
     return await snapshot();
   });
 }

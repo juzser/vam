@@ -55,7 +55,27 @@ export type ServeState = {
   readonly enabled: boolean;
   /** The literal words of the most recent failed enable/disable, or null. */
   readonly lastError: string | null;
+  /**
+   * The most recent enable/disable attempt gave up waiting rather than
+   * getting an answer (`remote/serve.ts`'s measured hang). Its own field
+   * rather than folded into `lastError`: there are no CLI words to carry, so
+   * inventing an English sentence for it here would be main making up prose
+   * that belongs to the renderer -- see `PairingPanel.tsx`. Mutually
+   * exclusive with a non-null `lastError`.
+   */
+  readonly timedOut: boolean;
 };
+
+/**
+ * WHICH ACTION A LINGERING `lastError`/`timedOut` CAME FROM IS `enabled`
+ * ITSELF, never a fourth field. The panel only ever exposes an Enable button
+ * while `enabled` is false and a Disable button while it is true, so a
+ * failure recorded while `enabled` is true can only be a failed DISABLE
+ * (a failed enable leaves `enabled` false), and one recorded while `enabled`
+ * is false can only be a failed ENABLE. `PairingPanel.tsx` reads this
+ * invariant directly rather than main inventing a `lastFailedAction` to say
+ * the same thing a second way.
+ */
 
 export type RemoteState = {
   readonly view: PairingStateView;

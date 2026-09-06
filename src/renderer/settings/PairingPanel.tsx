@@ -13,6 +13,13 @@
  * Presentational only: every piece of state arrives as a prop and every act
  * leaves as a callback. The code, its clock and the device list all live in
  * main, where the registry is.
+ *
+ * STYLED WITH TAILWIND UTILITIES AND THE APP'S OWN TOKENS, like every other
+ * component in this directory -- no new semantic classes, no rule added to
+ * `styles.css`. This panel shipped with three (`pairing`, `pairing-code`,
+ * `pairing-device-name`) that had no CSS rule anywhere in the repo, which
+ * `test/settings/pairing-panel.test.tsx`'s styling suite now asserts against
+ * directly on the rendered element, never against the stylesheet's text.
  */
 
 import { Copy, Trash2 } from 'lucide-react';
@@ -41,12 +48,23 @@ export type PairingView = {
  * rather than main's `ServeState` -- `cliMissing` folds in `ServeAddress`'s
  * `no-cli` reason, which `RemotePanel.tsx` already reads for the address, so
  * this panel does not need a second way to ask "is Tailscale here at all".
+ *
+ * `enabled` DOUBLES AS "WHICH ACTION `lastError`/`timedOut` CAME FROM" -- see
+ * `src/main/remote/state.ts`'s `ServeState` comment for the invariant this
+ * relies on: the only button ever drawn is Enable while `enabled` is false or
+ * Disable while it is true, so a failure recorded while `enabled` is true can
+ * only be a failed DISABLE. That is what gates the manual `tailscale serve
+ * reset` suggestion below to exactly the case where it makes sense.
  */
 export type ServeAccessView = {
   readonly cliMissing: boolean;
   readonly enabled: boolean;
   /** The most recent enable/disable refusal's own words, or null. */
   readonly lastError: string | null;
+  /** The most recent attempt gave up waiting rather than getting an answer. */
+  readonly timedOut: boolean;
+  /** An enable/disable round trip is in flight -- see `RemotePanel.tsx`. */
+  readonly pending: boolean;
 };
 
 export type PairingPanelProps = {
@@ -68,9 +86,9 @@ export type PairingPanelProps = {
   readonly onCopyUrl: () => void;
   readonly onRemove: (deviceId: string) => void;
   readonly onRevokeAll: () => void;
-  /** Runs `tailscale serve --bg <port>`. Never called merely by drawing this panel. */
+  /** Runs `tailscale serve --bg --yes <port>`. Never called merely by drawing this panel. */
   readonly onEnableServe: () => void;
-  /** Runs `tailscale serve reset`, reversing `onEnableServe`. */
+  /** Runs the TARGETED off, reversing `onEnableServe` -- never `tailscale serve reset`. */
   readonly onDisableServe: () => void;
 };
 
@@ -100,92 +118,169 @@ function ago(at: number, nowMs: number): string {
   return 'just now';
 }
 
+/** The words vam owns for a timeout -- main never invents this prose, see `ServeState`. */
+const TIMED_OUT_MESSAGE = 'tailscale did not answer in time.';
+
+const FOCUS_RING =
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
+
+/**
+ * Every button in this panel. `min-h-[44px]` is a real hit floor (SC 2.5.5's
+ * own AAA figure), called out for this file specifically -- and it is a
+ * height alone, never a fixed width: there is a standing lesson that a 44px
+ * floor does not check the PAINT, and a fixed box is exactly the shape that
+ * clears a hit measurement while clipping a longer label. `px-4` lets the box
+ * grow with its own content instead.
+ */
+const ACTION_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-line px-4 text-[13px] text-ink hover:bg-raised disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${FOCUS_RING}`;
+
+/** The same shape, for an act that revokes access rather than merely toggling a setting. */
+const DANGER_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-danger px-4 text-[13px] text-danger hover:bg-danger hover:text-canvas ${FOCUS_RING}`;
+
+/** The alert-box recipe `ErrorBoundary.tsx` already uses for a refusal in the operator's face. */
+const ALERT_BOX = 'rounded-md border border-danger bg-panel p-3 text-[12px] text-danger';
+
+const HINT = 'max-w-[52ch] text-[12px] text-ink-dim';
+const SECTION = 'border-line-loud border-t pt-4';
+const HEADING = 'font-medium text-[13px] text-ink';
+
 export function PairingPanel(props: PairingPanelProps) {
-  const { view, nowMs } = props;
+  const { view, nowMs, serve } = props;
   const throttled = view.throttledUntilMs > nowMs;
+  // See `ServeAccessView`'s own comment: a lingering failure while `enabled`
+  // is true can only be a failed DISABLE, so this is when the manual escape
+  // hatch belongs -- never for a failed enable, where there is nothing yet to
+  // reset.
+  const failedToDisable = serve.enabled && (serve.lastError !== null || serve.timedOut);
+
   return (
-    <section className="pairing">
-      <h3>Remote access</h3>
-      <p>
-        Everyone on your tailnet reaches this address — every laptop, phone, server and shared-in
-        guest. Being on the tailnet does not authorise a device to drive your agents; pairing it
-        here is what does.
-      </p>
-
-      <h4>Phone access</h4>
-      {props.serve.cliMissing ? (
-        // OFFERS NOTHING (requirement 3): no button appears in this branch at
-        // all, on either side of on/off -- there is no CLI to run one with,
-        // and vam does not walk the operator through installing it either.
-        <p data-testid="serve-no-cli">
-          vam can turn this on for you, but there is no Tailscale on this machine.{' '}
-          <a href="https://tailscale.com/download" target="_blank" rel="noreferrer">
-            Install Tailscale
-          </a>
-          , then reopen this screen.
+    <section data-testid="pairing-panel" className="flex flex-col gap-4 text-ink">
+      <div>
+        <h4 className={HEADING}>Remote access</h4>
+        <p className={`mt-1 ${HINT}`}>
+          Everyone on your tailnet reaches this address — every laptop, phone, server and shared-in
+          guest. Being on the tailnet does not authorise a device to drive your agents; pairing it
+          here is what does.
         </p>
-      ) : props.serve.enabled ? (
-        <>
-          {props.url === null ? null : (
-            <p>
-              <span data-testid="pairing-url">{props.url}</span>{' '}
-              <button type="button" onClick={props.onCopyUrl}>
-                <Copy aria-hidden="true" size={14} /> Copy address
-              </button>
+      </div>
+
+      <div className={SECTION}>
+        <h4 className={HEADING}>Phone access</h4>
+        {serve.cliMissing ? (
+          // OFFERS NOTHING (requirement 3): no button appears in this branch
+          // at all, on either side of on/off -- there is no CLI to run one
+          // with, and vam does not walk the operator through installing it.
+          <p data-testid="serve-no-cli" className={`mt-1 ${HINT}`}>
+            vam can turn this on for you, but there is no Tailscale on this machine.{' '}
+            {/* An inline link inside a sentence is WCAG 2.5.5's own documented
+                exception to the 44px target-size floor -- forcing this into a
+                button-sized box would look absurd mid-paragraph. */}
+            <a
+              href="https://tailscale.com/download"
+              target="_blank"
+              rel="noreferrer"
+              className="text-ink underline underline-offset-2 hover:text-ink-dim"
+            >
+              Install Tailscale
+            </a>
+            , then reopen this screen.
+          </p>
+        ) : serve.enabled ? (
+          <>
+            {props.url === null ? null : (
+              <p className="mt-1">
+                <span data-testid="pairing-url" className="font-mono text-[12px] text-ink">
+                  {props.url}
+                </span>{' '}
+                <button type="button" onClick={props.onCopyUrl} className={`mt-2 ${ACTION_BUTTON}`}>
+                  <Copy aria-hidden="true" size={14} /> Copy address
+                </button>
+              </p>
+            )}
+            <p data-testid="serve-on" className={`mt-1 ${HINT}`}>
+              Phone access is on. Your whole tailnet — every laptop, phone, tablet, server, CI
+              runner and shared-in guest on it — can reach this port until you turn it off.
             </p>
-          )}
-          <p data-testid="serve-on">
-            Phone access is on. Your whole tailnet — every laptop, phone, tablet, server, CI runner
-            and shared-in guest on it — can reach this port until you turn it off.
+            <button
+              type="button"
+              onClick={props.onDisableServe}
+              disabled={serve.pending}
+              aria-busy={serve.pending}
+              className={`mt-2 ${ACTION_BUTTON}`}
+            >
+              {serve.pending ? 'Turning off…' : 'Turn off phone access'}
+            </button>
+          </>
+        ) : (
+          <>
+            <p data-testid="serve-off" className={`mt-1 ${HINT}`}>
+              Enabling this runs <code>tailscale serve</code> on this machine: a standing
+              configuration change that puts this port in front of your whole tailnet — every
+              laptop, phone, tablet, server, CI runner and shared-in guest — until you turn it off
+              again. It outlives vam, and it is https only: the certificate is what lets the phone
+              keep a credential at all.
+            </p>
+            <button
+              type="button"
+              onClick={props.onEnableServe}
+              disabled={serve.pending}
+              aria-busy={serve.pending}
+              className={`mt-2 ${ACTION_BUTTON}`}
+            >
+              {serve.pending ? 'Enabling…' : 'Enable phone access'}
+            </button>
+          </>
+        )}
+        {serve.lastError === null && !serve.timedOut ? null : (
+          <p data-testid="serve-error" role="alert" className={`mt-2 ${ALERT_BOX}`}>
+            {serve.timedOut ? TIMED_OUT_MESSAGE : serve.lastError}
+            {failedToDisable ? (
+              <>
+                {' '}
+                You can turn it off yourself by running <code>tailscale serve reset</code>.
+              </>
+            ) : null}
           </p>
-          <button type="button" onClick={props.onDisableServe}>
-            Turn off phone access
-          </button>
-        </>
-      ) : (
-        <>
-          <p data-testid="serve-off">
-            Enabling this runs <code>tailscale serve</code> on this machine: a standing
-            configuration change that puts this port in front of your whole tailnet — every laptop,
-            phone, tablet, server, CI runner and shared-in guest — until you turn it off again. It
-            outlives vam, and it is https only: the certificate is what lets the phone keep a
-            credential at all.
-          </p>
-          <button type="button" onClick={props.onEnableServe}>
-            Enable phone access
-          </button>
-        </>
-      )}
-      {props.serve.lastError === null ? null : (
-        <p data-testid="serve-error" role="alert">
-          {props.serve.lastError}
+        )}
+      </div>
+
+      <div className={SECTION}>
+        <p data-testid="pairing-writes" className={HINT}>
+          {props.allowWrites
+            ? 'This server accepts writes: a paired device can close sessions and type into a running agent.'
+            : 'This server is read-only: the write routes are not registered at all.'}
         </p>
-      )}
 
-      <p data-testid="pairing-writes">
-        {props.allowWrites
-          ? 'This server accepts writes: a paired device can close sessions and type into a running agent.'
-          : 'This server is read-only: the write routes are not registered at all.'}
-      </p>
-
-      {view.code === null ? (
-        <button type="button" onClick={props.onRegenerate}>
-          {view.burned ? 'Regenerate' : 'Show a pairing code'}
-        </button>
-      ) : (
-        <div>
-          <p data-testid="pairing-code" className="pairing-code">
-            {grouped(view.code)}
-          </p>
-          <p data-testid="pairing-countdown">{countdown(view.expiresAtMs, nowMs)}</p>
-          <button type="button" onClick={props.onRegenerate}>
-            Regenerate
+        {view.code === null ? (
+          <button type="button" onClick={props.onRegenerate} className={`mt-3 ${ACTION_BUTTON}`}>
+            {view.burned ? 'Regenerate' : 'Show a pairing code'}
           </button>
-        </div>
-      )}
+        ) : (
+          <div className="mt-3">
+            <div className="rounded-md border border-line-loud bg-well px-6 py-4 text-center">
+              {/* LARGE, MONOSPACE, GENEROUSLY TRACKED: the one element on this
+                  whole screen whose entire job is being read across a room
+                  and retyped into a phone, by a human looking away from this
+                  screen while they do it. */}
+              <p
+                data-testid="pairing-code"
+                className="font-mono text-[40px] text-ink tracking-[0.3em]"
+              >
+                {grouped(view.code)}
+              </p>
+              <p data-testid="pairing-countdown" className="mt-1 text-[12px] text-ink-dim">
+                {countdown(view.expiresAtMs, nowMs)}
+              </p>
+            </div>
+            <button type="button" onClick={props.onRegenerate} className={`mt-3 ${ACTION_BUTTON}`}>
+              Regenerate
+            </button>
+          </div>
+        )}
+      </div>
 
       {view.awaiting === null ? null : (
-        <section data-testid="pairing-approval" aria-label="allow this device">
+        <section data-testid="pairing-approval" aria-label="allow this device" className={SECTION}>
           {/*
             THE NAME IS ATTACKER-CHOSEN TEXT and it is the operator's only
             discriminator here: `source` behind `tailscale serve` is always
@@ -196,35 +291,42 @@ export function PairingPanel(props: PairingPanelProps) {
             would let it try; this is the half that means it has nothing to
             close even if some got through.
           */}
-          <p>A device is asking to pair. It calls itself:</p>
-          <p data-testid="pairing-device-name" className="pairing-device-name">
+          <p className={HINT}>A device is asking to pair. It calls itself:</p>
+          <p
+            data-testid="pairing-device-name"
+            className="mt-1 inline-block rounded border border-line-loud bg-well px-2 py-1 font-mono text-[13px] text-ink"
+          >
             {view.awaiting.name}
           </p>
-          <p data-testid="pairing-grant">
+          <p data-testid="pairing-grant" className={`mt-2 ${HINT}`}>
             Allow it?{' '}
             {props.allowWrites
               ? 'It will be able to read your sessions and to type into a running agent.'
               : 'It will be able to read your sessions; this server is read-only, so it cannot type into an agent.'}
           </p>
-          <p data-testid="pairing-source">Connecting from {view.awaiting.source}.</p>
-          <button type="button" onClick={props.onApprove}>
-            Allow this device
-          </button>
-          <button type="button" onClick={props.onDeny}>
-            Don't allow
-          </button>
+          <p data-testid="pairing-source" className={HINT}>
+            Connecting from {view.awaiting.source}.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button type="button" onClick={props.onApprove} className={ACTION_BUTTON}>
+              Allow this device
+            </button>
+            <button type="button" onClick={props.onDeny} className={ACTION_BUTTON}>
+              Don't allow
+            </button>
+          </div>
         </section>
       )}
 
       {view.burned || throttled ? (
-        <p data-testid="pairing-warning" role="alert">
+        <p data-testid="pairing-warning" role="alert" className={ALERT_BOX}>
           {throttled
             ? 'Too many failed attempts: an unpaired device is trying to connect. Pairing is off for 15 minutes.'
             : 'Code burned after five wrong answers — press Regenerate for a new one.'}
         </p>
       ) : null}
 
-      <p data-testid="pairing-status">
+      <p data-testid="pairing-status" className={HINT}>
         {view.pairedName === null
           ? view.code === null
             ? 'No code is live. A device can only pair while one is.'
@@ -232,34 +334,42 @@ export function PairingPanel(props: PairingPanelProps) {
           : `Paired: ${view.pairedName}`}
       </p>
 
-      <h4>Paired devices</h4>
-      <div data-testid="paired-devices">
-        {props.devices.length === 0 ? (
-          <p>No devices are paired.</p>
-        ) : (
-          <>
-            <ul>
-              {props.devices.map((device) => (
-                <li key={device.deviceId} data-testid={`paired-device-${device.deviceId}`}>
-                  <span>{device.name}</span>{' '}
-                  <span>
-                    paired {ago(device.pairedAt, nowMs)}, last seen {ago(device.lastSeenAt, nowMs)}
-                  </span>{' '}
-                  <button
-                    type="button"
-                    aria-label={`Remove ${device.name}`}
-                    onClick={() => props.onRemove(device.deviceId)}
+      <div className={SECTION}>
+        <h4 className={HEADING}>Paired devices</h4>
+        <div data-testid="paired-devices" className="mt-2">
+          {props.devices.length === 0 ? (
+            <p className={HINT}>No devices are paired.</p>
+          ) : (
+            <>
+              <ul className="flex flex-col gap-2">
+                {props.devices.map((device) => (
+                  <li
+                    key={device.deviceId}
+                    data-testid={`paired-device-${device.deviceId}`}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-line px-3 py-2"
                   >
-                    <Trash2 aria-hidden="true" size={14} /> Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <button type="button" onClick={props.onRevokeAll}>
-              Revoke all
-            </button>
-          </>
-        )}
+                    <span className="text-[13px] text-ink">{device.name}</span>
+                    <span className="text-[12px] text-ink-dim">
+                      paired {ago(device.pairedAt, nowMs)}, last seen{' '}
+                      {ago(device.lastSeenAt, nowMs)}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${device.name}`}
+                      onClick={() => props.onRemove(device.deviceId)}
+                      className={`ml-auto ${DANGER_BUTTON}`}
+                    >
+                      <Trash2 aria-hidden="true" size={14} /> Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <button type="button" onClick={props.onRevokeAll} className={`mt-3 ${DANGER_BUTTON}`}>
+                Revoke all
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </section>
   );

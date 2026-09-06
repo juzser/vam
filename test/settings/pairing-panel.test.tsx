@@ -45,7 +45,7 @@ function draw(over: Partial<PairingPanelProps> = {}) {
     // Serve already on, by default: most of the tests in this file are about
     // the pairing code, not phone access, and depend on `url` being drawn
     // unconditionally the way it always was before phone access existed.
-    serve: { cliMissing: false, enabled: true, lastError: null },
+    serve: { cliMissing: false, enabled: true, lastError: null, timedOut: false, pending: false },
     onRegenerate: vi.fn(),
     onApprove: vi.fn(),
     onDeny: vi.fn(),
@@ -175,7 +175,9 @@ describe('the second gate', () => {
 
 describe('phone access -- vam setting up tailscale serve itself', () => {
   it('explains and links to Tailscale, offering nothing, when there is no CLI', () => {
-    draw({ serve: { cliMissing: true, enabled: false, lastError: null } });
+    draw({
+      serve: { cliMissing: true, enabled: false, lastError: null, timedOut: false, pending: false },
+    });
 
     expect(screen.getByTestId('serve-no-cli')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /enable phone access/i })).toBeNull();
@@ -185,7 +187,15 @@ describe('phone access -- vam setting up tailscale serve itself', () => {
   });
 
   it('states what turning it on exposes, and offers to enable it, while off', () => {
-    const props = draw({ serve: { cliMissing: false, enabled: false, lastError: null } });
+    const props = draw({
+      serve: {
+        cliMissing: false,
+        enabled: false,
+        lastError: null,
+        timedOut: false,
+        pending: false,
+      },
+    });
 
     expect(document.body.textContent ?? '').toMatch(/tailscale serve/i);
     expect(document.body.textContent ?? '').toMatch(/whole tailnet|every laptop/i);
@@ -194,12 +204,22 @@ describe('phone access -- vam setting up tailscale serve itself', () => {
   });
 
   it('never runs serve as a side effect of merely being drawn, while off', () => {
-    const props = draw({ serve: { cliMissing: false, enabled: false, lastError: null } });
+    const props = draw({
+      serve: {
+        cliMissing: false,
+        enabled: false,
+        lastError: null,
+        timedOut: false,
+        pending: false,
+      },
+    });
     expect(props.onEnableServe).not.toHaveBeenCalled();
   });
 
   it('offers an equally easy way back off, while on', () => {
-    const props = draw({ serve: { cliMissing: false, enabled: true, lastError: null } });
+    const props = draw({
+      serve: { cliMissing: false, enabled: true, lastError: null, timedOut: false, pending: false },
+    });
 
     expect(screen.queryByRole('button', { name: /enable phone access/i })).toBeNull();
     const off = screen.getByRole('button', { name: /turn off phone access/i });
@@ -209,7 +229,7 @@ describe('phone access -- vam setting up tailscale serve itself', () => {
 
   it('shows the resulting address while on', () => {
     draw({
-      serve: { cliMissing: false, enabled: true, lastError: null },
+      serve: { cliMissing: false, enabled: true, lastError: null, timedOut: false, pending: false },
       url: 'https://example-machine.example-tailnet.ts.net',
     });
 
@@ -217,7 +237,10 @@ describe('phone access -- vam setting up tailscale serve itself', () => {
   });
 
   it('says the address cannot be read rather than guessing one, while on', () => {
-    draw({ serve: { cliMissing: false, enabled: true, lastError: null }, url: null });
+    draw({
+      serve: { cliMissing: false, enabled: true, lastError: null, timedOut: false, pending: false },
+      url: null,
+    });
 
     expect(screen.queryByTestId('pairing-url')).toBeNull();
   });
@@ -228,12 +251,79 @@ describe('phone access -- vam setting up tailscale serve itself', () => {
         cliMissing: false,
         enabled: false,
         lastError: 'access denied: reauthenticate to use Serve',
+        timedOut: false,
+        pending: false,
       },
     });
 
     const said = screen.getByTestId('serve-error');
     expect(said.textContent).toBe('access denied: reauthenticate to use Serve');
     expect(said.getAttribute('role')).toBe('alert');
+  });
+
+  it('says the enable/disable round trip is in progress rather than looking frozen', () => {
+    const props = draw({
+      serve: { cliMissing: false, enabled: false, lastError: null, timedOut: false, pending: true },
+    });
+
+    // Not the same accessible name as the idle button -- a poll or a second
+    // click landing on "Enable phone access" while a request is already in
+    // flight is the thing this state exists to prevent.
+    expect(screen.queryByRole('button', { name: /^enable phone access$/i })).toBeNull();
+    const pending = screen.getByRole('button', { name: /enabling/i });
+    expect(pending.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(pending);
+    expect(props.onEnableServe).not.toHaveBeenCalled();
+  });
+
+  it('shows the same pending state disabling, not just enabling', () => {
+    draw({
+      serve: { cliMissing: false, enabled: true, lastError: null, timedOut: false, pending: true },
+    });
+
+    expect(screen.queryByRole('button', { name: /^turn off phone access$/i })).toBeNull();
+    const pending = screen.getByRole('button', { name: /turning off/i });
+    expect(pending.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('reports a timeout as its own honest state, not a made-up CLI refusal', () => {
+    draw({
+      serve: { cliMissing: false, enabled: false, lastError: null, timedOut: true, pending: false },
+    });
+
+    const said = screen.getByTestId('serve-error');
+    expect(said.textContent).toMatch(/did not answer in time/i);
+  });
+
+  it('offers the manual `tailscale serve reset` escape hatch only for a failed DISABLE', () => {
+    // enabled: true here can only mean the failure was a disable attempt --
+    // a failed enable would have left `enabled` false (ServeState's own
+    // invariant, see src/main/remote/state.ts).
+    draw({
+      serve: {
+        cliMissing: false,
+        enabled: true,
+        lastError: 'ENOSPC: no space left on device',
+        timedOut: false,
+        pending: false,
+      },
+    });
+
+    expect(screen.getByTestId('serve-error').textContent).toMatch(/tailscale serve reset/i);
+  });
+
+  it('never suggests the manual reset for a failed ENABLE', () => {
+    draw({
+      serve: {
+        cliMissing: false,
+        enabled: false,
+        lastError: 'ENOSPC: no space left on device',
+        timedOut: false,
+        pending: false,
+      },
+    });
+
+    expect(screen.getByTestId('serve-error').textContent).not.toMatch(/tailscale serve reset/i);
   });
 });
 
@@ -272,5 +362,76 @@ describe('the paired devices', () => {
     const props = draw({ devices });
     fireEvent.click(screen.getByRole('button', { name: /revoke all/i }));
     expect(props.onRevokeAll).toHaveBeenCalled();
+  });
+});
+
+/**
+ * This panel shipped with three semantic class names -- `pairing`,
+ * `pairing-code`, `pairing-device-name` -- and NONE OF THEM had a CSS rule
+ * anywhere in the repo: `src/renderer/styles.css` is the only stylesheet and
+ * defined none of the three, so the markup was effectively unstyled. Asserted
+ * here on the RENDERED ELEMENT's own `className`, never on the stylesheet's
+ * text: a content scan over `styles.css` can prove a rule was typed, never
+ * that it matches anything, which is exactly how the gap above shipped
+ * unnoticed. This suite fails the moment these controls go bare again.
+ */
+describe('styled with the rest of src/renderer/settings, not a dead semantic class', () => {
+  it('draws the pairing code as a large, generously tracked monospace glyph', () => {
+    draw();
+    const code = screen.getByTestId('pairing-code');
+    expect(code.className).not.toBe('pairing-code');
+    expect(code.className).toMatch(/font-mono/);
+    expect(code.className).toMatch(/tracking-/);
+    // "large enough to read across a room" (the coordinator's own words) is a
+    // real Tailwind size utility, not merely inherited 12-13px body text.
+    expect(code.className).toMatch(/text-\[(3|4)\d(\.\d+)?px\]/);
+  });
+
+  it('draws the asking device name as its own visually distinct block', () => {
+    draw({ view: { ...LIVE, awaiting: { name: 'a phone', source: '100.64.0.2' } } });
+    const name = screen.getByTestId('pairing-device-name');
+    expect(name.className).not.toBe('pairing-device-name');
+    expect(name.className.length).toBeGreaterThan(0);
+  });
+
+  it('gives every action button in this panel a real 44px+ hit target', () => {
+    draw({ devices: [{ deviceId: 'd-1', name: 'a phone', pairedAt: NOW, lastSeenAt: NOW }] });
+    const buttons = [
+      screen.getByRole('button', { name: /copy/i }),
+      screen.getByRole('button', { name: /regenerate/i }),
+      screen.getByRole('button', { name: /turn off phone access/i }),
+      screen.getByRole('button', { name: /remove a phone/i }),
+      screen.getByRole('button', { name: /revoke all/i }),
+    ];
+    for (const button of buttons) {
+      expect(button.className).toMatch(/min-h-\[44px\]/);
+    }
+  });
+
+  it('sizes buttons to their own label rather than a fixed box that could clip a longer one', () => {
+    draw();
+    const button = screen.getByRole('button', { name: /turn off phone access/i });
+    // A FIXED pixel width is exactly the shape that clears a hit-box floor
+    // while clipping longer paint -- the standing "44px floor does not check
+    // the paint" lesson. Padding lets the box grow with its own content.
+    expect(button.className).not.toMatch(/\bw-\[\d/);
+    expect(button.className).toMatch(/\bpx-\d/);
+  });
+
+  it('never borrows the four session-state tokens for decoration', () => {
+    draw({ view: { ...IDLE, burned: true } });
+    const root = document.body;
+    for (const token of ['running', 'waiting', 'done', 'failed']) {
+      // `text-waiting`/`bg-done`/etc -- word-bounded so `text-danger` (a real,
+      // unrelated token) or "waiting for a device" prose cannot false-positive.
+      expect(root.innerHTML).not.toMatch(new RegExp(`\\b(?:text|bg|border)-${token}\\b`));
+    }
+  });
+
+  it('is a Tailwind layout, not the old dead `.pairing` class', () => {
+    draw();
+    const root = screen.getByTestId('pairing-panel');
+    expect(root.className).not.toBe('pairing');
+    expect(root.className).toMatch(/flex|grid/);
   });
 });

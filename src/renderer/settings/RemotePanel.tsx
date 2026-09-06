@@ -114,6 +114,13 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
   const [off, setOff] = useState(api === undefined);
   /** The last act that rejected, if the operator has not acted since. */
   const [failed, setFailed] = useState<ActName | null>(null);
+  /**
+   * An enable/disable round trip is in flight. `tailscale serve` is now a
+   * MEASURED hang risk (`remote/serve.ts`), so this can genuinely sit at
+   * `true` for seconds -- the whole reason it exists is to keep the button
+   * from reading as frozen (or taking a second click) while that happens.
+   */
+  const [servePending, setServePending] = useState(false);
 
   useEffect(() => {
     if (api === undefined || !active) return;
@@ -156,8 +163,8 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
    * screen with it, which is the one surface that shows whether a revocation
    * happened. So the act names ITS OWN failure and the panel stays.
    */
-  const act = useCallback((name: ActName, run: () => Promise<RemoteState>) => {
-    run().then(
+  const act = useCallback((name: ActName, run: () => Promise<RemoteState>): Promise<void> => {
+    return run().then(
       (next) => {
         setFailed(null);
         setState(next);
@@ -165,6 +172,21 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
       () => setFailed(name),
     );
   }, []);
+
+  /**
+   * The one thing `servePending` tracks: set the instant the operator clicks,
+   * cleared once the round trip settles either way. `act()` above already
+   * resolves rather than rejects on a refusal (it is a VALUE on
+   * `state.serve`), so `.finally` alone is enough -- there is no separate
+   * error branch to clear it from.
+   */
+  const actServe = useCallback(
+    (name: 'serveEnable' | 'serveDisable', run: () => Promise<RemoteState>) => {
+      setServePending(true);
+      void act(name, run).finally(() => setServePending(false));
+    },
+    [act],
+  );
 
   if (api === undefined || off) {
     return (
@@ -192,7 +214,13 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
         url={url}
         allowWrites={state.allowWrites}
         nowMs={state.nowMs}
-        serve={{ cliMissing, enabled: state.serve.enabled, lastError: state.serve.lastError }}
+        serve={{
+          cliMissing,
+          enabled: state.serve.enabled,
+          lastError: state.serve.lastError,
+          timedOut: state.serve.timedOut,
+          pending: servePending,
+        }}
         onRegenerate={() => act('open', () => api.open())}
         onApprove={() => act('approve', () => api.approve())}
         onDeny={() => act('deny', () => api.deny())}
@@ -201,8 +229,8 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
         }}
         onRemove={(deviceId) => act('remove', () => api.remove(deviceId))}
         onRevokeAll={() => act('revokeAll', () => api.revokeAll())}
-        onEnableServe={() => act('serveEnable', () => api.enableServe())}
-        onDisableServe={() => act('serveDisable', () => api.disableServe())}
+        onEnableServe={() => actServe('serveEnable', () => api.enableServe())}
+        onDisableServe={() => actServe('serveDisable', () => api.disableServe())}
       />
       {state.registry !== null ? (
         <p data-testid="remote-registry" role="alert">

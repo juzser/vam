@@ -110,7 +110,7 @@ describe('unpair and Revoke all are reachable from the surface `.` opens', () =>
     address: { kind: 'unavailable', reason: 'no-cli' },
     allowWrites: true,
     registry: null,
-    serve: { enabled: false, lastError: null },
+    serve: { enabled: false, lastError: null, timedOut: false },
     nowMs: NOW,
   };
 

@@ -32,7 +32,7 @@ const BASE: RemoteState = {
   address: { kind: 'found', url: 'https://example-machine.example-tailnet.ts.net' },
   allowWrites: false,
   registry: null,
-  serve: { enabled: false, lastError: null },
+  serve: { enabled: false, lastError: null, timedOut: false },
   nowMs: NOW,
 };
 
@@ -45,8 +45,14 @@ function fakeApi(over: Partial<RemoteState> = {}): RemoteApi {
     deny: vi.fn(async () => idle),
     remove: vi.fn(async () => idle),
     revokeAll: vi.fn(async () => idle),
-    enableServe: vi.fn(async () => ({ ...idle, serve: { enabled: true, lastError: null } })),
-    disableServe: vi.fn(async () => ({ ...idle, serve: { enabled: false, lastError: null } })),
+    enableServe: vi.fn(async () => ({
+      ...idle,
+      serve: { enabled: true, lastError: null, timedOut: false },
+    })),
+    disableServe: vi.fn(async () => ({
+      ...idle,
+      serve: { enabled: false, lastError: null, timedOut: false },
+    })),
   };
 }
 
@@ -86,7 +92,7 @@ describe('RemotePanel: phone access', () => {
   });
 
   it('disables on a click and flips the panel back off', async () => {
-    const api = fakeApi({ serve: { enabled: true, lastError: null } });
+    const api = fakeApi({ serve: { enabled: true, lastError: null, timedOut: false } });
     render(<RemotePanel api={api} active />);
     const disable = await screen.findByRole('button', { name: /turn off phone access/i });
 
@@ -100,7 +106,11 @@ describe('RemotePanel: phone access', () => {
     const api = fakeApi();
     api.enableServe = vi.fn(async () => ({
       ...BASE,
-      serve: { enabled: false, lastError: 'access denied: reauthenticate to use Serve' },
+      serve: {
+        enabled: false,
+        lastError: 'access denied: reauthenticate to use Serve',
+        timedOut: false,
+      },
     }));
     render(<RemotePanel api={api} active />);
     const enable = await screen.findByRole('button', { name: /enable phone access/i });
@@ -109,5 +119,35 @@ describe('RemotePanel: phone access', () => {
 
     const said = await screen.findByTestId('serve-error');
     expect(said.textContent).toBe('access denied: reauthenticate to use Serve');
+  });
+
+  it('shows a pending state while the round trip is in flight, not a frozen button', async () => {
+    const api = fakeApi();
+    // An object property, not a bare `let`: TS's closure narrowing over a
+    // reassigned `let` captured only inside a nested callback is unreliable,
+    // and a property read keeps the declared (nullable) type at every site.
+    const deferred: { resolve: ((value: RemoteState) => void) | null } = { resolve: null };
+    api.enableServe = vi.fn(
+      () =>
+        new Promise<RemoteState>((resolve) => {
+          deferred.resolve = resolve;
+        }),
+    );
+    render(<RemotePanel api={api} active />);
+    const enable = await screen.findByRole('button', { name: /enable phone access/i });
+
+    await userEvent.click(enable);
+
+    // Still in flight: the idle "Enable phone access" name must be gone and
+    // replaced with a disabled, distinctly-named pending control -- not the
+    // same button silently accepting a second click.
+    expect(screen.queryByRole('button', { name: /^enable phone access$/i })).toBeNull();
+    const pending = await screen.findByRole('button', { name: /enabling/i });
+    expect(pending.hasAttribute('disabled')).toBe(true);
+    expect(api.enableServe).toHaveBeenCalledTimes(1);
+
+    deferred.resolve?.({ ...BASE, serve: { enabled: true, lastError: null, timedOut: false } });
+
+    expect(await screen.findByRole('button', { name: /turn off phone access/i })).toBeTruthy();
   });
 });
