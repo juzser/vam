@@ -29,9 +29,22 @@ const commonjsOutput = {
  */
 const external = ['electron'];
 
+/**
+ * `electron-vite build`'s own CLI defaults `minify` to `false` for all three
+ * targets -- unlike plain `vite build`, which defaults it to `true` -- and
+ * nothing here used to override that. The result was a renderer chunk
+ * shipped as 2.28 MB of full-name, fully-commented source: every session
+ * parsing and evaluating code nobody was ever meant to read, before the
+ * canvas could draw its first node. Same code, same chunks, set explicitly
+ * rather than left to a default this CLI does not share with the rest of
+ * the Vite ecosystem.
+ */
+const minify = true;
+
 export default defineConfig({
   main: {
     build: {
+      minify,
       rollupOptions: {
         input: { index: 'src/main/index.ts' },
         output: commonjsOutput,
@@ -41,6 +54,7 @@ export default defineConfig({
   },
   preload: {
     build: {
+      minify,
       rollupOptions: {
         input: { index: 'src/preload/index.ts' },
         output: commonjsOutput,
@@ -54,6 +68,7 @@ export default defineConfig({
     // README documents is silently ignored, exactly as in the browser config.
     envDir: '../..',
     build: {
+      minify,
       rollupOptions: { input: { index: 'src/renderer/index.html' } },
     },
     plugins: [react(), tailwindcss()],
