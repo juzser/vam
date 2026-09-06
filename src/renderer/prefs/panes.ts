@@ -88,6 +88,15 @@ export const DEFAULT_PANES: { readonly sidebar: number; readonly detail: number 
   detail: 408,
 };
 
+/**
+ * How far one `<`/`>` chord press, or one arrow-key press on the resize
+ * handle itself, moves a pane. One constant so the two keyboard routes to
+ * the same action cannot silently drift apart into two different step
+ * sizes — the worse bug the handle's own keyboard support would otherwise
+ * risk introducing.
+ */
+export const PANE_RESIZE_STEP = 24;
+
 function bounds(pane: Pane): { min: number; max: number; fallback: number } {
   return pane === 'sidebar'
     ? { min: SIDEBAR_MIN, max: SIDEBAR_MAX, fallback: DEFAULT_PANES.sidebar }

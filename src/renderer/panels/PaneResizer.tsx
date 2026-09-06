@@ -26,10 +26,16 @@ import {
   DETAIL_MIN,
   type Layout,
   layoutWidths,
+  PANE_RESIZE_STEP,
   type Pane,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
 } from '../prefs/panes.js';
+
+/** A Shift-held arrow press moves further than a bare one — the standard
+ *  slider pattern (WAI-ARIA APG "Slider"), sized against the same step the
+ *  bare press uses rather than an unrelated constant. */
+const JUMP_MULTIPLIER = 4;
 
 export type PaneResizerProps = {
   readonly pane: Pane;
@@ -110,6 +116,57 @@ export function PaneResizer(props: PaneResizerProps) {
     onCommit(pane, next);
   }
 
+  /**
+   * The keyboard half of the ARIA contract this element already claims —
+   * `aria-orientation="vertical"` plus `aria-valuenow`/min/max is a slider,
+   * and a slider that Tab reaches and answers no key is a trap dressed as a
+   * control.
+   *
+   * Arrow keys, because the handle's own orientation is vertical (a vertical
+   * line moved horizontally) — the WAI-ARIA APG slider pattern's horizontal
+   * arrows for a control oriented this way. Home/End jump to the two
+   * extremes, also per that pattern. Shift is the "larger jump" modifier;
+   * nothing here invents a step size of its own; `proposedWidth` is the exact
+   * function a drag already calls, fed a synthetic `clientX - startX` equal
+   * to the arrow's delta so an arrow press is arithmetic-for-arithmetic the
+   * same computation a mouse drag performs, through the identical
+   * `layoutWidths` clamp. `PANE_RESIZE_STEP` is the same constant `<`/`>`
+   * multiplies by delta in `Canvas.tsx` — one step size, not two keyboard
+   * routes to the same action disagreeing about how far a press moves.
+   *
+   * A key press COMMITS immediately, with no drag-shaped `onChange` phase:
+   * there is nothing transient to preview, so the width is persisted the way
+   * `onPointerUp` persists a drag's final position.
+   */
+  function onKeyDown(event: React.KeyboardEvent<HTMLHRElement>) {
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowRight': {
+        event.preventDefault();
+        const magnitude = PANE_RESIZE_STEP * (event.shiftKey ? JUMP_MULTIPLIER : 1);
+        const delta = event.key === 'ArrowRight' ? magnitude : -magnitude;
+        onCommit(pane, proposedWidth(delta, 0, width));
+        return;
+      }
+      case 'Home':
+        event.preventDefault();
+        onCommit(
+          pane,
+          layoutWidths(layout, { ...stored, [pane]: bounds.min }, viewportWidth)[pane],
+        );
+        return;
+      case 'End':
+        event.preventDefault();
+        onCommit(
+          pane,
+          layoutWidths(layout, { ...stored, [pane]: bounds.max }, viewportWidth)[pane],
+        );
+        return;
+      default:
+        return;
+    }
+  }
+
   return (
     // A native <hr> already carries the `separator` role, which is what
     // biome's a11y/useSemanticElements rule asks for in place of a bare
@@ -132,6 +189,7 @@ export function PaneResizer(props: PaneResizerProps) {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onKeyDown={onKeyDown}
     />
   );
 }
