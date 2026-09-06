@@ -126,19 +126,6 @@ beforeAll(() => {
   globalThis.DOMMatrixReadOnly ??= class {
     m22 = 1;
   } as unknown as typeof DOMMatrixReadOnly;
-  globalThis.localStorage ??= (() => {
-    const map = new Map<string, string>();
-    return {
-      getItem: (key: string) => map.get(key) ?? null,
-      setItem: (key: string, value: string) => void map.set(key, String(value)),
-      removeItem: (key: string) => void map.delete(key),
-      clear: () => map.clear(),
-      key: (index: number) => [...map.keys()][index] ?? null,
-      get length() {
-        return map.size;
-      },
-    };
-  })() as unknown as Storage;
 });
 
 afterEach(() => {
@@ -176,10 +163,14 @@ function typeOneCharacterAndCountNodeRenders(sessionCount: number): number {
 
 describe('a composer keystroke against the graph it should never touch', () => {
   it('causes zero node-component renders, at a realistic and a stress node count', () => {
-    // Exact counts, not a millisecond bound: this is deterministic and
-    // cannot flake under load, unlike a timing measurement on a machine
-    // that has been seen stretching an 11ms operation past 5 seconds.
+    // Exact counts, not a millisecond bound: the RENDER COUNT is
+    // deterministic and cannot flake under load. The 5s default
+    // `testTimeout` this runs under is still a wall-clock bound, and CI has
+    // been measured about 4x slower on this suite than this box (103s vs
+    // 26s wall for the whole file) -- comfortably enough to cross 5s on a
+    // loaded runner even though the render count itself never moves. Hence
+    // the explicit timeout below, well above the ~2s this costs locally.
     expect(typeOneCharacterAndCountNodeRenders(4)).toBe(0);
     expect(typeOneCharacterAndCountNodeRenders(200)).toBe(0);
-  });
+  }, 30_000);
 });

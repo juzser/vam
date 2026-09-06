@@ -222,23 +222,8 @@ beforeAll(() => {
   globalThis.DOMMatrixReadOnly ??= class {
     m22 = 1;
   } as unknown as typeof DOMMatrixReadOnly;
-  // happy-dom implements `Storage` but vitest's environment does not put a
-  // `localStorage` on the global, so `prefs` finds none and every preference
-  // silently becomes the default — which is exactly the branch these tests are
-  // NOT about. An in-memory one, so the store under test is a real one.
-  globalThis.localStorage ??= (() => {
-    const map = new Map<string, string>();
-    return {
-      getItem: (key: string) => map.get(key) ?? null,
-      setItem: (key: string, value: string) => void map.set(key, String(value)),
-      removeItem: (key: string) => void map.delete(key),
-      clear: () => map.clear(),
-      key: (index: number) => [...map.keys()][index] ?? null,
-      get length() {
-        return map.size;
-      },
-    };
-  })() as unknown as Storage;
+  // `localStorage` itself is installed for every test file by
+  // test/support/storage.ts, regardless of Node version.
 });
 
 afterEach(() => {
