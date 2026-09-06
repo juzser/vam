@@ -25,7 +25,7 @@ const MODEL: CanvasModel = {
     {
       id: 'p1',
       name: 'alpha',
-      source: 'black-smith',
+      source: 'factory',
       sessions: [
         {
           id: 'a1',

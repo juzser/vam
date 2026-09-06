@@ -393,7 +393,7 @@ function newSessionRoute(source: CanvasSource): NewSessionRoute {
     };
   }
   if (source.kind !== 'session') {
-    return { ok: false, decline: 'black-smith has no new-session command' };
+    return { ok: false, decline: 'the factory has no new-session command' };
   }
   const sessionSource: SessionSource = source.source;
   if (!canWriteTo(sessionSource) || sessionSource.write.createSession === undefined) {
@@ -574,9 +574,9 @@ function SourceReadout({ source }: { source: CanvasSource }) {
       ) : source.status === 'error' ? (
         <span className="text-failed">● {source.error}</span>
       ) : source.status === 'loading' ? (
-        <span className="text-ink-faint">○ connecting to black-smith…</span>
+        <span className="text-ink-faint">○ connecting to factory…</span>
       ) : (
-        <span className="text-done">● black-smith</span>
+        <span className="text-done">● factory</span>
       )}
     </span>
   );
@@ -1537,7 +1537,7 @@ function CanvasInner({
    * Write what you typed into the focused session's log — or, for a `'session'`
    * source whose capabilities say so, into the running agent itself.
    *
-   * The wording of every outcome here is load-bearing. black-smith RECORDS a
+   * The wording of every outcome here is load-bearing. The factory RECORDS a
    * prompt; it has no channel into a running agent session, so "recorded" is
    * the truth and "sent" would not be. A `'session'` source can be different:
    * when `capabilities.deliverPrompt` is true the write really does reach a
@@ -1563,7 +1563,7 @@ function CanvasInner({
    *
    * A refusal is reported in the factory's own words. `events.unknown-causal-session`
    * and `write.bad-request` each name a different mistake, and collapsing them
-   * into "error" throws away the one thing black-smith just told us. A
+   * into "error" throws away the one thing the factory just told us. A
    * `'session'` source whose `write` is absent (`recordPrompt: false`) is
    * refused before anything is called at all — `canWriteTo` is the only way in.
    */
@@ -1692,7 +1692,7 @@ function CanvasInner({
         return false;
       }
       if (source.kind !== 'session') {
-        setStatus(`black-smith has no close-session command — "${title}" is still here`);
+        setStatus(`the factory has no close-session command — "${title}" is still here`);
         return false;
       }
       const sessionSource = source.source;
@@ -2783,7 +2783,7 @@ function CanvasInner({
     // search, the status pills and the origin rules.
     allEntries: allEntries,
     focusedSessionId: focusedEntry?.session.id ?? null,
-    workspace: 'black-smith',
+    workspace: 'factory',
     theme: effective,
     onToggleTheme: onSidebarToggleTheme,
     onOpenFilter: onSidebarOpenFilter,
@@ -3438,7 +3438,7 @@ function sourceKeyOf(entry: SessionEntry): string {
 }
 
 const SOURCE_ICON: Readonly<Record<string, LucideIcon>> = {
-  'black-smith': Factory,
+  factory: Factory,
   'bundled-sample': FlaskConical,
 };
 

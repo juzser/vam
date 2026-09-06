@@ -74,7 +74,7 @@ function entryOf(over: Partial<Session> = {}): SessionEntry {
   const project: Project = {
     id: 'p1',
     name: 'vam',
-    source: 'black-smith' as SourceId,
+    source: 'factory' as SourceId,
     sessions: [session],
   };
   return { project, session };

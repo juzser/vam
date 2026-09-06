@@ -49,7 +49,7 @@ function start(actor: string | null): ApiTimelineEntry {
   };
 }
 
-/** Sessions as the black-smith adapter builds them, one per `session-start`. */
+/** Sessions as the factory adapter builds them, one per `session-start`. */
 function sessions(actors: readonly (string | null)[]): readonly Session[] {
   const overview = {
     runningSessions: actors.map((_, i) => api(`s${i}`)),
@@ -57,7 +57,7 @@ function sessions(actors: readonly (string | null)[]): readonly Session[] {
   const timelines = new Map<string, readonly ApiTimelineEntry[]>(
     actors.map((actor, i) => [`s${i}`, [start(actor)]]),
   );
-  return toCanvasModel(overview, timelines, 'black-smith').projects.flatMap((p) => p.sessions);
+  return toCanvasModel(overview, timelines, 'factory').projects.flatMap((p) => p.sessions);
 }
 
 describe('the hide-agent default, over real sessions', () => {

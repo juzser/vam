@@ -1,14 +1,13 @@
 /**
  * AC-3 and AC-6 (and AC-2's viewport half) — the parts vitest cannot decide,
  * because happy-dom has no layout engine and does not compile Tailwind
- * (epic.md §4.6, `factory/specs/active/vam-pane-resize/epic.md` in the
- * black-smith repo). Real hit-testing, a real pointer drag, the computed
+ * (§4.6 of this epic). Real hit-testing, a real pointer drag, the computed
  * hover tint and cursor, and the epic's three screenshots.
  *
  * Runs against the fixture (`?demo=1` → `src/fixtures/demo.ts`), never a
- * live black-smith — the committed PNGs ship in a public repo (AC-7).
+ * live factory — the committed PNGs ship in a public repo (AC-7).
  *
- * Run with the path filter so the black-smith-dependent `sse-drop.spec.ts`
+ * Run with the path filter so the factory-dependent `sse-drop.spec.ts`
  * does not also execute (it `test.skip()`s itself when unset, which is a
  * skip, not a pass, but folding it into this run would still muddy the
  * summary):

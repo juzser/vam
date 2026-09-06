@@ -2,11 +2,11 @@
  * The one shape the canvas draws.
  *
  * docs/design/canvas-layout.md §2 established that this is not an invention:
- * black-smith and orca each already treat "a decision waiting for a person" as
+ * the factory and orca each already treat "a decision waiting for a person" as
  * first-class, and each already has a project layer, a session layer and a
  * notion of how many agents are running. What differs is only the vocabulary.
  * So the adapters translate into these types and the canvas never learns which
- * system it is looking at — which is also what keeps §6's eventual write path
+ * system it is looking at — which is also what keeps the eventual write path
  * honest, because a component that cannot tell the sources apart cannot send
  * one an envelope meant for the other.
  *
@@ -90,7 +90,7 @@ export type Decision = {
  * A command the agent handed back for a person to run.
  *
  * §4 records why this is a field and not a string to be dug out of prose:
- * black-smith deliberately returns commands as structured data because only the
+ * the factory deliberately returns commands as structured data because only the
  * operator may create remotes, push, or send anything outward. `yy` copies
  * `command` verbatim. Vam never runs it.
  */
@@ -271,7 +271,7 @@ export type Session = {
   /**
    * The single activity line, already truncated to one line's worth of meaning
    * by the adapter. `null` when the source cannot say — which is today's state
-   * for black-smith until its worker-heartbeat epic lands (§5 epic B), and must
+   * for the factory until it can report a per-worker heartbeat, and must
    * render as "no line", never as an empty spinner pretending to be live.
    */
   readonly activity: string | null;
@@ -290,7 +290,7 @@ export type Session = {
    * of the same row `age` right-aligns.
    *
    * `null` means the source cannot say -- not "no branch". A source that has
-   * no notion of a working directory at all (black-smith, today) reports
+   * no notion of a working directory at all (the factory, today) reports
    * `null` for every session; a source that does but hits an unreadable or
    * malformed repository for one particular session reports `null` for that
    * session alone. Neither is "not on a branch", which git itself has no
@@ -310,7 +310,7 @@ export type Session = {
    * source has no such surface.
    *
    * ABSENT AND EMPTY MEAN DIFFERENT THINGS, and the pane says so. Absent is a
-   * source that cannot answer -- black-smith's HTTP model has no agent
+   * source that cannot answer -- the factory's HTTP model has no agent
    * surface, so `to-canvas.ts` leaves it out. Empty is a source that looked
    * and found none, which is the COMMON case: most sessions never spawn a
    * subagent. Neither is a reason to draw a spinner or invent a row.
@@ -328,7 +328,7 @@ export type Session = {
    * knowing.
    *
    * THREE STATES, the same shape `agents` established. ABSENT is a source
-   * with no pull-request surface at all -- black-smith's HTTP model has none,
+   * with no pull-request surface at all -- the factory's HTTP model has none,
    * so `to-canvas.ts` leaves it out. `{ kind: 'ok', prs: [] }` is a source
    * that ASKED GitHub and found none. `{ kind: 'unavailable' }` is a source
    * that has the surface and could not use it, and it says why.
@@ -372,7 +372,7 @@ export type Session = {
    * absent when the source has no such surface.
    *
    * The same three-state shape `agents` established. ABSENT is a source that
-   * cannot say -- black-smith's HTTP model records no tool calls. EMPTY is a
+   * cannot say -- the factory's HTTP model records no tool calls. EMPTY is a
    * source that looked and found none, which is the COMMON case: most
    * sessions never ask through the tool. Neither is a reason to draw an empty
    * box where a question would go.

@@ -35,9 +35,9 @@
  *
  * What the composer's button claims is now the SOURCE's to say. PR #70 gave
  * the Claude Code source a real channel into a running session, so for that
- * source a prompt is delivered and answered; black-smith still only appends to
- * a log. `delivers` carries the difference, and with nothing said the wording
- * stays at "record".
+ * source a prompt is delivered and answered; the factory source still only
+ * appends to a log. `delivers` carries the difference, and with nothing said
+ * the wording stays at "record".
  *
  * ## The mockup's four tabs
  *
@@ -52,8 +52,8 @@
  * process can take over another's controlling TTY.
  *
  * The `LIVE_TABS` list below is the honest part: a tab is live for a SOURCE
- * that reports the thing it draws, and black-smith still reports none of the
- * three. So the tabs are real and their emptiness is source-specific, rather
+ * that reports the thing it draws, and the factory source still reports none
+ * of the three. So the tabs are real and their emptiness is source-specific, rather
  * than the tabs being labels.
  */
 
@@ -233,7 +233,7 @@ export function readModelRequest(draft: string): string {
 /**
  * Write the model request onto the draft's first line, or take it off.
  *
- * vam has no model API and must not invent one: black-smith picks the model,
+ * vam has no model API and must not invent one: the factory picks the model,
  * and a control that quietly changed nothing would be worse than the honest
  * placeholder it replaces. What vam does have is the prompt text it records
  * verbatim, so the request goes THERE — one leading line, in the words a
@@ -253,7 +253,7 @@ export function readModeRequest(draft: string): string {
 /**
  * Write the mode request onto the draft, or take it off.
  *
- * Exactly the reasoning behind `setModelRequest`: black-smith has no
+ * Exactly the reasoning behind `setModelRequest`: the factory has no
  * per-session mode, so a control that changed vam's own state and nothing else
  * would look like it worked and do nothing. What vam has is the prompt it
  * records verbatim, so the request goes there in words a person reading the
@@ -529,7 +529,7 @@ export { TABS, type Tab } from './tabs.js';
 
 /**
  * The mockup's mode segments, and which one it draws as current. Presentation
- * only: black-smith exposes no per-session mode, so these are drawn and
+ * only: the factory exposes no per-session mode, so these are drawn and
  * labelled as placeholders in the same way the tab bar's three empty tabs are.
  */
 const MODES = ['Auto', 'Manual', 'Plan'] as const;
@@ -738,7 +738,7 @@ function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestL
  * ones first and by default running ones only.
  *
  * FOUR STATES, AND THREE OF THEM DRAW NO ROW FOR DIFFERENT REASONS
- * (model.ts). Absent is a source with no agent surface at all — black-smith
+ * (model.ts). Absent is a source with no agent surface at all — the factory
  * reports a live count and nothing about which agents they are — and empty is
  * a source that looked and found none, which is the common case, since most
  * sessions never spawn a subagent. The third is new with the filter: agents
@@ -853,7 +853,7 @@ function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | unde
  *
  * The icon replaced the words IN / OUT / PROGRESS. The mockup has no such
  * block at all — input and output are vam's own construct, because a
- * black-smith decision has both and the ADE design never modelled one — so
+ * factory decision has both and the ADE design never modelled one — so
  * this follows the mockup's IDIOM rather than copying a specific glyph: it
  * labels small repeated things with an icon, not a word, and reserves letter-
  * spaced capitals for state (NEEDS YOU, RUNNING, DONE).
@@ -2565,7 +2565,7 @@ export function DetailPanel(props: DetailPanelProps) {
    * PR #70 gave the Claude Code source a real channel into a running session,
    * so for that source a prompt is handed over and answered — `record` now
    * understates it, and an operator has to know when a message is going out.
-   * black-smith still genuinely only appends to a log, so this is per-source
+   * the factory source still genuinely only appends to a log, so this is per-source
    * and not a rename: one wording for both would be wrong for one of them.
    */
   const composerClaim = sending
@@ -2801,7 +2801,7 @@ export function DetailPanel(props: DetailPanelProps) {
               </div>
             </section>
 
-            {/* The mockup lists the actions inside one step. black-smith's unit
+            {/* The mockup lists the actions inside one step. The factory's unit
                 is the turn, so this lists the session's turns — the same shape
                 answering the same question, off data that exists. */}
             {/* Closed, this is a rule and a toggle and nothing else. The three
@@ -2997,7 +2997,7 @@ export function DetailPanel(props: DetailPanelProps) {
           data-question-bar
           className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3"
         >
-          {/* black-smith's governance queue — findings awaiting a waiver, and
+          {/* The factory's governance queue — findings awaiting a waiver, and
             lesson candidates — used to stand here. The operator asked for it
             to go, and it is gone from `buildActions` too: it went on
             contributing keyboard stops and a live `Enter` to this pane long
@@ -3362,7 +3362,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 </span>
               )}
               {/* The model field. Not a menu of names vam made up — vam has no
-              model API and black-smith does the choosing — but not an inert
+              model API and the factory does the choosing — but not an inert
               chip either: what is typed here becomes the prompt's first
               line, in the recorded text a person reads. */}
               <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
@@ -3390,7 +3390,7 @@ export function DetailPanel(props: DetailPanelProps) {
               )}
               <span className="min-w-0 flex-1" />
               {/* The mockup draws a send arrow here. This one says RECORD, in
-              the label and in the tooltip, because black-smith has no channel
+              the label and in the tooltip, because the factory has no channel
               into a running agent session — the click appends the prompt to
               the session's log and nothing reads it back out. A button that
               implied delivery would leave you waiting for an answer nobody is

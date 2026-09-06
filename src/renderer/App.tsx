@@ -1,9 +1,9 @@
 /**
- * Which black-smith vam is looking at, and whether it is looking at one at all.
+ * Which factory vam is looking at, and whether it is looking at one at all.
  *
  * Two modes, and the difference between them is deliberately loud:
  *
- *  - **live** (the default) — a real `smith ui serve`. Rows are real sessions,
+ *  - **live** (the default) — a real factory server. Rows are real sessions,
  *    the prompt box writes to a real log.
  *  - **demo** (`?demo=1`) — the fixture from §3. Every write is refused HERE,
  *    before it reaches the client, and the banner says so. A demo you can type
@@ -106,7 +106,7 @@ export function App() {
  *
  * Two servers can put this page in front of an operator: vam's remote
  * endpoint, which speaks the port's protocol at `/api/describe`, and anything
- * else, where the page has always rendered black-smith's factory feed. The
+ * else, where the page has always rendered the factory feed. The
  * page cannot be built twice for that -- an operator serving `dist-web`
  * through a tunnel would have to know which build they had -- so it ASKS, and
  * the answer is the descriptor it needs anyway.

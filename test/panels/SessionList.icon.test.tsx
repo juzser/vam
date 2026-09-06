@@ -42,7 +42,7 @@ function session(over: Partial<Session> = {}): Session {
 }
 
 function project(over: Partial<Project> = {}): Project {
-  return { id: 'p1', name: 'vam', source: 'black-smith' as SourceId, sessions: [], ...over };
+  return { id: 'p1', name: 'vam', source: 'factory' as SourceId, sessions: [], ...over };
 }
 
 function mount(entries: readonly SessionEntry[], over: Record<string, unknown> = {}) {

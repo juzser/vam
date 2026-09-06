@@ -1,6 +1,6 @@
 /**
  * Deriving "who started this" and "did you ever speak here" from the timeline
- * black-smith already hands over.
+ * factory already hands over.
  *
  * No new request and no cache: `useCanvas` fetches every session's timeline on
  * every load already, so both facts are read off data that is in hand.
@@ -46,7 +46,7 @@ function originOf(sessionId: string, timeline?: readonly ApiTimelineEntry[]) {
   if (timeline !== undefined) {
     map.set(sessionId, timeline);
   }
-  const model = toCanvasModel(overview, map, 'black-smith');
+  const model = toCanvasModel(overview, map, 'factory');
   return model.projects[0]?.sessions[0]?.origin;
 }
 
@@ -70,7 +70,7 @@ describe('Session.origin, derived from the timeline', () => {
   });
 
   it('leaves an actor it does not recognise UNKNOWN rather than guessing', () => {
-    // The safe direction: an actor string black-smith adds tomorrow stays
+    // The safe direction: an actor string factory adds tomorrow stays
     // visible instead of silently vanishing behind a default-on toggle.
     expect(originOf('s', [event('session-start', 'somebody-new')])?.startedBy).toBe('unknown');
     expect(originOf('s', [event('session-start', null)])?.startedBy).toBe('unknown');

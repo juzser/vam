@@ -2,7 +2,7 @@
  * Wires main's own change-stream subscription to `webContents.send`.
  *
  * Main owns the transport: it opens ONE `openChangeStream` (the same parser
- * `src/shared/stream.ts` gives the browser build) against black-smith's
+ * `src/shared/stream.ts` gives the browser build) against the factory's
  * `/api/stream`, injecting its own `EventSource` implementation
  * (`./event-source.ts`), and rebroadcasts every `change` frame to the
  * renderer, payload-free (AC-18 -- the data comes back through `load()`).

@@ -33,8 +33,8 @@ const MODEL: CanvasModel = {
   projects: [
     {
       id: 'p-bs',
-      name: 'black-smith',
-      source: 'black-smith',
+      name: 'factory',
+      source: 'factory',
       sessions: [
         session('D-257', { runningAgents: 3, status: 'waiting' }),
         session('D-263', { runningAgents: 0, status: 'done' }),
@@ -52,8 +52,8 @@ const MODEL: CanvasModel = {
 describe('allSessions', () => {
   it('flattens both layers, keeping the project each session belongs to', () => {
     expect(allSessions(MODEL).map((entry) => [entry.project.name, entry.session.id])).toEqual([
-      ['black-smith', 'D-257'],
-      ['black-smith', 'D-263'],
+      ['factory', 'D-257'],
+      ['factory', 'D-263'],
       ['vam', 'epic-1'],
     ]);
   });

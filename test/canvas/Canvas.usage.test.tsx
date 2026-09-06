@@ -287,21 +287,19 @@ describe("the status bar's source glyph", () => {
 
   it("falls back to the project's source, which is what the factory adapter sets", async () => {
     const model: CanvasModel = {
-      projects: [
-        { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [fixtureSession('a1')] },
-      ],
+      projects: [{ id: 'p1', name: 'alpha', source: 'factory', sessions: [fixtureSession('a1')] }],
     };
 
     render(<Canvas model={model} />);
     await act(async () => {});
 
-    expect(sourceGlyph()?.getAttribute('data-status-source')).toBe('black-smith');
+    expect(sourceGlyph()?.getAttribute('data-status-source')).toBe('factory');
   });
 
   it("prefers the session's own source over the project's when a project mixes both", async () => {
     // The ORDER of the two arms, which no other test pins: a project that
     // mixes sources still stamps its own legacy `source`, and the session's
-    // is the more specific fact. Swapping the two reads `black-smith` here
+    // is the more specific fact. Swapping the two reads `factory` here
     // while every other glyph test stays green -- that silence is why this
     // case is written down, and it is the same mixing that made
     // `Project.source` deprecated in the first place.
@@ -310,7 +308,7 @@ describe("the status bar's source glyph", () => {
         {
           id: 'p1',
           name: 'alpha',
-          source: 'black-smith',
+          source: 'factory',
           sessions: [fixtureSession('a1', 'claude-code')],
         },
       ],

@@ -140,9 +140,9 @@ describe('writing the group buckets', () => {
   });
 
   it('keeps one source out of another: a second source is its own bucket', () => {
-    const both = createGroup(withOne, 'black-smith', 'group:b', 'factory');
+    const both = createGroup(withOne, 'factory', 'group:b', 'factory');
     expect(both.groups[SOURCE]).toHaveLength(1);
-    expect(both.groups['black-smith']).toEqual([{ id: 'group:b', name: 'factory', projects: [] }]);
+    expect(both.groups['factory']).toEqual([{ id: 'group:b', name: 'factory', projects: [] }]);
   });
 
   it('renames and re-icons in place, leaving membership alone', () => {

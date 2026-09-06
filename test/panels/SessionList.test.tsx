@@ -139,7 +139,7 @@ describe('SessionList placeholder row', () => {
     const { container } = mount(entriesOf([makeSession({ branch: null })]));
     const branch = container.querySelector('[data-session-branch]');
     expect(branch?.textContent).toBe('—');
-    // Not the old claim, which named black-smith on every row including a
+    // Not the old claim, which named factory on every row including a
     // Claude Code one that simply had no transcript yet.
     expect(branch?.getAttribute('title')).toContain('cannot say');
   });
@@ -1124,10 +1124,10 @@ describe('SessionList new-project control', () => {
 
   it('captions the header `+` with the refusal when the source cannot create', () => {
     const { container } = mountWith(twoProjects(), {
-      newSessionDecline: 'black-smith has no new-session command',
+      newSessionDecline: 'factory has no new-session command',
     });
     const add = container.querySelector<HTMLButtonElement>('[data-new-project]');
-    expect(add?.getAttribute('title')).toBe('black-smith has no new-session command');
+    expect(add?.getAttribute('title')).toBe('factory has no new-session command');
   });
 
   it('captions the per-project `+` with what it does, and no longer calls it a placeholder', () => {
@@ -1141,10 +1141,10 @@ describe('SessionList new-project control', () => {
   it('captions the per-project `+` with the refusal when the source cannot create', () => {
     const { container } = mountWith(twoProjects(), {
       focusedSessionId: 'b1',
-      newSessionDecline: 'black-smith has no new-session command',
+      newSessionDecline: 'factory has no new-session command',
     });
     const add = container.querySelector<HTMLButtonElement>('[data-new-session-in-project]');
-    expect(add?.getAttribute('title')).toBe('black-smith has no new-session command');
+    expect(add?.getAttribute('title')).toBe('factory has no new-session command');
   });
 });
 

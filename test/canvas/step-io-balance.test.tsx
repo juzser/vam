@@ -56,7 +56,7 @@ function sessionWith(...decisions: Decision[]): Session {
 
 function modelOf(session: Session): CanvasModel {
   return {
-    projects: [{ id: 'p1', name: 'repo', source: 'black-smith' as SourceId, sessions: [session] }],
+    projects: [{ id: 'p1', name: 'repo', source: 'factory' as SourceId, sessions: [session] }],
   };
 }
 
@@ -96,7 +96,7 @@ function renderStep(recall: boolean): { input: number; output: number } {
   const project: Project = {
     id: 'p1',
     name: 'repo',
-    source: 'black-smith' as SourceId,
+    source: 'factory' as SourceId,
     sessions: [session],
   };
   const entry: SessionEntry = { project, session };

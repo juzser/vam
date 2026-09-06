@@ -30,7 +30,7 @@ import {
 
 afterEach(cleanup);
 
-const SOURCE = 'black-smith' as SourceId;
+const SOURCE = 'factory' as SourceId;
 
 function entryOf(sessionIcon: string | null, projectIcon?: string | null): SessionEntry {
   const session: Session = {

@@ -35,7 +35,7 @@ const SESSION = session('a1', {
 });
 
 const MODEL: CanvasModel = {
-  projects: [{ id: 'p1', name: 'black-smith', source: 'claude-code', sessions: [SESSION] }],
+  projects: [{ id: 'p1', name: 'factory', source: 'claude-code', sessions: [SESSION] }],
 };
 
 beforeAll(() => installPhoneGlobals());
@@ -64,7 +64,7 @@ describe('the phone session screen’s identity', () => {
 
   it('drops the bar’s second line, keeping the count on the Agents control', () => {
     // Was: the epic and the agent count, folded out of the deleted header card
-    // into a SECOND line on the app bar reading `black-smith · ui-server-sse ·
+    // into a SECOND line on the app bar reading `factory · ui-server-sse ·
     // 3 agents`. The operator asked for one row, so that line is gone. The
     // count is not lost with it -- it moved to the Agents view icon, in the
     // label and beside the glyph. The epic IS lost on the phone, which is the
@@ -96,7 +96,7 @@ describe('the phone session screen’s identity', () => {
 
 describe('the detail pane on a desktop, which shares this component', () => {
   it('still draws its header card, title, project, epic and all', () => {
-    const project: Project = { id: 'p1', name: 'black-smith', sessions: [SESSION] };
+    const project: Project = { id: 'p1', name: 'factory', sessions: [SESSION] };
     const entry: SessionEntry = { project, session: SESSION };
     render(
       <DetailPanel
@@ -117,12 +117,12 @@ describe('the detail pane on a desktop, which shares this component', () => {
       />,
     );
     expect(document.querySelector('[data-prompt-target]')?.textContent).toBe('factory-sse-1');
-    expect(document.querySelector('[data-prompt-project]')?.textContent).toBe('black-smith');
+    expect(document.querySelector('[data-prompt-project]')?.textContent).toBe('factory');
     expect(document.querySelector('[data-pane-status]')).not.toBeNull();
   });
 
   it('keeps the view tab bar, which only the phone lost', () => {
-    const project: Project = { id: 'p1', name: 'black-smith', sessions: [SESSION] };
+    const project: Project = { id: 'p1', name: 'factory', sessions: [SESSION] };
     const entry: SessionEntry = { project, session: SESSION };
     render(
       <DetailPanel

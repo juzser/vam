@@ -58,7 +58,7 @@ const ROW_NARROW = 'truncate';
  * What the icon says this step was.
  *
  * The mockup types every step — `READ · 6 FILES`, `EDIT · BOARDCOLUMN.TSX`,
- * `RUN · PYTEST -K LEDGER`, `ASK · APPROVAL`. black-smith does not hand that
+ * `RUN · PYTEST -K LEDGER`, `ASK · APPROVAL`. The factory does not hand that
  * over: a timeline entry carries a label and an answer, not a verb. So this
  * derives the three states vam can actually KNOW, and no more:
  *
@@ -69,7 +69,7 @@ const ROW_NARROW = 'truncate';
  * Inventing `READ`/`EDIT` from the label text was the alternative, and it is
  * worse than having none: a card that says `EDIT` because the label happened to
  * contain the word is a card that lies on the day it guesses wrong. Typed steps
- * need an event kind out of black-smith — see the todo.
+ * need an event kind out of the factory — see the todo.
  */
 export type StepKind = 'ask' | 'run' | 'done';
 
@@ -152,7 +152,7 @@ export function StepNode({ data }: NodeProps & { data: StepNodeData }) {
           {KIND_WORD[kind]} · {decision.label.toUpperCase()}
         </span>
         <span className="flex-1" />
-        {/* The mockup shows a per-step duration here. black-smith times a
+        {/* The mockup shows a per-step duration here. The factory times a
             session, not a step, so the slot stays and says it has nothing — an
             em dash the eye skips, rather than a number nobody measured. */}
         <span

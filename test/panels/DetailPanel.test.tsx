@@ -7,7 +7,7 @@
  * Every assertion here is one of five operator requests read off the ADE
  * mockup's right pane (artboards 1a/1b, the `width:408px` column). The one that
  * is NOT a fidelity question is the composer's button: the mockup draws a send
- * arrow, black-smith has no channel into a running agent session, and the whole
+ * arrow, factory has no channel into a running agent session, and the whole
  * point of the tests below is that the button says `record` in every place a
  * reader or a screen reader can find it.
  */
@@ -427,7 +427,7 @@ describe('the composer is multiline, and honest about what its button does', () 
     expect(box).not.toBeNull();
     expect(document.querySelector('input[aria-label="prompt to session"]')).toBeNull();
 
-    // The button exists and never uses the word `send`: black-smith records a
+    // The button exists and never uses the word `send`: factory records a
     // prompt into the session log, it cannot hand it to a running agent.
     const button = q<HTMLButtonElement>('[data-prompt-record]');
     expect(button?.tagName).toBe('BUTTON');
@@ -1328,7 +1328,7 @@ describe('the out region offers the two jumps that would do something', () => {
  * The mode pills, and the composer's missing caret.
  *
  * The pills were inert `<span>`s. They are buttons now, and what they change
- * is the prompt text — black-smith has no per-session mode to switch, so a
+ * is the prompt text — factory has no per-session mode to switch, so a
  * control that only moved vam's own highlight would look like it worked and
  * do nothing.
  */
@@ -1467,7 +1467,7 @@ describe('the Agents tab', () => {
   });
 
   it('distinguishes a source that has no roster at all from a session with none', () => {
-    // `agents` absent, per model.ts: black-smith reports a live count and
+    // `agents` absent, per model.ts: factory reports a live count and
     // nothing about which agents they are, so "spawned none" would be a claim
     // vam cannot make.
     draw({ entry: withAgents(undefined) });

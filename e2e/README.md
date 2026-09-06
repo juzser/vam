@@ -9,9 +9,9 @@ SSE wire contract (`src/adapter/stream.ts`), or the vite proxy
 
 ## What this can show
 
-On this machine, through vam's OWN `vite` dev proxy (never black-smith's port
-directly — cross-origin `EventSource` from vam's origin to black-smith's port
-delivers zero events), a black-smith process that is killed should surface at
+On this machine, through vam's OWN `vite` dev proxy (never the factory's port
+directly — cross-origin `EventSource` from vam's origin to the factory's port
+delivers zero events), a factory process that is killed should surface at
 the browser as an `error` event, and — **if the process is back before the
 browser's single retry, roughly 3s after the drop** — the browser's own
 reconnect should surface `open` then `hello` with `readyState` never observed
@@ -101,9 +101,9 @@ and a headless Chromium download — near-zero on a machine with
 
 | Variable | Meaning |
 | --- | --- |
-| `SMITH_CLI_ENTRY` | Absolute path to black-smith's built CLI, e.g. `factory/orchestrator/dist/cli.js`. |
-| `SMITH_E2E_STATE_DIR` | A **throwaway** directory the test may create, write events into, and delete. Never black-smith's real `state/` — a live orchestrator session writes there, and this test kills a server mid-run. |
-| `SMITH_E2E_PORT` | The port black-smith's server binds and vam's vite proxy forwards to (matches `vite.config.ts`'s `VAM_SMITH_URL` default, `4680`, unless you set `VAM_SMITH_URL` too). |
+| `SMITH_CLI_ENTRY` | Absolute path to the factory's built CLI, e.g. `factory/orchestrator/dist/cli.js`. |
+| `SMITH_E2E_STATE_DIR` | A **throwaway** directory the test may create, write events into, and delete. Never the factory's real `state/` — a live orchestrator session writes there, and this test kills a server mid-run. |
+| `SMITH_E2E_PORT` | The port the factory's server binds and vam's vite proxy forwards to (matches `vite.config.ts`'s `VAM_SMITH_URL` default, `4680`, unless you set `VAM_SMITH_URL` too). |
 
 ## Install
 
@@ -116,18 +116,18 @@ npx @playwright/test@1.62.1 install --with-deps chromium   # first time only
 ## Run
 
 **Nothing may already be listening on `SMITH_E2E_PORT`.** The spec starts,
-kills and restarts black-smith itself; a server you started by hand survives
+kills and restarts the factory itself; a server you started by hand survives
 the spec's `kill()`, so the drop never reaches the browser and the run fails
 at step (c) for a reason that has nothing to do with vam. Check with
 `lsof -ti tcp:4680` first.
 
 ```bash
-# 1. A THROWAWAY state dir — never black-smith's real state/, since a live
+# 1. A THROWAWAY state dir — never the factory's real state/, since a live
 #    orchestrator session writes there and this test kills a server mid-run.
 STATE_DIR=$(mktemp -d)
 
-# 2. Point the spec at it. The spec spawns black-smith on this port itself.
-export SMITH_CLI_ENTRY=/path/to/black-smith/factory/orchestrator/dist/cli.js
+# 2. Point the spec at it. The spec spawns the factory on this port itself.
+export SMITH_CLI_ENTRY=/path/to/factory/orchestrator/dist/cli.js
 export SMITH_E2E_STATE_DIR="$STATE_DIR"
 export SMITH_E2E_PORT=4680
 
@@ -186,32 +186,28 @@ delete them freely.
 
 ---
 
-# AC-10 (client) — reconnect after a transport flap, black-smith alive
+# AC-10 (client) — reconnect after a transport flap, the factory alive
 
 `e2e/sse-drop-reconnect.pw.ts`, its own config
-(`e2e/playwright.reconnect.config.ts`). Added by
-`factory/specs/active/vam-acg1-discriminating-ac10/epic.md`. **Neither this
-test nor AC-G1 above subsumes the other** (epic.md section 4):
+(`e2e/playwright.reconnect.config.ts`). Added by this epic. **Neither this
+test nor AC-G1 above subsumes the other** (section 4 of the same epic):
 
-- **AC-G1** restarts black-smith. A fresh process's cold fingerprint cache
+- **AC-G1** restarts the factory. A fresh process's cold fingerprint cache
   manufactures a masking `change` on reconnect regardless of whether the
   client refetches on `hello`, so AC-G1 passes even with `onHello` deleted
-  from `src/adapter/useCanvas.ts` (finding
-  `f-vam-sse-canvas/integration-424bca70`). It measures AC-10's SERVER half
+  from `src/adapter/useCanvas.ts`. It measures AC-10's SERVER half
   — recovery across a real restart.
-- **This test** keeps black-smith running and drops the TRANSPORT (vite)
+- **This test** keeps the factory running and drops the TRANSPORT (vite)
   instead, against an already-warm fingerprint cache (measured against a
-  real server before this epic was signed —
-  `factory/specs/active/vam-acg1-discriminating-ac10/design-validation.txt`
-  in the black-smith repo; a precondition, not this test's own result), so no
-  masking `change` forms. The canvas can then only show the session written
-  during the outage through `onHello`'s own refetch — deleting that line is
-  expected to fail this test.
+  real server before this epic was signed; a precondition, not this test's
+  own result), so no masking `change` forms. The canvas can then only show
+  the session written during the outage through `onHello`'s own refetch —
+  deleting that line is expected to fail this test.
 
-## What this does not measure (epic.md section 8)
+## What this does not measure (section 8 of the same epic)
 
-It does **not** restart black-smith and does **not** cover AC-10's server
-half at all — that is AC-G1's job. It does not test black-smith's cold-cache
+It does **not** restart the factory and does **not** cover AC-10's server
+half at all — that is AC-G1's job. It does not test the factory's cold-cache
 rescan (real and correct, but the confound this test keeps off its path).
 It does not prove `onHello` is *correct*, only that it is *necessary*.
 
@@ -228,19 +224,19 @@ without reloading. `vite preview` has no dev client and no such reload.
 to exercise that path. The build runs inside the spec itself (into the
 gitignored `dist/`); no separate build step is required by hand.
 
-## How "black-smith never died" is proved
+## How "the factory never died" is proved
 
 A single `GET /api/health` 200, taken immediately before the final canvas
 assertion, proves liveness **at that one instant and nothing more** — a
 died-and-restarted process answers 200 just as happily, with a cold cache
 that would silently void the run. The structural proof for the WHOLE run is
 **stream A**: a second, genuinely real SSE client the harness opens directly
-against black-smith's `/api/stream` (bypassing vite), via `fetch` with a
+against the factory's `/api/stream` (bypassing vite), via `fetch` with a
 hand-rolled frame parser — no `EventSource` global, no auto-retry. Its own
-job, beyond instrumenting the run, is to hold `listeners.size >= 1` so
-`changeFeed.ts:143-169`'s watcher stays armed through the outage. Two checks,
+job, beyond instrumenting the run, is to hold `listeners.size >= 1` so the
+factory's own change-feed watcher stays armed through the outage. Two checks,
 both required: **exactly one `hello`** across the whole run (a restarted
-black-smith cannot deliver the same connection twice), and stream A's **body
+factory cannot deliver the same connection twice), and stream A's **body
 never ends, errors, or is re-opened** before the final assertion (the reader
 does not auto-retry, so a death surfaces here, not as a second `hello`).
 
@@ -259,7 +255,7 @@ test's own preview port, distinct from AC-G1's 5273).
 
 ```bash
 STATE_DIR=$(mktemp -d)
-export SMITH_CLI_ENTRY=/path/to/black-smith/factory/orchestrator/dist/cli.js
+export SMITH_CLI_ENTRY=/path/to/factory/orchestrator/dist/cli.js
 export SMITH_E2E_STATE_DIR="$STATE_DIR"
 export SMITH_E2E_PORT=4680
 
@@ -270,7 +266,7 @@ e2e/node_modules/.bin/playwright test --config=e2e/playwright.reconnect.config.t
 
 `e2e/acg10-reconnect-transcript.json` carries the same stamp fields as
 `e2e/acg1-transcript.json` (`runnerCommand`, `playwrightVersion`, `vamSha`,
-`blackSmithSha` with the same `-dirty` suffix rule, `capturedAt`, `sessionA`,
+`factorySha` with the same `-dirty` suffix rule, `capturedAt`, `sessionA`,
 `sessionB`, `tuples`, `canvas`), plus a `streamA` object with its own
 recorded frames and `helloCount`. `runnerCommand` names this section's
 config, not AC-G1's.
@@ -279,14 +275,12 @@ config, not AC-G1's.
 
 This spec's discriminating power (epic AC-3) was proved by running it once
 with `onHello` deleted (red) and once restored (green); both runners'
-verbatim output is committed in the black-smith repo at
-`state/artifacts/vam-acg1-discriminating-ac10/task-2-falsification/falsification-onhello-removed.txt`
-and `.../confirmation-onhello-restored.txt`, not in this repo (raw output
-carries absolute machine paths).
+verbatim output is on record, not in this repo (raw output carries absolute
+machine paths).
 
 ## Cleanup
 
-Same discipline as AC-G1: the spec kills its own vite and black-smith
+Same discipline as AC-G1: the spec kills its own vite and factory
 children with `SIGKILL` in a `finally` on every path, including failure.
 SIGKILL, not the default signal, because `vite preview`'s graceful shutdown
 waits for the page's long-lived SSE connection to drain, which it never
@@ -315,7 +309,7 @@ is where it should be, or that a selector matches anything at all.
 
 ## Run
 
-Needs nothing but a free port 5277 — no black-smith, no state dir, no
+Needs nothing but a free port 5277 — no factory, no state dir, no
 environment variables. The fixture is the built page's own `?demo=1` mode, and
 the config builds and serves it itself.
 

@@ -47,7 +47,7 @@ function session(id: string): Session {
 }
 
 const MODEL: CanvasModel = {
-  projects: [{ id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a1')] }],
+  projects: [{ id: 'p1', name: 'alpha', source: 'factory', sessions: [session('a1')] }],
 };
 
 const mode = () => document.querySelector('[data-mode]')?.textContent ?? '';

@@ -1,27 +1,25 @@
 /**
  * AC-10 (client-side) — the canvas refetches on `hello` alone, with no
- * masking `change` frame, because black-smith stays up and its fingerprint
+ * masking `change` frame, because the factory stays up and its fingerprint
  * cache is warm.
- * (`factory/specs/active/vam-acg1-discriminating-ac10/epic.md`, sections 3
- * and 4, in the black-smith repo. Full rationale, honest limits and both
+ * (Sections 3 and 4 of this epic. Full rationale, honest limits and both
  * `--list` outputs: `e2e/README.md`.)
  *
  * ADDS TO, DOES NOT SUBSUME, e2e/sse-drop.spec.ts (AC-G1). AC-G1 restarts
- * BLACK-SMITH; a fresh process's cold cache manufactures a masking `change`
+ * THE FACTORY; a fresh process's cold cache manufactures a masking `change`
  * on reconnect, so AC-G1 passes even with `onHello` deleted from
- * `src/adapter/useCanvas.ts:113` (finding
- * f-vam-sse-canvas/integration-424bca70). This spec keeps black-smith up and
+ * `src/adapter/useCanvas.ts:113`. This spec keeps the factory up and
  * drops the TRANSPORT (vite) instead, against an already-warm cache, so the
  * masking frame never forms — the canvas can then only learn about the
  * session written during the outage through `onHello`'s own refetch.
  *
- * WHY VITE, NOT BLACK-SMITH (epic.md 3.2, e2e/sse-drop.spec.ts:9-20): a dead
- * black-smith is FATAL for `EventSource` through vite's proxy (502); a dead
+ * WHY VITE, NOT THE FACTORY (see e2e/sse-drop.spec.ts:9-20): a dead
+ * factory is FATAL for `EventSource` through vite's proxy (502); a dead
  * vite is a bare TCP refusal, which is not — the browser retries
  * indefinitely at ~3.00s. Connection-refused console noise during the
  * outage is therefore expected, not a failure.
  *
- * WHY ITS OWN CONFIG (epic.md 3.3): a test cannot kill a `webServer`
+ * WHY ITS OWN CONFIG: a test cannot kill a `webServer`
  * Playwright manages, so this spec spawns/kills its own vite (port 5274)
  * under e2e/playwright.reconnect.config.ts, whose `testMatch: '**\/*.pw.ts'`
  * — with this file's own `.pw.ts` name — keeps it and the AC-G1 config from
@@ -35,10 +33,7 @@
  * With that line gone the run fails exactly here:
  * `Locator: locator('[data-session-row="...-b"]')` / `Expected: visible` /
  * `Timeout: 10000ms`. Restoring the line and re-running the same command
- * passes. Both runners' verbatim output, in the black-smith repo:
- * `state/artifacts/vam-acg1-discriminating-ac10/task-2-falsification/falsification-onhello-removed.txt`
- * and
- * `state/artifacts/vam-acg1-discriminating-ac10/task-2-falsification/confirmation-onhello-restored.txt`.
+ * passes. Both runs' verbatim output is on record.
  */
 
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -68,7 +63,7 @@ type StreamAFrame = {
 
 const CLI_ENTRY_VAR = 'SMITH_CLI_ENTRY';
 const STATE_DIR_VAR = 'SMITH_E2E_STATE_DIR';
-// The port black-smith's server binds. Stream A hits it directly; the page
+// The port the factory's server binds. Stream A hits it directly; the page
 // reaches it through vite's own proxy (vite.config.ts's `VAM_SMITH_URL`
 // default), so this must match that default unless VAM_SMITH_URL is also
 // set — see e2e/README.md.
@@ -177,7 +172,7 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
     payload: {},
   });
 
-  const blackSmith = startServer(cli, stateDir, dbPath, port);
+  const factory = startServer(cli, stateDir, dbPath, port);
   // `vite` is declared here, before the protected region opens, so the
   // `finally` below can reach it even when the throw that triggers teardown
   // happens before `startVite` ever runs (in which case it stays undefined
@@ -269,15 +264,15 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
   try {
     await waitForHealth(`http://127.0.0.1:${port}/api/health`, 15_000);
 
-    // WHY STREAM A EXISTS: subscribing keeps black-smith's
-    // `changeFeed.ts:143-169` watcher and floor timer armed — `listeners.size`
-    // gates both, arming at 1 and disarming at 0. Without stream A holding
-    // `listeners.size >= 1` through the outage, session B would never be
-    // projected while vite is down, and the test would collapse back into the
-    // confound this epic removes.
+    // WHY STREAM A EXISTS: subscribing keeps the factory's own change-feed
+    // watcher and floor timer armed — `listeners.size` gates both, arming at
+    // 1 and disarming at 0. Without stream A holding `listeners.size >= 1`
+    // through the outage, session B would never be projected while vite is
+    // down, and the test would collapse back into the confound this epic
+    // removes.
     streamAReading = readStreamA();
 
-    // Proof black-smith accepted stream A and armed the watcher.
+    // Proof the factory accepted stream A and armed the watcher.
     await waitForStreamAFrame((f) => f.event === 'hello', 5_000);
 
     buildOnce(repoRoot);
@@ -328,7 +323,7 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
     const watermark = await page.evaluate(() => (window as unknown as { __sseEvents: SseTuple[] }).__sseEvents.length);
     const streamAWatermark = streamAFrames.length;
 
-    // (2) Drop the TRANSPORT, not black-smith. SIGKILL, not the default
+    // (2) Drop the TRANSPORT, not the factory. SIGKILL, not the default
     // signal: `vite preview`'s graceful shutdown waits for the page's
     // long-lived SSE connection to drain, which it never does, so a plain
     // `.kill()` would never actually sever the socket (see e2e/README.md).
@@ -354,8 +349,8 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
     );
     expect(positiveControl).toBeTruthy();
 
-    // (4) Vite returns. Black-smith's onConnect refresh finds B's
-    // fingerprint already cached (epic.md 3.4's precondition), so no
+    // (4) Vite returns. The factory's onConnect refresh finds B's
+    // fingerprint already cached (this epic's own precondition), so no
     // `change` reaches the page.
     vite = startVite(repoRoot, VITE_PORT);
     await waitForHealth(`http://127.0.0.1:${VITE_PORT}/`, 15_000);
@@ -366,7 +361,7 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
     const postReconnectHello = await waitForTuple(page, (t) => t.event === 'hello', 10_000, watermark);
 
     // AC-1 supporting check: liveness AT THIS INSTANT ONLY — corroboration,
-    // never the evidence black-smith "never died" (that is stream A, below).
+    // never the evidence the factory "never died" (that is stream A, below).
     const health = await fetch(`http://127.0.0.1:${port}/api/health`);
     expect(health.ok).toBe(true);
 
@@ -399,8 +394,8 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
     await expect(page.locator(sessionBRowSelector)).toBeVisible({ timeout: 10_000 });
 
     // AC-1: stream A recorded EXACTLY ONE `hello` for the whole run
-    // (sse.ts:138 — a restarted black-smith cannot deliver the same
-    // connection twice), and its body never ended, errored or re-opened.
+    // (a restarted factory cannot deliver the same connection twice), and
+    // its body never ended, errored or re-opened.
     const streamAHelloCount = streamAFrames.filter((f) => f.event === 'hello').length;
     expect(streamAHelloCount, `stream A hello count: ${JSON.stringify(streamAFrames)}`).toBe(1);
     expect(streamAState.endedUnexpectedly, 'stream A body ended before teardown').toBe(false);
@@ -420,8 +415,8 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
       return dirty === '' ? head : `${head}-dirty`;
     };
     const vamSha = shaOf(repoRoot);
-    const blackSmithRoot = path.resolve(path.dirname(cli), '..', '..', '..');
-    const blackSmithSha = shaOf(blackSmithRoot);
+    const factoryRoot = path.resolve(path.dirname(cli), '..', '..', '..');
+    const factorySha = shaOf(factoryRoot);
 
     writeFileSync(
       path.join(__dirname, 'acg10-reconnect-transcript.json'),
@@ -430,7 +425,7 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
           runnerCommand: 'e2e/node_modules/.bin/playwright test --config=e2e/playwright.reconnect.config.ts',
           playwrightVersion,
           vamSha,
-          blackSmithSha,
+          factorySha,
           capturedAt: new Date().toISOString(),
           sessionA,
           sessionB,
@@ -451,13 +446,13 @@ test('a client reconnecting to a warm server refetches on hello alone (AC-10, cl
     // the mid-run end-of-body / re-open failure AC-1 forbids.
     streamAState.tornDown = true;
     streamAController.abort();
-    // Guarded: a throw before `readStreamA` ran (e.g. the black-smith
+    // Guarded: a throw before `readStreamA` ran (e.g. the factory's
     // health check itself failing) leaves `streamAReading` undefined.
     await streamAReading?.catch(() => {});
-    // Guarded: a throw before `startVite` ran (e.g. a dead black-smith
+    // Guarded: a throw before `startVite` ran (e.g. a dead factory
     // health check, or `buildOnce` failing) leaves `vite` undefined — there
     // is nothing to kill.
     vite?.kill('SIGKILL');
-    blackSmith.kill('SIGKILL');
+    factory.kill('SIGKILL');
   }
 });

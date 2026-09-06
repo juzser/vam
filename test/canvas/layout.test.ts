@@ -44,14 +44,14 @@ function session(id: string, over: Partial<Session> = {}): Session {
 
 function model(...sessions: Session[]): CanvasModel {
   return {
-    projects: [{ id: 'p1', name: 'repo', source: 'black-smith', sessions }],
+    projects: [{ id: 'p1', name: 'repo', source: 'factory', sessions }],
   };
 }
 
 function twoProjects(bStatus: Session['status']): CanvasModel {
   return {
     projects: [
-      { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a')] },
+      { id: 'p1', name: 'alpha', source: 'factory', sessions: [session('a')] },
       { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b', { status: bStatus })] },
     ],
   };
@@ -92,7 +92,7 @@ describe('orderedSessions', () => {
         {
           id: 'p1',
           name: 'alpha',
-          source: 'black-smith',
+          source: 'factory',
           sessions: [session('a-idle'), session('a-run', { status: 'running' })],
         },
         { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b-idle')] },
@@ -106,7 +106,7 @@ describe('orderedSessions', () => {
     // just as a whole project rather than as a loose session.
     const two: CanvasModel = {
       projects: [
-        { id: 'p1', name: 'calm', source: 'black-smith', sessions: [session('c')] },
+        { id: 'p1', name: 'calm', source: 'factory', sessions: [session('c')] },
         {
           id: 'p2',
           name: 'urgent',

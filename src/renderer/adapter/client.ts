@@ -1,15 +1,15 @@
 /**
- * The one place vam talks to black-smith.
+ * The one place vam talks to the factory.
  *
- * Reads are ordinary. The writes are the reason this file is careful, and §6
- * says why: black-smith's event log is the factory's memory, every write
- * carries an envelope, and a malformed one is not a UI bug — it is a false
- * entry in the record of what happened and why.
+ * Reads are ordinary. The writes are the reason this file is careful: the
+ * factory's event log is its own memory, every write carries an envelope,
+ * and a malformed one is not a UI bug — it is a false entry in the record
+ * of what happened and why.
  *
  * Three rules follow from that, and all three are enforced here rather than
  * left to callers:
  *
- *  - **The server's refusal is shown, not swallowed.** black-smith answers a
+ *  - **The server's refusal is shown, not swallowed.** The factory answers a
  *    bad write with `{error: {code, message}}` and its message names the actual
  *    problem (`events.unknown-causal-session`, `write.bad-request`). A client
  *    that collapsed that into "failed" would leave you guessing at the one
@@ -33,7 +33,7 @@ import type {
 } from './api.js';
 
 /**
- * A refusal from black-smith, with the factory's own words kept intact.
+ * A refusal from the factory, with its own words kept intact.
  *
  * `code` is the machine-readable one from `errors.ts`; `message` is what the
  * factory would have printed on a terminal. The UI shows both.
@@ -53,7 +53,7 @@ export class SmithApiError extends Error {
 /** Thrown when the server is simply not there — a different problem from a refusal. */
 export class SmithUnreachableError extends Error {
   constructor(baseUrl: string, cause: unknown) {
-    super(`cannot reach black-smith at ${baseUrl}`);
+    super(`cannot reach the factory at ${baseUrl}`);
     this.name = 'SmithUnreachableError';
     this.cause = cause;
   }
@@ -95,7 +95,7 @@ export class SmithClient {
       response = await this.doFetch(`${this.baseUrl}${path}`, init);
     } catch (cause) {
       // A transport failure is not a refusal. Keeping them apart is what lets
-      // the UI say "black-smith is not running" instead of blaming your input.
+      // the UI say "the factory is not running" instead of blaming your input.
       throw new SmithUnreachableError(this.baseUrl, cause);
     }
 
@@ -161,7 +161,7 @@ export class SmithClient {
   /**
    * Record what you just said, into the session's log.
    *
-   * This RECORDS; it does not DELIVER. black-smith has no channel into a
+   * This RECORDS; it does not DELIVER. The factory has no channel into a
    * running agent session — what it has is `user_prompt`, stored verbatim so
    * the dispatch that follows can hang off it and the timeline reads "this work
    * happened because a person asked for it". Every caller has to say so in its

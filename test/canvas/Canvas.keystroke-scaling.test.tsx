@@ -114,7 +114,7 @@ function session(id: string): Session {
 function buildModel(sessionCount: number): CanvasModel {
   const sessions: Session[] = [];
   for (let i = 0; i < sessionCount; i++) sessions.push(session(`s${i}`));
-  return { projects: [{ id: 'p1', name: 'alpha', source: 'black-smith', sessions }] };
+  return { projects: [{ id: 'p1', name: 'alpha', source: 'factory', sessions }] };
 }
 
 beforeAll(() => {

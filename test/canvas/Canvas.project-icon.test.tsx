@@ -31,7 +31,7 @@ function session(id: string, over: Partial<Session> = {}): Session {
 
 const MODEL: CanvasModel = {
   projects: [
-    { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a1')] },
+    { id: 'p1', name: 'alpha', source: 'factory', sessions: [session('a1')] },
     // No `source` at all — the case `Canvas.tsx`'s existing session-icon
     // refusal already handles; the project icon picker must refuse the same
     // way rather than guess a fallback source to store under.
@@ -95,7 +95,7 @@ describe('the project heading icon picker', () => {
     localStorage.setItem(
       'vam.prefs.v1',
       JSON.stringify({
-        projectIcons: { 'black-smith': { p1: { icon: '📦', at: new Date().toISOString() } } },
+        projectIcons: { factory: { p1: { icon: '📦', at: new Date().toISOString() } } },
       }),
     );
     render(<Canvas model={MODEL} />);

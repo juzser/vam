@@ -31,8 +31,8 @@ function session(id: string, over: Partial<Session> = {}): Session {
 
 const MODEL: CanvasModel = {
   projects: [
-    { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a1')] },
-    { id: 'p2', name: 'beta', source: 'black-smith', sessions: [session('b1')] },
+    { id: 'p1', name: 'alpha', source: 'factory', sessions: [session('a1')] },
+    { id: 'p2', name: 'beta', source: 'factory', sessions: [session('b1')] },
   ],
 };
 
@@ -71,7 +71,7 @@ describe('groups, from the store to the sidebar', () => {
 
   it('draws a stored group over the members it resolves', () => {
     seed({
-      groups: { 'black-smith': [{ id: 'group:1', name: 'the-monorepo', projects: ['p1'] }] },
+      groups: { factory: [{ id: 'group:1', name: 'the-monorepo', projects: ['p1'] }] },
     });
     render(<Canvas model={MODEL} />);
     expect(heading('group:1')?.textContent).toContain('the-monorepo');
@@ -92,14 +92,14 @@ describe('groups, from the store to the sidebar', () => {
   });
 
   it('folds a group and writes the fold where a reload will find it', () => {
-    seed({ groups: { 'black-smith': [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
+    seed({ groups: { factory: [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
     render(<Canvas model={MODEL} />);
     expect(rows()).toBe(2);
     act(() => {
       document.querySelector<HTMLButtonElement>('[data-group-collapse="group:1"]')?.click();
     });
     expect(rows()).toBe(1);
-    expect(storedPrefs().collapsedGroups).toEqual({ 'black-smith': ['group:1'] });
+    expect(storedPrefs().collapsedGroups).toEqual({ factory: ['group:1'] });
   });
 });
 
@@ -124,7 +124,7 @@ describe('the group lifecycle, stored', () => {
     act(() => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
-    const stored = storedGroups()['black-smith'] ?? [];
+    const stored = storedGroups()['factory'] ?? [];
     expect(stored).toHaveLength(1);
     expect(stored[0]?.name).toBe('the-monorepo');
     expect(stored[0]?.id).toMatch(/^group:/);
@@ -133,7 +133,7 @@ describe('the group lifecycle, stored', () => {
 
   it('ungroups with no dialog, returning the members to the top level', () => {
     seed({
-      groups: { 'black-smith': [{ id: 'group:1', name: 'work', projects: ['p1', 'p2'] }] },
+      groups: { factory: [{ id: 'group:1', name: 'work', projects: ['p1', 'p2'] }] },
     });
     render(<Canvas model={MODEL} />);
     act(() => document.querySelector<HTMLButtonElement>('[data-group-menu="group:1"]')?.click());
@@ -144,14 +144,14 @@ describe('the group lifecycle, stored', () => {
     expect(document.querySelectorAll('[data-group-heading]')).toHaveLength(0);
     expect(document.querySelectorAll('[data-project-heading]')).toHaveLength(2);
     expect(rows()).toBe(2);
-    expect(storedGroups()['black-smith']).toBeUndefined();
+    expect(storedGroups()['factory']).toBeUndefined();
     // The status line names what happened, since nothing else does.
     expect(statusBar()).toContain('work');
     expect(statusBar()).toContain('2');
   });
 
   it('renames a group in the store', () => {
-    seed({ groups: { 'black-smith': [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
+    seed({ groups: { factory: [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
     render(<Canvas model={MODEL} />);
     act(() => document.querySelector<HTMLButtonElement>('[data-group-menu="group:1"]')?.click());
     act(() =>
@@ -162,11 +162,11 @@ describe('the group lifecycle, stored', () => {
     act(() => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
-    expect(storedGroups()['black-smith']?.[0]?.name).toBe('renamed');
+    expect(storedGroups()['factory']?.[0]?.name).toBe('renamed');
   });
 
   it('opens the icon picker for a group and stores what was picked', () => {
-    seed({ groups: { 'black-smith': [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
+    seed({ groups: { factory: [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
     render(<Canvas model={MODEL} />);
     act(() => document.querySelector<HTMLButtonElement>('[data-group-menu="group:1"]')?.click());
     act(() => document.querySelector<HTMLButtonElement>('[data-group-menu-item="icon"]')?.click());
@@ -185,7 +185,7 @@ describe('group membership, stored', () => {
     (storedPrefs().groups ?? {}) as Record<string, { id: string; projects: string[] }[]>;
 
   it('offers the projects vam already knows, and no directory dialog', () => {
-    seed({ groups: { 'black-smith': [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
+    seed({ groups: { factory: [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
     render(<Canvas model={MODEL} />);
     openList('group:1');
     expect(document.querySelector('[data-project-picker]')).toBeTruthy();
@@ -195,11 +195,11 @@ describe('group membership, stored', () => {
   });
 
   it('adds a project to the group and draws it there', () => {
-    seed({ groups: { 'black-smith': [{ id: 'group:1', name: 'work', projects: [] }] } });
+    seed({ groups: { factory: [{ id: 'group:1', name: 'work', projects: [] }] } });
     render(<Canvas model={MODEL} />);
     openList('group:1');
     act(() => choice('p2')?.click());
-    expect(storedGroups()['black-smith']?.[0]?.projects).toEqual(['p2']);
+    expect(storedGroups()['factory']?.[0]?.projects).toEqual(['p2']);
     expect(
       document
         .querySelector('[data-project-id="p2"]')
@@ -211,7 +211,7 @@ describe('group membership, stored', () => {
   it('MOVES a project that is already in another group', () => {
     seed({
       groups: {
-        'black-smith': [
+        factory: [
           { id: 'group:1', name: 'work', projects: ['p1'] },
           { id: 'group:2', name: 'other', projects: ['p2'] },
         ],
@@ -221,17 +221,17 @@ describe('group membership, stored', () => {
     openList('group:1');
     expect(choice('p2')?.textContent).toContain('other');
     act(() => choice('p2')?.click());
-    const stored = storedGroups()['black-smith'] ?? [];
+    const stored = storedGroups()['factory'] ?? [];
     expect(stored.find((g) => g.id === 'group:1')?.projects).toEqual(['p1', 'p2']);
     expect(stored.find((g) => g.id === 'group:2')?.projects).toEqual([]);
   });
 
   it('takes one back out, leaving it at the top level', () => {
-    seed({ groups: { 'black-smith': [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
+    seed({ groups: { factory: [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
     render(<Canvas model={MODEL} />);
     openList('group:1');
     act(() => choice('p1')?.click());
-    expect(storedGroups()['black-smith']?.[0]?.projects).toEqual([]);
+    expect(storedGroups()['factory']?.[0]?.projects).toEqual([]);
     expect(
       document
         .querySelector('[data-project-id="p1"]')

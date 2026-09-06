@@ -38,7 +38,7 @@ export function makeProject(
   return {
     id: 'p1',
     name: 'vam',
-    source: 'black-smith' as SourceId,
+    source: 'factory' as SourceId,
     sessions,
     ...over,
   };
