@@ -11,10 +11,16 @@
  * (`testDir: '.'`, no `testMatch`, no `testIgnore`) is byte-identical-
  * protected (epic AC-6) and collects every `*.spec.ts` under `e2e/` by
  * Playwright's default. This spec is therefore named `sse-drop-reconnect.pw.ts`
- * — a suffix the default collector does not match — and this config narrows
- * to it explicitly, so the two configs each collect exactly one spec (AC-9).
- * Verified with `--list` on both configs; see the task result for both
- * listings.
+ * — a suffix the default collector does not match.
+ *
+ * `testMatch` names this file exactly, not a `*.pw.ts` suffix class: a
+ * suffix pattern once matched this spec alone, then silently widened to
+ * also collect `phone-shell.pw.ts` the day that file was added, sending all
+ * 18 of its tests against this config's vite-less setup (no `webServer`
+ * block — see above) with nothing at `http://127.0.0.1:5274` to serve them.
+ * Naming the file is the only form that cannot re-widen when a future spec
+ * picks the same suffix. `test/e2e/config-collection.test.ts` guards this
+ * against each config's real `--list` output, not by re-reading this string.
  */
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -26,7 +32,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 
 export default defineConfig({
   testDir: '.',
-  testMatch: '**/*.pw.ts',
+  // The file itself, not a suffix glob — see the header for why.
+  testMatch: 'sse-drop-reconnect.pw.ts',
   // Keep artifacts inside e2e/, where .gitignore already ignores them, same
   // as the AC-G1 config.
   outputDir: path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'test-results', 'reconnect'),
