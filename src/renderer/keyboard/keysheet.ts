@@ -180,6 +180,11 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
     label: (a) => (a.delta === 1 ? 'widen the pane' : 'narrow the pane'),
   },
   resetPanes: { group: 'panes', label: () => 'reset both side panes' },
+  zoom: {
+    group: 'panes',
+    label: (a) => (a.delta === 1 ? 'zoom in' : 'zoom out'),
+  },
+  fitView: { group: 'panes', label: () => 'fit the whole canvas in view' },
   copy: { group: 'review', label: () => 'copy this step’s commands' },
   palette: { group: 'view', label: () => 'command palette' },
   filterMenu: { group: 'view', label: () => 'filter the session list' },

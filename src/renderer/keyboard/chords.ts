@@ -161,6 +161,12 @@ export type KeyAction =
   | { readonly kind: 'help' }
   /** `<` / `>` — narrow or widen the focused side pane by one step. */
   | { readonly kind: 'resizePane'; readonly delta: -1 | 1 }
+  /** `+` / `-` — zoom the canvas in or out by one ReactFlow step. */
+  | { readonly kind: 'zoom'; readonly delta: -1 | 1 }
+  /** `Z` — fit the whole canvas in view, the single-key form of the `z`
+      view-adjustments below it (the letter is capitalised for the same reason
+      `G` is: the stronger, whole-view form of a lowercase idea already taken). */
+  | { readonly kind: 'fitView' }
   /** `z0` — the shipped layout back: both side panes at their default width
       AND all three columns drawn again. */
   | { readonly kind: 'resetPanes' }
@@ -295,6 +301,19 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // (proven by test, not assumed — epic.md §4.5).
   '<': { kind: 'resizePane', delta: -1 },
   '>': { kind: 'resizePane', delta: 1 },
+  // Bare `+`/`-`, matching the labels already printed on the zoom buttons
+  // (`Canvas.tsx`'s zoom strip) rather than inventing a spelling the UI does
+  // not show. `=` is deliberately not a second slot for `zoom:1`: unlike
+  // Ctrl/Cmd+`=`, a bare `=` is a character an operator can legitimately want
+  // to type in a session's own terminal reached by other means, and this
+  // table only ever sees bare keys when nothing is capturing text.
+  '+': { kind: 'zoom', delta: 1 },
+  '-': { kind: 'zoom', delta: -1 },
+  // `Z`, not `z`: lowercase is the reserved prefix for the view-adjustment
+  // chords below (`AFTER_Z`), so the single-key "fit everything" gesture the
+  // audit asked for takes the capital, the same way `G` (last) sits beside
+  // the `g` prefix without colliding with it.
+  Z: { kind: 'fitView' },
 };
 
 const AFTER_G: Readonly<Record<string, KeyAction>> = {
@@ -437,6 +456,8 @@ export function actionId(action: KeyAction): string {
       return `project:${action.delta}`;
     case 'resizePane':
       return `resizePane:${action.delta}`;
+    case 'zoom':
+      return `zoom:${action.delta}`;
     default:
       return action.kind;
   }

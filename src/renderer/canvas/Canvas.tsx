@@ -92,6 +92,7 @@ import {
   DEFAULT_PANES,
   layoutForViewport,
   layoutWidths,
+  PANE_RESIZE_STEP,
 } from '../prefs/panes.js';
 import {
   addProjectToGroup,
@@ -2424,7 +2425,7 @@ function CanvasInner({
             setStatus(`the ${target} pane is hidden — z0 brings it back`);
             return;
           }
-          const step = action.delta * 24;
+          const step = action.delta * PANE_RESIZE_STEP;
           savePrefs(setPaneWidth(prefs, target, prefs.panes[target] + step));
           return;
         }
@@ -2447,6 +2448,18 @@ function CanvasInner({
               ALL_VISIBLE,
             ),
           );
+          return;
+        case 'zoom':
+          // The same two functions the zoom buttons already call — no second
+          // path, just a key reaching the one that exists.
+          if (action.delta === 1) {
+            zoomIn();
+          } else {
+            zoomOut();
+          }
+          return;
+        case 'fitView':
+          fitView();
           return;
         case 'layout': {
           const next = setLayout(prefs, action.name);
@@ -2543,6 +2556,9 @@ function CanvasInner({
     initialNodes,
     entries,
     getNodes,
+    zoomIn,
+    zoomOut,
+    fitView,
     jumping,
     labels,
     matches,
@@ -2855,9 +2871,10 @@ function CanvasInner({
             </span>
 
             <div className="flex h-[26px] shrink-0 items-center overflow-hidden rounded-[7px] border border-line text-ink-dim">
-              {/* Zoom and fit take no `action`: the grammar has no zoom
-                  chord, and a tip must not invent one. */}
-              <ShortcutTip label="Zoom out">
+              {/* `action` is read from the live grammar (`activeBindings`),
+                  never hardcoded here — a rebind changes the tip without
+                  touching this call site. */}
+              <ShortcutTip label="Zoom out" action={{ kind: 'zoom', delta: -1 }}>
                 <button
                   type="button"
                   aria-label="zoom out"
@@ -2870,7 +2887,7 @@ function CanvasInner({
               <span className="flex h-full items-center border-line border-r border-l px-1.5 font-mono text-[10px] text-ink">
                 {zoomPct}%
               </span>
-              <ShortcutTip label="Zoom in">
+              <ShortcutTip label="Zoom in" action={{ kind: 'zoom', delta: 1 }}>
                 <button
                   type="button"
                   aria-label="zoom in"
@@ -2882,7 +2899,7 @@ function CanvasInner({
               </ShortcutTip>
             </div>
 
-            <ShortcutTip label="Fit the whole canvas in view">
+            <ShortcutTip label="Fit the whole canvas in view" action={{ kind: 'fitView' }}>
               <button
                 type="button"
                 aria-label="fit view"
