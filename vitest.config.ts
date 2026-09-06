@@ -13,6 +13,10 @@ export default defineConfig({
     // already has. THE COST IS REAL AND IS NOT HIDDEN: AC-13's proof that the
     // application boots does not run in CI until a display is provided there.
     exclude: ['test/electron/launch.test.ts', '**/node_modules/**', '**/dist/**'],
+    // Makes `localStorage` deterministic across Node majors: see
+    // test/support/storage.ts for why the Node version otherwise decides
+    // which branch a test's own `globalThis.localStorage ??= <stub>` takes.
+    setupFiles: ['./test/support/storage.ts'],
     // Default to `node`. Most of vam's logic — spatial navigation, the chord
     // reducer, the adapters — is pure and has no business paying for a DOM.
     // A test that genuinely renders opts in with `// @vitest-environment

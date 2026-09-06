@@ -27,6 +27,7 @@ import { createPairing } from './remote/pairing.js';
 import { createStreamRegistry, startRemoteServer } from './remote/server.js';
 import { listLiveAgents } from './sources/claude-code/agents.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
+import type { MainSource } from './sources/source.js';
 import { createTmuxRunner } from './sources/tmux/spawn.js';
 import { createNodeEventSource } from './stream/event-source.js';
 import { registerStreamIpc } from './stream/register.js';
@@ -35,6 +36,44 @@ import { checkForUpdate } from './update/check.js';
 import { registerUpdateIpc } from './update/ipc.js';
 import { registerUsageIpc } from './usage/ipc.js';
 import { readUsage } from './usage/reader.js';
+
+/**
+ * Serves `test/electron/launch.test.ts` only, selected by `VAM_FIXTURE_SOURCE`
+ * on the spawned process. A clean CI runner has no Claude Code sessions on
+ * disk, so `CLAUDE_CODE_SOURCE.load()` there legitimately answers `[]` --
+ * and AC-13's proof that the launched shell actually reaches a real model
+ * needs at least one project to reach. One project, one session, with every
+ * field `test/electron/launch.test.ts`'s shape assertion reads off
+ * `DEMO_MODEL`'s first session (`waitingFor`, `vamControlled` included).
+ */
+const LAUNCH_FIXTURE_SOURCE: MainSource = {
+  descriptor: CLAUDE_CODE_SOURCE.descriptor,
+  load: () =>
+    Promise.resolve([
+      {
+        id: 'launch-fixture',
+        name: 'launch fixture',
+        source: 'claude-code',
+        sessions: [
+          {
+            id: 'launch-fixture-1',
+            title: 'launch fixture session',
+            icon: null,
+            epic: null,
+            branch: null,
+            status: 'waiting',
+            runningAgents: 0,
+            activity: null,
+            age: null,
+            decisions: [],
+            agents: [],
+            waitingFor: null,
+            vamControlled: false,
+          },
+        ],
+      },
+    ]),
+};
 
 /**
  * What the desktop shell serves: the operator's own Claude Code sessions,
@@ -53,7 +92,8 @@ import { readUsage } from './usage/reader.js';
  * browser build cannot use it and does not import it -- `src/renderer` never
  * names this module, and the web target is unaffected.
  */
-const DESKTOP_SOURCE = CLAUDE_CODE_SOURCE;
+const DESKTOP_SOURCE =
+  process.env.VAM_FIXTURE_SOURCE === '1' ? LAUNCH_FIXTURE_SOURCE : CLAUDE_CODE_SOURCE;
 
 /**
  * Where main's own change-stream connects, absolute (main is not served from
