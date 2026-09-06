@@ -751,7 +751,7 @@ export function TerminalTab({
       >
         {view.name}
         {hasFocus && (
-          <span data-terminal-exit-hint className="text-ink-ghost">
+          <span data-terminal-exit-hint className="text-ink-quiet">
             {' · Tab leaves'}
           </span>
         )}

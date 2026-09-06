@@ -934,8 +934,6 @@ function BindingLine({
             }`}
           >
             {keys === undefined ? (
-              // `ink-ghost` is 1.75:1 in dark — a `+` nobody can see is not an
-              // affordance. This is a meaningful non-text mark at 7.13 / 7.73.
               <Plus size={12} strokeWidth={2} className="mx-auto" aria-hidden="true" />
             ) : (
               <kbd data-settings-keys className="border-none bg-transparent">

@@ -3294,7 +3294,7 @@ function UsageBar({
   }
   return (
     <span className="flex items-center gap-1">
-      <span className="text-ink-ghost">{label}</span>
+      <span className="text-ink-quiet">{label}</span>
       <span className="h-1 w-8 overflow-hidden rounded-sm bg-line-strong">
         <span
           data-usage-bar={label}

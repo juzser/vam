@@ -9,7 +9,7 @@
  * token text itself, ground by ground, and fails on the number rather than on
  * the prose.
  *
- * The grounds are the ones a token is actually rendered on. Three exclusions
+ * The grounds are the ones a token is actually rendered on. Two exclusions
  * are deliberate and are NOT oversights (see issue 188):
  *
  *  - `--vam-raised`: the only `ink-faint`-on-`raised` sites pair
@@ -18,11 +18,14 @@
  *  - `--vam-segment-on`: `ink-faint` reaches it only through a `disabled:`
  *    variant while the fill arrives on `hover:`, and a disabled button takes
  *    no hover fill.
- *  - `--vam-ink-ghost`: genuinely below both thresholds wherever it carries
- *    text, and deliberately left that way here. Raising it is a different
- *    decision from raising `ink-faint` — it would collapse the ink ladder —
- *    and it has its own issue. Asserting it here would only get this file
- *    weakened by the first author it blocked.
+ *
+ * `--vam-ink-ghost` used to be excluded here too, genuinely below both
+ * thresholds wherever it carried text. That was the deferral; issue 201 is
+ * the decision. The token was split: `--vam-ink-quiet` took over every site
+ * that has to be read (text, a control border, an icon glyph), leaving
+ * `ink-ghost` for marks that carry no meaning of their own. `ink-quiet` is
+ * measured below like any other text token; `ink-ghost` carries no text
+ * anymore, so there is nothing left here for it to fail.
  *
  * A guard that asserts a ground nothing renders on is a guard that gets
  * deleted, so each ground below is one some component really paints.
@@ -83,6 +86,7 @@ const TEXT_TOKENS = [
   '--vam-ink',
   '--vam-ink-dim',
   '--vam-ink-faint',
+  '--vam-ink-quiet',
   '--vam-running',
   '--vam-waiting',
   '--vam-done',
@@ -121,9 +125,9 @@ describe('token contrast, per theme', () => {
         const pairs = TEXT_TOKENS.flatMap((token) =>
           TEXT_GROUNDS.map((ground) => [token, ground] as const),
         );
-        // 7 tokens x 5 grounds. The literal is the point: it is what makes
+        // 8 tokens x 5 grounds. The literal is the point: it is what makes
         // deleting a row from either list a failure rather than a quieter pass.
-        expect(measure(pairs, 4.5)).toEqual({ pairs: 35, failing: [] });
+        expect(measure(pairs, 4.5)).toEqual({ pairs: 40, failing: [] });
       });
 
       it('reads the waiting amber against its own tint and wash', () => {
@@ -154,6 +158,19 @@ describe('token contrast, per theme', () => {
         // The ground is `well`, not `panel` — a comment there once measured the
         // wrong one and recorded a pass the border did not have.
         expect(measure([['--vam-ink-faint', '--vam-well']], 3)).toEqual({
+          pairs: 1,
+          failing: [],
+        });
+      });
+
+      it('draws the "New session" control border at 3:1 against the sidebar it sits on', () => {
+        // `SessionList` draws `border-ink-quiet` on a control with no fill of
+        // its own, so the enclosing ground is the sidebar behind it, not a
+        // well. WCAG 1.4.11, not 1.4.3 — the 4.5:1 text check above already
+        // covers this pair at a stricter floor, but the border's own
+        // obligation is 3:1 and this asserts that directly rather than by
+        // implication.
+        expect(measure([['--vam-ink-quiet', '--vam-sidebar']], 3)).toEqual({
           pairs: 1,
           failing: [],
         });

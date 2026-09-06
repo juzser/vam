@@ -186,7 +186,7 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
         <span className="flex items-center gap-1.5">
           <GitBranch size={11} strokeWidth={1.6} aria-hidden="true" />
           {/* black-smith does not report a worktree per session. */}
-          <span data-session-worktree className="truncate text-ink-ghost">
+          <span data-session-worktree className="truncate text-ink-quiet">
             {session.epic ?? '—'}
           </span>
         </span>
@@ -212,7 +212,7 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
               all, and `truncate` is what makes it ellipsis instead of pushing.
               The step count is `flex-none` because it is short, bounded, and
               the half of this line worth keeping whole. */}
-          <span data-session-spend className="min-w-0 truncate text-ink-ghost">
+          <span data-session-spend className="min-w-0 truncate text-ink-quiet">
             {session.activity ?? '—'}
           </span>
         </div>

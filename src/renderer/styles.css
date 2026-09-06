@@ -89,6 +89,19 @@
   --color-ink: var(--vam-ink);
   --color-ink-dim: var(--vam-ink-dim);
   --color-ink-faint: var(--vam-ink-faint);
+  /* The split from issue 201. `ink-ghost` measured 1.75:1 dark / 2.39:1 light
+     against `panel` -- below both the 4.5:1 text floor and the 3:1 non-text
+     one -- and nine call sites were text anyway, plus a control border and a
+     pair of icon glyphs. Raising `ghost` wholesale would have collapsed the
+     ladder into `ink-faint`; ruling it out of text left the border still
+     failing. So there are two tokens where there was one:
+     `ink-quiet` for anything that has to be READ -- text, a control border, an
+     icon glyph standing in for one -- and `ink-ghost`, unchanged, for marks
+     that carry no meaning of their own: a scrollbar thumb, a list bullet next
+     to text that already says the same thing. Nothing routes text through
+     `ghost` anymore; `test/renderer/token-contrast.test.ts` is what stops the
+     next one from trying. */
+  --color-ink-quiet: var(--vam-ink-quiet);
   --color-ink-ghost: var(--vam-ink-ghost);
 
   /* Status. The reskin SWAPPED two of these and the swap is meaningful:
@@ -204,6 +217,13 @@
   --vam-ink: #ededed;
   --vam-ink-dim: #a1a1a1;
   --vam-ink-faint: #858585;
+  /* Matches `ink-faint` rather than given its own number: `ink-faint` itself
+     is the quietest grey that still clears 4.5:1 on every text ground this
+     theme paints (worst case `sidebar`, 4.86). A value quieter than that
+     fails somewhere; a value at it is just `ink-faint` under another name,
+     and this file says so rather than pretending a third grey exists that
+     does not. */
+  --vam-ink-quiet: #858585;
   --vam-ink-ghost: #3f3f3f;
 
   /* The terminal palette, dark. Drawn on `panel` (#141414), so ANSI black is
@@ -325,6 +345,10 @@ html.light {
   --vam-ink: #18181b;
   --vam-ink-dim: #52525b;
   --vam-ink-faint: #6a6a6f;
+  /* Same reasoning as dark: `ink-faint`'s own value is already the quietest
+     grey that clears 4.5:1 on every text ground here (worst case `sidebar`,
+     4.64), so `ink-quiet` matches it rather than inventing a new one. */
+  --vam-ink-quiet: #6a6a6f;
   --vam-ink-ghost: #a8a8a3;
 
   /* The terminal palette, light -- REMAPPED, not reproduced, and this is the
