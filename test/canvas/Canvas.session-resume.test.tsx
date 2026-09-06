@@ -78,9 +78,9 @@ function press(key: string) {
   });
 }
 
-// The same three shims the other Canvas tests install, for the same reason:
-// ReactFlow measures, and this happy-dom has neither a layout engine nor a
-// `localStorage`.
+// The same two shims the other Canvas tests install, for the same reason:
+// ReactFlow measures and this happy-dom has no layout engine. `localStorage`
+// itself is installed for every test file by test/support/storage.ts.
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
     observe() {}
@@ -90,19 +90,6 @@ beforeAll(() => {
   globalThis.DOMMatrixReadOnly ??= class {
     m22 = 1;
   } as unknown as typeof DOMMatrixReadOnly;
-  globalThis.localStorage ??= (() => {
-    const map = new Map<string, string>();
-    return {
-      getItem: (key: string) => map.get(key) ?? null,
-      setItem: (key: string, value: string) => void map.set(key, String(value)),
-      removeItem: (key: string) => void map.delete(key),
-      clear: () => map.clear(),
-      key: (index: number) => [...map.keys()][index] ?? null,
-      get length() {
-        return map.size;
-      },
-    };
-  })() as unknown as Storage;
 });
 
 afterEach(() => {

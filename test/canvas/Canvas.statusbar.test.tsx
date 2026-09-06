@@ -64,19 +64,6 @@ beforeAll(() => {
   globalThis.DOMMatrixReadOnly ??= class {
     m22 = 1;
   } as unknown as typeof DOMMatrixReadOnly;
-  globalThis.localStorage ??= (() => {
-    const map = new Map<string, string>();
-    return {
-      getItem: (key: string) => map.get(key) ?? null,
-      setItem: (key: string, value: string) => void map.set(key, String(value)),
-      removeItem: (key: string) => void map.delete(key),
-      clear: () => map.clear(),
-      key: (index: number) => [...map.keys()][index] ?? null,
-      get length() {
-        return map.size;
-      },
-    };
-  })() as unknown as Storage;
 });
 
 afterEach(() => {

@@ -111,6 +111,12 @@ function launch(port: number, streamPort: number): Promise<Launch> {
         ...process.env,
         VAM_SMOKE_PORT: String(port),
         VAM_STREAM_URL: `http://127.0.0.1:${streamPort}/api/stream`,
+        // A clean runner (this one, and CI) has no Claude Code sessions on
+        // disk, so the real source's load() legitimately answers `[]` and
+        // "resolves to at least the Project/Session shape" below has nothing
+        // to check. This seeds a deterministic one-project fixture instead,
+        // per src/main/index.ts's LAUNCH_FIXTURE_SOURCE.
+        VAM_FIXTURE_SOURCE: '1',
       },
     });
     let stdout = '';
@@ -199,20 +205,36 @@ describe('the Electron shell launches', () => {
   // The preload actually LOADED and exposed the bridge. Until this existed the
   // preload path was untested: `webPreferences.preload` could name a file that
   // does not exist and all eleven other assertions still passed.
+  //
+  // SUPERSET, not exact equality -- this list was exact until it silently
+  // drifted for three days while `createSessionIn`, `dialog`,
+  // `pickImageAttachment`, `remote`, `terminal` and `update` were added to the
+  // preload and nobody updated a hard-coded array here. `arrayContaining`
+  // still fails the moment any of these is renamed or removed, which is the
+  // actual regression this guards against; a PR that earns the bridge a new
+  // member is not one.
   it('runs the preload, which exposes the bridge', () => {
-    expect(smoke().bridgeKeys).toEqual([
-      'applyWaivers',
-      'clipboard',
-      'closeSession',
-      'createSession',
-      'describe',
-      'load',
-      'recordPrompt',
-      'renameSession',
-      'subscribe',
-      'transitionLesson',
-      'usage',
-    ]);
+    expect(smoke().bridgeKeys).toEqual(
+      expect.arrayContaining([
+        'applyWaivers',
+        'clipboard',
+        'closeSession',
+        'createSession',
+        'createSessionIn',
+        'describe',
+        'dialog',
+        'load',
+        'pickImageAttachment',
+        'recordPrompt',
+        'remote',
+        'renameSession',
+        'subscribe',
+        'terminal',
+        'transitionLesson',
+        'update',
+        'usage',
+      ]),
+    );
     expect(smoke().bridgeLoadType).toBe('function');
     // Not just that `usage` is among the keys above: that it carries a
     // callable `get`. The key-presence assertion would pass over a `usage`
