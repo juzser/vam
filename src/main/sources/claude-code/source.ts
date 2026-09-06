@@ -49,8 +49,8 @@ import {
 } from './pull-requests.js';
 import { paneForRow, replyToSession } from './reply.js';
 import { createBranchLookup } from './repo-branch.js';
-import { readPublishedPanes } from './session-pane.js';
-import { defaultSessionsRoot, readProcessFacts } from './session-status.js';
+import { readPublishedPanes, readPublishedPanesAndProcessFacts } from './session-pane.js';
+import { defaultSessionsRoot } from './session-status.js';
 import { stopSession, stopSessionViaCli } from './stop.js';
 import {
   compactAge,
@@ -187,10 +187,12 @@ export async function loadClaudeCodeProjects(
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
   // What the sessions publish about themselves: `sessionId` -> tmux session,
-  // out of the same `~/.claude/sessions` files the per-row status read already
-  // opens. One `readdir` per load. This is what makes `vamControlled` a fact
-  // about a SESSION rather than about a project (`session-pane.ts`).
-  const panes = await readPublishedPanes(sessionsRoot);
+  // out of the same `~/.claude/sessions` files the per-row status read below
+  // wants too -- read together, once per file, rather than the pairing and
+  // the status opening the same `<pid>.json` twice (`session-pane.ts`). This
+  // is what makes `vamControlled` a fact about a SESSION rather than about a
+  // project.
+  const { panes, facts: processFacts } = await readPublishedPanesAndProcessFacts(sessionsRoot);
 
   // Read each transcript once, however many processes resumed it.
   const reads = new Map<string, TranscriptRead>();
@@ -205,13 +207,16 @@ export async function loadClaudeCodeProjects(
   const grouped = new Map<string, { cwd: string; sessions: Session[] }>();
   for (const agent of agents) {
     const read = reads.get(agent.sessionId) ?? NO_TRANSCRIPT;
-    // Per row, because a row is a process. See the age comment below.
     // Per row, because a row is a process: the age below and the waiting
-    // state come out of the same file and are read together.
+    // state come out of the same file and are read together. Looked up
+    // rather than re-read -- `readPublishedPanesAndProcessFacts` above
+    // already opened this pid's file once this load; a pid absent from the
+    // map (no file at all, or one this user could not read) gets the same
+    // answer `readProcessFacts` gives a file it cannot use: nothing.
     const facts =
       agent.pid === null
         ? { statusUpdatedAt: null }
-        : await readProcessFacts(sessionsRoot, agent.pid);
+        : (processFacts.get(agent.pid) ?? { statusUpdatedAt: null });
     const statusUpdatedAt = facts.statusUpdatedAt;
     // TRANSCRIPT FIRST, `.git/HEAD` AS FALLBACK. `read.facts.branch` is
     // `gitBranch` as Claude Code itself recorded it per turn -- the branch the

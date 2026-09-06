@@ -14,11 +14,28 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   parsePublishedPane,
   readPublishedPanes,
+  readPublishedPanesAndProcessFacts,
 } from '../../src/main/sources/claude-code/session-pane.js';
+
+// The module namespace of a Node builtin is not configurable in ESM, so a
+// direct `vi.spyOn(fsPromises, 'readFile')` throws -- `vi.mock` with a
+// pass-through wrapper is the only way to count real calls without changing
+// what they return.
+const readFileCalls = vi.hoisted(() => [] as string[]);
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    readFile: (path: unknown, ...rest: unknown[]) => {
+      readFileCalls.push(String(path));
+      return (actual.readFile as (...args: unknown[]) => unknown)(path, ...rest);
+    },
+  };
+});
 
 const sessionFile = (over: Record<string, unknown> = {}) =>
   JSON.stringify({
@@ -137,5 +154,86 @@ describe('readPublishedPanes', () => {
     expect(panes.get('sess-shared#100')).toBe('vam-alpha-aa11bb');
     expect(panes.get('sess-shared#200')).toBe('vam-beta-cc22dd');
     expect(panes.size).toBe(2);
+  });
+});
+
+/**
+ * `load()` used to call `readPublishedPanes` for the pairing above and then
+ * `readProcessFacts` again, per agent, against the SAME `<pid>.json` file --
+ * at 200 sessions, 200 redundant reads out of roughly 1000 total in one
+ * `load()`. This is what closes that gap: one read per row, both facts out
+ * of it.
+ */
+describe('readPublishedPanesAndProcessFacts', () => {
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'vam-cc-panes-facts-'));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('reads each row exactly once, for both the pairing and the status', async () => {
+    writeFileSync(
+      join(root, '4242.json'),
+      sessionFile({ statusUpdatedAt: 1_700_000_400_000, status: 'waiting', waitingFor: 'input' }),
+    );
+    writeFileSync(
+      join(root, '4243.json'),
+      sessionFile({ pid: 4243, sessionId: 'sess-beta', tmux: 'vam-alpha-cc22dd:@0.%0' }),
+    );
+    readFileCalls.length = 0;
+    const { panes, facts } = await readPublishedPanesAndProcessFacts(root);
+    // Both facts, out of the pairing's own directory scan.
+    expect(panes.get('sess-alpha#4242')).toBe('vam-alpha-aa11bb');
+    expect(facts.get(4242)).toEqual({ statusUpdatedAt: 1_700_000_400_000, waitingFor: 'input' });
+    expect(facts.get(4243)?.statusUpdatedAt).toBeNull();
+    // ONE call per row -- never two for the same pid, whatever the caller
+    // ends up wanting out of it.
+    expect(readFileCalls.filter((name) => name.endsWith('4242.json'))).toHaveLength(1);
+    expect(readFileCalls.filter((name) => name.endsWith('4243.json'))).toHaveLength(1);
+  });
+
+  it('resolves each PID to its own facts and its own pane, not the other pid sharing its sessionId', async () => {
+    // Measured on a real machine (`agents.ts`): two processes can resume the
+    // same Claude Code session, each with its own pid, its own pane and its
+    // own status file. Keying either map by `sessionId` instead of pid would
+    // let the second file's read silently overwrite the first's -- the exact
+    // collapse that once made vam address the wrong tmux session while
+    // reporting success.
+    writeFileSync(
+      join(root, '100.json'),
+      sessionFile({
+        pid: 100,
+        sessionId: 'sess-shared',
+        tmux: 'vam-alpha-aa11bb:@0.%0',
+        status: 'waiting',
+        statusUpdatedAt: 1_700_000_100_000,
+        waitingFor: 'permission prompt',
+      }),
+    );
+    writeFileSync(
+      join(root, '200.json'),
+      sessionFile({
+        pid: 200,
+        sessionId: 'sess-shared',
+        tmux: 'vam-beta-cc22dd:@0.%0',
+        status: 'idle',
+        statusUpdatedAt: 1_700_000_200_000,
+      }),
+    );
+    const { panes, facts } = await readPublishedPanesAndProcessFacts(root);
+    // The pane claim: both survive, addressable by the process that made
+    // them -- one sessionId, two rows, two different tmux panes.
+    expect(panes.get('sess-shared#100')).toBe('vam-alpha-aa11bb');
+    expect(panes.get('sess-shared#200')).toBe('vam-beta-cc22dd');
+    expect(panes.size).toBe(2);
+    // The facts: each pid's own file, not one overwriting the other's.
+    expect(facts.get(100)).toEqual({
+      statusUpdatedAt: 1_700_000_100_000,
+      waitingFor: 'permission prompt',
+    });
+    expect(facts.get(200)).toEqual({ statusUpdatedAt: 1_700_000_200_000 });
+    expect(facts.size).toBe(2);
   });
 });

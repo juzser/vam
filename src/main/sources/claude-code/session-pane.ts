@@ -33,6 +33,7 @@
 
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { type ProcessFacts, parseProcessFacts } from './session-status.js';
 
 /** One session's published pane. */
 export type PublishedPane = {
@@ -120,6 +121,65 @@ export async function readPublishedPanes(
     }
   }
   return panes;
+}
+
+/**
+ * `readPublishedPanes` PLUS the per-pid facts `load()` also needs -- one
+ * `readdir` and one read per file, not two.
+ *
+ * WHY THIS EXISTS. `load()` (`source.ts`) already calls `readPublishedPanes`
+ * for the pairing above, then calls `readProcessFacts` again, per agent, for
+ * the SAME file this loop already opened -- at 200 sessions that is 200
+ * redundant reads out of roughly 1000 total, measured. The redundancy is
+ * fixable here because this is the one place that already has the text of
+ * every `<pid>.json` file in hand; `readProcessFacts` still exists on its
+ * own for the caller `session-status.ts` documents -- a single pid, not a
+ * directory scan -- and stays exported and tested for that reason.
+ *
+ * NOT A NEW READ PATH, a second parse of the same text `parsePublishedPane`
+ * already holds -- `parseProcessFacts` is the same pure function
+ * `session-status.ts` exports and `readProcessFacts` calls, so nothing here
+ * duplicates ITS logic, only the file-opening wrapper around it. Keyed by
+ * the numeric pid a filename names, never by the row (`<sessionId>#<pid>`)
+ * `panes` uses -- `load()` has a pid per agent, not a session id, which is
+ * exactly the asymmetry `session-pane.ts`'s own docs draw between the two
+ * modules.
+ */
+export async function readPublishedPanesAndProcessFacts(sessionsRoot: string): Promise<{
+  readonly panes: ReadonlyMap<string, string>;
+  readonly facts: ReadonlyMap<number, ProcessFacts>;
+}> {
+  const panes = new Map<string, string>();
+  const facts = new Map<number, ProcessFacts>();
+  let names: string[];
+  try {
+    names = (await readdir(sessionsRoot, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+      .map((entry) => entry.name);
+  } catch {
+    return { panes, facts };
+  }
+  for (const name of names) {
+    try {
+      const text = await readFile(join(sessionsRoot, name), 'utf8');
+      const pidText = name.slice(0, -'.json'.length);
+      const published = parsePublishedPane(text);
+      if (published !== null) {
+        panes.set(`${published.sessionId}#${pidText}`, published.tmuxSession);
+      }
+      const pid = Number(pidText);
+      // A non-numeric name never matches a real `agent.pid`, so recording it
+      // anyway would only ever cost the Map an entry nobody looks up.
+      if (Number.isFinite(pid)) {
+        facts.set(pid, parseProcessFacts(text));
+      }
+    } catch {
+      // Same as `readPublishedPanes`: a file gone between the listing and
+      // the read, or one this user cannot open, costs its own pairing and
+      // its own facts, never the rest of the directory.
+    }
+  }
+  return { panes, facts };
 }
 
 /**
