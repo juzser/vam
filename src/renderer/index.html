@@ -3,6 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!--
+      A PNG file, not an inline SVG data URI: this keeps every colour value
+      for the mark out of index.html, which nothing here scans for a literal
+      hex the way test/canvas/topology-constraints.test.ts scans src/*.ts,
+      *.tsx and *.css. The source of truth for the mark itself is
+      build/icon.svg.
+    -->
+    <link rel="icon" type="image/png" href="./favicon.png" />
     <title>VAM</title>
   </head>
   <body>
