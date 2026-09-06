@@ -150,6 +150,12 @@ export type KeyAction =
   | { readonly kind: 'filterMenu' }
   /** `,` — settings, the convention most editors already use. */
   | { readonly kind: 'settings' }
+  /** `.` — the Remote surface: pair a phone, approve or deny it, unpair one
+      or revoke every device at once. Beside `,` on purpose — the same row,
+      the same "open something" family, and the same physical relationship
+      as the icon it opens (pull request 219's collision analysis records
+      the free keys this drew from). */
+  | { readonly kind: 'remote' }
   /** `E` — the scrubbed event log and the report vam composes from it. It
       shipped reachable only by clicking the status bar, which on a
       keyboard-first tool means the surface most wanted at the worst moment was
@@ -227,6 +233,7 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   x: { kind: 'close' },
   o: { kind: 'newSession' },
   ',': { kind: 'settings' },
+  '.': { kind: 'remote' },
   // `E` for error, and Shift-e because plain `e` is worth keeping free while
   // the single-key space is this thin. Nothing in any table holds either.
   E: { kind: 'errorLog' },

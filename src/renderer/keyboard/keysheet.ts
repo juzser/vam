@@ -189,6 +189,7 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   palette: { group: 'view', label: () => 'command palette' },
   filterMenu: { group: 'view', label: () => 'filter the session list' },
   settings: { group: 'view', label: () => 'settings' },
+  remote: { group: 'view', label: () => 'remote access — pair a phone, unpair one, or revoke all' },
   errorLog: { group: 'view', label: () => 'the error log and the report to send' },
   help: { group: 'view', label: () => 'this sheet' },
   // Escape is handled ahead of every table in `resolveChord`, so it is in no

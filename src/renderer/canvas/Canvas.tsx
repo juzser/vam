@@ -131,6 +131,7 @@ import {
   writePrefs,
 } from '../prefs/prefs.js';
 import { SettingsOverlay } from '../settings/SettingsOverlay.js';
+import type { SectionId } from '../settings/sections.js';
 import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/port.js';
 import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
@@ -760,6 +761,9 @@ function CanvasInner({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [keySheetOpen, setKeySheetOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** Which section Settings opens on next — `appearance` unless the Remote
+   *  icon or its key just asked for `remote` directly (see `openSettings`). */
+  const [settingsSection, setSettingsSection] = useState<SectionId>('appearance');
   const [errorLogOpen, setErrorLogOpen] = useState(false);
   /** Any full-screen overlay on screen. See the keydown handler for the rule. */
   const overlayOpen = paletteOpen || keySheetOpen || settingsOpen || errorLogOpen;
@@ -2408,6 +2412,11 @@ function CanvasInner({
           void createSession(focusedEntry.project.id, focusedEntry.project.name);
           return;
         case 'settings':
+          setSettingsSection('appearance');
+          setSettingsOpen(true);
+          return;
+        case 'remote':
+          setSettingsSection('remote');
           setSettingsOpen(true);
           return;
         case 'revealProject':
@@ -2717,7 +2726,14 @@ function CanvasInner({
     );
   }, []);
 
-  const onSidebarSettings = useCallback(() => setSettingsOpen(true), []);
+  const onSidebarSettings = useCallback(() => {
+    setSettingsSection('appearance');
+    setSettingsOpen(true);
+  }, []);
+  const onSidebarRemote = useCallback(() => {
+    setSettingsSection('remote');
+    setSettingsOpen(true);
+  }, []);
 
   const onSidebarToggleTheme = useCallback(
     () => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark')),
@@ -2818,6 +2834,7 @@ function CanvasInner({
     newSessionDecline: newSessionDecline,
     onPickIcon: onSidebarPickIcon,
     onSettings: onSidebarSettings,
+    onRemote: onSidebarRemote,
     width: sidebarWidth,
     resizeHandle: sidebarResizeHandle,
   };
@@ -3115,6 +3132,7 @@ function CanvasInner({
           theme={effective}
           onChange={savePrefs}
           onClose={() => setSettingsOpen(false)}
+          initialSection={settingsSection}
         />
       )}
 
