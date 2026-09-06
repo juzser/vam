@@ -1481,6 +1481,18 @@ function QuestionCard({
   const question = questions[Math.min(showing, questions.length - 1)];
   const openSteps = questions.filter((one) => one.answer === null);
   const open = openSteps.length > 0;
+  /**
+   * Amber IS `open`, nothing narrower. A card with an open step is a live
+   * block whether or not vam can type the answer -- `--color-waiting` means
+   * "blocked on you", not "vam can act here". `onAnswer` used to gate this
+   * too, and the note-suppression rule it copied from the same term, which
+   * meant `WaitingNote`'s own remedy line stayed drawn over the exact card
+   * whose `data-question-note` states a route of its own -- two sentences
+   * naming two different routes for one ask (`permission-prompt-desktop.png`).
+   * A single condition here means the paint and the attribute can never
+   * disagree with each other.
+   */
+  const waiting = open;
   const picked = question === undefined ? [] : (marks[question.id] ?? []);
   /** What is left to send: every open step the picker has not already taken. */
   const pending = openSteps.slice(taken.length);
@@ -1678,7 +1690,11 @@ function QuestionCard({
       data-question
       data-question-open={open ? 'true' : undefined}
       data-question-select={question.multiSelect ? 'multi' : 'single'}
-      className="flex flex-col gap-1.5 rounded-[10px] border border-line-strong bg-panel px-2.5 py-2"
+      data-question-waiting={waiting ? 'true' : undefined}
+      className={[
+        'flex flex-col gap-1.5 rounded-[10px] border bg-panel px-2.5 py-2',
+        waiting ? 'border-waiting' : 'border-line-strong',
+      ].join(' ')}
     >
       {/* The strip, and ONLY when there is more than one question: a step
           counter over a single question is furniture that says nothing. It
@@ -2351,6 +2367,23 @@ export function DetailPanel(props: DetailPanelProps) {
           },
         ];
   const newestQuestion = newestQuestions[0] ?? null;
+  /* FOUR THINGS HAVE TO BE TRUE before a Submit is drawn: the source really
+     delivers prompts, the shell really has the bridge (there is none in the
+     browser build), there is a row to aim at, and VAM STARTED THAT ROW'S
+     SESSION. The fourth is the same test the mode row makes (`canCycleMode`)
+     and for the same reason: vam can press a key only in a pane it started,
+     because no process may take over another's controlling TTY. A focused
+     row is not an aimable pane, so `entry !== null` was drawing an enabled
+     Submit over the operator's own terminal that could only ever come back
+     refused. Any of the four missing draws no button rather than one that
+     would refuse -- see `QuestionCard`. */
+  const questionOnAnswer =
+    delivers === true &&
+    answer !== undefined &&
+    entry !== null &&
+    entry.session.vamControlled === true
+      ? (request: AnswerRequest) => answer(entry.project.id, request, entry.session.id)
+      : null;
   /** The card is keyed by the CALL, so walking its steps does not remount it. */
   const setId = newestQuestion === null ? '' : toolUseOf(newestQuestion.id);
   /**
@@ -2856,8 +2889,22 @@ export function DetailPanel(props: DetailPanelProps) {
           {/* Above the card, because it is the more general fact: the card is
             one shape of ask, this is "somebody is blocked on you" whatever the
             shape. A session can be both -- a question on screen IS a waiting
-            state -- and then the note says which pane can answer it. */}
-          {waitingFor !== undefined && (
+            state -- and then the note says which pane can answer it.
+
+            EXCEPT while a card with an open step is drawn: `data-question-note`
+            states a route of its own in BOTH branches, delivering or not, so
+            drawing the note over an open card duplicated the remedy line --
+            and in the approval case (pull request 211) the two sentences
+            named DIFFERENT routes and contradicted each other: the note said
+            the Terminal tab, the card said "type your choice in the box
+            below" (`permission-prompt-desktop.png`). While the card is open
+            it IS the waiting surface -- the ask, the options and the route
+            sentence, whether or not vam can deliver the pick. The note
+            returns once nothing on screen carries a route: no card at all, or
+            every step already resolved (`openQuestion` false), where a
+            `waitingFor` still set is an ask the settled card does not
+            represent. */}
+          {waitingFor !== undefined && (newestQuestion === null || !openQuestion) && (
             <WaitingNote waitingFor={waitingFor} vamControlled={entry?.session.vamControlled} />
           )}
           {newestQuestion !== null && (
@@ -2866,26 +2913,7 @@ export function DetailPanel(props: DetailPanelProps) {
               questions={newestQuestions}
               firstOptionRef={firstOptionRef}
               onChat={startChat}
-              /* FOUR THINGS HAVE TO BE TRUE before a Submit is drawn: the
-                 source really delivers prompts, the shell really has the
-                 bridge (there is none in the browser build), there is a row to
-                 aim at, and VAM STARTED THAT ROW'S SESSION. The fourth is the
-                 same test the mode row makes (`canCycleMode`) and for the same
-                 reason: vam can press a key only in a pane it started, because
-                 no process may take over another's controlling TTY. A focused
-                 row is not an aimable pane, so `entry !== null` was drawing an
-                 enabled Submit over the operator's own terminal that could
-                 only ever come back refused. Any of the four missing draws no
-                 button rather than one that would refuse -- see
-                 `QuestionCard`. */
-              onAnswer={
-                delivers === true &&
-                answer !== undefined &&
-                entry !== null &&
-                entry.session.vamControlled === true
-                  ? (request) => answer(entry.project.id, request, entry.session.id)
-                  : null
-              }
+              onAnswer={questionOnAnswer}
             />
           )}
         </div>
