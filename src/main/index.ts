@@ -423,10 +423,14 @@ void app.whenReady().then(() => {
     ipcMain,
     { showOpenDialog: (options) => dialog.showOpenDialog(options) },
     async (sessionId) => {
-      const agents = await listLiveAgents();
+      const agentsResult = await listLiveAgents();
+      // `unavailable` becomes `null`, same as an unmatched row: vam could not
+      // ask, so it has no cwd to attach an image relative to -- not "no
+      // sessions are running".
+      if (agentsResult.kind === 'unavailable') return null;
       const row =
-        agents.find((agent) => agent.key === sessionId) ??
-        agents.find((agent) => agent.sessionId === sessionId);
+        agentsResult.agents.find((agent) => agent.key === sessionId) ??
+        agentsResult.agents.find((agent) => agent.sessionId === sessionId);
       return row?.cwd ?? null;
     },
     async (path) => {

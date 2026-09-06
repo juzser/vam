@@ -8,7 +8,7 @@
  * `mkdtemp` under `os.tmpdir()` is the only root any of this touches.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -154,12 +154,118 @@ describe('parseAgentRows', () => {
 });
 
 describe('listLiveAgents', () => {
-  it('degrades to no sessions when the CLI is not installed', async () => {
-    await expect(listLiveAgents('definitely-not-a-real-binary-vam')).resolves.toEqual([]);
+  let binRoot: string;
+
+  beforeEach(() => {
+    binRoot = mkdtempSync(join(tmpdir(), 'vam-fake-cli-'));
   });
 
-  it('degrades to no sessions when the CLI exits non-zero', async () => {
-    await expect(listLiveAgents('false')).resolves.toEqual([]);
+  afterEach(() => {
+    rmSync(binRoot, { recursive: true, force: true });
+  });
+
+  /**
+   * A fake `claude` that ignores its argv and behaves exactly as `body`
+   * says, regardless of `agents --json --all` being appended to it -- real
+   * shell binaries like `sleep` or `echo` cannot do that, since they read
+   * their own argv.
+   */
+  const fakeCli = (body: string): string => {
+    const path = join(binRoot, 'claude');
+    writeFileSync(path, `#!/bin/sh\n${body}\n`);
+    chmodSync(path, 0o755);
+    return path;
+  };
+
+  // These two used to assert `resolves.toEqual([])`: a missing binary and a
+  // non-zero exit both degraded to "no sessions", which is the exact defect
+  // this file exists to fix -- "vam could not ask" must never read as "the
+  // CLI answered zero". They now assert the honest `unavailable` shape, each
+  // with its own code.
+  it('reports the binary as unavailable, not as no sessions, when it is not installed', async () => {
+    await expect(listLiveAgents('definitely-not-a-real-binary-vam')).resolves.toMatchObject({
+      kind: 'unavailable',
+      code: 'cli-missing',
+    });
+  });
+
+  it('reports a non-zero exit as unavailable with its own code', async () => {
+    await expect(listLiveAgents(fakeCli('exit 1'))).resolves.toMatchObject({
+      kind: 'unavailable',
+      code: 'cli-failed',
+    });
+  });
+
+  it('reports a timeout as unavailable, distinct from a plain failure', async () => {
+    // Outlives `CLI_TIMEOUT_MS` (5s), so `execFile` kills it itself.
+    await expect(listLiveAgents(fakeCli('sleep 10'))).resolves.toMatchObject({
+      kind: 'unavailable',
+      code: 'timed-out',
+    });
+  }, 10_000);
+
+  it('reports unparseable stdout as unavailable rather than as no sessions', async () => {
+    await expect(listLiveAgents(fakeCli('echo not-json'))).resolves.toMatchObject({
+      kind: 'unavailable',
+      code: 'unreadable-output',
+    });
+  });
+
+  it('reports a genuine empty answer as ok with no agents, and this must never regress', async () => {
+    // The CLI answered and said "none" -- the one situation that IS an empty
+    // list, and must keep reading as one rather than as `unavailable`.
+    await expect(listLiveAgents(fakeCli('echo []'))).resolves.toEqual({
+      kind: 'ok',
+      agents: [],
+    });
+  });
+});
+
+/**
+ * `CLAUDE_CODE_SOURCE`'s write surface calls `listLiveAgents()` with its
+ * default binary name (`claude`), so these tests reach it by putting a fake
+ * one first on `PATH` -- the only injection point that exists for the real
+ * source object, as opposed to `stopSession`/`replyToSession`, which take an
+ * agent list directly and are exercised above via `loadClaudeCodeProjects`.
+ */
+describe('CLAUDE_CODE_SOURCE write path when the CLI cannot be asked', () => {
+  let binRoot: string;
+  let originalPath: string | undefined;
+
+  beforeEach(() => {
+    binRoot = mkdtempSync(join(tmpdir(), 'vam-fake-cli-path-'));
+    const claudePath = join(binRoot, 'claude');
+    writeFileSync(claudePath, '#!/bin/sh\nexit 1\n');
+    chmodSync(claudePath, 0o755);
+    originalPath = process.env.PATH;
+    process.env.PATH = `${binRoot}:${originalPath ?? ''}`;
+  });
+
+  afterEach(() => {
+    process.env.PATH = originalPath;
+    rmSync(binRoot, { recursive: true, force: true });
+  });
+
+  it('reports closeSession as unreachable, never as "may have exited", when the CLI fails', async () => {
+    const result = await CLAUDE_CODE_SOURCE.closeSession?.('sess-1#1');
+    expect(result).toMatchObject({ kind: 'unreachable', code: 'cli-failed' });
+    // The wrong contract this guards: a failed listing must never surface as
+    // the row-not-found refusal, which asserts the session "may have exited"
+    // -- a claim vam has no basis for when it could not ask at all.
+    expect(result?.code).not.toBe('unknown-session');
+    expect(result?.message).not.toMatch(/may have exited/);
+  });
+
+  it('reports recordPrompt as unreachable, never as "may have exited", when the CLI fails', async () => {
+    const result = await CLAUDE_CODE_SOURCE.recordPrompt?.('sess-1#1', 'hi');
+    expect(result).toMatchObject({ kind: 'unreachable', code: 'cli-failed' });
+    expect(result?.code).not.toBe('unknown-session');
+    expect(result?.message).not.toMatch(/may have exited/);
+  });
+
+  it('reports createSession as unreachable, never as a project-not-found refusal, when the CLI fails', async () => {
+    const result = await CLAUDE_CODE_SOURCE.createSession?.('proj-1', 'title');
+    expect(result).toMatchObject({ kind: 'unreachable', code: 'cli-failed' });
   });
 });
 
