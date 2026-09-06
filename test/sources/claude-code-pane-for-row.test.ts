@@ -34,8 +34,8 @@ const one: readonly TmuxSession[] = [{ project, name: 'vam-atlas-aa11bb' }];
 describe('paneForRow with published panes', () => {
   it('gives each of two sessions in one project its own pane', () => {
     const panes = new Map([
-      ['sess-alpha', 'vam-atlas-aa11bb'],
-      ['sess-beta', 'vam-atlas-cc22dd'],
+      ['sess-alpha#7', 'vam-atlas-aa11bb'],
+      ['sess-beta#8', 'vam-atlas-cc22dd'],
     ]);
     expect(paneForRow(two, [ALPHA, BETA], ALPHA, panes)).toBe('vam-atlas-aa11bb');
     expect(paneForRow(two, [ALPHA, BETA], BETA, panes)).toBe('vam-atlas-cc22dd');
@@ -55,7 +55,7 @@ describe('paneForRow with published panes', () => {
   it('prefers the published pane over the tag when the two disagree', () => {
     // The tag is set at creation and never updated; the session itself reports
     // where it is now. Where they differ the session wins.
-    const panes = new Map([['sess-alpha', 'vam-atlas-cc22dd']]);
+    const panes = new Map([['sess-alpha#7', 'vam-atlas-cc22dd']]);
     expect(paneForRow(two, [ALPHA], ALPHA, panes)).toBe('vam-atlas-cc22dd');
   });
 
@@ -63,7 +63,7 @@ describe('paneForRow with published panes', () => {
     // The operator's own sessions publish their panes too. vam may not type
     // into, kill, or draw one, so a name absent from vam's own listing is not
     // a pairing -- and here there is no tag either, so the answer is null.
-    const panes = new Map([['sess-alpha', 'notes']]);
+    const panes = new Map([['sess-alpha#7', 'notes']]);
     expect(paneForRow([], [ALPHA], ALPHA, panes)).toBeNull();
   });
 
@@ -73,7 +73,7 @@ describe('paneForRow with published panes', () => {
     // path answers a different question -- one agent here, one session tagged
     // here -- and the session it names is a DIFFERENT, live one that this row
     // was never in. Falling back meant replying into it, and killing it.
-    const panes = new Map([['sess-alpha', 'vam-atlas-zz99zz']]);
+    const panes = new Map([['sess-alpha#7', 'vam-atlas-zz99zz']]);
     expect(paneForRow(one, [ALPHA], ALPHA, panes)).toBeNull();
   });
 });
@@ -105,7 +105,7 @@ describe('a published pane is checked against the row’s OWN project', () => {
   ];
 
   it('refuses a published pane that belongs to another project', () => {
-    const panes = new Map([['sess-alpha', 'vam-beacon-ee33ff']]);
+    const panes = new Map([['sess-alpha#7', 'vam-beacon-ee33ff']]);
     expect(paneForRow(elsewhere, [ALPHA], ALPHA, panes)).toBeNull();
   });
 
@@ -116,7 +116,7 @@ describe('a published pane is checked against the row’s OWN project', () => {
     // typed into, and killed. Two independently correct fixes at two call
     // sites combined into a worse third defect, and the fixture that caught
     // it lives in remove-project's suite.
-    const panes = new Map([['sess-alpha', 'vam-beacon-ee33ff']]);
+    const panes = new Map([['sess-alpha#7', 'vam-beacon-ee33ff']]);
     expect(paneForRow([...one, ...elsewhere], [ALPHA], ALPHA, panes)).toBeNull();
   });
 
@@ -126,18 +126,18 @@ describe('a published pane is checked against the row’s OWN project', () => {
     expect(paneForRow(one, [ALPHA], ALPHA, new Map())).toBe('vam-atlas-aa11bb');
     // 2. IT AGREES: the published value names a session tagged for this
     //    project. Resolved, and it bypasses the counts by design.
-    const agrees = new Map([['sess-alpha', 'vam-atlas-aa11bb']]);
+    const agrees = new Map([['sess-alpha#7', 'vam-atlas-aa11bb']]);
     expect(paneForRow(one, [ALPHA], ALPHA, agrees)).toBe('vam-atlas-aa11bb');
     // 3. IT DISAGREES: something about this row is wrong. Absence of evidence
     //    is not the same as evidence of a corrupt pairing, and only the first
     //    of the two may fall back.
-    const disagrees = new Map([['sess-alpha', 'vam-beacon-ee33ff']]);
+    const disagrees = new Map([['sess-alpha#7', 'vam-beacon-ee33ff']]);
     expect(paneForRow([...one, ...elsewhere], [ALPHA], ALPHA, disagrees)).toBeNull();
   });
 
   it('never matches a session no one tagged, whose project reads back empty', () => {
     const untagged: readonly TmuxSession[] = [{ project: '', name: 'someone-elses' }];
-    const panes = new Map([['sess-alpha', 'someone-elses']]);
+    const panes = new Map([['sess-alpha#7', 'someone-elses']]);
     expect(paneForRow(untagged, [ALPHA], ALPHA, panes)).toBeNull();
   });
 });
@@ -147,7 +147,7 @@ describe('paneForRow with three live sessions in one cwd', () => {
   const all = [ALPHA, BETA, GAMMA];
 
   it('pairs the session that published a pane and neither of the other two', () => {
-    const panes = new Map([['sess-beta', 'vam-atlas-aa11bb']]);
+    const panes = new Map([['sess-beta#8', 'vam-atlas-aa11bb']]);
     expect(paneForRow(one, all, BETA, panes)).toBe('vam-atlas-aa11bb');
     expect(paneForRow(one, all, ALPHA, panes)).toBeNull();
     expect(paneForRow(one, all, GAMMA, panes)).toBeNull();
@@ -172,7 +172,7 @@ describe('paneForRow and panes another row has claimed', () => {
     // publishes this pane and which is not among the rows here -- a session
     // vam is not currently drawing, or one that has exited leaving its file.
     // vam cannot tell those apart, and the pane is spoken for either way.
-    const panes = new Map([['sess-alpha', 'vam-atlas-aa11bb']]);
+    const panes = new Map([['sess-alpha#7', 'vam-atlas-aa11bb']]);
     expect(paneForRow(one, [GAMMA], GAMMA, panes)).toBeNull();
   });
 
@@ -184,7 +184,7 @@ describe('paneForRow and panes another row has claimed', () => {
     // The same ordering rule as `matchVamSession`'s: the claim is applied
     // after the single-candidate count, so it can only ever veto. Subtracting
     // first would leave one name here and type into it.
-    const panes = new Map([['sess-alpha', 'vam-atlas-aa11bb']]);
+    const panes = new Map([['sess-alpha#7', 'vam-atlas-aa11bb']]);
     expect(paneForRow(two, [GAMMA], GAMMA, panes)).toBeNull();
   });
 

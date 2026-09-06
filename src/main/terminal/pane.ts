@@ -27,7 +27,6 @@
  */
 
 import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
-import { sessionIdOf } from '../sources/claude-code/deliver.js';
 import { claimedPanes } from '../sources/claude-code/session-pane.js';
 import {
   sendBackspaceArgv,
@@ -127,7 +126,11 @@ export function targetSession(
   rowId: string | undefined,
   panes: ReadonlyMap<string, string> | undefined,
 ): SessionMatch {
-  const published = rowId === undefined ? undefined : panes?.get(sessionIdOf(rowId));
+  // `rowId` IS ALREADY the row key (`<sessionId>#<pid>`, `deliver.ts`), and
+  // `panes` is keyed the same way (`session-pane.ts`) precisely so two
+  // processes resuming one session -- each with its own pid and its own
+  // published pane -- do not collapse into a single, wrong lookup.
+  const published = rowId === undefined ? undefined : panes?.get(rowId);
   if (published !== undefined) {
     // THE PROJECT IS CHECKED, AND A DISAGREEMENT ENDS THE SEARCH. Matching
     // the name alone made this fast path strictly WEAKER than the fallback it

@@ -72,7 +72,16 @@ export function parsePublishedPane(text: string): PublishedPane | null {
 }
 
 /**
- * Every session id in `sessionsRoot` that published a pane, mapped to it.
+ * Every ROW in `sessionsRoot` that published a pane, mapped to it -- keyed by
+ * `<sessionId>#<pid>`, the same row identity `agents.ts` builds as `key`.
+ *
+ * NOT KEYED BY `sessionId`. `agents.ts` documents, as a measured fact, that
+ * two processes can resume the same session -- one session id, two pids, two
+ * different panes -- which is exactly why a row's identity there is `key` and
+ * not the session id: keying by session id alone would collapse one pid's
+ * claim into the other's, silently, to whichever `readdir` returned last.
+ * Each `<pid>.json` file already carries its own pid in its name, so building
+ * the row key costs nothing extra.
  *
  * Never throws, for the reason `readStatusUpdatedAt` does not: a missing or
  * unreadable directory means vam has no published pairing to prefer, which is
@@ -97,7 +106,13 @@ export async function readPublishedPanes(
   for (const name of names) {
     try {
       const published = parsePublishedPane(await readFile(join(sessionsRoot, name), 'utf8'));
-      if (published !== null) panes.set(published.sessionId, published.tmuxSession);
+      if (published !== null) {
+        // The pid is not in the document -- it is the filename, minus the
+        // `.json` this loop already filtered for -- and it is what makes the
+        // key a ROW rather than a session.
+        const pid = name.slice(0, -'.json'.length);
+        panes.set(`${published.sessionId}#${pid}`, published.tmuxSession);
+      }
     } catch {
       // A file that vanished between the listing and the read, or one this
       // user cannot open. One unreadable file costs its own pairing, never

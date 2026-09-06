@@ -114,7 +114,11 @@ export function paneForRow(
   // sweep up every session vam did NOT start. Checked before the published
   // path as well as the tag one: it disqualifies both.
   if (projectId === '') return null;
-  const published = panes?.get(row.sessionId);
+  // Keyed by `row.key` (`<sessionId>#<pid>`), not `row.sessionId`: two
+  // processes can resume the same session (`agents.ts`), each with its own
+  // pid and its own published pane, and looking this up by session id alone
+  // would let one row's claim answer for the other's.
+  const published = panes?.get(row.key);
   if (published !== undefined) {
     // A PUBLISHED VALUE THAT DISAGREES IS EVIDENCE OF A CORRUPT PAIRING, NOT
     // THE ABSENCE OF EVIDENCE -- and that distinction is the whole of this
