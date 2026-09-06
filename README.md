@@ -167,10 +167,13 @@ app — nothing extra to build or serve.
 
 ## Keyboard reference
 
-Bindings are defined in `src/renderer/keyboard/chords.ts`, and the table
-below is generated from that file, not hand-maintained — the in-app `?`
-sheet is built from the same source. `hjkl` move the focused node the way
-they always do; `Mod` means Ctrl or Cmd, whichever your platform uses.
+Bindings are defined in `src/renderer/keyboard/chords.ts`. The table below
+is hand-maintained, but not merely trusted: `test/keyboard/chords.readme.test.ts`
+reads `chords.ts`'s own binding tables and this file's `Key`/`Chord` columns
+and fails `vitest run` the moment either side names something the other
+doesn't — the same source the in-app `?` sheet is generated from. `hjkl`
+move the focused node the way they always do; `Mod` means Ctrl or Cmd,
+whichever your platform uses.
 
 | Key | Action |
 |---|---|
@@ -185,6 +188,7 @@ they always do; `Mod` means Ctrl or Cmd, whichever your platform uses.
 | `,` | Open settings |
 | `.` | Open Remote — pair a phone, approve or deny it, unpair one, or revoke every device |
 | `E` | Open the error log and the report vam can compose from it |
+| `?` | Open the in-app shortcut sheet (generated from these same bindings) |
 | `f` | Jump (open the jump-label overlay) |
 | `F` | Open the sidebar's filter popover |
 | `G` | Jump to the last session |
@@ -193,7 +197,7 @@ they always do; `Mod` means Ctrl or Cmd, whichever your platform uses.
 | `p` | Reveal the focused session's project in the sidebar |
 | `Enter` | Open the focused step |
 | `Mod-k` | Open the command palette |
-| `Mod-1` … `Mod-9` | Jump to a position — a session in the sidebar, or a tab in the response pane, whichever pane has the keyboard (`Mod-9` is always the last one) |
+| `Mod-1` `Mod-2` `Mod-3` `Mod-4` `Mod-5` `Mod-6` `Mod-7` `Mod-8` `Mod-9` | Jump to a position — a session in the sidebar, or a tab in the response pane, whichever pane has the keyboard (`Mod-9` is always the last one) |
 | `<` / `>` | Narrow / widen the focused side pane |
 | `+` / `-` | Zoom the canvas in / out |
 | `Z` | Fit the whole canvas in view |
