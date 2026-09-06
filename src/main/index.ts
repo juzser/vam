@@ -7,7 +7,7 @@
  * separately by `test/electron/launch.test.ts`.
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -24,6 +24,7 @@ import { readServeAddress } from './remote/hostname.js';
 import { registerRemoteIpc } from './remote/ipc.js';
 import { remoteConfigFromEnv } from './remote/launch.js';
 import { createPairing } from './remote/pairing.js';
+import { disableServe, enableServe } from './remote/serve.js';
 import { createStreamRegistry, startRemoteServer } from './remote/server.js';
 import { listLiveAgents } from './sources/claude-code/agents.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
@@ -288,6 +289,13 @@ function startRemoteTransport(): void {
       devices,
       allowWrites: config.allowWrites,
       readAddress: () => readServeAddress(runTailscale),
+      // Bound to THIS config's port here, so `ipc.ts` never has to know it.
+      // `spawnTailscaleServe`, NOT `runTailscale`: `serve --bg` can print the
+      // one actionable thing on screen to stdout and then never exit, so this
+      // needs a runner that hands stdout back while the process is still
+      // running -- see `remote/serve.ts`'s module comment.
+      enableServe: () => enableServe(spawnTailscaleServe, config.port),
+      disableServe: () => disableServe(spawnTailscaleServe),
     });
     await startRemoteServer({
       ...config,
@@ -330,6 +338,37 @@ function runTailscale(args: readonly string[]): Promise<{ code: number; stdout: 
       else resolve({ code: error === null ? 0 : 1, stdout });
     });
   });
+}
+
+/**
+ * `tailscale serve`/`tailscale serve ... off`, watched live.
+ *
+ * `execFile` (above) buffers everything and answers once at the end, which is
+ * exactly what `remote/serve.ts` measured `tailscale serve --bg` refusing to
+ * do: on a tailnet with Serve turned off it prints the one actionable line to
+ * stdout and then never exits, so `execFile`'s callback would simply never
+ * fire. `spawn` hands back the child directly, so its stdout can be read
+ * WHILE the process is still running and it can be killed once `attempt()`
+ * has enough to answer with -- see `TailscaleServeRun`.
+ */
+function spawnTailscaleServe(
+  args: readonly string[],
+  onStdout: (chunk: string) => void,
+): { exit: Promise<{ code: number; stdout: string }>; kill: () => void } {
+  const child = spawn('tailscale', [...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  child.stdout?.on('data', (data: Buffer) => {
+    const chunk = data.toString('utf8');
+    stdout += chunk;
+    onStdout(chunk);
+  });
+  const exit = new Promise<{ code: number; stdout: string }>((resolve, reject) => {
+    // `error` (e.g. ENOENT: no `tailscale` on PATH) fires INSTEAD OF `close`,
+    // never alongside it -- Node's own contract for a child that never spawned.
+    child.once('error', reject);
+    child.once('close', (code) => resolve({ code: code ?? 1, stdout }));
+  });
+  return { exit, kill: () => child.kill() };
 }
 
 void app.whenReady().then(() => {

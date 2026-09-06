@@ -24,7 +24,8 @@ import type { IpcMainLike } from '../ipc/handlers.js';
 import type { DeviceRegistry } from './devices.js';
 import type { ServeAddress } from './hostname.js';
 import type { Pairing } from './pairing.js';
-import type { RemoteDeviceView, RemoteState } from './state.js';
+import type { ServeToggleResult } from './serve.js';
+import type { RemoteDeviceView, RemoteState, ServeState } from './state.js';
 
 export type { RemoteState };
 
@@ -33,6 +34,14 @@ export type RemoteIpcOptions = {
   readonly devices: DeviceRegistry;
   readonly allowWrites: boolean;
   readonly readAddress: () => Promise<ServeAddress>;
+  /**
+   * Runs `tailscale serve --bg <port>` for a port this module never sees --
+   * the caller (`src/main/index.ts`) already knows its own config's port, and
+   * closing over it there keeps that number out of the pairing bridge.
+   */
+  readonly enableServe: () => Promise<ServeToggleResult>;
+  /** Runs the TARGETED off, never `tailscale serve reset` -- see `remote/serve.ts`. */
+  readonly disableServe: () => Promise<ServeToggleResult>;
   readonly now?: () => number;
 };
 
@@ -59,6 +68,19 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
    * `pairedSince` below.
    */
   let openedAt: number | null = null;
+
+  /**
+   * vam's own record of the last `enableServe`/`disableServe` outcome --
+   * NEVER a live read of the OS. Starts off, and only an explicit act on
+   * `serveEnable`/`serveDisable` below ever changes it: `snapshot` below only
+   * READS this variable, so polling `remoteState` can never flip it.
+   */
+  let serve: ServeState = {
+    enabled: false,
+    lastError: null,
+    timedOut: false,
+    tailnetServeDisabledUrl: null,
+  };
 
   const address = async (): Promise<ServeAddress> => {
     if (cached !== null && now() - cached.at < ADDRESS_CACHE_MS) {
@@ -112,6 +134,7 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
       devices: options.devices.list(),
       address: await address(),
       allowWrites: options.allowWrites,
+      serve,
       // The failure path's only desktop surface. A grant that did not persist
       // and a registry vam refused to overwrite are both known here and were
       // said nowhere -- the phone was the only side told.
@@ -163,6 +186,57 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
 
   ipcMain.handle(CHANNELS.deviceRemoveAll, async (): Promise<RemoteState> => {
     await options.devices.removeAll();
+    return await snapshot();
+  });
+
+  /**
+   * Folds a toggle attempt's result into the next `ServeState`. `wasEnabling`
+   * is what `enabled` becomes on `ok`; on any failure `enabled` is left
+   * UNCHANGED, because neither a refusal nor a timeout tells vam the standing
+   * configuration actually moved. `lastError`/`timedOut` keep the LAST
+   * attempt's own words (or its own honest silence) and clear on the next
+   * success -- never flattened into a generic "could not enable/disable".
+   */
+  const nextServeState = (result: ServeToggleResult, wasEnabling: boolean): ServeState => {
+    if (result.kind === 'ok') {
+      return {
+        enabled: wasEnabling,
+        lastError: null,
+        timedOut: false,
+        tailnetServeDisabledUrl: null,
+      };
+    }
+    if (result.kind === 'timed-out') {
+      return {
+        enabled: serve.enabled,
+        lastError: null,
+        timedOut: true,
+        tailnetServeDisabledUrl: null,
+      };
+    }
+    if (result.kind === 'tailnet-serve-disabled') {
+      return {
+        enabled: serve.enabled,
+        lastError: null,
+        timedOut: false,
+        tailnetServeDisabledUrl: result.url,
+      };
+    }
+    return {
+      enabled: serve.enabled,
+      lastError: result.message,
+      timedOut: false,
+      tailnetServeDisabledUrl: null,
+    };
+  };
+
+  ipcMain.handle(CHANNELS.serveEnable, async (): Promise<RemoteState> => {
+    serve = nextServeState(await options.enableServe(), true);
+    return await snapshot();
+  });
+
+  ipcMain.handle(CHANNELS.serveDisable, async (): Promise<RemoteState> => {
+    serve = nextServeState(await options.disableServe(), false);
     return await snapshot();
   });
 }

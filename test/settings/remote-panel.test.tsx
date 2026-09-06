@@ -33,6 +33,7 @@ const IDLE: RemoteState = {
   address: { kind: 'unavailable', reason: 'no-cli' },
   allowWrites: false,
   registry: null,
+  serve: { enabled: false, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
   nowMs: NOW,
 };
 
@@ -49,6 +50,8 @@ function fakeApi(over: Partial<RemoteState> = {}, opened: Partial<RemoteState> =
     deny: vi.fn(async () => idle),
     remove: vi.fn(async () => idle),
     revokeAll: vi.fn(async () => idle),
+    enableServe: vi.fn(async () => idle),
+    disableServe: vi.fn(async () => idle),
   };
 }
 
@@ -67,6 +70,9 @@ describe('RemotePanel', () => {
   it('shows the https address when this machine could be asked for it', async () => {
     const api = fakeApi({
       address: { kind: 'found', url: 'https://example-machine.example-tailnet.ts.net' },
+      // The address is only WORTH drawing once phone access is actually on --
+      // otherwise it names a port nothing is proxying to yet.
+      serve: { enabled: true, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
     });
     render(<RemotePanel api={api} active />);
 
@@ -107,6 +113,7 @@ describe('RemotePanel', () => {
     const copyText = vi.fn(async () => true);
     const api = fakeApi({
       address: { kind: 'found', url: 'https://example-machine.example-tailnet.ts.net' },
+      serve: { enabled: true, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
     });
     render(<RemotePanel api={api} copyText={copyText} active />);
 

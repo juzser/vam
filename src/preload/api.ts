@@ -333,6 +333,10 @@ export type RemoteApi = {
   deny(): Promise<RemoteState>;
   remove(deviceId: string): Promise<RemoteState>;
   revokeAll(): Promise<RemoteState>;
+  /** Runs `tailscale serve --bg <port>` on THIS machine. Never called by a read. */
+  enableServe(): Promise<RemoteState>;
+  /** Runs `tailscale serve reset`, reversing `enableServe`. */
+  disableServe(): Promise<RemoteState>;
 };
 
 export function createRemoteApi(ipc: InvokerLike): RemoteApi {
@@ -345,6 +349,8 @@ export function createRemoteApi(ipc: InvokerLike): RemoteApi {
     deny: () => ask(CHANNELS.pairingDeny),
     remove: (deviceId) => ask(CHANNELS.deviceRemove, deviceId),
     revokeAll: () => ask(CHANNELS.deviceRemoveAll),
+    enableServe: () => ask(CHANNELS.serveEnable),
+    disableServe: () => ask(CHANNELS.serveDisable),
   };
 }
 

@@ -110,6 +110,7 @@ describe('unpair and Revoke all are reachable from the surface `.` opens', () =>
     address: { kind: 'unavailable', reason: 'no-cli' },
     allowWrites: true,
     registry: null,
+    serve: { enabled: false, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
     nowMs: NOW,
   };
 
@@ -121,6 +122,8 @@ describe('unpair and Revoke all are reachable from the surface `.` opens', () =>
       deny: vi.fn(async () => STATE),
       remove: vi.fn(async () => STATE),
       revokeAll: vi.fn(async () => STATE),
+      enableServe: vi.fn(async () => STATE),
+      disableServe: vi.fn(async () => STATE),
     };
     // biome-ignore lint/suspicious/noExplicitAny: the bridge widens past Window's declared api type, same as RemotePanel.tsx's own BridgeWithRemote
     (window as any).api = { remote: api };
