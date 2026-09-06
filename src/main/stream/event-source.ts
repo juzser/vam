@@ -40,7 +40,18 @@ export type MinimalEventSource = {
   close(): void;
 };
 
-export function createNodeEventSource(url: string): MinimalEventSource {
+/**
+ * `reconnectMs` overrides `RECONNECT_MS` for tests only -- production never
+ * passes it. It exists so a reconnect test can assert on REACHING the retry
+ * rather than on its wall-clock timing: this machine has been measured
+ * stretching an 11ms operation past five seconds under load, so a bound
+ * tuned to the typical delay would flake.
+ */
+export function createNodeEventSource(
+  url: string,
+  options?: { readonly reconnectMs?: number },
+): MinimalEventSource {
+  const reconnectMs = options?.reconnectMs ?? RECONNECT_MS;
   const listeners = new Map<string, Set<FrameListener>>();
   let closed = false;
   let buffer = '';
@@ -49,11 +60,30 @@ export function createNodeEventSource(url: string): MinimalEventSource {
   let skipLeadingLf = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let currentReq: ReturnType<typeof httpRequest> | null = null;
+  // Guards a single connection attempt against dispatching more than one
+  // `error` / reconnect for one drop: a mid-stream reset can fire several of
+  // `end`/`error`/`aborted`/`close` for the SAME failure. Reset at the top of
+  // each `connect()`, so the NEXT attempt's failure is still reported.
+  let failureHandled = false;
 
   const dispatch = (type: string, data: string | undefined) => {
     for (const listener of listeners.get(type) ?? []) {
       listener({ data });
     }
+  };
+
+  // The single funnel for "this connection attempt has failed" -- whether
+  // that surfaced as the response ending, a request-level error, a
+  // mid-stream reset landing on the response, or the buffer cap tripping.
+  // Guarded by `failureHandled` so a reset that fires more than one of
+  // those events still produces exactly one `error` dispatch and exactly
+  // one scheduled reconnect (the existing `reconnectTimer !== null` guard on
+  // `scheduleReconnect` only covers the SECOND part of that).
+  const handleFailure = () => {
+    if (closed || failureHandled) return;
+    failureHandled = true;
+    dispatch('error', undefined);
+    scheduleReconnect();
   };
 
   // Frames are separated by a blank line; within a frame, `event:` names it
@@ -84,10 +114,9 @@ export function createNodeEventSource(url: string): MinimalEventSource {
     // connection instead; the reconnect path gives it a clean start.
     if (buffer.length > MAX_BUFFER_CHARS) {
       buffer = '';
-      dispatch('error', undefined);
       currentReq?.destroy();
       currentReq = null;
-      scheduleReconnect();
+      handleFailure();
       return;
     }
     let boundary = buffer.indexOf('\n\n');
@@ -115,29 +144,31 @@ export function createNodeEventSource(url: string): MinimalEventSource {
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       connect();
-    }, RECONNECT_MS);
+    }, reconnectMs);
     reconnectTimer.unref?.();
   };
 
   function connect(): void {
     if (closed) return;
+    failureHandled = false;
     const client = url.startsWith('https:') ? httpsRequest : httpRequest;
     const req = client(url, { headers: { accept: 'text/event-stream' } }, (res) => {
       res.setEncoding('utf8');
       res.on('data', consume);
-      res.on('end', () => {
-        if (!closed) {
-          dispatch('error', undefined);
-          scheduleReconnect();
-        }
-      });
+      // A response that completes normally (`end`) is itself abnormal for
+      // SSE, which never ends on its own -- treated as a failure, same as
+      // today. `error` and `aborted` cover a reset the request/response
+      // pair itself reports. `close` is the catch-all: Node's own docs note
+      // a peer that resets the connection AFTER headers were sent can fire
+      // `close` on the response with none of `end`/`error`/`aborted` --
+      // exactly the corner this fixes. All four funnel into the same
+      // once-per-attempt guard.
+      res.on('end', handleFailure);
+      res.on('error', handleFailure);
+      res.on('aborted', handleFailure);
+      res.on('close', handleFailure);
     });
-    req.on('error', () => {
-      if (!closed) {
-        dispatch('error', undefined);
-        scheduleReconnect();
-      }
-    });
+    req.on('error', handleFailure);
     // The connection is long-lived by design (SSE never completes on its
     // own); `unref` keeps it from being the reason the process can't exit --
     // main's own quit sequence, not an idle socket, decides that.
