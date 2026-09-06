@@ -1,0 +1,128 @@
+# vam release — builds the downloadable artifacts for a tag.
+#
+# WHAT THIS DOES NOT DO, stated up front so a green tick is not read as more
+# than it is: it does not SIGN anything. There is no Apple Developer identity
+# and no Windows certificate for this project, and `electron-builder.config.cjs`
+# sets `mac.identity: null` so the result is deterministic rather than silently
+# signed by whatever happens to be in a build machine's keychain. macOS
+# Gatekeeper therefore refuses the first launch of the .dmg outright, and
+# Windows SmartScreen interrupts the installer. Both are expected, both are
+# documented in the release notes this workflow writes, and neither is fixable
+# from this file -- they need certificates, not configuration.
+#
+# The release is created as a DRAFT. Publishing is a person's decision, not a
+# side effect of pushing a tag.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (must already exist)'
+        required: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  # One job, before the matrix, so three parallel builders do not race to
+  # create the same release. Each builder only ever uploads.
+  create:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: resolve
+        shell: bash
+        run: echo "tag=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: create draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG='${{ steps.resolve.outputs.tag }}'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists; builders will upload into it"
+            exit 0
+          fi
+          gh release create "$TAG" --draft --title "vam $TAG" --notes "$(cat <<'NOTES'
+          ## These builds are unsigned
+
+          vam has no code-signing certificate, so your operating system will
+          refuse to open these downloads on the first try. That is expected.
+
+          - **macOS** — the app is blocked as unidentified or "damaged".
+            Right-click the app and choose *Open*, or run
+            `xattr -cr /Applications/vam.app` once.
+          - **Windows** — SmartScreen shows "Windows protected your PC".
+            Choose *More info* → *Run anyway*.
+          - **Linux** — the AppImage needs the executable bit:
+            `chmod +x vam-*.AppImage`.
+
+          If you would rather not do any of that, build from source: `pnpm install && pnpm run dist`.
+
+          ## Downloads
+
+          - macOS Apple Silicon — `*-arm64.dmg`
+          - macOS Intel — `*-x64.dmg`
+          - Windows — `*-Setup-*.exe`
+          - Linux — `*.AppImage`
+          NOTES
+          )"
+
+  build:
+    needs: create
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create.outputs.tag }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # package.json engines: node >=22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # `dist` builds the desktop app AND the phone client, then packages both.
+      # Skipping the phone build would produce an app whose every remote
+      # request answers 404 -- see test/app/packaged-files.test.ts.
+      - name: package
+        shell: bash
+        run: pnpm run dist
+
+      # Upload only the distributables at the top level. The `*-unpacked`
+      # directories and builder-effective-config.yaml are build intermediates.
+      - name: upload artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG='${{ needs.create.outputs.tag }}'
+          shopt -s nullglob
+          files=(dist-app/*.dmg dist-app/*.zip dist-app/*.exe dist-app/*.AppImage dist-app/*.blockmap)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no distributables were produced in dist-app/ -- failing rather than reporting a green upload of nothing"
+            ls -la dist-app || true
+            exit 1
+          fi
+          printf 'uploading %s\n' "${files[@]}"
+          gh release upload "$TAG" "${files[@]}" --clobber

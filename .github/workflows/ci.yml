@@ -2,7 +2,7 @@
 #
 # WHAT IS DELIBERATELY ABSENT, and why, so nobody reads a green tick as more
 # than it is: neither e2e spec runs in CI. `e2e/sse-drop.spec.ts` (AC-G1) and
-# `e2e/sse-drop-reconnect.pw.ts` (AC-10) each need a live black-smith — they
+# `e2e/sse-drop-reconnect.pw.ts` (AC-10) each need a live factory backend — they
 # spawn it via SMITH_CLI_ENTRY, which points into a SIBLING REPOSITORY that is
 # private and not checked out here. They also need a Playwright browser, and
 # `e2e/` has no package.json anywhere in the repo, so its dependency set is not
