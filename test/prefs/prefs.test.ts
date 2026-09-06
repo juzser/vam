@@ -57,7 +57,7 @@ function session(id: string, icon: string | null = null) {
 
 function model(icon: string | null = null): CanvasModel {
   return {
-    projects: [{ id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a1', icon)] }],
+    projects: [{ id: 'p1', name: 'alpha', source: 'factory', sessions: [session('a1', icon)] }],
   };
 }
 
@@ -71,7 +71,7 @@ describe('remembering what you arranged', () => {
 
   it('round-trips an icon', () => {
     const store = fake();
-    const saved = setIcon(EMPTY_PREFS, 'black-smith', 'a1', '🛠', NOW);
+    const saved = setIcon(EMPTY_PREFS, 'factory', 'a1', '🛠', NOW);
     writePrefs(store, saved);
     expect(readPrefs(store, NOW)).toEqual(saved);
   });
@@ -79,8 +79,8 @@ describe('remembering what you arranged', () => {
   it('clearing an icon removes it rather than storing an empty one', () => {
     // An entry holding "" would render as an icon-shaped nothing and, worse,
     // would keep the session out of whatever the absent case does.
-    const set = setIcon(EMPTY_PREFS, 'black-smith', 'a1', '🛠', NOW);
-    expect(setIcon(set, 'black-smith', 'a1', '', NOW).icons).toEqual({});
+    const set = setIcon(EMPTY_PREFS, 'factory', 'a1', '🛠', NOW);
+    expect(setIcon(set, 'factory', 'a1', '', NOW).icons).toEqual({});
   });
 });
 
@@ -88,18 +88,18 @@ describe('AC-1: two sources sharing a session id do not share an icon', () => {
   it('setting the icon on one source leaves the other source untouched', () => {
     const twoSources: CanvasModel = {
       projects: [
-        { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('D-257')] },
+        { id: 'p1', name: 'alpha', source: 'factory', sessions: [session('D-257')] },
         { id: 'p2', name: 'beta', source: 'orca', sessions: [session('D-257')] },
       ],
     };
-    let prefs = setIcon(EMPTY_PREFS, 'black-smith', 'D-257', '🔥', NOW);
+    let prefs = setIcon(EMPTY_PREFS, 'factory', 'D-257', '🔥', NOW);
     prefs = setIcon(prefs, 'orca', 'D-257', '🌊', NOW);
     const out = applyIcons(twoSources, prefs.icons);
-    const blackSmith = out.projects.find((p) => p.source === 'black-smith');
+    const factory = out.projects.find((p) => p.source === 'factory');
     const orca = out.projects.find((p) => p.source === 'orca');
     // Assert both independently: a shared-key store would make orca read
-    // 'black-smith's last write and pass one of these while failing the other.
-    expect(blackSmith?.sessions[0]?.icon).toBe('🔥');
+    // 'factory's last write and pass one of these while failing the other.
+    expect(factory?.sessions[0]?.icon).toBe('🔥');
     expect(orca?.sessions[0]?.icon).toBe('🌊');
   });
 });
@@ -107,14 +107,14 @@ describe('AC-1: two sources sharing a session id do not share an icon', () => {
 describe('putting icons on the model', () => {
   it('replaces the factory’s null with your choice', () => {
     const out = applyIcons(model(), {
-      'black-smith': { a1: { icon: '🛠', at: NOW.toISOString() } },
+      factory: { a1: { icon: '🛠', at: NOW.toISOString() } },
     });
     expect(out.projects[0]?.sessions[0]?.icon).toBe('🛠');
   });
 
   it('leaves a session you never chose for alone', () => {
     const out = applyIcons(model(), {
-      'black-smith': { other: { icon: '🛠', at: NOW.toISOString() } },
+      factory: { other: { icon: '🛠', at: NOW.toISOString() } },
     });
     expect(out.projects[0]?.sessions[0]?.icon).toBeNull();
   });
@@ -129,33 +129,33 @@ describe('putting icons on the model', () => {
 
 describe('project icons: keyed (sourceId, projectId), the same idiom as session icons', () => {
   it('round-trips a project icon', () => {
-    const saved = setProjectIcon(EMPTY_PREFS, 'black-smith', 'p1', '📦', NOW);
+    const saved = setProjectIcon(EMPTY_PREFS, 'factory', 'p1', '📦', NOW);
     expect(saved.projectIcons).toEqual({
-      'black-smith': { p1: { icon: '📦', at: NOW.toISOString() } },
+      factory: { p1: { icon: '📦', at: NOW.toISOString() } },
     });
   });
 
   it('clearing a project icon removes it rather than storing an empty one', () => {
-    const set = setProjectIcon(EMPTY_PREFS, 'black-smith', 'p1', '📦', NOW);
-    expect(setProjectIcon(set, 'black-smith', 'p1', '', NOW).projectIcons).toEqual({});
+    const set = setProjectIcon(EMPTY_PREFS, 'factory', 'p1', '📦', NOW);
+    expect(setProjectIcon(set, 'factory', 'p1', '', NOW).projectIcons).toEqual({});
   });
 
   it('two sources sharing a project id do not share an icon', () => {
-    let prefs = setProjectIcon(EMPTY_PREFS, 'black-smith', 'p1', '📦', NOW);
+    let prefs = setProjectIcon(EMPTY_PREFS, 'factory', 'p1', '📦', NOW);
     prefs = setProjectIcon(prefs, 'orca', 'p1', '🐋', NOW);
-    expect(prefs.projectIcons['black-smith']?.p1?.icon).toBe('📦');
+    expect(prefs.projectIcons['factory']?.p1?.icon).toBe('📦');
     expect(prefs.projectIcons.orca?.p1?.icon).toBe('🐋');
   });
 
   it('applyIcons puts the stored project icon onto the model', () => {
-    const prefs = setProjectIcon(EMPTY_PREFS, 'black-smith', 'p1', '📦', NOW);
+    const prefs = setProjectIcon(EMPTY_PREFS, 'factory', 'p1', '📦', NOW);
     const out = applyIcons(model(), {}, prefs.projectIcons);
     expect(out.projects[0]?.icon).toBe('📦');
   });
 
   it('leaves a project with no source alone — never guesses which bucket to read', () => {
     const sourceless: CanvasModel = { projects: [{ id: 'p1', name: 'alpha', sessions: [] }] };
-    const prefs = setProjectIcon(EMPTY_PREFS, 'black-smith', 'p1', '📦', NOW);
+    const prefs = setProjectIcon(EMPTY_PREFS, 'factory', 'p1', '📦', NOW);
     const out = applyIcons(sourceless, {}, prefs.projectIcons);
     expect(out.projects[0]?.icon).toBeUndefined();
   });
@@ -167,8 +167,8 @@ describe('project icons: keyed (sourceId, projectId), the same idiom as session 
 
   it('round-trips through storage alongside session icons and theme', () => {
     const store = fake();
-    let prefs = setProjectIcon(EMPTY_PREFS, 'black-smith', 'p1', '📦', NOW);
-    prefs = setIcon(prefs, 'black-smith', 'a1', '🛠', NOW);
+    let prefs = setProjectIcon(EMPTY_PREFS, 'factory', 'p1', '📦', NOW);
+    prefs = setIcon(prefs, 'factory', 'a1', '🛠', NOW);
     writePrefs(store, prefs);
     expect(readPrefs(store, NOW)).toEqual(prefs);
   });
@@ -204,9 +204,7 @@ describe('when localStorage misbehaves', () => {
         throw new Error('QuotaExceededError');
       },
     };
-    expect(() =>
-      writePrefs(full, setIcon(EMPTY_PREFS, 'black-smith', 'a1', '🛠', NOW)),
-    ).not.toThrow();
+    expect(() => writePrefs(full, setIcon(EMPTY_PREFS, 'factory', 'a1', '🛠', NOW))).not.toThrow();
   });
 
   it('starts over on junk rather than guessing', () => {
@@ -225,7 +223,7 @@ describe('when localStorage misbehaves', () => {
       }),
     );
     const out = readPrefs(store, NOW);
-    expect(Object.keys(out.icons['black-smith'] ?? {})).toEqual(['good']);
+    expect(Object.keys(out.icons['factory'] ?? {})).toEqual(['good']);
   });
 
   it('forgets what has gone stale, and keeps what has not', () => {
@@ -237,7 +235,7 @@ describe('when localStorage misbehaves', () => {
         },
       }),
     );
-    expect(Object.keys(readPrefs(store, NOW).icons['black-smith'] ?? {})).toEqual(['recent']);
+    expect(Object.keys(readPrefs(store, NOW).icons['factory'] ?? {})).toEqual(['recent']);
   });
 
   it('keeps an entry whose date it cannot read', () => {
@@ -245,7 +243,7 @@ describe('when localStorage misbehaves', () => {
     // somebody arranged on purpose. Decision kept as-is from before AC-1: an
     // unparseable `at` never expires.
     const store = fake(JSON.stringify({ icons: { a1: { icon: '🛠', at: 'yesterday' } } }));
-    expect(Object.keys(readPrefs(store, NOW).icons['black-smith'] ?? {})).toEqual(['a1']);
+    expect(Object.keys(readPrefs(store, NOW).icons['factory'] ?? {})).toEqual(['a1']);
   });
 });
 
@@ -265,7 +263,7 @@ describe('AC-1: a payload written by the currently shipped version still loads',
     store.setItem('vam.prefs.v1', SHIPPED_PAYLOAD);
     const out = readPrefs(store, NOW);
     expect(out.theme).toBe('light');
-    expect(out.icons['black-smith']?.['s-1']?.icon).toBe('🔥');
+    expect(out.icons['factory']?.['s-1']?.icon).toBe('🔥');
     expect(out.panes).toEqual(DEFAULT_PANES);
   });
 
@@ -323,9 +321,9 @@ describe('readPanes is defensive on every field', () => {
 
 describe('AC-1(b): a `/`-containing session id cannot reach another source', () => {
   it('a slash in the session id does not cross the source boundary', () => {
-    let prefs = setIcon(EMPTY_PREFS, 'black-smith', 'vam-electron-shell/task-4', '🔧', NOW);
+    let prefs = setIcon(EMPTY_PREFS, 'factory', 'vam-electron-shell/task-4', '🔧', NOW);
     prefs = setIcon(prefs, 'orca', 'vam-electron-shell/task-4', '🐙', NOW);
-    expect(prefs.icons['black-smith']?.['vam-electron-shell/task-4']?.icon).toBe('🔧');
+    expect(prefs.icons['factory']?.['vam-electron-shell/task-4']?.icon).toBe('🔧');
     expect(prefs.icons.orca?.['vam-electron-shell/task-4']?.icon).toBe('🐙');
   });
 });
@@ -341,10 +339,10 @@ describe('AC-2: a hostile key cannot forge, corrupt or vanish an entry', () => {
   });
 
   it('an icon set on a session literally named __proto__ survives a JSON round trip', () => {
-    const prefs = setIcon(EMPTY_PREFS, 'black-smith', '__proto__', '🔥', NOW);
+    const prefs = setIcon(EMPTY_PREFS, 'factory', '__proto__', '🔥', NOW);
     const roundTripped = JSON.parse(JSON.stringify(prefs.icons));
-    expect(Object.hasOwn(roundTripped['black-smith'] ?? {}, '__proto__')).toBe(true);
-    expect(roundTripped['black-smith']['__proto__'].icon).toBe('🔥');
+    expect(Object.hasOwn(roundTripped['factory'] ?? {}, '__proto__')).toBe(true);
+    expect(roundTripped['factory']['__proto__'].icon).toBe('🔥');
   });
 
   // NOT a falsifier, and labelled so nobody re-files it as one. AC-2 demands a
@@ -362,9 +360,9 @@ describe('AC-2: a hostile key cannot forge, corrupt or vanish an entry', () => {
   // switched to a `Map` keyed by something clever, would fail it — and because
   // deleting it would invite someone to re-add it as the guard it is not.
   it('a session literally named constructor round-trips (documentation, not a guard)', () => {
-    const prefs = setIcon(EMPTY_PREFS, 'black-smith', 'constructor', '🐛', NOW);
+    const prefs = setIcon(EMPTY_PREFS, 'factory', 'constructor', '🐛', NOW);
     const roundTripped = JSON.parse(JSON.stringify(prefs.icons));
-    expect(roundTripped['black-smith'].constructor.icon).toBe('🐛');
+    expect(roundTripped['factory'].constructor.icon).toBe('🐛');
   });
 
   it('a source id literally named __proto__ survives the same round trip', () => {
@@ -375,10 +373,10 @@ describe('AC-2: a hostile key cannot forge, corrupt or vanish an entry', () => {
 
   it('the full store round trip (writePrefs then readPrefs) keeps a __proto__-named session', () => {
     const store = fake();
-    const saved = setIcon(EMPTY_PREFS, 'black-smith', '__proto__', '🔥', NOW);
+    const saved = setIcon(EMPTY_PREFS, 'factory', '__proto__', '🔥', NOW);
     writePrefs(store, saved);
     const out = readPrefs(store, NOW);
-    expect(out.icons['black-smith']?.['__proto__']?.icon).toBe('🔥');
+    expect(out.icons['factory']?.['__proto__']?.icon).toBe('🔥');
   });
 });
 
@@ -395,7 +393,7 @@ describe('AC-3 & AC-4: migrating the pre-AC-1 flat shape', () => {
       }),
     );
     const out = readPrefs(store, NOW);
-    const bucket = out.icons['black-smith'] ?? {};
+    const bucket = out.icons['factory'] ?? {};
     expect(bucket['D-257']?.icon).toBe('🔥');
     expect(bucket['vam-electron-shell/task-4']?.icon).toBe('🔧');
     expect(bucket['s-9']?.icon).toBe('📐');
@@ -407,7 +405,73 @@ describe('AC-3 & AC-4: migrating the pre-AC-1 flat shape', () => {
     );
     const out = readPrefs(store, NOW, 'orca');
     expect(out.icons.orca?.['D-257']?.icon).toBe('🔥');
+    expect(out.icons['factory']).toBeUndefined();
+  });
+});
+
+describe('the source id rename (black-smith -> factory) carries existing prefs forward', () => {
+  // Real installs already have data keyed by the OLD id, in the CURRENT
+  // (post-AC-1, nested) shape -- not the ancient flat shape `migrateSource`
+  // exists for. A rename in code changes nothing already on disk, so without
+  // an explicit migration this bucket would sit under a key nothing looks up
+  // anymore: readable, present in `localStorage`, and permanently invisible.
+  it('reads a session icon stored under the old id back under the new one', () => {
+    const store = fake(
+      JSON.stringify({
+        icons: { 'black-smith': { 's-1': { icon: '🔥', at: NOW.toISOString() } } },
+      }),
+    );
+    const out = readPrefs(store, NOW);
+    expect(out.icons.factory?.['s-1']?.icon).toBe('🔥');
     expect(out.icons['black-smith']).toBeUndefined();
+  });
+
+  it('merges an old-id bucket with one already under the new id, newest write winning', () => {
+    const store = fake(
+      JSON.stringify({
+        icons: {
+          'black-smith': {
+            's-1': { icon: '🔥', at: '2026-08-01T00:00:00.000Z' },
+            's-2': { icon: '📦', at: NOW.toISOString() },
+          },
+          factory: { 's-1': { icon: '🛠', at: NOW.toISOString() } },
+        },
+      }),
+    );
+    const out = readPrefs(store, NOW);
+    // s-1 exists under both; the newer write (factory's) wins.
+    expect(out.icons.factory?.['s-1']?.icon).toBe('🛠');
+    // s-2 only exists under the old id; it survives the merge.
+    expect(out.icons.factory?.['s-2']?.icon).toBe('📦');
+    expect(out.icons['black-smith']).toBeUndefined();
+  });
+
+  it('carries a project icon, a rename, a fold, a hide, a group and the last-focus pointer', () => {
+    const store = fake(
+      JSON.stringify({
+        projectIcons: { 'black-smith': { p1: { icon: '📦', at: NOW.toISOString() } } },
+        renames: { 'black-smith': { s1: { title: 'renamed', at: NOW.toISOString() } } },
+        collapsedProjects: { 'black-smith': ['p1'] },
+        hiddenProjects: { 'black-smith': ['p2'] },
+        collapsedGroups: { 'black-smith': ['g1'] },
+        groups: { 'black-smith': [{ id: 'g1', name: 'alpha', projects: ['p1'] }] },
+        lastFocus: { source: 'black-smith', session: 's1' },
+      }),
+    );
+    const out = readPrefs(store, NOW);
+    expect(out.projectIcons.factory?.p1?.icon).toBe('📦');
+    expect(out.renames.factory?.s1?.title).toBe('renamed');
+    expect(out.collapsedProjects.factory).toEqual(['p1']);
+    expect(out.hiddenProjects.factory).toEqual(['p2']);
+    expect(out.collapsedGroups.factory).toEqual(['g1']);
+    expect(out.groups.factory?.[0]?.id).toBe('g1');
+    expect(out.lastFocus).toEqual({ source: 'factory', session: 's1' });
+    expect(out.projectIcons['black-smith']).toBeUndefined();
+    expect(out.renames['black-smith']).toBeUndefined();
+    expect(out.collapsedProjects['black-smith']).toBeUndefined();
+    expect(out.hiddenProjects['black-smith']).toBeUndefined();
+    expect(out.collapsedGroups['black-smith']).toBeUndefined();
+    expect(out.groups['black-smith']).toBeUndefined();
   });
 });
 
@@ -446,7 +510,7 @@ describe('AC-5: the reader stays total', () => {
       }),
     );
     const out = readPrefs(store, NOW);
-    expect(out.icons['black-smith']?.['D-257']?.icon).toBe('🔥');
+    expect(out.icons['factory']?.['D-257']?.icon).toBe('🔥');
     expect(out.icons.orca?.['s-9']?.icon).toBe('🌊');
   });
 });
@@ -469,11 +533,11 @@ describe('AC-5(b): both shapes contending for the same session id', () => {
     const raw = JSON.stringify({
       icons: {
         'D-257': { icon: 'older', at: iso(1_000_000) },
-        'black-smith': { 'D-257': { icon: 'newer', at: iso(2_000_000) } },
+        factory: { 'D-257': { icon: 'newer', at: iso(2_000_000) } },
       },
     });
     const got = readPrefs({ getItem: () => raw, setItem: () => {} }, now);
-    expect(got.icons['black-smith']?.['D-257']?.icon).toBe('newer');
+    expect(got.icons['factory']?.['D-257']?.icon).toBe('newer');
   });
 
   it('keeps the later choice when the MIGRATED flat entry is newer', () => {
@@ -481,12 +545,12 @@ describe('AC-5(b): both shapes contending for the same session id', () => {
     const raw = JSON.stringify({
       icons: {
         'D-257': { icon: 'newer', at: iso(2_000_000) },
-        'black-smith': { 'D-257': { icon: 'older', at: iso(1_000_000) } },
+        factory: { 'D-257': { icon: 'older', at: iso(1_000_000) } },
       },
     });
     const got = readPrefs({ getItem: () => raw, setItem: () => {} }, now);
     // Order-independent: the flat entry is read FIRST here and must still win.
-    expect(got.icons['black-smith']?.['D-257']?.icon).toBe('newer');
+    expect(got.icons['factory']?.['D-257']?.icon).toBe('newer');
   });
 
   it('prefers a readable date over an unreadable one', () => {
@@ -494,11 +558,11 @@ describe('AC-5(b): both shapes contending for the same session id', () => {
     const raw = JSON.stringify({
       icons: {
         'D-257': { icon: 'unreadable', at: 'not-a-date' },
-        'black-smith': { 'D-257': { icon: 'readable', at: iso(1_000_000) } },
+        factory: { 'D-257': { icon: 'readable', at: iso(1_000_000) } },
       },
     });
     const got = readPrefs({ getItem: () => raw, setItem: () => {} }, now);
-    expect(got.icons['black-smith']?.['D-257']?.icon).toBe('readable');
+    expect(got.icons['factory']?.['D-257']?.icon).toBe('readable');
   });
 });
 
@@ -507,7 +571,7 @@ describe('AC-6: TTL prunes per source', () => {
     const store = fake(
       JSON.stringify({
         icons: {
-          'black-smith': { 'D-257': { icon: '🔥', at: '2026-01-01T00:00:00.000Z' } }, // stale
+          factory: { 'D-257': { icon: '🔥', at: '2026-01-01T00:00:00.000Z' } }, // stale
           orca: { 'D-257': { icon: '🌊', at: '2026-08-20T00:00:00.000Z' } }, // fresh
         },
       }),
@@ -515,7 +579,7 @@ describe('AC-6: TTL prunes per source', () => {
     const out = readPrefs(store, NOW);
     // A single shared cutoff pass over one merged map would drop both or
     // neither; this asserts exactly one drops.
-    expect(out.icons['black-smith']).toBeUndefined();
+    expect(out.icons['factory']).toBeUndefined();
     expect(out.icons.orca?.['D-257']?.icon).toBe('🌊');
   });
 });
@@ -541,24 +605,24 @@ describe('AC-7: theme and panes are not id-keyed maps', () => {
 
 describe('AC-9: the demo path', () => {
   it('an icon set on a demo session lands on that session and not the other demo source', () => {
-    const prefs = setIcon(EMPTY_PREFS, 'black-smith', 'factory-sse-1', '🎯', NOW);
+    const prefs = setIcon(EMPTY_PREFS, 'factory', 'factory-sse-1', '🎯', NOW);
     const out = applyIcons(DEMO_MODEL, prefs.icons);
-    const bs = out.projects.find((p) => p.id === 'black-smith');
+    const bs = out.projects.find((p) => p.id === 'factory');
     const vamProject = out.projects.find((p) => p.id === 'vam');
     expect(bs?.sessions.find((s) => s.id === 'factory-sse-1')?.icon).toBe('🎯');
-    // vam's project is tagged 'orca' — an icon meant for the black-smith
+    // vam's project is tagged 'orca' — an icon meant for the factory
     // bucket must not leak onto it even though DEMO_MODEL renders both at
     // once (AC-9's "must not move or vanish").
     expect(vamProject?.sessions[0]?.icon).not.toBe('🎯');
   });
 
   it('a demo-shaped read (both sources present) keeps each source’s icon independent', () => {
-    let prefs = setIcon(EMPTY_PREFS, 'black-smith', 'factory-sse-1', '🎯', NOW);
+    let prefs = setIcon(EMPTY_PREFS, 'factory', 'factory-sse-1', '🎯', NOW);
     prefs = setIcon(prefs, 'orca', 'vam-build-1', '📌', NOW);
     const store = fake();
     writePrefs(store, prefs);
     const out = applyIcons(DEMO_MODEL, readPrefs(store, NOW).icons);
-    expect(out.projects.find((p) => p.id === 'black-smith')?.sessions[0]?.icon).toBe('🎯');
+    expect(out.projects.find((p) => p.id === 'factory')?.sessions[0]?.icon).toBe('🎯');
     expect(out.projects.find((p) => p.id === 'vam')?.sessions[0]?.icon).toBe('📌');
   });
 });
@@ -614,9 +678,9 @@ describe('the stored project buckets are named, and stay named', () => {
     const store = fake();
     const saved: typeof EMPTY_PREFS = {
       ...EMPTY_PREFS,
-      projectIcons: { 'black-smith': { p1: { icon: '🎯', at: NOW.toISOString() } } },
-      collapsedProjects: { 'black-smith': ['p1'] },
-      hiddenProjects: { 'black-smith': ['p2'] },
+      projectIcons: { factory: { p1: { icon: '🎯', at: NOW.toISOString() } } },
+      collapsedProjects: { factory: ['p1'] },
+      hiddenProjects: { factory: ['p2'] },
     };
     writePrefs(store, saved);
 
@@ -626,12 +690,12 @@ describe('the stored project buckets are named, and stay named', () => {
     expect(Object.keys(stored)).toEqual(
       expect.arrayContaining(['projectIcons', 'collapsedProjects', 'hiddenProjects']),
     );
-    expect(stored.collapsedProjects).toEqual({ 'black-smith': ['p1'] });
-    expect(stored.hiddenProjects).toEqual({ 'black-smith': ['p2'] });
+    expect(stored.collapsedProjects).toEqual({ factory: ['p1'] });
+    expect(stored.hiddenProjects).toEqual({ factory: ['p2'] });
 
     const back = readPrefs(store, NOW);
-    expect(back.projectIcons['black-smith']?.p1?.icon).toBe('🎯');
-    expect(back.collapsedProjects['black-smith']).toEqual(['p1']);
-    expect(back.hiddenProjects['black-smith']).toEqual(['p2']);
+    expect(back.projectIcons['factory']?.p1?.icon).toBe('🎯');
+    expect(back.collapsedProjects['factory']).toEqual(['p1']);
+    expect(back.hiddenProjects['factory']).toEqual(['p2']);
   });
 });

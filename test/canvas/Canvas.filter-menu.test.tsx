@@ -40,7 +40,7 @@ const MODEL: CanvasModel = {
     {
       id: 'p1',
       name: 'alpha',
-      source: 'black-smith',
+      source: 'factory',
       sessions: [
         session('a1', 'waiting'),
         session('a2', 'waiting'),

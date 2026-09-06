@@ -36,7 +36,7 @@ beforeAll(() => {
 });
 afterEach(() => cleanup());
 
-const PROJECT = makeProject({ id: 'p1', name: 'black-smith' }, []);
+const PROJECT = makeProject({ id: 'p1', name: 'factory' }, []);
 const GROUP: Group = { id: 'group:1', name: 'gamma', icon: null, projects: [PROJECT] };
 
 /** The list as the shell hosts it, inside both hooks the phone rules use. */

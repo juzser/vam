@@ -1,9 +1,10 @@
 /**
  * The canvas from docs/design/canvas-layout.md §3, as data.
  *
- * This exists because §5 says vam's real feed waits on two black-smith epics
- * (SSE, worker heartbeat) that have not landed. Waiting for them to look at the
- * layout would mean designing the hardest part of the UI blind. So the shape is
+ * This exists because vam's real feed waits on two capabilities its data
+ * source has not shipped yet: pushed updates over SSE, and a heartbeat from
+ * each running worker. Waiting for them to look at the layout would mean
+ * designing the hardest part of the UI blind. So the shape is
  * fixed here and the adapters fill it later — and because the canvas only ever
  * sees `CanvasModel`, swapping this for a live adapter changes no component.
  *
@@ -14,14 +15,14 @@
  *    things you opened and can type into. The agents those sessions run inside
  *    themselves (reviewer, coder, verifier) are NOT rows: they are the `●N` and
  *    the activity line on the session that owns them. An earlier draft used
- *    black-smith task ids like `D-257` as rows, which put a subagent's work on
+ *    the data source's own task ids as rows, which put a subagent's work on
  *    the canvas as if it were something you had opened.
  *  - **`input` is what YOU said** — the prompt you typed, verbatim, never the
  *    agent's paraphrase. `output` is the session's final answer, never its
  *    working, and `null` means it is still writing one.
- *  - Nothing is invented that the sources cannot produce. black-smith cannot
- *    emit an activity line until §5 epic B lands, so `vam-build-1` reads `null`
- *    rather than a plausible-looking string.
+ *  - Nothing is invented that the sources cannot produce. The factory source
+ *    cannot emit an activity line until it can report a per-worker heartbeat,
+ *    so `vam-build-1` reads `null` rather than a plausible-looking string.
  *
  * Note where `waiting` sits and where it does not. `crosscheck-2` has an
  * unanswered turn and is `running`: it is working, and it wants nothing from
@@ -62,9 +63,9 @@ export const DEMO_PROMPT: PromptView = {
 export const DEMO_MODEL: CanvasModel = {
   projects: [
     {
-      id: 'black-smith',
-      name: 'black-smith',
-      source: 'black-smith',
+      id: 'factory',
+      name: 'factory',
+      source: 'factory',
       sessions: [
         {
           // A SESSION BLOCKED WITH NOTHING TO DRAW A CARD FROM, which is the

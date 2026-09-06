@@ -72,13 +72,13 @@ describe('setRename', () => {
   it('keeps two sources apart, since a session id is unique only within one', () => {
     const both = setRename(
       setRename(EMPTY_PREFS, 'claude-code', 'a1', 'mine', NOW),
-      'black-smith',
+      'factory',
       'a1',
       'theirs',
       NOW,
     );
     expect(both.renames['claude-code']?.['a1']?.title).toBe('mine');
-    expect(both.renames['black-smith']?.['a1']?.title).toBe('theirs');
+    expect(both.renames['factory']?.['a1']?.title).toBe('theirs');
   });
 });
 
@@ -94,7 +94,7 @@ describe('applyRenames', () => {
   });
 
   it('does not apply another source’s override to this project', () => {
-    const prefs = setRename(EMPTY_PREFS, 'black-smith', 'a1', 'wrong', NOW);
+    const prefs = setRename(EMPTY_PREFS, 'factory', 'a1', 'wrong', NOW);
     expect(applyRenames(MODEL, prefs.renames).projects[0]?.sessions[0]?.title).toBe('sess-077b');
   });
 });

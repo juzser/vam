@@ -45,14 +45,14 @@ function session(id: string): Session {
 
 const MODEL: CanvasModel = {
   projects: [
-    { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a1'), session('a2')] },
+    { id: 'p1', name: 'alpha', source: 'factory', sessions: [session('a1'), session('a2')] },
   ],
 };
 
 /** The same model with the second session ended -- what a relaunch finds when
  *  the remembered session finished while vam was closed. */
 const WITHOUT_A2: CanvasModel = {
-  projects: [{ id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a1')] }],
+  projects: [{ id: 'p1', name: 'alpha', source: 'factory', sessions: [session('a1')] }],
 };
 
 const PREFS_KEY = 'vam.prefs.v1';
@@ -115,7 +115,7 @@ describe('the focused session, across a relaunch', () => {
     render(<Canvas model={MODEL} />);
     press('j');
     expect(focused()).toBe('a2');
-    expect(stored().lastFocus).toEqual({ source: 'black-smith', session: 'a2' });
+    expect(stored().lastFocus).toEqual({ source: 'factory', session: 'a2' });
   });
 
   it('lands back on the remembered session after a remount', () => {
@@ -129,7 +129,7 @@ describe('the focused session, across a relaunch', () => {
   });
 
   it('lands on the first session, not on nothing, when the remembered one has ended', () => {
-    seed({ lastFocus: { source: 'black-smith', session: 'a2' } });
+    seed({ lastFocus: { source: 'factory', session: 'a2' } });
     render(<Canvas model={WITHOUT_A2} />);
     expect(focused()).toBe('a1');
   });
@@ -175,7 +175,7 @@ describe('what a launch that touches nothing costs', () => {
     expect(first).toHaveLength(2);
     expect(JSON.parse(first[0] ?? '{}').detailTab).toBe('Response');
     expect(JSON.parse(first[1] ?? '{}').lastFocus).toEqual({
-      source: 'black-smith',
+      source: 'factory',
       session: 'a1',
     });
   });
@@ -188,7 +188,7 @@ describe('what a launch that touches nothing costs', () => {
 
   it('keeps every key it does not model, because it never rewrites unprompted', () => {
     seed({
-      lastFocus: { source: 'black-smith', session: 'a1' },
+      lastFocus: { source: 'factory', session: 'a1' },
       detailTab: 'Response',
       somethingNewer: 7,
     });
@@ -216,7 +216,7 @@ describe('the detail tab, across a relaunch', () => {
     seed({
       detailTab: 'Sprockets',
       theme: 'light',
-      lastFocus: { source: 'black-smith', session: 'a2' },
+      lastFocus: { source: 'factory', session: 'a2' },
     });
     render(<Canvas model={MODEL} />);
     expect(currentTab()).toBe('response');

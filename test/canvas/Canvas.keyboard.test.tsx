@@ -62,7 +62,7 @@ const MODEL: CanvasModel = {
     {
       id: 'p1',
       name: 'alpha',
-      source: 'black-smith',
+      source: 'factory',
       sessions: [
         session('a1', { decisions: [decision('d-new'), decision('d-old')] }),
         session('a2', { decisions: [decision('e1')] }),
@@ -817,15 +817,15 @@ describe('the sidebar', () => {
   it('offers adding a session, and says plainly that THIS source cannot', () => {
     // Creating one is real now -- a detached tmux session, see
     // `src/main/sources/tmux/` -- but only where a session source can do it.
-    // This canvas is rendered on black-smith, which has no such route, so the
-    // honest answer is that black-smith has no command rather than a promise
+    // This canvas is rendered on factory, which has no such route, so the
+    // honest answer is that factory has no command rather than a promise
     // that one is coming. `Canvas.new-session.test.tsx` covers the source
     // that can.
     render(<Canvas model={MODEL} />);
     act(() => {
       screen.getByLabelText('new session').click();
     });
-    expect(screen.getByText(/black-smith has no new-session command/)).toBeTruthy();
+    expect(screen.getByText(/factory has no new-session command/)).toBeTruthy();
   });
 
   it('pins settings at the bottom, and it opens the overlay', () => {
@@ -849,7 +849,7 @@ describe('renaming, icons and closing', () => {
 
   it('rename KEEPS the name — locally, and it wins over the row’s own title', () => {
     // This used to assert the opposite ("cannot rename a session"), which was
-    // true of black-smith's event log and false of what the operator had just
+    // true of factory's event log and false of what the operator had just
     // typed: the editor took the name and threw it away. The override is
     // vam's own and deliberately local (`RenameChoice` in prefs.ts).
     render(<Canvas model={MODEL} />);
@@ -916,7 +916,7 @@ describe('renaming, icons and closing', () => {
     act(() => {
       screen.getByText('clear icon').click();
     });
-    // It says "on this machine", not "not saved": black-smith having no icon route
+    // It says "on this machine", not "not saved": factory having no icon route
     // was never the point — §3 says this is per-user state that must NOT reach
     // the event log.
     expect(screen.getByText(/on this machine/)).toBeTruthy();
@@ -933,9 +933,9 @@ describe('renaming, icons and closing', () => {
    *
    * A model refresh between opening the picker and picking is the one input
    * that separates carrying the target from re-deriving it. Re-deriving meant
-   * `allEntries.find(e => e.session.id === id)?.project.source ?? 'black-smith'`
+   * `allEntries.find(e => e.session.id === id)?.project.source ?? 'factory'`
    * — and once the entry is gone that `??` fires, so a pick aimed at an ORCA
-   * session silently rewrote the black-smith bucket instead. `b1` exists under
+   * session silently rewrote the factory bucket instead. `b1` exists under
    * both sources here, so the wrong bucket is a real entry rather than a
    * harmless no-op, which is what makes the two directions distinguishable at
    * all.
@@ -954,7 +954,7 @@ describe('renaming, icons and closing', () => {
       'vam.prefs.v1',
       JSON.stringify({
         icons: {
-          'black-smith': { b1: { icon: '🛠', at: new Date().toISOString() } },
+          factory: { b1: { icon: '🛠', at: new Date().toISOString() } },
           orca: { b1: { icon: '🐋', at: new Date().toISOString() } },
         },
       }),
@@ -981,7 +981,7 @@ describe('renaming, icons and closing', () => {
     });
     const stored = JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}');
     expect(stored.icons).toEqual({
-      'black-smith': { b1: { icon: '🛠', at: expect.any(String) } },
+      factory: { b1: { icon: '🛠', at: expect.any(String) } },
     });
   });
 
@@ -1105,7 +1105,7 @@ describe('waiting on you', () => {
       {
         id: 'p1',
         name: 'alpha',
-        source: 'black-smith',
+        source: 'factory',
         sessions: [
           session('calm'),
           session('urgent', {
@@ -1153,7 +1153,7 @@ describe('waiting on you', () => {
   });
 });
 
-describe('writing a prompt to a live black-smith', () => {
+describe('writing a prompt to a live factory', () => {
   /** A client that records what it was asked and answers however the test says. */
   function liveSource(
     recordPrompt: (sessionId: string, prompt: string) => Promise<{ eventId: string }>,
@@ -1192,7 +1192,7 @@ describe('writing a prompt to a live black-smith', () => {
   });
 
   it('says it RECORDED, never that it sent', async () => {
-    // black-smith has no channel into a running agent session. A prompt box
+    // factory has no channel into a running agent session. A prompt box
     // claiming to have sent would leave you waiting for an answer nobody is
     // coming to give.
     const { source } = liveSource(async () => ({ eventId: 'e1' }));
@@ -1239,14 +1239,12 @@ describe('writing a prompt to a live black-smith', () => {
           kind: 'live',
           client: {} as unknown as SmithClient,
           status: 'error',
-          error: 'cannot reach black-smith at http://127.0.0.1:4680',
+          error: 'cannot reach factory at http://127.0.0.1:4680',
           onWrote: () => {},
         }}
       />,
     );
-    expect(document.querySelector('[data-source]')?.textContent).toContain(
-      'cannot reach black-smith',
-    );
+    expect(document.querySelector('[data-source]')?.textContent).toContain('cannot reach factory');
   });
 });
 
@@ -1447,7 +1445,7 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
 /*
  * The review-queue keyboard tests stood here.
  *
- * black-smith's governance queue was removed from the detail pane at the
+ * factory's governance queue was removed from the detail pane at the
  * operator's request. It was left in the action list, so `I` → `j`/`k` → Enter
  * went on reaching rows nothing drew and POSTing waivers and lesson
  * transitions to the factory unseen; `ReviewQueue`, `useReviewQueue` and their
@@ -1580,7 +1578,7 @@ describe('the focused cell renders at full opacity, and the override moves with 
       {
         id: 'p1',
         name: 'alpha',
-        source: 'black-smith',
+        source: 'factory',
         sessions: [
           session('s1', { status: 'waiting' }),
           session('s2', { status: 'done' }),
@@ -1647,7 +1645,7 @@ describe('the fan and its slots, rendered end to end through <Canvas>', () => {
         {
           id: 'p1',
           name: 'alpha',
-          source: 'black-smith',
+          source: 'factory',
           sessions: [session('lone', { status: 'waiting', decisions: [decision('only')] })],
         },
       ],
@@ -1672,7 +1670,7 @@ describe('the fan and its slots, rendered end to end through <Canvas>', () => {
         {
           id: 'p1',
           name: 'alpha',
-          source: 'black-smith',
+          source: 'factory',
           sessions: [
             session('busy', {
               status: 'waiting',
@@ -1850,7 +1848,7 @@ const MANY: CanvasModel = {
     {
       id: 'p9',
       name: 'gamma',
-      source: 'black-smith',
+      source: 'factory',
       sessions: Array.from({ length: 10 }, (_, i) => session(`s${i + 1}`)),
     },
   ],

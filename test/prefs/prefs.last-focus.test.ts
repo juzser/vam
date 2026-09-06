@@ -44,8 +44,8 @@ function store(initial?: string): StorageLike {
 }
 
 const candidates = [
-  { nodeId: 'n-alpha', source: 'black-smith', session: 'alpha' },
-  { nodeId: 'n-beta', source: 'black-smith', session: 'beta' },
+  { nodeId: 'n-alpha', source: 'factory', session: 'alpha' },
+  { nodeId: 'n-beta', source: 'factory', session: 'beta' },
   { nodeId: 'n-beta-other', source: 'other-source', session: 'beta' },
 ];
 
@@ -56,13 +56,13 @@ describe('the remembered focus, persisted', () => {
 
   it('survives a write/read round trip, by value', () => {
     const storage = store();
-    writePrefs(storage, setLastFocus(EMPTY_PREFS, { source: 'black-smith', session: 'beta' }));
-    expect(readPrefs(storage).lastFocus).toEqual({ source: 'black-smith', session: 'beta' });
+    writePrefs(storage, setLastFocus(EMPTY_PREFS, { source: 'factory', session: 'beta' }));
+    expect(readPrefs(storage).lastFocus).toEqual({ source: 'factory', session: 'beta' });
   });
 
   it('restores focus to the remembered session on relaunch', () => {
     const storage = store();
-    writePrefs(storage, setLastFocus(EMPTY_PREFS, { source: 'black-smith', session: 'beta' }));
+    writePrefs(storage, setLastFocus(EMPTY_PREFS, { source: 'factory', session: 'beta' }));
     expect(resolveFocusNodeId(readPrefs(storage).lastFocus, candidates)).toBe('n-beta');
   });
 
@@ -74,7 +74,7 @@ describe('the remembered focus, persisted', () => {
 
   it('lands on the first candidate when the remembered session is gone', () => {
     const storage = store();
-    writePrefs(storage, setLastFocus(EMPTY_PREFS, { source: 'black-smith', session: 'ended' }));
+    writePrefs(storage, setLastFocus(EMPTY_PREFS, { source: 'factory', session: 'ended' }));
     expect(resolveFocusNodeId(readPrefs(storage).lastFocus, candidates)).toBe('n-alpha');
   });
 
@@ -83,7 +83,7 @@ describe('the remembered focus, persisted', () => {
   });
 
   it('answers null only when there is genuinely nothing to point at', () => {
-    expect(resolveFocusNodeId({ source: 'black-smith', session: 'beta' }, [])).toBe(null);
+    expect(resolveFocusNodeId({ source: 'factory', session: 'beta' }, [])).toBe(null);
     expect(resolveFocusNodeId(null, [])).toBe(null);
   });
 
@@ -98,14 +98,14 @@ describe('the remembered focus, defended per field', () => {
       JSON.stringify({
         theme: 'light',
         outFontSize: 17,
-        hiddenProjects: { 'black-smith': ['p1'] },
+        hiddenProjects: { factory: ['p1'] },
       }),
     );
     const prefs = readPrefs(storage);
     expect(prefs.lastFocus).toBe(null);
     expect(prefs.theme).toBe('light');
     expect(prefs.outFontSize).toBe(17);
-    expect(prefs.hiddenProjects).toEqual({ 'black-smith': ['p1'] });
+    expect(prefs.hiddenProjects).toEqual({ factory: ['p1'] });
   });
 
   it('drops a garbage value without taking a good sibling with it', () => {
@@ -115,7 +115,7 @@ describe('the remembered focus, defended per field', () => {
       null,
       [],
       {},
-      { source: 'black-smith' },
+      { source: 'factory' },
       { source: 7, session: 'beta' },
     ]) {
       const storage = store(

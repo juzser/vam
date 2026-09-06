@@ -2,7 +2,7 @@
   "runnerCommand": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.config.ts",
   "playwrightVersion": "1.62.1",
   "vamSha": "a9d8eb1ebf6bc5d7ad9486941b4b9d03ad31f1c7",
-  "blackSmithSha": "a59826953dd5aee3b30fe5d3e4a1597aeb0f965c-dirty",
+  "factorySha": "a59826953dd5aee3b30fe5d3e4a1597aeb0f965c-dirty",
   "capturedAt": "2026-08-30T11:27:45.937Z",
   "sessionA": "e2e-acg1-1788089261195-a",
   "sessionB": "e2e-acg1-1788089261195-b",

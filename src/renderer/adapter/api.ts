@@ -1,5 +1,5 @@
 /**
- * The slice of black-smith's HTTP API that vam consumes.
+ * The slice of the factory's HTTP API that vam consumes.
  *
  * Transcribed from `factory/orchestrator/src/db/queries.ts` — `RunningSession`,
  * `TimelineEntry`, `OverviewResult` — and deliberately NOT imported from it.

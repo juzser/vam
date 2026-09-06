@@ -23,8 +23,8 @@ const MODEL: CanvasModel = {
   projects: [
     {
       id: 'p1',
-      name: 'black-smith',
-      source: 'black-smith',
+      name: 'factory',
+      source: 'factory',
       sessions: [session('D-257', { epic: 'ui-server-sse' }), session('D-263', { epic: 'quorum' })],
     },
     { id: 'p2', name: 'vam', source: 'orca', sessions: [session('epic-1')] },
@@ -48,7 +48,7 @@ describe('searchMatches', () => {
 
   it('ignores case', () => {
     expect(searchMatches(ENTRIES, 'd-2')).toEqual(['D-257', 'D-263']);
-    expect(searchMatches(ENTRIES, 'BLACK')).toEqual(['D-257', 'D-263']);
+    expect(searchMatches(ENTRIES, 'FACTORY')).toEqual(['D-257', 'D-263']);
   });
 
   it('keeps canvas order, so n walks the screen rather than a ranking', () => {

@@ -21,7 +21,7 @@
  *   - Orca's. Its repository is MIT, but MIT licenses Lovecast's CODE, not its
  *     logo, and a licence cannot pass on a brand its author does not own. The
  *     `orca` source gets the neutral glyph and its name in words.
- *   - vam's own sources (`black-smith`, `bundled-sample`). These are concepts,
+ *   - vam's own sources (`factory`, `bundled-sample`). These are concepts,
  *     not companies; they keep their lucide glyphs, which is the app's own
  *     visual language and the right register for them.
  *

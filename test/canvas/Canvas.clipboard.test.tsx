@@ -24,7 +24,7 @@ const MODEL: CanvasModel = {
     {
       id: 'p1',
       name: 'alpha',
-      source: 'black-smith',
+      source: 'factory',
       sessions: [
         {
           id: 's1',
@@ -238,7 +238,7 @@ describe('i opens the composer', () => {
 /**
  * A live source adds no stops of its own to the action pane.
  *
- * It used to. black-smith's governance queue was removed from the detail pane
+ * It used to. factory's governance queue was removed from the detail pane
  * at the operator's request but left in `buildActions`, so a live source put
  * four rows -- two verdicts per finding, two per lesson candidate -- ahead of
  * the commands with nothing drawn for any of them. `I` then landed on an

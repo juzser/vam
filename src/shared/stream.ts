@@ -1,5 +1,5 @@
 /**
- * A framework-free reader for black-smith's `GET /api/stream`. It parses the
+ * A framework-free reader for the factory's `GET /api/stream`. It parses the
  * two named SSE frames the server sends (`hello`, `change`) and hands the
  * caller parsed objects. No React, no timer, no clock.
  *
@@ -8,9 +8,7 @@
  * keep-alive is an SSE comment, and `EventSource` never surfaces a comment to
  * JS in any form; the browser reconnects on its own at a measured constant
  * 3.00s; and `floorMs` (10000) is *less* than `heartbeatMs` (15000), so the
- * two cannot compose into a sound bound anyway. See black-smith's
- * factory/specs/active/vam-sse-canvas/epic.md sections 3.3 and 5.2 for the
- * full measurement this rests on.
+ * two cannot compose into a sound bound anyway.
  */
 
 export type HelloFrame = {

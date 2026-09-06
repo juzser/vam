@@ -1,5 +1,5 @@
 /**
- * Loading the canvas from a live black-smith, and keeping it loaded.
+ * Loading the canvas from a live factory source, and keeping it loaded.
  *
  * Streaming, not polling. The old shape ran `load()` on a four-second timer
  * whether or not anything moved; this one reacts to `openChangeStream`
@@ -69,9 +69,9 @@ export function useCanvas(client: SmithClient, options?: UseCanvasOptions): Canv
       if (!alive.current || mine !== generation.current) {
         return;
       }
-      // This hook only ever talks to black-smith; toCanvasModel now takes the
-      // source id as a parameter instead of assuming it.
-      setModel(toCanvasModel(overview, timelines, 'black-smith'));
+      // This hook only ever talks to the factory source; toCanvasModel now
+      // takes the source id as a parameter instead of assuming it.
+      setModel(toCanvasModel(overview, timelines, 'factory'));
       setStatus('live');
       setError(null);
     } catch (cause) {

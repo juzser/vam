@@ -31,25 +31,25 @@ function store(initial?: string): StorageLike {
 describe('collapsed projects, persisted', () => {
   it('defaults to nothing collapsed', () => {
     expect(EMPTY_PREFS.collapsedProjects).toEqual({});
-    expect(isProjectCollapsed(EMPTY_PREFS, 'black-smith', 'p1')).toBe(false);
+    expect(isProjectCollapsed(EMPTY_PREFS, 'factory', 'p1')).toBe(false);
   });
 
   it('survives a write/read round trip', () => {
     const storage = store();
-    const next = setProjectCollapsed(EMPTY_PREFS, 'black-smith', 'p1', true);
+    const next = setProjectCollapsed(EMPTY_PREFS, 'factory', 'p1', true);
     writePrefs(storage, next);
-    expect(isProjectCollapsed(readPrefs(storage), 'black-smith', 'p1')).toBe(true);
+    expect(isProjectCollapsed(readPrefs(storage), 'factory', 'p1')).toBe(true);
   });
 
   it('does not collapse another source that reuses the project id', () => {
-    const next = setProjectCollapsed(EMPTY_PREFS, 'black-smith', 'p1', true);
+    const next = setProjectCollapsed(EMPTY_PREFS, 'factory', 'p1', true);
     expect(isProjectCollapsed(next, 'claude-code', 'p1')).toBe(false);
   });
 
   it('expanding removes the entry rather than storing a false', () => {
-    const on = setProjectCollapsed(EMPTY_PREFS, 'black-smith', 'p1', true);
-    const off = setProjectCollapsed(on, 'black-smith', 'p1', false);
-    expect(isProjectCollapsed(off, 'black-smith', 'p1')).toBe(false);
+    const on = setProjectCollapsed(EMPTY_PREFS, 'factory', 'p1', true);
+    const off = setProjectCollapsed(on, 'factory', 'p1', false);
+    expect(isProjectCollapsed(off, 'factory', 'p1')).toBe(false);
     expect(JSON.parse(JSON.stringify(off)).collapsedProjects).toEqual({});
   });
 
@@ -62,15 +62,15 @@ describe('collapsed projects, persisted', () => {
   });
 
   it('ignores garbage under the key instead of throwing', () => {
-    const junk = store(JSON.stringify({ collapsedProjects: { 'black-smith': [1, 'p1', null] } }));
-    expect(readPrefs(junk).collapsedProjects).toEqual({ 'black-smith': ['p1'] });
+    const junk = store(JSON.stringify({ collapsedProjects: { factory: [1, 'p1', null] } }));
+    expect(readPrefs(junk).collapsedProjects).toEqual({ factory: ['p1'] });
     const worse = store(JSON.stringify({ collapsedProjects: 7 }));
     expect(readPrefs(worse).collapsedProjects).toEqual({});
   });
 
   it('does not let a __proto__ project id vanish through the prototype setter', () => {
     const storage = store();
-    writePrefs(storage, setProjectCollapsed(EMPTY_PREFS, 'black-smith', '__proto__', true));
-    expect(isProjectCollapsed(readPrefs(storage), 'black-smith', '__proto__')).toBe(true);
+    writePrefs(storage, setProjectCollapsed(EMPTY_PREFS, 'factory', '__proto__', true));
+    expect(isProjectCollapsed(readPrefs(storage), 'factory', '__proto__')).toBe(true);
   });
 });

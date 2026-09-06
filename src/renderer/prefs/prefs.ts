@@ -5,10 +5,10 @@
  * remembers position. Position is saved per user, **and does not go into
  * the event log**." Where you dragged a card and which emoji you put on a
  * session are facts about how you like to look at the work — they are not
- * facts about the work, so they must not become events. black-smith is right
- * to have no route for them, and vam was wrong to answer "black-smith
+ * facts about the work, so they must not become events. The factory is right
+ * to have no route for them, and vam was wrong to answer "the factory
  * doesn't store icons" as though that settled it.
- * Nobody asked black-smith. This is the browser's job.
+ * Nobody asked the factory. This is the browser's job.
  *
  * So: `localStorage`, per browser, per person. It never leaves the machine and
  * it is never sent anywhere.
@@ -464,7 +464,7 @@ export function browserStorage(): StorageLike | null {
 export function readPrefs(
   storage: StorageLike | null,
   now: Date = new Date(),
-  migrateSource: SourceId = 'black-smith',
+  migrateSource: SourceId = 'factory',
 ): Prefs {
   return activatePrefs(parsePrefs(storage, now, migrateSource));
 }
@@ -472,7 +472,7 @@ export function readPrefs(
 function parsePrefs(
   storage: StorageLike | null,
   now: Date = new Date(),
-  migrateSource: SourceId = 'black-smith',
+  migrateSource: SourceId = 'factory',
 ): Prefs {
   if (storage === null) {
     return EMPTY_PREFS;
@@ -511,7 +511,20 @@ function parsePrefs(
   };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   return {
-    icons: pruneBuckets(readIcons(record.icons, migrateSource), cutoff),
+    // `migrateSourceKey` runs BEFORE `pruneBuckets`: it only reshuffles which
+    // source a bucket sits under, and the TTL cutoff is evaluated per entry
+    // regardless, so the order does not change what survives -- but pruning
+    // the merged, current-named picture reads as the one true timeline rather
+    // than two half-histories pruned separately then stitched together.
+    icons: pruneBuckets(
+      migrateSourceKey(
+        readIcons(record.icons, migrateSource),
+        LEGACY_HTTP_SOURCE_ID,
+        migrateSource,
+        mergeTimestamped,
+      ),
+      cutoff,
+    ),
     // Not pruned by the TTL icons get. A theme is about the person, and one
     // who opens vam twice a year still wants the theme they chose.
     theme: readTheme((parsed as { theme?: unknown }).theme),
@@ -530,25 +543,64 @@ function parsePrefs(
     // panes are drawn" without a version number or a migration.
     paneVisibility: readPaneVisibility(record.paneVisibility),
     // Same TTL as session icons, same reasoning: a project's glyph is not
-    // worth remembering forever either.
-    projectIcons: pruneBuckets(readProjectIcons(record.projectIcons), cutoff),
+    // worth remembering forever either. Same old-id migration too -- a
+    // project's glyph is keyed by source exactly like a session's is.
+    projectIcons: pruneBuckets(
+      migrateSourceKey(
+        readProjectIcons(record.projectIcons),
+        LEGACY_HTTP_SOURCE_ID,
+        migrateSource,
+        mergeTimestamped,
+      ),
+      cutoff,
+    ),
     // Same argument again: not pruned, and per-field defensive so one garbage
     // toggle cannot drag the other back to its default with it.
     filters: readFilters(record.filters),
     // Not pruned either, and per-source defensive: one garbage bucket cannot
-    // unfold the projects another source folded.
-    collapsedProjects: readIdsBySource(record.collapsedProjects),
+    // unfold the projects another source folded. Old-id migrated like every
+    // other source-keyed field: a fold made under the old id is still a fold.
+    collapsedProjects: migrateSourceKey(
+      readIdsBySource(record.collapsedProjects),
+      LEGACY_HTTP_SOURCE_ID,
+      migrateSource,
+      mergeIdLists,
+    ),
     // Per field and per source like the fold above it: a payload from a vam
     // that predates removal has no key, and reads back as "nothing removed".
-    hiddenProjects: readIdsBySource(record.hiddenProjects),
+    hiddenProjects: migrateSourceKey(
+      readIdsBySource(record.hiddenProjects),
+      LEGACY_HTTP_SOURCE_ID,
+      migrateSource,
+      mergeIdLists,
+    ),
     // Per field and per source again, and NOT pruned by the TTL: every store
     // in existence predates the group layer and has neither key, which reads
     // back as "no groups" -- the state the whole app already renders.
-    groups: readGroups(record.groups),
-    collapsedGroups: readIdsBySource(record.collapsedGroups),
+    groups: migrateSourceKey(
+      readGroups(record.groups),
+      LEGACY_HTTP_SOURCE_ID,
+      migrateSource,
+      mergeGroups,
+    ),
+    collapsedGroups: migrateSourceKey(
+      readIdsBySource(record.collapsedGroups),
+      LEGACY_HTTP_SOURCE_ID,
+      migrateSource,
+      mergeIdLists,
+    ),
     // Same TTL and same shape as the icons above; a payload written before
-    // this field existed simply has none, and reads as `{}`.
-    renames: pruneBuckets(readBuckets(record.renames, readRename), cutoff),
+    // this field existed simply has none, and reads as `{}`. Old-id migrated
+    // the same way, off the same `{ at }` shape `IconChoice` has.
+    renames: pruneBuckets(
+      migrateSourceKey(
+        readBuckets(record.renames, readRename),
+        LEGACY_HTTP_SOURCE_ID,
+        migrateSource,
+        mergeTimestamped,
+      ),
+      cutoff,
+    ),
     // Per field like everything above it: a payload from a vam that predates
     // either of these has no key at all, and reads back as "no overrides" —
     // the shipped palette and the shipped chords — without touching a
@@ -567,9 +619,15 @@ function parsePrefs(
     // Per field like every line above it: every payload already in a browser
     // has no `lastFocus` key at all and reads back as "nothing remembered",
     // which is precisely what a first launch means -- no version number, no
-    // migration. Not pruned; see the field's own note for why the TTL would
-    // buy nothing here.
-    lastFocus: readLastFocus((parsed as { lastFocus?: unknown }).lastFocus),
+    // migration otherwise. Not pruned; see the field's own note for why the
+    // TTL would buy nothing here. The pointer's `source` is still migrated
+    // off the old id -- a focus recorded under `black-smith` should still
+    // resolve, not silently fail to match any session on screen.
+    lastFocus: migrateLastFocusSource(
+      readLastFocus((parsed as { lastFocus?: unknown }).lastFocus),
+      LEGACY_HTTP_SOURCE_ID,
+      migrateSource,
+    ),
     // Per field again, and deliberately NOT validated here -- see the field.
     // Anything that is not a string is "no tab remembered", which is what a
     // payload from a vam predating this field already says by having no key.
@@ -1325,22 +1383,118 @@ function readMap<T>(value: unknown, read: (entry: unknown) => T | null): Record<
  * first seen is kept, because there is nothing to prefer it by.
  */
 /** Milliseconds for ordering; an unreadable date sorts oldest and never wins. */
-function ageOf(choice: IconChoice): number {
+function ageOf(choice: { readonly at: string }): number {
   const t = Date.parse(choice.at);
   return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t;
 }
 
-/** Add `choice` at `sid` unless something strictly newer is already there. */
-function keepNewer(
-  bucket: Record<string, IconChoice>,
+/**
+ * Add `choice` at `sid` unless something strictly newer is already there.
+ *
+ * Generic over anything shaped like `{ at: string }` -- `IconChoice` and
+ * `RenameChoice` both are -- because `migrateSourceKey` below needs the exact
+ * same newest-wins rule to fold a legacy-id bucket into a current one, and a
+ * second copy of this logic keyed to one concrete type would drift from this
+ * one the first time either changed.
+ */
+function keepNewer<T extends { readonly at: string }>(
+  bucket: Record<string, T>,
   sid: string,
-  choice: IconChoice,
-): Record<string, IconChoice> {
+  choice: T,
+): Record<string, T> {
   const existing = bucket[sid];
   if (existing !== undefined && ageOf(existing) >= ageOf(choice)) {
     return bucket;
   }
   return withEntry(bucket, sid, choice);
+}
+
+/**
+ * The on-disk name of vam's original, single-source integration before this
+ * rename. A LITERAL, deliberately, not a display name -- nothing shows it (see
+ * `Canvas.tsx`, `App.tsx`, the adapters). It survives here only because
+ * `migrateSourceKey` needs the exact byte string an already-installed vam
+ * already wrote to `localStorage`, months or years before this file's own
+ * `migrateSource` started returning a different one.
+ */
+const LEGACY_HTTP_SOURCE_ID = 'black-smith';
+
+/**
+ * Carry a source-keyed bucket forward from an id's old name to its new one.
+ *
+ * Every prefs field below this line is keyed by source id, and `readPrefs`
+ * runs against whatever a browser already has stored -- unmoved since before
+ * a source was ever renamed in code. Without this, every icon, rename, fold,
+ * hide, group and pointer an operator already made under `black-smith` would
+ * stay on disk keyed by a name nothing looks up anymore: present, readable by
+ * a person with devtools open, and permanently invisible to vam. That is
+ * exactly the silent loss a rename must not cause.
+ *
+ * `merge` resolves the one case that is rare rather than impossible: an
+ * install old enough to still carry pre-AC-1 flat data (which `readIcons`
+ * folds into `migrateSource`'s bucket on its own) can ALSO already have a
+ * genuine nested bucket sitting under the literal old id, in the same
+ * payload -- so a bucket can exist under both names in the same read, and
+ * dropping either half would be the same silent loss this function exists to
+ * prevent.
+ */
+function migrateSourceKey<T>(
+  buckets: Readonly<Record<string, T>>,
+  from: string,
+  to: string,
+  merge: (legacy: T, current: T) => T,
+): Readonly<Record<string, T>> {
+  if (!Object.hasOwn(buckets, from)) {
+    return buckets;
+  }
+  const asRecord = buckets as Record<string, T>;
+  const legacy = asRecord[from] as T;
+  const current = asRecord[to];
+  const merged = current === undefined ? legacy : merge(legacy, current);
+  return withEntry(withoutEntry(asRecord, from), to, merged);
+}
+
+/** `migrateSourceKey`'s `merge` for the two `{ at: string }`-keyed buckets
+ *  (`icons`/`projectIcons` and `renames`): per entry, the newer write wins. */
+function mergeTimestamped<T extends { readonly at: string }>(
+  legacy: Readonly<Record<string, T>>,
+  current: Readonly<Record<string, T>>,
+): Readonly<Record<string, T>> {
+  let out: Record<string, T> = { ...current };
+  for (const [id, choice] of Object.entries(legacy)) {
+    out = keepNewer(out, id, choice);
+  }
+  return out;
+}
+
+/** `migrateSourceKey`'s `merge` for an id list (`collapsedProjects`,
+ *  `hiddenProjects`, `collapsedGroups`): union, order-preserving. */
+function mergeIdLists(legacy: readonly string[], current: readonly string[]): readonly string[] {
+  const seen = new Set(current);
+  return [...current, ...legacy.filter((id) => !seen.has(id))];
+}
+
+/** `migrateSourceKey`'s `merge` for `groups`: concatenated, current's ids
+ *  winning a collision -- as unreachable in practice as the outer collision
+ *  `migrateSourceKey` itself guards against, since a group id is minted, not
+ *  derived, but dropping a legacy group outright would still be the wrong
+ *  failure mode if it ever happened. */
+function mergeGroups(
+  legacy: readonly StoredGroup[],
+  current: readonly StoredGroup[],
+): readonly StoredGroup[] {
+  const ids = new Set(current.map((group) => group.id));
+  return [...current, ...legacy.filter((group) => !ids.has(group.id))];
+}
+
+/** `lastFocus` is one pointer, not a bucket: migrate its `source` field in
+ *  place rather than reaching for `migrateSourceKey`, which is for maps. */
+function migrateLastFocusSource(
+  focus: FocusChoice | null,
+  from: string,
+  to: string,
+): FocusChoice | null {
+  return focus !== null && focus.source === from ? { ...focus, source: to } : focus;
 }
 
 function readIcons(raw: unknown, migrateSource: SourceId): Prefs['icons'] {

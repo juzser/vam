@@ -173,7 +173,7 @@ describe('useCanvas', () => {
       }),
     );
     await act(async () => {});
-    expect(seen.current?.error).toContain('cannot reach black-smith');
+    expect(seen.current?.error).toContain('cannot reach the factory');
   });
 
   it('the 4-second timer is gone: a change frame refetches once, and a malformed one is ignored', async () => {

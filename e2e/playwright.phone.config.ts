@@ -18,7 +18,7 @@
  * deciding it has found the other's server.
  *
  * `?demo=1` is the whole fixture: the built page's demo mode renders the §3
- * fixture with every write refused in the renderer. No black-smith, no proxy,
+ * fixture with every write refused in the renderer. No live factory, no proxy,
  * no port to keep free, and the same four sessions every run -- a layout
  * assertion against a live factory would measure whatever that factory
  * happened to be doing.

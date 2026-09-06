@@ -42,7 +42,7 @@ const MODEL: CanvasModel = {
     {
       id: 'p1',
       name: 'alpha',
-      source: 'black-smith',
+      source: 'factory',
       sessions: [
         session('spoken', { startedBy: 'human', promptCount: 2 }),
         session('silent', { startedBy: 'human', promptCount: 0 }),

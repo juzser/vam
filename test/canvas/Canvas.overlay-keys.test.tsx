@@ -36,7 +36,7 @@ function session(id: string): Session {
 
 const MODEL: CanvasModel = {
   projects: [
-    { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a1'), session('a2')] },
+    { id: 'p1', name: 'alpha', source: 'factory', sessions: [session('a1'), session('a2')] },
     { id: 'p2', name: 'beta', source: 'orca', sessions: [session('b1')] },
   ],
 };

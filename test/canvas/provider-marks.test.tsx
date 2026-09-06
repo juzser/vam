@@ -108,7 +108,7 @@ describe('the status bar glyph for a session source', () => {
   });
 
   it('keeps the lucide glyph for vam-native sources, which are not brands', () => {
-    render(<Canvas model={modelFromSource('black-smith')} />);
+    render(<Canvas model={modelFromSource('factory')} />);
     expect(glyph()?.getAttribute('data-source-mark')).toBe('native');
   });
 

@@ -5,7 +5,7 @@
  * `e2e/sse-drop-reconnect.pw.ts` must kill and restart vite mid-run — so this
  * config declares NO `webServer` block; the spec spawns and kills
  * `node_modules/.bin/vite` itself, with `cwd` at the repo root, same as
- * `startServer`/`kill` do for black-smith in the sibling spec.
+ * `startServer`/`kill` do for the factory in the sibling spec.
  *
  * `testMatch` is explicit and load-bearing: `e2e/playwright.config.ts`
  * (`testDir: '.'`, no `testMatch`, no `testIgnore`) is byte-identical-

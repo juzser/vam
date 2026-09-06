@@ -109,7 +109,7 @@ describe('writes', () => {
 describe('when the factory refuses', () => {
   it('keeps the factory’s own code and message', async () => {
     // The message names the actual problem. Collapsing it into "failed" throws
-    // away the one thing black-smith just told us.
+    // away the one thing factory just told us.
     const { fetch } = stub({
       ok: false,
       status: 400,
@@ -131,7 +131,7 @@ describe('when the factory refuses', () => {
   });
 
   it('tells a dead server apart from a rejected write', async () => {
-    // Different problems, different sentences: one is "black-smith isn't running",
+    // Different problems, different sentences: one is "factory isn't running",
     // the other is "what you sent was wrong".
     const { fetch } = stub({ throws: new TypeError('fetch failed') });
     await expect(client(fetch).overview()).rejects.toBeInstanceOf(SmithUnreachableError);

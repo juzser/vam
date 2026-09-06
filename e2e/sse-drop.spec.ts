@@ -1,11 +1,10 @@
 /**
  * AC-G1 — the drop reaches the client, through vam's OWN vite dev proxy.
- * (`factory/specs/active/vam-sse-canvas/epic.md`, section 3.4 and AC-G1, in
- * the black-smith repo.)
+ * (Section 3.4 and AC-G1 of this epic.)
  *
  * WHAT THIS CAN SHOW: on this machine, through vam's own `vite` dev proxy
  * (`vite.config.ts`, target `VAM_SMITH_URL` or its own default,
- * `changeOrigin: false`), a black-smith process that is killed surfaces at
+ * `changeOrigin: false`), a factory process that is killed surfaces at
  * the browser as an `error` event, and once the process is back the browser's
  * own reconnect surfaces `open` then `hello`. On the path this spec drives —
  * kill, then restart inside the browser's single retry — no tuple carries
@@ -16,8 +15,7 @@
  * attempt — because vite answers a dead upstream with `GET /api/stream` ->
  * `HTTP/1.1 502 Bad Gateway`, `Content-Type: text/plain`, and the HTML
  * specification makes a non-200/non-`text/event-stream` response fatal for
- * `EventSource`. This epic's own negative control records exactly that:
- * `state/artifacts/vam-sse-canvas/task-4-acg1-e2e/falsification-no-restart.txt`.
+ * `EventSource`. This epic's own negative control records exactly that.
  *
  * WHAT THIS CANNOT SHOW: `kill()` closes the TCP socket cleanly, which is the
  * EASY case for a proxy to propagate. It says nothing about a half-open
@@ -63,10 +61,10 @@ type SseTuple = {
 
 const CLI_ENTRY_VAR = 'SMITH_CLI_ENTRY';
 const STATE_DIR_VAR = 'SMITH_E2E_STATE_DIR';
-// The port black-smith's server binds and vam's vite proxy forwards to (its
+// The port the factory's server binds and vam's vite proxy forwards to (its
 // own default, see vite.config.ts). Read from the environment, never
 // hardcoded here, so this file cannot be mistaken for one that addresses
-// black-smith's port directly instead of going through the proxy.
+// the factory's port directly instead of going through the proxy.
 const PORT_VAR = 'SMITH_E2E_PORT';
 
 const cliEntry = process.env[CLI_ENTRY_VAR];
@@ -291,8 +289,8 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
     // `--untracked-files=all` explicitly, and NOT the default or `=no`: a
     // `status.showUntrackedFiles = no` anywhere in git's config chain makes an
     // untracked-only tree read back as clean, which is exactly the tree
-    // someone forgot to commit. black-smith's own integration check settled
-    // this (D-178) and this stamp had it wrong in the other direction for one
+    // someone forgot to commit. The factory's own integration check settled
+    // this, and this stamp had it wrong in the other direction for one
     // commit. Ignored paths are still ignored, so `e2e/node_modules` — the
     // local Playwright install this harness runs from — does not trip it.
     const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd })
@@ -301,8 +299,8 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
     return dirty === '' ? head : `${head}-dirty`;
   };
   const vamSha = shaOf(path.resolve(__dirname, '..'));
-  const blackSmithRoot = path.resolve(path.dirname(cli), '..', '..', '..');
-  const blackSmithSha = shaOf(blackSmithRoot);
+  const factoryRoot = path.resolve(path.dirname(cli), '..', '..', '..');
+  const factorySha = shaOf(factoryRoot);
 
   writeFileSync(
     path.join(__dirname, 'acg1-transcript.json'),
@@ -319,7 +317,7 @@ test('the drop reaches the client through vam\'s own vite proxy (AC-G1)', async 
         runnerCommand: 'e2e/node_modules/.bin/playwright test --config=e2e/playwright.config.ts',
         playwrightVersion,
         vamSha,
-        blackSmithSha,
+        factorySha,
         capturedAt: new Date().toISOString(),
         sessionA,
         sessionB,

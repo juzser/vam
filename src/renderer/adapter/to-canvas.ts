@@ -1,10 +1,10 @@
 /**
- * black-smith's API → the one shape the canvas draws. Pure, no fetching.
+ * The factory's API → the one shape the canvas draws. Pure, no fetching.
  *
  * The whole reason `CanvasModel` exists is so this file can be the only place
  * that knows what a `dispatch_decision` is. Get the translation right here and
  * no component ever learns which system it is looking at — which is also what
- * keeps §6's write path honest, because a component that cannot tell the sources
+ * keeps the write path honest, because a component that cannot tell the sources
  * apart cannot send one an envelope meant for the other.
  *
  * Three translations are judgement calls rather than renames, and each is
@@ -71,7 +71,7 @@ function text(value: unknown): string | null {
  *
  * Deliberately shallow. The factory's payloads are open-ended and a renderer
  * that reached into them field by field would be a second copy of the event
- * taxonomy, drifting the first time black-smith adds a key. What it does
+ * taxonomy, drifting the first time it adds a key. What it does
  * instead is name the event, name the task, and quote the one field that
  * usually carries the verdict.
  */
@@ -166,7 +166,7 @@ export function toDecisions(entries: readonly ApiTimelineEntry[]): Decision[] {
  *  5. no turns at all → `done`. Never spoken to; nothing owed either way.
  *
  * What this still cannot distinguish is "answered you and finished for good"
- * from "answered you and is expecting a reply", because black-smith has no
+ * from "answered you and is expecting a reply", because the factory has no
  * session-end event. Rung 4 errs towards showing you a session that may need
  * nothing, rather than hiding one that does.
  */
@@ -192,7 +192,7 @@ function statusOf(api: ApiRunningSession, decisions: readonly Decision[]): Sessi
 /**
  * The activity line — what the session last DID, not what an agent is doing.
  *
- * §5 epic B (worker heartbeat) has not landed, so nothing in black-smith can
+ * Nothing yet reports a per-worker heartbeat, so nothing in the factory can
  * say what an agent is working on right now. What the log can say is the type
  * of the last event it wrote, and that is what this is: labelled as the past
  * tense it is, rather than dressed up as a live feed.
@@ -213,11 +213,11 @@ function ageOf(api: ApiRunningSession, now: Date): string | null {
 /**
  * Which epic a session is working in, or `null`.
  *
- * Derived from its turns' task ids, which black-smith qualifies as
- * `<epic>/<task>` — the same read `epicOfTaskId` does on the factory side. Not
- * from `overview.epicsInFlight`, which is factory-wide: picking one of those
- * for a row would put a plausible label on a session that has nothing to do
- * with it, and a plausible wrong label is worse than a blank.
+ * Derived from its turns' task ids, qualified as `<epic>/<task>` — the same
+ * read `epicOfTaskId` does on the factory side. Not from `overview.epicsInFlight`,
+ * which is factory-wide: picking one of those for a row would put a plausible
+ * label on a session that has nothing to do with it, and a plausible wrong
+ * label is worse than a blank.
  *
  * The newest turn wins. A session that moved on to another epic is labelled
  * with the one it is in now, not the one it started in.
@@ -264,23 +264,23 @@ function toSession(
   return {
     id: api.sessionId,
     title: api.sessionId,
-    // Nothing in black-smith stores an icon for a session, so nothing is
+    // Nothing in the factory stores an icon for a session, so nothing is
     // invented. The picker still opens; nothing saves it.
     icon: null,
     epic: epicOf(decisions),
-    // black-smith's API reports no branch or worktree per session -- there is
+    // The factory's API reports no branch or worktree per session -- there is
     // no field on `ApiRunningSession` to derive one from. `null` is the honest
     // answer, and the sidebar renders it as a gap that names itself rather
     // than as an empty string pretending to be a branch name.
     branch: null,
     status: statusOf(api, decisions),
-    // `Session.agents` is deliberately ABSENT here, not `[]`. black-smith's
+    // `Session.agents` is deliberately ABSENT here, not `[]`. The factory's
     // API reports how many agents are live and nothing about which they are,
     // and an empty roster beside a non-zero count would read as "this session
     // spawned none" -- a claim this adapter cannot make. Absent is model.ts's
     // "the source cannot answer", and the pane says exactly that.
     // `Session.pullRequests` is ABSENT here for the same reason and with the
-    // same force: black-smith's API has no branch, no remote and no notion of
+    // same force: the factory's API has no branch, no remote and no notion of
     // a pull request, so vam has nothing to ask on this session's behalf. An
     // empty list would read as "asked, and there are none".
     runningAgents: api.liveAgentCount,
@@ -317,7 +317,7 @@ export function toCanvasModel(
      *
      * Against the live factory on 2026-09-03 — 14 running sessions — three of
      * them (`factory-vam-2`, `factory-sse-1`, `dogfood-novel-rpg-1`) each list
-     * two projects, and in all three cases `projects[0]` is `black-smith`. So
+     * two projects, and in all three cases `projects[0]` is `factory`. So
      * the sidebar files them under the factory and the groups an operator
      * looks for (`vam`, `novel-rpg`) never appear at all.
      *

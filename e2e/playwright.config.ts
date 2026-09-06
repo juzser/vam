@@ -1,11 +1,11 @@
 /**
- * Config for the AC-G1 harness (epic.md `factory/specs/active/vam-sse-canvas/epic.md`,
- * section 3.4 and AC-G1). testDir resolves to this directory; the target
- * origin is vam's OWN vite dev server, never black-smith's port directly —
- * cross-origin `EventSource` from vam's origin to black-smith's port was
- * measured to deliver zero events, and the proxy (`vite.config.ts`) is
- * itself part of what this criterion exists to exercise. See
- * `e2e/sse-drop.spec.ts`'s header for what this harness can and cannot show.
+ * Config for the AC-G1 harness (section 3.4 and AC-G1 of this epic). testDir
+ * resolves to this directory; the target origin is vam's OWN vite dev
+ * server, never the factory's port directly — cross-origin `EventSource`
+ * from vam's origin to the factory's port was measured to deliver zero
+ * events, and the proxy (`vite.config.ts`) is itself part of what this
+ * criterion exists to exercise. See `e2e/sse-drop.spec.ts`'s header for what
+ * this harness can and cannot show.
  */
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

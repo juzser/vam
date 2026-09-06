@@ -14,7 +14,7 @@ function apiSession(id: string, over: Partial<ApiRunningSession> = {}): ApiRunni
     eventCount: 4,
     liveAgentCount: 0,
     lastEventType: 'task-result-recorded',
-    projects: ['black-smith'],
+    projects: ['factory'],
     ...over,
   };
 }
@@ -32,7 +32,7 @@ function entry(
     planVersion: 1,
     causalParent: null,
     payload: {},
-    project: 'black-smith',
+    project: 'factory',
     actor: null,
     ...over,
   };
@@ -140,13 +140,13 @@ describe('toCanvasModel', () => {
   it('groups sessions by their project', () => {
     const model = toCanvasModel(
       overview([
-        apiSession('a', { projects: ['black-smith'] }),
+        apiSession('a', { projects: ['factory'] }),
         apiSession('b', { projects: ['vam'] }),
       ]),
       new Map(),
-      'black-smith',
+      'factory',
     );
-    expect(model.projects.map((p) => p.id)).toEqual(['black-smith', 'vam']);
+    expect(model.projects.map((p) => p.id)).toEqual(['factory', 'vam']);
   });
 
   it('stamps every project with the source id it was given, not a constant', () => {
@@ -160,7 +160,7 @@ describe('toCanvasModel', () => {
     const model = toCanvasModel(
       overview([apiSession('a', { projects: [] })]),
       new Map(),
-      'black-smith',
+      'factory',
     );
     expect(model.projects.map((p) => p.id)).toEqual([NO_PROJECT_ID]);
     expect(model.projects[0]?.sessions).toHaveLength(1);
@@ -170,7 +170,7 @@ describe('toCanvasModel', () => {
     const model = toCanvasModel(
       overview([apiSession('a', { projects: ['aa', 'bb'] })]),
       new Map(),
-      'black-smith',
+      'factory',
     );
     expect(model.projects.map((p) => p.id)).toEqual(['aa']);
   });
@@ -179,16 +179,16 @@ describe('toCanvasModel', () => {
     const model = toCanvasModel(
       overview([apiSession('a', { liveAgentCount: 3 })]),
       new Map(),
-      'black-smith',
+      'factory',
     );
     expect(model.projects[0]?.sessions[0]?.runningAgents).toBe(3);
   });
 
   it('leaves pull requests absent, because this source cannot ask about any', () => {
-    // ABSENT, not an empty list. black-smith's API knows nothing about
+    // ABSENT, not an empty list. factory's API knows nothing about
     // branches or GitHub, and an empty list would say "vam asked and there
     // are none" -- a claim this adapter has no way to make (model.ts).
-    const model = toCanvasModel(overview([apiSession('a')]), new Map(), 'black-smith');
+    const model = toCanvasModel(overview([apiSession('a')]), new Map(), 'factory');
     const session = model.projects[0]?.sessions[0];
     expect(session?.pullRequests).toBeUndefined();
     expect('pullRequests' in (session ?? {})).toBe(false);
@@ -198,7 +198,7 @@ describe('toCanvasModel', () => {
     const model = toCanvasModel(
       overview([apiSession('a', { liveAgentCount: 2 })]),
       new Map(),
-      'black-smith',
+      'factory',
     );
     expect(model.projects[0]?.sessions[0]?.status).toBe('running');
   });
@@ -207,7 +207,7 @@ describe('toCanvasModel', () => {
     const model = toCanvasModel(
       overview([apiSession('a', { liveAgentCount: 0, lastEventType: 'error-logged' })]),
       new Map(),
-      'black-smith',
+      'factory',
     );
     expect(model.projects[0]?.sessions[0]?.status).toBe('failed');
   });
@@ -226,7 +226,7 @@ describe('toCanvasModel', () => {
           ] as readonly ApiTimelineEntry[],
         ],
       ]),
-      'black-smith',
+      'factory',
     );
     expect(model.projects[0]?.sessions[0]?.status).toBe('running');
   });
@@ -243,7 +243,7 @@ describe('toCanvasModel', () => {
           ] as readonly ApiTimelineEntry[],
         ],
       ]),
-      'black-smith',
+      'factory',
     );
     expect(model.projects[0]?.sessions[0]?.status).toBe('waiting');
   });
@@ -252,7 +252,7 @@ describe('toCanvasModel', () => {
     const model = toCanvasModel(
       overview([apiSession('a', { liveAgentCount: 0 })]),
       new Map(),
-      'black-smith',
+      'factory',
     );
     expect(model.projects[0]?.sessions[0]?.status).toBe('done');
   });
@@ -264,7 +264,7 @@ describe('toCanvasModel', () => {
     const model = toCanvasModel(
       overview([apiSession('a', { lastEventAt: '2026-08-27T11:45:00Z' })]),
       new Map(),
-      'black-smith',
+      'factory',
       now,
     );
     // The two are separate fields now: the activity line says WHAT it last
@@ -275,7 +275,7 @@ describe('toCanvasModel', () => {
   });
 
   it('labels a session with the epic its newest turn is in', () => {
-    // black-smith qualifies task ids as <epic>/<task>, so the epic is in the
+    // factory qualifies task ids as <epic>/<task>, so the epic is in the
     // data rather than guessed from the factory-wide epicsInFlight.
     const model = toCanvasModel(
       overview([apiSession('a')]),
@@ -291,13 +291,13 @@ describe('toCanvasModel', () => {
           ] as readonly ApiTimelineEntry[],
         ],
       ]),
-      'black-smith',
+      'factory',
     );
     expect(model.projects[0]?.sessions[0]?.epic).toBe('ui-server-sse');
   });
 
   it('leaves the epic blank rather than guessing one', () => {
-    const model = toCanvasModel(overview([apiSession('a')]), new Map(), 'black-smith');
+    const model = toCanvasModel(overview([apiSession('a')]), new Map(), 'factory');
     expect(model.projects[0]?.sessions[0]?.epic).toBeNull();
   });
 
@@ -307,7 +307,7 @@ describe('toCanvasModel', () => {
     const model = toCanvasModel(
       overview([apiSession('a', { lastEventType: 'gate-outcome' })]),
       new Map(),
-      'black-smith',
+      'factory',
     );
     expect(model.projects[0]?.sessions[0]?.activity).toContain('gate-outcome');
   });
@@ -316,7 +316,7 @@ describe('toCanvasModel', () => {
     const model = toCanvasModel(
       overview([apiSession('a', { lastEventType: null })]),
       new Map(),
-      'black-smith',
+      'factory',
     );
     expect(model.projects[0]?.sessions[0]?.activity).toBeNull();
   });
@@ -332,13 +332,13 @@ describe('toCanvasModel', () => {
           ] as readonly ApiTimelineEntry[],
         ],
       ]),
-      'black-smith',
+      'factory',
     );
     expect(model.projects[0]?.sessions[0]?.decisions[0]?.input).toBe('hi');
   });
 
   it('gives a session no icon, because nothing in the factory stores one', () => {
-    const model = toCanvasModel(overview([apiSession('a')]), new Map(), 'black-smith');
+    const model = toCanvasModel(overview([apiSession('a')]), new Map(), 'factory');
     expect(model.projects[0]?.sessions[0]?.icon).toBeNull();
   });
 });
@@ -364,7 +364,7 @@ describe('toCanvasModel carries the factory budget, or says it has none', () => 
         budgetUsedPct: 324.45,
       },
       new Map(),
-      'black-smith',
+      'factory',
     );
     expect(model.budget).toEqual({
       tokensSpent: 600_000,
@@ -384,13 +384,13 @@ describe('toCanvasModel carries the factory budget, or says it has none', () => 
         budgetUsedPct: 324.45,
       },
       new Map(),
-      'black-smith',
+      'factory',
     );
     expect(model.budget?.usedPct).toBe(324.45);
   });
 
   it('reports null when the payload carries no budget at all', () => {
-    const model = toCanvasModel(base, new Map(), 'black-smith');
+    const model = toCanvasModel(base, new Map(), 'factory');
     expect(model.budget).toBeNull();
   });
 
@@ -398,7 +398,7 @@ describe('toCanvasModel carries the factory budget, or says it has none', () => 
     const half = toCanvasModel(
       { ...base, tokensByEpic: [{ epicId: 'a', tokensSpent: 1, tokensBudget: 2 }] },
       new Map(),
-      'black-smith',
+      'factory',
     );
     expect(half.budget).toBeNull();
   });

@@ -5,7 +5,7 @@
  *
  * WHAT THE DESKTOP ROW SPENDS ITS SECOND LINE ON, measured at 390px before any
  * of this: a branch icon and an em dash. `session.branch` is `null` for every
- * black-smith session -- the worktree line is on `docs/ade-redesign.md`'s
+ * factory session -- the worktree line is on `docs/ade-redesign.md`'s
  * placeholder table, waiting on data the factory does not report -- so a whole
  * line of a 63.5px row, on the narrowest screen vam has, said nothing. The
  * same line carried the age in `ink-faint`, which measures 3.27:1 dark and
@@ -36,7 +36,7 @@ import { baseProps, decision, makeProject, makeSession } from '../panels/session
 const ASKED = 'Does cross-origin EventSource reach the 127.0.0.1 server?';
 
 function entries(): SessionEntry[] {
-  const project = makeProject({ id: 'p1', name: 'black-smith' }, []);
+  const project = makeProject({ id: 'p1', name: 'factory' }, []);
   return [
     {
       project,

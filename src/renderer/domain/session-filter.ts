@@ -51,7 +51,7 @@ export const DEFAULT_SESSION_FILTERS: SessionFilters = {
  *
  * Written as a denylist, deliberately, and the direction is the whole design.
  * An allowlist of human actors would hide any session opened by an actor
- * string black-smith invents next — silently, behind a toggle that is on by
+ * string the factory invents next — silently, behind a toggle that is on by
  * default. A denylist of known roles merely fails to hide such a session,
  * which costs a row on screen instead of costing you the work.
  *
@@ -61,7 +61,7 @@ export const DEFAULT_SESSION_FILTERS: SessionFilters = {
  * — treating it as an agent would hide `dogfood-mcp-1` (379 events) and
  * `dogfood-mcp-followup-1` (157) the moment the toggle came on.
  *
- * The roles themselves come from black-smith's own vocabulary: the agent roles
+ * The roles themselves come from the factory's own vocabulary: the agent roles
  * `/api/overview` reports under `liveAgents[].agentRole`, the ones that appear
  * as event actors on a real timeline, and `system` for what the factory writes
  * on its own behalf.

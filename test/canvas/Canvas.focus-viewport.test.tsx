@@ -74,7 +74,7 @@ const MODEL: Model = {
     {
       id: 'p1',
       name: 'alpha',
-      source: 'black-smith',
+      source: 'factory',
       sessions: [session('a1', [decision('d1'), decision('d2')]), session('a2')],
     },
   ],

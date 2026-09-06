@@ -4,7 +4,7 @@
  *
  * The list holds one entry per thing the pane DRAWS, and that is the whole
  * decision here. It used to hold more: two stops per waivable finding and two
- * per lesson candidate, from black-smith's governance queue. The queue was
+ * per lesson candidate, from the factory's governance queue. The queue was
  * taken out of the pane at the operator's request and this list was not, so
  * the cursor kept walking stops with nothing on screen and `Enter` on one of
  * them filed a real governance decision the operator could not see himself

@@ -77,7 +77,7 @@ async function startNoCorsServer(): Promise<{ server: Server; port: number }> {
 }
 
 /**
- * black-smith's wire format, minimally: one `hello` and then a `change`
+ * factory's wire format, minimally: one `hello` and then a `change`
  * frame every 300ms for as long as the connection stays open. Real enough
  * for `createNodeEventSource` to parse and for AC-15(e2e)/AC-17/AC-18 to
  * observe pushes actually arriving and actually stopping.

@@ -10,7 +10,7 @@
  *
  * WHAT MAY BE PAINTED AND WHAT MAY NOT. The words themselves are true for
  * every source -- the operator typed them and they exist. `running` is not:
- * where `deliverPrompt` is false black-smith RECORDS a prompt and has no
+ * where `deliverPrompt` is false the factory RECORDS a prompt and has no
  * channel into any agent (see `sendPrompt`), so painting the session as
  * running there would claim an agent is composing an answer when nothing was
  * told anything. Hence `live`, which is the source's `deliverPrompt` and

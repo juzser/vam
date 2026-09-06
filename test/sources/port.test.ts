@@ -45,7 +45,7 @@ function makeSource(
   return {
     // `SourceId` is now the open plain string task-2 made it. This value is
     // just a familiar member reused here -- this task owns only the port.
-    id: 'black-smith',
+    id: 'factory',
     label: 'Fixture A',
     capabilities,
     declines: {},

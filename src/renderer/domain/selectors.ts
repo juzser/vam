@@ -115,7 +115,7 @@ export function decisionAwaitingYou(session: Session): Decision | null {
 /**
  * Everything `yy` could copy from this session, newest decision first.
  *
- * §4: black-smith hands commands back as structured fields precisely so they do
+ * §4: the factory hands commands back as structured fields precisely so they do
  * not have to be dug out of prose with a mouse. This is the list that makes that
  * pay off.
  */

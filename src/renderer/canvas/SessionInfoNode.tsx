@@ -13,7 +13,7 @@
  *
  * ## What is real here and what is a slot
  *
- * The ADE mockup's card carries six facts. black-smith can answer four of them
+ * The ADE mockup's card carries six facts. The factory can answer four of them
  * (status, title, repo, step count) and cannot answer two: which worktree the
  * session is running in, and what it has spent. Those keep their line and say
  * `—`, because a card that silently drops a row it cannot fill teaches you the
@@ -73,7 +73,7 @@ export type SessionInfoNodeData = {
  *
  * A finished session is full and a queued one is empty; everything between is
  * the share of its turns that have an answer. That is a real ratio off real
- * data — not a guess dressed as one — and it is the only progress black-smith
+ * data — not a guess dressed as one — and it is the only progress the factory
  * can support, since nothing declares how many steps a session will take.
  */
 export function progressOf(session: Session): number {
@@ -185,7 +185,7 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
         <span className="truncate text-ink-dim">{entry.project.name}</span>
         <span className="flex items-center gap-1.5">
           <GitBranch size={11} strokeWidth={1.6} aria-hidden="true" />
-          {/* black-smith does not report a worktree per session. */}
+          {/* The factory does not report a worktree per session. */}
           <span data-session-worktree className="truncate text-ink-quiet">
             {session.epic ?? '—'}
           </span>
@@ -204,7 +204,7 @@ export function SessionInfoNode({ data }: NodeProps & { data: SessionInfoNodeDat
         <div className="flex min-w-0 gap-2 font-mono text-[9.5px] text-ink-faint">
           <span className="flex-none">{session.decisions.length} steps</span>
           <span className="flex-1" />
-          {/* Tokens and spend per session are not in black-smith's overview, so
+          {/* Tokens and spend per session are not in the factory's overview, so
               this cell carries `activity` -- the newest tool call, which is
               text an agent wrote and therefore has no length vam controls. It
               broke the node's width until it was made to give way: `min-w-0`

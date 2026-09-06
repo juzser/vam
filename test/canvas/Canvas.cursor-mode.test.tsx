@@ -60,7 +60,7 @@ const ASKING: CanvasModel = {
     {
       id: 'p1',
       name: 'alpha',
-      source: 'black-smith',
+      source: 'factory',
       sessions: [session('a1', { questions: [QUESTION] }), session('a2')],
     },
   ],
@@ -69,7 +69,7 @@ const ASKING: CanvasModel = {
 /** The same shape with nothing being asked — Insert with no options. */
 const QUIET: CanvasModel = {
   projects: [
-    { id: 'p1', name: 'alpha', source: 'black-smith', sessions: [session('a1'), session('a2')] },
+    { id: 'p1', name: 'alpha', source: 'factory', sessions: [session('a1'), session('a2')] },
   ],
 };
 
@@ -321,7 +321,7 @@ const TWO_QUESTIONS: CanvasModel = {
     {
       id: 'p1',
       name: 'alpha',
-      source: 'black-smith',
+      source: 'factory',
       sessions: [session('a1', { questions: [FIRST, SECOND] }), session('a2')],
     },
   ],

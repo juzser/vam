@@ -56,12 +56,12 @@ describe('the session-origin filters, persisted', () => {
     const raw = JSON.stringify({
       theme: 'light',
       panes: { sidebar: 320, detail: 408 },
-      collapsedProjects: { 'black-smith': ['p1'] },
+      collapsedProjects: { factory: ['p1'] },
     });
     const prefs = readPrefs(store(raw));
     expect(prefs.theme).toBe('light');
     expect(prefs.panes.sidebar).toBe(320);
-    expect(prefs.collapsedProjects).toEqual({ 'black-smith': ['p1'] });
+    expect(prefs.collapsedProjects).toEqual({ factory: ['p1'] });
     expect(prefs.filters).toEqual(DEFAULT_SESSION_FILTERS);
   });
 
