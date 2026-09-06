@@ -63,7 +63,7 @@ import type {
 } from '../domain/model.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
-import type { StatusFilter } from '../domain/session-filter.js';
+import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain/session-filter.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
@@ -171,6 +171,10 @@ const NODE_TYPES = {
  *  the fan is a scenery node (epic.md §5.2). A module-level constant keeps
  *  this a stable reference across renders. */
 const NO_EDGES: Edge[] = [];
+
+/** `model.groups ?? []` on every render is a fresh reference each keystroke,
+ *  defeating `SessionList`'s memo -- stable like `NO_EDGES` above. */
+const EMPTY_GROUPS: readonly Group[] = [];
 
 /** Home-row first: the labels you can hit without looking. */
 const JUMP_KEYS = 'asdfghjkl;qwertyuiop';
@@ -2594,6 +2598,152 @@ function CanvasInner({
   const zoom = useStore((state) => state.transform[2]);
   const zoomPct = Math.round(zoom * 100);
 
+  // `sidebarProps` feeds a `React.memo`-wrapped `SessionList`; a fresh
+  // inline arrow on any one of its 40+ props defeats the whole shallow
+  // compare, so every handler `sidebarProps` used to build inline is a
+  // `useCallback` instead -- bodies unchanged, only the wrapping is new.
+  const onSidebarOpenFilter = useCallback(() => {
+    searchOrigin.current = focusedId;
+    setFiltering(true);
+  }, [focusedId]);
+
+  const onSidebarFilterChange = useCallback(
+    (next: string) => {
+      setQuery(next);
+      // incsearch: the answer arrives while you type, not after you
+      // commit. Without it the list narrows under a focus ring that is
+      // still pointing at a row the filter just removed.
+      const first = searchMatches(allEntries, next)[0];
+      if (first !== undefined) {
+        focusSession(first);
+      }
+    },
+    [allEntries, focusSession],
+  );
+
+  const onSidebarOriginFilters = useCallback(
+    (next: SessionFilters) => savePrefs(setSessionFilters(prefs, next)),
+    [savePrefs, prefs],
+  );
+
+  const onSidebarFilterCommit = useCallback(() => setFiltering(false), []);
+
+  const onSidebarFilterCancel = useCallback(() => {
+    setFiltering(false);
+    setQuery('');
+    setFocusedId(searchOrigin.current);
+  }, []);
+
+  const onSidebarRenameCancel = useCallback(() => {
+    setRenamingId(null);
+    setRenameTarget(null);
+  }, []);
+
+  const onSidebarPick = useCallback(
+    (sessionId: string) => {
+      focusSession(sessionId);
+      setMode('select');
+    },
+    [focusSession],
+  );
+
+  const onSidebarClose = useCallback(
+    (sessionId: string) => {
+      // The row's title, not the id: the same sentence the keyboard
+      // path writes, about the same session.
+      const entry = allEntries.find((e) => e.session.id === sessionId);
+      void closeSession(sessionId, entry?.session.title ?? sessionId);
+    },
+    [allEntries, closeSession],
+  );
+
+  const onSidebarAdd = useCallback(() => {
+    // The footer strip names no project, so it uses the focused
+    // session's, exactly as `o` does — the two controls are one path.
+    if (focusedEntry === null) {
+      setStatus('pick a session first — a new one is started in its project');
+      return;
+    }
+    void createSession(focusedEntry.project.id, focusedEntry.project.name);
+  }, [focusedEntry, createSession]);
+
+  const onSidebarAddInProject = useCallback(
+    (project: Project) => void createSession(project.id, project.name),
+    [createSession],
+  );
+
+  const onSidebarPickGroupIcon = useCallback(
+    (group: Group) => {
+      const source = groupSource(prefs.groups, group.id);
+      if (source === null) return;
+      setPickingGroupIconFor((current) =>
+        current !== null && current.groupId === group.id
+          ? null
+          : { source, groupId: group.id, name: group.name },
+      );
+    },
+    [prefs.groups],
+  );
+
+  const onSidebarAddToGroup = useCallback(
+    (group: Group) => {
+      const source = groupSource(prefs.groups, group.id);
+      if (source === null) return;
+      setPickingMembersFor({ source, groupId: group.id, name: group.name });
+    },
+    [prefs.groups],
+  );
+
+  const onSidebarRemoveProject = useCallback(
+    (project: Project, plan: RemovalPlan) => void removeProject(project, plan),
+    [removeProject],
+  );
+
+  const onSidebarNewProject = useCallback(() => void newProject(), [newProject]);
+
+  const onSidebarPickIcon = useCallback((project: Project) => {
+    // Same refusal as the session picker (§ above): a project with no
+    // source has no bucket to store under, and guessing one would
+    // reintroduce the cross-source collision AC-1 removed.
+    if (project.source === undefined) {
+      setStatus('this project has no source — icon unavailable');
+      return;
+    }
+    const projectSource = project.source;
+    setPickingProjectIconFor((current) =>
+      current !== null && current.projectId === project.id && current.source === projectSource
+        ? null
+        : { source: projectSource, projectId: project.id, name: project.name },
+    );
+  }, []);
+
+  const onSidebarSettings = useCallback(() => setSettingsOpen(true), []);
+
+  const onSidebarToggleTheme = useCallback(
+    () => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark')),
+    [savePrefs, prefs, effective],
+  );
+
+  // Memoised for the same reason as the callbacks above: a JSX element
+  // literal is a fresh object every render, and `resizeHandle` is one of
+  // `SessionListProps`' members. `visible` is the same reference
+  // `prefs.paneVisibility` returns on a keystroke (`layoutForViewport`'s
+  // no-op branch), so this stays stable across one too.
+  const sidebarResizeHandle = useMemo(
+    () => (
+      <PaneResizer
+        pane="sidebar"
+        ariaLabel="resize sessions panel"
+        layout={visible}
+        stored={{ sidebar: storedSidebar, detail: storedDetail }}
+        viewportWidth={viewportWidth}
+        onChange={onPaneChange}
+        onCommit={onPaneCommit}
+      />
+    ),
+    [visible, storedSidebar, storedDetail, viewportWidth, onPaneChange, onPaneCommit],
+  );
+
   /**
    * The two panels’ props, lifted out of the JSX.
    *
@@ -2619,131 +2769,57 @@ function CanvasInner({
     focusedSessionId: focusedEntry?.session.id ?? null,
     workspace: 'black-smith',
     theme: effective,
-    onToggleTheme: () => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark')),
-    onOpenFilter: () => {
-      searchOrigin.current = focusedId;
-      setFiltering(true);
-    },
+    onToggleTheme: onSidebarToggleTheme,
+    onOpenFilter: onSidebarOpenFilter,
     filter: query,
     filtering: filtering,
-    onFilterChange: (next) => {
-      setQuery(next);
-      // incsearch: the answer arrives while you type, not after you
-      // commit. Without it the list narrows under a focus ring that is
-      // still pointing at a row the filter just removed.
-      const first = searchMatches(allEntries, next)[0];
-      if (first !== undefined) {
-        focusSession(first);
-      }
-    },
+    onFilterChange: onSidebarFilterChange,
     statusFilter: statusFilter,
     onStatusFilter: setStatusFilter,
-    statusTally: {
-      all: tally.all,
-      running: tally.running,
-      waiting: tally.waiting,
-      done: tally.done,
-      failed: tally.failed,
-    },
+    // `tally` is already `Record<StatusFilter, number>`; passed as-is
+    // rather than rebuilt into a fresh object literal each render.
+    statusTally: tally,
     filterMenuOpen: filterMenuOpen,
     onFilterMenuToggle: setFilterMenuOpen,
     originFilters: prefs.filters,
-    onOriginFilters: (next) => savePrefs(setSessionFilters(prefs, next)),
+    onOriginFilters: onSidebarOriginFilters,
     hiddenCounts: hiddenCounts,
-    onFilterCommit: () => setFiltering(false),
-    onFilterCancel: () => {
-      setFiltering(false);
-      setQuery('');
-      setFocusedId(searchOrigin.current);
-    },
+    onFilterCommit: onSidebarFilterCommit,
+    onFilterCancel: onSidebarFilterCancel,
     renamingId: renamingId,
     renameDraft: renameDraft,
     onRenameChange: setRenameDraft,
     onRenameCommit: commitRename,
-    onRenameCancel: () => {
-      setRenamingId(null);
-      setRenameTarget(null);
-    },
-    onPick: (sessionId) => {
-      focusSession(sessionId);
-      setMode('select');
-    },
-    onClose: (sessionId) => {
-      // The row's title, not the id: the same sentence the keyboard
-      // path writes, about the same session.
-      const entry = allEntries.find((e) => e.session.id === sessionId);
-      void closeSession(sessionId, entry?.session.title ?? sessionId);
-    },
-    onAdd: () => {
-      // The footer strip names no project, so it uses the focused
-      // session's, exactly as `o` does — the two controls are one path.
-      if (focusedEntry === null) {
-        setStatus('pick a session first — a new one is started in its project');
-        return;
-      }
-      void createSession(focusedEntry.project.id, focusedEntry.project.name);
-    },
-    onAddInProject: (project) => void createSession(project.id, project.name),
+    onRenameCancel: onSidebarRenameCancel,
+    onPick: onSidebarPick,
+    onClose: onSidebarClose,
+    onAdd: onSidebarAdd,
+    onAddInProject: onSidebarAddInProject,
     pendingAction: pendingAction,
     // The group layer. `model.groups` rather than the filtered model's,
     // because the only thing this prop is for is a group holding no live
     // project -- see the prop -- and a filter cannot narrow one further.
-    groups: model.groups ?? [],
+    // `EMPTY_GROUPS`, not a fresh `[]`, for the same reason as `statusTally`.
+    groups: model.groups ?? EMPTY_GROUPS,
     collapsedGroups: collapsedGroups,
     onToggleGroupCollapse: toggleGroupCollapse,
     onCreateGroup: createNewGroup,
     onRenameGroup: renameOneGroup,
-    onPickGroupIcon: (group) => {
-      const source = groupSource(prefs.groups, group.id);
-      if (source === null) return;
-      setPickingGroupIconFor((current) =>
-        current !== null && current.groupId === group.id
-          ? null
-          : { source, groupId: group.id, name: group.name },
-      );
-    },
+    onPickGroupIcon: onSidebarPickGroupIcon,
     onUngroup: ungroup,
-    onAddToGroup: (group) => {
-      const source = groupSource(prefs.groups, group.id);
-      if (source === null) return;
-      setPickingMembersFor({ source, groupId: group.id, name: group.name });
-    },
+    onAddToGroup: onSidebarAddToGroup,
     hiddenProjects: hiddenProjects,
     // Restoring is the only thing the sidebar asks for by itself: it
     // ends nothing, so there is nothing to serialise or refuse.
     onHideProject: setProjectRemoved,
-    onRemoveProject: (project, plan) => void removeProject(project, plan),
+    onRemoveProject: onSidebarRemoveProject,
     revealRequest: revealRequest,
-    onNewProject: () => void newProject(),
+    onNewProject: onSidebarNewProject,
     newSessionDecline: newSessionDecline,
-    onPickIcon: (project: Project) => {
-      // Same refusal as the session picker (§ above): a project with no
-      // source has no bucket to store under, and guessing one would
-      // reintroduce the cross-source collision AC-1 removed.
-      if (project.source === undefined) {
-        setStatus('this project has no source — icon unavailable');
-        return;
-      }
-      const projectSource = project.source;
-      setPickingProjectIconFor((current) =>
-        current !== null && current.projectId === project.id && current.source === projectSource
-          ? null
-          : { source: projectSource, projectId: project.id, name: project.name },
-      );
-    },
-    onSettings: () => setSettingsOpen(true),
+    onPickIcon: onSidebarPickIcon,
+    onSettings: onSidebarSettings,
     width: sidebarWidth,
-    resizeHandle: (
-      <PaneResizer
-        pane="sidebar"
-        ariaLabel="resize sessions panel"
-        layout={visible}
-        stored={{ sidebar: storedSidebar, detail: storedDetail }}
-        viewportWidth={viewportWidth}
-        onChange={onPaneChange}
-        onCommit={onPaneCommit}
-      />
-    ),
+    resizeHandle: sidebarResizeHandle,
   };
 
   const detailProps: ComponentProps<typeof DetailPanel> = {

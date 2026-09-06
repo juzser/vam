@@ -37,7 +37,15 @@ import {
   Sun,
   Trash2,
 } from 'lucide-react';
-import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  memo,
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import type { Group, Project, SessionStatus } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
@@ -411,7 +419,13 @@ export type SessionListProps = {
   readonly resizeHandle: ReactNode;
 };
 
-export function SessionList(props: SessionListProps) {
+/**
+ * `React.memo`: `draft` (the composer's text) lives one level up in
+ * `Canvas`, so a keystroke re-renders `Canvas` and would otherwise
+ * re-render this whole pane too. `Canvas` carries the matching half --
+ * every one of its 40+ props here is a stable `useCallback`/`useMemo`.
+ */
+export const SessionList = memo(function SessionList(props: SessionListProps) {
   const {
     entries,
     allEntries: unfiltered,
@@ -2115,4 +2129,4 @@ export function SessionList(props: SessionListProps) {
       </div>
     </aside>
   );
-}
+});
