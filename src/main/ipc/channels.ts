@@ -157,6 +157,16 @@ export const CHANNELS = {
   pairingDeny: 'vam:pairing:deny',
   deviceRemove: 'vam:remote:device-remove',
   deviceRemoveAll: 'vam:remote:device-remove-all',
+  /**
+   * Turning `tailscale serve` on or off, THE SAME DESKTOP-ONLY BRIDGE as
+   * `pairingOpen` and for the same reason: it changes this machine's own
+   * standing network configuration, which is only defensible while pressing
+   * it takes a human sitting here. `remote/serve.ts` is what actually runs
+   * the CLI; this channel is only reachable while a remote endpoint is
+   * configured at all, same as every channel above it.
+   */
+  serveEnable: 'vam:remote:serve-enable',
+  serveDisable: 'vam:remote:serve-disable',
 } as const;
 
 /**

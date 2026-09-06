@@ -34,6 +34,7 @@ const PAIRED: RemoteState = {
   address: { kind: 'unavailable', reason: 'no-cli' },
   allowWrites: false,
   registry: null,
+  serve: { enabled: false, lastError: null },
   nowMs: NOW,
 };
 
@@ -45,6 +46,8 @@ function api(over: Partial<RemoteApi> = {}): RemoteApi {
     deny: vi.fn(async () => PAIRED),
     remove: vi.fn(async () => PAIRED),
     revokeAll: vi.fn(async () => PAIRED),
+    enableServe: vi.fn(async () => PAIRED),
+    disableServe: vi.fn(async () => PAIRED),
     ...over,
   };
 }

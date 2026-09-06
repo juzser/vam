@@ -22,14 +22,20 @@ import { PairingPanel } from './PairingPanel.js';
 /** Matches main's `ADDRESS_CACHE_MS` floor: the poll is cheap by construction. */
 const POLL_MS = 1_000;
 
-/** Why there is no address, said in the operator's terms rather than a code. */
+/**
+ * Why there is no address, said in the operator's terms rather than a code.
+ *
+ * NEITHER ENTRY TELLS THE OPERATOR TO GO RUN `tailscale serve` BY HAND
+ * ANYMORE -- the phone-access control below does that now. `no-cli` also
+ * gates that whole control's inertness (see `cliMissing` below); `not-running`
+ * and `no-name` leave the control offered, because vam does not know without
+ * trying whether `tailscale serve` itself would still succeed.
+ */
 const NO_ADDRESS: Record<string, string> = {
-  'no-cli':
-    'vam could not ask this machine for its address: there is no tailscale command here. Read the https address off `tailscale serve` and type it into the phone.',
+  'no-cli': 'vam could not ask this machine for its address: there is no tailscale command here.',
   'not-running':
     'Tailscale is not running on this machine, so there is no address for the phone to reach yet.',
-  'no-name':
-    'Tailscale is running but reported no MagicDNS name, and vam will not guess one. Read the https address off `tailscale serve`.',
+  'no-name': 'Tailscale is running but reported no MagicDNS name, and vam will not guess one.',
 };
 
 /**
@@ -45,12 +51,26 @@ const NO_ADDRESS: Record<string, string> = {
 type BridgeWithRemote = { readonly remote?: RemoteApi };
 
 /** Every control on the panel, so a failure can be said in its own terms. */
-type ActName = 'open' | 'approve' | 'deny' | 'remove' | 'revokeAll';
+type ActName =
+  | 'open'
+  | 'approve'
+  | 'deny'
+  | 'remove'
+  | 'revokeAll'
+  | 'serveEnable'
+  | 'serveDisable';
 
 /**
  * What failed, and -- for the two that revoke access -- what is still true
  * afterwards. An operator removing a device needs to know whether it actually
  * happened, and the answer here is that it did not.
+ *
+ * `serveEnable`/`serveDisable` failing HERE means the IPC round-trip itself
+ * broke -- main threw rather than answering `RemoteState`. The ordinary
+ * refusal (CLI missing, refused, not logged in) is not this path at all: it
+ * arrives as a VALUE on `state.serve.lastError`, rendered verbatim by
+ * `PairingPanel`, because a refusal in the CLI's own words is not an
+ * exception in vam's.
  */
 const ACT_FAILED: Record<ActName, string> = {
   open: 'vam could not mint a pairing code.',
@@ -59,6 +79,8 @@ const ACT_FAILED: Record<ActName, string> = {
   remove: 'vam could not remove that device: it is still paired, and its token still works.',
   revokeAll:
     'vam could not revoke these devices: they are still paired, and their tokens still work.',
+  serveEnable: 'vam could not ask tailscale to turn phone access on.',
+  serveDisable: 'vam could not ask tailscale to turn phone access off.',
 };
 
 /** The registry's own trouble, which no surface said before. */
@@ -158,6 +180,10 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
   }
 
   const url = state.address.kind === 'found' ? state.address.url : null;
+  // `no-cli` ALREADY means "there is no tailscale command to ask" for the
+  // address above; reused here rather than asked a second way, so the phone
+  // access control and the address share one honest source for it.
+  const cliMissing = state.address.kind === 'unavailable' && state.address.reason === 'no-cli';
   return (
     <>
       <PairingPanel
@@ -166,6 +192,7 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
         url={url}
         allowWrites={state.allowWrites}
         nowMs={state.nowMs}
+        serve={{ cliMissing, enabled: state.serve.enabled, lastError: state.serve.lastError }}
         onRegenerate={() => act('open', () => api.open())}
         onApprove={() => act('approve', () => api.approve())}
         onDeny={() => act('deny', () => api.deny())}
@@ -174,6 +201,8 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
         }}
         onRemove={(deviceId) => act('remove', () => api.remove(deviceId))}
         onRevokeAll={() => act('revokeAll', () => api.revokeAll())}
+        onEnableServe={() => act('serveEnable', () => api.enableServe())}
+        onDisableServe={() => act('serveDisable', () => api.disableServe())}
       />
       {state.registry !== null ? (
         <p data-testid="remote-registry" role="alert">

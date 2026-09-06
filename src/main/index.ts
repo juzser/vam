@@ -24,6 +24,7 @@ import { readServeAddress } from './remote/hostname.js';
 import { registerRemoteIpc } from './remote/ipc.js';
 import { remoteConfigFromEnv } from './remote/launch.js';
 import { createPairing } from './remote/pairing.js';
+import { disableServe, enableServe } from './remote/serve.js';
 import { createStreamRegistry, startRemoteServer } from './remote/server.js';
 import { listLiveAgents } from './sources/claude-code/agents.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
@@ -288,6 +289,9 @@ function startRemoteTransport(): void {
       devices,
       allowWrites: config.allowWrites,
       readAddress: () => readServeAddress(runTailscale),
+      // Bound to THIS config's port here, so `ipc.ts` never has to know it.
+      enableServe: () => enableServe(runTailscale, config.port),
+      disableServe: () => disableServe(runTailscale),
     });
     await startRemoteServer({
       ...config,

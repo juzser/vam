@@ -22,12 +22,14 @@ import { openDeviceRegistry } from '../../../src/main/remote/devices.js';
 import type { ServeAddress } from '../../../src/main/remote/hostname.js';
 import { type RemoteState, registerRemoteIpc } from '../../../src/main/remote/ipc.js';
 import { createPairing } from '../../../src/main/remote/pairing.js';
+import type { ServeToggleResult } from '../../../src/main/remote/serve.js';
 import { createStreamRegistry, startRemoteServer } from '../../../src/main/remote/server.js';
 import type { MainSource } from '../../../src/main/sources/source.js';
 
 const NO_CLI: ServeAddress = { kind: 'unavailable', reason: 'no-cli' };
 /** A literal invented for this test; nothing minted it and nothing accepts it. */
 const TOKEN = 'a-token-only-this-test-knows';
+const OK: ServeToggleResult = { kind: 'ok' };
 
 function fakeIpcMain() {
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
@@ -44,7 +46,13 @@ function fakeIpcMain() {
 }
 
 async function wire(
-  over: { address?: ServeAddress; allowWrites?: boolean; devices?: DeviceRegistry } = {},
+  over: {
+    address?: ServeAddress;
+    allowWrites?: boolean;
+    devices?: DeviceRegistry;
+    enableServe?: () => Promise<ServeToggleResult>;
+    disableServe?: () => Promise<ServeToggleResult>;
+  } = {},
 ) {
   const path = join(await mkdtemp(join(tmpdir(), 'vam-remote-ipc-')), 'devices.json');
   const streams = createStreamRegistry();
@@ -53,15 +61,19 @@ async function wire(
     (await openDeviceRegistry({ path, onRevoked: (deviceId) => streams.closeFor(deviceId) }));
   const pairing = createPairing({ grant: (name) => devices.grant(name) });
   const ipcMain = fakeIpcMain();
+  const enableServe = over.enableServe ?? vi.fn(async (): Promise<ServeToggleResult> => OK);
+  const disableServe = over.disableServe ?? vi.fn(async (): Promise<ServeToggleResult> => OK);
   registerRemoteIpc(ipcMain, {
     pairing,
     devices,
     allowWrites: over.allowWrites ?? true,
     readAddress: async () => over.address ?? NO_CLI,
+    enableServe,
+    disableServe,
   });
   const state = (channel: string, ...args: unknown[]) =>
     ipcMain.invoke(channel, ...args) as Promise<RemoteState>;
-  return { pairing, devices, streams, ipcMain, state };
+  return { pairing, devices, streams, ipcMain, state, enableServe, disableServe };
 }
 
 describe('the pairing channel', () => {
@@ -200,6 +212,83 @@ describe('the pairing channel', () => {
 
     expect(after.devices).toEqual([]);
     expect(closed).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the serve toggle channel', () => {
+  it('starts off, and reading state never enables it', async () => {
+    const { state, enableServe } = await wire();
+
+    for (let read = 0; read < 5; read += 1) {
+      const snapshot = await state(CHANNELS.remoteState);
+      expect(snapshot.serve).toEqual({ enabled: false, lastError: null });
+    }
+
+    expect(enableServe).not.toHaveBeenCalled();
+  });
+
+  it('calls the injected enableServe and reports enabled on success', async () => {
+    const enableServe = vi.fn(async (): Promise<ServeToggleResult> => OK);
+    const { state } = await wire({ enableServe });
+
+    const after = await state(CHANNELS.serveEnable);
+
+    expect(enableServe).toHaveBeenCalledTimes(1);
+    expect(after.serve).toEqual({ enabled: true, lastError: null });
+  });
+
+  it('disabling reverses it', async () => {
+    const { state } = await wire();
+    await state(CHANNELS.serveEnable);
+
+    const after = await state(CHANNELS.serveDisable);
+
+    expect(after.serve).toEqual({ enabled: false, lastError: null });
+  });
+
+  it('surfaces a refusal in its own real words, and leaves enabled honest', async () => {
+    const enableServe = vi.fn(
+      async (): Promise<ServeToggleResult> => ({
+        kind: 'refused',
+        message: 'access denied: reauthenticate to use Serve',
+      }),
+    );
+    const { state } = await wire({ enableServe });
+
+    const after = await state(CHANNELS.serveEnable);
+
+    expect(after.serve).toEqual({
+      enabled: false,
+      lastError: 'access denied: reauthenticate to use Serve',
+    });
+  });
+
+  it('a failed disable keeps enabled true, with the real refusal text', async () => {
+    const disableServe = vi.fn(
+      async (): Promise<ServeToggleResult> => ({
+        kind: 'refused',
+        message: 'ENOSPC: reset failed',
+      }),
+    );
+    const { state } = await wire({ disableServe });
+    await state(CHANNELS.serveEnable);
+
+    const after = await state(CHANNELS.serveDisable);
+
+    expect(after.serve).toEqual({ enabled: true, lastError: 'ENOSPC: reset failed' });
+  });
+
+  it('clears a stale refusal once a later attempt succeeds', async () => {
+    const enableServe = vi
+      .fn<() => Promise<ServeToggleResult>>()
+      .mockResolvedValueOnce({ kind: 'refused', message: 'not logged in' })
+      .mockResolvedValueOnce(OK);
+    const { state } = await wire({ enableServe });
+
+    await state(CHANNELS.serveEnable);
+    const after = await state(CHANNELS.serveEnable);
+
+    expect(after.serve).toEqual({ enabled: true, lastError: null });
   });
 });
 

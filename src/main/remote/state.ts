@@ -38,6 +38,25 @@ export type RemoteDeviceView = {
   readonly lastSeenAt: number;
 };
 
+/**
+ * Whether THIS run of vam has phone access standing up via `tailscale serve`,
+ * and the last honest word about it.
+ *
+ * TRACKED, NOT POLLED. `tailscale serve --bg` is a standing configuration
+ * change that outlives vam, but confirming it live would mean parsing
+ * `tailscale serve status --json`, whose exact shape `remote/serve.ts` has
+ * not verified against a real binary -- so this is vam's own record of what
+ * ITS OWN `enableServe`/`disableServe` calls did, never a live read of the
+ * operating system. A restart after a previous session left this on starts
+ * the panel reading `enabled: false` again; the standing configuration is
+ * untouched, only the panel's memory of it is not -- see `RemotePanel.tsx`.
+ */
+export type ServeState = {
+  readonly enabled: boolean;
+  /** The literal words of the most recent failed enable/disable, or null. */
+  readonly lastError: string | null;
+};
+
 export type RemoteState = {
   readonly view: PairingStateView;
   readonly devices: readonly RemoteDeviceView[];
@@ -45,6 +64,7 @@ export type RemoteState = {
   readonly allowWrites: boolean;
   /** Null when the registry is simply fine, which is the ordinary case. */
   readonly registry: RegistryTrouble | null;
+  readonly serve: ServeState;
   /** MAIN's clock, so the panel's countdown is not drawn against a second one. */
   readonly nowMs: number;
 };

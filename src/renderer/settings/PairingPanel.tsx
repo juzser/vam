@@ -36,6 +36,19 @@ export type PairingView = {
   readonly pairedName: string | null;
 };
 
+/**
+ * What the phone-access control needs to know, in the operator's own terms
+ * rather than main's `ServeState` -- `cliMissing` folds in `ServeAddress`'s
+ * `no-cli` reason, which `RemotePanel.tsx` already reads for the address, so
+ * this panel does not need a second way to ask "is Tailscale here at all".
+ */
+export type ServeAccessView = {
+  readonly cliMissing: boolean;
+  readonly enabled: boolean;
+  /** The most recent enable/disable refusal's own words, or null. */
+  readonly lastError: string | null;
+};
+
 export type PairingPanelProps = {
   readonly view: PairingView;
   readonly devices: readonly PairedDeviceView[];
@@ -48,12 +61,17 @@ export type PairingPanelProps = {
   readonly url: string | null;
   readonly allowWrites: boolean;
   readonly nowMs: number;
+  readonly serve: ServeAccessView;
   readonly onRegenerate: () => void;
   readonly onApprove: () => void;
   readonly onDeny: () => void;
   readonly onCopyUrl: () => void;
   readonly onRemove: (deviceId: string) => void;
   readonly onRevokeAll: () => void;
+  /** Runs `tailscale serve --bg <port>`. Never called merely by drawing this panel. */
+  readonly onEnableServe: () => void;
+  /** Runs `tailscale serve reset`, reversing `onEnableServe`. */
+  readonly onDisableServe: () => void;
 };
 
 /** `XXXX-XXXX`: a group of four is what a person holds while looking away. */
@@ -94,17 +112,53 @@ export function PairingPanel(props: PairingPanelProps) {
         here is what does.
       </p>
 
-      {props.url === null ? (
-        <p data-testid="pairing-hint">
-          Run <code>tailscale serve</code> on this machine and open the https address it prints. It
-          must be https: the certificate is what lets the phone keep a credential at all.
+      <h4>Phone access</h4>
+      {props.serve.cliMissing ? (
+        // OFFERS NOTHING (requirement 3): no button appears in this branch at
+        // all, on either side of on/off -- there is no CLI to run one with,
+        // and vam does not walk the operator through installing it either.
+        <p data-testid="serve-no-cli">
+          vam can turn this on for you, but there is no Tailscale on this machine.{' '}
+          <a href="https://tailscale.com/download" target="_blank" rel="noreferrer">
+            Install Tailscale
+          </a>
+          , then reopen this screen.
         </p>
-      ) : (
-        <p>
-          <span data-testid="pairing-url">{props.url}</span>{' '}
-          <button type="button" onClick={props.onCopyUrl}>
-            <Copy aria-hidden="true" size={14} /> Copy address
+      ) : props.serve.enabled ? (
+        <>
+          {props.url === null ? null : (
+            <p>
+              <span data-testid="pairing-url">{props.url}</span>{' '}
+              <button type="button" onClick={props.onCopyUrl}>
+                <Copy aria-hidden="true" size={14} /> Copy address
+              </button>
+            </p>
+          )}
+          <p data-testid="serve-on">
+            Phone access is on. Your whole tailnet — every laptop, phone, tablet, server, CI runner
+            and shared-in guest on it — can reach this port until you turn it off.
+          </p>
+          <button type="button" onClick={props.onDisableServe}>
+            Turn off phone access
           </button>
+        </>
+      ) : (
+        <>
+          <p data-testid="serve-off">
+            Enabling this runs <code>tailscale serve</code> on this machine: a standing
+            configuration change that puts this port in front of your whole tailnet — every laptop,
+            phone, tablet, server, CI runner and shared-in guest — until you turn it off again. It
+            outlives vam, and it is https only: the certificate is what lets the phone keep a
+            credential at all.
+          </p>
+          <button type="button" onClick={props.onEnableServe}>
+            Enable phone access
+          </button>
+        </>
+      )}
+      {props.serve.lastError === null ? null : (
+        <p data-testid="serve-error" role="alert">
+          {props.serve.lastError}
         </p>
       )}
 

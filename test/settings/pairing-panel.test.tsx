@@ -42,12 +42,18 @@ function draw(over: Partial<PairingPanelProps> = {}) {
     url: 'https://example-machine.example-tailnet.ts.net',
     allowWrites: false,
     nowMs: NOW,
+    // Serve already on, by default: most of the tests in this file are about
+    // the pairing code, not phone access, and depend on `url` being drawn
+    // unconditionally the way it always was before phone access existed.
+    serve: { cliMissing: false, enabled: true, lastError: null },
     onRegenerate: vi.fn(),
     onApprove: vi.fn(),
     onDeny: vi.fn(),
     onRemove: vi.fn(),
     onRevokeAll: vi.fn(),
     onCopyUrl: vi.fn(),
+    onEnableServe: vi.fn(),
+    onDisableServe: vi.fn(),
     ...over,
   };
   render(<PairingPanel {...props} />);
@@ -80,10 +86,9 @@ describe('the pairing screen', () => {
     expect(props.onCopyUrl).toHaveBeenCalled();
   });
 
-  it('asks the operator to find the address when it could not be read', () => {
+  it('draws no address when it could not be read, and invents nothing in its place', () => {
     draw({ url: null });
     expect(screen.queryByTestId('pairing-url')).toBeNull();
-    expect(document.body.textContent ?? '').toMatch(/tailscale serve/i);
   });
 
   it('says whether this server accepts writes', () => {
@@ -165,6 +170,70 @@ describe('the second gate', () => {
     expect(screen.getByTestId('pairing-grant').textContent).not.toContain(hostile);
     // The prompt draws no quotation marks the name could close.
     expect(screen.getByTestId('pairing-grant').textContent ?? '').not.toMatch(/["\u201c\u201d]/);
+  });
+});
+
+describe('phone access -- vam setting up tailscale serve itself', () => {
+  it('explains and links to Tailscale, offering nothing, when there is no CLI', () => {
+    draw({ serve: { cliMissing: true, enabled: false, lastError: null } });
+
+    expect(screen.getByTestId('serve-no-cli')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /enable phone access/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /turn off phone access/i })).toBeNull();
+    const link = screen.getByRole('link', { name: /install tailscale/i });
+    expect(link.getAttribute('href')).toMatch(/^https:\/\/tailscale\.com\//);
+  });
+
+  it('states what turning it on exposes, and offers to enable it, while off', () => {
+    const props = draw({ serve: { cliMissing: false, enabled: false, lastError: null } });
+
+    expect(document.body.textContent ?? '').toMatch(/tailscale serve/i);
+    expect(document.body.textContent ?? '').toMatch(/whole tailnet|every laptop/i);
+    fireEvent.click(screen.getByRole('button', { name: /enable phone access/i }));
+    expect(props.onEnableServe).toHaveBeenCalled();
+  });
+
+  it('never runs serve as a side effect of merely being drawn, while off', () => {
+    const props = draw({ serve: { cliMissing: false, enabled: false, lastError: null } });
+    expect(props.onEnableServe).not.toHaveBeenCalled();
+  });
+
+  it('offers an equally easy way back off, while on', () => {
+    const props = draw({ serve: { cliMissing: false, enabled: true, lastError: null } });
+
+    expect(screen.queryByRole('button', { name: /enable phone access/i })).toBeNull();
+    const off = screen.getByRole('button', { name: /turn off phone access/i });
+    fireEvent.click(off);
+    expect(props.onDisableServe).toHaveBeenCalled();
+  });
+
+  it('shows the resulting address while on', () => {
+    draw({
+      serve: { cliMissing: false, enabled: true, lastError: null },
+      url: 'https://example-machine.example-tailnet.ts.net',
+    });
+
+    expect(screen.getByTestId('pairing-url').textContent).toMatch(/^https:\/\//);
+  });
+
+  it('says the address cannot be read rather than guessing one, while on', () => {
+    draw({ serve: { cliMissing: false, enabled: true, lastError: null }, url: null });
+
+    expect(screen.queryByTestId('pairing-url')).toBeNull();
+  });
+
+  it("surfaces a refusal in the CLI's own real words, not a generic error", () => {
+    draw({
+      serve: {
+        cliMissing: false,
+        enabled: false,
+        lastError: 'access denied: reauthenticate to use Serve',
+      },
+    });
+
+    const said = screen.getByTestId('serve-error');
+    expect(said.textContent).toBe('access denied: reauthenticate to use Serve');
+    expect(said.getAttribute('role')).toBe('alert');
   });
 });
 
