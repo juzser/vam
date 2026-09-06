@@ -8,9 +8,11 @@
  * `testMatch` is explicit and load-bearing, same reasoning as
  * `e2e/playwright.reconnect.config.ts`: Playwright's default collector
  * claims `**\/*.spec.ts` and `**\/*.test.ts`, and
- * `e2e/playwright.reconnect.config.ts`'s own `testMatch` (`**\/*.pw.ts`,
- * `testDir: '.'`) claims recursively too. This spec is named
- * `electron-launch.et.ts` -- a suffix none of the three existing configs
+ * `e2e/playwright.reconnect.config.ts`'s `testMatch` used to be a
+ * `**\/*.pw.ts` suffix glob that claimed recursively too -- until it
+ * silently swept up a second `*.pw.ts` spec, and that config now names its
+ * own file exactly instead of a suffix class. This spec is named
+ * `electron-launch.et.ts` -- a suffix none of the other three configs
  * match -- and this config narrows to it explicitly, so each config still
  * collects exactly its own spec (AC-18(b)).
  *
