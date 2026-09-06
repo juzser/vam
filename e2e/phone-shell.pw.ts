@@ -979,3 +979,240 @@ test.describe('the sheets behind a source', () => {
     expect(geometry.overflowY).toBe('auto');
   });
 });
+
+/**
+ * The session tab strip and the keystroke strip, measured for real at 390px.
+ *
+ * Neither the demo fixture nor the source stub above carries `vamControlled`
+ * or a `terminal: true` capability with more than one session per project, so
+ * a source is stubbed here too (same `**\/api/**` pattern as "the sheets
+ * behind a source") rather than reusing either -- these two controls need
+ * both facts at once, which neither existing fixture states.
+ */
+test.describe('the session tab strip and the keystroke strip at 390px', () => {
+  const DESCRIPTOR = {
+    id: 'stub2',
+    label: 'stub source 2',
+    capabilities: {
+      liveUpdates: false,
+      recordPrompt: true,
+      deliverPrompt: false,
+      promptAttachments: false,
+      slashCommands: false,
+      renameSession: false,
+      closeSession: false,
+      createSession: true,
+      governance: false,
+      pullRequests: false,
+      terminal: true,
+      agentRoster: false,
+    },
+    declines: {
+      liveUpdates: 'the stub does not stream',
+      deliverPrompt: 'the stub delivers nothing',
+      promptAttachments: 'the stub takes no attachments',
+      slashCommands: 'the stub has no slash commands',
+      governance: 'the stub has no governance surface',
+      pullRequests: 'the stub has no pull requests',
+      agentRoster: 'the stub has no agent roster',
+    },
+    viewerScope: { kind: 'connection', note: 'a stubbed transport, not a server' },
+  };
+  const session = (
+    id: string,
+    title: string,
+    status: string,
+    vamControlled: boolean | undefined,
+  ) => ({
+    id,
+    title,
+    icon: null,
+    epic: null,
+    status,
+    runningAgents: 0,
+    activity: null,
+    age: '4m',
+    branch: null,
+    decisions: [{ id: `${id}-d1`, label: 'start', input: 'go', output: 'done', commands: [] }],
+    source: 'stub2',
+    vamControlled,
+  });
+  // waiting < running < done in `orderedInProject`'s own rank -- so the tab
+  // order below is s2, s1, s3, matching the sidebar's own row order.
+  const PROJECTS = [
+    {
+      id: 'p1',
+      name: 'alpha',
+      source: 'stub2',
+      sessions: [
+        session('s1', 'alpha-one', 'running', true),
+        session('s2', 'alpha-two', 'waiting', true),
+        session('s3', 'alpha-three', 'done', true),
+      ],
+    },
+    {
+      id: 'p2',
+      name: 'beta',
+      source: 'stub2',
+      sessions: [session('s4', 'beta-one', 'running', false)],
+    },
+  ];
+
+  const envelope = (value: unknown) => ({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, value }),
+  });
+
+  const stubSource = async (page: Page): Promise<void> => {
+    await page.route('**/api/**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: false,
+          error: { kind: 'unreachable', code: 'stub2', message: 'the stub refuses writes' },
+        }),
+      }),
+    );
+    await page.route('**/api/describe', (route) => route.fulfill(envelope(DESCRIPTOR)));
+    await page.route('**/api/load', (route) => route.fulfill(envelope(PROJECTS)));
+    await page.goto('/');
+    await expect(page.locator('[data-phone-shell] [data-session-row]').first()).toBeVisible();
+  };
+
+  const openFirstAlphaSession = async (page: Page): Promise<void> => {
+    const row = page.locator('[data-phone-shell] [data-session-row]').first();
+    const box = await row.boundingBox();
+    if (box === null) throw new Error('no session row');
+    await page.touchscreen.tap(box.x + 60, box.y + box.height / 2);
+    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
+  };
+
+  test('draws one tab per session, fits 390px with room for the pinned + and ›', async ({
+    page,
+  }) => {
+    await stubSource(page);
+    await openFirstAlphaSession(page);
+
+    const tabs = page.locator('[data-phone-session-tab]');
+    await expect(tabs).toHaveCount(3);
+    const add = page.locator('[data-phone-session-add]');
+    const expandBtn = page.locator('[data-phone-session-expand]');
+    await expect(add).toBeVisible();
+    await expect(expandBtn).toBeVisible();
+
+    const addBox = await add.boundingBox();
+    const expandBox = await expandBtn.boundingBox();
+    if (addBox === null || expandBox === null) throw new Error('missing strip controls');
+    // Both sit to the RIGHT of the scrollable tab region, inside the 390px
+    // viewport -- not clipped, not pushed off-screen by the tabs.
+    expect(addBox.x + addBox.width).toBeLessThanOrEqual(390);
+    expect(expandBox.x + expandBox.width).toBeLessThanOrEqual(390);
+    expect(expandBox.x).toBeGreaterThan(addBox.x);
+  });
+
+  test('every control in the session tab strip is a real 44px touch target, painted at 30px', async ({
+    page,
+  }) => {
+    await stubSource(page);
+    await openFirstAlphaSession(page);
+
+    const strip = page.locator('[data-phone-session-tabs]');
+    await expect(strip).toBeVisible();
+    const geometry = await strip.evaluate((el) => {
+      const controls = [...el.querySelectorAll('button')].map((b) => {
+        const r = b.getBoundingClientRect();
+        const skin = b.querySelector('[data-tap-skin]');
+        const s = skin?.getBoundingClientRect();
+        return {
+          label: (b.getAttribute('aria-label') ?? '').slice(0, 30),
+          w: Math.round(r.width),
+          h: Math.round(r.height),
+          skinH: s === undefined ? null : Math.round(s.height),
+        };
+      });
+      return controls;
+    });
+    expect(geometry.length, 'controls found in the session tab strip').toBeGreaterThanOrEqual(5);
+    const undersized = geometry.filter((c) => c.w < 44 || c.h < 44);
+    expect(undersized, JSON.stringify(geometry)).toEqual([]);
+    const unpaintedAt30 = geometry.filter((c) => c.skinH !== 30);
+    expect(unpaintedAt30, JSON.stringify(geometry)).toEqual([]);
+  });
+
+  test('a tab tap switches the focused session in place, without leaving the screen', async ({
+    page,
+  }) => {
+    await stubSource(page);
+    await openFirstAlphaSession(page);
+
+    await expect(page.locator('[data-prompt-target]')).toHaveText('alpha-two');
+    const tabs = page.locator('[data-phone-session-tab]');
+    await tabs.nth(1).tap();
+    await expect(page.locator('[data-prompt-target]')).toHaveText('alpha-one');
+    // Still the session screen -- a lateral move, not a navigation.
+    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
+  });
+
+  test('the waiting tab carries a badge, and it is not the only channel for its state', async ({
+    page,
+  }) => {
+    await stubSource(page);
+    await openFirstAlphaSession(page);
+    const waitingTab = page.locator('[data-phone-session-tab="s2"]');
+    await expect(waitingTab).toHaveAttribute('aria-label', /waiting/);
+    await expect(waitingTab.locator('[data-phone-session-waiting-badge]')).toBeVisible();
+  });
+
+  test('the keystroke strip draws five 44px controls that fit inside 390px', async ({ page }) => {
+    await stubSource(page);
+    await openFirstAlphaSession(page);
+
+    const strip = page.locator('[data-key-strip]');
+    await expect(strip).toBeVisible();
+    const keys = strip.locator('[data-key-strip-key]');
+    await expect(keys).toHaveCount(5);
+
+    const geometry = await strip.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const controls = [...el.querySelectorAll('button')].map((b) => {
+        const box = b.getBoundingClientRect();
+        return { w: Math.round(box.width), h: Math.round(box.height) };
+      });
+      return { right: r.right, controls };
+    });
+    expect(geometry.right, 'the strip must not overflow the 390px viewport').toBeLessThanOrEqual(
+      390,
+    );
+    const undersized = geometry.controls.filter((c) => c.w < 44 || c.h < 44);
+    expect(undersized, JSON.stringify(geometry.controls)).toEqual([]);
+  });
+
+  test('the keystroke strip is absent for a session vam did not start', async ({ page }) => {
+    await stubSource(page);
+    // `beta-one` is the second project's only session -- `vamControlled: false`.
+    const row = page.locator('[data-phone-shell] [data-session-row]', {
+      hasText: 'beta-one',
+    });
+    const box = await row.boundingBox();
+    if (box === null) throw new Error('no beta-one row');
+    await page.touchscreen.tap(box.x + 60, box.y + box.height / 2);
+    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
+    await expect(page.locator('[data-key-strip]')).toHaveCount(0);
+    // One session in this project -- the tab strip is 0px too.
+    await expect(page.locator('[data-phone-session-tabs]')).toHaveCount(0);
+  });
+
+  test('the › control returns to the list, scrolled to this project’s heading', async ({
+    page,
+  }) => {
+    await stubSource(page);
+    await openFirstAlphaSession(page);
+    await page.locator('[data-phone-session-expand]').tap();
+    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'list');
+    await expect(
+      page.locator('[data-project-heading][data-project-id="p1"]'),
+    ).toBeInViewport();
+  });
+});

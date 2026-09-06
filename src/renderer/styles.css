@@ -1052,6 +1052,20 @@ body {
   border-radius: 8px;
 }
 
+/* The one exception to the square above: a skin that holds TEXT rather than
+ * one glyph (the phone keystroke strip's "Esc → agent" / "⏎ → agent"
+ * captions) cannot be clamped to 30px wide without its own words overflowing
+ * past the box they are painted in -- measured on a real Playwright render,
+ * where the outer 44px hit box still passed every existing floor while the
+ * caption spilled into the next chip, invisible to a `getBoundingClientRect`
+ * check that only ever asks "is it AT LEAST 44?". `data-tap-pill` opts a
+ * skin OUT of the fixed square and into a hit-still-44, paint-still-30-tall,
+ * width-to-content pill instead -- every other `[data-tap-skin]` in this file
+ * is an icon and keeps the square untouched. */
+.vam-phone .vam-tap > [data-tap-skin][data-tap-pill] {
+  width: auto;
+}
+
 /* A phone has no hover, so every hover-only affordance is dead there and the
    press is the only feedback a finger gets. Drawn on the skin, like
    everything else visible. */

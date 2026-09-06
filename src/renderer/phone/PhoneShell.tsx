@@ -50,6 +50,8 @@
 
 import { Bot, GitPullRequest, type LucideIcon, MessageSquare, SquareTerminal } from 'lucide-react';
 import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react';
+import { orderedInProject } from '../canvas/layout.js';
+import type { Project, Session } from '../domain/model.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
 import { SessionList } from '../panels/SessionList.js';
 import { type Tab, visibleTabs } from '../panels/tabs.js';
@@ -203,6 +205,135 @@ function ViewIcons({
   );
 }
 
+/** The four status tokens, on a 6px dot -- never borrowed for decoration. */
+const STATUS_DOT: Readonly<Record<Session['status'], string>> = {
+  running: 'bg-running',
+  waiting: 'bg-waiting',
+  done: 'bg-done',
+  failed: 'bg-failed',
+};
+
+/**
+ * Which session, in this project -- a different axis from `ViewIcons`, which
+ * answers which facet of ONE session. Ordered by `orderedInProject`, the same
+ * urgency-first rule the canvas itself uses, scoped to one project.
+ *
+ * ONE SESSION RENDERS NOTHING: a strip that can only ever show one tab,
+ * permanently selected, teaches nothing and costs a full row on every
+ * single-session project. Selection is said three ways, following
+ * `ViewIcons`' own precedent: `aria-pressed`, a filled ground, and a 2px
+ * mark -- never `role="tab"`, which would be a third orphaned tablist in a
+ * codebase that already has two unpaired with any `tabpanel`.
+ *
+ * The `+` and `›` sit fixed outside the scrollable region so they stay
+ * reachable at any scroll position, and both reuse existing routes: `+` is
+ * `sidebar.onAddInProject`, the same call the list screen's per-project add
+ * makes; `›` unwinds this screen's own history entry and lands on the list,
+ * pre-scrolled to this project's heading.
+ */
+function SessionTabStrip({
+  project,
+  sessions,
+  currentSessionId,
+  onPick,
+  onAdd,
+  onExpand,
+}: {
+  readonly project: Project;
+  readonly sessions: readonly Session[];
+  readonly currentSessionId: string;
+  readonly onPick: (sessionId: string) => void;
+  readonly onAdd: () => void;
+  readonly onExpand: () => void;
+}) {
+  if (sessions.length < 2) return null;
+  return (
+    <nav
+      aria-label={`sessions in ${project.name}`}
+      data-phone-session-tabs
+      className="flex flex-none items-center gap-1.5 border-line border-b bg-panel px-3"
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+        {sessions.map((session) => {
+          const on = session.id === currentSessionId;
+          return (
+            <button
+              key={session.id}
+              type="button"
+              data-phone-session-tab={session.id}
+              aria-pressed={on}
+              aria-label={`${session.title}, ${session.status}`}
+              onClick={() => onPick(session.id)}
+              className={`${TOUCH} ${FOCUS_RING} relative flex-none`}
+            >
+              <span
+                data-tap-skin
+                className={[
+                  'flex h-[30px] max-w-[104px] items-center gap-1 rounded-[8px] px-2',
+                  on ? 'bg-segment-on text-ink' : 'text-ink-dim active:bg-raised',
+                ].join(' ')}
+              >
+                <span
+                  aria-hidden="true"
+                  data-phone-session-status={session.status}
+                  className={`h-[6px] w-[6px] flex-none rounded-full ${STATUS_DOT[session.status]}`}
+                />
+                {/* Colour alone repeats a WCAG 1.4.1 failure this codebase has
+                    shipped before -- a glyph carries the one state that needs
+                    a second channel, on a chip too narrow for a word. */}
+                {session.status === 'waiting' && (
+                  <span
+                    aria-hidden="true"
+                    data-phone-session-waiting-badge
+                    className="flex-none font-mono text-[9px] text-waiting"
+                  >
+                    !
+                  </span>
+                )}
+                <span className="truncate text-[11px]">{session.title}</span>
+              </span>
+              {on && (
+                <span
+                  data-phone-session-mark
+                  className="-translate-x-1/2 absolute bottom-[5px] left-1/2 h-[2px] w-[16px] rounded-full bg-ink"
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        data-phone-session-add
+        aria-label={`new session in ${project.name}`}
+        onClick={onAdd}
+        className={`${TOUCH} ${FOCUS_RING} flex-none`}
+      >
+        <span
+          data-tap-skin
+          className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] text-ink-dim active:bg-raised"
+        >
+          +
+        </span>
+      </button>
+      <button
+        type="button"
+        data-phone-session-expand
+        aria-label={`sessions in ${project.name}`}
+        onClick={onExpand}
+        className={`${TOUCH} ${FOCUS_RING} flex-none`}
+      >
+        <span
+          data-tap-skin
+          className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] text-ink-dim active:bg-raised"
+        >
+          ›
+        </span>
+      </button>
+    </nav>
+  );
+}
+
 /**
  * What this connection cannot do, in the source's own words.
  *
@@ -268,6 +399,13 @@ export function PhoneShell({
    */
   const [view, setView] = useState<Tab>('Response');
   const [viewRequest, setViewRequest] = useState<{ readonly tab: Tab } | null>(null);
+  /**
+   * A project id to scroll the list screen to, set by the session tab
+   * strip's `›` and consumed once the list is back on screen. Not a second
+   * navigation surface: `back()` still does the actual unwind, this only adds
+   * where it lands.
+   */
+  const [scrollToProjectId, setScrollToProjectId] = useState<string | null>(null);
 
   const entry = detail.entry;
   const session = entry?.session ?? null;
@@ -295,6 +433,15 @@ export function PhoneShell({
     return () => window.removeEventListener('popstate', pop);
   }, []);
 
+  useEffect(() => {
+    if (open || scrollToProjectId === null) return;
+    const heading = document.querySelector(
+      `[data-project-heading][data-project-id="${CSS.escape(scrollToProjectId)}"]`,
+    );
+    heading?.scrollIntoView({ block: 'start' });
+    setScrollToProjectId(null);
+  }, [open, scrollToProjectId]);
+
   const show = () => {
     openSession(window.history);
     pushed.current = true;
@@ -310,6 +457,15 @@ export function PhoneShell({
       pushed.current = false;
     }
     setOpen(false);
+  };
+  /**
+   * The strip's `›`: the same unwind `back()` does, plus where it lands. No
+   * second navigation surface -- this is the list screen the chevron already
+   * reaches, arriving pre-scrolled to the right heading instead of at the top.
+   */
+  const expand = () => {
+    if (entry !== null) setScrollToProjectId(entry.project.id);
+    back();
   };
 
   if (!open || entry === null) {
@@ -437,6 +593,23 @@ export function PhoneShell({
       >
         {statusCell}
       </div>
+
+      {/* Out of the way while the keyboard is up, on the same rule as
+          `RemoteLimits` beside it: chrome the operator is not reading while
+          composing. This is the OTHER axis from `ViewIcons` above -- which
+          session, not which facet of it -- and it sits in the step rail's old
+          slot without being the step rail's return; see this file's header
+          comment. */}
+      {!typing && (
+        <SessionTabStrip
+          project={entry.project}
+          sessions={orderedInProject(entry.project)}
+          currentSessionId={entry.session.id}
+          onPick={(sessionId) => sidebar.onPick(sessionId)}
+          onAdd={() => sidebar.onAddInProject(entry.project)}
+          onExpand={expand}
+        />
+      )}
 
       {/* Out of the way while the keyboard is up: chrome the operator is not
           reading, out of the ~400px the keyboard leaves. The step rail that

@@ -82,7 +82,7 @@ import {
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AnswerRequest, AnswerResult, PanePrompt, PromptView } from '../../shared/answer.js';
-import type { PaneSendResult } from '../../shared/terminal.js';
+import type { PaneKey, PaneSendResult } from '../../shared/terminal.js';
 import type {
   AgentQuestion,
   Command,
@@ -1376,6 +1376,56 @@ function cycleWording(result: PaneSendResult): string | null {
 }
 
 /**
+ * The phone keystroke strip's five keys -- vam's real `PaneKey` shapes, not
+ * orca's five: there is no `PaneKey` kind for a plain Tab (`terminal.ts`), so
+ * it is refused outright rather than drawn as a button that always fails.
+ * `id` is the strip's own attribute name, distinct from `PaneKey['kind']`
+ * only for `space`, which is a `text` key rather than a kind of its own.
+ *
+ * Escape and Enter carry a visible caption naming a different destination
+ * than their textarea siblings already claim (`Esc → sidebar`, the send
+ * arrow) -- the one place this spec asks for exact wording rather than
+ * leaving it to the coder.
+ */
+const KEY_STRIP: readonly {
+  readonly id: string;
+  readonly key: PaneKey;
+  readonly caption: string;
+  readonly ariaLabel: string;
+}[] = [
+  {
+    id: 'escape',
+    key: { kind: 'escape' },
+    caption: 'Esc → agent',
+    ariaLabel: 'press Escape in the session',
+  },
+  {
+    id: 'enter',
+    key: { kind: 'enter' },
+    caption: '⏎ → agent',
+    ariaLabel: 'press Enter in the session',
+  },
+  {
+    id: 'backspace',
+    key: { kind: 'backspace' },
+    caption: '⌫',
+    ariaLabel: 'press Backspace in the session',
+  },
+  {
+    id: 'back-tab',
+    key: { kind: 'back-tab' },
+    caption: '⇧⇥',
+    ariaLabel: 'press Shift-Tab in the session',
+  },
+  {
+    id: 'space',
+    key: { kind: 'text', text: ' ' },
+    caption: '␣',
+    ariaLabel: 'press Space in the session',
+  },
+];
+
+/**
  * What a session says it is waiting on, and whether vam can do anything about
  * it.
  *
@@ -1983,20 +2033,23 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const canCycleMode = entry !== null && terminal !== false && entry.session.vamControlled === true;
   /**
-   * Press the session's own Shift-Tab, OVER THE ONE CHANNEL THAT ALREADY
-   * TYPES INTO A PANE: `terminal.send` resolves the pane in main and refuses
-   * every answer but a single session it can prove is this row's, so a second
-   * path would be a second chance to get that wrong -- into somebody's
-   * running agent. `window.api` exists only in the Electron shell, and its
-   * absence is reported rather than made into a no-op.
+   * ONE KEYSTROKE, into this session's pane, shared by the mode row's own
+   * Shift-Tab AND every button of the phone keystroke strip -- they are the
+   * SAME channel (`window.api.terminal.send`) into the SAME pane, so one
+   * in-flight guard and one refusal caption serve both rather than each
+   * growing its own copy. `cycleNote` is the shared note; `sentText`/
+   * `busyText` are the one difference between a mode cycle and a keystroke.
+   *
+   * One press at a time, ACROSS BOTH CONTROLS: held down, a repeat here
+   * queued a `back-tab` per repeat into a live agent with nothing on screen
+   * counting them, and a phone tap repeated in a hurry is the same failure.
+   * `window.api` exists only in the Electron shell, and its absence is
+   * reported rather than made into a no-op.
    */
-  const cycleMode = async () => {
-    const send = globalThis.window?.api?.terminal?.send;
+  const pressPaneKey = async (key: PaneKey, sentText: string, busyText: string) => {
     if (entry === null) return;
-    // One chord at a time. Held down, this queued a `back-tab` per repeat into
-    // a live agent with nothing on screen counting them; the caption raised
-    // below is what answers the second press instead.
     if (cycleNote?.kind === 'busy') return;
+    const send = globalThis.window?.api?.terminal?.send;
     if (send === undefined) {
       setCycleNote({
         kind: 'refused',
@@ -2005,9 +2058,9 @@ export function DetailPanel(props: DetailPanelProps) {
       return;
     }
     // BEFORE THE AWAIT: one to three tmux spawns follow, at ten seconds each.
-    setCycleNote({ kind: 'busy', text: '⇧Tab · sending…' });
+    setCycleNote({ kind: 'busy', text: busyText });
     const mine = cycleAbout;
-    const landed = await send(entry.project.id, { kind: 'back-tab' }, entry.session.id).catch(
+    const landed = await send(entry.project.id, key, entry.session.id).catch(
       (): PaneSendResult => 'refused',
     );
     // Thirty seconds is long enough to move on, and an answer about the
@@ -2015,14 +2068,28 @@ export function DetailPanel(props: DetailPanelProps) {
     if (noteFor.current !== mine) return;
     const refusal = cycleWording(landed);
     setCycleNote(
-      refusal === null
-        ? // THE DELIVERY, NOT THE MODE. vam presses the session's own chord
-          // into the pane and never reads back which mode the agent landed
-          // in, so naming one here would be a claim nothing checked.
-          { kind: 'sent', text: '⇧Tab sent — vam does not read the mode back' }
-        : { kind: 'refused', text: refusal },
+      refusal === null ? { kind: 'sent', text: sentText } : { kind: 'refused', text: refusal },
     );
   };
+  /**
+   * Press the session's own Shift-Tab, OVER THE ONE CHANNEL THAT ALREADY
+   * TYPES INTO A PANE: `terminal.send` resolves the pane in main and refuses
+   * every answer but a single session it can prove is this row's, so a second
+   * path would be a second chance to get that wrong -- into somebody's
+   * running agent.
+   */
+  const cycleMode = () =>
+    // THE DELIVERY, NOT THE MODE. vam presses the session's own chord into the
+    // pane and never reads back which mode the agent landed in, so naming one
+    // here would be a claim nothing checked.
+    pressPaneKey(
+      { kind: 'back-tab' },
+      '⇧Tab sent — vam does not read the mode back',
+      '⇧Tab · sending…',
+    );
+  /** One keystroke-strip button's press, over the shared bridge above. */
+  const sendKey = (item: (typeof KEY_STRIP)[number]) =>
+    pressPaneKey(item.key, `${item.caption} sent`, `${item.caption} · sending…`);
   /** The first option of the open question, when one is being asked. */
   const firstOptionRef = useRef<HTMLButtonElement>(null);
   /**
@@ -2409,6 +2476,19 @@ export function DetailPanel(props: DetailPanelProps) {
   // a control that takes text it cannot deliver is worse than no control, and
   // the source's own sentence for the refusal is carried in `declines`.
   const composerHidden = records === false || (openQuestion && chattingAbout !== setId);
+  /**
+   * The phone keystroke strip's own gate -- structurally the SAME boolean
+   * `canCycleMode` already is, shared rather than re-derived, AND the card
+   * must not be live: `newestQuestion === null || !openQuestion` is
+   * `WaitingNote`'s own "no card, or the card has nothing open" test
+   * (below), reused rather than re-derived a second time. `composerHidden`
+   * ALONE is not this test -- `chattingAbout` un-hides the composer the
+   * moment "Chat about this" is tapped, while `QuestionCard` keeps drawing
+   * the very card that press was about, which would put a structured pick
+   * and a raw keypress live over the one question at once. `phone` is
+   * checked separately at the render site.
+   */
+  const canSendKeys = canCycleMode && (newestQuestion === null || !openQuestion);
   const startChat = () => {
     if (newestQuestion !== null) setChattingAbout(setId);
     onCompose();
@@ -2934,6 +3014,49 @@ export function DetailPanel(props: DetailPanelProps) {
             newestQuestion === null ? 'border-line border-t' : '',
           ].join(' ')}
         >
+          {/* First child, so it inherits `composerHidden` for free: a
+              `QuestionCard` open and unanswered withdraws the whole composer
+              block, this strip included -- one surface answering one prompt,
+              rather than two competing ones. Gated on `phone` too: this file
+              is shared with the desktop detail column, and un-gating this
+              would put the strip there the moment `canSendKeys` held, which
+              nothing asked for. */}
+          {phone && canSendKeys && (
+            <nav
+              aria-label="press a key in the session"
+              data-key-strip
+              className="flex flex-none items-center gap-1.5"
+            >
+              {KEY_STRIP.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  data-key-strip-key={item.id}
+                  aria-label={item.ariaLabel}
+                  onClick={() => void sendKey(item)}
+                  className="vam-tap flex flex-none items-center justify-center"
+                >
+                  <span
+                    data-tap-skin
+                    // `data-tap-pill` (`styles.css`): the shared
+                    // `.vam-phone .vam-tap > [data-tap-skin]` rule pins every
+                    // skin to a 30x30 SQUARE, which is correct for the icon
+                    // skins it was written for and wrong for a skin holding
+                    // TEXT -- "Esc → agent" measured 72px wide and, clamped to
+                    // 30, spilled into the next chip on a real render (caught
+                    // only by a screenshot; `getBoundingClientRect()` on the
+                    // 44px hit box stays green regardless). This opts out of
+                    // the square into a width-to-content pill, hit still 44,
+                    // paint still 30 tall.
+                    data-tap-pill
+                    className="flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-panel px-1.5 font-mono text-[11px] text-ink-quiet active:bg-raised"
+                  >
+                    {item.caption}
+                  </span>
+                </button>
+              ))}
+            </nav>
+          )}
           {suggesting && (
             <div
               data-bang-suggest
