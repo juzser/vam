@@ -34,6 +34,7 @@ import {
   RotateCcw,
   Search,
   Settings,
+  Smartphone,
   Sun,
   Trash2,
 } from 'lucide-react';
@@ -74,6 +75,7 @@ export const NEW_PROJECT_PENDING = 'vam/new-project';
 /** The actions the sidebar's controls stand for — actions, never keys, so
  *  every hint below reads the chord in force rather than a shipped default. */
 const SETTINGS_ACTION: KeyAction = { kind: 'settings' };
+const REMOTE_ACTION: KeyAction = { kind: 'remote' };
 const SEARCH_ACTION: KeyAction = { kind: 'search' };
 const FILTER_MENU_ACTION: KeyAction = { kind: 'filterMenu' };
 const CLOSE_ACTION: KeyAction = { kind: 'close' };
@@ -401,6 +403,13 @@ export type SessionListProps = {
   readonly revealRequest?: { readonly projectId: string } | null;
   readonly onSettings: () => void;
   /**
+   * Opens the same Settings overlay `onSettings` does, focused directly on
+   * the Remote section — pairing, approve/deny, unpair and revoke all — so
+   * the operator reaches it without navigating through Settings first. Not a
+   * second overlay: `RemotePanel` stays the one place that draws it.
+   */
+  readonly onRemote: () => void;
+  /**
    * The theme ON SCREEN, already resolved — never `prefs.theme`, which can be
    * `system`. The two-way ternary below is exactly why: a third value would
    * land in its `else` arm, label the wrong direction and typecheck anyway.
@@ -475,6 +484,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     onHideProject,
     onRemoveProject,
     onSettings,
+    onRemote,
     theme,
     onToggleTheme,
     width,
@@ -955,6 +965,26 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
             >
               <Settings size={14} strokeWidth={1.5} />
+            </button>
+          </ShortcutTip>
+          {/* Beside Settings, at the operator's request: pairing, approve/deny,
+              unpair and revoke-all were all real already, buried one section
+              inside Settings. This opens the same overlay, focused directly
+              on Remote (`SettingsOverlay`'s `initialSection`) — one surface,
+              not a second one. No `vam-tap`/`[data-tap-skin]` opt-in needed:
+              `styles.css` already ENUMERATES `[data-avatar-bar] button` at a
+              44px floor for the phone shell, the same rule Settings and the
+              theme toggle already ride on, and none of the three paints a
+              border that pull request 222's shrink-to-30 rule would need to
+              undo — an icon with no border needs no opt-out either way. */}
+          <ShortcutTip label="Remote access" action={REMOTE_ACTION}>
+            <button
+              type="button"
+              onClick={onRemote}
+              aria-label="remote access"
+              className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+            >
+              <Smartphone size={14} strokeWidth={1.5} />
             </button>
           </ShortcutTip>
           {/* No chord reaches the theme toggle, so the tip is its label. */}

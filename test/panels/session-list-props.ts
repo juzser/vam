@@ -115,6 +115,7 @@ export function baseProps(entries: readonly SessionEntry[]): SessionListProps {
     onHideProject: noop,
     onRemoveProject: noop,
     onSettings: noop,
+    onRemote: noop,
     theme: 'dark',
     onToggleTheme: noop,
     width: 264,

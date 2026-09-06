@@ -75,6 +75,14 @@ export type SettingsOverlayProps = {
   readonly theme: EffectiveTheme;
   readonly onChange: (next: Prefs) => void;
   readonly onClose: () => void;
+  /**
+   * Which section is on screen the moment the overlay opens. Absent means
+   * `appearance`, where the overlay has opened since before sections existed
+   * (see the note on `SECTIONS`) — the Remote icon is the one caller that
+   * needs to land somewhere else, so it is optional rather than threading a
+   * fifth required prop through every other opener.
+   */
+  readonly initialSection?: SectionId;
 };
 
 /** Derived from the same table the `?` sheet reads, so the picker cannot
@@ -166,12 +174,20 @@ function useWideNav(): boolean {
   return wide;
 }
 
-export function SettingsOverlay({ prefs, theme, onChange, onClose }: SettingsOverlayProps) {
+export function SettingsOverlay({
+  prefs,
+  theme,
+  onChange,
+  onClose,
+  initialSection,
+}: SettingsOverlayProps) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
   const dialog = useRef<HTMLDivElement | null>(null);
   // Component state, not a pref: which pane you last had open is not a setting,
   // and persisting it would open the overlay somewhere different every time.
-  const [section, setSection] = useState<SectionId>('appearance');
+  // Read once, at mount — the overlay is only ever mounted fresh (`Canvas.tsx`
+  // conditionally renders it), so there is no later prop change to track.
+  const [section, setSection] = useState<SectionId>(initialSection ?? 'appearance');
   const [capturing, setCapturing] = useState<Capturing>(null);
   const [message, setMessage] = useState('');
   const wide = useWideNav();
