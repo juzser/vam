@@ -1176,6 +1176,28 @@ function CanvasInner({
   const nodeIds = useMemo(() => layout.nodes.map((n) => n.id), [layout]);
 
   /**
+   * A click lands the cursor where the click landed, exactly as `j`/`k`
+   * would have -- the mouse is a shortcut through the same door `nodeIds`
+   * already gates, never a second one.
+   *
+   * MEMOISED, AND THAT IS THE POINT. `<ReactFlow>`'s node renderer
+   * (`GraphView`) is wrapped in `React.memo`, so a keystroke that leaves
+   * `nodes`/`edges` untouched should cost that subtree nothing -- but a
+   * fresh closure here on every render is itself a prop that changed, which
+   * defeats the memo and re-renders every drawn node on every keystroke.
+   * Measured: at 200 nodes that turned a draft keystroke into ~110ms; see
+   * `Canvas.keystroke-scaling.test.tsx`.
+   */
+  const onNodeClick: ComponentProps<typeof ReactFlow>['onNodeClick'] = useCallback(
+    (_event, node) => {
+      if (nodeIds.includes(node.id)) {
+        setFocusedId(node.id);
+      }
+    },
+    [nodeIds],
+  );
+
+  /**
    * Every node focus could land on, paired with the SESSION it draws.
    *
    * The pairing is the point. A remembered focus stores a session id under its
@@ -2885,11 +2907,7 @@ function CanvasInner({
               // a second one. Scenery (fans, empty slots) is not in that set
               // and is therefore inert, which is right: there is nothing to
               // focus on a connector.
-              onNodeClick={(_event, node) => {
-                if (nodeIds.includes(node.id)) {
-                  setFocusedId(node.id);
-                }
-              }}
+              onNodeClick={onNodeClick}
               nodeTypes={NODE_TYPES}
               // 80%, not `fitView`. Fitting picks whatever scale makes every
               // node visible, so the canvas opened at a different zoom for
