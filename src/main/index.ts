@@ -8,11 +8,13 @@
  */
 
 import { execFile } from 'node:child_process';
+import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell } from 'electron';
 import { registerClipboardIpc } from './clipboard/ipc.js';
 import { contentSecurityPolicy } from './csp.js';
+import { registerAttachImageIpc } from './dialog/attach-image.js';
 import { registerDialogIpc } from './dialog/ipc.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { releaseCloseAccelerator } from './menu.js';
@@ -23,6 +25,7 @@ import { registerRemoteIpc } from './remote/ipc.js';
 import { remoteConfigFromEnv } from './remote/launch.js';
 import { createPairing } from './remote/pairing.js';
 import { createStreamRegistry, startRemoteServer } from './remote/server.js';
+import { listLiveAgents } from './sources/claude-code/agents.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
 import { createTmuxRunner } from './sources/tmux/spawn.js';
 import { createNodeEventSource } from './stream/event-source.js';
@@ -334,6 +337,36 @@ void app.whenReady().then(() => {
   // call is what this channel means -- a modeless picker, not one owned by a
   // window that may already be closing.
   registerDialogIpc(ipcMain, { showOpenDialog: (options) => dialog.showOpenDialog(options) });
+  // The image-attach picker. The cwd it scopes to is asked fresh, same as
+  // `recordPrompt` re-asks it: a canvas drawn minutes ago is not evidence
+  // about which directory a session is in now, or whether it still exists.
+  registerAttachImageIpc(
+    ipcMain,
+    { showOpenDialog: (options) => dialog.showOpenDialog(options) },
+    async (sessionId) => {
+      const agents = await listLiveAgents();
+      const row =
+        agents.find((agent) => agent.key === sessionId) ??
+        agents.find((agent) => agent.sessionId === sessionId);
+      return row?.cwd ?? null;
+    },
+    async (path) => {
+      const { open } = await import('node:fs/promises');
+      const handle = await open(path, 'r');
+      try {
+        const buffer = new Uint8Array(16);
+        await handle.read(buffer, 0, 16, 0);
+        return buffer;
+      } finally {
+        await handle.close();
+      }
+    },
+    // The real `fs.realpath`: resolves symlinks against the actual disk, so
+    // a link inside the session's directory that points outside it is caught
+    // before its bytes are ever attached. See `attach-image.ts`'s own header
+    // for the finding this closes and the TOCTOU window it does not.
+    (path) => realpath(path),
+  );
   startRemoteTransport();
   createWindow();
 });

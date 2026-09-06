@@ -80,9 +80,16 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
           ? ipc.invoke(CHANNELS.createSessionIn, cwd, title)
           : ipc.invoke(CHANNELS.createSessionIn, cwd, title, provider),
       ),
+    pickImageAttachment: (sessionId) =>
+      unwrap<string | null>(ipc.invoke(CHANNELS.pickImageAttachment, sessionId)),
   } satisfies Pick<
     PreloadSourceApi,
-    'recordPrompt' | 'renameSession' | 'closeSession' | 'createSession' | 'createSessionIn'
+    | 'recordPrompt'
+    | 'renameSession'
+    | 'closeSession'
+    | 'createSession'
+    | 'createSessionIn'
+    | 'pickImageAttachment'
   >;
 
   const governance = {

@@ -130,6 +130,15 @@ export const CHANNELS = {
    */
   chooseDirectory: 'vam:dialog:choose-directory',
   /**
+   * The image-attach picker. Unlike `chooseDirectory` it answers through the
+   * `IpcResult` envelope: there IS a refusal behind this one to report in
+   * words -- outside the session's directory, or not really an image -- and
+   * cancelling the dialog is `{ok: true, value: null}`, the same "not a
+   * failure" reading `chooseDirectory` gives its own cancel. See
+   * `./dialog/attach-image.ts`.
+   */
+  pickImageAttachment: 'vam:dialog:pick-image-attachment',
+  /**
    * The pairing screen's channels. Every one of them answers a bare
    * `RemoteState` (`src/main/remote/ipc.ts`) rather than an `IpcResult`: the
    * screen's whole content is that one snapshot, so an act returning the

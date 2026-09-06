@@ -80,6 +80,7 @@ function makeApi(descriptor: SourceDescriptor): PreloadSourceApi {
     closeSession: vi.fn(async () => undefined),
     createSession: vi.fn(async () => undefined),
     createSessionIn: vi.fn(async () => undefined),
+    pickImageAttachment: vi.fn(async () => null),
     applyWaivers: vi.fn(async () => undefined),
     transitionLesson: vi.fn(async () => undefined),
   };
@@ -144,6 +145,23 @@ describe('createSourceFromPreload', () => {
     // Same flag, so the same answer: a source that cannot create carries
     // neither member, and the new-project path has nothing to call.
     expect('createSessionIn' in source.write).toBe(false);
+  });
+
+  it('gates pickImageAttachment on promptAttachments, independently of createSession', async () => {
+    const withoutAttach = await createSourceFromPreload(
+      makeApi(makeDescriptor({ ...NO_CAPABILITIES, recordPrompt: true, createSession: true })),
+    );
+    if (!canWriteTo(withoutAttach)) throw new Error('expected a writable source');
+    expect('pickImageAttachment' in withoutAttach.write).toBe(false);
+
+    const api = makeApi(
+      makeDescriptor({ ...NO_CAPABILITIES, recordPrompt: true, promptAttachments: true }),
+    );
+    const withAttach = await createSourceFromPreload(api);
+    if (!canWriteTo(withAttach)) throw new Error('expected a writable source');
+    expect('pickImageAttachment' in withAttach.write).toBe(true);
+    await withAttach.write.pickImageAttachment?.('row-1');
+    expect(api.pickImageAttachment).toHaveBeenCalledWith('row-1');
   });
 
   it('refuses a lifecycle capability that no member could ever reach', async () => {

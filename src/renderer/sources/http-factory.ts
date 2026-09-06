@@ -149,6 +149,14 @@ export function createHttpSourceApi(options: HttpSourceOptions = {}): PreloadSou
       post('/api/create-session', { projectId, title, provider: provider ?? activeProviderId() }),
     createSessionIn: (cwd, title, provider) =>
       post('/api/create-session-in', { cwd, title, provider: provider ?? activeProviderId() }),
+    // No route to add one to: the picker needs a native dialog and a
+    // filesystem read, neither of which exists on the other end of an HTTP
+    // connection, and the remote server carries only JSON POST bodies through
+    // a fixed route table. `promptAttachments` stays `false` for this source
+    // (`fixture-source.ts` states the same reasoning), so nothing ever calls
+    // this -- present only because the api is unconditional.
+    pickImageAttachment: () =>
+      Promise.reject(unreachable('no-such-route', 'vam serves no image picker over HTTP')),
     applyWaivers: (sessionId, findingIds) => post('/api/apply-waivers', { sessionId, findingIds }),
     transitionLesson: (sessionId, lessonId, status) =>
       post('/api/transition-lesson', { sessionId, lessonId, status }),

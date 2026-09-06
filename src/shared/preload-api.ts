@@ -75,6 +75,14 @@ export type PreloadSourceApi = {
   closeSession(sessionId: string): Promise<void>;
   createSession(projectId: string, title: string, provider?: string): Promise<void>;
   createSessionIn(cwd: string, title: string, provider?: string): Promise<void>;
+  /**
+   * Opens the native image picker scoped to the session's own working
+   * directory and answers a validated absolute path, `null` on cancel, or
+   * rejects with the `SourceError` naming why the picked file was refused
+   * (outside the directory, or not really an image). See
+   * `main/dialog/attach-image.ts` for why this crosses into main at all.
+   */
+  pickImageAttachment(sessionId: string): Promise<string | null>;
   applyWaivers(sessionId: string, findingIds: readonly string[]): Promise<void>;
   transitionLesson(sessionId: string, lessonId: string, status: string): Promise<void>;
 };

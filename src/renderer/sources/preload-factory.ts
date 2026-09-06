@@ -44,6 +44,11 @@ function buildWrites(api: PreloadSourceApi, descriptor: SourceDescriptor): Sourc
     // and one in a directory that is about to become a project.
     writes.createSessionIn = (cwd, title) => api.createSessionIn(cwd, title, activeProviderId());
   }
+  // Its own flag, not folded into `createSession`'s: a source can deliver
+  // text without being able to scope a picker to a directory.
+  if (capabilities.promptAttachments) {
+    writes.pickImageAttachment = (sessionId) => api.pickImageAttachment(sessionId);
+  }
   return writes;
 }
 
