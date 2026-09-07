@@ -77,4 +77,32 @@ describe('a remote port that is already in use', () => {
       process.off('uncaughtException', record);
     }
   });
+
+  // A caller (`src/main/index.ts`) has to tell "the port is taken" apart from
+  // every other bind refusal WITHOUT re-parsing this message's English --
+  // `RemoteBindError.reason` is the machine-readable half of the same
+  // refusal, carried on the rejection rather than reconstructed from prose.
+  it('rejects with a RemoteBindError whose reason is port-in-use', async () => {
+    const port = await squat();
+    await expect(
+      startRemoteServer({ port, devices, allowWrites: false, source, subscribe: () => () => {} }),
+    ).rejects.toMatchObject({ reason: 'port-in-use' });
+  });
+});
+
+describe('a remote port that cannot be bound for some other reason', () => {
+  it('rejects with a RemoteBindError whose reason is "other", not port-in-use', async () => {
+    // Port 1 is in the privileged range; a non-root process is refused
+    // EACCES, never EADDRINUSE, so this is a REAL other-cause bind failure
+    // rather than a mocked one.
+    await expect(
+      startRemoteServer({
+        port: 1,
+        devices,
+        allowWrites: false,
+        source,
+        subscribe: () => () => {},
+      }),
+    ).rejects.toMatchObject({ reason: 'other' });
+  });
 });

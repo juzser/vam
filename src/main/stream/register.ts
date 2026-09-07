@@ -16,6 +16,7 @@
  */
 
 import { openChangeStream } from '../../shared/stream.js';
+import { recordMainFailure } from '../errors/log.js';
 import { CHANNELS } from '../ipc/channels.js';
 
 export type IpcMainLike = {
@@ -79,6 +80,17 @@ export function registerStreamIpc(
       return true;
     } catch (error) {
       console.error('vam: failed to open the change stream:', error);
+      // The RETURNED `false` above stays exactly as generic as the falsifier
+      // in `test/electron/stream-register.test.ts` requires -- nothing about
+      // `error` crosses THAT bridge. This is a different, already-gated
+      // route: `src/main/errors/log.ts` is local-only and never leaves the
+      // machine except through `src/renderer/errors/report.ts`'s own scrub,
+      // the same gate every other recorded failure goes through.
+      recordMainFailure(
+        'open the live update stream',
+        'stream-open-failed',
+        `vam could not open its live update stream: ${error instanceof Error ? error.message : String(error)}. The canvas will not update on its own until vam restarts.`,
+      );
       return false;
     }
   });

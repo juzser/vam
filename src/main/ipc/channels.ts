@@ -173,6 +173,19 @@ export const CHANNELS = {
    * that turns on write routes the NEXT time vam starts.
    */
   remoteWritesSet: 'vam:remote:writes-set',
+  /**
+   * MAIN's own failure buffer (`src/main/errors/log.ts`), not the renderer's
+   * -- the renderer's `errors/log.ts` never leaves the renderer, by design.
+   * This is the ROUTE ONTO it for a failure that started in main, most often
+   * before any renderer existed to be pushed to. `vam:errors:get` is a plain
+   * pull -- the whole backlog, oldest first -- and `vam:errors:changed` is
+   * payload-free, the SAME "ask again" shape `vam:stream:change` already
+   * uses: a tick means "call `get` again", never a payload of its own. That
+   * shape is what makes a late subscriber recover everything recorded before
+   * it existed, which a bare push would silently have dropped.
+   */
+  mainErrorsGet: 'vam:errors:get',
+  mainErrorsChanged: 'vam:errors:changed',
 } as const;
 
 /**

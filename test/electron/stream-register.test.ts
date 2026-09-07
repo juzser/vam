@@ -7,11 +7,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearMainFailures, mainFailures } from '../../src/main/errors/log.js';
 import { CHANNELS } from '../../src/main/ipc/channels.js';
 import { CLOSE_LINGER_MS, registerStreamIpc } from '../../src/main/stream/register.js';
 import { createStreamSubscribe } from '../../src/preload/api.js';
 
-beforeEach(() => vi.useFakeTimers());
+beforeEach(() => {
+  vi.useFakeTimers();
+  clearMainFailures();
+});
 afterEach(() => vi.useRealTimers());
 
 function fakeIpcMain() {
@@ -152,6 +156,35 @@ describe('registerStreamIpc', () => {
     const result = await ipcMain.invoke(CHANNELS.streamSubscribe);
     expect(result).toBe(false);
     expect(JSON.stringify(result)).not.toContain(sensitivePath);
+    consoleSpy.mockRestore();
+  });
+
+  // A stream-open failure used to end at `console.error` and nowhere else --
+  // invisible in a packaged app, same defect as the remote endpoint's. It
+  // must reach `src/main/errors/log.ts` too, under its own code, so the
+  // operator's error log carries it -- while the RETURNED boolean above stays
+  // exactly as generic as the falsifier just above proved it is: this is the
+  // local-only sink the scrubber gates before anything leaves the machine,
+  // not a second bridge answer.
+  it("also records the failure to main's own error log, under stream-open-failed", async () => {
+    const ipcMain = fakeIpcMain();
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    registerStreamIpc(
+      ipcMain,
+      { send: vi.fn() },
+      {
+        url: 'http://example.invalid/stream',
+        createEventSource: () => {
+          throw new Error('ECONNREFUSED');
+        },
+      },
+    );
+
+    await ipcMain.invoke(CHANNELS.streamSubscribe);
+    const [event] = mainFailures();
+    expect(event?.code).toBe('stream-open-failed');
+    expect(event?.message).toContain('ECONNREFUSED');
     consoleSpy.mockRestore();
   });
 });
