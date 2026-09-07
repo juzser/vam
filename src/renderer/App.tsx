@@ -19,6 +19,7 @@ import type {
   ClipboardApi,
   DesktopSourceApi,
   DialogApi,
+  MainErrorsApi,
   TerminalApi,
   UpdateApi,
   UsageApi,
@@ -28,6 +29,7 @@ import { SmithClient } from './adapter/client.js';
 import { useCanvas } from './adapter/useCanvas.js';
 import { Canvas } from './canvas/Canvas.js';
 import { ErrorBoundary } from './errors/ErrorBoundary.js';
+import { bridgeMainErrors } from './errors/main-errors-bridge.js';
 import { DEMO_MODEL } from './fixtures/demo.js';
 import { createSourceFromHttp } from './sources/http-factory.js';
 import { describeFailure, type SessionSource } from './sources/port.js';
@@ -56,6 +58,12 @@ declare global {
        * bridge, so `UpdateNotice` simply never draws there.
        */
       readonly update: UpdateApi;
+      /**
+       * MAIN's own failure buffer, read side (`src/main/errors/log.ts`,
+       * `src/main/errors/ipc.ts`). `DesktopCanvas` below is the one caller,
+       * through `bridgeMainErrors`.
+       */
+      readonly mainErrors: MainErrorsApi;
     };
   }
 }
@@ -91,7 +99,7 @@ export function App() {
   return (
     <ErrorBoundary surface="vam">
       {api !== undefined ? (
-        <DesktopCanvas api={api} update={api.update} />
+        <DesktopCanvas api={api} update={api.update} mainErrors={api.mainErrors} />
       ) : isDemo() ? (
         <DemoCanvas />
       ) : (
@@ -173,9 +181,17 @@ export function BrowserCanvas({ client }: { readonly client: SmithClient }) {
 export function DesktopCanvas({
   api,
   update,
+  mainErrors,
 }: {
   readonly api: DesktopSourceApi;
   readonly update?: UpdateApi;
+  /**
+   * Main's own failure buffer's read side. Optional so every existing test
+   * fixture (a bare `DesktopSourceApi`) keeps compiling; `bridgeMainErrors`
+   * below is a no-op when it is absent, same as `UpdateNotice` already is
+   * without `update`.
+   */
+  readonly mainErrors?: MainErrorsApi;
 }) {
   const [source, setSource] = useState<SessionSource | null>(null);
   const [assembleError, setAssembleError] = useState<string | null>(null);
@@ -199,6 +215,16 @@ export function DesktopCanvas({
       cancelled = true;
     };
   }, [api]);
+
+  // Started once, for the life of this shell: `bridgeMainErrors` pulls the
+  // WHOLE backlog on its first call (recovering anything main recorded
+  // before this component -- or this window -- existed) and again on every
+  // tick. See `./errors/main-errors-bridge.js` for why a push alone would
+  // drop exactly the earliest failures.
+  useEffect(() => {
+    if (mainErrors === undefined) return;
+    return bridgeMainErrors(mainErrors);
+  }, [mainErrors]);
 
   // The notice is a `fixed` popover in the top-right corner, so it takes no
   // room from the canvas and pushes nothing off the bottom of the viewport --

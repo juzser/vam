@@ -15,6 +15,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   createClipboardApi,
   createDialogApi,
+  createMainErrorsApi,
   createPreloadApi,
   createRemoteApi,
   createStreamSubscribe,
@@ -37,4 +38,7 @@ contextBridge.exposeInMainWorld('api', {
   // other member -- whether main registered them is runtime state, and the
   // bridge's shape may not depend on runtime state.
   remote: createRemoteApi(ipcRenderer),
+  // Main's own failure buffer (`src/main/errors/log.ts`), read side. See
+  // `src/renderer/errors/main-errors-bridge.ts` for the one caller.
+  mainErrors: createMainErrorsApi(ipcRenderer),
 });

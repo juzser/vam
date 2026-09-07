@@ -469,6 +469,27 @@ async function handlePair(
 }
 
 /**
+ * A bind refusal, carrying WHY as data rather than prose a caller has to
+ * re-parse.
+ *
+ * `reason` is what lets `src/main/index.ts` (and, through it, the operator)
+ * tell "the port is taken -- recoverable, and there is something to try" from
+ * every other bind failure, without matching against this class' own English
+ * message: the message can change; a caller branching on `error.message`
+ * cannot. `'port-in-use'` is EXACTLY the `EADDRINUSE` case below; every other
+ * `'error'` the socket can raise (`EACCES` on a privileged port, most often)
+ * is `'other'`.
+ */
+export class RemoteBindError extends Error {
+  constructor(
+    message: string,
+    public readonly reason: 'port-in-use' | 'other',
+  ) {
+    super(message);
+  }
+}
+
+/**
  * Starts the server, or refuses and says why.
  *
  * The refusal is the point: there is no mode of this server that answers a
@@ -589,10 +610,14 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
     server.once('error', (error: NodeJS.ErrnoException) => {
       reject(
         error.code === 'EADDRINUSE'
-          ? new Error(
+          ? new RemoteBindError(
               `the remote endpoint could not bind port ${options.port}: it is already in use`,
+              'port-in-use',
             )
-          : new Error(`the remote endpoint could not bind port ${options.port}: ${error.message}`),
+          : new RemoteBindError(
+              `the remote endpoint could not bind port ${options.port}: ${error.message}`,
+              'other',
+            ),
       );
     });
     server.listen(options.port, LOOPBACK, resolve);

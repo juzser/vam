@@ -18,10 +18,13 @@ import { contentSecurityPolicy } from './csp.js';
 import { registerAttachImageIpc } from './dialog/attach-image.js';
 import { registerDialogIpc } from './dialog/ipc.js';
 import { applyLoginShellPath, probeLoginShellPath } from './env/resolve-path.js';
+import { registerMainErrorIpc } from './errors/ipc.js';
+import { recordMainFailure } from './errors/log.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { releaseCloseAccelerator } from './menu.js';
 import { isSameOrigin } from './origin.js';
 import { openDeviceRegistry, registryPath } from './remote/devices.js';
+import { bindFailureEvent, setupFailureEvent } from './remote/failure-messages.js';
 import { readServeAddress } from './remote/hostname.js';
 import { registerRemoteIpc } from './remote/ipc.js';
 import { remoteConfigFromEnv } from './remote/launch.js';
@@ -215,6 +218,15 @@ function createWindow(): void {
     url: streamUrl,
     createEventSource: (url) => createNodeEventSource(url) as unknown as EventSource,
   });
+  // SAME REASON AS ABOVE -- it needs this window's `webContents` to push to.
+  // Nothing recorded before this call is lost: `recordMainFailure`
+  // (`./errors/log.js`) buffers unconditionally, and the renderer's own
+  // bootstrap (`bridgeMainErrors`, `src/renderer/errors/main-errors-bridge.ts`)
+  // pulls the WHOLE backlog on its first ask rather than waiting for a tick.
+  // `startRemoteTransport()` below runs BEFORE this window exists at all, so
+  // a remote-endpoint failure recorded there is exactly the case this
+  // ordering has to survive.
+  registerMainErrorIpc(ipcMain, window.webContents);
 
   if (devServerUrl === undefined) {
     void window.loadFile(rendererHtml);
@@ -330,11 +342,26 @@ function startRemoteTransport(): void {
       // terms instead of a pairing screen that silently never connects.
       console.error(`[vam] the remote endpoint did not start: ${String(error)}`);
       remote.reportServerError(String(error));
+      // AND ON THE ERROR LOG, so the operator does not have to already be on
+      // the Remote settings page to learn this -- the status bar's `N
+      // failures` cell and the `E` key both reach it from wherever they are.
+      // `bindFailureEvent` (`./remote/failure-messages.js`) is what tells "the
+      // port is taken, and here is what to try" apart from every other bind
+      // refusal, under two different codes.
+      const { code, message } = bindFailureEvent(error, config.port);
+      recordMainFailure('start the remote endpoint', code, message);
     }
   })().catch((error: unknown) => {
     // Anything before the `try` above -- opening the device registry or the
     // writes preference file, most often -- still cannot take the app down.
     console.error(`[vam] the remote transport did not start: ${String(error)}`);
+    // THIS is the case that, today, `RemotePanel` cannot tell apart from a
+    // plain "switched off": nothing above ever reached `registerRemoteIpc`,
+    // so `vam:remote:state` has no handler and the panel reads that as
+    // "not running" -- not "tried and failed". The error log is the one
+    // place this failure's true story survives at all.
+    const { code, message } = setupFailureEvent(error);
+    recordMainFailure('set up remote access', code, message);
   });
 }
 

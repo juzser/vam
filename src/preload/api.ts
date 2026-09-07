@@ -18,6 +18,7 @@
  * untouched. `src/preload/index.ts` assembles the two into one bridge.
  */
 
+import type { MainFailureEvent } from '../main/errors/log.js';
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
 import type { RemoteState } from '../main/remote/state.js';
 import type { Project } from '../renderer/domain/model.js';
@@ -311,6 +312,43 @@ export function createStreamSubscribe(
         console.error('vam: stream unsubscribe failed:', error);
       });
     };
+  };
+}
+
+/**
+ * The bridge's main-errors member: the read side of `src/main/errors/log.ts`,
+ * MAIN's own failure buffer -- distinct from the renderer's own
+ * `src/renderer/errors/log.ts`, which never crosses a process boundary at
+ * all. `src/renderer/errors/main-errors-bridge.ts` is the one caller: it
+ * pulls `list()` once on mount (recovering anything recorded before this
+ * renderer existed, including before `createWindow()` ran) and again on every
+ * `subscribe` tick.
+ */
+export type MainErrorsApi = {
+  /** The WHOLE backlog, oldest first -- never a delta. See `src/main/errors/ipc.ts`. */
+  list(): Promise<readonly MainFailureEvent[]>;
+  /** A payload-free tick meaning "call `list()` again", the same shape `stream` uses. */
+  subscribe(onChange: () => void): () => void;
+};
+
+/**
+ * `list()` forwards straight to `vam:errors:get` -- no `unwrap`, because that
+ * channel answers bare (see `src/main/errors/ipc.ts`). `subscribe` needs no
+ * refcounted open/close on main's side (unlike `createStreamSubscribe`'s
+ * `vam:stream:subscribe`/`unsubscribe`): there is no connection to hold open,
+ * only a listener set main already owns, so removing THIS listener is the
+ * whole of an unsubscribe.
+ */
+export function createMainErrorsApi(ipc: InvokerLike & ListenerLike): MainErrorsApi {
+  return {
+    list: () => ipc.invoke(CHANNELS.mainErrorsGet) as Promise<readonly MainFailureEvent[]>,
+    subscribe: (onChange: () => void) => {
+      const listener = () => onChange();
+      ipc.on(CHANNELS.mainErrorsChanged, listener);
+      return () => {
+        ipc.removeListener(CHANNELS.mainErrorsChanged, listener);
+      };
+    },
   };
 }
 
