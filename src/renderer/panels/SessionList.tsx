@@ -1403,22 +1403,49 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                         heading come first, the one that adds something to it
                         comes after them. It offers what vam ALREADY KNOWS --
                         no directory dialog, no validation, no IPC; see
-                        `ProjectPicker`. */}
-                    {onAddToGroup !== undefined && (
-                      <button
-                        type="button"
-                        data-add-to-group={group.id}
-                        onClick={() => onAddToGroup(group)}
-                        title={`Add a repo to ${group.name}`}
-                        aria-label={`add a repo to ${group.name}`}
-                        className={[
-                          'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-quiet hover:border-line-strong hover:text-ink-dim focus:opacity-100',
-                          revealed === group.id ? 'opacity-100' : 'opacity-0',
-                        ].join(' ')}
-                      >
-                        <Plus size={13} strokeWidth={1.7} />
-                      </button>
-                    )}
+                        `ProjectPicker`.
+
+                        A GENUINELY EMPTY group (no projects, so nothing under
+                        it explains itself) gets the named, permanently-visible
+                        form instead of the quiet hover `+` -- there is no row
+                        content to hover in the first place, so an opacity-0
+                        control here is not an accelerator, it is the only way
+                        in, invisible. Sized by its own label (`whitespace-nowrap`,
+                        no fixed width, no `truncate`) so it cannot clip
+                        regardless of the group name next to it; the label
+                        itself is fixed text, not the group name, so it never
+                        grows with it. A non-empty group keeps the quiet `+`
+                        unchanged: its row already has content explaining
+                        itself, and the sidebar's hover-reveal pattern is
+                        deliberate everywhere else. */}
+                    {onAddToGroup !== undefined &&
+                      (group.projects.length === 0 ? (
+                        <button
+                          type="button"
+                          data-add-to-group={group.id}
+                          onClick={() => onAddToGroup(group)}
+                          title={`Add a repo to ${group.name}`}
+                          aria-label={`add a repo to ${group.name}`}
+                          className="vam-tap vam-hit-24 flex h-[19px] flex-none cursor-pointer items-center gap-[3px] whitespace-nowrap rounded-[5px] border border-line-strong px-1.5 font-mono text-[9.5px] text-ink-quiet hover:text-ink-dim"
+                        >
+                          <Plus size={11} strokeWidth={1.7} />
+                          add repo
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          data-add-to-group={group.id}
+                          onClick={() => onAddToGroup(group)}
+                          title={`Add a repo to ${group.name}`}
+                          aria-label={`add a repo to ${group.name}`}
+                          className={[
+                            'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-quiet hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                            revealed === group.id ? 'opacity-100' : 'opacity-0',
+                          ].join(' ')}
+                        >
+                          <Plus size={13} strokeWidth={1.7} />
+                        </button>
+                      ))}
 
                     {openGroupMenu === group.id && (
                       <div
