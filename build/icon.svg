@@ -1,34 +1,62 @@
-<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
-  <!--
-    vam app icon — a miniature canvas: three session nodes in a loose
-    triangle, two quiet and one lit amber. The amber node is vam's own
-    `waiting` colour, used here to mean exactly what it means in the
-    product: this is the one that needs you. At 16px the quiet nodes and
-    edges nearly vanish and the icon should read as an amber dot on
-    near-black — that is deliberate, not a loss of detail.
-  -->
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="10" />
+    <radialGradient id="bg" cx="61%" cy="66%" r="78%">
+      <stop offset="0%"  stop-color="#191512"/>
+      <stop offset="42%" stop-color="#0c0b0a"/>
+      <stop offset="100%" stop-color="#040404"/>
+    </radialGradient>
+
+    <radialGradient id="ambient" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#ff9d00" stop-opacity="0.55"/>
+      <stop offset="35%"  stop-color="#ff8a00" stop-opacity="0.28"/>
+      <stop offset="70%"  stop-color="#ff7a00" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#ff7a00" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="glow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="11"/>
     </filter>
+    <filter id="glowSoft" x="-90%" y="-90%" width="280%" height="280%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
+
+    <!-- Connecting beams: end exactly at the active node's outer ring edge,
+         so they never cross its border; drawn BEHIND the nodes. -->
+    <g id="beams">
+      <line x1="526.9" y1="592.9" x2="262.1" y2="374.0"
+            stroke="#fe9d00" stroke-width="16.5" stroke-linecap="round"/>
+      <line x1="670.8" y1="554.8" x2="770.9" y2="290.7"
+            stroke="#fe9d00" stroke-width="16.5" stroke-linecap="round"/>
+    </g>
+
+    <!-- Active (orange) node -->
+    <g id="node">
+      <circle cx="625.5" cy="674.5" r="94.7" fill="#fe9d00"/>
+      <circle cx="625.5" cy="674.5" r="124.9" fill="none"
+              stroke="#fe9d00" stroke-width="11.4"/>
+    </g>
   </defs>
 
-  <!-- background tile: vam's canvas colour, corner radius ~22% of the side -->
-  <rect x="0" y="0" width="256" height="256" rx="56" ry="56" fill="#0a0a0a" />
+  <!-- Background + ambient bloom -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <ellipse cx="625.5" cy="686" rx="300" ry="312" fill="url(#ambient)"/>
 
-  <!-- edges, drawn behind the nodes -->
-  <g stroke="#1f1f1f" stroke-width="6" stroke-linecap="round">
-    <line x1="84" y1="104" x2="76" y2="190" />
-    <line x1="84" y1="104" x2="176" y2="150" />
-    <line x1="76" y1="190" x2="176" y2="150" />
-  </g>
+  <!-- Beams (back layer): glow, then sharp -->
+  <use href="#beams" filter="url(#glowSoft)" opacity="0.5"/>
+  <use href="#beams" filter="url(#glow)" opacity="0.85"/>
+  <use href="#beams"/>
 
-  <!-- two quiet nodes -->
-  <circle cx="84" cy="104" r="22" fill="#262626" stroke="#4a4a4a" stroke-width="4" />
-  <circle cx="76" cy="190" r="20" fill="#262626" stroke="#4a4a4a" stroke-width="4" />
+  <!-- Dotted link between the idle nodes -->
+  <line x1="353.9" y1="359.0" x2="679.1" y2="305.7"
+        stroke="#7c7b7b" stroke-width="24" stroke-linecap="round"
+        stroke-dasharray="0.01 55"/>
 
-  <!-- the node that needs you: lit amber, noticeably larger, glow + ring -->
-  <circle cx="176" cy="150" r="58" fill="#f59e0b" opacity="0.28" filter="url(#glow)" />
-  <circle cx="176" cy="150" r="48" fill="none" stroke="#f59e0b" stroke-width="4" opacity="0.45" />
-  <circle cx="176" cy="150" r="38" fill="#f59e0b" />
+  <!-- Idle (gray) nodes: opaque, drawn OVER the beams -->
+  <circle cx="262.1" cy="374.0" r="68.1" fill="#232322" stroke="#6e6d6d" stroke-width="14"/>
+  <circle cx="770.9" cy="290.7" r="68.1" fill="#232322" stroke="#6e6d6d" stroke-width="14"/>
+
+  <!-- Active node on top: glow, then sharp (its ring hides the beam junction) -->
+  <use href="#node" filter="url(#glowSoft)" opacity="0.55"/>
+  <use href="#node" filter="url(#glow)" opacity="0.9"/>
+  <use href="#node"/>
 </svg>
