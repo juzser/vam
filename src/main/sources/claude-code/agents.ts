@@ -13,7 +13,7 @@
  * renderer's types, never load its code.
  */
 
-import { execFile } from 'node:child_process';
+import { type ExecFileException, execFile } from 'node:child_process';
 import type { SessionStatus } from '../../../renderer/domain/model.js';
 
 /** One live process, normalised. Not one session -- see `key`. */
@@ -143,24 +143,86 @@ export function parseAgentRows(stdout: string, nowMs: number = Date.now()): read
 }
 
 /**
- * Ask the CLI. Never throws: a missing binary, a non-zero exit, a timeout and
- * unparseable output all mean the same thing to the canvas -- vam cannot see
- * any live sessions right now -- and none of them is worth taking the window
- * down for. `execFile` with an argument array, never a shell string, so
- * nothing here can be shell-interpreted.
+ * What `listLiveAgents` hands back.
+ *
+ * `ok` means the CLI answered and `agents` is its genuine session list, which
+ * may be empty -- an operator with nothing running is a real, reportable
+ * state. `unavailable` means vam could not ask, or could not understand the
+ * answer, and NEVER collapses into an empty list: a missing binary, a
+ * non-zero exit, a timeout and unparseable output are four different
+ * problems with four different remedies, so each gets its own `code` and its
+ * own sentence, matching `pull-requests.ts`'s `PullRequestList`. Rendering
+ * any of them as "no sessions" would tell the operator "nothing is running"
+ * on the strength of never having found out, which is the one thing a status
+ * indicator must never do.
+ */
+export type AgentsResult =
+  | { readonly kind: 'ok'; readonly agents: readonly LiveAgent[] }
+  | { readonly kind: 'unavailable'; readonly code: string; readonly message: string };
+
+const unavailable = (code: string, message: string): AgentsResult => ({
+  kind: 'unavailable',
+  code,
+  message,
+});
+
+const UNREADABLE_OUTPUT = 'the `claude` CLI answered, but vam could not parse what it said';
+
+/** Turn a failed spawn into a distinct, honest reason. */
+function classifyExecFailure(error: ExecFileException, stderr: string): AgentsResult {
+  if (error.code === 'ENOENT') {
+    return unavailable(
+      'cli-missing',
+      'the `claude` command was not found, so vam cannot see live sessions',
+    );
+  }
+  if (error.killed === true) {
+    return unavailable(
+      'timed-out',
+      `the \`claude\` CLI did not answer within ${Math.round(CLI_TIMEOUT_MS / 1000)}s`,
+    );
+  }
+  const said = stderr.trim();
+  return unavailable(
+    'cli-failed',
+    `\`claude agents\` failed: ${said === '' ? 'the command exited without saying why' : said}`,
+  );
+}
+
+/**
+ * Ask the CLI. Never throws: every failure resolves to `AgentsResult`'s
+ * `unavailable` arm instead, carrying its own code and message rather than
+ * being flattened into "no sessions" -- see the type above for why that
+ * distinction exists. `execFile` with an argument array, never a shell
+ * string, so nothing here can be shell-interpreted.
  *
  * `--all` is passed so that completed BACKGROUND sessions are included: they
  * are the only rows that carry `done`/`failed`, and dropping them would mean
  * two of vam's four statuses were unreachable by construction.
  */
-export function listLiveAgents(binary = 'claude'): Promise<readonly LiveAgent[]> {
+export function listLiveAgents(binary = 'claude'): Promise<AgentsResult> {
   return new Promise((resolve) => {
     execFile(
       binary,
       ['agents', '--json', '--all'],
       { timeout: CLI_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true },
-      (error, stdout) => {
-        resolve(error ? [] : parseAgentRows(stdout));
+      (error, stdout, stderr) => {
+        if (error) {
+          resolve(classifyExecFailure(error, String(stderr)));
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(stdout);
+        } catch {
+          resolve(unavailable('unreadable-output', UNREADABLE_OUTPUT));
+          return;
+        }
+        if (!Array.isArray(parsed)) {
+          resolve(unavailable('unreadable-output', UNREADABLE_OUTPUT));
+          return;
+        }
+        resolve({ kind: 'ok', agents: parseAgentRows(stdout) });
       },
     );
   });

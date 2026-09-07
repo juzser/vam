@@ -35,10 +35,11 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { Project, Session } from '../../../renderer/domain/model.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
+import type { SourceError } from '../../ipc/channels.js';
 import type { MainSource } from '../source.js';
 import { createTmuxRunner, listVamSessions, type TmuxSession } from '../tmux/spawn.js';
 import { type AgentRoster, readAgentRoster } from './agent-roster.js';
-import { type LiveAgent, listLiveAgents } from './agents.js';
+import { type AgentsResult, type LiveAgent, listLiveAgents } from './agents.js';
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
 import { deliverPromptViaCli } from './deliver.js';
 import { projectIdOf } from './project-id.js';
@@ -415,12 +416,34 @@ const DESCRIPTOR: SourceDescriptor = {
 /** The process-wide throttled reader. See the note in `load` below. */
 const PR_READER = createPullRequestReader(readPullRequestsViaCli());
 
+/**
+ * `AgentsResult`'s `unavailable` arm, turned into the same `SourceError`
+ * shape `recordPrompt`, `closeSession` and `createSession` already resolve
+ * to. `kind: 'unreachable'` because this is never a refusal of a request vam
+ * understood -- it is vam failing to reach the CLI at all.
+ */
+const agentsUnavailableError = (
+  result: Extract<AgentsResult, { kind: 'unavailable' }>,
+): SourceError => ({
+  kind: 'unreachable',
+  code: result.code,
+  message: result.message,
+});
+
 export const CLAUDE_CODE_SOURCE: MainSource = {
   descriptor: DESCRIPTOR,
-  load: async () =>
-    loadClaudeCodeProjects(
+  load: async () => {
+    const agentsResult = await listLiveAgents();
+    // Thrown rather than degraded to an empty project list: `load()`'s only
+    // channel for "vam could not ask" is a rejection, which `useSourceModel`
+    // catches and shows beside the source instead of quietly emptying the
+    // canvas. See `Canvas.tsx`'s `SourceReadout`.
+    if (agentsResult.kind === 'unavailable') {
+      throw new Error(agentsResult.message);
+    }
+    return loadClaudeCodeProjects(
       defaultTranscriptRoot(),
-      await listLiveAgents(),
+      agentsResult.agents,
       Date.now(),
       createBranchLookup(),
       defaultSessionsRoot(),
@@ -437,7 +460,8 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
         const listed = await listVamSessions(createTmuxRunner());
         return listed.kind === 'ok' ? listed.sessions : null;
       })(),
-    ),
+    );
+  },
   /**
    * The live list is re-asked here rather than cached from `load()`: it is
    * where the session's working directory comes from, and a canvas drawn
@@ -445,9 +469,11 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    * one subprocess and is the difference between refusing a dead session and
    * delivering into the wrong directory.
    */
-  recordPrompt: async (sessionId, prompt) =>
-    replyToSession({
-      agents: await listLiveAgents(),
+  recordPrompt: async (sessionId, prompt) => {
+    const agentsResult = await listLiveAgents();
+    if (agentsResult.kind === 'unavailable') return agentsUnavailableError(agentsResult);
+    return replyToSession({
+      agents: agentsResult.agents,
       rowId: sessionId,
       prompt,
       run: createTmuxRunner(),
@@ -455,16 +481,19 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       // Read fresh, for the same reason the agent list is: a canvas drawn
       // minutes ago is not evidence about which pane a session is in now.
       panes: await readPublishedPanes(defaultSessionsRoot()),
-    }),
+    });
+  },
   /**
    * The live list is re-asked for the same reason `recordPrompt` re-asks it,
    * plus one of its own: `kind` is what decides whether this session can be
    * stopped at all, and a canvas drawn minutes ago is not evidence about a
    * process now.
    */
-  closeSession: async (sessionId) =>
-    stopSession(
-      await listLiveAgents(),
+  closeSession: async (sessionId) => {
+    const agentsResult = await listLiveAgents();
+    if (agentsResult.kind === 'unavailable') return agentsUnavailableError(agentsResult);
+    return stopSession(
+      agentsResult.agents,
       sessionId,
       (id) => stopSessionViaCli({ sessionId: id }),
       // With a runner in hand, a session vam started is killed rather than
@@ -473,21 +502,25 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       // The published pairing, without which a project holding more than one
       // live session can prove nothing and close refuses every row in it.
       await readPublishedPanes(defaultSessionsRoot()),
-    ),
+    );
+  },
   /**
    * The live list is re-asked here too, and for a third reason of its own: it
    * is the only thing that maps a project id back to a directory, and a
    * canvas drawn minutes ago may name a project whose last session has since
    * exited.
    */
-  createSession: async (projectId, title, provider) =>
-    createSessionInProject({
+  createSession: async (projectId, title, provider) => {
+    const agentsResult = await listLiveAgents();
+    if (agentsResult.kind === 'unavailable') return agentsUnavailableError(agentsResult);
+    return createSessionInProject({
       provider,
-      agents: await listLiveAgents(),
+      agents: agentsResult.agents,
       projectId,
       title,
       run: createTmuxRunner(),
-    }),
+    });
+  },
   /** No agent list to consult: the operator named the directory themselves. */
   createSessionInDirectory: async (cwd, title, provider) =>
     createSessionInDirectory({ cwd, title, provider, run: createTmuxRunner() }),
