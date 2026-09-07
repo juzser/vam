@@ -28,14 +28,55 @@ export const PILL_SIZE = { width: 58, height: 20 };
 /**
  * The top-left corner of cell `index` (0-based, reading order) within the
  * canvas grid, in cell coordinates.
+ *
+ * `columns` defaults to `GRID.columns` (the grid's usual width) but is a
+ * parameter, not the constant itself: a narrow canvas pane lays out with
+ * `columns=1` instead (see `columnsForWidth`), and this function stays
+ * ignorant of why — it only ever places, never measures.
  */
-export function cellOrigin(index: number): { x: number; y: number } {
-  const column = index % GRID.columns;
-  const row = Math.floor(index / GRID.columns);
+export function cellOrigin(
+  index: number,
+  columns: number = GRID.columns,
+): { x: number; y: number } {
+  const column = index % columns;
+  const row = Math.floor(index / columns);
   return {
     x: GRID.padding + column * (CELL.width + GRID.columnGap),
     y: GRID.padding + row * (CELL.height + GRID.rowGap),
   };
+}
+
+/**
+ * How many grid columns fit legibly in a canvas pane `widthPx` device pixels
+ * wide, at a REFERENCE `zoom`.
+ *
+ * `GRID.columns` cells span, in canvas units, `GRID.padding` once (the
+ * leading edge only — `cellOrigin` never adds a matching trailing padding,
+ * and this does not invent one) plus the cells themselves plus the gaps
+ * between them:
+ *
+ *     GRID.padding + GRID.columns * CELL.width + (GRID.columns - 1) * GRID.columnGap
+ *
+ * which is 16 + 2*580 + 1*72 = 1248 canvas units at the shipped GRID. At
+ * `zoom`, that span occupies `span * zoom` device pixels — a pane narrower
+ * than that cannot show every column without shrinking the cards, and
+ * `CELL.width` is fixed on purpose. Below the threshold this returns 1, so
+ * every card gets the pane's full width instead of a half that was too
+ * narrow to read; at or above it, `GRID.columns`.
+ *
+ * `zoom` MUST be a fixed reference (the caller passes `DEFAULT_VIEWPORT.zoom`,
+ * the canvas's fixed opening zoom — see that constant's own comment in
+ * `Canvas.tsx`), never the live viewport zoom the operator is actively
+ * scrolling. This function stays pure either way, but wiring in a live zoom
+ * would make the ARRANGEMENT depend on how far zoomed in the operator
+ * happens to be: a wheel notch could cross the threshold mid-gesture and
+ * rearrange every node, which is the opening-zoom mistake `DEFAULT_VIEWPORT`
+ * was already corrected for, in the other direction. Zoom scales what is on
+ * screen; it must never decide what is on screen.
+ */
+export function columnsForWidth(widthPx: number, zoom: number): number {
+  const span = GRID.padding + GRID.columns * CELL.width + (GRID.columns - 1) * GRID.columnGap;
+  return widthPx >= span * zoom ? GRID.columns : 1;
 }
 
 /**
