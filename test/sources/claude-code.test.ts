@@ -354,6 +354,113 @@ describe('summarizeTranscript', () => {
     const facts = summarizeTranscript(lines.join('\n'), 'k');
     expect(facts.decisions).toHaveLength(3276);
   });
+
+  /**
+   * THE FOLLOW-UP DEFECT. `id` used to be `${prefix}:${index}`, counted from
+   * the newest end -- so appending a turn shifted every EARLIER turn's index
+   * by one, and the same id string named a different turn on the next poll.
+   * That was invisible while nothing remembered an id across two parses; it
+   * stopped being invisible once the detail panel and the canvas started
+   * doing exactly that (`vam-canvas-topology`, this file's own earlier fix).
+   *
+   * A poll, exactly as the operator's own bug report describes it: several
+   * requests land while an older answer is still on screen. The SAME turn,
+   * parsed before and after a new one arrives, must keep the SAME id.
+   */
+  it('keeps a turn’s id stable across a poll that delivers one more turn', () => {
+    const before = summarizeTranscript(
+      jsonl(
+        userPrompt('first ask'),
+        reply('first answer'),
+        userPrompt('second ask'),
+        reply('second answer'),
+      ),
+      'k',
+    );
+    const firstBefore = before.decisions.find((d) => d.input === 'first ask');
+    expect(firstBefore).toBeDefined();
+
+    const after = summarizeTranscript(
+      jsonl(
+        userPrompt('first ask'),
+        reply('first answer'),
+        userPrompt('second ask'),
+        reply('second answer'),
+        userPrompt('third ask'),
+        reply('third answer'),
+      ),
+      'k',
+    );
+    const firstAfter = after.decisions.find((d) => d.input === 'first ask');
+    expect(firstAfter?.id).toBe(firstBefore?.id);
+  });
+
+  /**
+   * Content alone is not enough: two turns can carry the exact same words --
+   * "continue", sent twice, with something else in between (adjacent repeats
+   * already collapse into one turn, above). Each still needs its OWN id, or
+   * selecting one by id would resolve to whichever comes first.
+   */
+  it('gives two turns with identical input text different ids', () => {
+    const facts = summarizeTranscript(
+      jsonl(
+        userPrompt('continue'),
+        reply('did a'),
+        userPrompt('something else'),
+        reply('did b'),
+        userPrompt('continue'),
+        reply('did c'),
+      ),
+      'k',
+    );
+    const continues = facts.decisions.filter((d) => d.input === 'continue');
+    expect(continues).toHaveLength(2);
+    expect(continues[0]?.id).not.toBe(continues[1]?.id);
+    expect(new Set(facts.decisions.map((d) => d.id)).size).toBe(facts.decisions.length);
+  });
+
+  /**
+   * And each occurrence's id has to survive the same poll the first test
+   * above checks for a unique turn -- a duplicate's id is not allowed to
+   * shift just because a later, unrelated turn arrived either.
+   */
+  it('keeps a duplicated turn’s id stable across a poll too', () => {
+    const build = (extra: readonly unknown[]) =>
+      jsonl(
+        userPrompt('continue'),
+        reply('did a'),
+        userPrompt('something else'),
+        reply('did b'),
+        userPrompt('continue'),
+        reply('did c'),
+        ...extra,
+      );
+    const before = summarizeTranscript(build([]), 'k');
+    const after = summarizeTranscript(
+      build([userPrompt('fourth ask'), reply('fourth answer')]),
+      'k',
+    );
+    const beforeIds = before.decisions.filter((d) => d.input === 'continue').map((d) => d.id);
+    const afterIds = after.decisions.filter((d) => d.input === 'continue').map((d) => d.id);
+    expect(afterIds).toEqual(beforeIds);
+  });
+
+  /**
+   * Streaming: a turn's id is fixed the moment its prompt line opens it, so
+   * more assistant text arriving for the SAME still-open turn must not mint
+   * a new one -- an id that changed under a running answer would make the
+   * live turn look like a different turn mid-stream.
+   */
+  it('keeps a turn’s id unchanged while its own output is still streaming in', () => {
+    const opening = summarizeTranscript(jsonl(userPrompt('go'), reply('working')), 'k');
+    const id = opening.decisions[0]?.id;
+    const streamed = summarizeTranscript(
+      jsonl(userPrompt('go'), reply('working'), reply('working, and more')),
+      'k',
+    );
+    expect(streamed.decisions[0]?.id).toBe(id);
+    expect(streamed.decisions[0]?.output).toBe('working, and more');
+  });
 });
 
 describe('loadClaudeCodeProjects', () => {

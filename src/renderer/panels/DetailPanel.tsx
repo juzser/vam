@@ -402,6 +402,28 @@ export type DetailPanelProps = {
   readonly entry: SessionEntry | null;
   /** The step the canvas has focused — the newest one unless `h`/`l` moved. */
   readonly decision: Decision | null;
+  /**
+   * WHICH CANVAS NODE THE CURSOR SITS ON — `Canvas.tsx`'s own `focusedId`,
+   * passed through unexamined. This is NOT a second copy of `decision`: it
+   * changes only on an explicit navigation (a click, a jump, `h`/`j`/`k`/`l`
+   * landing somewhere new), never merely because the data underneath
+   * refreshed. That distinction did not used to matter — turn ids were
+   * positional (`${prefix}:${index}`), so the canvas's DEFAULT pick
+   * (`decisions[0]`, drawn whenever the cursor sits on the session card
+   * rather than a specific step) kept the same id string across a poll
+   * whether or not the newest turn actually changed. Turn ids are now
+   * content-derived (`transcript.ts`), so that default pick genuinely gets a
+   * NEW id every time a new turn arrives — exactly the case that must NOT
+   * drag an operator reading history back to the newest turn. This is what
+   * lets the panel tell "the canvas cursor actually moved" apart from "a new
+   * turn arrived while the cursor stayed put".
+   *
+   * `undefined` (`PhoneShell`, which has no step cursor at all) is treated as
+   * NO SIGNAL: session identity is the only thing that resets the pick
+   * there, which is what "no yank" means for a shell with nothing to
+   * navigate.
+   */
+  readonly focusNodeId?: string | null;
   readonly draft: string;
   readonly onDraftChange: (value: string) => void;
   readonly onSubmit: () => void;
@@ -2041,6 +2063,7 @@ export function DetailPanel(props: DetailPanelProps) {
   const {
     entry,
     decision: canvasDecision,
+    focusNodeId,
     draft,
     onDraftChange,
     onSubmit,
@@ -2074,24 +2097,60 @@ export function DetailPanel(props: DetailPanelProps) {
    * turn a session has (`transcript.ts`), so the progress list below can hold
    * turns the canvas never shows at all. `selectedId` is this panel's own
    * answer to "which turn am I looking at": it starts on the canvas's pick
-   * and moves only when a progress row is clicked (below), or when
-   * `canvasDecision` itself changes -- a session refocused, or the canvas
-   * cursor moved to a different slot -- which is what "follows it" means.
+   * and moves only when a progress row is clicked (below), or when the
+   * canvas ITSELF navigates -- a session refocused, or its cursor moved to a
+   * different step -- which is what "follows it" means.
    *
-   * COMPARED DURING RENDER, THE SAME TRICK `cycleAbout`/`noteFor` ABOVE
+   * TWO SIGNALS DECIDE THAT, NEITHER ONE ALONE. Session identity
+   * (`sessionKey`) always resets the pick -- a new session is a new document,
+   * the same rule `cycleAbout`/`noteFor` below already applies to the
+   * mode-cycle note. `focusNodeId` (see its own doc on the prop) is what
+   * catches an EXPLICIT canvas navigation within one session. `canvasDecision`
+   * itself is deliberately NOT the trigger any more: turn ids are now
+   * content-derived (`transcript.ts`), so the canvas's default pick
+   * (`decisions[0]`) gets a genuinely new id every time a new turn arrives,
+   * with no navigation at all -- keying the follow on THAT would drag an
+   * operator reading history back to the newest turn on every poll, the
+   * mirror image of the bug this whole mechanism exists to prevent.
+   *
+   * COMPARED DURING RENDER, THE SAME TRICK `cycleAbout`/`noteFor` BELOW
    * ALREADY USES for the identical shape of problem: this state belongs to a
-   * subject (the canvas's current pick) and the subject just changed under
-   * it. An effect would draw one frame of the OLD turn before catching up --
-   * exactly the half-read flash `focusKey` below already exists to avoid for
-   * a genuine focus change.
+   * subject and the subject just changed under it. An effect would draw one
+   * frame of the OLD turn before catching up -- exactly the half-read flash
+   * `focusKey` below already exists to avoid for a genuine focus change.
    */
   const canvasDecisionId = canvasDecision?.id ?? null;
   const [selectedId, setSelectedId] = useState<string | null>(canvasDecisionId);
-  const canvasIdRef = useRef(canvasDecisionId);
-  if (canvasIdRef.current !== canvasDecisionId) {
-    canvasIdRef.current = canvasDecisionId;
-    if (selectedId !== canvasDecisionId) setSelectedId(canvasDecisionId);
+  const sessionKey = entry?.session.id ?? null;
+  const sessionKeyRef = useRef(sessionKey);
+  const focusNodeRef = useRef(focusNodeId);
+  let followCanvas = false;
+  if (sessionKeyRef.current !== sessionKey) {
+    sessionKeyRef.current = sessionKey;
+    followCanvas = true;
   }
+  // `undefined` (no caller offering the signal, e.g. `PhoneShell`) is never a
+  // "change" -- only a caller that actually reports a node id can ask this
+  // panel to follow one.
+  if (focusNodeId !== undefined && focusNodeRef.current !== focusNodeId) {
+    focusNodeRef.current = focusNodeId;
+    followCanvas = true;
+  }
+  if (followCanvas && selectedId !== canvasDecisionId) setSelectedId(canvasDecisionId);
+  /**
+   * A PICK THE WINDOW NO LONGER CARRIES AT ALL -- not merely off the newest
+   * slice, but genuinely absent from `entry.session.decisions`, the same gap
+   * `source.ts` already documents for `questions` past `TAIL_BYTES`: vam
+   * cannot tell "answered a while ago" from "never happened" for something
+   * outside the window, so it must not pretend otherwise. Checked before
+   * falling back to `canvasDecision`, which is what stops that fallback from
+   * quietly relabelling a different turn as the one the operator picked.
+   */
+  const selectedTurnMissing =
+    entry !== null &&
+    selectedId !== null &&
+    selectedId !== canvasDecisionId &&
+    !entry.session.decisions.some((d) => d.id === selectedId);
   /**
    * RENDERED FROM THE PROP WHEN IT MATCHES, RATHER THAN RE-FOUND BY ID. While
    * this panel is following the canvas's own pick (the common case),
@@ -2101,10 +2160,12 @@ export function DetailPanel(props: DetailPanelProps) {
    * find the same id, but there is no reason to add one. Only once the
    * operator has picked something else does this reach into
    * `entry.session.decisions` for it, which is the one place that turn's
-   * current content actually lives.
+   * current content actually lives -- and `null` when it is not there at
+   * all, so `selectedTurnMissing`'s message draws instead of a substitute.
    */
-  const decision: Decision | null =
-    selectedId === canvasDecisionId
+  const decision: Decision | null = selectedTurnMissing
+    ? null
+    : selectedId === canvasDecisionId
       ? canvasDecision
       : (entry?.session.decisions.find((d) => d.id === selectedId) ?? canvasDecision);
   /**
@@ -2887,6 +2948,23 @@ export function DetailPanel(props: DetailPanelProps) {
           <AgentsTab agents={entry?.session.agents} />
         ) : current === 'PRs' ? (
           <PullRequestsTab pullRequests={entry?.session.pullRequests} />
+        ) : selectedTurnMissing ? (
+          // THIS TURN, NOT ANOTHER ONE. Falling through to the newest turn
+          // here would look identical to the operator to actually having
+          // read it -- exactly the swap this whole mechanism exists to
+          // refuse. Said plainly, with a way back to what the canvas is
+          // actually showing rather than a dead end.
+          <p data-progress-turn-missing className="text-[11px] text-ink-faint">
+            The turn you were reading has scrolled out of what vam can see.{' '}
+            <button
+              type="button"
+              data-progress-turn-return
+              onClick={() => setSelectedId(canvasDecisionId)}
+              className="cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
+            >
+              Back to the current turn
+            </button>
+          </p>
         ) : decision === null ? (
           <p className="text-[11px] text-ink-faint">
             {/* Two different absences. "This session has no steps yet" named a
@@ -2964,9 +3042,12 @@ export function DetailPanel(props: DetailPanelProps) {
                         the newest `TAIL_BYTES` of the transcript, so on a
                         session bigger than that window this is what vam
                         FOUND, not a provable total for the session's whole
-                        life. Wording it as an action rather than a fact is
-                        what keeps it true either way. */}
-                    read {turnsRead} turns
+                        life. Trailing, not leading: "read 7 turns" is an
+                        imperative -- a command this button does not carry
+                        out -- while "7 turns read" is what it actually is, a
+                        count with its qualifier attached, the same shape as
+                        every other reading on this pane. */}
+                    {turnsRead} turns read
                     {progressOpen ? (
                       <ChevronDown size={11} strokeWidth={1.7} />
                     ) : (

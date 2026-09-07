@@ -462,6 +462,92 @@ describe('walking a session’s chain with h and l', () => {
   });
 });
 
+/**
+ * THE CANVAS'S OWN VERSION OF THE FOLLOW-UP DEFECT `transcript.ts` fixes.
+ *
+ * The focused NODE id for a step is `stepNodeId(sessionId, decision.id)`
+ * (`layout.ts`) -- built from the decision's own id, not from which slot it
+ * happens to sit in. `focusedId` (React state) is a raw string that survives
+ * a model refresh untouched, so this was already exposed to exactly the same
+ * swap `DetailPanel`'s own `selectedId` was: if `decision.id` were still
+ * positional, a poll that added a new turn would leave `focusedId` pointing
+ * at a string that now named a DIFFERENT decision, and the canvas would draw
+ * a different turn's content under an operator's unmoved cursor without
+ * either of them noticing. Now that turn ids are content-derived
+ * (`transcript.ts`'s `turnFingerprint`), the same node id keeps naming the
+ * same turn across a refresh -- this is what proves that end to end, through
+ * the real `<Canvas>` render and the real detail panel it drives, not just
+ * through `layout.ts`'s own unit tests.
+ */
+describe('a focused step keeps its own content across a model refresh', () => {
+  const findStepByInput = (input: string): HTMLElement | null =>
+    [...document.querySelectorAll('[data-step-input]')].find(
+      (el) => el.textContent === input,
+    ) as HTMLElement | null;
+
+  it('does not let a newly arrived turn swap the content under a focused older step', () => {
+    // THREE turns, all visible (`VISIBLE_DECISION_COUNT`) -- the fourth
+    // below is what pushes `turnB` from slot 1 to slot 0 while it stays on
+    // screen the whole time. A fixture with only two or three turns total
+    // never moves anything between slots, so it would pass even against a
+    // canvas that focused by SLOT rather than by turn -- this shape is the
+    // one that actually exercises the difference.
+    const turnA = decision('sess:fp-aaa:0', {
+      label: 'oldest',
+      input: 'ask 0',
+      output: 'answer 0',
+    });
+    const turnB = decision('sess:fp-bbb:0', {
+      label: 'middle',
+      input: 'ask 1',
+      output: 'answer 1',
+    });
+    const turnC = decision('sess:fp-ccc:0', { label: 'newer', input: 'ask 2', output: 'answer 2' });
+    const before: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'factory',
+          sessions: [session('a1', { decisions: [turnC, turnB, turnA] })], // newest-first
+        },
+      ],
+    };
+    const { rerender } = render(<Canvas model={before} />);
+
+    // The MIDDLE step -- slot 1 of 3 today, about to become slot 0.
+    const middleNode = findStepByInput('ask 1');
+    expect(middleNode, 'fixture has no step showing "ask 1" to click').not.toBeNull();
+    act(() => middleNode?.click());
+    expect(detailStep()).toBe('middle');
+    expect(detailBlock('in')).toContain('ask 1');
+
+    // The poll: a fourth turn arrives with its OWN id. `turnA` (the old
+    // slot-0 occupant) falls out of the visible three; `turnB` -- still
+    // focused -- slides from slot 1 into slot 0.
+    const turnD = decision('sess:fp-ddd:0', {
+      label: 'newest',
+      input: 'ask 3',
+      output: 'answer 3',
+    });
+    const after: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'factory',
+          sessions: [session('a1', { decisions: [turnD, turnC, turnB, turnA] })],
+        },
+      ],
+    };
+    act(() => rerender(<Canvas model={after} />));
+
+    // Still the turn that was focused, not whatever now sits in slot 1.
+    expect(detailStep()).toBe('middle');
+    expect(detailBlock('in')).toContain('ask 1');
+  });
+});
+
 describe('jumps', () => {
   it('G goes to the last session and gg back to the first', () => {
     render(<Canvas model={MODEL} />);

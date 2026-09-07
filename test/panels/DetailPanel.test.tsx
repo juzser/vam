@@ -17,6 +17,11 @@ import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// The real parser, not a hand-picked id -- see "a selected historical turn
+// survives a poll" below for why this crosses from a renderer test into
+// `main/`: `test/canvas/Canvas.new-project.test.tsx` already does the same
+// for `whyNotARepository`, which is the precedent this follows.
+import { summarizeTranscript } from '../../src/main/sources/claude-code/transcript.js';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import {
@@ -397,14 +402,17 @@ describe('the progress region shows nothing until it is opened', () => {
   it('says how many turns vam read, not a bare total it cannot prove', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
     const text = toggle()?.textContent ?? '';
-    expect(text).toContain('7');
     // Not the bare "N turns" the operator's bug report was about: on a
     // session whose transcript outgrows the tail window vam reads
     // (`source.ts`'s `TAIL_BYTES`), `decisions.length` is what vam FOUND in
     // that window, not a provable lifetime total -- so the word here has to
     // be about what vam did, never a claim about the session's whole history.
     expect(text).not.toBe('7 turns');
-    expect(text.toLowerCase()).toContain('read');
+    // Pinned as a COUNT with its qualifier trailing, not as an imperative:
+    // "read 7 turns" reads as an instruction this button does not carry
+    // out. "7 turns read" is the count, honestly labelled.
+    expect(text).toBe('7 turns read');
+    expect(text.toLowerCase()).not.toMatch(/^read/);
   });
 });
 
@@ -450,30 +458,75 @@ describe('the panel remembers which turn you are reading, independent of the can
   });
 
   it('keeps the picked turn across a re-render the canvas did not cause', () => {
-    const view = drawFor({ entry: manyEntry, decision: MANY[0] as Decision });
+    // `focusNodeId` HELD CONSTANT -- the canvas's own cursor did not move,
+    // which is the real-world shape of "something unrelated refreshed":
+    // `Canvas.tsx` always reports a `focusedId`, it just did not change.
+    const view = drawFor({
+      entry: manyEntry,
+      decision: MANY[0] as Decision,
+      focusNodeId: 'info:s1',
+    });
     pick('d1');
     expect(inText()).toContain('ask d1');
-    // The canvas's OWN choice is unchanged (still `MANY[0]`) -- only
-    // something unrelated moved, e.g. the session's activity line on a poll.
-    // That must not yank the operator back to the newest turn.
+    // The canvas's OWN cursor is unchanged (still the info node) -- only
+    // something unrelated moved, e.g. the session's activity line on a poll,
+    // or -- the case that matters most -- `decision` itself, because turn ids
+    // are now content-derived (`transcript.ts`) and the canvas's DEFAULT pick
+    // (`decisions[0]`) genuinely gets a new id every time a new turn really
+    // arrives. Neither must yank the operator back to the newest turn.
     view.rerender({
       entry: { project: PROJECT, session: { ...manyEntry.session, activity: 'still going' } },
       decision: MANY[0] as Decision,
+      focusNodeId: 'info:s1',
     });
     expect(inText()).toContain('ask d1');
     expect(stepLabel()).toBe('step d1');
   });
 
-  it('defers back to the canvas the moment the canvas’s own choice moves', () => {
-    const view = drawFor({ entry: manyEntry, decision: MANY[0] as Decision });
+  it('defers back to the canvas the moment the canvas’s own cursor moves', () => {
+    const view = drawFor({
+      entry: manyEntry,
+      decision: MANY[0] as Decision,
+      focusNodeId: 'info:s1',
+    });
     pick('d1');
     expect(inText()).toContain('ask d1');
-    // `h`/`l` moved the canvas cursor (or a different session was focused):
-    // the canvas handed over a NEW decision, and that wins over the in-panel
-    // pick -- the panel's memory is a default, not a lock.
-    view.rerender({ entry: manyEntry, decision: MANY[1] as Decision });
+    // `h`/`l` moved the canvas cursor onto a specific step: `focusNodeId`
+    // changes along with `decision`, which is what tells the panel this is a
+    // real navigation rather than the default pick's id merely drifting --
+    // and that wins over the in-panel pick, the panel's memory being a
+    // default, not a lock.
+    view.rerender({
+      entry: manyEntry,
+      decision: MANY[1] as Decision,
+      focusNodeId: 'step:s1:d6',
+    });
     expect(inText()).toContain('ask d6');
     expect(stepLabel()).toBe('step d6');
+  });
+
+  it('defers back to the canvas on a plain session refocus too, with no step cursor at all', () => {
+    // The OTHER real navigation: a different session gets focused (`j`/`k`,
+    // or a sidebar click), landing on its info node -- no step cursor,
+    // `focusNodeId` still changes because the SESSION changed. Session
+    // identity alone already covered this before turn ids were stabilised;
+    // this pins that it still does now that `focusNodeId` is the mechanism
+    // doing most of the work.
+    const view = drawFor({
+      entry: manyEntry,
+      decision: MANY[0] as Decision,
+      focusNodeId: 'info:s1',
+    });
+    pick('d1');
+    expect(inText()).toContain('ask d1');
+    const otherSession: Session = { ...manyEntry.session, id: 's2' };
+    view.rerender({
+      entry: { project: PROJECT, session: otherSession },
+      decision: otherSession.decisions[0] as Decision,
+      focusNodeId: 'info:s2',
+    });
+    expect(inText()).toContain('ask d7');
+    expect(stepLabel()).toBe('step d7');
   });
 
   it('turns off the live turn markers for a turn picked out of history', () => {
@@ -492,6 +545,159 @@ describe('the panel remembers which turn you are reading, independent of the can
     // `data-out-empty`) is what keeps this test from passing vacuously
     // against a fixture whose every turn already has an answer.
     expect(all('[data-out-live]')).toHaveLength(0);
+  });
+});
+
+/**
+ * THE FOLLOW-UP DEFECT, end to end. Turn ids used to be positional
+ * (`${prefix}:${index}`, counted from the newest end), so a poll that
+ * delivered a new turn shifted every earlier turn's index -- the SAME id
+ * string named a DIFFERENT turn on the next parse, and this panel's own
+ * `selectedId` lookup would silently swap the content under an operator
+ * still reading it. `transcript.ts` now derives ids from a turn's own input
+ * (plus a same-input rank, for the operator resending identical words), so a
+ * turn keeps its id across a poll that adds another one.
+ *
+ * THE REAL PARSER, NOT A HAND-PICKED ID: every other test in this file
+ * builds `Decision`s by hand, which cannot prove id STABILITY -- a literal
+ * never drifts. This drives `DetailPanel` with `summarizeTranscript`'s own
+ * output, parsed twice, to prove the actual promise: select a historical
+ * turn, have the SOURCE deliver a new one, and the panel is still showing
+ * the turn it was.
+ */
+describe('a selected historical turn survives a poll that delivers a new one', () => {
+  const jsonl = (...lines: unknown[]) => lines.map((l) => JSON.stringify(l)).join('\n');
+  const turnsFor = (prompts: readonly string[]) => {
+    const lines: unknown[] = [];
+    for (const [i, prompt] of prompts.entries()) {
+      lines.push(
+        { type: 'last-prompt', lastPrompt: prompt },
+        {
+          type: 'assistant',
+          message: { role: 'assistant', content: [{ type: 'text', text: `answer ${i}` }] },
+        },
+      );
+    }
+    return summarizeTranscript(jsonl(...lines), 'sess-1').decisions;
+  };
+  const entryWith = (decisions: readonly Decision[]): SessionEntry => ({
+    project: PROJECT,
+    session: { ...SESSION, id: 'sess-1', decisions },
+  });
+  const inText = () => q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '';
+
+  it('keeps the same turn on screen after the source delivers one more turn', () => {
+    // A real parse: two turns, oldest-first "ask 0" then "ask 1".
+    const before = turnsFor(['ask 0', 'ask 1']);
+    const view = drawFor({ entry: entryWith(before), decision: before[0] as Decision });
+
+    // Read the OLDEST turn, which the canvas never focuses by default.
+    act(() => toggle()?.click());
+    const oldestRow = turns()[0]?.querySelector<HTMLButtonElement>('[data-progress-select]');
+    expect(oldestRow, 'fixture has no oldest row to click').not.toBeNull();
+    act(() => oldestRow?.click());
+    expect(inText()).toContain('ask 0');
+
+    // The poll: the source is asked again and now reports THREE turns --
+    // one more request landed while "ask 0" was on screen. Exactly the
+    // operator's own bug report.
+    const after = turnsFor(['ask 0', 'ask 1', 'ask 2']);
+    view.rerender({ entry: entryWith(after), decision: after[0] as Decision });
+
+    // Still "ask 0" -- the same real, content-derived id survived the poll.
+    expect(inText()).toContain('ask 0');
+  });
+
+  it('keeps a REPEATED prompt’s own turn on screen too, not its earlier twin', () => {
+    // The duplicate-input case `transcript.ts`'s `turnFingerprint` reasons
+    // through: "continue" sent twice, non-adjacently. `in` shows the PROMPT,
+    // identical for both occurrences by construction, so `out` -- each
+    // turn's own distinct reply -- is what has to be read here.
+    const outText = () => q<HTMLElement>('[data-detail-scroll="out"]')?.textContent ?? '';
+    const before = turnsFor(['continue', 'something else', 'continue']);
+    const view = drawFor({ entry: entryWith(before), decision: before[0] as Decision });
+
+    act(() => toggle()?.click());
+    // Both "continue" rows exist; the SECOND occurrence (newer) is what is
+    // opened here, oldest-first so it is the last of the three rows.
+    const secondContinue = turns()[2]?.querySelector<HTMLButtonElement>('[data-progress-select]');
+    expect(secondContinue, 'fixture has no second "continue" row to click').not.toBeNull();
+    act(() => secondContinue?.click());
+    expect(inText()).toContain('continue');
+    expect(outText()).toContain('answer 2'); // the third turn's own reply
+
+    const after = turnsFor(['continue', 'something else', 'continue', 'a fourth ask']);
+    view.rerender({ entry: entryWith(after), decision: after[0] as Decision });
+
+    // Still the SECOND "continue" turn's own answer -- not the first
+    // occurrence's, which a rank collision would have resolved to instead.
+    expect(outText()).toContain('answer 2');
+  });
+});
+
+/**
+ * WHAT VAM CANNOT PROMISE: a turn old enough to fall out of the byte window
+ * entirely (`source.ts`'s `TAIL_BYTES`) is not just off the newest slice any
+ * more -- it is gone from what vam read, the same way an old-enough question
+ * already reads as "none asked" rather than as stale (`source.ts`'s own note
+ * on `questions`). Silently substituting a different turn there would be
+ * exactly the failure this whole change exists to remove, just moved one
+ * level up: "the turn you were reading has scrolled out of view" and "here
+ * is your turn" must not look the same.
+ */
+describe('a turn that has genuinely scrolled out of the window', () => {
+  const MANY = ['d3', 'd2', 'd1'].map((id) => decision(id));
+  const manyEntry: SessionEntry = { project: PROJECT, session: { ...SESSION, decisions: MANY } };
+
+  it('says so, rather than silently drawing a different turn', () => {
+    const view = drawFor({
+      entry: manyEntry,
+      decision: MANY[0] as Decision,
+      focusNodeId: 'info:s1',
+    });
+    act(() => toggle()?.click());
+    const oldestRow = turns()[0]?.querySelector<HTMLButtonElement>('[data-progress-select]');
+    act(() => oldestRow?.click());
+    expect(q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '').toContain('ask d1');
+
+    // The window no longer carries `d1` at all -- every id in the new
+    // decisions list is one the panel has never seen, simulating it having
+    // fallen out of `TAIL_BYTES` rather than merely off a slice.
+    const REPLACED = ['d5', 'd4'].map((id) => decision(id));
+    view.rerender({
+      entry: { project: PROJECT, session: { ...manyEntry.session, decisions: REPLACED } },
+      decision: REPLACED[0] as Decision,
+      focusNodeId: 'info:s1',
+    });
+
+    expect(document.body.textContent ?? '').toContain('scrolled out');
+    // Not the newest turn silently standing in for the one that vanished.
+    expect(document.body.textContent ?? '').not.toContain('ask d5');
+    expect(all('[data-progress-turn-missing]')).toHaveLength(1);
+  });
+
+  it('offers a way back to the turn the canvas is actually showing', () => {
+    const view = drawFor({
+      entry: manyEntry,
+      decision: MANY[0] as Decision,
+      focusNodeId: 'info:s1',
+    });
+    act(() => toggle()?.click());
+    const oldestRow = turns()[0]?.querySelector<HTMLButtonElement>('[data-progress-select]');
+    act(() => oldestRow?.click());
+
+    const REPLACED = ['d5', 'd4'].map((id) => decision(id));
+    view.rerender({
+      entry: { project: PROJECT, session: { ...manyEntry.session, decisions: REPLACED } },
+      decision: REPLACED[0] as Decision,
+      focusNodeId: 'info:s1',
+    });
+
+    const back = q<HTMLButtonElement>('[data-progress-turn-return]');
+    expect(back).not.toBeNull();
+    act(() => back?.click());
+    expect(q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '').toContain('ask d5');
+    expect(all('[data-progress-turn-missing]')).toHaveLength(0);
   });
 });
 
