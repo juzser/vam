@@ -31,6 +31,8 @@ const BASE: RemoteState = {
   devices: [],
   address: { kind: 'found', url: 'https://example-machine.example-tailnet.ts.net' },
   allowWrites: false,
+  writesPreference: false,
+  serverError: null,
   registry: null,
   serve: { enabled: false, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
   nowMs: NOW,
@@ -53,6 +55,7 @@ function fakeApi(over: Partial<RemoteState> = {}): RemoteApi {
       ...idle,
       serve: { enabled: false, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
     })),
+    setWrites: vi.fn(async () => idle),
   };
 }
 
