@@ -73,6 +73,7 @@ import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
 import { nextNode } from '../keyboard/spatial-nav.js';
 import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
+import { GroupPicker, type GroupPickerChoice } from '../panels/GroupPicker.js';
 import { IconPicker } from '../panels/IconPicker.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
@@ -824,6 +825,13 @@ function CanvasInner({
   const [pickingProjectIconFor, setPickingProjectIconFor] = useState<ProjectIconTarget | null>(
     null,
   );
+  /** The project `gm` is asking a folder for, captured when the picker opens —
+   *  the same reasoning as the two icon targets above. */
+  const [pickingGroupFor, setPickingGroupFor] = useState<{
+    readonly source: SourceId;
+    readonly projectId: string;
+    readonly name: string;
+  } | null>(null);
   const [filtering, setFiltering] = useState(false);
   /**
    * The pill row: All / Running / Needs you / Done — drawn by the sidebar's
@@ -1085,6 +1093,21 @@ function CanvasInner({
     }
     return choices;
   }, [model, pickingMembersFor]);
+
+  /**
+   * What `gm`'s picker offers: every folder in the project's own source, each
+   * marked `current` when the project is already there. At most one can be —
+   * `addProjectToGroup` enforces that on write, and `composeGroups` on read.
+   */
+  const groupPickerChoices = useMemo((): readonly GroupPickerChoice[] => {
+    if (pickingGroupFor === null) return [];
+    const { source, projectId } = pickingGroupFor;
+    return (prefs.groups[source] ?? []).map((group) => ({
+      id: group.id,
+      name: group.name,
+      current: group.projects.includes(projectId),
+    }));
+  }, [prefs.groups, pickingGroupFor]);
 
   const toggleGroupCollapse = useCallback(
     (group: Group) => {
@@ -2426,6 +2449,23 @@ function CanvasInner({
           }
           setRevealRequest({ projectId: focusedEntry.project.id });
           return;
+        case 'moveToGroup':
+          if (focusedEntry === null) {
+            setStatus('pick a session first');
+            return;
+          }
+          // Same refusal as the project icon picker: a project with no
+          // source has no bucket a folder could be filed under either.
+          if (focusedEntry.project.source === undefined) {
+            setStatus('this project has no source — folders unavailable');
+            return;
+          }
+          setPickingGroupFor({
+            source: focusedEntry.project.source,
+            projectId: focusedEntry.project.id,
+            name: focusedEntry.project.name,
+          });
+          return;
         case 'resizePane': {
           // Which pane owns the keyboard right now decides which one moves —
           // the same `pane` state `I`/`H` already set, nothing new (epic.md §4.5).
@@ -3200,6 +3240,52 @@ function CanvasInner({
             );
           }}
           onClose={() => setPickingMembersFor(null)}
+        />
+      )}
+
+      {pickingGroupFor !== null && (
+        <GroupPicker
+          projectName={pickingGroupFor.name}
+          choices={groupPickerChoices}
+          onPick={(groupId) => {
+            const name =
+              groupPickerChoices.find((choice) => choice.id === groupId)?.name ?? groupId;
+            savePrefs(
+              addProjectToGroup(prefs, pickingGroupFor.source, groupId, pickingGroupFor.projectId),
+            );
+            setStatus(`${pickingGroupFor.name} → ${name}`);
+            setPickingGroupFor(null);
+          }}
+          onRemove={() => {
+            const current = groupPickerChoices.find((choice) => choice.current);
+            if (current === undefined) return;
+            savePrefs(
+              removeProjectFromGroup(
+                prefs,
+                pickingGroupFor.source,
+                current.id,
+                pickingGroupFor.projectId,
+              ),
+            );
+            setStatus(`${pickingGroupFor.name} is back at the top level`);
+            setPickingGroupFor(null);
+          }}
+          onCreate={(name) => {
+            // Minted the same way `createNewGroup` mints one: no cwd to
+            // digest, and it must exist before it holds anything.
+            const id = `group:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+            savePrefs(
+              addProjectToGroup(
+                createGroup(prefs, pickingGroupFor.source, id, name),
+                pickingGroupFor.source,
+                id,
+                pickingGroupFor.projectId,
+              ),
+            );
+            setStatus(`${pickingGroupFor.name} → ${name}`);
+            setPickingGroupFor(null);
+          }}
+          onClose={() => setPickingGroupFor(null)}
         />
       )}
 

@@ -89,6 +89,10 @@ describe('resolveChord — two-key chords', () => {
     expect(type(['y', 'y']).actions).toEqual([{ kind: 'copy' }]);
   });
 
+  it('gm moves the focused project into a folder', () => {
+    expect(type(['g', 'm']).actions).toEqual([{ kind: 'moveToGroup' }]);
+  });
+
   it('emits nothing on the first key of a chord', () => {
     const { actions, state } = type(['g']);
     expect(actions).toEqual([]);

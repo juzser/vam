@@ -189,6 +189,12 @@ export type KeyAction =
   /** `p` — reveal the focused session's project in the sidebar and put the
       keyboard on its fold. */
   | { readonly kind: 'revealProject' }
+  /** `gm` — move the focused session's project into a folder, or out of one.
+      Under `g` rather than a single key: the single-key space is thin, and
+      this is a project-level act the way `gt`/`gT` already are, not a
+      session-level one like `x` or `r`. `m` for "move" — a folder is
+      filled by moving a project into it, never by creating one there. */
+  | { readonly kind: 'moveToGroup' }
   | { readonly kind: 'cancel' };
 
 export type ChordStep = {
@@ -327,6 +333,7 @@ const AFTER_G: Readonly<Record<string, KeyAction>> = {
   g: { kind: 'first' },
   t: { kind: 'project', delta: 1 },
   T: { kind: 'project', delta: -1 },
+  m: { kind: 'moveToGroup' },
 };
 
 const AFTER_Y: Readonly<Record<string, KeyAction>> = {

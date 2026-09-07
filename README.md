@@ -218,6 +218,7 @@ Chord prefixes — press the first key, then the second:
 |---|---|
 | `gg` | Jump to the first session |
 | `gt` / `gT` | Next / previous project |
+| `gm` | Move the focused session's project into a folder, or out of one |
 | `yy` | Copy the focused step's commands |
 | `z0` | Reset both side panes to their default layout |
 | `zc` | Hide the canvas |
