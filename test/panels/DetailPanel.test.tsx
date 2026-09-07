@@ -1967,6 +1967,112 @@ describe('the ! typeahead replaces the standing command strip', () => {
   });
 });
 
+/** The `/` typeahead: `session.slashCommands`, built like `!` above. */
+describe('the / typeahead offers the provider’s own commands', () => {
+  const SLASH_COMMANDS = [
+    { id: 'compact', name: 'compact', description: 'summarise the conversation so far' },
+    { id: 'notify', name: 'notify', description: 'toggle a push notification' },
+    { id: 'review', name: 'review', description: null },
+  ];
+  const ENTRY_WITH_SLASH: SessionEntry = {
+    project: PROJECT,
+    session: { ...SESSION, slashCommands: SLASH_COMMANDS },
+  };
+
+  const suggestedNames = () =>
+    all('[data-slash-suggestion]').map((row) =>
+      (row.querySelector('[data-slash-command]')?.textContent ?? '').trim().replace(/^\//, ''),
+    );
+  const selectedNames = () =>
+    all('[data-slash-suggestion]')
+      .filter((row) => row.getAttribute('data-selected') === 'true')
+      .map((row) =>
+        (row.querySelector('[data-slash-command]')?.textContent ?? '').trim().replace(/^\//, ''),
+      );
+  const box = () =>
+    q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]') as HTMLTextAreaElement;
+
+  function Composer(props: { readonly onSubmit: () => void; readonly entry?: SessionEntry }) {
+    const [draft, setDraft] = useState('');
+    return (
+      <DetailPanel
+        entry={props.entry ?? ENTRY_WITH_SLASH}
+        decision={null}
+        draft={draft}
+        onDraftChange={setDraft}
+        onSubmit={props.onSubmit}
+        composing={true}
+        onCompose={() => {}}
+        onStopComposing={() => {}}
+        active={false}
+        actionIndex={0}
+        width={408}
+        resizeHandle={null}
+      />
+    );
+  }
+
+  function type(text: string) {
+    fireEvent.change(box(), { target: { value: text } });
+  }
+
+  function composer(entry?: SessionEntry) {
+    const sent: string[] = [];
+    render(<Composer onSubmit={() => sent.push('sent')} entry={entry} />);
+    return sent;
+  }
+
+  it('draws nothing for a source with no configured commands', () => {
+    // `ENTRY` carries no `slashCommands` at all -- constraint 2: never invent
+    // a list the source did not hand over.
+    composer(ENTRY);
+    type('/');
+    expect(q('[data-slash-suggest]')).toBeNull();
+  });
+
+  it('opens only at line start, and narrows on the name or description typed after', () => {
+    composer();
+    type('ship it');
+    expect(q('[data-slash-suggest]')).toBeNull();
+    type('run this /'); // mid-word, same rule `!` follows
+    expect(q('[data-slash-suggest]')).toBeNull();
+    type('run this\n/');
+    expect(suggestedNames()).toEqual(['compact', 'notify', 'review']);
+    type('run this\n/push');
+    expect(suggestedNames()).toEqual(['notify']);
+    type('run this\n/zzz');
+    expect(q('[data-slash-suggest]')).toBeNull();
+  });
+
+  it('writes the picked command into the prompt, keeping the / and the caret after it', () => {
+    composer();
+    type('/comp');
+    fireEvent.click(all('[data-slash-suggestion]')[0] as HTMLElement);
+    expect(box().value).toBe('/compact');
+    expect(q('[data-slash-suggest]')).toBeNull();
+  });
+
+  it('accepts on Enter, sending nothing, and walks the list with arrow keys', () => {
+    const sent = composer();
+    type('/');
+    expect(selectedNames()).toEqual(['compact']);
+    fireEvent.keyDown(box(), { key: 'ArrowDown' });
+    expect(selectedNames()).toEqual(['notify']);
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(sent).toEqual([]);
+    expect(box().value).toBe('/notify');
+  });
+
+  it('never opens both lists at once, since a token cannot start with ! and / together', () => {
+    composer();
+    type('!');
+    expect(q('[data-bang-suggest]')).toBeNull(); // no decision commands on this fixture
+    type('/');
+    expect(q('[data-slash-suggest]')).not.toBeNull();
+    expect(q('[data-bang-suggest]')).toBeNull();
+  });
+});
+
 describe('a turn with no answer says which kind of nothing it is', () => {
   const withOutput = (output: string | null): Decision => ({
     id: 'd9',
