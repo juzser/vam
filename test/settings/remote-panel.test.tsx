@@ -32,6 +32,8 @@ const IDLE: RemoteState = {
   devices: [],
   address: { kind: 'unavailable', reason: 'no-cli' },
   allowWrites: false,
+  writesPreference: false,
+  serverError: null,
   registry: null,
   serve: { enabled: false, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
   nowMs: NOW,
@@ -52,6 +54,7 @@ function fakeApi(over: Partial<RemoteState> = {}, opened: Partial<RemoteState> =
     revokeAll: vi.fn(async () => idle),
     enableServe: vi.fn(async () => idle),
     disableServe: vi.fn(async () => idle),
+    setWrites: vi.fn(async () => idle),
   };
 }
 
@@ -120,6 +123,26 @@ describe('RemotePanel', () => {
     await userEvent.click(await screen.findByText('Copy address'));
 
     expect(copyText).toHaveBeenCalledWith('https://example-machine.example-tailnet.ts.net');
+  });
+
+  it('says why the endpoint could not bind, rather than a dead pairing screen', async () => {
+    const api = fakeApi({
+      serverError: 'the remote endpoint could not bind port 58217: it is already in use',
+    });
+    render(<RemotePanel api={api} active />);
+
+    expect((await screen.findByTestId('remote-server-error')).textContent).toMatch(/58217/);
+    // Pairing itself is still on screen: the IPC channels above answered.
+    expect(screen.queryByTestId('remote-off')).toBeNull();
+  });
+
+  it('forwards the writes preference toggle to main', async () => {
+    const api = fakeApi({ writesPreference: false });
+    render(<RemotePanel api={api} active />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /turn writes on/i }));
+
+    expect(api.setWrites).toHaveBeenCalledWith(true);
   });
 
   it('forwards allow, remove and revoke-all to main', async () => {

@@ -98,6 +98,23 @@ export type RemoteState = {
   /** Null when the registry is simply fine, which is the ordinary case. */
   readonly registry: RegistryTrouble | null;
   readonly serve: ServeState;
+  /**
+   * `startRemoteServer`'s own refusal message (a port already in use, most
+   * often), or null while nothing has failed. Without this the panel had no
+   * way to say WHY a phone can never reach the endpoint -- the operator saw a
+   * pairing screen that looked live and a phone that could never connect,
+   * with nothing on screen to explain the gap. Never cleared automatically:
+   * there is no retry, so once set it is true for the rest of this run.
+   */
+  readonly serverError: string | null;
+  /**
+   * The persisted write-access preference (`remote/writes-preference.ts`),
+   * read back so the panel can show what will be true the NEXT time vam
+   * starts. Distinct from `allowWrites` above, which is what THIS running
+   * server was actually started with -- the two can disagree the moment the
+   * operator flips the toggle and before they restart vam.
+   */
+  readonly writesPreference: boolean;
   /** MAIN's clock, so the panel's countdown is not drawn against a second one. */
   readonly nowMs: number;
 };

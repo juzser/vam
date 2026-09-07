@@ -26,6 +26,7 @@ import type { ServeAddress } from './hostname.js';
 import type { Pairing } from './pairing.js';
 import type { ServeToggleResult } from './serve.js';
 import type { RemoteDeviceView, RemoteState, ServeState } from './state.js';
+import type { WritesPreference } from './writes-preference.js';
 
 export type { RemoteState };
 
@@ -42,7 +43,19 @@ export type RemoteIpcOptions = {
   readonly enableServe: () => Promise<ServeToggleResult>;
   /** Runs the TARGETED off, never `tailscale serve reset` -- see `remote/serve.ts`. */
   readonly disableServe: () => Promise<ServeToggleResult>;
+  /** The persisted write-access choice, read at snapshot time and set from the panel. */
+  readonly writesPreference: WritesPreference;
   readonly now?: () => number;
+};
+
+/** What `registerRemoteIpc` hands back to `src/main/index.ts`, beyond the channels themselves. */
+export type RemoteIpc = {
+  /**
+   * Records `startRemoteServer`'s own refusal message so the next
+   * `RemoteState` snapshot carries it -- called from `index.ts`'s catch, once
+   * the bind attempt has actually failed. See `RemoteState.serverError`.
+   */
+  reportServerError(message: string): void;
 };
 
 /**
@@ -59,9 +72,11 @@ export const ADDRESS_CACHE_MS = 30_000;
 /** A device id is a `randomUUID`; the bound is far above one. */
 const MAX_DEVICE_ID_LENGTH = 200;
 
-export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOptions): void {
+export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOptions): RemoteIpc {
   const now = options.now ?? (() => Date.now());
   let cached: { at: number; address: ServeAddress } | null = null;
+  /** Set once, by `reportServerError` below, and never cleared -- see `RemoteState.serverError`. */
+  let serverError: string | null = null;
   /**
    * When the operator last opened the screen, or null while it has never been
    * open. The status line is derived against this rather than remembered: see
@@ -139,6 +154,8 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
       // and a registry vam refused to overwrite are both known here and were
       // said nowhere -- the phone was the only side told.
       registry: options.devices.trouble(),
+      serverError,
+      writesPreference: options.writesPreference.get(),
       nowMs: now(),
     };
   };
@@ -239,4 +256,21 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
     serve = nextServeState(await options.disableServe(), false);
     return await snapshot();
   });
+
+  ipcMain.handle(CHANNELS.remoteWritesSet, async (_event, ...args): Promise<RemoteState> => {
+    const [next] = args;
+    // A value from the least trusted process in the app. There is no control
+    // on the panel that sends anything but a boolean, so a malformed one
+    // leaves the preference untouched rather than guessing.
+    if (args.length === 1 && typeof next === 'boolean') {
+      await options.writesPreference.set(next);
+    }
+    return await snapshot();
+  });
+
+  return {
+    reportServerError(message: string): void {
+      serverError = message;
+    },
+  };
 }

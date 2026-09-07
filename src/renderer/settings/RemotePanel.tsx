@@ -58,7 +58,8 @@ type ActName =
   | 'remove'
   | 'revokeAll'
   | 'serveEnable'
-  | 'serveDisable';
+  | 'serveDisable'
+  | 'setWrites';
 
 /**
  * What failed, and -- for the two that revoke access -- what is still true
@@ -81,6 +82,7 @@ const ACT_FAILED: Record<ActName, string> = {
     'vam could not revoke these devices: they are still paired, and their tokens still work.',
   serveEnable: 'vam could not ask tailscale to turn phone access on.',
   serveDisable: 'vam could not ask tailscale to turn phone access off.',
+  setWrites: 'vam could not save the writes preference.',
 };
 
 /** The registry's own trouble, which no surface said before. */
@@ -193,7 +195,7 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
       <p data-testid="remote-off">
         {api === undefined
           ? 'Remote access is part of the desktop app: this page has no bridge to a pairing screen.'
-          : "vam's remote endpoint is not running, so there is nothing for a phone to pair with. Start vam with VAM_REMOTE_PORT set."}
+          : "vam's remote endpoint is not running, so there is nothing for a phone to pair with."}
       </p>
     );
   }
@@ -208,11 +210,17 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
   const cliMissing = state.address.kind === 'unavailable' && state.address.reason === 'no-cli';
   return (
     <>
+      {state.serverError !== null ? (
+        <p data-testid="remote-server-error" role="alert" className="text-[12px] text-ink-dim">
+          {state.serverError}
+        </p>
+      ) : null}
       <PairingPanel
         view={state.view}
         devices={state.devices}
         url={url}
         allowWrites={state.allowWrites}
+        writesPreference={state.writesPreference}
         nowMs={state.nowMs}
         serve={{
           cliMissing,
@@ -232,6 +240,7 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
         onRevokeAll={() => act('revokeAll', () => api.revokeAll())}
         onEnableServe={() => actServe('serveEnable', () => api.enableServe())}
         onDisableServe={() => actServe('serveDisable', () => api.disableServe())}
+        onSetWritesPreference={(next) => void act('setWrites', () => api.setWrites(next))}
       />
       {state.registry !== null ? (
         <p data-testid="remote-registry" role="alert">

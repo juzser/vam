@@ -28,6 +28,7 @@ import { remoteConfigFromEnv } from './remote/launch.js';
 import { createPairing } from './remote/pairing.js';
 import { disableServe, enableServe } from './remote/serve.js';
 import { createStreamRegistry, startRemoteServer } from './remote/server.js';
+import { openWritesPreference, writesPreferencePath } from './remote/writes-preference.js';
 import { listLiveAgents } from './sources/claude-code/agents.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
 import type { MainSource } from './sources/source.js';
@@ -223,7 +224,8 @@ function createWindow(): void {
 }
 
 /**
- * The browser transport, off unless the environment asks for it.
+ * The browser transport, ON BY DEFAULT -- see `remote/launch.ts`'s module
+ * comment for why a packaged app cannot rely on `VAM_REMOTE_PORT` at all.
  *
  * It listens on LOOPBACK ONLY and is meant to be reached through `tailscale
  * serve`, which proxies tailnet requests to `http://127.0.0.1:<port>` on this
@@ -235,18 +237,20 @@ function createWindow(): void {
  * Being on the tailnet is not authorisation. Every device on it -- and every
  * local process that can reach loopback -- can open a socket here, so each
  * device must be paired from the desktop before any route answers it. A
- * misconfiguration is fatal ON PURPOSE.
+ * misconfiguration (`VAM_REMOTE_PORT` set to something that is not a port) is
+ * fatal ON PURPOSE; a port simply being taken is not -- see the `catch` below.
  */
 function startRemoteTransport(): void {
-  let config: ReturnType<typeof remoteConfigFromEnv>;
+  // Validated eagerly, before anything async: a `VAM_REMOTE_PORT` that is not
+  // a port is a misconfiguration and stays fatal on purpose. The persisted
+  // writes preference below cannot change whether THIS call throws --
+  // `allowWrites` never affects port parsing -- so `false` here is only a
+  // placeholder; the real value is read once `userData` is available.
   try {
-    config = remoteConfigFromEnv(process.env);
+    remoteConfigFromEnv(process.env);
   } catch (error) {
     console.error(`[vam] remote transport refused to start: ${String(error)}`);
     app.exit(1);
-    return;
-  }
-  if (config === null) {
     return;
   }
   // Payload-free, exactly like the `stream` IPC channel: a tick means "ask
@@ -268,25 +272,32 @@ function startRemoteTransport(): void {
     browsers.add(onChange);
     return () => browsers.delete(onChange);
   };
-  // The page the browser loads. `VAM_REMOTE_WEB_ROOT` wins; otherwise it is
-  // the `dist-web` build beside the app, and a missing one answers 404 rather
-  // than half a page -- `serveAsset` opens files, it does not invent them.
-  const webRoot = config.webRoot ?? join(app.getAppPath(), 'dist-web');
   // The paired devices, their live streams, and the screen that grants a
   // pairing. Revoking a device closes ITS OWN open connections at once: a
   // stream opened while it was paired otherwise outlives the pairing.
   const streams = createStreamRegistry();
   void (async () => {
+    const userData = app.getPath('userData');
     const devices = await openDeviceRegistry({
-      path: registryPath(app.getPath('userData')),
+      path: registryPath(userData),
       onRevoked: (deviceId) => streams.closeFor(deviceId),
     });
+    const writesPreference = await openWritesPreference(writesPreferencePath(userData));
+    // Re-read now that the persisted preference is available. `process.env`
+    // has not changed since the eager check above, so this cannot throw here
+    // when it did not throw there.
+    const config = remoteConfigFromEnv(process.env, writesPreference.get());
+    // The page the browser loads. `VAM_REMOTE_WEB_ROOT` wins; otherwise it is
+    // the `dist-web` build beside the app, and a missing one answers 404
+    // rather than half a page -- `serveAsset` opens files, it does not invent
+    // them.
+    const webRoot = config.webRoot ?? join(app.getAppPath(), 'dist-web');
     const pairing = createPairing({ grant: (name) => devices.grant(name) });
     // The desktop half: the screen that mints a code, the prompt that allows a
-    // device, and the list that revokes one. Registered only when the remote
-    // endpoint is configured at all -- with no endpoint there is nothing to
-    // pair with, and the panel says so rather than offering a dead control.
-    registerRemoteIpc(ipcMain, {
+    // device, and the list that revokes one. Registered UNCONDITIONALLY now --
+    // the endpoint is on by default, so there is always something to pair
+    // with, even before `startRemoteServer` below has settled.
+    const remote = registerRemoteIpc(ipcMain, {
       pairing,
       devices,
       allowWrites: config.allowWrites,
@@ -298,25 +309,32 @@ function startRemoteTransport(): void {
       // running -- see `remote/serve.ts`'s module comment.
       enableServe: () => enableServe(spawnTailscaleServe, config.port),
       disableServe: () => disableServe(spawnTailscaleServe),
+      writesPreference,
     });
-    await startRemoteServer({
-      ...config,
-      devices,
-      pairing,
-      streams,
-      webRoot,
-      source: DESKTOP_SOURCE,
-      subscribe,
-    });
+    try {
+      await startRemoteServer({
+        ...config,
+        devices,
+        pairing,
+        streams,
+        webRoot,
+        source: DESKTOP_SOURCE,
+        subscribe,
+      });
+    } catch (error) {
+      // THE APP OUTLIVES ITS OPTIONAL SURFACE. A port that is already taken
+      // does not mean the operator loses every tmux session vam is driving.
+      // Nothing was bound, but the IPC channels above ARE registered, so this
+      // is not a dead screen: `reportServerError` puts the refusal on the next
+      // `RemoteState` snapshot, and `RemotePanel` renders it in the operator's
+      // terms instead of a pairing screen that silently never connects.
+      console.error(`[vam] the remote endpoint did not start: ${String(error)}`);
+      remote.reportServerError(String(error));
+    }
   })().catch((error: unknown) => {
-    // THE APP OUTLIVES ITS OPTIONAL SURFACE. A port that is already taken, or
-    // a registry this process cannot open, means there is no remote endpoint
-    // -- it does not mean the operator loses every tmux session vam is
-    // driving, which is what `app.exit(1)` did here. Nothing was bound and no
-    // route was registered on this path, so continuing serves nothing over
-    // the network; the desktop simply keeps working, and the refusal says
-    // which port and why.
-    console.error(`[vam] the remote endpoint did not start: ${String(error)}`);
+    // Anything before the `try` above -- opening the device registry or the
+    // writes preference file, most often -- still cannot take the app down.
+    console.error(`[vam] the remote transport did not start: ${String(error)}`);
   });
 }
 

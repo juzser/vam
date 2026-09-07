@@ -33,6 +33,8 @@ const PAIRED: RemoteState = {
   devices: [{ deviceId: 'device-1', name: 'a paired phone', pairedAt: NOW, lastSeenAt: NOW }],
   address: { kind: 'unavailable', reason: 'no-cli' },
   allowWrites: false,
+  writesPreference: false,
+  serverError: null,
   registry: null,
   serve: { enabled: false, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
   nowMs: NOW,
@@ -48,6 +50,7 @@ function api(over: Partial<RemoteApi> = {}): RemoteApi {
     revokeAll: vi.fn(async () => PAIRED),
     enableServe: vi.fn(async () => PAIRED),
     disableServe: vi.fn(async () => PAIRED),
+    setWrites: vi.fn(async () => PAIRED),
     ...over,
   };
 }
