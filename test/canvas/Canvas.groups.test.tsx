@@ -240,3 +240,107 @@ describe('group membership, stored', () => {
     ).toBe(null);
   });
 });
+
+describe('moving the focused project with `gm`', () => {
+  function press(key: string) {
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    });
+  }
+  /** Puts the keyboard on `p1`'s only session before typing the chord --
+   *  explicit, rather than relying on where the default cursor happens to
+   *  land, which moves once `p1` is inside a folder. */
+  const chord = () => {
+    act(() => {
+      document.querySelector<HTMLButtonElement>('[data-session-row="a1"]')?.click();
+    });
+    press('g');
+    press('m');
+  };
+  const pickerChoice = (id: string) =>
+    document.querySelector<HTMLButtonElement>(`[data-group-choice="${id}"]`);
+  const inGroup = (projectId: string) =>
+    document
+      .querySelector(`[data-project-id="${projectId}"]`)
+      ?.closest('li')
+      ?.getAttribute('data-in-group') ?? null;
+  const storedGroups = () =>
+    (storedPrefs().groups ?? {}) as Record<
+      string,
+      { id: string; name: string; projects: string[] }[]
+    >;
+
+  it('opens a picker naming the focused project and listing existing folders', () => {
+    seed({ groups: { factory: [{ id: 'group:1', name: 'work', projects: [] }] } });
+    render(<Canvas model={MODEL} />);
+    chord();
+    expect(document.querySelector('[data-group-picker]')?.textContent).toContain('alpha');
+    expect(pickerChoice('group:1')?.textContent).toContain('work');
+  });
+
+  it('moves the focused project into an existing folder, stored', () => {
+    seed({ groups: { factory: [{ id: 'group:1', name: 'work', projects: [] }] } });
+    render(<Canvas model={MODEL} />);
+    chord();
+    act(() => pickerChoice('group:1')?.click());
+    expect(storedGroups()['factory']?.[0]?.projects).toEqual(['p1']);
+    expect(inGroup('p1')).toBe('group:1');
+  });
+
+  it('mints a new folder from the picker and moves the project into it', () => {
+    render(<Canvas model={MODEL} />);
+    chord();
+    act(() => document.querySelector<HTMLButtonElement>('[data-new-folder]')?.click());
+    const input = document.querySelector<HTMLInputElement>('[data-group-picker-draft]');
+    expect(input).not.toBeNull();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    act(() => {
+      setter?.call(input, 'infra');
+      input?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    const stored = storedGroups()['factory'] ?? [];
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.name).toBe('infra');
+    expect(stored[0]?.projects).toEqual(['p1']);
+  });
+
+  it('removes the focused project from its folder, back to the top level', () => {
+    seed({ groups: { factory: [{ id: 'group:1', name: 'work', projects: ['p1'] }] } });
+    render(<Canvas model={MODEL} />);
+    chord();
+    act(() => pickerChoice('none')?.click());
+    expect(storedGroups()['factory']?.[0]?.projects).toEqual([]);
+    expect(inGroup('p1')).toBe(null);
+  });
+
+  it('the project appears in exactly one folder even after a second move', () => {
+    seed({
+      groups: {
+        factory: [
+          { id: 'group:1', name: 'work', projects: ['p1'] },
+          { id: 'group:2', name: 'other', projects: [] },
+        ],
+      },
+    });
+    render(<Canvas model={MODEL} />);
+    chord();
+    act(() => pickerChoice('group:2')?.click());
+    const stored = storedGroups().factory ?? [];
+    expect(stored.find((g) => g.id === 'group:1')?.projects).toEqual([]);
+    expect(stored.find((g) => g.id === 'group:2')?.projects).toEqual(['p1']);
+    expect(inGroup('p1')).toBe('group:2');
+  });
+
+  it('survives a reload: the move is read back from prefs', () => {
+    seed({ groups: { factory: [{ id: 'group:1', name: 'work', projects: [] }] } });
+    const { unmount } = render(<Canvas model={MODEL} />);
+    chord();
+    act(() => pickerChoice('group:1')?.click());
+    unmount();
+    render(<Canvas model={MODEL} />);
+    expect(inGroup('p1')).toBe('group:1');
+  });
+});
