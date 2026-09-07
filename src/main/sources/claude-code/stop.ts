@@ -27,6 +27,7 @@
 import { execFile } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { SessionStatus } from '../../../renderer/domain/model.js';
 import { cliMissingMessage } from '../../env/cli-missing.js';
 import type { SourceError } from '../../ipc/channels.js';
 import { killSessionArgv } from '../tmux/argv.js';
@@ -70,6 +71,28 @@ export function stopArgv(sessionId: string): readonly string[] {
  */
 const NO_WORDS = 'the command exited without saying why';
 
+/**
+ * The CLI's own sentence for a background job it cannot find, measured
+ * verbatim: `claude stop <id>` on an id no running job matches answers, on
+ * stderr, exit 1:
+ *   No job matching '<id>'. Run 'claude agents' to list running sessions.
+ * That is CLI-speak -- it assumes a `claude` binary and a terminal, neither
+ * of which vam's own operator necessarily has -- and republishing it as-is
+ * (the previous behaviour, via the `cli-failed` catch-all below) is the exact
+ * bug this branch exists to fix: an operator closing a session from the GUI
+ * was told, in the CLI's own words, to go run a CLI command.
+ *
+ * NARROW ON PURPOSE. This matches only the fixed opening words ("No job
+ * matching"), not the quoted id or the remedy sentence after it -- both are
+ * free to change without breaking the match, and neither is needed to know
+ * what happened. If the CLI rewords the message entirely (drops "No job
+ * matching"), this simply stops matching: the answer falls through to the
+ * `cli-failed` catch-all just below, which still carries the CLI's real
+ * words rather than inventing a false "you're fine" -- an honest miss, never
+ * a false one.
+ */
+const NO_JOB_MARKER = /^No job matching\b/i;
+
 export type SpawnFailure = {
   readonly message: string;
   readonly code?: string | number | undefined;
@@ -96,6 +119,17 @@ export function classifyStopFailure(input: {
       kind: 'unreachable',
       code: 'timed-out',
       message: `stopping session ${sessionId} did not finish within ${Math.round(STOP_TIMEOUT_MS / 1000)}s; it may still be running`,
+    };
+  }
+  if (NO_JOB_MARKER.test(said)) {
+    // Refused, not unreachable: the CLI answered, and answered clearly --
+    // there is no running job by this id any more. Nothing vam asked for was
+    // lost: `claude stop --help` says a stop keeps the conversation, and not
+    // stopping keeps it exactly as much.
+    return {
+      kind: 'refused',
+      code: 'session-gone',
+      message: `session ${sessionId} is not a running background job any more, so there was nothing to stop. Nothing was lost -- the conversation is kept either way.`,
     };
   }
   return {
@@ -142,6 +176,15 @@ export type StoppableAgent = {
    * the CLI itself reported with no pid.
    */
   readonly pid?: number | null;
+  /**
+   * The status the source last reported for this row, when the caller has
+   * one to give -- `LiveAgent`'s own field, satisfied structurally by every
+   * production caller. Used ONLY to pre-empt a BACKGROUND row `claude stop`
+   * can no longer act on; see `stopSession`. `undefined` for a caller that
+   * never had one (most existing tests, and every interactive row, which
+   * never reads this field at all).
+   */
+  readonly status?: SessionStatus;
 };
 
 /** What actually performs the stop. Injectable so the join is testable without a spawn. */
@@ -311,6 +354,23 @@ export async function stopSession(
     };
   }
   if (row.kind !== 'interactive') {
+    // A row the source ITSELF already reports as `done` or `failed` is never
+    // handed to the CLI at all. `agents.ts` documents that these are the two
+    // statuses ONLY a background row can honestly carry, and that `state` is
+    // a fact the CLI reports, not a guess `load()` made -- so by the time
+    // this row reached the canvas there was already no job left for `claude
+    // stop` to find. Asking anyway is not a stop that failed, it is a stop
+    // that was never on offer, and the CLI's answer to it is exactly the
+    // `session-gone` case `classifyStopFailure` exists for -- pre-empted
+    // here so the operator is not spending a spawn (and, on this row, a
+    // *repeat* refusal on every retry) to learn what vam already knew.
+    if (row.status === 'done' || row.status === 'failed') {
+      return {
+        kind: 'refused',
+        code: 'already-finished',
+        message: `"${nameOf(row)}" already ${row.status}; there is no running job left to stop. Nothing was lost -- the conversation is kept either way.`,
+      };
+    }
     // A BACKGROUND row is never killed here even when a tmux session vam
     // started sits in the same project -- `claude stop` is the verb that
     // fits it, and it is the pane's neighbour, not the pane.
