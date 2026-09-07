@@ -28,14 +28,10 @@ import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/c
 import { setActiveProvider } from '../sources/provider.js';
 import {
   ALL_VISIBLE,
-  type ColumnId,
   clampPaneWidth,
-  DEFAULT_ORDER,
   DEFAULT_PANES,
-  LAYOUTS,
-  type Layout,
-  type LayoutName,
   type Pane,
+  type PaneVisibility,
 } from './panes.js';
 
 const KEY = 'vam.prefs.v1';
@@ -87,77 +83,6 @@ export type Theme = 'dark' | 'light' | 'system';
 
 /** Dark is the default: it is the theme vam was designed in (artboard 1a). */
 export const DEFAULT_THEME: Theme = 'dark';
-
-/**
- * How much of the canvas a focused session's row should take up.
- *
- * Lives here rather than in `Canvas.tsx` because it is now a stored value and
- * the store is what owns a default; `FOCUS_VIEWPORT_SHARE` there is this
- * constant, re-exported, so there is still exactly one 0.6 in the tree.
- */
-export const DEFAULT_FOCUS_SHARE = 0.6;
-
-/**
- * The range the picker offers and every read clamps into.
- *
- * Below 0.3 the row is a speck in the middle of an empty canvas; above 1 the
- * derived padding goes negative and ReactFlow fits the row past the edges of
- * the viewport, which is the one input that makes the canvas draw nothing at
- * all. Both ends are therefore correctness bounds, not taste.
- */
-export const FOCUS_SHARE_MIN = 0.3;
-export const FOCUS_SHARE_MAX = 1;
-
-/**
- * Off: the canvas never frames a session by itself, it only follows focus.
- *
- * A value outside the range above rather than a second boolean field, because
- * a boolean beside a share is two ways to say the same thing and they can
- * disagree in storage. Zero reads literally as "the session takes none of the
- * canvas", which is not a framing anyone could want, so it is free to mean
- * this instead.
- *
- * It exists because the operator asked for the automatic framing to be removed
- * once already. Whoever wants it gone again should be able to say so here
- * rather than by asking for the code to be deleted a second time.
- */
-export const FOCUS_SHARE_OFF = 0;
-
-/**
- * Total, like `clampPaneWidth`: a stored share can be a string an older vam
- * wrote, a `NaN` from a hand-edited payload, or an Infinity from devtools, and
- * none of those may reach `focusPadding` — a `NaN` padding is a canvas that
- * renders nothing and says nothing.
- *
- * `FOCUS_SHARE_OFF` passes through whole. It is the one value below the
- * minimum that is not garbage, and clamping it up to 0.3 would make "off"
- * unstorable.
- */
-export function clampFocusShare(share: number): number {
-  if (typeof share !== 'number' || Number.isNaN(share)) {
-    return DEFAULT_FOCUS_SHARE;
-  }
-  if (share === FOCUS_SHARE_OFF) {
-    return FOCUS_SHARE_OFF;
-  }
-  return Math.min(FOCUS_SHARE_MAX, Math.max(FOCUS_SHARE_MIN, share));
-}
-
-/**
- * Where a stepper lands when it is asked to move to `next`.
- *
- * Off and the smallest useful share are ADJACENT: there is nothing between
- * them, so a step into the gap means "cross it" rather than "clamp back to the
- * side you came from". Without this the control is a one-way door — the minus
- * button at 30% would ask for 25%, `clampFocusShare` would return 30%, and off
- * would be reachable only by typing a zero into the box.
- */
-export function nudgeFocusShare(current: number, next: number): number {
-  if (next >= FOCUS_SHARE_MIN) {
-    return clampFocusShare(next);
-  }
-  return current === FOCUS_SHARE_OFF ? FOCUS_SHARE_MIN : FOCUS_SHARE_OFF;
-}
 
 /** The root text size of the `out` pane, in px.
  *
@@ -244,20 +169,6 @@ export type Prefs = {
   readonly icons: Readonly<Record<string, IconsBySession>>;
   readonly theme: Theme;
   /**
-   * The share of the canvas WIDTH a focused session is framed to occupy, or
-   * `FOCUS_SHARE_OFF` for "never frame it". Same TTL exemption as `theme` and
-   * `panes`, for the same reason: it is a fact about how you like to read the
-   * canvas, not about a session.
-   *
-   * It spent a release marked deprecated, read by nothing: the framing it
-   * configured had been removed and deleting a persisted field is a data
-   * migration, not a delete. The operator then asked for framing back in a
-   * different shape — the whole session rather than one node, and this share
-   * rather than a constant — so the field is live again, at the meaning it
-   * always had. Keeping it was what made that a UI change and not a migration.
-   */
-  readonly focusViewportShare: number;
-  /**
    * The two dragged pane widths, always present — there are exactly two
    * panes and both are known at compile time, so this is not a keyed map.
    * Not pruned by the TTL `icons` gets: a pane width is a fact about the
@@ -272,7 +183,7 @@ export type Prefs = {
    * garbage width from rendering as a pane that has vanished. Same TTL
    * exemption as `panes` and `theme`, for the same reason.
    */
-  readonly paneVisibility: Layout;
+  readonly paneVisibility: PaneVisibility;
   /**
    * Source id → project id → the emoji you gave that project's heading.
    *
@@ -462,29 +373,11 @@ export type Prefs = {
    * first is a fact about you, not about a session.
    */
   readonly detailTab: string | null;
-  /**
-   * Which session tabs are open, in the order they are drawn — OWNED STATE,
-   * not the incidental order sessions happened to be focused in.
-   *
-   * Persisted for the same reason `panes` and `theme` are exempt from the
-   * icon TTL: a hand-arranged tab order the app forgets on restart is worse
-   * than no arrangement at all (epic.md Amendment A1.5), and that holds even
-   * before drag-reordering ships — the mere OPEN order is already something
-   * the operator built up one click at a time.
-   *
-   * Same shape as `lastFocus`, one level up: a session id is unique only
-   * within its source, so each entry carries both. Unlike `lastFocus`, a
-   * single pointer dropped whole on a bad shape, this is a LIST — one
-   * malformed entry must not cost its well-formed neighbours, the same
-   * defence `icons`/`renames` give their own buckets.
-   */
-  readonly openTabs: readonly FocusChoice[];
 };
 
 export const EMPTY_PREFS: Prefs = {
   icons: {},
   theme: DEFAULT_THEME,
-  focusViewportShare: DEFAULT_FOCUS_SHARE,
   panes: DEFAULT_PANES,
   paneVisibility: ALL_VISIBLE,
   projectIcons: {},
@@ -502,7 +395,6 @@ export const EMPTY_PREFS: Prefs = {
   defaultProvider: DEFAULT_PROVIDER_ID,
   lastFocus: null,
   detailTab: null,
-  openTabs: [],
 };
 
 /**
@@ -599,11 +491,6 @@ function parsePrefs(
     // Not pruned by the TTL icons get. A theme is about the person, and one
     // who opens vam twice a year still wants the theme they chose.
     theme: readTheme((parsed as { theme?: unknown }).theme),
-    // Per field like every line around it: a payload from a vam that predates
-    // this setting has no key at all, and a garbage one costs only itself.
-    focusViewportShare: readFocusShare(
-      (parsed as { focusViewportShare?: unknown }).focusViewportShare,
-    ),
     // Same argument as theme: not pruned, and defensive against an absent
     // field (today's shipped payloads have none), a non-object, or garbage
     // numbers left by devtools or an older vam.
@@ -729,10 +616,6 @@ function parsePrefs(
     // Anything that is not a string is "no tab remembered", which is what a
     // payload from a vam predating this field already says by having no key.
     detailTab: readDetailTab((parsed as { detailTab?: unknown }).detailTab),
-    // Per field like `lastFocus` above it, and for the same reason there is
-    // no source migration here: this field did not exist before the tab
-    // shell, so no stored payload can carry an entry under the old id.
-    openTabs: readOpenTabs((parsed as { openTabs?: unknown }).openTabs),
   };
 }
 
@@ -1077,13 +960,7 @@ function readTheme(raw: unknown): Theme {
   return raw === 'light' || raw === 'dark' || raw === 'system' ? raw : DEFAULT_THEME;
 }
 
-/** `clampFocusShare` is total, so a non-number falls through to `NaN` and
- * lands on the default, exactly like a malformed pane width. */
-function readFocusShare(raw: unknown): number {
-  return clampFocusShare(typeof raw === 'number' ? raw : Number.NaN);
-}
-
-/** Same shape as `readFocusShare`: a non-number falls through to `NaN` and
+/** Same shape as `clampPaneWidth`: a non-number falls through to `NaN` and
  *  lands on the default, and a number out of range is pulled into it. */
 function readOutFontSize(raw: unknown): number {
   return clampOutFontSize(typeof raw === 'number' ? raw : Number.NaN);
@@ -1107,28 +984,6 @@ function readLastFocus(raw: unknown): FocusChoice | null {
   return { source, session };
 }
 
-/**
- * The open tabs, in order. A LIST of the same `{ source, session }` pointer
- * `readLastFocus` validates one of, so each entry is checked the same way --
- * but here a malformed entry is DROPPED, not disqualifying, because a list is
- * many independent facts and one bad one must not cost its well-formed
- * neighbours. Not an array at all reads as "nothing open", exactly what a
- * payload written before this field existed already means by having no key.
- */
-function readOpenTabs(raw: unknown): readonly FocusChoice[] {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-  const tabs: FocusChoice[] = [];
-  for (const entry of raw) {
-    const choice = readLastFocus(entry);
-    if (choice !== null) {
-      tabs.push(choice);
-    }
-  }
-  return tabs;
-}
-
 /** A string or nothing. The only check the store is entitled to make: it does
  *  not know what the tabs are called, so it cannot say more than "this is the
  *  kind of thing a tab name is". */
@@ -1146,17 +1001,6 @@ export function setLastFocus(prefs: Prefs, lastFocus: FocusChoice | null): Prefs
   return { ...prefs, lastFocus };
 }
 
-/**
- * Written whenever a tab opens, closes, or (once dragging ships) moves.
- *
- * Replaces the whole list rather than merging it: the caller already holds
- * the complete, ordered set of open tabs — that is what "owned state" means —
- * so there is nothing here to reconcile against what was stored before.
- */
-export function setOpenTabs(prefs: Prefs, openTabs: readonly FocusChoice[]): Prefs {
-  return { ...prefs, openTabs };
-}
-
 function readPanes(raw: unknown): Prefs['panes'] {
   if (typeof raw !== 'object' || raw === null) {
     return DEFAULT_PANES;
@@ -1168,54 +1012,30 @@ function readPanes(raw: unknown): Prefs['panes'] {
   };
 }
 
-/** A missing or garbage field means "drawn", per field: the safe direction to
- * fail is showing a pane you wanted hidden, never hiding one you did not. The
- * order gets the same treatment one field along — every payload already in a
- * browser predates it, and each of those reads back as the shipped sequence. */
-function readPaneVisibility(raw: unknown): Layout {
-  const { sidebar, canvas, detail, order } = (
-    typeof raw === 'object' && raw !== null ? raw : {}
-  ) as {
+/**
+ * A missing or garbage field means "drawn", per field: the safe direction to
+ * fail is showing a pane you wanted hidden, never hiding one you did not.
+ *
+ * A 0.1 payload carries `canvas` and `order` too — the reservation and the
+ * column sequence a three-column shell needed. Both are simply not read: per
+ * field, like every other preference here, an unknown key is not an error,
+ * it is a key this version has nothing to say about (epic.md A4.1 — dropped
+ * fields need no migration, they sit unread and are gone on the next save).
+ */
+function readPaneVisibility(raw: unknown): PaneVisibility {
+  const { sidebar, detail } = (typeof raw === 'object' && raw !== null ? raw : {}) as {
     sidebar?: unknown;
-    canvas?: unknown;
     detail?: unknown;
-    order?: unknown;
   };
-  const columns = readColumnOrder(order);
   return {
     sidebar: sidebar !== false,
-    canvas: canvas !== false,
     detail: detail !== false,
-    // Absent stays ABSENT rather than being materialised as the default: the
-    // field is optional in `Layout`, `columnOrder()` answers for it, and a
-    // payload that never named an order round-trips through here unchanged.
-    ...(columns === undefined ? {} : { order: columns }),
   };
 }
 
-/**
- * Total: anything that is not a permutation of the three column ids reads as
- * "no order stored", which `columnOrder()` answers with the shipped sequence. A partial or repeated list is rejected whole rather
- * than repaired, because half an order is a column that would not be drawn at
- * all — and a dropped column is exactly the failure `readPaneVisibility`
- * refuses one field above.
- */
-function readColumnOrder(raw: unknown): readonly ColumnId[] | undefined {
-  if (!Array.isArray(raw) || raw.length !== DEFAULT_ORDER.length) {
-    return undefined;
-  }
-  const named = new Set(raw.filter((id): id is ColumnId => DEFAULT_ORDER.includes(id as ColumnId)));
-  return named.size === DEFAULT_ORDER.length ? (raw as readonly ColumnId[]) : undefined;
-}
-
-/** Written by the layout chords. */
-export function setPaneVisibility(prefs: Prefs, paneVisibility: Layout): Prefs {
+/** Written by the settings overlay's pane toggles. */
+export function setPaneVisibility(prefs: Prefs, paneVisibility: PaneVisibility): Prefs {
   return { ...prefs, paneVisibility };
-}
-
-/** One of the named layouts, applied. */
-export function setLayout(prefs: Prefs, layout: LayoutName): Prefs {
-  return setPaneVisibility(prefs, LAYOUTS[layout]);
 }
 
 /** `clampPaneWidth` is already total, so a non-number falls through to `NaN`
@@ -1227,11 +1047,6 @@ function readPaneWidth(pane: Pane, raw: unknown): number {
 /** Flip it. Written by the sidebar's one toggle and by the settings overlay. */
 export function setTheme(prefs: Prefs, theme: Theme): Prefs {
   return { ...prefs, theme };
-}
-
-/** Clamped on the way in, so nothing downstream has to wonder. */
-export function setFocusShare(prefs: Prefs, share: number): Prefs {
-  return { ...prefs, focusViewportShare: clampFocusShare(share) };
 }
 
 /** Clamped on the way in as well, for the same reason: the slider cannot

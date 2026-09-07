@@ -12,8 +12,6 @@
  * hook that owns the listener has no rules in it to drift from these.
  */
 
-import type { LayoutName } from '../prefs/panes.js';
-
 /**
  * `h` `j` `k` `l`, spelled out.
  *
@@ -183,11 +181,9 @@ export type KeyAction =
       view-adjustments below it (the letter is capitalised for the same reason
       `G` is: the stronger, whole-view form of a lowercase idea already taken). */
   | { readonly kind: 'fitView' }
-  /** `z0` — the shipped layout back: both side panes at their default width
-      AND all three columns drawn again. */
+  /** `z0` — the shipped layout back: both panes at their default width and
+      both drawn again. */
   | { readonly kind: 'resetPanes' }
-  /** `zc` / `zC` hide columns, `zf` reorders them. See `AFTER_Z`. */
-  | { readonly kind: 'layout'; readonly name: LayoutName }
   /** `Mod-1` … `Mod-9` — a POSITION, 1-based, in whatever the keyboard is
       pointed at: a session in the sidebar, a tab in the response pane.
       The action carries the digit and NOTHING ELSE. Which pane is looking is
@@ -351,27 +347,16 @@ const AFTER_Y: Readonly<Record<string, KeyAction>> = {
 };
 
 /**
- * `z` is vim's "adjust the view" namespace — which is exactly what hiding a
- * column is — so the layouts live here rather than taking three more of the
- * dwindling single keys.
- *
- * `zc` is vim's "close a fold", and closing the canvas is the same gesture on
- * the same key: the thing in front of you folds away and its neighbours take
- * the room. `zC` is vim's "close them recursively", i.e. the same idea taken
- * further — here, everything but the response. The pair reads as one binding
- * with a stronger form, the way `gt`/`gT` and `n`/`N` already do in this table.
- *
- * `z0` is the undo for both, and restores visibility as well as width — see
- * the `resetPanes` handler in Canvas.tsx for why that is one idea, not two.
+ * `z` is vim's "adjust the view" namespace. The three named layouts that used
+ * to live here (`zc`/`zC`/`zf`) hid or reordered the canvas column, and the
+ * canvas is gone (A12.1, epic.md decision 5) — `c`, `C` and `f` are free.
+ * `z0` survives: with exactly two panes there is still a "put it back" key,
+ * restoring both panes' visibility and their default widths in one press —
+ * see the `resetPanes` handler in `Canvas.tsx` for why that is one idea, not
+ * two.
  */
 const AFTER_Z: Readonly<Record<string, KeyAction>> = {
   '0': { kind: 'resetPanes' },
-  c: { kind: 'layout', name: 'noCanvas' },
-  C: { kind: 'layout', name: 'responseOnly' },
-  // `f` for focus, and the odd one out of this table: it hides nothing. It
-  // moves the response into the middle and the canvas out to a strip, which is
-  // still "adjust the view" and so still belongs under `z`.
-  f: { kind: 'layout', name: 'focusResponse' },
 };
 
 function isPrefix(key: string): key is Prefix {
@@ -472,8 +457,6 @@ export function actionId(action: KeyAction): string {
   switch (action.kind) {
     case 'move':
       return `move:${action.direction}`;
-    case 'layout':
-      return `layout:${action.name}`;
     case 'position':
       return `position:${action.digit}`;
     case 'project':

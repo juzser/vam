@@ -1,33 +1,39 @@
 /**
- * The three-column shell, and the one place a keypress becomes a move.
+ * The two-pane shell, and the one place a keypress becomes a move.
  *
- *     [ sessions ] [ ——— session tabs ——— ] [ detail + answer ]
+ *     [ sessions ] [ —— tabs —— / detail + answer ]
  *
- * 0.2 migration, step 2: the node-graph canvas is gone. The middle column now
- * draws a VSCode-shaped tab strip, one tab per open session (`TabStrip`
- * below) — no more geometry, no more `@xyflow/react`, no more per-decision
- * cards. The chord grammar still lives in `keyboard/chords.ts`; what used to
- * live beside it in `keyboard/spatial-nav.ts` and `canvas/nav-nodes.ts` (the
+ * 0.2 migration, A12.1: the middle canvas column is gone. There are exactly
+ * two panes now — the sidebar, and the detail pane, which fills everything
+ * to the sidebar's right. A tab IS that session's detail pane: `TabStrip`
+ * (below) draws a VSCode-shaped strip along the TOP of the detail pane, not
+ * a strip above a separate middle column, and selecting a tab shows that
+ * session's `DetailPanel` filling the rest of the same pane.
+ *
+ * A13.1: the strip shows one PROJECT's sessions, not every session vam
+ * knows about (`SessionEntry.project` — the sidebar's grouping level, not
+ * `Group`). "The active project" is the focused session's project; with
+ * nothing focused (a genuinely empty filtered view) there is no project to
+ * scope by and the strip is empty. See `activeProjectId` below.
+ *
+ * The chord grammar still lives in `keyboard/chords.ts`; what used to live
+ * beside it in `keyboard/spatial-nav.ts` and `canvas/nav-nodes.ts` (the
  * coordinate maths `h`/`l` used to walk a session's own chain of steps) was
- * deleted with the graph — there is no more per-session geometry to walk, and
- * `h`/`l` walk the open tab strip instead. See the `move` case of `onKeyDown`
- * below for the new meaning; the deletion and the re-homing land in the same
- * commit because `nextNode`'s only caller was that branch.
+ * deleted with the graph in step 2 — `h`/`l` walk the active project's tabs
+ * instead. See the `move` case of `onKeyDown` below.
  *
- * **One focus, three views.** The sidebar, the canvas column and the detail
- * panel all read the same `focusedSessionId`; none of them owns a cursor of
- * its own. That is why `j` does not have to mean something different
- * depending on which pane you are "in" — there is no such thing as being in
- * a pane. `j`/`k` walk the sidebar's own order, one session at a time.
- * Nothing had to be added for the sidebar: it mirrors the same id, and the
- * tab strip's `activeId` is that same id again.
+ * **One focus, two views.** The sidebar and the detail pane both read the
+ * same `focusedSessionId`; neither owns a cursor of its own. That is why `j`
+ * does not have to mean something different depending on which pane you are
+ * "in" — there is no such thing as being in a pane. `j`/`k` walk the
+ * sidebar's own order, one session at a time. Nothing had to be added for
+ * the sidebar: it mirrors the same id, and the tab strip's `activeId` is
+ * that same id again.
  */
 
 import { Box, Factory, FlaskConical, type LucideIcon } from 'lucide-react';
 import {
-  Children,
   type ComponentProps,
-  isValidElement,
   type ReactNode,
   useCallback,
   useEffect,
@@ -86,17 +92,7 @@ import { visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
-import {
-  ALL_VISIBLE,
-  CANVAS_STRIP,
-  type ColumnId,
-  canvasIsMain,
-  columnOrder,
-  DEFAULT_PANES,
-  layoutForViewport,
-  layoutWidths,
-  PANE_RESIZE_STEP,
-} from '../prefs/panes.js';
+import { ALL_VISIBLE, DEFAULT_PANES, layoutWidths, PANE_RESIZE_STEP } from '../prefs/panes.js';
 import {
   addProjectToGroup,
   applyIcons,
@@ -120,8 +116,6 @@ import {
   setGroupIcon,
   setIcon,
   setLastFocus,
-  setLayout,
-  setOpenTabs,
   setPaneVisibility,
   setPaneWidth,
   setProjectHidden,
@@ -415,71 +409,70 @@ function useUsageSnapshot(getUsage: (() => Promise<UsageSnapshot>) | undefined):
  * all, which is what "unmounted" has to mean — a display:none pane is still a
  * pane, still measured, and still findable by every query that should now miss.
  *
- * A hidden `CanvasColumn`'s children are still BUILT (JSX is evaluated at the
- * call site) — they are plain element objects, never rendered, so nothing in
- * them mounts, subscribes or measures.
+ * A hidden pane's children are still BUILT (JSX is evaluated at the call
+ * site) — they are plain element objects, never rendered, so nothing in them
+ * mounts, subscribes or measures.
  */
 function SidebarSlot({ show, ...props }: ComponentProps<typeof SessionList> & { show: boolean }) {
   return show ? <SessionList {...props} /> : null;
 }
 
 /**
- * ONE `DetailPanel` instance, fed whichever tab is active — not one instance
- * per open tab. Keying it by session id was tried and reverted: switching
- * away from "nothing focused yet" to the first landed session is ALSO a key
- * change, so it forced an extra mount on every launch and double-fired
- * `DetailPanel`'s own mount-time report of its resolved `initialTab` — a real
- * regression `Canvas.session-resume.test.tsx`'s asserted write count caught.
- * Composer state (draft/composing/writing/actionIndex) is already isolated
- * per session one level up in `CanvasInner`, so switching tabs still keeps
- * what you typed; what this gives up is `DetailPanel`'s OWN uncontrolled
- * state — a mid-scroll position, a live terminal connection — staying warm
- * on a hidden tab. See the PR notes for why that trade was made in this task.
- */
-function DetailSlot({ show, ...props }: ComponentProps<typeof DetailPanel> & { show: boolean }) {
-  return show ? <DetailPanel {...props} /> : null;
-}
-
-/**
- * The canvas column, in one of its two jobs.
+ * The detail pane's own column: the tab strip along its top edge, and
+ * `DetailPanel` filling the rest — A12.1's "a tab IS that session's detail
+ * pane", not a strip above a separate column.
  *
- * As the main column it flexes: it is what the window is about, and it takes
- * whatever the two fixed panes leave. As a strip it is a fixed `CANVAS_STRIP`
- * wide and flexes not at all, because in that layout the RESPONSE is what takes
- * the leftover room. Which of the two it is comes from the layout's order —
- * `canvasIsMain` — never from a width someone dragged.
+ * `width` is applied HERE, on the wrapper, not on `DetailPanel` (which is
+ * handed `width={undefined}` and fills via its own `w-full`, the same
+ * contract `PhoneShell` already relies on) — one width, in one place, so the
+ * toolbar above `DetailPanel` cannot render a different width than the pane
+ * below it.
+ *
+ * `DetailPanel` is still mounted only while `show` is true, for the same
+ * "unmounted is not display:none" reason `SidebarSlot` gives: it opens with
+ * hooks, so an early return inside it would be a conditional hook, and a
+ * wrapper is what keeps this a real unmount rather than a hidden pane still
+ * measured and still findable by every query that should now miss it.
  */
-function CanvasColumn({
+function DetailColumn({
   show,
-  strip,
+  width,
+  toolbar,
   children,
 }: {
-  show: boolean;
-  strip: boolean;
-  children: ReactNode;
+  readonly show: boolean;
+  readonly width: number;
+  readonly toolbar: ReactNode;
+  readonly children: ReactNode;
 }) {
   return show ? (
-    <div
-      data-canvas-pane
-      className={`relative flex min-w-0 flex-col bg-canvas ${strip ? 'flex-none border-line border-l' : 'flex-1'}`}
-      style={strip ? { width: CANVAS_STRIP } : undefined}
-    >
+    <div data-detail-pane className="relative flex min-w-0 flex-col" style={{ width }}>
+      <div className="flex h-12 flex-none items-stretch gap-[9px] border-line border-b px-1.5">
+        {toolbar}
+      </div>
       {children}
     </div>
   ) : null;
 }
 
 /**
- * The session tab strip — VSCode-shaped: one tab per open session, click to
- * switch, `×` to close without ending the session (decision 6).
+ * The session tab strip — VSCode-shaped: one tab per session in the active
+ * project (A13.1), click to switch, `×` to close.
+ *
+ * `×` closes the SESSION, exactly what the sidebar row's own `×` and the `x`
+ * chord do (A11.3: "a tab that cannot be closed independently of its
+ * session makes it meaningless. One action, two keys.") — decision 6's
+ * lighter "close the tab, leave the session running" is void under the
+ * every-session-is-a-tab model, because there is no tab to close that is
+ * not the session itself.
  *
  * `orientation` IS A PROP FROM THE START, even though only `'horizontal'` is
  * wired up in this task, per epic.md Amendment A1.5: the strip must
  * eventually support a vertical arrangement and drag-to-reorder, and a strip
  * hard-coded horizontal with the axis bolted on later is a rewrite landing on
  * top of the largest diff in this migration. `tabs` is handed in the ORDER
- * `openTabs` owns (drag-reordering, when it ships, only ever has to change
- * that one array) — never re-sorted here by title or status.
+ * the sidebar draws its own project (`orderedSessions`) — never re-sorted
+ * here by title or status.
  *
  * No drag yet: the `×` and the click are the whole surface. Step 1 shipped
  * only the non-draggable case on purpose, ahead of A1.5's drag-to-reorder.
@@ -581,28 +574,6 @@ function TabStrip({
 }
 
 /**
- * The three columns, drawn in the layout's order.
- *
- * The children are written in `Canvas.tsx` in reading order and matched to the
- * order by their KEY, so the sequence lives in one place — the layout
- * descriptor — instead of in this file's JSX, which is exactly the thing
- * `panes.ts` said could not be expressed while the order was hard-coded here.
- */
-function Columns({ order, children }: { order: readonly ColumnId[]; children: ReactNode }) {
-  const byId = new Map(
-    Children.toArray(children).map((child) => [
-      isValidElement(child) ? String(child.key).replace(/^\.\$/, '') : '',
-      child,
-    ]),
-  );
-  // An order naming no column is not an empty row of columns, it is no row at
-  // all -- which is what the phone shell asks for, and what leaves nothing of
-  // the desktop layout in the tree beside it.
-  if (order.length === 0) return null;
-  return <div className="flex min-h-0 flex-1">{order.map((id) => byId.get(id))}</div>;
-}
-
-/**
  * Where the rows came from, said out loud.
  *
  * Its own component because two shells draw it: the canvas top bar, and the
@@ -697,22 +668,15 @@ function CanvasInner({
   const storedSidebar = liveWidths.sidebar ?? prefs.panes.sidebar;
   const storedDetail = liveWidths.detail ?? prefs.panes.detail;
   // Visibility is read here and passed down, never asked of a child: which
-  // columns exist is a fact about the layout, and `layoutWidths` is the one
+  // panes exist is a fact about the layout, and `layoutWidths` is the one
   // place that knows an unmounted pane owes its sibling nothing.
-  // And read through `layoutForViewport`, so that "which columns exist" also
-  // answers the window too narrow to hold them: with the canvas demoted none of
-  // the three columns flexes, and the strip is what gives. Render-time only —
-  // `prefs.paneVisibility` is untouched, so widening the window restores it.
-  const visible = layoutForViewport(prefs.paneVisibility, viewportWidth);
-  const order = columnOrder(visible);
+  const visible = prefs.paneVisibility;
   /**
    * Which shell this viewport gets. `false` wherever `matchMedia` is missing,
    * so every environment without one -- jsdom, happy-dom, the tests -- keeps
    * the columns it was written against.
    */
   const phone = usePhoneViewport();
-  // The canvas is a strip exactly when it is drawn but is not the main column.
-  const canvasStrip = visible.canvas && !canvasIsMain(visible);
 
   const { sidebar: sidebarWidth, detail: detailWidth } = layoutWidths(
     visible,
@@ -1376,111 +1340,33 @@ function CanvasInner({
   );
 
   /**
-   * Which sessions have an open tab, in the order the strip draws them —
-   * OWNED STATE (epic.md Amendment A1.5), not the incidental order sessions
-   * happened to be focused in. Persisted (`prefs.openTabs`) so a hand-built
-   * arrangement survives a relaunch; restored once below, as soon as there is
-   * a model to match stored pointers against, and kept in step with what is
-   * actually on screen by the effects that follow.
-   */
-  const [openTabs, setOpenTabsState] = useState<readonly string[]>([]);
-  /** Latches once the restore attempt below has run, so it never re-runs —
-   *  a REF because re-running it is what it guards against, not something a
-   *  render needs to react to. */
-  const openTabsRestoreAttempted = useRef(false);
-  /**
-   * STATE, not a ref, and that distinction is the fix for a real race the
-   * persist effect below used to lose: `setOpenTabsState(restored)` and a
-   * ref flip both land in the SAME effect call, but a ref mutation is
-   * visible to every effect in THIS pass while the state update it sits
-   * beside is not — it only takes effect on the NEXT render. A ref-gated
-   * persist effect could therefore see "restore has run" true while
-   * `openTabs` was still the pre-restore `[]`, read that as "every tab just
-   * closed", and write `[]` over the very value restore was about to apply.
-   * Gating on STATE means the gate and the restored value become visible on
-   * the SAME render, together, because React batches the two `setState`
-   * calls below into one. Measured: `Canvas.session-resume.test.tsx`'s
-   * relaunch caught the clobber this replaces.
-   */
-  const [openTabsReady, setOpenTabsReady] = useState(false);
-
-  useEffect(() => {
-    if (openTabsRestoreAttempted.current || focusCandidates.length === 0) {
-      return;
-    }
-    openTabsRestoreAttempted.current = true;
-    // Entries the current model no longer has a session for are silently
-    // dropped — the same fate a stale `lastFocus` already gets from
-    // `resolveFocusNodeId`, and for the same reason: there is nothing left to
-    // point a restored tab at.
-    const restored = prefs.openTabs
-      .map(
-        (choice) =>
-          focusCandidates.find((c) => c.source === choice.source && c.session === choice.session)
-            ?.session,
-      )
-      .filter((id): id is string => id !== undefined);
-    if (restored.length > 0) {
-      setOpenTabsState(restored);
-    }
-    setOpenTabsReady(true);
-  }, [focusCandidates, prefs.openTabs]);
-
-  /**
-   * Opening a session from the sidebar opens a tab — and so does every other
-   * way focus can land somewhere new (a chord, a jump, a search, the
-   * palette). All of those already move through `setFocusedSessionId` below,
-   * so this watches the RESULT, exactly as the "record where focus is" effect one
-   * screen down does for `lastFocus`, rather than re-deriving "opened a tab"
-   * separately at each of the eight places focus can move from. It only ever
-   * ADDS a session; only the strip's own close button removes one.
-   */
-  useEffect(() => {
-    if (focusedSessionId === null) {
-      return;
-    }
-    setOpenTabsState((current) =>
-      current.includes(focusedSessionId) ? current : [...current, focusedSessionId],
-    );
-  }, [focusedSessionId]);
-
-  /**
-   * The other half, matching the `lastFocus` effect one screen down: record
-   * the open set so a relaunch finds the same tabs. A session that has since
-   * ended is dropped on write rather than carried forward — there is nothing
-   * left for a future restore to match it against, the same reasoning
-   * `hiddenProjects`' own TTL note makes elsewhere.
+   * A13.1: the tab strip shows one PROJECT's sessions, not every session vam
+   * knows about — "every session is always a tab" (A11.1) is scoped to the
+   * ACTIVE project. There is nothing to open, close (as a tab, independent
+   * of the session) or persist: the strip is a pure projection of `entries`
+   * and whichever project is active, recomputed on every render exactly the
+   * way `entries` itself already is.
    *
-   * GATED ON `openTabsReady`, and that gate is load-bearing, not defensive
-   * dressing — see that state's own comment for the race it closes: without
-   * it, this effect can fire on an earlier commit than the restore above,
-   * find still-empty `openTabs` against an already-populated
-   * `prefs.openTabs`, read that as "the operator closed every tab", and write
-   * `[]` over the value the restore was about to apply.
+   * "The active project" is DEFINED here as the focused session's project —
+   * the derivation the epic itself calls obvious. The second case the epic
+   * flags — a project selected in the sidebar with NO session focused — has
+   * no live UI action to select a project independently of a session
+   * (verified: `SessionList.tsx`'s `data-project-heading` binds a click only
+   * to its icon, its collapse chevron and its own "add session" button, none
+   * of which "select" the project), so that case cannot currently arise from
+   * the UI. What CAN happen is genuinely no session focused at all — cold
+   * start before "land focus on something real" resolves, or every session
+   * filtered out — and there `activeProjectId` is `null` and the strip is
+   * empty, reusing the same "no sessions open" copy `TabStrip` already draws
+   * for an empty tab list. If a future surface lets the operator select a
+   * project without a session, THIS is the one place that needs to learn it.
    */
-  useEffect(() => {
-    if (!openTabsReady) {
-      return;
-    }
-    const live = openTabs
-      .map((id) => allEntries.find((e) => e.session.id === id))
-      .filter((e): e is SessionEntry => e !== undefined);
-    const next: readonly FocusChoice[] = live.map((entry) => ({
-      source: sourceKeyOf(entry),
-      session: entry.session.id,
-    }));
-    const unchanged =
-      next.length === prefs.openTabs.length &&
-      next.every(
-        (choice, index) =>
-          choice.source === prefs.openTabs[index]?.source &&
-          choice.session === prefs.openTabs[index]?.session,
-      );
-    if (unchanged) {
-      return;
-    }
-    savePrefs(setOpenTabs(prefs, next));
-  }, [openTabsReady, openTabs, allEntries, prefs, savePrefs]);
+  const activeProjectId = focusedEntry?.project.id ?? null;
+  const projectTabs = useMemo(
+    () => (activeProjectId === null ? [] : entries.filter((e) => e.project.id === activeProjectId)),
+    [entries, activeProjectId],
+  );
+  const projectTabIds = useMemo(() => projectTabs.map((e) => e.session.id), [projectTabs]);
 
   /**
    * What the detail panel expands: the focused session's newest decision.
@@ -1569,34 +1455,6 @@ function CanvasInner({
   const focusSession = useCallback((sessionId: string) => {
     setFocusedSessionId(sessionId);
   }, []);
-
-  /**
-   * Close a tab without touching the session it shows — decision 6 keeps `x`
-   * for ending the session itself; this is the strip's own `×`.
-   *
-   * Closing the ACTIVE tab hands focus to its former neighbour in the strip
-   * (favouring the one before it, so repeated closes walk left rather than
-   * bouncing to the end), or — with none left — clears the pointer and lets
-   * the "land focus on something real" effect above pick a candidate, exactly
-   * as it already does on first launch with nothing remembered.
-   */
-  const closeTab = useCallback(
-    (sessionId: string) => {
-      setOpenTabsState((current) => current.filter((id) => id !== sessionId));
-      if (sessionId !== focusedSessionId) {
-        return;
-      }
-      const remaining = openTabs.filter((id) => id !== sessionId);
-      const at = openTabs.indexOf(sessionId);
-      const fallback = remaining[Math.min(Math.max(at - 1, 0), remaining.length - 1)] ?? null;
-      if (fallback !== null) {
-        focusSession(fallback);
-      } else {
-        setFocusedSessionId(null);
-      }
-    },
-    [focusedSessionId, openTabs, focusSession],
-  );
 
   /**
    * Write what you typed into the focused session's log — or, for a `'session'`
@@ -2291,35 +2149,34 @@ function CanvasInner({
           }
           /**
            * `h`/`l` used to keep a spatial walk along a session's own row of
-           * graph cards; the graph is gone, and this branch is re-homed in
-           * the SAME commit as its deletion, not left for later: `nextNode`'s
-           * only caller was this branch, so the code that walked the
-           * geometry and the geometry itself have to leave together.
-           *
-           * Previous/next SESSION TAB, Select mode only (the `mode ===
-           * 'insert'` branches above already returned).
+           * graph cards; the graph is gone, and this branch was re-homed to
+           * the (then-global) open tab set in the same commit as the
+           * deletion. A13.1 scopes it again: previous/next tab OF THE
+           * ACTIVE PROJECT (`projectTabIds`), Select mode only (the `mode
+           * === 'insert'` branches above already returned).
            *
            * WRAPPING FOLLOWS THE THING TRAVERSED, NOT THE KEY. `j`/`k`, just
            * above, walk an open-ended list where "the last one" is a real
            * place worth stopping at and announcing, so they do not wrap.
-           * `h`/`l` walk a closed ring of open tabs, the same shape every tab
-           * strip's own arrow keys already have, so they do — including the
-           * degenerate one-tab ring, which wraps to the tab already focused
-           * rather than refusing. An EMPTY strip is the one case with no
-           * ring to wrap around, so that is what gets a status message.
+           * `h`/`l` walk a closed ring — the active project's tabs — the same
+           * shape every tab strip's own arrow keys already have, so they do
+           * — including the degenerate one-tab ring, which wraps to the tab
+           * already focused rather than refusing. An EMPTY ring (nothing
+           * focused, so no active project) is the one case with no ring to
+           * wrap around, so that is what gets a status message.
            */
-          if (openTabs.length === 0) {
+          if (projectTabIds.length === 0) {
             setStatus('no tabs open');
             return;
           }
-          const at = focusedSessionId === null ? -1 : openTabs.indexOf(focusedSessionId);
+          const at = focusedSessionId === null ? -1 : projectTabIds.indexOf(focusedSessionId);
           if (at === -1) {
-            const first = openTabs[0] as string;
+            const first = projectTabIds[0] as string;
             focusSession(first);
             return;
           }
           const delta = action.direction === 'right' ? 1 : -1;
-          const nextTab = openTabs[(at + delta + openTabs.length) % openTabs.length];
+          const nextTab = projectTabIds[(at + delta + projectTabIds.length) % projectTabIds.length];
           if (nextTab !== undefined) {
             focusSession(nextTab);
           }
@@ -2529,19 +2386,27 @@ function CanvasInner({
           });
           return;
         case 'resizePane': {
-          // Which pane owns the keyboard right now decides which one moves —
-          // the same `pane` state `I`/`H` already set, nothing new (epic.md §4.5).
-          const target: 'sidebar' | 'detail' = mode === 'insert' ? 'detail' : 'sidebar';
-          // A width you cannot see change is a keypress that did nothing and
-          // said nothing. The `I` guard above keeps the cursor off a hidden
-          // detail pane, but the sidebar can be hidden under a cursor that is
-          // legitimately on the list, so this one is not redundant.
-          if (!visible[target]) {
-            setStatus(`the ${target} pane is hidden — z0 brings it back`);
+          // A12.1: the detail pane no longer has a width of its own to
+          // drag — it fills everything to the sidebar's right (`panes.ts`)
+          // — so the sidebar is the only real knob left, regardless of
+          // which pane the keyboard is in. Writing to `prefs.panes.detail`
+          // here, the way this case did before the canvas column left,
+          // would be the exact "silence must not look like success" defect
+          // this codebase keeps finding: a keypress that changes a stored
+          // number nothing ever reads again.
+          //
+          // In Insert the seam is approached from the OTHER side: "widen
+          // the pane I am in" (the detail pane) means "shrink the sidebar",
+          // so the sign flips. In Select it is the sidebar's own edge, sign
+          // unchanged — the same `pane` state `I`/`H` already set decides
+          // which (epic.md §4.5).
+          if (!visible.sidebar) {
+            setStatus('the sidebar is hidden — z0 brings it back');
             return;
           }
-          const step = action.delta * PANE_RESIZE_STEP;
-          savePrefs(setPaneWidth(prefs, target, prefs.panes[target] + step));
+          const sign = mode === 'insert' ? -1 : 1;
+          const step = action.delta * sign * PANE_RESIZE_STEP;
+          savePrefs(setPaneWidth(prefs, 'sidebar', prefs.panes.sidebar + step));
           return;
         }
         case 'resetPanes':
@@ -2576,29 +2441,6 @@ function CanvasInner({
         case 'fitView':
           setStatus('nothing to fit — the canvas view is gone');
           return;
-        case 'layout': {
-          const next = setLayout(prefs, action.name);
-          const shown = next.paneVisibility;
-          // Hiding the pane the keyboard is in strands the cursor in a pane
-          // nothing draws — the same defect the `I` guard refuses, arriving
-          // from the other side, so the layout has to move the focus itself.
-          //
-          // Both directions are live. Losing the detail pane sends the
-          // keyboard back to 'list', the fallback the composer and Escape
-          // already use. Losing BOTH the sidebar and the canvas is the same
-          // problem mirrored: 'list' is drawn by those two — the row's focus
-          // ring and the card's — so with neither on screen a list cursor is
-          // pointing at nothing, and the only pane left is the one to be in.
-          if (!shown.detail && mode === 'insert') {
-            setMode('select');
-            setComposing(false);
-          } else if (!shown.sidebar && !shown.canvas && mode === 'select') {
-            setMode('insert');
-            setActionIndex(0);
-          }
-          savePrefs(next);
-          return;
-        }
         case 'prompt': {
           if (focusedEntry === null) {
             setStatus('pick a session first');
@@ -2667,7 +2509,7 @@ function CanvasInner({
     phone,
     focusedEntry,
     focusedSessionId,
-    openTabs,
+    projectTabIds,
     sessionIds,
     entries,
     jumping,
@@ -2692,21 +2534,6 @@ function CanvasInner({
     overlayOpen,
     openSessionIconPicker,
   ]);
-
-  /**
-   * The tabs the strip draws, resolved to their live entries and in the
-   * order `openTabs` owns. A session an `allEntries` refresh has since lost
-   * (closed elsewhere, or the model narrowed) drops out here rather than
-   * drawing a tab for something that no longer exists — the persist effect
-   * above will catch up and stop remembering it on the next write.
-   */
-  const openTabEntries = useMemo(
-    () =>
-      openTabs
-        .map((id) => allEntries.find((e) => e.session.id === id))
-        .filter((e): e is SessionEntry => e !== undefined),
-    [openTabs, allEntries],
-  );
 
   // `sidebarProps` feeds a `React.memo`-wrapped `SessionList`; a fresh
   // inline arrow on any one of its 40+ props defeats the whole shallow
@@ -2864,9 +2691,9 @@ function CanvasInner({
 
   // Memoised for the same reason as the callbacks above: a JSX element
   // literal is a fresh object every render, and `resizeHandle` is one of
-  // `SessionListProps`' members. `visible` is the same reference
-  // `prefs.paneVisibility` returns on a keystroke (`layoutForViewport`'s
-  // no-op branch), so this stays stable across one too.
+  // `SessionListProps`' members. `visible` is `prefs.paneVisibility` itself
+  // now that there is no viewport-dependent layout swap to give it a second
+  // identity, so this stays stable across a re-render that changed nothing.
   const sidebarResizeHandle = useMemo(
     () => (
       <PaneResizer
@@ -3047,25 +2874,18 @@ function CanvasInner({
       // which is why this only ever bit one of the two entry points.
       setMode('select');
     },
-    width: detailWidth,
-    /* Only where it would move something. The detail pane is a fixed
-       column with the leftover room beside it exactly while the canvas
-       is the main column; everywhere else its width is derived from the
-       sidebar and the canvas's reserve, so its own edge has nothing to
-       drag and the seam that does move is the sidebar's. A handle that
-       moves nothing is worse than no handle: it advertises a gesture the
-       layout cannot honour. */
-    resizeHandle: canvasIsMain(visible) ? (
-      <PaneResizer
-        pane="detail"
-        ariaLabel="resize detail panel"
-        layout={visible}
-        stored={{ sidebar: storedSidebar, detail: storedDetail }}
-        viewportWidth={viewportWidth}
-        onChange={onPaneChange}
-        onCommit={onPaneCommit}
-      />
-    ) : null,
+    // `undefined`, not `detailWidth`: the width now lives on `DetailColumn`,
+    // the wrapper one level up that also holds the tab strip above this
+    // pane, so there is exactly one place that number is applied. `width
+    // === undefined` is `DetailPanel`'s own "fill your host" contract —
+    // the same one `PhoneShell` already relies on.
+    width: undefined,
+    // No handle: the detail pane has no width of its own to drag any more
+    // (A12.1 — it fills everything to the sidebar's right), so its own edge
+    // has nothing to move. The one seam left is the sidebar's own, already
+    // wired below. A handle that moves nothing is worse than no handle: it
+    // advertises a gesture the layout cannot honour.
+    resizeHandle: null,
   };
 
   // Read once per render, from the bindings in force. `null` means the
@@ -3079,49 +2899,35 @@ function CanvasInner({
     // derived breakpoint, never from a second media query with the number
     // written out again.
     <div className={`relative flex h-full flex-col ${phone ? 'vam-phone' : ''}`}>
-      {/* Named none of them on a phone: `Columns` renders by order, so a
-          column the order does not name is never created -- which is what
-          "unmounted" has to mean for a pane that is measured, focused and
-          queried. The phone shell below takes their place. */}
-      <Columns order={phone ? [] : order}>
-        <SidebarSlot key="sidebar" show={visible.sidebar} {...sidebarProps} />
-
-        <CanvasColumn key="canvas" show={visible.canvas} strip={canvasStrip}>
-          {/* 0.2 migration step 2: the graph is gone from this column,
-              replaced by the session tab strip. The toolbar this used to be
-              — "Canvas" label, zoom controls, fit-view, the "layout:
-              automatic" note — went with it; every one of those buttons
-              targeted a graph nobody can see any more. `SourceReadout`
-              survives here because it is shell, not graph (its own doc
-              comment: "two shells draw it"), and the source-cell tests find
-              it by `[data-source]` wherever it lands. */}
-          <div className="flex h-12 flex-none items-stretch gap-[9px] border-line border-b px-1.5">
-            <TabStrip
-              orientation="horizontal"
-              tabs={openTabEntries}
-              activeId={focusedSessionId}
-              onSelect={focusSession}
-              onClose={closeTab}
-            />
-            <div className="flex flex-none items-center gap-[9px] px-1.5">
-              <SourceReadout source={source} />
-            </div>
-          </div>
-
-          {/* The body below the tab strip draws nothing of its own — the
-              graph it used to hold (`layoutCanvas`, the four `*Node.tsx`
-              components, `@xyflow/react` itself) is deleted, not hidden, as
-              of this task. `data-canvas-pane` one level up is what
-              `Canvas.pane-visibility.test.tsx` and its neighbours measure;
-              this inner element is kept only so the column still fills its
-              vertical space instead of collapsing to the toolbar's height —
-              whatever comes next in this space (step 4 onward) fills it in,
-              this task does not decide it. */}
-          <div data-canvas-viewport className="relative min-h-0 flex-1" />
-        </CanvasColumn>
-
-        <DetailSlot key="detail" show={visible.detail} {...detailProps} />
-      </Columns>
+      {/* Named none of them on a phone: the phone shell below takes their
+          place entirely, so nothing here mounts a pane it also draws. */}
+      {!phone && (
+        <div className="flex min-h-0 flex-1">
+          <SidebarSlot show={visible.sidebar} {...sidebarProps} />
+          {/* A12.1: the tab strip is the top of the detail pane's OWN
+              column, not a strip above a separate middle column — there is
+              no middle column any more. The source readout that used to
+              sit beside the strip is gone from here (A12.1 item 3): it
+              moved to the status bar, the one place already on screen
+              whether or not a session is focused, so "is vam connected" is
+              never something the tab row alone had to say. */}
+          <DetailColumn
+            show={visible.detail}
+            width={detailWidth}
+            toolbar={
+              <TabStrip
+                orientation="horizontal"
+                tabs={projectTabs}
+                activeId={focusedSessionId}
+                onSelect={focusSession}
+                onClose={onSidebarClose}
+              />
+            }
+          >
+            <DetailPanel {...detailProps} />
+          </DetailColumn>
+        </div>
+      )}
 
       {phone && (
         <PhoneShell
@@ -3363,6 +3169,14 @@ function CanvasInner({
                 state for. */}
             {jumping ? 'JUMP' : filtering ? 'FILTER' : MODE_TITLES[mode]}
           </span>
+          {/* A12.1 item 3: relocated here from the tab row, which now draws
+              only tabs. This is the one thing a dashboard must never do
+              differently depending on whether it is connected (the
+              component's own doc comment), so it needs a permanent home —
+              and the status bar, unlike the tab row, is on screen whether or
+              not a session is even focused. */}
+          <SourceReadout source={source} />
+          <span className="h-3 w-px bg-line" />
           {/* The `project/session` cell that used to sit here is gone at the
               operator's request: the slash between a project and a session made
               the pair read as a git ref, and the sidebar row, the canvas card

@@ -6,8 +6,7 @@
  * This file owns the wiring only: that `,` reaches the grammar, that the
  * overlay takes focus on open and gives it back on Escape. It does NOT trap
  * focus — Tab leaves it, exactly as it does in `KeySheet` — so do not read an
- * assertion here as covering containment. The round-tripping of each stored
- * setting lives in `test/prefs/prefs.settings.test.ts`.
+ * assertion here as covering containment.
  */
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -15,13 +14,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import { buildKeySheet } from '../../src/renderer/keyboard/keysheet.js';
-import { LAYOUTS } from '../../src/renderer/prefs/panes.js';
-import {
-  DEFAULT_FOCUS_SHARE,
-  FOCUS_SHARE_MIN,
-  FOCUS_SHARE_OFF,
-  type Prefs,
-} from '../../src/renderer/prefs/prefs.js';
+import type { Prefs } from '../../src/renderer/prefs/prefs.js';
 
 function session(id: string): Session {
   return {
@@ -51,13 +44,6 @@ const stored = (): Partial<Prefs> => JSON.parse(localStorage.getItem(KEY) ?? '{}
 const seed = (payload: Record<string, unknown>) =>
   localStorage.setItem(KEY, JSON.stringify(payload));
 const option = (name: string) => screen.getByRole('button', { name });
-/** A layout tile is a radio in a panel the overlay does not open on, and its
- *  accessible name now carries the drawn column order after the label — so:
- *  navigate first, then match the label rather than the whole name. */
-const layoutTile = (label: string) => {
-  fireEvent.click(screen.getByRole('tab', { name: 'Layout' }));
-  return screen.getByRole('radio', { name: new RegExp(label) });
-};
 
 function press(key: string, modifiers: KeyboardEventInit = {}) {
   act(() => {
@@ -146,16 +132,19 @@ describe('the settings overlay is reachable and drawable', () => {
     expect(overlay()).toBeNull();
   });
 
-  it('draws in a layout that hides the canvas', () => {
-    // #114 moved the palette and the sheet out of the canvas column for this
-    // exact reason: inside it, an overlay in `noCanvas` renders into nothing.
-    seed({ paneVisibility: LAYOUTS.noCanvas });
+  it('draws with the detail pane hidden', () => {
+    // #114 moved the palette and the sheet out of the (now-deleted) canvas
+    // column for this exact reason: an overlay nested inside a hideable pane
+    // renders into nothing the moment that pane is hidden. A12.1 collapsed
+    // the shell to two panes, so the case that exercises it now is the
+    // detail pane itself hidden, not a canvas layout.
+    seed({ paneVisibility: { sidebar: true, detail: false } });
     render(<Canvas model={MODEL} />);
     press(',');
     expect(overlay()).not.toBeNull();
-    // The canvas really is unmounted in this layout — without this the
-    // assertion above would pass in the layout it was meant to exclude.
-    expect(document.querySelector('[data-canvas-pane]')).toBeNull();
+    // The pane really is unmounted here — without this the assertion above
+    // would pass in a state it was meant to exclude.
+    expect(document.querySelector('[data-detail-pane]')).toBeNull();
   });
 });
 
@@ -179,92 +168,49 @@ describe('the theme section is the same state as the sidebar toggle', () => {
 });
 
 /**
- * The control the canvas framing reads, back in a section of its own.
- *
- * It was retired along with the framing it configured; the section went with
- * it rather than stand empty. Both come back together, because the operator
- * asked for the amount of framing to be theirs to set -- a percentage of the
- * canvas width, which is what the stored share has always meant.
- *
- * The store round-trip proper lives in `test/prefs/prefs.settings.test.ts`.
- * What is asserted here is the wiring: that the control shows the STORED
- * value and that turning it writes one.
+ * A12.1: the layout section is a plain show/hide toggle per pane now, in
+ * place of the LayoutPicker over the three canvas presets — vam is two
+ * panes, and there is nothing left to pick a NAMED arrangement of (epic.md
+ * decision 5).
  */
-describe('the session zoom share is editable', () => {
-  const openCanvasPanel = () => {
+describe('the layout section toggles panes', () => {
+  const openLayoutPanel = () => {
     render(<Canvas model={MODEL} />);
     press(',');
-    fireEvent.click(screen.getByRole('tab', { name: 'Canvas' }));
-    return screen.getByRole('spinbutton', { name: 'session zoom share' }) as HTMLInputElement;
+    fireEvent.click(screen.getByRole('tab', { name: 'Layout' }));
   };
 
-  it('starts at the stored value, as a percentage of the canvas width', () => {
-    seed({ focusViewportShare: 0.45 });
-    expect(Number(openCanvasPanel().value)).toBe(45);
-  });
-
-  it('falls back to the shipped default when nothing is stored', () => {
-    expect(Number(openCanvasPanel().value)).toBe(Math.round(DEFAULT_FOCUS_SHARE * 100));
-  });
-
-  it('writes the share the operator sets', () => {
-    const field = openCanvasPanel();
-    fireEvent.change(field, { target: { value: '90' } });
-    expect(stored().focusViewportShare).toBe(0.9);
-  });
-
-  it('turns the framing off one step below the smallest share', () => {
-    // The operator asked for this behaviour removed once; getting back to that
-    // state must not need another round trip. There is nothing between off and
-    // the smallest useful share, so one press crosses the gap.
-    seed({ focusViewportShare: FOCUS_SHARE_MIN });
-    openCanvasPanel();
-    fireEvent.click(screen.getByRole('button', { name: 'decrease session zoom share' }));
-    expect(stored().focusViewportShare).toBe(FOCUS_SHARE_OFF);
-  });
-});
-
-describe('the layout section picks from the layouts that exist', () => {
-  it('lists every exported layout and no invented one', () => {
-    const names = Object.keys(LAYOUTS);
-    expect(names.length).toBeGreaterThanOrEqual(2);
-    render(<Canvas model={MODEL} />);
-    press(',');
-    const listed = [...(overlay()?.querySelectorAll('[data-layout-option]') ?? [])].map(
-      (el) => el.getAttribute('data-layout-option') ?? '',
+  it('shows both panes pressed by default', () => {
+    openLayoutPanel();
+    expect(screen.getByRole('button', { name: 'Sidebar' }).getAttribute('aria-pressed')).toBe(
+      'true',
     );
-    for (const name of names) {
-      expect(listed, `${name} is a layout but the picker does not offer it`).toContain(name);
-    }
-    // Plus the shipped one, which is what `z0` restores and is not in LAYOUTS.
-    expect(listed).toContain('full');
-    expect(listed.length).toBe(names.length + 1);
+    expect(screen.getByRole('button', { name: 'Detail pane' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
   });
 
-  it('marks the current layout, and the mark follows the pick', () => {
-    render(<Canvas model={MODEL} />);
-    press(',');
-    const current = () =>
-      overlay()
-        ?.querySelector('[data-layout-option][aria-checked="true"]')
-        ?.getAttribute('data-layout-option');
-    expect(current()).toBe('full');
-    fireEvent.click(layoutTile('hide the canvas'));
-    expect(current()).toBe('noCanvas');
+  it('hides the sidebar and stores it, unmounting the pane', () => {
+    openLayoutPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Sidebar' }));
+    expect(document.querySelector('[data-sidebar-pane]')).toBeNull();
+    expect(stored().paneVisibility).toEqual({ sidebar: false, detail: true });
   });
 
-  it('writes the same pref the chord writes, byte for byte', () => {
-    render(<Canvas model={MODEL} />);
-    press('z');
-    press('c');
-    const fromChord = localStorage.getItem(KEY);
-    cleanup();
-    localStorage.clear();
+  it('hides the detail pane and stores it, unmounting the pane', () => {
+    openLayoutPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Detail pane' }));
+    expect(document.querySelector('[data-detail-pane]')).toBeNull();
+    expect(stored().paneVisibility).toEqual({ sidebar: true, detail: false });
+  });
 
-    render(<Canvas model={MODEL} />);
-    press(',');
-    fireEvent.click(layoutTile('hide the canvas'));
-    expect(localStorage.getItem(KEY)).toBe(fromChord);
+  it('refuses to hide the last pane standing — the button is disabled, and the click is a no-op', () => {
+    seed({ paneVisibility: { sidebar: false, detail: true } });
+    openLayoutPanel();
+    const detailToggle = screen.getByRole('button', { name: 'Detail pane' }) as HTMLButtonElement;
+    expect(detailToggle.disabled).toBe(true);
+    fireEvent.click(detailToggle);
+    expect(document.querySelector('[data-detail-pane]')).not.toBeNull();
   });
 });
 

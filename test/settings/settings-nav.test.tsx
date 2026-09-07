@@ -14,6 +14,7 @@
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ALL_VISIBLE } from '../../src/renderer/prefs/panes.js';
 import { EMPTY_PREFS, type Prefs } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 import { SECTIONS } from '../../src/renderer/settings/sections.js';
@@ -158,13 +159,19 @@ describe('the overlay draws a focus indicator', () => {
   it('gives every nav item, tile and the close button a visible ring', () => {
     open();
     const nav = [...document.querySelectorAll('[data-settings-nav-item]')];
-    const tiles = [...document.querySelectorAll('[data-layout-option]')];
+    // A12.1: the LayoutPicker's `[data-layout-option]` radio tiles are gone
+    // with the three canvas presets — `[data-pane-toggle]` is the layout
+    // section's own tile now, one per pane.
+    const tiles = [...document.querySelectorAll('[data-pane-toggle]')];
     const ringed = [...nav, ...tiles, screen.getByRole('button', { name: 'Esc' })];
     // Derived, not counted: this guard exists to prove it examined a real
     // corpus, and a hard-coded floor turns into a false red the moment a
     // section is added or retired — which is exactly what it just did.
     expect(nav.length).toBe(SECTIONS.length);
-    expect(tiles.length).toBeGreaterThan(3);
+    // One tile per pane — derived from the visibility shape itself, not a
+    // literal, for the same reason `nav.length` is checked against
+    // `SECTIONS.length` above rather than a number.
+    expect(tiles.length).toBe(Object.keys(ALL_VISIBLE).length);
     for (const el of ringed) {
       expect(el.className, `${el.textContent} has no focus ring`).toContain(
         'focus-visible:outline-ink',

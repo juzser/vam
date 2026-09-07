@@ -24,10 +24,10 @@ import { useCallback, useRef, useState } from 'react';
 import {
   DETAIL_MAX,
   DETAIL_MIN,
-  type Layout,
   layoutWidths,
   PANE_RESIZE_STEP,
   type Pane,
+  type PaneVisibility,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
 } from '../prefs/panes.js';
@@ -51,7 +51,7 @@ export type PaneResizerProps = {
    * that layout would render — the same call the canvas itself makes, so the
    * handle cannot disagree with the columns it is moving.
    */
-  readonly layout: Layout;
+  readonly layout: PaneVisibility;
   readonly stored: { readonly sidebar: number; readonly detail: number };
   readonly viewportWidth: number;
   /** Fired on every pointermove while dragging, with the arithmetic result. */

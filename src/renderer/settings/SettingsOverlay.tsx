@@ -1,12 +1,13 @@
 /**
  * `,` and the gear — the settings the operator already had, made editable.
  *
- * Four sections, and every one of them is wiring rather than invention: the
- * theme is `prefs.theme` and `applyTheme`, which shipped long ago with one
- * toggle as their whole interface; the layout section is a
- * picker over `LAYOUTS`, which another epic built and this one only reads; and
- * the keyboard reference is `buildKeySheet()`, the same generator the `?` sheet
- * renders, so a row here can only exist because a binding exists.
+ * Every section is wiring rather than invention: the theme is `prefs.theme`
+ * and `applyTheme`, which shipped long ago with one toggle as their whole
+ * interface; the layout section is a plain show/hide toggle per pane
+ * (epic.md decision 5 — vam is two panes now, and there is nothing left to
+ * pick a NAMED arrangement of); and the keyboard reference is
+ * `buildKeySheet()`, the same generator the `?` sheet renders, so a row here
+ * can only exist because a binding exists.
  *
  * The overlay idiom is `CommandPalette`'s and `KeySheet`'s, deliberately not a
  * third one: a scrim that is a real button, Escape caught HERE as well as on
@@ -32,15 +33,12 @@ import {
   NO_BINDINGS,
   normalizeKey,
 } from '../keyboard/chords.js';
-import { type BindingRow, buildBindingSheet, describeAction } from '../keyboard/keysheet.js';
-import { ALL_VISIBLE, columnOrder, LAYOUTS, type LayoutName } from '../prefs/panes.js';
+import { type BindingRow, buildBindingSheet } from '../keyboard/keysheet.js';
+import type { PaneVisibility } from '../prefs/panes.js';
 import {
   clearPalette,
   clearPaletteColor,
   type EffectiveTheme,
-  FOCUS_SHARE_MAX,
-  FOCUS_SHARE_OFF,
-  nudgeFocusShare,
   OUT_FONT_SIZE_MAX,
   OUT_FONT_SIZE_MIN,
   PALETTE_TOKENS,
@@ -48,18 +46,15 @@ import {
   paletteFor,
   paletteValue,
   setDefaultProvider,
-  setFocusShare,
   setKeyBindings,
-  setLayout,
   setOutFontSize,
   setPaletteColor,
   setPaneVisibility,
   setTheme,
   type Theme,
 } from '../prefs/prefs.js';
-import { LayoutPicker } from './LayoutPicker.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
-import { FULL, type LayoutChoice, SECTIONS, type SectionId, shortcutSections } from './sections.js';
+import { SECTIONS, type SectionId, shortcutSections } from './sections.js';
 
 export type SettingsOverlayProps = {
   readonly prefs: Prefs;
@@ -84,31 +79,6 @@ export type SettingsOverlayProps = {
    */
   readonly initialSection?: SectionId;
 };
-
-/** Derived from the same table the `?` sheet reads, so the picker cannot
- *  advertise a layout the chord layer never built. */
-function layoutLabel(choice: LayoutChoice): string {
-  return choice === FULL
-    ? 'everything on screen'
-    : describeAction({ kind: 'layout', name: choice }).label;
-}
-
-/** Which choice the stored visibility IS, or null when a hand-set combination
- *  matches none of them — an unmarked picker is honest, a wrong mark is not. */
-export function currentLayout(visibility: Prefs['paneVisibility']): LayoutChoice | null {
-  const order = columnOrder(visibility);
-  const same = (other: Prefs['paneVisibility']) =>
-    other.sidebar === visibility.sidebar &&
-    other.canvas === visibility.canvas &&
-    other.detail === visibility.detail &&
-    // The order as well as the visibility, or the focus layout — which draws
-    // all three columns, like the shipped one — would light up the `full` mark.
-    columnOrder(other).join() === order.join();
-  if (same(ALL_VISIBLE)) {
-    return FULL;
-  }
-  return (Object.keys(LAYOUTS) as LayoutName[]).find((name) => same(LAYOUTS[name])) ?? null;
-}
 
 const THEMES: readonly Theme[] = ['dark', 'light', 'system'];
 
@@ -270,8 +240,6 @@ export function SettingsOverlay({
       }
     };
   }, []);
-
-  const layout = currentLayout(prefs.paneVisibility);
 
   return (
     <div
@@ -475,54 +443,42 @@ export function SettingsOverlay({
             <Panel
               id="layout"
               active={section === 'layout'}
-              hint="the same layouts the z chords apply"
-            >
-              <LayoutPicker
-                current={layout}
-                label={layoutLabel}
-                onPick={(choice) =>
-                  onChange(
-                    choice === FULL
-                      ? setPaneVisibility(prefs, ALL_VISIBLE)
-                      : setLayout(prefs, choice),
-                  )
-                }
-              />
-            </Panel>
-
-            <Panel
-              id="canvas"
-              active={section === 'canvas'}
-              hint="how the canvas itself behaves — not a colour, and not chrome"
+              hint="show or hide either pane — z0 brings both back"
             >
               <Block
-                label="session zoom"
-                hint="how much of the canvas width a session fills when focus arrives in it"
+                label="panes"
+                hint="vam is the sidebar and the detail pane; either can be hidden, never both"
               >
-                <Stepper
-                  name="session zoom share"
-                  // Percent, because that is the unit the operator asked in and
-                  // the one the field reads back; the store keeps the fraction.
-                  min={FOCUS_SHARE_OFF * 100}
-                  max={FOCUS_SHARE_MAX * 100}
-                  step={5}
-                  value={Math.round(prefs.focusViewportShare * 100)}
-                  unit="%"
-                  // `nudgeFocusShare` and not the raw value: off and the
-                  // smallest useful share are adjacent, and it is the thing
-                  // that knows a step into the gap between them crosses it
-                  // rather than clamping back.
-                  onCommit={(next) =>
-                    onChange(
-                      setFocusShare(prefs, nudgeFocusShare(prefs.focusViewportShare, next / 100)),
-                    )
-                  }
-                />
-                <p className="mt-3 text-[12px] text-ink-dim">
-                  {prefs.focusViewportShare === FOCUS_SHARE_OFF
-                    ? 'Off: the canvas follows focus without ever changing the zoom.'
-                    : 'Moving within a session never rescales — only arriving in one does.'}
-                </p>
+                <div className="flex gap-1">
+                  <PaneToggle
+                    label="Sidebar"
+                    visible={prefs.paneVisibility.sidebar}
+                    // The last pane standing cannot be turned off: there is
+                    // nothing on screen left to turn it back on FROM.
+                    disabled={prefs.paneVisibility.sidebar && !prefs.paneVisibility.detail}
+                    onPick={() =>
+                      onChange(
+                        setPaneVisibility(prefs, {
+                          ...prefs.paneVisibility,
+                          sidebar: !prefs.paneVisibility.sidebar,
+                        }),
+                      )
+                    }
+                  />
+                  <PaneToggle
+                    label="Detail pane"
+                    visible={prefs.paneVisibility.detail}
+                    disabled={prefs.paneVisibility.detail && !prefs.paneVisibility.sidebar}
+                    onPick={() =>
+                      onChange(
+                        setPaneVisibility(prefs, {
+                          ...prefs.paneVisibility,
+                          detail: !prefs.paneVisibility.detail,
+                        }),
+                      )
+                    }
+                  />
+                </div>
               </Block>
             </Panel>
 
@@ -823,6 +779,43 @@ function Choice({
       // asks and costs two assertions. Raised as a follow-up instead.
       className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-[12px] ${FOCUS_RING} ${
         selected ? 'border-line-loudest bg-raised text-ink' : 'border-line text-ink-dim'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
+ * One pane's show/hide toggle — a pressed toggle, not a `Choice` radio: two
+ * of these are independent booleans, not one selection among many, so
+ * `aria-pressed` is the correct role rather than a borrowed one.
+ *
+ * `disabled` is the caller's job (it needs to know the OTHER pane's state,
+ * which this component does not) — a disabled toggle still announces
+ * `aria-pressed`, it just refuses the click, the same contract every other
+ * disabled control in this file already keeps.
+ */
+function PaneToggle({
+  label,
+  visible,
+  disabled,
+  onPick,
+}: {
+  readonly label: string;
+  readonly visible: boolean;
+  readonly disabled: boolean;
+  readonly onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-pane-toggle={label}
+      aria-pressed={visible}
+      disabled={disabled}
+      onClick={onPick}
+      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-[12px] disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING} ${
+        visible ? 'border-line-loudest bg-raised text-ink' : 'border-line text-ink-dim'
       }`}
     >
       {label}

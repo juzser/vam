@@ -15,7 +15,6 @@
  */
 
 import { TABS } from '../panels/tabs.js';
-import type { LayoutName } from '../prefs/panes.js';
 import {
   activeBindings,
   chordText,
@@ -96,17 +95,6 @@ type Meta<K extends KeyAction['kind']> = {
  * compiler demand an entry for every kind in the union — the day a binding is
  * added, this file is where the build stops.
  */
-/**
- * One caption per layout, keyed by name so the compiler stops the build the day
- * a layout is added without one — which is what the comment on `layout` below
- * promises and a ternary could not keep.
- */
-const LAYOUT_LABELS: Readonly<Record<LayoutName, string>> = {
-  noCanvas: 'hide the canvas',
-  responseOnly: 'response pane only',
-  focusResponse: 'response in the middle, canvas as a strip',
-};
-
 export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   move: {
     group: 'navigation',
@@ -116,13 +104,6 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
       select: `move ${a.direction} — the session list`,
       insert: `move ${a.direction} — the options of an open question, when one is asked`,
     }),
-  },
-  // Derived from the action's own `name`, so a third layout added to the
-  // table gets a row here without anyone editing this file — and one added
-  // with a name this switch does not cover fails to compile.
-  layout: {
-    group: 'panes',
-    label: (a) => LAYOUT_LABELS[a.name],
   },
   first: { group: 'navigation', label: () => 'first session' },
   last: { group: 'navigation', label: () => 'last session' },

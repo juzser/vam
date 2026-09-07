@@ -113,26 +113,42 @@ describe('h and l walk the open tabs, not the sidebar', () => {
   });
 });
 
-describe('l reads a fresh openTabs, not a closure captured before a tab closed', () => {
-  it('does not resurrect a tab closed after the listener was attached', () => {
-    render(<Canvas model={MODEL} />);
+describe('l reads a fresh tab list, not a closure captured before the model changed', () => {
+  /**
+   * 0.2 migration, A13.1: `openTabs` (an owned, persisted set with its own
+   * lightweight `×`) is gone — every session in the active project is
+   * always a tab, a pure projection of `entries`. There is no longer a
+   * cheap way to shrink the tab ring without a real session ending, so the
+   * trigger this test uses is the realistic one: a poll bringing back a
+   * narrower model, exactly what a session ending between two keystrokes
+   * looks like from this file's own vantage point. The property under test
+   * is unchanged — `l`'s `onKeyDown` effect must read the CURRENT
+   * `projectTabIds`, not one captured when the listener was attached.
+   */
+  it('does not wrap onto a session the model no longer reports', () => {
+    const { rerender } = render(<Canvas model={MODEL} />);
     press('j'); // a2
-    press('j'); // a3 -- openTabs is now [a1, a2, a3], focus a3
-    press('k'); // back to a2 in the sidebar order -- openTabs unchanged, focus a2
+    press('j'); // a3
+    press('k'); // back to a2, tab ring still [a1, a2, a3]
     expect(focusedTitle()).toBe('a2');
 
-    // Close a3's tab WITHOUT moving focus (a3 was not the focused tab), so
-    // this changes `openTabs` -- [a1, a2] now -- while every other dependency
-    // the keydown effect reads (`focusedSessionId`, `sessionIds`, `entries`,
-    // `mode`, ...) stays exactly as it was. If the effect's listener still
-    // closes over the openTabs array from BEFORE this close, `l` from a2
-    // wraps against the stale 3-tab ring and lands back on a3 -- a tab that
-    // is no longer open. Fresh, it wraps against the real 2-tab ring and
-    // lands on a1.
-    const closeA3 = document.querySelector<HTMLButtonElement>(
-      '[data-tab-close][aria-label="close a3 tab"]',
-    );
-    act(() => closeA3?.click());
+    // a3 ends between two keystrokes -- every other dependency the keydown
+    // effect reads (`focusedSessionId`, `sessionIds`, `mode`, ...) is
+    // otherwise unchanged. If the effect's listener still closes over the
+    // 3-tab ring from BEFORE this poll, `l` from a2 wraps to a3 -- a
+    // session that is no longer there. Fresh, it wraps against the real
+    // 2-tab ring and lands on a1.
+    const NARROWED: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'claude-code',
+          sessions: [session('a1'), session('a2')],
+        },
+      ],
+    };
+    rerender(<Canvas model={NARROWED} />);
 
     press('l');
     expect(focusedTitle()).toBe('a1');
