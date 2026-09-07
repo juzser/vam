@@ -89,6 +89,14 @@ export type PairingPanelProps = {
    */
   readonly url: string | null;
   readonly allowWrites: boolean;
+  /**
+   * The persisted preference (`remote/writes-preference.ts`), which is what
+   * `onSetWritesPreference` changes -- distinct from `allowWrites` above,
+   * which is what THIS running server was actually started with and cannot
+   * change without a restart. The two can disagree the moment the operator
+   * flips the toggle.
+   */
+  readonly writesPreference: boolean;
   readonly nowMs: number;
   readonly serve: ServeAccessView;
   readonly onRegenerate: () => void;
@@ -101,6 +109,8 @@ export type PairingPanelProps = {
   readonly onEnableServe: () => void;
   /** Runs the TARGETED off, reversing `onEnableServe` -- never `tailscale serve reset`. */
   readonly onDisableServe: () => void;
+  /** Persists the preference above. Takes effect the next time vam starts. */
+  readonly onSetWritesPreference: (next: boolean) => void;
 };
 
 /** `XXXX-XXXX`: a group of four is what a person holds while looking away. */
@@ -282,6 +292,20 @@ export function PairingPanel(props: PairingPanelProps) {
             ? 'This server accepts writes: a paired device can close sessions and type into a running agent.'
             : 'This server is read-only: the write routes are not registered at all.'}
         </p>
+        <button
+          type="button"
+          onClick={() => props.onSetWritesPreference(!props.writesPreference)}
+          className={`mt-2 ${ACTION_BUTTON}`}
+        >
+          {props.writesPreference ? 'Turn writes off' : 'Turn writes on'}
+        </button>
+        {props.writesPreference === props.allowWrites ? null : (
+          <p data-testid="pairing-writes-preference" className={`mt-1 ${HINT}`}>
+            {props.writesPreference
+              ? 'Writes will be allowed the next time vam starts.'
+              : 'Writes will be read-only the next time vam starts.'}
+          </p>
+        )}
 
         {view.code === null ? (
           <button type="button" onClick={props.onRegenerate} className={`mt-3 ${ACTION_BUTTON}`}>

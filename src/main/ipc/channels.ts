@@ -167,6 +167,12 @@ export const CHANNELS = {
    */
   serveEnable: 'vam:remote:serve-enable',
   serveDisable: 'vam:remote:serve-disable',
+  /**
+   * The persisted "let paired devices write" preference (`remote/writes-preference.ts`).
+   * THE SAME DESKTOP-ONLY BRIDGE, for the same reason: it is the explicit act
+   * that turns on write routes the NEXT time vam starts.
+   */
+  remoteWritesSet: 'vam:remote:writes-set',
 } as const;
 
 /**

@@ -24,6 +24,7 @@ import { type RemoteState, registerRemoteIpc } from '../../../src/main/remote/ip
 import { createPairing } from '../../../src/main/remote/pairing.js';
 import type { ServeToggleResult } from '../../../src/main/remote/serve.js';
 import { createStreamRegistry, startRemoteServer } from '../../../src/main/remote/server.js';
+import type { WritesPreference } from '../../../src/main/remote/writes-preference.js';
 import type { MainSource } from '../../../src/main/sources/source.js';
 
 const NO_CLI: ServeAddress = { kind: 'unavailable', reason: 'no-cli' };
@@ -45,6 +46,16 @@ function fakeIpcMain() {
   };
 }
 
+function fakeWritesPreference(initial = false): WritesPreference {
+  let enabled = initial;
+  return {
+    get: () => enabled,
+    set: async (next: boolean) => {
+      enabled = next;
+    },
+  };
+}
+
 async function wire(
   over: {
     address?: ServeAddress;
@@ -52,6 +63,7 @@ async function wire(
     devices?: DeviceRegistry;
     enableServe?: () => Promise<ServeToggleResult>;
     disableServe?: () => Promise<ServeToggleResult>;
+    writesPreference?: WritesPreference;
   } = {},
 ) {
   const path = join(await mkdtemp(join(tmpdir(), 'vam-remote-ipc-')), 'devices.json');
@@ -63,17 +75,19 @@ async function wire(
   const ipcMain = fakeIpcMain();
   const enableServe = over.enableServe ?? vi.fn(async (): Promise<ServeToggleResult> => OK);
   const disableServe = over.disableServe ?? vi.fn(async (): Promise<ServeToggleResult> => OK);
-  registerRemoteIpc(ipcMain, {
+  const writesPreference = over.writesPreference ?? fakeWritesPreference();
+  const remote = registerRemoteIpc(ipcMain, {
     pairing,
     devices,
     allowWrites: over.allowWrites ?? true,
     readAddress: async () => over.address ?? NO_CLI,
     enableServe,
     disableServe,
+    writesPreference,
   });
   const state = (channel: string, ...args: unknown[]) =>
     ipcMain.invoke(channel, ...args) as Promise<RemoteState>;
-  return { pairing, devices, streams, ipcMain, state, enableServe, disableServe };
+  return { pairing, devices, streams, ipcMain, state, enableServe, disableServe, remote };
 }
 
 describe('the pairing channel', () => {
@@ -428,6 +442,42 @@ describe('the serve toggle channel', () => {
       timedOut: false,
       tailnetServeDisabledUrl: null,
     });
+  });
+});
+
+describe('the remote server start failure, surfaced', () => {
+  it('starts with no server error', async () => {
+    const { state } = await wire();
+
+    expect((await state(CHANNELS.remoteState)).serverError).toBeNull();
+  });
+
+  it('reportServerError makes a bind failure legible on the next read, instead of a dead screen', async () => {
+    const { state, remote } = await wire();
+
+    remote.reportServerError('the remote endpoint could not bind port 58217: it is already in use');
+
+    expect((await state(CHANNELS.remoteState)).serverError).toBe(
+      'the remote endpoint could not bind port 58217: it is already in use',
+    );
+  });
+});
+
+describe('the writes preference, changeable where the operator pairs', () => {
+  it('reads the persisted preference at snapshot time', async () => {
+    const { state } = await wire({ writesPreference: fakeWritesPreference(true) });
+
+    expect((await state(CHANNELS.remoteState)).writesPreference).toBe(true);
+  });
+
+  it('setting it persists and is reflected on the next snapshot', async () => {
+    const writesPreference = fakeWritesPreference(false);
+    const { state } = await wire({ writesPreference });
+
+    const after = await state(CHANNELS.remoteWritesSet, true);
+
+    expect(after.writesPreference).toBe(true);
+    expect(writesPreference.get()).toBe(true);
   });
 });
 
