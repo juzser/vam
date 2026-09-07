@@ -125,6 +125,7 @@ import {
   setPaneWidth,
   setProjectHidden,
   setProjectIcon,
+  setProjectRename,
   setRename,
   setSessionFilters,
   setTheme,
@@ -720,8 +721,13 @@ function CanvasInner({
     // the sidebar, the node and the detail panel all render `session.title`,
     // and none of them should know a title can be vam's own rather than the
     // source's.
-    () => applyRenames(applyIcons(factoryModel, prefs.icons, prefs.projectIcons), prefs.renames),
-    [factoryModel, prefs.icons, prefs.projectIcons, prefs.renames],
+    () =>
+      applyRenames(
+        applyIcons(factoryModel, prefs.icons, prefs.projectIcons),
+        prefs.renames,
+        prefs.projectNames,
+      ),
+    [factoryModel, prefs.icons, prefs.projectIcons, prefs.renames, prefs.projectNames],
   );
 
   /**
@@ -2801,6 +2807,27 @@ function CanvasInner({
     );
   }, []);
 
+  /**
+   * Keep the name the operator just typed on a project's heading -- the same
+   * local override `commitRename` writes for a session, one field over. An
+   * empty name clears it and the source's own name comes back.
+   */
+  const renameOneProject = useCallback(
+    (project: Project, name: string) => {
+      if (project.source === undefined) {
+        setStatus('this project has no source — rename unavailable');
+        return;
+      }
+      savePrefs(setProjectRename(prefs, project.source, project.id, name, new Date()));
+      setStatus(
+        name.trim() === ''
+          ? `"${project.name}" goes back to the name its source gives it`
+          : `renamed to "${name.trim()}" — vam's own name for it, kept on this machine`,
+      );
+    },
+    [prefs, savePrefs],
+  );
+
   const onSidebarSettings = useCallback(() => {
     setSettingsSection('appearance');
     setSettingsOpen(true);
@@ -2921,6 +2948,7 @@ function CanvasInner({
     onNewProject: onSidebarNewProject,
     newSessionDecline: newSessionDecline,
     onPickIcon: onSidebarPickIcon,
+    onRenameProject: renameOneProject,
     onSettings: onSidebarSettings,
     onRemote: onSidebarRemote,
     width: sidebarWidth,

@@ -22,6 +22,7 @@ import {
   type SessionFilters,
 } from '../../src/renderer/domain/session-filter.js';
 import {
+  BRANCH_TAIL_MAX_CHARS,
   FILTER_POPOVER_WIDTH,
   SessionList,
   type SessionListProps,
@@ -113,6 +114,62 @@ describe('SessionList placeholder row', () => {
     const branch = container.querySelector('[data-session-row="s1"] [data-session-branch]');
     expect(branch?.textContent).toBe('smith/specs/vam-seam-plan');
     expect(branch?.getAttribute('title')).toBe('smith/specs/vam-seam-plan');
+  });
+
+  /**
+   * The half of `splitBranch`'s promise that had no ceiling: the tail is
+   * `flex-none`, so nothing capped it once the head had already shrunk to
+   * nothing. At `SIDEBAR_MIN`, with a long final segment or no slash at all
+   * (100% tail), an uncapped tail grows straight through `data-session-age`
+   * — the operator's report, "the branch overlaps the timer". The age must
+   * stay whole and in place regardless; a test that only checked the tail
+   * for a `truncate` class would pass without proving that.
+   */
+  it('caps a long final segment so it cannot grow into the age, at the sidebar floor', () => {
+    const longTail = `vam-${'x'.repeat(BRANCH_TAIL_MAX_CHARS)}-topology`;
+    const { container } = mountWith(
+      entriesOf([makeSession({ branch: `smith/specs/${longTail}` })]),
+      {
+        width: SIDEBAR_MIN,
+      },
+    );
+    const tail = container.querySelector('[data-branch-tail]');
+    expect(tail?.textContent).toBe(longTail);
+    expect(tail?.className).toContain('truncate');
+    // The age is a wholly separate element the cap never touches — full
+    // text, still there, still last in the row.
+    const age = container.querySelector('[data-session-age]');
+    expect(age?.textContent).toBe('12m');
+    expect(age?.className).toContain('flex-none');
+  });
+
+  it('caps a no-slash branch the same way — 100% tail is the worst case, and an ordinary one', () => {
+    const longBranch = `release-${'x'.repeat(BRANCH_TAIL_MAX_CHARS)}`;
+    const { container } = mountWith(entriesOf([makeSession({ branch: longBranch })]), {
+      width: SIDEBAR_MIN,
+    });
+    expect(container.querySelector('[data-branch-head]')?.textContent).toBe('');
+    const tail = container.querySelector('[data-branch-tail]');
+    expect(tail?.textContent).toBe(longBranch);
+    expect(tail?.className).toContain('truncate');
+    expect(container.querySelector('[data-session-age]')?.textContent).toBe('12m');
+  });
+
+  it('draws the exact character budget as the line: one under is whole, one over is capped', () => {
+    const atBudget = `x`.repeat(BRANCH_TAIL_MAX_CHARS);
+    const overBudget = `x`.repeat(BRANCH_TAIL_MAX_CHARS + 1);
+    const { container } = mount(
+      entriesOf([
+        makeSession({ id: 's1', branch: atBudget }),
+        makeSession({ id: 's2', branch: overBudget }),
+      ]),
+    );
+    expect(
+      container.querySelector('[data-session-row="s1"] [data-branch-tail]')?.className,
+    ).not.toContain('truncate');
+    expect(
+      container.querySelector('[data-session-row="s2"] [data-branch-tail]')?.className,
+    ).toContain('truncate');
   });
 
   it('handles a branch with no slash, and one that is all slash', () => {

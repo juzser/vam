@@ -467,13 +467,14 @@ export type Project = {
    * carrying no source of their own — the factory adapter stamps only this
    * one — so deleting it blanks the glyph for every such session.
    *
-   * DELETING IT IS A PERSISTED-DATA MIGRATION, NOT A DELETE. Three prefs
+   * DELETING IT IS A PERSISTED-DATA MIGRATION, NOT A DELETE. Four prefs
    * buckets are keyed on this value at the top level of stored JSON:
-   * `renames`, `icons` and `projectIcons` (`prefs.ts`, `applyRenames` and
-   * `applyIcons`). Dropping the field orphans every rename and every icon
-   * an operator has saved, silently, on their next launch. Whoever removes
-   * it re-keys those three buckets and ships a migration for existing
-   * stores FIRST; until then the ten call sites that read it are correct.
+   * `renames`, `icons`, `projectIcons` and `projectNames` (`prefs.ts`,
+   * `applyRenames` and `applyIcons`). Dropping the field orphans every
+   * rename and every icon an operator has saved, silently, on their next
+   * launch. Whoever removes it re-keys those four buckets and ships a
+   * migration for existing stores FIRST; until then the ten call sites
+   * that read it are correct.
    */
   readonly source?: SourceId;
   readonly sessions: readonly Session[];
