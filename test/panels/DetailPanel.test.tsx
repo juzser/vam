@@ -355,7 +355,7 @@ describe('the progress region shows nothing until it is opened', () => {
     session: { ...SESSION, decisions: MANY },
   };
 
-  it('draws no turn collapsed, the newest five expanded, and says which it is', () => {
+  it('draws no turn collapsed, every turn expanded, and says which it is', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
     // Zero, per the operator: collapsed, `progress` is its rule and its toggle
     // and nothing else, so the height it costs goes to `out`.
@@ -366,11 +366,15 @@ describe('the progress region shows nothing until it is opened', () => {
     expect(toggle()?.getAttribute('aria-expanded')).toBe('false');
 
     act(() => toggle()?.click());
-    // The five most RECENT, not all seven, and ordered oldest-first like the
-    // ribbon: the last line is the newest turn.
-    expect(turns()).toHaveLength(5);
-    expect(turns()[4]?.textContent).toContain('step d7');
-    expect(turns()[0]?.textContent).toContain('step d3');
+    // ALL SEVEN, not the newest five: `PROGRESS_LINES` used to slice the data
+    // itself, which is exactly the defect this change fixes at the parser --
+    // an artificial ceiling discarding turns nothing forced it to discard.
+    // The oldest turn (d1) has to be REACHABLE, or the fix one file over
+    // bought nothing an operator can actually use. Ordered oldest-first like
+    // the ribbon: the last line is the newest turn.
+    expect(turns()).toHaveLength(7);
+    expect(turns()[0]?.textContent).toContain('step d1');
+    expect(turns()[6]?.textContent).toContain('step d7');
     expect(toggle()?.getAttribute('aria-expanded')).toBe('true');
 
     act(() => toggle()?.click());
@@ -388,6 +392,106 @@ describe('the progress region shows nothing until it is opened', () => {
     expect(progress()?.className).toContain('flex-none');
     act(() => toggle()?.click());
     expect(progress()?.querySelector('.vam-no-scrollbar')?.className).toContain('overflow-y-auto');
+  });
+
+  it('says how many turns vam read, not a bare total it cannot prove', () => {
+    draw({ entry: manyEntry, decision: MANY[0] as Decision });
+    const text = toggle()?.textContent ?? '';
+    expect(text).toContain('7');
+    // Not the bare "N turns" the operator's bug report was about: on a
+    // session whose transcript outgrows the tail window vam reads
+    // (`source.ts`'s `TAIL_BYTES`), `decisions.length` is what vam FOUND in
+    // that window, not a provable lifetime total -- so the word here has to
+    // be about what vam did, never a claim about the session's whole history.
+    expect(text).not.toBe('7 turns');
+    expect(text.toLowerCase()).toContain('read');
+  });
+});
+
+/**
+ * `DetailPanel` used to have no memory of its own: every render drew exactly
+ * the `decision` prop the canvas handed over, which is at most one of the
+ * canvas's own three visible slots (`grid.ts`'s `STEP_SLOTS`). The progress
+ * list can now show every turn a session has, so it has to be able to put one
+ * of THOSE on screen too -- reading history was the whole point of keeping it.
+ */
+describe('the panel remembers which turn you are reading, independent of the canvas', () => {
+  // Seven turns; the canvas would only ever focus one of the newest three, so
+  // `d1`, the oldest, is reachable ONLY through this panel's own list.
+  const MANY = ['d7', 'd6', 'd5', 'd4', 'd3', 'd2', 'd1'].map((id) => decision(id));
+  const manyEntry: SessionEntry = { project: PROJECT, session: { ...SESSION, decisions: MANY } };
+
+  /** Clicks the progress row whose id is `id`, opening the list first. */
+  function pick(id: string) {
+    if (toggle()?.getAttribute('aria-expanded') !== 'true') act(() => toggle()?.click());
+    const row = turns().find((t) => t.textContent?.includes(`step ${id}`));
+    const button = row?.querySelector<HTMLButtonElement>('[data-progress-select]');
+    act(() => button?.click());
+  }
+
+  const inText = () => q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '';
+  const stepLabel = () => q<HTMLElement>('[data-detail-step]')?.textContent ?? '';
+
+  it('shows the canvas’s own pick by default', () => {
+    draw({ entry: manyEntry, decision: MANY[0] as Decision });
+    expect(inText()).toContain('ask d7');
+    expect(stepLabel()).toBe('step d7');
+  });
+
+  it('draws a turn the canvas never focused once its own row is clicked', () => {
+    draw({ entry: manyEntry, decision: MANY[0] as Decision });
+    pick('d1');
+    expect(inText()).toContain('ask d1');
+    expect(stepLabel()).toBe('step d1');
+    // The picked row marks itself, the same way the canvas's own newest-turn
+    // row already did before this change.
+    const row = turns().find((t) => t.textContent?.includes('step d1'));
+    expect(row?.querySelector('span')?.className ?? '').not.toBe('');
+  });
+
+  it('keeps the picked turn across a re-render the canvas did not cause', () => {
+    const view = drawFor({ entry: manyEntry, decision: MANY[0] as Decision });
+    pick('d1');
+    expect(inText()).toContain('ask d1');
+    // The canvas's OWN choice is unchanged (still `MANY[0]`) -- only
+    // something unrelated moved, e.g. the session's activity line on a poll.
+    // That must not yank the operator back to the newest turn.
+    view.rerender({
+      entry: { project: PROJECT, session: { ...manyEntry.session, activity: 'still going' } },
+      decision: MANY[0] as Decision,
+    });
+    expect(inText()).toContain('ask d1');
+    expect(stepLabel()).toBe('step d1');
+  });
+
+  it('defers back to the canvas the moment the canvas’s own choice moves', () => {
+    const view = drawFor({ entry: manyEntry, decision: MANY[0] as Decision });
+    pick('d1');
+    expect(inText()).toContain('ask d1');
+    // `h`/`l` moved the canvas cursor (or a different session was focused):
+    // the canvas handed over a NEW decision, and that wins over the in-panel
+    // pick -- the panel's memory is a default, not a lock.
+    view.rerender({ entry: manyEntry, decision: MANY[1] as Decision });
+    expect(inText()).toContain('ask d6');
+    expect(stepLabel()).toBe('step d6');
+  });
+
+  it('turns off the live turn markers for a turn picked out of history', () => {
+    // Companion to "does not animate an older turn of a running session"
+    // above, which reaches the same state through the `decision` PROP. This
+    // reaches it through a progress-row CLICK instead, proving the in-panel
+    // selector feeds the same `isNewestTurn`/`outIsLive` rule rather than a
+    // second one that could disagree with it.
+    draw({
+      entry: { project: PROJECT, session: { ...manyEntry.session, status: 'running' } },
+      decision: MANY[0] as Decision,
+    });
+    pick('d1');
+    // `data-out-live` is `outIsLive` rendered, and it is not gated on empty
+    // output the way `data-out-empty` is -- asserting on it (rather than
+    // `data-out-empty`) is what keeps this test from passing vacuously
+    // against a fixture whose every turn already has an answer.
+    expect(all('[data-out-live]')).toHaveLength(0);
   });
 });
 
