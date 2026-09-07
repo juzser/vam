@@ -33,7 +33,7 @@
 import { open, readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
-import type { Project, Session } from '../../../renderer/domain/model.js';
+import type { Project, Session, SlashCommand } from '../../../renderer/domain/model.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
 import type { MainSource } from '../source.js';
@@ -52,6 +52,7 @@ import { paneForRow, replyToSession } from './reply.js';
 import { createBranchLookup } from './repo-branch.js';
 import { readPublishedPanes, readPublishedPanesAndProcessFacts } from './session-pane.js';
 import { defaultSessionsRoot } from './session-status.js';
+import { readUserSlashCommands } from './slash-commands.js';
 import { stopSession, stopSessionViaCli } from './stop.js';
 import {
   compactAge,
@@ -185,6 +186,11 @@ export async function loadClaudeCodeProjects(
   // vam checked. `CLAUDE_CODE_SOURCE` passes the real listing; a listing vam
   // failed to obtain arrives here as null too, not as an empty array.
   tmuxSessions: readonly TmuxSession[] | null = null,
+  // The `/` typeahead's list, read once per `load()` and stamped onto every
+  // session -- USER-level configuration (`slash-commands.ts`), the same
+  // regardless of the row. Injectable like `branchOf`: tests read invented
+  // commands, never the operator's real `~/.claude/commands`.
+  slashCommands: readonly SlashCommand[] = [],
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
   // What the sessions publish about themselves: `sessionId` -> tmux session,
@@ -272,6 +278,7 @@ export async function loadClaudeCodeProjects(
       // asked and then produced 128 KB of output while still waiting) is the
       // one where the question is stale anyway.
       questions: read.facts.questions,
+      slashCommands,
       // WHAT THE SESSION SAYS IT IS BLOCKED ON, out of the same per-process
       // file the age came from. A tool-approval prompt is a TUI state and
       // writes no transcript record, so `questions` above is empty for it and
@@ -322,8 +329,6 @@ export async function loadClaudeCodeProjects(
 }
 
 /** Why each remaining `false` is false. */
-const NOT_YET_WRITTEN =
-  'this round reads only; the CLI does support resuming a session with a prompt, so this is unimplemented rather than impossible';
 const NOT_RECORDED = 'a Claude Code transcript records nothing that answers this';
 const NO_SURFACE = 'the CLI exposes no such operation on a session, so vam has nothing to call';
 
@@ -349,7 +354,10 @@ const DESCRIPTOR: SourceDescriptor = {
     // image by content -- happen in main before the draft ever changes
     // (`main/dialog/attach-image.ts`).
     promptAttachments: true,
-    slashCommands: false,
+    // `readUserSlashCommands` reads `~/.claude/commands/*.md` -- see
+    // `slash-commands.ts` for why that is user-level only, and for why no
+    // built-in is ever listed alongside them.
+    slashCommands: true,
     renameSession: false,
     // `claude stop <id>` is real. It stops BACKGROUND sessions only, and an
     // interactive row is refused by name rather than silently ignored -- see
@@ -381,10 +389,9 @@ const DESCRIPTOR: SourceDescriptor = {
     // without one gives the canvas a badge no event ever arrives at.
     liveUpdates:
       'this source re-reads on demand; nothing watches the session list or the transcripts yet',
-    // No entry for recordPrompt, deliverPrompt or promptAttachments: a
-    // decline is written only for a capability that is false, and all three
-    // are now true.
-    slashCommands: NOT_YET_WRITTEN,
+    // No entry for recordPrompt, deliverPrompt, promptAttachments or
+    // slashCommands: a decline is written only for a capability that is
+    // false, and all four are now true.
     renameSession: NO_SURFACE,
     // No entry for closeSession: a decline is written only for a capability
     // that is false, and this one is now true.
@@ -460,6 +467,7 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
         const listed = await listVamSessions(createTmuxRunner());
         return listed.kind === 'ok' ? listed.sessions : null;
       })(),
+      await readUserSlashCommands(),
     );
   },
   /**

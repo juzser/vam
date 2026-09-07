@@ -100,6 +100,14 @@ export type Command = {
   readonly command: string;
 };
 
+/** One command the PROVIDER configures -- `Command` above is agent-proposed. */
+export type SlashCommand = {
+  readonly id: string;
+  /** Without the leading `/` -- the composer adds that back on completion. */
+  readonly name: string;
+  readonly description: string | null;
+};
+
 /**
  * Two immutable facts about how a session came to exist, both read off its
  * timeline: who opened it, and how many times a person has spoken in it.
@@ -305,6 +313,12 @@ export type Session = {
    * existing fixture to name one at once.
    */
   readonly source?: SourceId;
+  /**
+   * The commands the PROVIDER configures -- what `/` offers, as distinct
+   * from `decisions[].commands`. Absent means no such surface; empty means
+   * the source looked and found none, the common case for `claude-code`.
+   */
+  readonly slashCommands?: readonly SlashCommand[];
   /**
    * The subagents this session spawned, newest first, or absent when the
    * source has no such surface.
