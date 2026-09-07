@@ -138,6 +138,7 @@ import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/po
 import { buildActions, clampIndex } from './actions.js';
 import { CommandPalette } from './CommandPalette.js';
 import { copyText } from './clipboard.js';
+import { columnsForWidth, GRID } from './grid.js';
 import { KeySheet } from './KeySheet.js';
 import { infoNodeId, layoutCanvas, orderedSessions, sessionBounds } from './layout.js';
 import { type FlowNodeLike, toNavNodes } from './nav-nodes.js';
@@ -666,6 +667,39 @@ function CanvasInner({
   const phone = usePhoneViewport();
   // The canvas is a strip exactly when it is drawn but is not the main column.
   const canvasStrip = visible.canvas && !canvasIsMain(visible);
+
+  /**
+   * The canvas pane's OWN width, watched directly rather than derived from
+   * `viewportWidth` and the two side panes' widths.
+   *
+   * A pane-resizer drag (or a layout preset moving the strip) changes what
+   * the canvas pane measures without ever firing a window `resize` event --
+   * `viewportWidth` above would not move. `TerminalTab.tsx`'s own pane-size
+   * effect already hits exactly this gap for the SAME reason (a resizer drag
+   * resizing its pane) and works around it the same way: a `ResizeObserver`
+   * on the pane element itself, not a window listener. `clientWidth` is that
+   * file's own measurement, reused here rather than a second unit.
+   *
+   * `null` until the first observation -- "not yet measured", not "very
+   * narrow" -- which is what keeps a still-mounting canvas at the default
+   * `GRID.columns` instead of collapsing to one column for a render or two
+   * before anything has actually been laid out.
+   */
+  const canvasPaneRef = useRef<HTMLDivElement | null>(null);
+  const [canvasPaneWidth, setCanvasPaneWidth] = useState<number | null>(null);
+  useEffect(() => {
+    const el = canvasPaneRef.current;
+    if (!visible.canvas || el === null) {
+      return;
+    }
+    const measure = () => setCanvasPaneWidth(el.clientWidth);
+    // `observe` delivers the element's initial size, so this is also the
+    // first measurement.
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [visible.canvas]);
+
   const { sidebar: sidebarWidth, detail: detailWidth } = layoutWidths(
     visible,
     { sidebar: storedSidebar, detail: storedDetail },
@@ -1223,7 +1257,33 @@ function CanvasInner({
     return { projects: narrow(model.projects), ...(groups === undefined ? {} : { groups }) };
   }, [model, entries, allEntries]);
 
-  const layout = useMemo(() => layoutCanvas(visibleModel), [visibleModel]);
+  /**
+   * Subscribed, not read.
+   *
+   * This was `Math.round(getZoom() * 100)` computed during render. `getZoom()`
+   * is an imperative call into ReactFlow's store: it returns the right number
+   * at the moment it runs, and it does not make the component re-render when
+   * the viewport changes. So the readout only refreshed when something ELSE
+   * caused a render, and scrolling to zoom left it showing a stale figure.
+   * `useStore` subscribes to `transform[2]` — the viewport's scale — so the
+   * number tracks the canvas.
+   *
+   * Read here, ahead of `layout` below, because `columnsForWidth` needs it
+   * too: the canvas pane's width is in device pixels but the grid's geometry
+   * is in canvas units, and `zoom` is the conversion between them.
+   */
+  const zoom = useStore((state) => state.transform[2]);
+
+  /**
+   * How many grid columns the canvas pane can show right now.
+   *
+   * `canvasPaneWidth` is `null` until the pane has been measured once, and a
+   * still-mounting canvas stays at the default `GRID.columns` rather than
+   * flashing to one column and back — see the ref/effect above.
+   */
+  const columns = canvasPaneWidth === null ? GRID.columns : columnsForWidth(canvasPaneWidth, zoom);
+
+  const layout = useMemo(() => layoutCanvas(visibleModel, columns), [visibleModel, columns]);
 
   /**
    * What `hjkl`, `f` and `gg` may land on: every node on the canvas, no filter
@@ -2668,18 +2728,8 @@ function CanvasInner({
     openSessionIconPicker,
   ]);
 
-  /**
-   * Subscribed, not read.
-   *
-   * This was `Math.round(getZoom() * 100)` computed during render. `getZoom()`
-   * is an imperative call into ReactFlow's store: it returns the right number
-   * at the moment it runs, and it does not make the component re-render when
-   * the viewport changes. So the readout only refreshed when something ELSE
-   * caused a render, and scrolling to zoom left it showing a stale figure.
-   * `useStore` subscribes to `transform[2]` — the viewport's scale — so the
-   * number tracks the canvas.
-   */
-  const zoom = useStore((state) => state.transform[2]);
+  // `zoom` itself is read once, above `layout`, where `columnsForWidth` also
+  // needs it — this is only the percentage the toolbar prints.
   const zoomPct = Math.round(zoom * 100);
 
   // `sidebarProps` feeds a `React.memo`-wrapped `SessionList`; a fresh
@@ -3109,7 +3159,10 @@ function CanvasInner({
             </ShortcutTip>
           </div>
 
-          <div className="relative min-h-0 flex-1">
+          {/* `data-canvas-viewport` is the element `columnsForWidth` measures —
+              a test hook, same as `data-canvas-pane` one level up (the
+              CanvasColumn root, which also carries the now-hidden toolbar). */}
+          <div ref={canvasPaneRef} data-canvas-viewport className="relative min-h-0 flex-1">
             <ReactFlow
               nodes={drawnNodes}
               edges={NO_EDGES}

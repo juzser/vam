@@ -23,6 +23,7 @@ import {
   CELL,
   cellOrigin,
   FAN,
+  GRID,
   INFO_OFFSET,
   INFO_SIZE,
   STEP_SIZE,
@@ -286,7 +287,14 @@ export function slotNodeId(sessionId: string, position: number): string {
   return `slot:${sessionId}:${position}`;
 }
 
-export function layoutCanvas(model: CanvasModel): CanvasLayout {
+/**
+ * `columns` defaults to `GRID.columns` (the grid's usual width) and is
+ * threaded straight to `cellOrigin` — this module places, `grid.ts` measures,
+ * and the column COUNT is a measurement of the canvas pane (`columnsForWidth`
+ * in `grid.ts`), decided by `Canvas.tsx` and passed in here. This function
+ * does not know, and must not learn, why the count is whatever it is.
+ */
+export function layoutCanvas(model: CanvasModel, columns: number = GRID.columns): CanvasLayout {
   const nodes: CanvasNodeSpec[] = [];
   const fans: FanSpec[] = [];
   const slots: StepSlotSpec[] = [];
@@ -296,7 +304,7 @@ export function layoutCanvas(model: CanvasModel): CanvasLayout {
   orderedForCanvas(model).forEach((entry, index) => {
     const { session } = entry;
     const steps = visibleDecisions(session);
-    const origin = cellOrigin(index);
+    const origin = cellOrigin(index, columns);
     const opacity = STATUS_OPACITY[session.status];
 
     const info: InfoNodeSpec = {

@@ -8,6 +8,7 @@ import {
 import {
   CELL,
   cellOrigin,
+  columnsForWidth,
   fanPaths,
   GRID,
   INFO_OFFSET,
@@ -54,6 +55,56 @@ describe('cellOrigin', () => {
 
   it('places cell 5 (row 2, column 1)', () => {
     expect(cellOrigin(5)).toEqual({ x: 668, y: 724 });
+  });
+
+  it('defaults to GRID.columns when no column count is given', () => {
+    expect(cellOrigin(1)).toEqual(cellOrigin(1, GRID.columns));
+  });
+
+  it('stacks every cell in one column when columns=1', () => {
+    expect(cellOrigin(0, 1)).toEqual({ x: 16, y: 16 });
+    // Cell 1 is the SECOND row, not the second column: with one column,
+    // `column` is always 0 and every index advances the row instead.
+    expect(cellOrigin(1, 1)).toEqual({ x: 16, y: 370 });
+    expect(cellOrigin(2, 1)).toEqual({ x: 16, y: 724 });
+  });
+});
+
+describe('columnsForWidth', () => {
+  /**
+   * The threshold, worked out from the same geometry `cellOrigin` places
+   * with: two columns span `GRID.padding` once (the leading edge only —
+   * `cellOrigin` never adds trailing padding, and this does not invent any)
+   * plus `GRID.columns` cells plus the gaps between them, in canvas units.
+   * At zoom 1 that is `16 + 2*580 + 1*72 = 1248`.
+   */
+  const TWO_COLUMN_SPAN =
+    GRID.padding + GRID.columns * CELL.width + (GRID.columns - 1) * GRID.columnGap;
+
+  it('matches the worked arithmetic', () => {
+    expect(TWO_COLUMN_SPAN).toBe(1248);
+  });
+
+  it('returns GRID.columns when the pane is at least the two-column span wide, at zoom 1', () => {
+    expect(columnsForWidth(TWO_COLUMN_SPAN, 1)).toBe(GRID.columns);
+    expect(columnsForWidth(TWO_COLUMN_SPAN + 400, 1)).toBe(GRID.columns);
+  });
+
+  it('drops to one column exactly below the threshold, at zoom 1', () => {
+    expect(columnsForWidth(TWO_COLUMN_SPAN - 1, 1)).toBe(1);
+    expect(columnsForWidth(200, 1)).toBe(1);
+  });
+
+  it('scales the pixel threshold by zoom — zooming out lets two columns fit in a narrower pane', () => {
+    // At the shipped default zoom (0.8) the two-column span occupies
+    // TWO_COLUMN_SPAN * 0.8 device pixels, not the full 1248.
+    const atDefaultZoom = TWO_COLUMN_SPAN * 0.8;
+    expect(columnsForWidth(atDefaultZoom, 0.8)).toBe(GRID.columns);
+    expect(columnsForWidth(atDefaultZoom - 1, 0.8)).toBe(1);
+    // The same pane width that reads as one column at zoom 1 reads as two
+    // once the operator zooms out far enough.
+    expect(columnsForWidth(800, 1)).toBe(1);
+    expect(columnsForWidth(800, 0.5)).toBe(GRID.columns);
   });
 });
 

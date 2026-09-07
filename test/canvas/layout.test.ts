@@ -160,6 +160,20 @@ describe('layoutCanvas', () => {
     });
   });
 
+  it('stacks cells in one column when layoutCanvas is asked for columns=1', () => {
+    // The narrow-pane case (vam operator report, canvas-narrow-column):
+    // every info card shares the same x and rows down instead of alternating
+    // left/right — the same arithmetic `cellOrigin(index, 1)` exercises
+    // directly in grid.test.ts, exercised here through `layoutCanvas`'s own
+    // threading of the column count.
+    const five = model(session('a'), session('b'), session('c'), session('d'), session('e'));
+    const { nodes } = layoutCanvas(five, 1);
+    const infos = ['a', 'b', 'c', 'd', 'e'].map((id) => nodes.find((n) => n.id === infoNodeId(id)));
+    infos.forEach((info, i) => {
+      expect(info?.position).toEqual({ x: 16, y: 16 + i * 354 + 58 });
+    });
+  });
+
   it('stacks a session’s steps in one column, 100px apart, sized 250x90', () => {
     const one = model(
       session('s1', { decisions: [decision('d3'), decision('d2'), decision('d1')] }),
