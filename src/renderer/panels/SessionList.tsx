@@ -107,6 +107,49 @@ function splitBranch(branch: string): { head: string; tail: string } {
 }
 
 /**
+ * How many characters `data-branch-tail` may hold before it, too, has to
+ * give way — the missing half of `splitBranch`'s own promise. The head is
+ * `flex-1`/`truncate`, so it shrinks to nothing under pressure; the tail is
+ * `flex-none`, held at its full width with no ceiling at all. Once the head
+ * has genuinely shrunk to nothing, a tail longer than this still grows
+ * straight past its row's allotment and bleeds into `data-session-age` —
+ * the operator's report, "the branch overlaps the timer". A no-slash
+ * branch (`main`, a release tag, anything without a `/`) is 100% tail by
+ * `splitBranch`'s own rule, so this is not a rare shape.
+ *
+ * DERIVED, not eyeballed, the same way `FILTER_POPOVER_WIDTH` derives its
+ * own ceiling from `SIDEBAR_MIN` one comment above — through THIS row's own
+ * chrome rather than the filter header's:
+ *
+ *   200   SIDEBAR_MIN, the resizer's floor
+ *   - 20  the scroller's own `px-2.5` (`OverlayScroll`, 10px each side)
+ *   - 20  the row's own `px-2.5` (the session `<button>`, 10px each side)
+ *   = 160 the branch/age line's own content width, worst case
+ *   -  6  `gap-1.5` between the branch group and the age
+ *   - 24  `data-session-age`'s worst case — `relativeTime` never emits more
+ *         than a number and a letter, but this leaves room for four
+ *         characters ("999d") at roughly 6px each
+ *   - 10  the `GitBranch` icon (`size={10}`)
+ *   -  4  `gap-1` between the icon and the branch text
+ *   = 116px left for `data-branch-head` and `data-branch-tail` TOGETHER,
+ *     worst case — and all of it goes to the tail once the head has
+ *     shrunk to nothing, which is exactly the priority already in force.
+ *
+ * `font-mono` at `text-[10px]` runs close to 6px per character (a
+ * monospace face's usual ~0.6em advance), so 116px is roughly 19
+ * characters. Rounded up to 20 — a character of margin against that
+ * estimate, and just past the longer of the two names the test above
+ * already proves fit at this width (13 and 19 characters) rather than
+ * sitting exactly on the line.
+ *
+ * Expressed in `ch`, not px, where it is applied: `font-mono` is a
+ * monospace face, so 1ch is the exact width of every character in it — the
+ * browser measures the real cut point instead of this comment's estimate
+ * having to be exact.
+ */
+export const BRANCH_TAIL_MAX_CHARS = 20;
+
+/**
  * How wide the filter popover opens when the sidebar has room for it.
  *
  * It replaces a fixed 212px, which was cramped enough that the two origin
@@ -311,6 +354,20 @@ export type SessionListProps = {
    * is no keyboard shortcut for it, unlike the session picker's `s`. */
   readonly onPickIcon: (project: Project) => void;
   /**
+   * Rename a project's heading -- the local override, "Rename repo" in its
+   * own menu item. NOT "Rename project": the group menu already owns that
+   * label for the group one level up (UI "project"; see the vocabulary table
+   * in `domain/model.ts`), and a second control reading the same words in a
+   * sibling menu is the exact confusion the "one-line shortcut tips, missing
+   * tooltips, first-load spinner, click-outside menus" fix resolved on the
+   * two `+` buttons.
+   *
+   * Optional, and a control whose handler is absent is not drawn -- same
+   * idiom and same reason as `onRenameGroup`: a caller with nowhere to store
+   * the override must not be given a button that silently does nothing.
+   */
+  readonly onRenameProject?: (project: Project, name: string) => void;
+  /**
    * The ids of the projects that are folded shut, and the ask to fold one.
    *
    * OPTIONAL, and that is a decision rather than an oversight: without them
@@ -474,6 +531,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     newSessionDecline,
     pendingAction,
     onPickIcon,
+    onRenameProject,
     revealRequest,
     collapsedProjects,
     onToggleCollapse,
@@ -624,6 +682,14 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   const hidden = hiddenProjects;
   /** The project whose removal is being confirmed, or null. One at a time. */
   const [confirming, setConfirming] = useState<Project | null>(null);
+  /**
+   * The project heading whose name is being edited, or null. Exactly
+   * `groupDraft`'s `'rename'` case, one level down -- there is no `'new'`
+   * case here, since a project heading is never created from this pane, only
+   * derived from a live session's cwd.
+   */
+  const [projectDraft, setProjectDraft] = useState<Project | null>(null);
+  const [projectDraftName, setProjectDraftName] = useState('');
 
   const projectMenuRefs = useRef(new Map<string, HTMLButtonElement>());
   const groupMenuRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -668,6 +734,25 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     setGroupDraft(null);
     setGroupDraftName('');
   }, [groupDraft, groupDraftName, onCreateGroup, onRenameGroup]);
+
+  const cancelProjectDraft = useCallback(() => {
+    setProjectDraft(null);
+    setProjectDraftName('');
+  }, []);
+
+  /**
+   * UNLIKE `commitGroupDraft`, an empty name still commits -- it is the undo,
+   * not a no-op. A group has no name of its own to fall back to; a project
+   * does, and `setProjectRename` already treats an empty title as "clear the
+   * override", so the trimmed name is always handed onward.
+   */
+  const commitProjectDraft = useCallback(() => {
+    if (projectDraft !== null) {
+      onRenameProject?.(projectDraft, projectDraftName.trim());
+    }
+    setProjectDraft(null);
+    setProjectDraftName('');
+  }, [projectDraft, projectDraftName, onRenameProject]);
 
   const toggleGroupCollapse = useCallback(
     (group: Group) => {
@@ -774,14 +859,19 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   useEffect(() => {
     if (openMenu !== null) {
       projectPanelRef.current?.querySelector('button')?.focus();
-    } else if (openMenuWas.current !== null && confirming === null) {
-      // Not when the menu closed BECAUSE it opened a dialog. A parent effect
-      // runs after its child's, so without this the restore lands after the
-      // confirm has taken focus and drags the keyboard back out of the modal.
+    } else if (openMenuWas.current !== null && confirming === null && projectDraft === null) {
+      // Not when the menu closed BECAUSE it opened a dialog (`confirming`) or
+      // an inline editor (`projectDraft`) -- a parent effect runs after its
+      // child's, so without either guard the restore lands after the confirm
+      // has taken focus, or after the rename editor has, and drags the
+      // keyboard back out: `groupDraft === null` guards the group menu's
+      // equivalent effect the same way, added after the restore was found
+      // stealing focus from "Rename" and silently discarding the draft via
+      // the editor's own `onBlur`.
       projectMenuRefs.current.get(openMenuWas.current)?.focus();
     }
     openMenuWas.current = openMenu;
-  }, [openMenu, confirming]);
+  }, [openMenu, confirming, projectDraft]);
 
   /** A press outside a project's action menu closes it — same idiom as the
    *  filter popover above: `pointerdown`, and the toggle excluded so pressing
@@ -954,6 +1044,35 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
         }
       }}
       onBlur={cancelGroupDraft}
+      className="min-w-0 flex-1 rounded-[5px] border border-line-strong bg-panel px-1 py-0.5 font-mono text-[10px] text-ink outline-none"
+    />
+  );
+
+  /** Exactly `groupEditor`, one level down -- a project heading's own name,
+   *  reused rather than reinvented: same Enter/Escape/blur handling, same
+   *  focus-on-mount ref, same classes. */
+  const projectEditor = (
+    <input
+      data-project-draft
+      value={projectDraftName}
+      placeholder="repo name"
+      aria-label="repo name"
+      ref={(node) => {
+        if (node !== null && document.activeElement !== node) {
+          node.focus();
+        }
+      }}
+      onChange={(event) => setProjectDraftName(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          commitProjectDraft();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          cancelProjectDraft();
+        }
+      }}
+      onBlur={cancelProjectDraft}
       className="min-w-0 flex-1 rounded-[5px] border border-line-strong bg-panel px-1 py-0.5 font-mono text-[10px] text-ink outline-none"
     />
   );
@@ -1643,9 +1762,13 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       )}
                     </button>
                   </ShortcutTip>
-                  <span className="truncate font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
-                    {section.project.name}
-                  </span>
+                  {projectDraft?.id === section.project.id ? (
+                    projectEditor
+                  ) : (
+                    <span className="truncate font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
+                      {section.project.name}
+                    </span>
+                  )}
                   <span className="font-mono text-[9.5px] text-ink-faint">
                     {section.items.length}
                   </span>
@@ -1794,6 +1917,28 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       }}
                       className="absolute top-[19px] right-0 z-20 flex w-[168px] flex-col rounded-[9px] border border-line-strong bg-panel p-1 shadow-lg"
                     >
+                      {/* "Rename repo", not "Rename project" -- the group
+                          menu already owns that label one level up (UI
+                          "project" is the code's `Group`), and the
+                          click-outside-menus fix resolved the identical
+                          collision on the two `+` buttons by keeping "repo"
+                          for this exact layer rather than repeating a word
+                          two menus now disagree about. */}
+                      {onRenameProject !== undefined && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          data-project-menu-item="rename"
+                          onClick={() => {
+                            setProjectDraftName(section.project.name);
+                            setProjectDraft(section.project);
+                            setOpenMenu(null);
+                          }}
+                          className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                        >
+                          Rename repo
+                        </button>
+                      )}
                       <button
                         type="button"
                         role="menuitem"
@@ -1854,7 +1999,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   Six pixels, because the sidebar is narrow: the rows already
                   carry 10px of their own left padding, so this is a visible
                   step without spending a tab stop of a column where the
-                  title, the branch and the age all truncate. */}
+                  title and the branch already truncate -- the age never
+                  does, on purpose (`BRANCH_TAIL_MAX_CHARS`), which is the
+                  one thing worth spending a pixel to keep readable. */}
                 {!isCollapsed && (
                   <div
                     data-project-rows={section.project.id}
@@ -2084,7 +2231,31 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                             <span data-branch-head className="truncate">
                                               {splitBranch(session.branch).head}
                                             </span>
-                                            <span data-branch-tail className="flex-none">
+                                            {/* `flex-none` below the cap -- untouched, exactly
+                                                as it always rendered for every branch name
+                                                short enough to fit. Past it, `truncate` and an
+                                                inline `maxWidth` turn on TOGETHER: `truncate`
+                                                alone sets no ceiling, and Tailwind's static
+                                                scanner cannot see a class built from
+                                                `BRANCH_TAIL_MAX_CHARS` at build time, so the
+                                                width is inline rather than an arbitrary
+                                                class -- the same reason `popoverWidth` above is
+                                                a `style`, not a class. */}
+                                            <span
+                                              data-branch-tail
+                                              className={
+                                                splitBranch(session.branch).tail.length >
+                                                BRANCH_TAIL_MAX_CHARS
+                                                  ? 'flex-none truncate'
+                                                  : 'flex-none'
+                                              }
+                                              style={
+                                                splitBranch(session.branch).tail.length >
+                                                BRANCH_TAIL_MAX_CHARS
+                                                  ? { maxWidth: `${BRANCH_TAIL_MAX_CHARS}ch` }
+                                                  : undefined
+                                              }
+                                            >
                                               {splitBranch(session.branch).tail}
                                             </span>
                                           </>
