@@ -46,6 +46,14 @@ export type SourceError = {
   readonly kind: 'refused' | 'unreachable';
   readonly code: string;
   readonly message: string;
+  /**
+   * `true` only when the source could not confirm ownership but has a
+   * process id it could ask a caller to force-kill instead -- see
+   * `stop.ts`'s `unresolvedInteractive`. Absent or `false` everywhere else,
+   * including the one case a source can positively place elsewhere: killing
+   * is not something confirming again can unlock there.
+   */
+  readonly forcible?: boolean;
 };
 
 /**
@@ -82,7 +90,12 @@ export type ViewerScope =
 export type SourceWrites = {
   recordPrompt(sessionId: string, prompt: string): Promise<void>;
   renameSession?(sessionId: string, title: string): Promise<void>;
-  closeSession?(sessionId: string): Promise<void>;
+  /**
+   * `force` is a SECOND, DELIBERATE CALL, never the default of the first --
+   * see `Canvas.tsx`'s confirmation. Omitted or `false` is the normal close;
+   * `true` only after the operator has read what it will kill and agreed.
+   */
+  closeSession?(sessionId: string, force?: boolean): Promise<void>;
   createSession?(projectId: string, title: string): Promise<void>;
   /**
    * Start a session in a DIRECTORY rather than in a project vam already

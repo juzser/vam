@@ -79,7 +79,7 @@ function typeInto(input: HTMLInputElement, text: string) {
 }
 
 /** A `SessionSource` whose `write` carries `closeSession` only when it can. */
-function sessionSourceWith(closeSession?: (sessionId: string) => Promise<void>): {
+function sessionSourceWith(closeSession?: (sessionId: string, force?: boolean) => Promise<void>): {
   source: CanvasSource;
   wrote: { count: number };
 } {
@@ -184,6 +184,120 @@ describe('closing a session with `x`', () => {
     await pressAsync('x');
     expect(statusBar()).toContain('nightly sweep');
     expect(statusBar()).toMatch(/cannot|no /i);
+  });
+});
+
+const confirmDialog = () => document.querySelector('[data-confirm-force-close]');
+const confirmGo = () => document.querySelector<HTMLButtonElement>('[data-confirm-force-close-go]');
+const confirmCancel = () =>
+  document.querySelector<HTMLButtonElement>('[data-confirm-force-close-cancel]');
+
+/**
+ * `stop.ts` marks a refusal `forcible` only when it could not VERIFY
+ * ownership and still has a pid to act on -- never when it can positively
+ * place the pane elsewhere. These pin the renderer's half of that contract:
+ * the close key itself never kills, a second explicit step is required, and
+ * that step is refused right back when the source says it must be.
+ */
+describe('the confirmed "kill anyway" that follows an unverifiable close', () => {
+  it('the close key alone never kills: a forcible refusal opens a prompt, not a kill', async () => {
+    const calls: Array<[string, boolean | undefined]> = [];
+    const { source } = sessionSourceWith(async (id, force) => {
+      calls.push([id, force]);
+      throw { kind: 'refused', code: 'pane-unresolved', message: 'could not tell', forcible: true };
+    });
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('x');
+    // ONE call, unforced -- the refusal that offered force is not force itself.
+    expect(calls).toEqual([['a1', false]]);
+    expect(confirmDialog()).not.toBeNull();
+    expect(confirmDialog()?.textContent).toMatch(/kill/i);
+    expect(confirmDialog()?.textContent).toMatch(/terminal/i);
+  });
+
+  it('does nothing on an ordinary refusal that is not forcible', async () => {
+    const { source } = sessionSourceWith(async () => {
+      throw { kind: 'refused', code: 'interactive-session', message: 'no' };
+    });
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('x');
+    expect(confirmDialog()).toBeNull();
+  });
+
+  it('confirming sends the SAME session id with force true, and only then', async () => {
+    const calls: Array<[string, boolean | undefined]> = [];
+    const { source, wrote } = sessionSourceWith(async (id, force) => {
+      calls.push([id, force]);
+      if (force !== true) {
+        throw {
+          kind: 'refused',
+          code: 'pane-unresolved',
+          message: 'could not tell',
+          forcible: true,
+        };
+      }
+    });
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('x');
+    expect(confirmGo()).not.toBeNull();
+    await act(async () => {
+      confirmGo()?.click();
+    });
+    expect(calls).toEqual([
+      ['a1', false],
+      ['a1', true],
+    ]);
+    expect(confirmDialog()).toBeNull();
+    expect(wrote.count).toBe(1);
+  });
+
+  it('cancelling kills nothing and closes the prompt', async () => {
+    const calls: Array<[string, boolean | undefined]> = [];
+    const { source } = sessionSourceWith(async (id, force) => {
+      calls.push([id, force]);
+      throw { kind: 'refused', code: 'pane-unresolved', message: 'could not tell', forcible: true };
+    });
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('x');
+    await act(async () => {
+      confirmCancel()?.click();
+    });
+    expect(confirmDialog()).toBeNull();
+    expect(calls).toEqual([['a1', false]]);
+  });
+
+  it('a pane vam can positively place in another project is refused even after confirming', async () => {
+    const calls: Array<[string, boolean | undefined]> = [];
+    const { source } = sessionSourceWith(async (id, force) => {
+      calls.push([id, force]);
+      // NEVER `forcible`: this is the one case vam is not merely unsure about.
+      throw {
+        kind: 'refused',
+        code: 'wrong-project-pane',
+        message: 'belongs to a different project',
+      };
+    });
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('x');
+    // No forcible flag, so no prompt was ever offered for this refusal.
+    expect(confirmDialog()).toBeNull();
+    expect(calls).toEqual([['a1', false]]);
+    expect(statusBar()).toContain('wrong-project-pane');
+  });
+
+  it('Escape closes the prompt exactly like Cancel', async () => {
+    const { source } = sessionSourceWith(async () => {
+      throw { kind: 'refused', code: 'pane-unresolved', message: 'could not tell', forcible: true };
+    });
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('x');
+    expect(confirmDialog()).not.toBeNull();
+    await act(async () => {
+      confirmDialog()?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
+    expect(confirmDialog()).toBeNull();
   });
 });
 

@@ -211,7 +211,7 @@ describe('createSourceFromPreload', () => {
     await source.write.createSessionIn?.('/srv/work/orchard', 'orchard');
     expect(api.recordPrompt).toHaveBeenCalledWith('s1', 'hello');
     expect(api.renameSession).toHaveBeenCalledWith('s1', 'new title');
-    expect(api.closeSession).toHaveBeenCalledWith('s1');
+    expect(api.closeSession).toHaveBeenCalledWith('s1', undefined);
     // The provider the operator chose in settings, BY VALUE and third: the
     // call site names a project and a title, and the factory is the one place
     // that knows which agent a new session should run.

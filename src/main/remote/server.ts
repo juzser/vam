@@ -365,8 +365,8 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     [
       '/api/close-session',
       'closeSession',
-      (b) => isText(b.sessionId),
-      (s, b) => s.closeSession?.(b.sessionId as string) ?? null,
+      (b) => isText(b.sessionId) && (b.force === undefined || typeof b.force === 'boolean'),
+      (s, b) => s.closeSession?.(b.sessionId as string, b.force as boolean | undefined) ?? null,
     ],
     [
       '/api/create-session',

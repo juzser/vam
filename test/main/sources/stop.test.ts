@@ -14,6 +14,7 @@ import { projectIdOf } from '../../../src/main/sources/claude-code/project-id.js
 import { CLAUDE_CODE_SOURCE } from '../../../src/main/sources/claude-code/source.js';
 import {
   classifyStopFailure,
+  killPidViaSignal,
   type StoppableAgent,
   stopArgv,
   stopSession,
@@ -53,12 +54,15 @@ describe('stopSession', () => {
     expect(stop).toHaveBeenCalledWith('sess-1');
   });
 
-  it('SPAWNS NOTHING for an interactive session and names the real remedy', async () => {
+  it('SPAWNS NOTHING for an interactive row when no tmux runner was offered, and says WHY', async () => {
     const stop = vi.fn(async () => null);
     const error = await stopSession([interactive], 'sess-2#77', stop);
     expect(stop).not.toHaveBeenCalled();
     expect(error?.kind).toBe('refused');
-    expect(error?.code).toBe('interactive-session');
+    // NOT `interactive-session` -- that sentence asserts this IS a terminal
+    // the operator is sitting in, which is one specific cause among several.
+    // Absent a runner, vam has not even asked; it does not know that yet.
+    expect(error?.code).toBe('tmux-unavailable');
     expect(error?.message).toContain('my terminal');
     expect(error?.message).toMatch(/terminal/i);
   });
@@ -240,13 +244,13 @@ describe('closing a session vam itself started', () => {
     expect(stop).not.toHaveBeenCalled();
   });
 
-  it('SPAWNS NOTHING for an interactive session vam did not start', async () => {
+  it('SPAWNS NOTHING for an interactive session vam did not start, and cannot resolve a pane for it', async () => {
     // No tmux session carries this row's project, so no pairing exists.
     const { calls, run } = runner(ok, listing(`${projectIdOf('/w/elsewhere')}\t${OWNED}`));
     const stop = vi.fn(async () => null);
     const error = await stopSession([interactive], 'sess-2#77', stop, run);
-    expect(error?.code).toBe('interactive-session');
-    expect(error?.message).toContain('close that terminal yourself');
+    expect(error?.code).toBe('pane-unresolved');
+    expect(error?.message).toContain('Close the terminal yourself');
     expect(stop).not.toHaveBeenCalled();
     expect(calls.every((argv) => argv[0] === 'list-sessions')).toBe(true);
   });
@@ -277,7 +281,7 @@ describe('closing a session vam itself started', () => {
       vi.fn(async () => null),
       run,
     );
-    expect(error?.code).toBe('interactive-session');
+    expect(error?.code).toBe('pane-unresolved');
     expect(calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
   });
 
@@ -403,7 +407,166 @@ describe('stopSession with published panes', () => {
       run,
       new Map(),
     );
-    expect(error?.code).toBe('interactive-session');
+    expect(error?.code).toBe('pane-unresolved');
     expect(calls.filter((argv) => argv[0] === 'kill-session')).toEqual([]);
+  });
+});
+
+/**
+ * A row whose PUBLISHED pane names a REAL vam session tagged for a DIFFERENT
+ * project. This is the one case vam does not merely lack a proof for -- it
+ * has evidence against it -- so it is refused unconditionally, `force` or
+ * not. Distinct from every other refusal above: those say "vam could not
+ * tell", this says "vam can tell, and it is not yours".
+ */
+describe('a row whose published pane belongs to another project', () => {
+  const row: StoppableAgent = {
+    key: 'sess-x#1',
+    sessionId: 'sess-x',
+    kind: 'interactive',
+    name: 'crossed',
+    cwd: '/w/mine',
+    pid: 555,
+  };
+  const listed: TmuxRunResult = {
+    failure: null,
+    // Tagged for '/w/other', never '/w/mine' -- a real vam session, just not
+    // this row's project.
+    stdout: `${projectIdOf('/w/other')}\tvam-other-ee55ff\n`,
+    stderr: '',
+  };
+  const run: TmuxRun = async (argv) =>
+    argv[0] === 'list-sessions' ? listed : { failure: null, stdout: '', stderr: '' };
+  const panes = new Map([['sess-x#1', 'vam-other-ee55ff']]);
+
+  it('refuses without confirmation, naming what it found', async () => {
+    const error = await stopSession(
+      [row],
+      'sess-x#1',
+      vi.fn(async () => null),
+      run,
+      panes,
+    );
+    expect(error?.code).toBe('wrong-project-pane');
+    expect(error?.message).toContain('different project');
+  });
+
+  it('STILL refuses when confirmed -- force never overrides a positive identification', async () => {
+    const killPid = vi.fn(async () => null);
+    const error = await stopSession(
+      [row],
+      'sess-x#1',
+      vi.fn(async () => null),
+      run,
+      panes,
+      true,
+      killPid,
+    );
+    expect(error?.code).toBe('wrong-project-pane');
+    expect(killPid).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The confirmed kill-anyway route: only reachable through `force: true`, only
+ * ever a raw signal to the pid, and only when vam genuinely could not tell.
+ */
+describe('force-closing a row vam could not verify by tmux', () => {
+  const row: StoppableAgent = {
+    key: 'sess-y#2',
+    sessionId: 'sess-y',
+    kind: 'interactive',
+    name: 'unverifiable',
+    cwd: '/w/solo',
+    pid: 999,
+  };
+
+  it('the close key alone never kills: force defaults to false', async () => {
+    const killPid = vi.fn(async () => null);
+    const error = await stopSession(
+      [row],
+      'sess-y#2',
+      vi.fn(async () => null),
+      undefined,
+      undefined,
+      // `force` omitted entirely, exactly as every ordinary caller does.
+    );
+    expect(killPid).not.toHaveBeenCalled();
+    expect(error?.code).toBe('tmux-unavailable');
+    expect(error?.forcible).toBe(false);
+  });
+
+  it('says a force is on offer only once a pid is actually available to use', async () => {
+    const error = await stopSession(
+      [row],
+      'sess-y#2',
+      vi.fn(async () => null),
+      undefined,
+      undefined,
+      false,
+      killPidViaSignal,
+    );
+    expect(error?.forcible).toBe(true);
+  });
+
+  it('confirmed, kills the pid directly rather than guessing a tmux pane', async () => {
+    const killPid = vi.fn(async () => null);
+    const error = await stopSession(
+      [row],
+      'sess-y#2',
+      vi.fn(async () => null),
+      undefined,
+      undefined,
+      true,
+      killPid,
+    );
+    expect(error).toBeNull();
+    expect(killPid).toHaveBeenCalledWith(999);
+  });
+
+  it('refuses the confirmed kill too when there is no pid to act on', async () => {
+    const noPid: StoppableAgent = { ...row, key: 'sess-z#3', sessionId: 'sess-z', pid: null };
+    const error = await stopSession(
+      [noPid],
+      'sess-z#3',
+      vi.fn(async () => null),
+      undefined,
+      undefined,
+      true,
+      vi.fn(async () => null),
+    );
+    expect(error?.code).toBe('force-unavailable');
+  });
+
+  it('propagates a failing tmux listing as its own error, not the generic interactive refusal', async () => {
+    const run: TmuxRun = async () => ({
+      failure: { message: 'boom', code: 'ENOENT' },
+      stdout: '',
+      stderr: '',
+    });
+    const error = await stopSession(
+      [row],
+      'sess-y#2',
+      vi.fn(async () => null),
+      run,
+    );
+    expect(error?.code).toBe('tmux-missing');
+    expect(error?.kind).toBe('unreachable');
+    expect(error?.message).toContain('unverifiable');
+  });
+});
+
+describe('killPidViaSignal', () => {
+  it('treats an already-gone process as success, not a failure to retry', async () => {
+    const original = process.kill;
+    // biome-ignore lint/suspicious/noExplicitAny: stubbing a node global for one assertion
+    (process as any).kill = () => {
+      throw Object.assign(new Error('no such process'), { code: 'ESRCH' });
+    };
+    try {
+      await expect(killPidViaSignal(123456)).resolves.toBeNull();
+    } finally {
+      process.kill = original;
+    }
   });
 });

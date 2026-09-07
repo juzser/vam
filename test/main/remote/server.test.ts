@@ -234,7 +234,7 @@ describe('write routes', () => {
     const response = await post(base, '/api/close-session', { sessionId: 'session-1' });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, value: null });
-    expect(closeSession).toHaveBeenCalledWith('session-1');
+    expect(closeSession).toHaveBeenCalledWith('session-1', undefined);
     expect(audit).toHaveBeenCalledWith(expect.stringContaining(PAIRED.name));
     expect(audit).toHaveBeenCalledWith(expect.stringContaining(PAIRED.deviceId));
   });
@@ -254,6 +254,28 @@ describe('write routes', () => {
     const closeSession = vi.fn(async () => null);
     const base = await start({ source: makeSource({ closeSession }) });
     const response = await post(base, '/api/close-session', { sessionId: 42 });
+    expect(response.status).toBe(400);
+    expect(closeSession).not.toHaveBeenCalled();
+  });
+
+  it('forwards a confirmed force close', async () => {
+    const closeSession = vi.fn(async () => null);
+    const base = await start({ source: makeSource({ closeSession }) });
+    const response = await post(base, '/api/close-session', {
+      sessionId: 'session-1',
+      force: true,
+    });
+    expect(response.status).toBe(200);
+    expect(closeSession).toHaveBeenCalledWith('session-1', true);
+  });
+
+  it('refuses a non-boolean force before the source sees it', async () => {
+    const closeSession = vi.fn(async () => null);
+    const base = await start({ source: makeSource({ closeSession }) });
+    const response = await post(base, '/api/close-session', {
+      sessionId: 'session-1',
+      force: 'yes',
+    });
     expect(response.status).toBe(400);
     expect(closeSession).not.toHaveBeenCalled();
   });

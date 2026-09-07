@@ -121,7 +121,9 @@ describe('the main-side ownership guard', () => {
       stray,
     );
     expect(calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
-    expect(error?.code).toBe('interactive-session');
+    // This IS the case vam can prove is not the row's own -- its own code,
+    // not the borrowed "a terminal you are sitting in" sentence.
+    expect(error?.code).toBe('wrong-project-pane');
   });
 
   it('still kills the pane tagged for the row’s own project', async () => {

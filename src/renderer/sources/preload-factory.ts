@@ -29,7 +29,7 @@ function buildWrites(api: PreloadSourceApi, descriptor: SourceDescriptor): Sourc
     writes.renameSession = (sessionId, title) => api.renameSession(sessionId, title);
   }
   if (capabilities.closeSession) {
-    writes.closeSession = (sessionId) => api.closeSession(sessionId);
+    writes.closeSession = (sessionId, force) => api.closeSession(sessionId, force);
   }
   if (capabilities.createSession) {
     // WHICH AGENT A NEW SESSION RUNS IS ANSWERED HERE, not at the call site.

@@ -144,7 +144,7 @@ export function createHttpSourceApi(options: HttpSourceOptions = {}): PreloadSou
     },
     recordPrompt: (sessionId, prompt) => post('/api/record-prompt', { sessionId, prompt }),
     renameSession: (sessionId, title) => post('/api/rename-session', { sessionId, title }),
-    closeSession: (sessionId) => post('/api/close-session', { sessionId }),
+    closeSession: (sessionId, force) => post('/api/close-session', { sessionId, force }),
     createSession: (projectId, title, provider) =>
       post('/api/create-session', { projectId, title, provider: provider ?? activeProviderId() }),
     createSessionIn: (cwd, title, provider) =>
