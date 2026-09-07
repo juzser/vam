@@ -3020,6 +3020,13 @@ function CanvasInner({
   const detailProps: ComponentProps<typeof DetailPanel> = {
     entry: focusedEntry,
     decision: focusedDecision,
+    // The panel's own cursor-vs-refresh signal (`DetailPanel.tsx`'s own doc
+    // on the prop explains why `decision` alone stopped being enough once
+    // turn ids became content-derived): `focusedId` is exactly "which node
+    // the cursor sits on", changed only by `setFocusedId`, which this file
+    // calls only from an explicit navigation -- a click, a chord, a jump --
+    // never from a model refresh landing on the same node.
+    focusNodeId: focusedId,
     delivers: source.kind === 'session' && source.source.capabilities.deliverPrompt,
     // Present only for a source whose `write` surface actually carries it --
     // `promptAttachments`, read the same way `delivers` reads its own flag.

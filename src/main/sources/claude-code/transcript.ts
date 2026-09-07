@@ -23,6 +23,7 @@
  * renderer's types, never load its code.
  */
 
+import { createHash } from 'node:crypto';
 import type { AgentQuestion, Decision } from '../../../renderer/domain/model.js';
 import { extractCommands } from './commands.js';
 import { collectQuestions } from './questions.js';
@@ -142,6 +143,55 @@ export function compactAge(ms: number): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
+/**
+ * A short, content-derived fingerprint of a turn's own prompt.
+ *
+ * WHY CONTENT, NOT POSITION. `id` used to be `${prefix}:${index}`, counted
+ * from the newest end of the kept window -- so appending one turn shifted
+ * every earlier turn's index, and the same id string named a DIFFERENT turn
+ * on the next poll. That was invisible while nothing remembered an id
+ * across two parses of the file; it stopped being invisible the moment the
+ * detail panel let an operator sit on a historical turn and the canvas's own
+ * step focus does the equivalent by slot. Position counted from the START of
+ * the file is not available either -- this function is handed only a byte
+ * SUFFIX (`source.ts`'s `TAIL_BYTES`), so it has no absolute anchor to count
+ * from. The one thing every turn genuinely owns, independent of where the
+ * window happens to be cut, is its own prompt -- so identity is derived from
+ * that instead of from a place in a list.
+ *
+ * WHY A HASH OF `input` ALONE IS NOT ENOUGH: two turns can carry the exact
+ * same words (an operator resending "continue"), so this is combined with
+ * `idOf`'s own rank -- the count of same-fingerprint turns strictly BEFORE
+ * this one, oldest-first, within THIS SAME PARSE. Ranking from the oldest
+ * end rather than the newest is deliberate and not symmetric with the
+ * defect being fixed: a turn's rank depends only on turns before it, so
+ * appending ANY new turn (matching or not) never changes it -- the common
+ * case stays stable unconditionally. Ranking from the newest end would have
+ * inherited the exact instability this function exists to remove, just
+ * triggered by a duplicate arriving instead of by any turn arriving. The
+ * residual this still cannot fix: if one of two same-input turns is old
+ * enough to fall out of the byte window entirely (not merely off the
+ * newest-`MAX_DECISIONS` slice below, which keeps every rank), the survivor's
+ * rank -- and so its id -- can shift. That requires both a repeated prompt
+ * and enough new content to push the earlier occurrence out of 128 KiB, a
+ * narrower and later-arriving condition than "any turn arrived", which is
+ * what made the old scheme fail on every poll.
+ *
+ * WHY NOT A FIELD THE CLI ALREADY WRITES (e.g. a per-line id): nothing this
+ * file already reads carries one (see `Line`'s own shape, built from what
+ * `messageText`/`toolUse`/`collectQuestions` use), and minting identity from
+ * an undocumented field this codebase has never verified against a real
+ * transcript would be a guess baked into parsing, not a fact read from it.
+ *
+ * sha256 mirrors `project-id.ts`'s own digest -- the same move for the same
+ * reason: a stable id that carries no raw content. Not a security boundary --
+ * collisions are handled by `idOf`'s rank, not prevented by hash width -- so
+ * a short slice is enough.
+ */
+function turnFingerprint(input: string): string {
+  return createHash('sha256').update(input).digest('hex').slice(0, 12);
+}
+
 export function summarizeTranscript(tail: string, decisionIdPrefix: string): TranscriptFacts {
   const lines = parseLines(tail);
 
@@ -180,24 +230,34 @@ export function summarizeTranscript(tail: string, decisionIdPrefix: string): Tra
     }
   }
 
+  // IDS, MINTED OLDEST-FIRST, OVER THE FULL LIST -- before the byte budget
+  // below ever slices it. `turnId` explains why: a turn's id has to depend
+  // only on itself and on same-input turns strictly BEFORE it, never on how
+  // many turns exist after it, or appending a turn (the whole point of this
+  // fix) would keep renumbering everything that already existed.
+  const rank = new Map<string, number>();
+  const idOf = (turn: { readonly input: string }): string => {
+    const fp = turnFingerprint(turn.input);
+    const n = rank.get(fp) ?? 0;
+    rank.set(fp, n + 1);
+    return `${decisionIdPrefix}:${fp}:${n}`;
+  };
   const decisions: readonly Decision[] = turns
+    .map((turn) => ({ ...turn, id: idOf(turn) }))
     .slice(-MAX_DECISIONS)
     .reverse()
-    .map((turn, index) => {
-      const id = `${decisionIdPrefix}:${index}`;
-      return {
-        id,
-        label: agentName ?? 'claude-code',
-        input: turn.input,
-        output: turn.output,
-        // Claude Code hands commands back as prose inside an answer, not as
-        // structured data, so `commands.ts` reads the fenced blocks of that
-        // answer under a rule tuned to accept nothing it cannot vouch for.
-        // The prefix is the decision's OWN id, so no two decisions mint the
-        // same command id -- the canvas finds a command by id to copy it.
-        commands: turn.output === null ? [] : extractCommands(turn.output, id),
-      };
-    });
+    .map((turn) => ({
+      id: turn.id,
+      label: agentName ?? 'claude-code',
+      input: turn.input,
+      output: turn.output,
+      // Claude Code hands commands back as prose inside an answer, not as
+      // structured data, so `commands.ts` reads the fenced blocks of that
+      // answer under a rule tuned to accept nothing it cannot vouch for.
+      // The prefix is the decision's OWN id, so no two decisions mint the
+      // same command id -- the canvas finds a command by id to copy it.
+      commands: turn.output === null ? [] : extractCommands(turn.output, turn.id),
+    }));
 
   // Read off the SAME parsed lines: the questions are a second reading of one
   // pass over the window, not a second read of the file.
