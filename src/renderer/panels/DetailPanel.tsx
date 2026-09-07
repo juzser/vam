@@ -60,15 +60,17 @@
 import {
   ArrowUp,
   Bot,
-  ChevronDown,
-  ChevronRight,
   ChevronsDown,
   ChevronsUp,
   CircleSlash,
   GitCommitVertical,
+  GitPullRequest,
   Image as ImageIcon,
+  MessageSquare,
   Paperclip,
+  SquareTerminal,
   User,
+  Users,
   X,
 } from 'lucide-react';
 import {
@@ -96,7 +98,6 @@ import type {
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { questionKeys } from '../keyboard/question-keys.js';
-import { ShortcutTip } from '../keyboard/ShortcutTip.js';
 import { describeFailure } from '../sources/port.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
@@ -114,7 +115,7 @@ import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 
 import { TerminalTab } from './TerminalTab.js';
-import { TABS, type Tab, visibleTabs } from './tabs.js';
+import { TABS, type Tab, tabForDigit, visibleTabs } from './tabs.js';
 
 /**
  * How often the pane is re-read while a row says it is waiting.
@@ -268,38 +269,13 @@ export function setModeRequest(draft: string, mode: string): string {
 }
 
 /**
- * The header dot, per status.
- *
- * This was `needsYou ? waiting : running`, which is two values for four
- * states plus an empty one: a `done` session, a `failed` session and NO
- * SESSION AT ALL were all painted as running, the last of those putting a
- * live-looking dot beside the words "No session selected". The sidebar has
- * carried a four-way map since it was written; this is the same map, and the
- * same tokens, so the two panes cannot disagree about what a status looks
- * like.
- *
- * `null` -- no session -- gets `bg-line-strong`: present, so the header's
- * layout does not shift, and colourless, because there is no status to
- * report.
+ * The header this pane once drew its own status dot in is gone (A12.2): the
+ * sidebar row already carries the same four-way status map for every
+ * session, always visible, and the `out` rule below carries the one status
+ * fact that is actually about the turn on screen — whether IT is still being
+ * worked (`outIsLive`). A third copy in a header that no longer exists would
+ * be the same colour said a third way for no new information.
  */
-const PANE_STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
-  waiting: 'bg-waiting',
-  running: 'bg-running',
-  done: 'bg-done',
-  failed: 'bg-failed',
-};
-
-/**
- * Which statuses breathe: the ones still in motion. `waiting` is asking for
- * something and `running` is working; `done` and `failed` have stopped, and a
- * pulse on a stopped session reads as activity that is not there.
- */
-const PANE_STATUS_BREATHES: Readonly<Record<SessionStatus, boolean>> = {
-  waiting: true,
-  running: true,
-  done: false,
-  failed: false,
-};
 
 /**
  * What the operator is typing after a `!` that begins a line, or `null` when
@@ -573,7 +549,7 @@ export type DetailPanelProps = {
 };
 
 /**
- * The tab bar's four entries. All four now select something.
+ * The four views. All four now select something.
  *
  * `Agents` joined `Response` when a source that actually reports a roster
  * arrived (`Session.agents`), `PRs` joined them when one learned to ask `gh`,
@@ -583,44 +559,57 @@ export type DetailPanelProps = {
  * gone with it.
  *
  * The list itself now lives in `tabs.ts`, and re-exported rather than moved
- * because `Mod-<digit>` counts POSITIONS in the DRAWN bar: the count had to
- * become something the handler and the key sheet could read without importing
- * this component, and a handler with its own idea of how many tabs there are
- * is a fifth digit that opens nothing.
+ * because `Alt+<digit>` (A12.2, A5.4) counts POSITIONS in the DRAWN bar: the
+ * count had to become something the handler and the key sheet could read
+ * without importing this component, and a handler with its own idea of how
+ * many views there are is a fifth digit that opens nothing.
  */
 export { TABS, type Tab } from './tabs.js';
 
 /**
  * The mockup's mode segments, and which one it draws as current. Presentation
  * only: the factory exposes no per-session mode, so these are drawn and
- * labelled as placeholders in the same way the tab bar's three empty tabs are.
+ * labelled as placeholders in the same way the icon row's three empty views
+ * once were.
  */
 const MODES = ['Auto', 'Manual', 'Plan'] as const;
 
+/** One glyph per view — chosen for what each shows, not decoration. */
+const VIEW_ICON: Readonly<Record<Tab, typeof MessageSquare>> = {
+  Response: MessageSquare,
+  PRs: GitPullRequest,
+  Terminal: SquareTerminal,
+  Agents: Users,
+};
+
 /**
- * The mockup's segmented control: one filled pill on a sunken well, not
- * underlined labels.
+ * A12.2: the four views stop being a labelled pill row and become small
+ * ICONS in the top-right of the tab — the operator's own words, "they stop
+ * being called tabs", now that a session IS a tab (A11) and calling both
+ * things the same word is the collision the sidebar's project/repo naming
+ * already hit once.
  *
- * The Agents badge has a real source (`runningAgents`) and is omitted at
- * zero. PRs still ships with NO badge, even now that it has data: a count
- * there would have to read as zero both for a branch with no pull request and
- * for a session vam could not ask about, which is the one conflation this
- * pane exists to avoid.
+ * ICON-ONLY DOES NOT MEAN UNLABELLED. `aria-label` carries the name AND the
+ * shortcut (`Alt+N`, A2.5/A5.4) — a `title` alone would be the exact defect
+ * this file already refused once for the pill row ("a tooltip alone is not
+ * one"): a `title` never opens on keyboard focus and screen readers are not
+ * required to read it. The Agents badge survives unchanged (a real source,
+ * omitted at zero) and is now the ONLY place the running-agent count is
+ * shown in this pane — see the identity line in the `in` block for why the
+ * header's old "N agents" line does not need a second home.
  *
- * EVERY PILL IS A REAL <button> NOW — Tab reaches it, Enter and Space activate
- * it, and `aria-pressed` says which one is showing. The three
- * that were plain labels became buttons as each got something behind it; the
- * rule that made them labels stands unchanged for any future one, because a
- * focus stop that activates nothing and explains nothing is a keyboard trap
- * with a hover state.
+ * EVERY ICON IS STILL A REAL <button> — Tab reaches it, Enter and Space
+ * activate it, `aria-pressed` says which one is showing. That property is
+ * what this file has always meant by "not a keyboard trap with a hover
+ * state", and shrinking the control to an icon does not get to spend it.
  */
-function TabBar({
+function ViewIcons({
   tabs,
   runningAgents,
   current,
   onSelect,
 }: {
-  /** The tabs this source offers -- `TABS` minus the ones it has said it lacks. */
+  /** The views this source offers -- `TABS` minus the ones it has said it lacks. */
   readonly tabs: readonly Tab[];
   readonly runningAgents: number;
   readonly current: Tab;
@@ -636,56 +625,44 @@ function TabBar({
     <nav
       aria-label="views"
       /* This bar is DESKTOP-ONLY now -- see the `phone` gate at its call site.
-         The rule that used to hide it while the phone keyboard was up
-         (`.vam-phone-typing [data-view-tabs]`) is gone: a phone that never
-         draws this bar makes that selector match nothing, and a rule matching
-         nothing is indistinguishable from a rule that works. The phone's own
-         icon row deliberately does NOT wear this hook, so no rule written for
-         a desktop bar can silently collect it. */
+         The phone's own icon row deliberately does NOT wear this hook, so no
+         rule written for a desktop bar can silently collect it. */
       data-view-tabs
-      className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px]"
+      className="flex flex-none items-center gap-1"
     >
       {tabs.map((tab, index) => {
         const selected = tab === current;
         const badge = tab === 'Agents' && runningAgents > 0 ? runningAgents : null;
-        const shape = [
-          'vam-tap flex h-[26px] flex-1 items-center justify-center gap-[5px] rounded-[7px] text-[12px]',
-          selected ? 'bg-line-strong font-medium text-ink' : 'text-ink-dim',
-        ].join(' ');
-        const label = (
-          <>
-            {tab}
+        const Icon = VIEW_ICON[tab];
+        const name =
+          badge === null
+            ? `${tab} view — Alt+${index + 1}`
+            : `${tab} view, ${badge} running — Alt+${index + 1}`;
+        return (
+          <button
+            key={tab}
+            type="button"
+            data-view={tab.toLowerCase()}
+            aria-pressed={selected}
+            aria-label={name}
+            title={name}
+            onClick={() => onSelect(tab)}
+            className={[
+              'vam-tap relative flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-[7px]',
+              selected ? 'bg-line-strong text-ink' : 'text-ink-dim hover:bg-raised hover:text-ink',
+            ].join(' ')}
+          >
+            <Icon size={13} strokeWidth={1.7} aria-hidden="true" />
             {badge !== null && (
               <span
-                className={[
-                  'font-mono text-[9.5px]',
-                  selected ? 'text-ink-dim' : 'text-ink-faint',
-                ].join(' ')}
+                data-view-badge
+                aria-hidden="true"
+                className="absolute -top-[3px] -right-[3px] flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-waiting px-[3px] font-mono text-[8px] text-ink leading-none"
               >
                 {badge}
               </span>
             )}
-          </>
-        );
-        return (
-          // `position` selects a session in Select and a tab in Insert; a
-          // pill IS the Insert reading, so it says which one it means.
-          <ShortcutTip
-            key={tab}
-            label={tab}
-            action={{ kind: 'position', digit: index + 1 }}
-            mode="insert"
-          >
-            <button
-              type="button"
-              data-tab={tab.toLowerCase()}
-              aria-pressed={selected}
-              onClick={() => onSelect(tab)}
-              className={`${shape} cursor-pointer ${selected ? '' : 'hover:bg-raised hover:text-ink'}`}
-            >
-              {label}
-            </button>
-          </ShortcutTip>
+          </button>
         );
       })}
     </nav>
@@ -993,31 +970,13 @@ const IN_LINES = 2;
 const IN_MAX_HEIGHT = Math.round(IN_BODY_PX * IN_LEADING * IN_LINES) + 22;
 
 /**
- * How many turns' worth of height `progress` opens to before it scrolls.
- *
- * Collapsed it shows NONE: it is context, and the operator asked for the whole
- * region to cost only its own header until it is asked for.
- *
- * USED TO BE A DATA CAP -- `orderedTurns.slice(-PROGRESS_LINES)` -- which
- * discarded every turn past the newest five from the LIST ITSELF, not merely
- * from view. That was dead code for as long as the parser kept at most three
- * turns (`transcript.ts`'s old `MAX_DECISIONS`), and it would have been the
- * exact same bug as the one this whole change fixes the moment the parser
- * stopped discarding: an operator could open this list and still never reach
- * the turn they were looking for. Now that the list can genuinely hold more
- * than five, the constant sizes the BOX instead (the same move `IN_MAX_HEIGHT`
- * above makes, and for the same reason -- a promise about the text, not about
- * the window): five rows are visible without scrolling, matching how compact
- * `in`'s two lines and `out`'s own space already are, and every turn beyond
- * that is one scroll away rather than gone.
+ * `progress` used to open into a scrollable list of turns, capped to about
+ * five rows' worth of height before it scrolled on its own (`PROGRESS_LINES`,
+ * `PROGRESS_MAX_HEIGHT`). A12.2 collapses it into a single `<select>` instead
+ * (see the `progress` block below) — one control regardless of how many
+ * turns exist, so there is no list height left to cap. Both constants died
+ * with the list; nothing else read them.
  */
-const PROGRESS_ROW_PX = 10; // the list's own `text-[10px]`
-const PROGRESS_ROW_LEADING = 1.5; // close to `IN_LEADING`, for the same single-line rows
-const PROGRESS_ROW_GAP_PX = 6; // `gap-1.5` between rows
-const PROGRESS_LINES = 5;
-const PROGRESS_MAX_HEIGHT =
-  Math.round(PROGRESS_LINES * PROGRESS_ROW_PX * PROGRESS_ROW_LEADING) +
-  (PROGRESS_LINES - 1) * PROGRESS_ROW_GAP_PX;
 
 /** What `to-canvas.ts` joins each summarised answer with, and splits on here. */
 const ANSWER_SEPARATOR = ' · ';
@@ -1854,7 +1813,7 @@ function QuestionCard({
           wearing a different shape. */}
       {questions.length > 1 && (
         <nav
-          // NOT a tablist, for the reason `TabBar` above is not one: the
+          // NOT a tablist, for the reason `ViewIcons` above is not one: the
           // region a step changes is the card below, which is no `tabpanel` of
           // theirs and never was. A `nav` is what this is -- navigation within
           // one call -- and a `nav` can carry the name a bare box cannot, which
@@ -2273,14 +2232,6 @@ export function DetailPanel(props: DetailPanelProps) {
   /** The first option of the open question, when one is being asked. */
   const firstOptionRef = useRef<HTMLButtonElement>(null);
   /**
-   * `progress` is context, not the thing you read, so it opens showing no turn
-   * at all — the newest five are one keystroke away.
-   * Component state rather than a prop: nothing outside this pane has an
-   * opinion about it, and routing it through the canvas would put a
-   * presentation toggle in the model every other pane has to carry.
-   */
-  const [progressOpen, setProgressOpen] = useState(false);
-  /**
    * Which tab the pane is showing. Still component state, and still nobody
    * else's opinion: it survives switching sessions on purpose -- an operator
    * who opened Agents is looking at agents, not at whichever tab the last
@@ -2320,6 +2271,62 @@ export function DetailPanel(props: DetailPanelProps) {
   // drawing a tab that is no longer offered is the state this collapses.
   const tabs = visibleTabs(terminal !== false);
   const current = tabs.includes(tab) ? tab : 'Response';
+
+  /**
+   * What the last `Alt+<digit>` refused, or `null` at rest — the "refuses
+   * aloud" half of A2.5/A5.4's promise, carried the same way `cycleNote`
+   * above carries the pane-key press's own outcome: local state, read by a
+   * small `role="status"` line beside the icons, cleared the moment a press
+   * actually lands somewhere.
+   */
+  const [viewNote, setViewNote] = useState<string | null>(null);
+  // `sessionKey` is the trigger, not something the body reads: a refusal
+  // raised for the session just left must not still be showing over the one
+  // the operator switched to.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: clear on session change, body reads nothing
+  useEffect(() => {
+    setViewNote(null);
+  }, [sessionKey]);
+  /**
+   * `Alt+<digit>` picks a view (A12.2, A2.5, A5.4) — resolved through
+   * `tabForDigit(tabs, …)`, the SAME derivation `visibleTabs` already forces
+   * on the click handler two lines up, never a second count of `TABS`.
+   *
+   * A WINDOW LISTENER OF ITS OWN, not a new case in the shared chord switch
+   * (`keyboard/chords.ts`/`Canvas.tsx`) — the pattern A5.1 already
+   * established for `ProjectPicker`/`GroupPicker`/`IconPicker`, and safe for
+   * the same reason it is there: exactly one `DetailPanel` is ever mounted
+   * at a time (`Canvas.tsx`'s own `DetailSlot` doc), so this can never
+   * double-fire the way one per open tab would.
+   *
+   * THE CONTRACT (A5.3): decline what this widget does not own. A key typed
+   * into an INPUT/TEXTAREA (the composer, the terminal's own hidden field)
+   * is left alone entirely — not even inspected — and any key that is not a
+   * bare `Alt+<digit>` (no other modifier) falls through with no
+   * `preventDefault`. Only that one combination is ever claimed, which is
+   * the whole of what `DELIBERATELY_FREE`/`UNREACHABLE_KEYS` (`chords.ts`)
+   * promise nothing else has.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName)) return;
+      const match = /^Digit([1-9])$/.exec(event.code);
+      if (match === null) return;
+      event.preventDefault();
+      const digit = Number(match[1]);
+      const requested = tabForDigit(tabs, digit);
+      if (requested === undefined) {
+        setViewNote(`no view ${digit} — only ${tabs.length} shown (${tabs.join(', ')})`);
+        return;
+      }
+      setViewNote(null);
+      setTab(requested);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [tabs]);
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
   /**
@@ -2740,13 +2747,6 @@ export function DetailPanel(props: DetailPanelProps) {
   // ordering is what makes "the last line" and "the newest turn" the same
   // line, so the ones kept are taken off the end.
   const orderedTurns = [...(entry?.session.decisions ?? [])].reverse();
-  // Nothing while closed — not a shorter list, no list at all. Open, this is
-  // now EVERY turn vam read, not the newest `PROGRESS_LINES` of them: that
-  // slice used to discard the very history this change exists to keep
-  // reachable, and it was dead code besides -- see `PROGRESS_LINES`'s own
-  // comment for why the box still only shows about that many without a
-  // scroll.
-  const visibleTurns = progressOpen ? orderedTurns : [];
 
   /**
    * What the composer's button claims, in the words the SOURCE earns.
@@ -2809,94 +2809,75 @@ export function DetailPanel(props: DetailPanelProps) {
       */}
       {active && <FocusEdge />}
       {resizeHandle}
-      <div
-        className={`flex flex-col gap-2.5 border-line border-b px-3.5 ${phone ? 'pt-2.5' : 'pt-3'}`}
-      >
-        {!phone && (
-          <div className="flex items-start gap-2">
+      {/*
+        A12.2: THE HEADER IS GONE. It used to carry five facts — the status
+        dot, the session's name, its project, its epic ("branch"), how many
+        agents are running, and which turn is focused — in a block that cost
+        real height on every render whether or not any of it had changed
+        since the operator last looked. None of the five is dropped, each
+        moved to where it is actually read:
+          - the session's NAME is the tab it already sits in (A11/A12.1) —
+            drawing it again one row down was the same word twice;
+          - STATUS is the sidebar row's own dot, which was already the same
+            four-colour map (`PANE_STATUS_DOT` used to duplicate it exactly)
+            — a second copy of an unchanged fact bought nothing; the `out`
+            rule below still shows the one status fact that is actually about
+            the turn on screen, whether IT is still being worked;
+          - PROJECT and EPIC move into the `in` block's identity line, below
+            — still always on screen while there is a turn to read, just
+            inside the column instead of above it;
+          - AGENT COUNT is the badge on the Agents icon, immediately below —
+            the same "a real source, omitted at zero" rule this pane already
+            uses everywhere else, not a new one invented for this;
+          - the focused TURN's label moves into the `in` rule's own meta
+            slot, beside "you" — see the `in` block below.
+        What is left here is a slim, always-desktop-only row for the four
+        views, now icons, top-right of the pane — where the mockup's own tab
+        strip sits, and the only thing this pane still owns above the
+        scrolling column.
+      */}
+      {!phone && (
+        <div className="flex flex-none items-center justify-end gap-1 border-line border-b px-3.5 py-2">
+          {/* `Alt+<digit>`'s own refusal, said aloud (A2.5: "refuses aloud
+              when the source has none") — `role="status"` so a screen reader
+              announces it without the operator having to go looking. Truncates
+              rather than pushing the icons off the right edge, and sits on
+              the LEFT of them: the icons are always reachable, the refusal is
+              not always there. */}
+          {viewNote !== null && (
             <span
-              data-pane-status={entry?.session.status ?? 'none'}
-              className={[
-                'mt-1.5 h-1.5 w-1.5 flex-none rounded-full',
-                entry === null ? 'bg-line-strong' : PANE_STATUS_DOT[entry.session.status],
-                entry !== null && PANE_STATUS_BREATHES[entry.session.status] ? 'vam-breathe' : '',
-              ].join(' ')}
-            />
-            <div className="min-w-0 flex-1">
-              {/* `data-prompt-target` lives here now, not beside the composer.
-                The operator asked for the branch line under the input to go;
-                the guarantee it carried must not go with it. One input serving
-                many sessions is the easiest possible way to send the right
-                words to the wrong agent, so SOMETHING on screen has to say
-                which session is about to be written to — and the pane header
-                already did, two lines up from where the chip was. The tests
-                that covered the chip now assert against this. */}
-              <div
-                data-prompt-target
-                className="truncate font-medium text-[14px] text-ink leading-[1.35]"
-              >
-                {entry === null ? 'No session selected' : entry.session.title}
-              </div>
-              <div className="mt-1 flex items-center gap-[5px] font-mono text-[10px] text-ink-faint">
-                <span data-prompt-project className="truncate text-ink-dim">
-                  {entry?.project.name ?? '—'}
-                </span>
-                <span>·</span>
-                <span className="truncate">{entry?.session.epic ?? '—'}</span>
-                <span>·</span>
-                <span className="flex-none">
-                  {entry === null || entry.session.runningAgents === 0
-                    ? 'no agent'
-                    : `${entry.session.runningAgents} agents`}
-                </span>
-              </div>
-            </div>
-            {/* Which step the panel is expanding. The mockup puts it at the far
-              right of the title row, where the eye lands last — it names the
-              thing you are reading, not the thing you are choosing. */}
-            {decision !== null && (
-              <span data-detail-step className="flex-none font-mono text-[10px] text-ink-dim">
-                {decision.label}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* The row that stood here carried the `x/y` step counter, its
-            expandable note, and the session age. The operator found it did no
-            work and asked for it to go, following the tick strip that stood
-            here before it. Nothing it showed is only here: the focused step is
-            named at the right of the title row above, how many turns exist is
-            the `progress` section's own counter, and the age is on the session
-            card in the sidebar and on the canvas. */}
-
-        {/* Not on a phone -- MOVED, not removed. Operator instruction: the
-            phone's session screen is the prompt screen, and a full-width strip
-            of words between the app bar and the output is chrome it cannot
-            afford (this bar, the deleted step rail and the bar's second line
-            cost 107px of an 844px viewport between them, measured). The same
-            views are icon buttons in the app
-            bar; `phone/PhoneShell.tsx` draws them, drives this pane's tab
-            through `tabRequest`, and carries the note about what that cost. */}
-        {!phone && (
-          <TabBar
+              data-view-note
+              role="status"
+              className="min-w-0 flex-1 truncate text-right font-mono text-[9.5px] text-waiting"
+            >
+              {viewNote}
+            </span>
+          )}
+          <ViewIcons
             tabs={tabs}
             runningAgents={entry?.session.runningAgents ?? 0}
             current={current}
             onSelect={setTab}
           />
-        )}
-      </div>
+        </div>
+      )}
+      {/* Not drawn at all on a phone -- the same `!phone` gate the icon row
+          above wears. Operator instruction: the phone's session screen is the
+          prompt screen, and a full-width strip of words between the app bar
+          and the output is chrome it cannot afford. The same views are icon
+          buttons in the app bar there; `phone/PhoneShell.tsx` draws them and
+          drives this pane's view through `tabRequest`. */}
 
       {/*
-        Three regions, three scrollbars, one decision.
-        Before this the whole pane scrolled as one column, so reading a long
-        answer pushed the request that prompted it off the top — and the two
-        things you compare to decide were never on screen together. Now `in`
-        and `progress` are capped short (they are context) and `out` takes the
-        remaining height (it is the thing you read), each scrolling on its own.
-        `min-h-0` on every level is what makes a flex child actually able to
-        shrink and scroll rather than growing its parent.
+        `in`, `progress` and `out` are now ONE continuous scrollable column
+        (A12.2), shaped like the Claude Code VSCode plugin's own turn view:
+        everything inline, one scrollbar, not three fixed-height panes each
+        competing for the pane's total height and each fighting its own
+        scrollbar. `in` stays pinned to the top of THIS column via
+        `position: sticky` (below) rather than a fixed height budget, so the
+        prompt that produced a long answer never scrolls out of view while
+        you read it. `min-h-0` on every level is still what makes a flex
+        child able to shrink and scroll rather than growing its parent.
       */}
       <div className="flex min-h-0 flex-1 select-text flex-col gap-2.5 px-3.5 py-3">
         {/* A failed session says so here, not only in the dot's colour.
@@ -2980,8 +2961,42 @@ export function DetailPanel(props: DetailPanelProps) {
                 : 'This session has no steps yet.'}
           </p>
         ) : (
-          <>
-            <section data-detail-block="in" className="flex flex-none flex-col gap-1.5">
+          // THE MERGED COLUMN (A12.2). One scrollable region for `in`,
+          // `progress` and `out` together — the ref and the scroll handler
+          // that used to live on `out` alone (it was the only region that
+          // grew) now live HERE, because this is the region that scrolls.
+          // `stuckRef`/`isAtBottom` re-derive unchanged: they never cared
+          // which element they were reading metrics off, only whether it was
+          // resting at its own bottom.
+          <div
+            ref={outRef}
+            data-detail-column
+            onScroll={(event) => {
+              stuckRef.current = isAtBottom(event.currentTarget);
+              syncJumps(event.currentTarget);
+            }}
+            className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto"
+          >
+            {/* STICKY, not merely first: `position: sticky` against the
+                column's own scroll (the operator's ask, A12.2 — "IN stays
+                sticky at the top while scrolling"), with an opaque
+                background so `out` text scrolling underneath does not bleed
+                through the two lines of `in`. The identity line the removed
+                header used to carry (project, epic) rides along here too —
+                see the header-removal comment above for the full account of
+                where each fact went. */}
+            <section
+              data-detail-block="in"
+              className="sticky top-0 z-10 flex flex-none flex-col gap-1 bg-sidebar pb-1.5"
+            >
+              <div
+                data-detail-identity
+                className="flex items-center gap-[5px] font-mono text-[9.5px] text-ink-faint"
+              >
+                <span className="truncate text-ink-dim">{entry?.project.name ?? '—'}</span>
+                <span>·</span>
+                <span className="truncate">{entry?.session.epic ?? '—'}</span>
+              </div>
               <Rule
                 label="in"
                 // `you`, and no time. `Decision` carries no timestamp, so
@@ -2990,8 +3005,10 @@ export function DetailPanel(props: DetailPanelProps) {
                 // agent's most recent write rather than when you typed this.
                 // Walk back a turn with `h` and the old caption went on
                 // describing the present. The session's age is on its sidebar
-                // row, where it is true.
-                meta="you"
+                // row, where it is true. The turn's own label (the removed
+                // header's `data-detail-step` chip, informally "which round")
+                // rides beside it now, since both are facts about THIS turn.
+                meta={decision.label === '' ? 'you' : `you · ${decision.label}`}
                 iconLabel="you"
                 tone="text-rule-in"
                 icon={<User size={13} strokeWidth={1.6} />}
@@ -3009,35 +3026,20 @@ export function DetailPanel(props: DetailPanelProps) {
 
             {/* The mockup lists the actions inside one step. The factory's unit
                 is the turn, so this lists the session's turns — the same shape
-                answering the same question, off data that exists. */}
-            {/* Closed, this is a rule and a toggle and nothing else. The three
-                regions compete for one pane's height and a turn list is the
-                least of the three to read, so it costs its own header until it
-                is asked for — and then it costs about five lines' worth of
-                height, with the rest of it (now every turn vam read, not
-                only the newest few) one scroll away rather than gone.
-                A real <button>, not a new key: Enter and Space already activate
-                one, it is reachable by Tab from the composer, and the modal
-                keymap loses nothing to it. Each ROW is now a control too --
-                see `data-progress-select` below -- so this is the turn you
-                are reading, not only the turn the canvas is. */}
-            <section
-              data-detail-block="progress"
-              className={[
-                'flex flex-none flex-col',
-                progressOpen ? 'min-h-[56px] gap-1.5' : '',
-              ].join(' ')}
-            >
+                answering the same question, off data that exists.
+                COLLAPSED INTO A SINGLE STEP (A12.2), not a list of rows: a
+                `<select>` is one control regardless of how many turns exist,
+                so browsing history costs one lightweight `<option>` per turn
+                rather than a styled, icon-bearing row per turn — the answer
+                to "what happens at volume" now that turn history is uncapped
+                (3,276, not 3): only the SELECTED turn's `in`/`out` is ever
+                rendered in full; every other turn costs one line of text in
+                a control the browser itself manages. */}
+            <section data-detail-block="progress" className="flex flex-none flex-col">
               <Rule
                 label="progress"
                 meta={
-                  <button
-                    type="button"
-                    data-progress-toggle
-                    aria-expanded={progressOpen}
-                    onClick={() => setProgressOpen((open) => !open)}
-                    className="vam-tap flex cursor-pointer items-center gap-1 rounded-[var(--radius-sm)] px-1 py-0.5 text-ink-faint hover:bg-raised hover:text-ink"
-                  >
+                  <span className="flex items-center gap-1.5">
                     {/* "read", not a bare count: `source.ts` only ever opens
                         the newest `TAIL_BYTES` of the transcript, so on a
                         session bigger than that window this is what vam
@@ -3047,13 +3049,23 @@ export function DetailPanel(props: DetailPanelProps) {
                         out -- while "7 turns read" is what it actually is, a
                         count with its qualifier attached, the same shape as
                         every other reading on this pane. */}
-                    {turnsRead} turns read
-                    {progressOpen ? (
-                      <ChevronDown size={11} strokeWidth={1.7} />
-                    ) : (
-                      <ChevronRight size={11} strokeWidth={1.7} />
+                    <span data-progress-count>{turnsRead} turns read</span>
+                    {orderedTurns.length > 1 && (
+                      <select
+                        data-progress-jump
+                        aria-label="jump to a turn"
+                        value={decision.id}
+                        onChange={(event) => setSelectedId(event.target.value)}
+                        className="max-w-[130px] cursor-pointer truncate rounded-[var(--radius-sm)] border border-line-strong bg-panel px-1 py-0.5 font-mono text-[9.5px] text-ink-faint outline-none hover:text-ink"
+                      >
+                        {orderedTurns.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.output === null ? '◌' : '✓'} {d.label}
+                          </option>
+                        ))}
+                      </select>
                     )}
-                  </button>
+                  </span>
                 }
                 // `turns`, not `progress`: the visible label already says
                 // progress, and a glyph that only repeats it is a word said
@@ -3062,38 +3074,9 @@ export function DetailPanel(props: DetailPanelProps) {
                 tone="text-rule-progress"
                 icon={<GitCommitVertical size={12} strokeWidth={1.7} />}
               />
-              {progressOpen && (
-                <ul
-                  style={{ maxHeight: PROGRESS_MAX_HEIGHT }}
-                  className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-0.5 font-mono text-[10px] text-ink-faint"
-                >
-                  {visibleTurns.map((d) => (
-                    <li key={d.id} data-progress-turn className="flex items-center gap-2">
-                      {/* The control that reads an older turn without ever
-                          leaving this panel -- `decision` above already
-                          resolves to whichever one was clicked here, so
-                          nothing downstream has to know this exists. */}
-                      <button
-                        type="button"
-                        data-progress-select
-                        onClick={() => setSelectedId(d.id)}
-                        aria-current={d.id === decision?.id ? 'true' : undefined}
-                        className="vam-tap flex min-w-0 flex-1 items-center gap-2 rounded-[var(--radius-sm)] py-0.5 text-left hover:bg-raised hover:text-ink"
-                      >
-                        <span className={d.output === null ? 'text-waiting' : 'text-ink-quiet'}>
-                          {d.output === null ? '◌' : '✓'}
-                        </span>
-                        <span className={`truncate ${d.id === decision?.id ? 'text-ink-dim' : ''}`}>
-                          {d.label}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
             </section>
 
-            <section data-detail-block="out" className="flex min-h-0 flex-1 flex-col gap-1.5">
+            <section data-detail-block="out" className="flex flex-none flex-col gap-1.5">
               <Rule
                 label="out"
                 meta={
@@ -3133,17 +3116,9 @@ export function DetailPanel(props: DetailPanelProps) {
                 tone="text-rule-out"
                 icon={<Bot size={14} strokeWidth={1.75} />}
               />
-              {/* The one region that grows. Everything the operator reads to
-                  decide lives in here, so it gets the height and its own
-                  scroll rather than pushing `in` off the top of the pane. */}
               <div
-                ref={outRef}
                 data-detail-scroll="out"
-                onScroll={(event) => {
-                  stuckRef.current = isAtBottom(event.currentTarget);
-                  syncJumps(event.currentTarget);
-                }}
-                className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto text-[length:var(--vam-out-font-size,12px)]"
+                className="flex flex-col gap-2 text-[length:var(--vam-out-font-size,12px)]"
               >
                 {decision.output !== null && decision.output !== '' && (
                   <OutText output={decision.output} />
@@ -3174,8 +3149,10 @@ export function DetailPanel(props: DetailPanelProps) {
                      -- one motion story, not three -- and under
                      `prefers-reduced-motion` the dots park on at full opacity
                      (styles.css), which still reads as "still going". It is
-                     withheld from every stopped status for the reason recorded
-                     at PANE_STATUS_BREATHES. A null `activity` is a source that
+                     withheld from every stopped status -- `outIsLive` above is
+                     `running` AND newest-turn only, the same "still in
+                     motion" test the removed header's status dot used to
+                     make. A null `activity` is a source that
                      cannot say (model.ts): the sentence stays as the word and no
                      words are invented, because it asserts only that the session
                      is running, which it is. */
@@ -3218,7 +3195,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 )}
               </div>
             </section>
-          </>
+          </div>
         )}
       </div>
 

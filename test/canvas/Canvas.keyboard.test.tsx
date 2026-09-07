@@ -15,7 +15,7 @@
  * sidebar, tab strip and detail panel all follow the same single focus.
  */
 
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SmithApiError, type SmithClient } from '../../src/renderer/adapter/client.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
@@ -101,14 +101,31 @@ const EMPTY: CanvasModel = { projects: [] };
  * `h`/`l` walk that session's chain. What these tests assert — where focus
  * moved — is unchanged.
  */
+/**
+ * A12.2 removed `[data-prompt-target]`/`[data-prompt-project]` along with
+ * the rest of `DetailPanel`'s header — the tab now carries the session's
+ * name, and nothing in this pane carries the project's. Both halves of
+ * "which session has the keyboard" are read off the SIDEBAR instead, which
+ * this change does not touch: `[data-row-cursor]` marks the focused row
+ * (unconditionally, own hook, unrelated to the detail pane), and its
+ * project is found by walking up to the `[data-project-rows]` container
+ * that groups it and reading the matching heading's own name span (the
+ * heading also carries a bare session count with no separator, hence
+ * `span.truncate` rather than the heading's whole `textContent`).
+ */
+const focusedRow = () =>
+  document.querySelector('[data-row-cursor]')?.closest('[data-session-row]') ?? null;
 const focused = () => {
-  const title = document.querySelector('[data-prompt-target]')?.textContent ?? '';
+  const row = focusedRow();
+  const title = row?.querySelector('[data-row-title]')?.textContent ?? '';
   if (title === '' || title === 'No session selected') return '';
-  const project = document.querySelector('[data-prompt-project]')?.textContent ?? '';
+  const projectId = row?.closest('[data-project-rows]')?.getAttribute('data-project-rows') ?? '';
+  const heading = document.querySelector(`[data-project-heading][data-project-id="${projectId}"]`);
+  const project = heading?.querySelector('span.truncate')?.textContent ?? '';
   return `${project}/${title}`;
 };
 const mode = () => document.querySelector('[data-mode]')?.textContent ?? '';
-const promptTarget = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
+const promptTarget = () => focusedRow()?.querySelector('[data-row-title]')?.textContent ?? '';
 /** The full `in` or `out` text as the detail panel renders it. */
 const detailBlock = (which: 'in' | 'out') =>
   document.querySelector(`[data-detail-block="${which}"]`)?.textContent ?? '';
@@ -232,34 +249,34 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe('in and out are labelled differently in the node and in the pane', () => {
-  it('gives the right pane an icon AND the word, and its own scroll per region', () => {
+/**
+ * RETIRED: `'gives the right pane an icon AND the word, and its own scroll
+ * per region'` pinned the OLD three-fixed-height-pane layout — `in`,
+ * `progress` and `out` each with their own `flex-none`/`flex-1` share of
+ * the pane and, once `progress` was toggled open, their own
+ * `overflow-y-auto` scroller. A12.2 removes that layout outright: the three
+ * are one merged, continuously scrolling column now
+ * (`[data-detail-column]`), with no per-region scroller and no toggle to
+ * open. That shape is covered at length in `test/panels/DetailPanel.test.tsx`
+ * (`describe('`in` still caps its own text, inside one merged scrolling
+ * column (A12.2)', ...)` and `describe('the progress region is a single
+ * step, not a list of rows (A12.2)', ...)`) — unit-level, not through a full
+ * `<Canvas>` render, which is the right place for CSS-class-shaped
+ * assertions like these. What is still worth pinning HERE, through the real
+ * mount, is that the labelled glyphs survive the trip through `Canvas.tsx`'s
+ * own props at all — kept below.
+ */
+describe('in, progress and out are labelled through the real Canvas mount', () => {
+  it('gives the pane an icon AND the word for all three regions', () => {
     render(<Canvas model={MODEL} />);
-
-    // The pane has room for words and the operator asked for them back: an
-    // icon alone is ambiguous in the one place a decision gets made.
     const inBlock = document.querySelector('[data-detail-block="in"]');
     const outBlock = document.querySelector('[data-detail-block="out"]');
     const progress = document.querySelector('[data-detail-block="progress"]');
     expect(inBlock?.textContent).toContain('in');
     expect(outBlock?.textContent).toContain('out');
     expect(progress?.textContent).toContain('progress');
-
-    // Three regions, three scrollers. Before this the pane scrolled as one
-    // column, so reading a long answer pushed the request that prompted it off
-    // the top — the two things you compare were never on screen together.
-    // `progress` renders no list until it is opened, so its scroller is behind
-    // its own toggle; the other two are always there.
-    for (const block of [inBlock, outBlock]) {
-      expect(block?.querySelector('.vam-no-scrollbar')).not.toBeNull();
-    }
-    act(() => progress?.querySelector<HTMLButtonElement>('[data-progress-toggle]')?.click());
-    expect(progress?.querySelector('.vam-no-scrollbar')).not.toBeNull();
-    // And `out` is the one that grows: context stays short, the answer gets
-    // the height.
-    expect(outBlock?.className).toContain('flex-1');
-    expect(inBlock?.className).toContain('flex-none');
-    expect(progress?.className).toContain('flex-none');
+    // The one shared scroll column, mounted and reachable through Canvas.
+    expect(document.querySelector('[data-detail-column]')).not.toBeNull();
   });
 });
 
@@ -334,20 +351,24 @@ describe('walking sessions with j and k', () => {
  *
  * 0.2 migration, step 2: re-pointed, not deleted. It used to click a graph
  * step card (`[data-step-input]`, `stepNodeId(sessionId, decision.id)` in
- * the deleted `layout.ts`); the pane's own turns list
- * (`data-progress-select`, `DetailPanel.tsx`) is driven by the same
- * content-derived `decision.id` (`transcript.ts`'s `turnFingerprint`), so the
- * defect class is identical: a poll that adds a new turn must not swap the
- * content under a cursor an operator left on an OLDER one just because that
- * turn's position in the list moved. This is what proves that end to end,
- * through the real `<Canvas>` render and the real detail panel it drives.
+ * the deleted `layout.ts`); the pane's own turn picker
+ * (`[data-progress-jump]`, `DetailPanel.tsx` — a single `<select>` since
+ * A12.2, formerly a list of `data-progress-select` rows) is driven by the
+ * same content-derived `decision.id` (`transcript.ts`'s `turnFingerprint`),
+ * so the defect class is identical: a poll that adds a new turn must not
+ * swap the content under a cursor an operator left on an OLDER one just
+ * because that turn's position in the list moved. This is what proves that
+ * end to end, through the real `<Canvas>` render and the real detail panel
+ * it drives.
  */
 describe('a focused turn keeps its own content across a model refresh', () => {
   const selectTurnByLabel = (label: string) => {
-    const button = [...document.querySelectorAll<HTMLButtonElement>('[data-progress-select]')].find(
-      (el) => el.textContent?.includes(label),
-    );
-    act(() => button?.click());
+    const select = document.querySelector<HTMLSelectElement>('[data-progress-jump]');
+    const option = [...(select?.querySelectorAll('option') ?? [])].find((o) =>
+      o.textContent?.includes(label),
+    ) as HTMLOptionElement | undefined;
+    if (select === null || option === undefined) throw new Error(`no "${label}" turn to pick`);
+    act(() => fireEvent.change(select, { target: { value: option.value } }));
   };
 
   it('does not let a newly arrived turn swap the content under a focused older one', () => {
@@ -380,9 +401,7 @@ describe('a focused turn keeps its own content across a model refresh', () => {
     };
     const { rerender } = render(<Canvas model={before} />);
 
-    // Open the turns list, then pick the MIDDLE one -- slot 1 of 3 today,
-    // about to become slot 0.
-    act(() => document.querySelector<HTMLButtonElement>('[data-progress-toggle]')?.click());
+    // Pick the MIDDLE turn -- slot 1 of 3 today, about to become slot 0.
     selectTurnByLabel('middle');
     expect(detailBlock('in')).toContain('ask 1');
 
@@ -1050,13 +1069,18 @@ describe('waiting on you', () => {
     expect(focused()).toBe('alpha/urgent');
   });
 
-  it('says so with the pane\u2019s status dot, not with a line of prose', () => {
+  it('says so with the sidebar row, not with a line of prose in the pane', () => {
     render(<Canvas model={WAITING} />);
-    // The operator asked for the sentence under the tab bar to go. The state
-    // it carried is still on screen: the header dot is amber and breathing,
-    // and nothing else in the pane turns that class on.
+    // The operator asked for the sentence under the tab bar to go. RETIRED
+    // half: "the header dot is amber and breathing" \u2014 A12.2 removed that
+    // dot along with the rest of the header; the same `waiting` status is
+    // still on screen, on the sidebar row itself (`STATUS_DOT`,
+    // `SessionList.tsx`), which this change does not touch.
     expect(screen.queryByText('session stopped, waiting on you')).toBeNull();
-    expect(document.querySelector('[data-action-pane] .vam-breathe.bg-waiting')).not.toBeNull();
+    expect(document.querySelector('[data-action-pane] .vam-breathe.bg-waiting')).toBeNull();
+    expect(
+      document.querySelector('[data-session-row="urgent"] .vam-breathe.bg-waiting'),
+    ).not.toBeNull();
   });
 
   it('groups it apart in the palette', () => {
@@ -1645,7 +1669,7 @@ describe('Cmd-number jumps to a session while the sidebar has the keyboard', () 
     typeInto(box, 'half a prompt');
     keyOn(box, '1', { metaKey: true, code: 'Digit1' });
     expect(
-      document.querySelector('[data-tab][aria-pressed="true"]')?.getAttribute('data-tab'),
+      document.querySelector('[data-view][aria-pressed="true"]')?.getAttribute('data-view'),
     ).toBe('response');
     expect(focused()).toBe('alpha/a2');
     expect(promptInput()?.value).toBe('half a prompt');

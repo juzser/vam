@@ -471,7 +471,9 @@ describe('a modifier means the keystroke is not ours', () => {
 
   it('marks nothing for a modified digit, whichever modifier it is', () => {
     draw([QUESTION]);
-    for (const modifier of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }]) {
+    // Cmd and Ctrl claim nothing downstream (yet), so this list standing
+    // aside is the whole story and the event genuinely goes uncancelled.
+    for (const modifier of [{ metaKey: true }, { ctrlKey: true }]) {
       const notCancelled = fireEvent.keyDown(list(), {
         key: '2',
         code: 'Digit2',
@@ -481,6 +483,15 @@ describe('a modifier means the keystroke is not ours', () => {
       expect(notCancelled, JSON.stringify(modifier)).toBe(true);
       expect(picked(), JSON.stringify(modifier)).toHaveLength(0);
     }
+    // Alt IS claimed downstream now (A12.2, A2.5): `Alt+<digit>` picks a
+    // session view, a window listener of its own in `DetailPanel.tsx`. This
+    // is the collision the comment above predicted before anything actually
+    // answered to Alt -- "leaves the keystroke to the grammar" now means the
+    // grammar does something with it. What this list still owns is only
+    // that IT marks no option, asserted directly rather than through
+    // `defaultPrevented`, which the view switch legitimately claims.
+    fireEvent.keyDown(list(), { key: '2', code: 'Digit2', bubbles: true, altKey: true });
+    expect(picked()).toHaveLength(0);
   });
 
   it('leaves a modified arrow to whatever else wants it', () => {

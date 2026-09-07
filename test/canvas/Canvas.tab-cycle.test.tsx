@@ -43,7 +43,11 @@ const MODEL: CanvasModel = {
   ],
 };
 
-const focusedTitle = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
+const focusedTitle = () =>
+  document
+    .querySelector('[data-row-cursor]')
+    ?.closest('[data-session-row]')
+    ?.querySelector('[data-row-title]')?.textContent ?? '';
 const promptInput = () =>
   document.querySelector<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
 

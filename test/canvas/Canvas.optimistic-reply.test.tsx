@@ -159,11 +159,14 @@ const statusBar = () => document.querySelector('[data-status-bar]')?.textContent
 // Relocated from `stepInputs()` (0.2 migration step 2): the graph drew one
 // card per decision, so counting how many carried "ship it" caught a
 // reconciled model that still held a duplicate. The shell's `in` block shows
-// only the focused decision, but the progress toggle's count is drawn
-// straight off `entry.session.decisions.length` — a direct read of the same
-// array, not an incidental side effect of what one region happens to paint.
+// only the focused decision, but the progress count is drawn straight off
+// `entry.session.decisions.length` — a direct read of the same array, not an
+// incidental side effect of what one region happens to paint. A12.2 moved
+// this text off a toggle button (retired) onto its own
+// `[data-progress-count]` span, which is now the whole of the control's
+// non-interactive half — see `DetailPanel.tsx`.
 const turnsRead = () =>
-  Number(document.querySelector('[data-progress-toggle]')?.textContent?.match(/^\d+/)?.[0] ?? -1);
+  Number(document.querySelector('[data-progress-count]')?.textContent?.match(/^\d+/)?.[0] ?? -1);
 
 function press(key: string) {
   act(() => {

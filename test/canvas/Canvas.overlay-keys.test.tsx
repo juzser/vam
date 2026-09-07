@@ -45,7 +45,11 @@ const sheet = () => document.querySelector('[data-key-sheet]');
 const settings = () => document.querySelector('[data-settings-overlay]');
 const palette = () => document.querySelector('[cmdk-root]');
 const canvasPane = () => document.querySelector('[data-canvas-pane]');
-const focusedTitle = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
+const focusedTitle = () =>
+  document
+    .querySelector('[data-row-cursor]')
+    ?.closest('[data-session-row]')
+    ?.querySelector('[data-row-title]')?.textContent ?? '';
 
 function press(key: string, modifiers: KeyboardEventInit = {}) {
   act(() => {

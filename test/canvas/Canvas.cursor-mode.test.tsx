@@ -74,7 +74,11 @@ const QUIET: CanvasModel = {
 };
 
 const mode = () => document.querySelector('[data-mode]')?.textContent ?? '';
-const focusedSession = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
+const focusedSession = () =>
+  document
+    .querySelector('[data-row-cursor]')
+    ?.closest('[data-session-row]')
+    ?.querySelector('[data-row-title]')?.textContent ?? '';
 const options = () => [...document.querySelectorAll<HTMLElement>('[data-question-option]')];
 const optionLabel = (el: Element | null) =>
   el?.querySelector('span > span:last-child')?.textContent ?? '';

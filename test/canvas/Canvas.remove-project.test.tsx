@@ -85,7 +85,11 @@ const restore = (id: string) => document.querySelector(`[data-restore-project="$
 const stored = () => localStorage.getItem('vam.prefs.v1') ?? '';
 const statusFull = () =>
   document.querySelector('[data-status-bar] [data-status]')?.getAttribute('data-note') ?? '';
-const focusedTitle = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
+const focusedTitle = () =>
+  document
+    .querySelector('[data-row-cursor]')
+    ?.closest('[data-session-row]')
+    ?.querySelector('[data-row-title]')?.textContent ?? '';
 
 function press(key: string, modifiers: KeyboardEventInit = {}) {
   act(() => {
