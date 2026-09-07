@@ -72,6 +72,7 @@ import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../key
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
 import { nextNode } from '../keyboard/spatial-nav.js';
+import { ConfirmForceClose } from '../panels/ConfirmForceClose.js';
 import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
 import { GroupPicker, type GroupPickerChoice } from '../panels/GroupPicker.js';
 import { IconPicker } from '../panels/IconPicker.js';
@@ -420,6 +421,21 @@ function directoryName(cwd: string): string {
   return segments[segments.length - 1] ?? cwd;
 }
 
+/**
+ * Whether a rejected `closeSession` offers the confirmed kill route -- the
+ * source's own `SourceError.forcible`, and nothing this reads guesses at it:
+ * a plain `Error`, a string, or a refusal with the field absent all answer
+ * `false`, which is the safe default for a signal this destructive.
+ */
+function isForcible(cause: unknown): boolean {
+  return (
+    typeof cause === 'object' &&
+    cause !== null &&
+    'forcible' in cause &&
+    (cause as { forcible?: unknown }).forcible === true
+  );
+}
+
 /** Neither `window.api` nor its `usage` member exists in the browser build. */
 const UNKNOWN_SNAPSHOT: UsageSnapshot = { kind: 'unknown', reason: 'unavailable' };
 
@@ -766,8 +782,18 @@ function CanvasInner({
    *  icon or its key just asked for `remote` directly (see `openSettings`). */
   const [settingsSection, setSettingsSection] = useState<SectionId>('appearance');
   const [errorLogOpen, setErrorLogOpen] = useState(false);
+  /**
+   * The row a close refused without being able to prove it is not vam's own
+   * -- `SourceError.forcible` -- and offered the operator a confirmed kill
+   * for. `null` means no such prompt is on screen. See `ConfirmForceClose`.
+   */
+  const [confirmForceClose, setConfirmForceClose] = useState<{
+    sessionId: string;
+    title: string;
+  } | null>(null);
   /** Any full-screen overlay on screen. See the keydown handler for the rule. */
-  const overlayOpen = paletteOpen || keySheetOpen || settingsOpen || errorLogOpen;
+  const overlayOpen =
+    paletteOpen || keySheetOpen || settingsOpen || errorLogOpen || confirmForceClose !== null;
   /**
    * Whether the source has a terminal to draw, which decides how many tabs the
    * bar has. Read in two places -- the pane is told, and `Mod-<digit>` counts
@@ -1702,7 +1728,7 @@ function CanvasInner({
    * ended sessions that were still running.
    */
   const closeSession = useCallback(
-    async (sessionId: string, title: string): Promise<boolean> => {
+    async (sessionId: string, title: string, force = false): Promise<boolean> => {
       if (pendingAction !== null) {
         // NAMED, and named for the session the operator just clicked: only
         // the pending control is disabled, so this click landed on a `×` that
@@ -1728,16 +1754,24 @@ function CanvasInner({
         return false;
       }
       setPendingAction(sessionId);
-      setStatus(`stopping "${title}"…`);
+      setStatus(force ? `force-closing "${title}"…` : `stopping "${title}"…`);
       try {
-        await sessionSource.write.closeSession(sessionId);
+        await sessionSource.write.closeSession(sessionId, force);
         setStatus(
-          `stopped "${title}" — the conversation is kept; resume it with \`claude attach\``,
+          force
+            ? `killed "${title}" — vam could not confirm it was one of its own, and it is now gone`
+            : `stopped "${title}" — the conversation is kept; resume it with \`claude attach\``,
         );
         source.onWrote();
         return true;
       } catch (cause) {
         setStatus(noteFailure('close session', cause));
+        // A SECOND, DELIBERATE STEP -- never offered again on a force call
+        // that itself failed, and never on anything but the source's own
+        // `forcible: true`: the close key alone must never reach a kill.
+        if (!force && isForcible(cause)) {
+          setConfirmForceClose({ sessionId, title });
+        }
         return false;
       } finally {
         // EVERY path, and that is the whole of this `finally`. A spinner still
@@ -2583,6 +2617,7 @@ function CanvasInner({
           setComposing(false);
           setRenamingId(null);
           setPickingIconFor(null);
+          setConfirmForceClose(null);
           setMode('select');
           setStatus(null);
           return;
@@ -3184,6 +3219,18 @@ function CanvasInner({
             setPaletteOpen(false);
           }}
           onClose={() => setPaletteOpen(false)}
+        />
+      )}
+
+      {confirmForceClose !== null && (
+        <ConfirmForceClose
+          title={confirmForceClose.title}
+          onConfirm={() => {
+            const target = confirmForceClose;
+            setConfirmForceClose(null);
+            void closeSession(target.sessionId, target.title, true);
+          }}
+          onCancel={() => setConfirmForceClose(null)}
         />
       )}
 

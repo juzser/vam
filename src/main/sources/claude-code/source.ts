@@ -53,7 +53,12 @@ import { createBranchLookup } from './repo-branch.js';
 import { readPublishedPanes, readPublishedPanesAndProcessFacts } from './session-pane.js';
 import { defaultSessionsRoot } from './session-status.js';
 import { readUserSlashCommands } from './slash-commands.js';
-import { stopSession, stopSessionViaCli } from './stop.js';
+import {
+  killPidViaSignal,
+  pidHasClaudeSessionFile,
+  stopSession,
+  stopSessionViaCli,
+} from './stop.js';
 import {
   compactAge,
   EMPTY_FACTS,
@@ -497,7 +502,7 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    * stopped at all, and a canvas drawn minutes ago is not evidence about a
    * process now.
    */
-  closeSession: async (sessionId) => {
+  closeSession: async (sessionId, force = false) => {
     const agentsResult = await listLiveAgents();
     if (agentsResult.kind === 'unavailable') return agentsUnavailableError(agentsResult);
     return stopSession(
@@ -510,6 +515,16 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       // The published pairing, without which a project holding more than one
       // live session can prove nothing and close refuses every row in it.
       await readPublishedPanes(defaultSessionsRoot()),
+      force,
+      // The confirmed last resort, real only here: a raw signal to the pid
+      // `claude agents --json` reported, for the row a tmux route could not
+      // verify at all. See `stop.ts` for what it will and will not do.
+      killPidViaSignal,
+      // Re-checked at the moment force actually signals, not at this poll --
+      // `row.pid` is already stale by the time it gets here. See
+      // `pidHasClaudeSessionFile`'s own doc for what the check does and does
+      // not prove.
+      pidHasClaudeSessionFile(defaultSessionsRoot()),
     );
   },
   /**

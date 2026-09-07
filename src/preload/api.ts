@@ -63,7 +63,12 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
       unwrap<void>(ipc.invoke(CHANNELS.recordPrompt, sessionId, prompt)),
     renameSession: (sessionId, title) =>
       unwrap<void>(ipc.invoke(CHANNELS.renameSession, sessionId, title)),
-    closeSession: (sessionId) => unwrap<void>(ipc.invoke(CHANNELS.closeSession, sessionId)),
+    closeSession: (sessionId, force) =>
+      unwrap<void>(
+        force === undefined
+          ? ipc.invoke(CHANNELS.closeSession, sessionId)
+          : ipc.invoke(CHANNELS.closeSession, sessionId, force),
+      ),
     // The provider is forwarded ONLY when the renderer named one: main takes
     // an absent third argument as "your default provider", and sending an
     // explicit `undefined` would make the arity two-or-three at every layer

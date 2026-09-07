@@ -72,7 +72,7 @@ export type PreloadSourceApi = {
   subscribe(onChange: () => void): () => void;
   recordPrompt(sessionId: string, prompt: string): Promise<void>;
   renameSession(sessionId: string, title: string): Promise<void>;
-  closeSession(sessionId: string): Promise<void>;
+  closeSession(sessionId: string, force?: boolean): Promise<void>;
   createSession(projectId: string, title: string, provider?: string): Promise<void>;
   createSessionIn(cwd: string, title: string, provider?: string): Promise<void>;
   /**

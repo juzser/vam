@@ -96,11 +96,19 @@ const isDirectoryPath = (value: unknown): boolean =>
  */
 const isOptionalText = (value: unknown): boolean => value === undefined || isText(value);
 
+/**
+ * `closeSession`'s second argument -- the confirmed kill-anyway. Same
+ * "admits `undefined`" trick as `isOptionalText`: a renderer that predates
+ * `force` sends nothing, and that is still a valid, non-forcing call.
+ */
+const isOptionalBool = (value: unknown): boolean =>
+  value === undefined || typeof value === 'boolean';
+
 /** What each argumentful channel accepts, positionally. Arity is part of it. */
 const ARGUMENTS: Record<string, readonly ((value: unknown) => boolean)[]> = {
   [CHANNELS.recordPrompt]: [isText, isPromptText],
   [CHANNELS.renameSession]: [isText, isText],
-  [CHANNELS.closeSession]: [isText],
+  [CHANNELS.closeSession]: [isText, isOptionalBool],
   [CHANNELS.createSession]: [isText, isText, isOptionalText],
   [CHANNELS.createSessionIn]: [isDirectoryPath, isText, isOptionalText],
   [CHANNELS.applyWaivers]: [isText, isTextList],
@@ -199,7 +207,10 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
         return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
       }
       if (channel === CHANNELS.closeSession && source.closeSession !== undefined) {
-        const failure = await source.closeSession(args[0] as string);
+        const failure = await source.closeSession(
+          args[0] as string,
+          args[1] as boolean | undefined,
+        );
         return failure === null ? { ok: true, value: undefined } : { ok: false, error: failure };
       }
       if (channel === CHANNELS.createSession && source.createSession !== undefined) {

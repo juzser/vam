@@ -35,7 +35,8 @@ export type MainSource = {
    * "this one is a terminal you are sitting in" -- keeps its code and its
    * words instead of being flattened into `unreachable/source-failed`.
    */
-  closeSession?(sessionId: string): Promise<SourceError | null>;
+  /** `force` is the confirmed kill-anyway route -- see `SourceWrites.closeSession`. */
+  closeSession?(sessionId: string, force?: boolean): Promise<SourceError | null>;
   /**
    * Start a new session in a project, present only on a source that really
    * can. Same contract again: it RESOLVES to the `SourceError`, so "vam
