@@ -197,6 +197,10 @@ function useFilterPopoverCap(
 
 export type SessionListProps = {
   readonly entries: readonly SessionEntry[];
+  /** True while the first read of the source is still out (`useSourceModel`)
+   *  — "no sessions" and "still asking" must read differently. Optional,
+   *  defaulting to `false`. */
+  readonly loading?: boolean;
   /**
    * The same sessions BEFORE any narrowing -- `Canvas`'s `allEntries`.
    *
@@ -437,6 +441,7 @@ export type SessionListProps = {
 export const SessionList = memo(function SessionList(props: SessionListProps) {
   const {
     entries,
+    loading = false,
     allEntries: unfiltered,
     focusedSessionId,
     keyboardHere = false,
@@ -621,11 +626,14 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   const [confirming, setConfirming] = useState<Project | null>(null);
 
   const projectMenuRefs = useRef(new Map<string, HTMLButtonElement>());
+  const groupMenuRefs = useRef(new Map<string, HTMLButtonElement>());
   const foldRefs = useRef(new Map<string, HTMLButtonElement>());
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const projectPanelRef = useRef<HTMLDivElement>(null);
+  const groupPanelRef = useRef<HTMLDivElement>(null);
   const openMenuWas = useRef<string | null>(null);
+  const openGroupMenuWas = useRef<string | null>(null);
 
   const toggleCollapse = useCallback(
     (project: Project) => {
@@ -774,6 +782,53 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     }
     openMenuWas.current = openMenu;
   }, [openMenu, confirming]);
+
+  /** A press outside a project's action menu closes it — same idiom as the
+   *  filter popover above: `pointerdown`, and the toggle excluded so pressing
+   *  it does not close-then-reopen in one press. */
+  useEffect(() => {
+    if (openMenu === null) {
+      return;
+    }
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target as globalThis.Node | null;
+      if (target === null) return;
+      if (projectPanelRef.current?.contains(target) === true) return;
+      if (projectMenuRefs.current.get(openMenu)?.contains(target) === true) return;
+      setOpenMenu(null);
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [openMenu]);
+
+  /** Same contract as the project menu above, for the group's own action
+   *  menu. `groupDraft === null` guards it exactly as `confirming === null`
+   *  guards the project one: "Rename" opens an inline editor that
+   *  autofocuses and cancels itself on blur, so stealing focus back to the
+   *  toggle right after would silently wipe what it just opened. */
+  useEffect(() => {
+    if (openGroupMenu !== null) {
+      groupPanelRef.current?.querySelector('button')?.focus();
+    } else if (openGroupMenuWas.current !== null && groupDraft === null) {
+      groupMenuRefs.current.get(openGroupMenuWas.current)?.focus();
+    }
+    openGroupMenuWas.current = openGroupMenu;
+  }, [openGroupMenu, groupDraft]);
+
+  useEffect(() => {
+    if (openGroupMenu === null) {
+      return;
+    }
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target as globalThis.Node | null;
+      if (target === null) return;
+      if (groupPanelRef.current?.contains(target) === true) return;
+      if (groupMenuRefs.current.get(openGroupMenu)?.contains(target) === true) return;
+      setOpenGroupMenu(null);
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [openGroupMenu]);
 
   /**
    * How many rules are narrowing the list right now — the badge's number.
@@ -1063,75 +1118,75 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
         {/* The layer above: a group of the projects vam already knows, named
             "project" because that is the operator's word for it (see the
             vocabulary table in `domain/model.ts`). LEFT of the directory
-            picker, which is untouched and unmoved: that one is the only route
-            to a repository vam has never seen, and this one cannot reach a
-            directory at all. Both are the same 26px square, in the row that
-            already held two.
+            picker, untouched and unmoved. Both are the same 26px square.
 
-            THE ACCESSIBLE NAME IS QUALIFIED AND THE VISIBLE TITLE IS NOT.
-            "new project" is the name the control beside this one has answered
-            to since before the group layer existed, and two squares in one row
-            answering to one name is worse for a screen reader than a longer
-            phrase is for anyone. The tooltip a person reads is the operator's
-            word, unqualified; see the note in the plan -- this pairing is the
-            one open UI question and it is theirs to settle. */}
+            THE ACCESSIBLE NAME STAYS QUALIFIED; renaming it would ripple into
+            `screen.getByLabelText` in the canvas's own new-session tests, well
+            past the two controls the operator actually looked at. So the
+            TOOLTIP -- what a sighted or keyboard-focused person reads -- does
+            the disambiguating instead: "a group of repos" says plainly this
+            button makes the OUTER layer, not the same thing as the button
+            beside it. */}
         {onCreateGroup !== undefined && (
+          <ShortcutTip label="New project (a group of repos)">
+            <button
+              type="button"
+              data-new-group
+              aria-label="new project (a group of repos)"
+              onClick={() => {
+                setGroupDraftName('');
+                setGroupDraft({ kind: 'new' });
+              }}
+              className="vam-tap flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center text-ink-faint"
+            >
+              {/* THE HIT IS 44 ON A PHONE, THE PAINT IS 30. On the desktop this
+                  skin is the 26px square the button used to be and nothing
+                  moves. On a phone `.vam-phone .vam-tap` grows the BUTTON to 44
+                  and `styles.css` sizes the skin to 30 -- because what makes a
+                  phone control read as too big is not the 44, it is a
+                  `border-line` rectangle drawn AT 44 around a 13px glyph
+                  (UI spec `vam-phone-controls`, 2.1 and 3.1). The per-project
+                  `+` beside it is the same 44 box with no border and reads
+                  correctly sized, which is the whole finding. Not the desktop's
+                  `vam-hit-24` inversion: that hangs the hit area off an
+                  `::after`, and the phone guard reads
+                  `getBoundingClientRect()` on the element, which cannot see
+                  one. */}
+              <span
+                aria-hidden="true"
+                data-tap-skin
+                className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border border-line bg-panel hover:border-line-strong"
+              >
+                <FolderPlus size={13} strokeWidth={1.6} />
+              </span>
+            </button>
+          </ShortcutTip>
+        )}
+        {/* Choose a directory, start a session in it — the only thing this
+            button does; a project is derived from the cwd of a live session,
+            so there is nothing to create and nothing to store. THE TOOLTIP
+            NAMES THE ACTION, NOT "project": the accessible name stays "new
+            project" (see the button above), but the words a person reads on
+            focus never repeat the word the group button just used for
+            something else. */}
+        <ShortcutTip label={newSessionDecline ?? 'Choose a directory and start a session in it'}>
           <button
             type="button"
-            data-new-group
-            aria-label="new project (a group of repos)"
-            onClick={() => {
-              setGroupDraftName('');
-              setGroupDraft({ kind: 'new' });
-            }}
-            title="New project"
+            data-new-project
+            aria-label="new project"
+            onClick={onNewProject}
             className="vam-tap flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center text-ink-faint"
+            {...pending(NEW_PROJECT_PENDING, 'Starting a session in the chosen directory…')}
           >
-            {/* THE HIT IS 44 ON A PHONE, THE PAINT IS 30. On the desktop this
-                skin is the 26px square the button used to be and nothing
-                moves. On a phone `.vam-phone .vam-tap` grows the BUTTON to 44
-                and `styles.css` sizes the skin to 30 -- because what makes a
-                phone control read as too big is not the 44, it is a
-                `border-line` rectangle drawn AT 44 around a 13px glyph
-                (UI spec `vam-phone-controls`, 2.1 and 3.1). The per-project
-                `+` beside it is the same 44 box with no border and reads
-                correctly sized, which is the whole finding. Not the desktop's
-                `vam-hit-24` inversion: that hangs the hit area off an
-                `::after`, and the phone guard reads
-                `getBoundingClientRect()` on the element, which cannot see
-                one. */}
             <span
               aria-hidden="true"
               data-tap-skin
               className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border border-line bg-panel hover:border-line-strong"
             >
-              <FolderPlus size={13} strokeWidth={1.6} />
+              <Plus size={13} strokeWidth={1.6} />
             </span>
           </button>
-        )}
-        {/* Choose a directory, start a session in it. That is the ONLY thing
-            "new project" can mean here: a project is derived from the cwd of
-            a live session, so there is nothing to create and nothing to
-            store. Same 26px square as the filter control beside it — two
-            controls in one row that are the same kind of thing. No chord is
-            bound to it and none is captioned. */}
-        <button
-          type="button"
-          data-new-project
-          aria-label="new project"
-          onClick={onNewProject}
-          title={newSessionDecline ?? 'Choose a directory and start a session in it'}
-          className="vam-tap flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center text-ink-faint"
-          {...pending(NEW_PROJECT_PENDING, 'Starting a session in the chosen directory…')}
-        >
-          <span
-            aria-hidden="true"
-            data-tap-skin
-            className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border border-line bg-panel hover:border-line-strong"
-          >
-            <Plus size={13} strokeWidth={1.6} />
-          </span>
-        </button>
+        </ShortcutTip>
         {/* Search answers "the one called permalink"; this answers "the ones
             that stopped" — two different questions, so two controls. */}
         <ShortcutTip label="Filter sessions" action={FILTER_MENU_ACTION}>
@@ -1380,6 +1435,13 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     {hasGroupMenu && (
                       <button
                         type="button"
+                        ref={(node) => {
+                          if (node === null) {
+                            groupMenuRefs.current.delete(group.id);
+                          } else {
+                            groupMenuRefs.current.set(group.id, node);
+                          }
+                        }}
                         data-group-menu={group.id}
                         aria-haspopup="menu"
                         aria-expanded={openGroupMenu === group.id}
@@ -1449,6 +1511,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
 
                     {openGroupMenu === group.id && (
                       <div
+                        ref={groupPanelRef}
                         data-group-menu-panel={group.id}
                         role="menu"
                         aria-label={`${group.name} actions`}
@@ -2096,7 +2159,19 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             );
           })}
 
-          {entries.length === 0 && (
+          {entries.length === 0 && loading && (
+            // First read still out -- distinct from "no sessions" below and
+            // from a failure, which the banner above the canvas already
+            // names. Same spinner as the row-busy indicator above.
+            <li
+              data-sidebar-loading
+              className="flex items-center gap-1.5 px-1 py-4 text-[11px] text-ink-dim"
+            >
+              <LoaderCircle size={11} strokeWidth={1.8} className="vam-spin" />
+              Loading sessions…
+            </li>
+          )}
+          {entries.length === 0 && !loading && (
             <li className="px-1 py-4 text-[11px] text-ink-dim">
               {filter.trim() === '' ? 'No sessions yet' : 'No match'}
             </li>

@@ -48,7 +48,12 @@ function gatedSource() {
 
 /** Renders the hook and exposes its latest return value. */
 function mount(source: SessionSource | null) {
-  const seen: { model: CanvasModel; error: string | null; reload: () => void }[] = [];
+  const seen: {
+    model: CanvasModel;
+    error: string | null;
+    loading: boolean;
+    reload: () => void;
+  }[] = [];
   function Probe() {
     seen.push(useSourceModel(source));
     return null;
@@ -164,5 +169,35 @@ describe('useSourceModel', () => {
     });
     expect(latest()?.model.projects).toEqual([]);
     expect(latest()?.error).toBeNull();
+  });
+
+  describe('loading: distinct from an empty model and from a failed one', () => {
+    it('starts loading, and stays loading with no source at all — there is no answer yet', () => {
+      const { latest } = mount(null);
+      expect(latest()?.loading).toBe(true);
+    });
+
+    it('clears once the first load answers, empty or not, and never returns on a later poll', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: false });
+      const { source, pending } = gatedSource();
+      const { latest } = mount(source);
+      expect(latest()?.loading).toBe(true);
+      await act(async () => pending[0]?.resolve([]));
+      expect(latest()?.loading).toBe(false);
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS);
+      });
+      expect(latest()?.loading).toBe(false);
+      await act(async () => pending[1]?.resolve(projects('later')));
+      expect(latest()?.loading).toBe(false);
+    });
+
+    it('clears on a first load that FAILS too — a stuck spinner is its own lie', async () => {
+      const { source, pending } = gatedSource();
+      const { latest } = mount(source);
+      await act(async () => pending[0]?.reject(new Error('claude went away')));
+      expect(latest()?.loading).toBe(false);
+      expect(latest()?.error).toMatch(/claude went away/);
+    });
   });
 });

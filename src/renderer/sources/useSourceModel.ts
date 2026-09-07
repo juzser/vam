@@ -46,10 +46,15 @@ const EMPTY: CanvasModel = { projects: [] };
 export function useSourceModel(source: SessionSource | null): {
   readonly model: CanvasModel;
   readonly error: string | null;
+  /** True until the FIRST load answers — success or failure, either settles
+   *  it, never again after. Empty `model.projects` and `loading: true` are
+   *  two different sentences ("nothing here" vs. "still asking"). */
+  readonly loading: boolean;
   readonly reload: () => void;
 } {
   const [model, setModel] = useState<CanvasModel>(EMPTY);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   // Refs, not state: these coordinate loads and must never cause a render.
   const cancelled = useRef(false);
@@ -86,6 +91,11 @@ export function useSourceModel(source: SessionSource | null): {
         if (seq === issued.current) {
           inFlight.current = false;
         }
+        // Settled, win or lose -- once an answer has arrived, no later poll
+        // puts "loading" back; that is `error`'s job.
+        if (mine()) {
+          setLoading(false);
+        }
       });
   }, [source]);
 
@@ -105,5 +115,5 @@ export function useSourceModel(source: SessionSource | null): {
     };
   }, [source, load]);
 
-  return { model, error, reload: load };
+  return { model, error, loading, reload: load };
 }

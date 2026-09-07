@@ -132,6 +132,31 @@ describe('a tooltip states the label and the shortcut in force', () => {
   });
 });
 
+describe('the label and the shortcut read on one line', () => {
+  it('puts the label and its chord in the same row when the meaning is unambiguous', () => {
+    renderTip();
+    const tip = openByFocus();
+    const keys = tip.querySelector('[data-tip-keys]');
+    expect(keys).not.toBeNull();
+    const label = screen.getByText('Settings');
+    expect(label.parentElement).toBe(keys?.parentElement);
+  });
+
+  it('keeps a header line above the per-mode rows when the meaning depends on cursor mode', () => {
+    // Two distinct mode meanings cannot share one row with the label without
+    // repeating it — the label stays a header, and each mode keeps its own
+    // single line of caption + keys, unchanged from before this layout pass.
+    renderTip({ label: 'move left', action: MOVE_LEFT });
+    const tip = openByFocus();
+    const label = screen.getByText('move left');
+    const keys = tip.querySelectorAll('[data-tip-keys]');
+    expect(keys.length).toBe(2);
+    for (const chip of keys) {
+      expect(chip.parentElement).not.toBe(label.parentElement);
+    }
+  });
+});
+
 describe('a mode-dependent binding is never flattened to one meaning', () => {
   it('states the meaning of the mode that applies, when the caller knows it', () => {
     renderTip({ label: 'move left', action: MOVE_LEFT, mode: 'insert' });
@@ -163,6 +188,25 @@ describe('shortcutLines: the pure reading of the table', () => {
 });
 
 describe('the sidebar is wired to it', () => {
+  it('gives the "new group" and "new repo" header buttons a tooltip each, and says which is which', () => {
+    render(<SessionList {...baseProps(entriesOf([makeSession()]))} onCreateGroup={() => {}} />);
+    const groupText =
+      openByFocus(screen.getByLabelText('new project (a group of repos)')).textContent ?? '';
+    cleanup();
+    render(<SessionList {...baseProps(entriesOf([makeSession()]))} onCreateGroup={() => {}} />);
+    const repoText = openByFocus(screen.getByLabelText('new project')).textContent ?? '';
+    // Two side-by-side "+" squares that both say "project" is the confusion
+    // the operator reported; the tooltips must not repeat it.
+    expect(groupText.toLowerCase()).toContain('group');
+    expect(repoText.toLowerCase()).not.toContain('group');
+  });
+
+  it('gives the filter toggle a tooltip too (already wired, pinned here alongside its siblings)', () => {
+    render(<SessionList {...baseProps(entriesOf([makeSession()]))} />);
+    const text = openByFocus(screen.getByLabelText('filter sessions')).textContent ?? '';
+    expect(text.toLowerCase()).toContain('filter');
+  });
+
   it('gives the settings button a tooltip carrying the chord in force', () => {
     setActiveBindings({ [actionId(SETTINGS)]: ['Q'] });
     render(<SessionList {...baseProps(entriesOf([makeSession()]))} />);

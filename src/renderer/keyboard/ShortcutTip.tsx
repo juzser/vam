@@ -148,6 +148,12 @@ export function ShortcutTip({
   readonly children: ReactNode;
 }) {
   const lines = shortcutLines(action, mode);
+  // One line, not two, EXCEPT where a caption is doing real work: a
+  // mode-dependent action already reads as "caption  keys" per row, and
+  // folding the label in too would overflow the 280px box for anything but a
+  // short label. So only the unambiguous case (no caption) merges; a
+  // mode-qualified action keeps the label as a header above its row(s).
+  const merge = lines.length <= 1 && (lines[0]?.caption ?? null) === null;
   const body = (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>{children}</Tooltip.Trigger>
@@ -162,20 +168,36 @@ export function ShortcutTip({
         >
           {/* ink on raised (14.9:1 dark, 15.5:1 light) and ink-dim (6.7:1 in
               both), never ink-faint: faint measures 3.27 / 3.01, under AA. */}
-          <span className="text-ink">{label}</span>
-          {lines.map((line) => (
-            <span key={line.caption ?? line.keys} className="flex items-baseline gap-1.5">
-              {line.caption === null ? null : (
-                <span className="min-w-0 flex-1 text-ink-dim">{line.caption}</span>
+          {merge ? (
+            <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+              <span className="min-w-0 flex-1 text-ink">{label}</span>
+              {lines[0] === undefined ? null : (
+                <span
+                  data-tip-keys
+                  className="shrink-0 rounded-[4px] border border-line-strong px-1 py-px font-mono text-[10px] text-ink-dim"
+                >
+                  {lines[0].keys}
+                </span>
               )}
-              <span
-                data-tip-keys
-                className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-[10px] text-ink-dim"
-              >
-                {line.keys}
-              </span>
             </span>
-          ))}
+          ) : (
+            <>
+              <span className="text-ink">{label}</span>
+              {lines.map((line) => (
+                <span key={line.caption ?? line.keys} className="flex items-baseline gap-1.5">
+                  {line.caption === null ? null : (
+                    <span className="min-w-0 flex-1 text-ink-dim">{line.caption}</span>
+                  )}
+                  <span
+                    data-tip-keys
+                    className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-[10px] text-ink-dim"
+                  >
+                    {line.keys}
+                  </span>
+                </span>
+              ))}
+            </>
+          )}
         </Tooltip.Content>
       </Tooltip.Portal>
     </Tooltip.Root>

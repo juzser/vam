@@ -223,7 +223,7 @@ function SourceCanvas({
   readonly source: SessionSource | null;
   readonly failure: string | null;
 }) {
-  const { model, error, reload } = useSourceModel(source);
+  const { model, error, loading, reload } = useSourceModel(source);
   const shown = failure ?? error;
 
   // Empty and saying why, never a fixture standing in for a source that failed.
@@ -261,7 +261,7 @@ function SourceCanvas({
                   // `shown` set there is no source and there will not be one, so
                   // the cell says that instead of connecting forever.
                   { kind: 'connecting', error: shown }
-                : { kind: 'session', source, error: shown, onWrote: reload }
+                : { kind: 'session', source, error: shown, loading, onWrote: reload }
             }
           />
         </ErrorBoundary>
