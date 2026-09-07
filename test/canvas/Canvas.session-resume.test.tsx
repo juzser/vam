@@ -154,17 +154,23 @@ describe('what a launch that touches nothing costs', () => {
     return seen;
   }
 
-  it('writes twice on the first launch — once per field — and then settles', () => {
+  it('writes three times on the first launch — once per field — and then settles', () => {
     const first = writes(() => render(<Canvas model={MODEL} />));
-    // Two, not one, and the count is asserted rather than bounded: the tab
-    // settles to its default and focus lands, each once, from two independent
-    // effects. Anything more than two would be an effect re-triggering itself.
-    expect(first).toHaveLength(2);
+    // Three, not two, since the tab shell: the detail tab settles to its
+    // default, focus lands, and the session focus landed on opens a tab —
+    // each once, from three independent effects. `openTabs` is the third and
+    // newest: opening a session from the sidebar opens a tab (epic.md), and
+    // the FIRST session focus ever lands on is no exception — there has to
+    // be a tab open for it, or the strip would claim nothing is open while
+    // the detail pane plainly shows something. Anything more than three
+    // would be an effect re-triggering itself.
+    expect(first).toHaveLength(3);
     expect(JSON.parse(first[0] ?? '{}').detailTab).toBe('Response');
     expect(JSON.parse(first[1] ?? '{}').lastFocus).toEqual({
       source: 'factory',
       session: 'a1',
     });
+    expect(JSON.parse(first[2] ?? '{}').openTabs).toEqual([{ source: 'factory', session: 'a1' }]);
   });
 
   it('writes nothing at all on the next launch, having nothing new to say', () => {
@@ -174,9 +180,13 @@ describe('what a launch that touches nothing costs', () => {
   });
 
   it('keeps every key it does not model, because it never rewrites unprompted', () => {
+    // `openTabs` seeded too, matching what the launch would compute anyway:
+    // with nothing left unmodeled to say, all three settling effects find
+    // their guard already satisfied and none of them writes.
     seed({
       lastFocus: { source: 'factory', session: 'a1' },
       detailTab: 'Response',
+      openTabs: [{ source: 'factory', session: 'a1' }],
       somethingNewer: 7,
     });
     render(<Canvas model={MODEL} />);
