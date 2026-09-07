@@ -462,6 +462,23 @@ export type Prefs = {
    * first is a fact about you, not about a session.
    */
   readonly detailTab: string | null;
+  /**
+   * Which session tabs are open, in the order they are drawn — OWNED STATE,
+   * not the incidental order sessions happened to be focused in.
+   *
+   * Persisted for the same reason `panes` and `theme` are exempt from the
+   * icon TTL: a hand-arranged tab order the app forgets on restart is worse
+   * than no arrangement at all (epic.md Amendment A1.5), and that holds even
+   * before drag-reordering ships — the mere OPEN order is already something
+   * the operator built up one click at a time.
+   *
+   * Same shape as `lastFocus`, one level up: a session id is unique only
+   * within its source, so each entry carries both. Unlike `lastFocus`, a
+   * single pointer dropped whole on a bad shape, this is a LIST — one
+   * malformed entry must not cost its well-formed neighbours, the same
+   * defence `icons`/`renames` give their own buckets.
+   */
+  readonly openTabs: readonly FocusChoice[];
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -485,6 +502,7 @@ export const EMPTY_PREFS: Prefs = {
   defaultProvider: DEFAULT_PROVIDER_ID,
   lastFocus: null,
   detailTab: null,
+  openTabs: [],
 };
 
 /**
@@ -711,6 +729,10 @@ function parsePrefs(
     // Anything that is not a string is "no tab remembered", which is what a
     // payload from a vam predating this field already says by having no key.
     detailTab: readDetailTab((parsed as { detailTab?: unknown }).detailTab),
+    // Per field like `lastFocus` above it, and for the same reason there is
+    // no source migration here: this field did not exist before the tab
+    // shell, so no stored payload can carry an entry under the old id.
+    openTabs: readOpenTabs((parsed as { openTabs?: unknown }).openTabs),
   };
 }
 
@@ -1085,6 +1107,28 @@ function readLastFocus(raw: unknown): FocusChoice | null {
   return { source, session };
 }
 
+/**
+ * The open tabs, in order. A LIST of the same `{ source, session }` pointer
+ * `readLastFocus` validates one of, so each entry is checked the same way --
+ * but here a malformed entry is DROPPED, not disqualifying, because a list is
+ * many independent facts and one bad one must not cost its well-formed
+ * neighbours. Not an array at all reads as "nothing open", exactly what a
+ * payload written before this field existed already means by having no key.
+ */
+function readOpenTabs(raw: unknown): readonly FocusChoice[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const tabs: FocusChoice[] = [];
+  for (const entry of raw) {
+    const choice = readLastFocus(entry);
+    if (choice !== null) {
+      tabs.push(choice);
+    }
+  }
+  return tabs;
+}
+
 /** A string or nothing. The only check the store is entitled to make: it does
  *  not know what the tabs are called, so it cannot say more than "this is the
  *  kind of thing a tab name is". */
@@ -1100,6 +1144,17 @@ export function setDetailTab(prefs: Prefs, detailTab: string | null): Prefs {
 /** Written whenever focus lands somewhere; `null` forgets the pointer. */
 export function setLastFocus(prefs: Prefs, lastFocus: FocusChoice | null): Prefs {
   return { ...prefs, lastFocus };
+}
+
+/**
+ * Written whenever a tab opens, closes, or (once dragging ships) moves.
+ *
+ * Replaces the whole list rather than merging it: the caller already holds
+ * the complete, ordered set of open tabs — that is what "owned state" means —
+ * so there is nothing here to reconcile against what was stored before.
+ */
+export function setOpenTabs(prefs: Prefs, openTabs: readonly FocusChoice[]): Prefs {
+  return { ...prefs, openTabs };
 }
 
 function readPanes(raw: unknown): Prefs['panes'] {

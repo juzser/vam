@@ -23,17 +23,14 @@
  */
 
 import {
-  Background,
   type Edge,
-  MiniMap,
   type Node,
   ReactFlow,
   ReactFlowProvider,
   useNodesState,
   useReactFlow,
-  useStore,
 } from '@xyflow/react';
-import { Box, Factory, FlaskConical, type LucideIcon, Maximize } from 'lucide-react';
+import { Box, Factory, FlaskConical, type LucideIcon } from 'lucide-react';
 import {
   Children,
   type ComponentProps,
@@ -108,6 +105,7 @@ import {
   deleteGroup,
   type EffectiveTheme,
   FOCUS_SHARE_OFF,
+  type FocusChoice,
   isGroupCollapsed,
   isProjectHidden,
   type Prefs,
@@ -121,6 +119,7 @@ import {
   setIcon,
   setLastFocus,
   setLayout,
+  setOpenTabs,
   setPaneVisibility,
   setPaneWidth,
   setProjectHidden,
@@ -502,6 +501,19 @@ function SidebarSlot({ show, ...props }: ComponentProps<typeof SessionList> & { 
   return show ? <SessionList {...props} /> : null;
 }
 
+/**
+ * ONE `DetailPanel` instance, fed whichever tab is active — not one instance
+ * per open tab. Keying it by session id was tried and reverted: switching
+ * away from "nothing focused yet" to the first landed session is ALSO a key
+ * change, so it forced an extra mount on every launch and double-fired
+ * `DetailPanel`'s own mount-time report of its resolved `initialTab` — a real
+ * regression `Canvas.session-resume.test.tsx`'s asserted write count caught.
+ * Composer state (draft/composing/writing/actionIndex) is already isolated
+ * per session one level up in `CanvasInner`, so switching tabs still keeps
+ * what you typed; what this gives up is `DetailPanel`'s OWN uncontrolled
+ * state — a mid-scroll position, a live terminal connection — staying warm
+ * on a hidden tab. See the PR notes for why that trade was made in this task.
+ */
 function DetailSlot({ show, ...props }: ComponentProps<typeof DetailPanel> & { show: boolean }) {
   return show ? <DetailPanel {...props} /> : null;
 }
@@ -533,6 +545,108 @@ function CanvasColumn({
       {children}
     </div>
   ) : null;
+}
+
+/**
+ * The session tab strip — VSCode-shaped: one tab per open session, click to
+ * switch, `×` to close without ending the session (decision 6).
+ *
+ * `orientation` IS A PROP FROM THE START, even though only `'horizontal'` is
+ * wired up in this task, per epic.md Amendment A1.5: the strip must
+ * eventually support a vertical arrangement and drag-to-reorder, and a strip
+ * hard-coded horizontal with the axis bolted on later is a rewrite landing on
+ * top of the largest diff in this migration. `tabs` is handed in the ORDER
+ * `openTabs` owns (drag-reordering, when it ships, only ever has to change
+ * that one array) — never re-sorted here by title or status.
+ *
+ * No drag yet: the `×` and the click are the whole surface. Dragging was
+ * deliberately removed from the CANVAS once (`nodesDraggable={false}`,
+ * `topology-constraints.test.ts` rule 1) — that ban is about NODES and does
+ * not extend to tabs, but this task ships only the non-draggable case either
+ * way.
+ */
+/** The literal class strings, not a template literal, so Tailwind's static
+ *  scanner can see them — the same reason `SessionInfoNode.tsx`'s own
+ *  `STATUS_INK` is a lookup rather than `` `text-${status}` ``. */
+const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
+  running: 'text-running',
+  waiting: 'text-waiting',
+  done: 'text-done',
+  failed: 'text-failed',
+};
+
+function TabStrip({
+  orientation,
+  tabs,
+  activeId,
+  onSelect,
+  onClose,
+}: {
+  readonly orientation: 'horizontal' | 'vertical';
+  readonly tabs: readonly SessionEntry[];
+  readonly activeId: string | null;
+  readonly onSelect: (sessionId: string) => void;
+  readonly onClose: (sessionId: string) => void;
+}) {
+  if (tabs.length === 0) {
+    return (
+      <div
+        data-tab-strip
+        data-orientation={orientation}
+        className="flex min-w-0 flex-1 items-center px-1 text-[11px] text-ink-faint"
+      >
+        no sessions open — pick one from the sidebar
+      </div>
+    );
+  }
+  return (
+    <div
+      data-tab-strip
+      data-orientation={orientation}
+      className={
+        orientation === 'horizontal'
+          ? 'flex min-w-0 flex-1 items-stretch overflow-x-auto'
+          : 'flex min-h-0 flex-1 flex-col overflow-y-auto'
+      }
+    >
+      {tabs.map((entry) => {
+        const active = entry.session.id === activeId;
+        return (
+          <div
+            key={entry.session.id}
+            data-session-tab
+            data-active={active ? 'true' : 'false'}
+            className={`group flex flex-none items-center gap-1.5 border-line border-r px-2.5 text-[11px] ${active ? 'bg-canvas text-ink' : 'text-ink-dim hover:text-ink'}`}
+          >
+            <button
+              type="button"
+              data-tab-select
+              onClick={() => onSelect(entry.session.id)}
+              className={`max-w-[160px] truncate py-1.5 ${active ? TAB_STATUS_INK[entry.session.status] : ''}`}
+            >
+              {entry.session.icon !== null && entry.session.icon !== undefined && (
+                <span aria-hidden="true">{entry.session.icon} </span>
+              )}
+              {entry.session.title}
+            </button>
+            <button
+              type="button"
+              data-tab-close
+              aria-label={`close ${entry.session.title} tab`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose(entry.session.id);
+              }}
+              className="shrink-0 rounded-[4px] px-1 text-ink-faint opacity-0 hover:text-ink group-hover:opacity-100 data-[active=true]:opacity-100"
+              data-active={active ? 'true' : 'false'}
+            >
+              ×
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /**
@@ -847,8 +961,29 @@ function CanvasInner({
    */
   const events = useSyncExternalStore(subscribeEvents, loggedEvents, loggedEvents);
   const failureCount = events.filter((event) => event.kind === 'failure').length;
-  const [composing, setComposing] = useState(false);
-  const [draft, setDraft] = useState('');
+  /**
+   * Composer state, KEYED BY SESSION — the load-bearing change a tab shell
+   * makes here. `DetailPanel` is now mounted once per open tab (not once for
+   * whichever session happened to be focused), so a draft typed in one tab
+   * must survive switching to another and back rather than bleeding into it
+   * or vanishing. One `Record` per piece of state, read and written through
+   * the `*For(sessionId, …)` helpers below; the zero-argument `draft` /
+   * `setDraft` / `composing` / `setComposing` / `writing` / `setWriting` /
+   * `actionIndex` / `setActionIndex` names reappear further down, bound to
+   * whichever session is the ACTIVE tab — every keyboard-driven caller below
+   * (the chord switch, `sendPrompt`, `beginComposing`) only ever acts on the
+   * pane the keyboard is in, so those call sites are unchanged text.
+   */
+  const [draftsBySession, setDraftsBySession] = useState<Readonly<Record<string, string>>>({});
+  const [composingBySession, setComposingBySession] = useState<Readonly<Record<string, boolean>>>(
+    {},
+  );
+  const setDraftFor = useCallback((sessionId: string, value: string) => {
+    setDraftsBySession((current) => ({ ...current, [sessionId]: value }));
+  }, []);
+  const setComposingFor = useCallback((sessionId: string, value: boolean) => {
+    setComposingBySession((current) => ({ ...current, [sessionId]: value }));
+  }, []);
   /**
    * WHICH CURSOR MODE THE KEYBOARD IS IN — Select or Insert.
    *
@@ -869,7 +1004,21 @@ function CanvasInner({
    * The names are the operator's own, and `keysheet.ts` prints the same two.
    */
   const [mode, setMode] = useState<CursorMode>('select');
-  const [actionIndex, setActionIndex] = useState(0);
+  /** Same per-session shape as the composer state above, and the same reason:
+   *  which action `j`/`k` has landed on in the Insert pane is a fact about
+   *  the tab you are reading, not a single global cursor. */
+  const [actionIndexBySession, setActionIndexBySession] = useState<
+    Readonly<Record<string, number>>
+  >({});
+  const setActionIndexFor = useCallback(
+    (sessionId: string, updater: number | ((current: number) => number)) => {
+      setActionIndexBySession((current) => ({
+        ...current,
+        [sessionId]: typeof updater === 'function' ? updater(current[sessionId] ?? 0) : updater,
+      }));
+    },
+    [],
+  );
   const [renamingId, setRenamingId] = useState<string | null>(null);
   /**
    * WHICH source's session is being renamed, captured when the editor opens
@@ -950,8 +1099,12 @@ function CanvasInner({
    */
   const [tabRequest, setTabRequest] = useState<{ readonly tab: DetailTab } | null>(null);
   const [revealRequest, setRevealRequest] = useState<{ readonly projectId: string } | null>(null);
-  /** True while a write is in flight — Enter must not fire twice. */
-  const [writing, setWriting] = useState(false);
+  /** True while a write is in flight for THAT session — Enter must not fire
+   *  twice, and a send in one tab must not gate Enter in another. */
+  const [writingBySession, setWritingBySession] = useState<Readonly<Record<string, boolean>>>({});
+  const setWritingFor = useCallback((sessionId: string, value: boolean) => {
+    setWritingBySession((current) => ({ ...current, [sessionId]: value }));
+  }, []);
   /** The same guard for `x`: one keypress must not become two stop attempts. */
   /**
    * THE ONE PENDING FLAG, and it is one on purpose.
@@ -1349,6 +1502,163 @@ function CanvasInner({
   const focusedSessionId = focusedSpec?.entry.session.id ?? null;
 
   /**
+   * Composer state, bound to whichever session is the ACTIVE TAB.
+   *
+   * These four names — `draft`, `setDraft`, `composing`, `setComposing`,
+   * `writing`, `setWriting`, `actionIndex`, `setActionIndex` — are exactly the
+   * names this file used before the per-session `Record`s above existed, and
+   * every caller below (the chord switch, `sendPrompt`, `beginComposing`,
+   * `detailProps`) is unchanged text as a result: all of them already only
+   * ever act on the session the keyboard is currently in, which is this one.
+   * A hidden tab's own draft sits untouched in its own slot of the `Record`
+   * until IT becomes the active tab.
+   */
+  const draft = focusedSessionId === null ? '' : (draftsBySession[focusedSessionId] ?? '');
+  const setDraft = useCallback(
+    (value: string) => {
+      if (focusedSessionId !== null) {
+        setDraftFor(focusedSessionId, value);
+      }
+    },
+    [focusedSessionId, setDraftFor],
+  );
+  const composing =
+    focusedSessionId === null ? false : (composingBySession[focusedSessionId] ?? false);
+  const setComposing = useCallback(
+    (value: boolean) => {
+      if (focusedSessionId !== null) {
+        setComposingFor(focusedSessionId, value);
+      }
+    },
+    [focusedSessionId, setComposingFor],
+  );
+  const writing = focusedSessionId === null ? false : (writingBySession[focusedSessionId] ?? false);
+  const setWriting = useCallback(
+    (value: boolean) => {
+      if (focusedSessionId !== null) {
+        setWritingFor(focusedSessionId, value);
+      }
+    },
+    [focusedSessionId, setWritingFor],
+  );
+  const actionIndex = focusedSessionId === null ? 0 : (actionIndexBySession[focusedSessionId] ?? 0);
+  const setActionIndex = useCallback(
+    (updater: number | ((current: number) => number)) => {
+      if (focusedSessionId !== null) {
+        setActionIndexFor(focusedSessionId, updater);
+      }
+    },
+    [focusedSessionId, setActionIndexFor],
+  );
+
+  /**
+   * Which sessions have an open tab, in the order the strip draws them —
+   * OWNED STATE (epic.md Amendment A1.5), not the incidental order sessions
+   * happened to be focused in. Persisted (`prefs.openTabs`) so a hand-built
+   * arrangement survives a relaunch; restored once below, as soon as there is
+   * a model to match stored pointers against, and kept in step with what is
+   * actually on screen by the effects that follow.
+   */
+  const [openTabs, setOpenTabsState] = useState<readonly string[]>([]);
+  /** Latches once the restore attempt below has run, so it never re-runs —
+   *  a REF because re-running it is what it guards against, not something a
+   *  render needs to react to. */
+  const openTabsRestoreAttempted = useRef(false);
+  /**
+   * STATE, not a ref, and that distinction is the fix for a real race the
+   * persist effect below used to lose: `setOpenTabsState(restored)` and a
+   * ref flip both land in the SAME effect call, but a ref mutation is
+   * visible to every effect in THIS pass while the state update it sits
+   * beside is not — it only takes effect on the NEXT render. A ref-gated
+   * persist effect could therefore see "restore has run" true while
+   * `openTabs` was still the pre-restore `[]`, read that as "every tab just
+   * closed", and write `[]` over the very value restore was about to apply.
+   * Gating on STATE means the gate and the restored value become visible on
+   * the SAME render, together, because React batches the two `setState`
+   * calls below into one. Measured: `Canvas.session-resume.test.tsx`'s
+   * relaunch caught the clobber this replaces.
+   */
+  const [openTabsReady, setOpenTabsReady] = useState(false);
+
+  useEffect(() => {
+    if (openTabsRestoreAttempted.current || focusCandidates.length === 0) {
+      return;
+    }
+    openTabsRestoreAttempted.current = true;
+    // Entries the current model no longer has a session for are silently
+    // dropped — the same fate a stale `lastFocus` already gets from
+    // `resolveFocusNodeId`, and for the same reason: there is nothing left to
+    // point a restored tab at.
+    const restored = prefs.openTabs
+      .map(
+        (choice) =>
+          focusCandidates.find((c) => c.source === choice.source && c.session === choice.session)
+            ?.session,
+      )
+      .filter((id): id is string => id !== undefined);
+    if (restored.length > 0) {
+      setOpenTabsState(restored);
+    }
+    setOpenTabsReady(true);
+  }, [focusCandidates, prefs.openTabs]);
+
+  /**
+   * Opening a session from the sidebar opens a tab — and so does every other
+   * way focus can land somewhere new (a chord, a jump, a search, the
+   * palette). All of those already move through `setFocusedId` below, so this
+   * watches the RESULT, exactly as the "record where focus is" effect one
+   * screen down does for `lastFocus`, rather than re-deriving "opened a tab"
+   * separately at each of the eight places focus can move from. It only ever
+   * ADDS a session; only the strip's own close button removes one.
+   */
+  useEffect(() => {
+    if (focusedSessionId === null) {
+      return;
+    }
+    setOpenTabsState((current) =>
+      current.includes(focusedSessionId) ? current : [...current, focusedSessionId],
+    );
+  }, [focusedSessionId]);
+
+  /**
+   * The other half, matching the `lastFocus` effect one screen down: record
+   * the open set so a relaunch finds the same tabs. A session that has since
+   * ended is dropped on write rather than carried forward — there is nothing
+   * left for a future restore to match it against, the same reasoning
+   * `hiddenProjects`' own TTL note makes elsewhere.
+   *
+   * GATED ON `openTabsReady`, and that gate is load-bearing, not defensive
+   * dressing — see that state's own comment for the race it closes: without
+   * it, this effect can fire on an earlier commit than the restore above,
+   * find still-empty `openTabs` against an already-populated
+   * `prefs.openTabs`, read that as "the operator closed every tab", and write
+   * `[]` over the value the restore was about to apply.
+   */
+  useEffect(() => {
+    if (!openTabsReady) {
+      return;
+    }
+    const live = openTabs
+      .map((id) => allEntries.find((e) => e.session.id === id))
+      .filter((e): e is SessionEntry => e !== undefined);
+    const next: readonly FocusChoice[] = live.map((entry) => ({
+      source: sourceKeyOf(entry),
+      session: entry.session.id,
+    }));
+    const unchanged =
+      next.length === prefs.openTabs.length &&
+      next.every(
+        (choice, index) =>
+          choice.source === prefs.openTabs[index]?.source &&
+          choice.session === prefs.openTabs[index]?.session,
+      );
+    if (unchanged) {
+      return;
+    }
+    savePrefs(setOpenTabs(prefs, next));
+  }, [openTabsReady, openTabs, allEntries, prefs, savePrefs]);
+
+  /**
    * The viewport follows focus, and frames a session when you arrive in one.
    *
    * `j`/`k` can walk to a session that is off screen, and before any of this
@@ -1641,10 +1951,40 @@ function CanvasInner({
     );
   }, [focusedId, focusedEntry, labels, setNodes]);
 
-  /** Move focus to a session by id — what the sidebar and the palette do. */
+  /** Move focus to a session by id — what the sidebar and the palette do.
+   *  Opening a tab piggybacks on this (see the effect above): every one of
+   *  this function's callers already means "look at this session now". */
   const focusSession = useCallback((sessionId: string) => {
     setFocusedId(infoNodeId(sessionId));
   }, []);
+
+  /**
+   * Close a tab without touching the session it shows — decision 6 keeps `x`
+   * for ending the session itself; this is the strip's own `×`.
+   *
+   * Closing the ACTIVE tab hands focus to its former neighbour in the strip
+   * (favouring the one before it, so repeated closes walk left rather than
+   * bouncing to the end), or — with none left — clears the pointer and lets
+   * the "land focus on something real" effect above pick a candidate, exactly
+   * as it already does on first launch with nothing remembered.
+   */
+  const closeTab = useCallback(
+    (sessionId: string) => {
+      setOpenTabsState((current) => current.filter((id) => id !== sessionId));
+      if (sessionId !== focusedSessionId) {
+        return;
+      }
+      const remaining = openTabs.filter((id) => id !== sessionId);
+      const at = openTabs.indexOf(sessionId);
+      const fallback = remaining[Math.min(Math.max(at - 1, 0), remaining.length - 1)] ?? null;
+      if (fallback !== null) {
+        focusSession(fallback);
+      } else {
+        setFocusedId(null);
+      }
+    },
+    [focusedSessionId, openTabs, focusSession],
+  );
 
   /**
    * Write what you typed into the focused session's log — or, for a `'session'`
@@ -1764,7 +2104,7 @@ function CanvasInner({
     } finally {
       setWriting(false);
     }
-  }, [focusedEntry, draft, source, writing, sourceModel]);
+  }, [focusedEntry, draft, source, writing, sourceModel, setDraft, setComposing, setWriting]);
 
   /**
    * Stop the focused session — really, when the source can.
@@ -1861,7 +2201,7 @@ function CanvasInner({
   const beginComposing = useCallback(() => {
     setMode('insert');
     setComposing(true);
-  }, []);
+  }, [setComposing]);
 
   /**
    * Store the removal -- or, when there is nowhere to store it, keep it for
@@ -2723,6 +3063,8 @@ function CanvasInner({
     focusSession,
     mode,
     actionIndex,
+    setActionIndex,
+    setComposing,
     actions,
     prefs,
     savePrefs,
@@ -2733,22 +3075,19 @@ function CanvasInner({
   ]);
 
   /**
-   * Subscribed, not read.
-   *
-   * This was `Math.round(getZoom() * 100)` computed during render. `getZoom()`
-   * is an imperative call into ReactFlow's store: it returns the right number
-   * at the moment it runs, and it does not make the component re-render when
-   * the viewport changes. So the readout only refreshed when something ELSE
-   * caused a render, and scrolling to zoom left it showing a stale figure.
-   * `useStore` subscribes to `transform[2]` — the viewport's scale — so the
-   * number tracks the canvas.
-   *
-   * DISPLAY ONLY. `columns` above reads `DEFAULT_VIEWPORT.zoom`, a fixed
-   * reference, not this live subscription — the two must not be conflated:
-   * this one may change every wheel notch, the layout's must not.
+   * The tabs the strip draws, resolved to their live entries and in the
+   * order `openTabs` owns. A session an `allEntries` refresh has since lost
+   * (closed elsewhere, or the model narrowed) drops out here rather than
+   * drawing a tab for something that no longer exists — the persist effect
+   * above will catch up and stop remembering it on the next write.
    */
-  const zoom = useStore((state) => state.transform[2]);
-  const zoomPct = Math.round(zoom * 100);
+  const openTabEntries = useMemo(
+    () =>
+      openTabs
+        .map((id) => allEntries.find((e) => e.session.id === id))
+        .filter((e): e is SessionEntry => e !== undefined),
+    [openTabs, allEntries],
+  );
 
   // `sidebarProps` feeds a `React.memo`-wrapped `SessionList`; a fresh
   // inline arrow on any one of its 40+ props defeats the whole shallow
@@ -3129,159 +3468,70 @@ function CanvasInner({
         <SidebarSlot key="sidebar" show={visible.sidebar} {...sidebarProps} />
 
         <CanvasColumn key="canvas" show={visible.canvas} strip={canvasStrip}>
-          {/* The toolbar is chrome inside a column, not a column: hidden rather
-              than unmounted in the strip, where 300px has no room for a source
-              readout and four filters. The unmount rule this file argues for
-              elsewhere is about PANES — things that are measured, focused and
-              queried — and keeping the source line mounted keeps its polling
-              exactly as it was in every other layout. */}
-          <div
-            className={`flex h-12 flex-none items-center gap-[9px] border-line border-b px-3.5 ${canvasStrip ? 'hidden' : ''}`}
-          >
-            <span className="shrink-0 font-medium text-[13px] text-ink">Canvas</span>
-            <span className="mx-1 h-3.5 w-px shrink-0 bg-line-strong" />
-
-            <SourceReadout source={source} />
-
-            <span className="flex-1" />
-
-            {/* Positions are a pure function of the model, always — there is
-                no drag to opt a node out of it. It used to read "auto-layout
-                on", bordered and boxed exactly like the zoom/fit buttons to
-                its right, and an operator reasonably read it as one: they
-                pressed it expecting a rearrange, and nothing happened,
-                because there was never a handler to press. Two fixes, not
-                one: no border/box/hover — nothing here should look clickable
-                next to controls that are — and no word implying an "off"
-                that cannot exist, since dragging and pinning were removed
-                (2944843). `Note` carries the actual answer to what someone
-                clicking this was asking: why nodes cannot be dragged. */}
-            <Note text="nodes arrange themselves by status; they cannot be dragged">
-              <span
-                data-auto-layout
-                className="flex h-[26px] shrink-0 cursor-default items-center whitespace-nowrap font-mono text-[10px] text-ink-quiet"
-              >
-                layout: automatic
-              </span>
-            </Note>
-
-            <div className="flex h-[26px] shrink-0 items-center overflow-hidden rounded-[7px] border border-line text-ink-dim">
-              {/* `action` is read from the live grammar (`activeBindings`),
-                  never hardcoded here — a rebind changes the tip without
-                  touching this call site. */}
-              <ShortcutTip label="Zoom out" action={{ kind: 'zoom', delta: -1 }}>
-                <button
-                  type="button"
-                  aria-label="zoom out"
-                  onClick={() => zoomOut()}
-                  className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
-                >
-                  −
-                </button>
-              </ShortcutTip>
-              <span className="flex h-full items-center border-line border-r border-l px-1.5 font-mono text-[10px] text-ink">
-                {zoomPct}%
-              </span>
-              <ShortcutTip label="Zoom in" action={{ kind: 'zoom', delta: 1 }}>
-                <button
-                  type="button"
-                  aria-label="zoom in"
-                  onClick={() => zoomIn()}
-                  className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
-                >
-                  +
-                </button>
-              </ShortcutTip>
+          {/* Step 1 of the 0.2 migration: the graph is gone from this column,
+              replaced by the session tab strip. The toolbar this used to be
+              — "Canvas" label, zoom controls, fit-view, the "layout:
+              automatic" note — went with it; every one of those buttons
+              targeted a graph nobody can see any more. `SourceReadout`
+              survives here because it is shell, not graph (its own doc
+              comment: "two shells draw it"), and the source-cell tests find
+              it by `[data-source]` wherever it lands. */}
+          <div className="flex h-12 flex-none items-stretch gap-[9px] border-line border-b px-1.5">
+            <TabStrip
+              orientation="horizontal"
+              tabs={openTabEntries}
+              activeId={focusedSessionId}
+              onSelect={focusSession}
+              onClose={closeTab}
+            />
+            <div className="flex flex-none items-center gap-[9px] px-1.5">
+              <SourceReadout source={source} />
             </div>
-
-            <ShortcutTip label="Fit the whole canvas in view" action={{ kind: 'fitView' }}>
-              <button
-                type="button"
-                aria-label="fit view"
-                onClick={() => fitView()}
-                className="flex h-[26px] shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim hover:text-ink"
-              >
-                <Maximize size={13} strokeWidth={1.6} aria-hidden="true" />
-              </button>
-            </ShortcutTip>
           </div>
 
-          {/* `data-canvas-viewport` is the element `columnsForWidth` measures —
-              a test hook, same as `data-canvas-pane` one level up (the
-              CanvasColumn root, which also carries the now-hidden toolbar). */}
-          <div ref={canvasPaneRef} data-canvas-viewport className="relative min-h-0 flex-1">
-            <ReactFlow
-              nodes={drawnNodes}
-              edges={NO_EDGES}
-              onNodesChange={onNodesChange}
-              nodesDraggable={false}
-              // A click lands the cursor on the node you clicked, exactly as
-              // `j`/`k` would have. `nodeIds` is the navigable set, so a click
-              // can only reach somewhere the keyboard could also reach — the
-              // mouse takes a shortcut through the same door, it does not open
-              // a second one. Scenery (fans, empty slots) is not in that set
-              // and is therefore inert, which is right: there is nothing to
-              // focus on a connector.
-              onNodeClick={onNodeClick}
-              nodeTypes={NODE_TYPES}
-              // 80%, not `fitView`. Fitting picks whatever scale makes every
-              // node visible, so the canvas opened at a different zoom for
-              // every workspace size and the cards were unreadable in a busy
-              // one. A fixed default means the first frame always looks the
-              // same, and the "move to the focused session" effect below is
-              // what keeps you from having to hunt for where you are.
-              defaultViewport={DEFAULT_VIEWPORT}
-              minZoom={0.2}
-              maxZoom={2}
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background color="var(--color-dots)" gap={24} size={1} />
-              {/* Measured off the mockup's minimap: 176x56, one chip per
-                  session cell in that session's status colour. The mockup's
-                  viewport outline is the one measurement not reproduced — see
-                  the note on `maskColor` below. `nodeStrokeWidth` is in flow
-                  units, not pixels, where 1px is ~26 at this scale, so the
-                  mockup's bordered chip is drawn as a filled one instead — at
-                  8px wide the fill is what carries the colour anyway. */}
-              <MiniMap
-                pannable
-                zoomable
-                ariaLabel="canvas minimap"
-                // The spotlight is a DIMMED OUTSIDE and NOTHING ELSE — no
-                // `maskStrokeColor`, no `maskStrokeWidth`. An outline draws a
-                // rectangle around the visible area, and when that area is
-                // wider than the content — the normal case at any ordinary
-                // zoom — its top and bottom edges fall outside the map. Only
-                // the two vertical edges survive, and they read as two bright
-                // rules cut off down the sides, not as a rectangle.
-                //
-                // This has now been removed TWICE: once with the outline in the
-                // ink colour, and again after it was re-added in a quieter line
-                // tone on the argument that a softer tone would read as the
-                // edge of the lit area. It does not. The tone was never the
-                // problem — the geometry is, and no colour fixes a rectangle
-                // whose horizontal edges are off-canvas. Please do not
-                // re-litigate it a third time; masking outside says the same
-                // thing with no lines at all and degrades correctly, dimming
-                // nothing when everything is visible. The absence is guarded
-                // by `test/canvas/Canvas.minimap.test.tsx`, so re-adding
-                // either prop fails a test rather than shipping.
-                maskColor="color-mix(in srgb, var(--color-canvas) 66%, transparent)"
-                // `nodeStrokeWidth` is in FLOW units and is drawn around the
-                // chip, so it is also the only lever that makes a chip bigger
-                // than the node it stands for. A session card is 220 wide, so
-                // 40 is a visible fattening without merging neighbours.
-                nodeStrokeWidth={70}
-                nodeStrokeColor={minimapChipColor}
-                nodeBorderRadius={3}
-                // Narrower than the mockup's 176. A minimap earns its corner by
-                // being glanceable, not by being legible on its own, and the
-                // width it gives up is width the canvas gets back.
-                style={{ width: 132, height: 56 }}
-                className={`!bottom-3 !right-3 !m-0 !rounded-[8px] !border !border-line !bg-sunken ${canvasStrip ? 'hidden' : ''}`}
-                nodeColor={minimapChipColor}
+          {/* `data-canvas-viewport` is the element `columnsForWidth` measures
+              — a test hook, same as `data-canvas-pane` one level up. It stays
+              a normally laid-out (not `display:none`) element on purpose: a
+              hidden element measures 0 wide, and `columnsForWidth` feeds the
+              layout `nodeIds`/h-l navigation still reads (see below). It now
+              draws nothing itself — the stub the graph column has become —
+              other than the invisible `ReactFlow` mount inside it. */}
+          <div
+            ref={canvasPaneRef}
+            data-canvas-viewport
+            data-canvas-stub
+            className="relative min-h-0 flex-1"
+          >
+            {/*
+             * `ReactFlow` STAYS MOUNTED, invisibly, rather than being deleted
+             * here — a deliberate step-1 choice, not an oversight. The
+             * highest-risk edit in this epic is the 25-case `onKeyDown`
+             * switch a few hundred lines down, and its `h`/`l` chain-walk
+             * case reads `getNodes()` from `useReactFlow()`. Removing this
+             * element would make that call meaningless (and `useReactFlow()`
+             * itself needs a live `<ReactFlow>` under `ReactFlowProvider` to
+             * mean anything), forcing an edit to the very switch the epic
+             * says to leave whole if it cannot be split safely. Every other
+             * graph file (`layout.ts`, `nav-nodes.ts`, the `*Node.tsx`
+             * components) is unchanged and unrendered visually for the same
+             * reason: they stay imported and wired until step 2 deletes
+             * `@xyflow/react` and rewrites this switch for real. `Background`
+             * and `MiniMap` are dropped — pure chrome, worth nothing hidden.
+             */}
+            <div style={{ display: 'none' }} aria-hidden="true">
+              <ReactFlow
+                nodes={drawnNodes}
+                edges={NO_EDGES}
+                onNodesChange={onNodesChange}
+                nodesDraggable={false}
+                onNodeClick={onNodeClick}
+                nodeTypes={NODE_TYPES}
+                defaultViewport={DEFAULT_VIEWPORT}
+                minZoom={0.2}
+                maxZoom={2}
+                proOptions={{ hideAttribution: true }}
               />
-            </ReactFlow>
+            </div>
           </div>
         </CanvasColumn>
 
@@ -3733,22 +3983,10 @@ function SourceGlyph({ source }: { readonly source: SourceId | null }) {
   );
 }
 
-/**
- * A minimap chip's colour: the session's status, or nothing at all.
- *
- * Only the info card earns a chip. Its steps, its fan and its slots all belong
- * to the same row, and drawing four more rectangles per session turns a map you
- * read at a glance into a texture — the mockup draws one chip per cell, and so
- * does this. `transparent` rather than an omission because xyflow renders a
- * rect for every node either way.
- */
-function minimapChipColor(node: Node): string {
-  if (node.type !== 'info') {
-    return 'transparent';
-  }
-  const { entry } = node.data as { entry?: SessionEntry };
-  return entry === undefined ? 'transparent' : `var(--color-${entry.session.status})`;
-}
+// `minimapChipColor` (the MiniMap's per-node fill) was here and is deleted
+// with the MiniMap it painted — pure chrome, worth nothing hidden, unlike
+// `ReactFlow` itself a few hundred lines up, which stays mounted for
+// `getNodes()`/the `onKeyDown` h/l case. See that block's own comment.
 
 export function Canvas({
   model,
