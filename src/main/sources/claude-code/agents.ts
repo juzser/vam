@@ -68,8 +68,9 @@ const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
  * news however long it has been up, and on this machine the longest-running
  * one is also the one being worked in.
  *
- * Background rows are different. `--all` is what makes `done` and `failed`
- * reachable at all, and it also returns every background session ever run --
+ * Background rows are different. `--all` is what makes a FINISHED background
+ * row (`done`, `failed`, or the CLI's own `stopped` -- see `statusOf`) reach
+ * this list at all, and it also returns every background session ever run --
  * measured, two `failed` rows from 61 and 57 days ago. Those are the exact
  * "sessions I don't care about" the operator complained of, so they are cut
  * here rather than shown for the sake of a status.
@@ -81,22 +82,45 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? 
 /**
  * The status mapping, and what it loses.
  *
- * An INTERACTIVE row carries `status: 'busy' | 'idle'` -- two states against
- * vam's four. `busy` is `running` and `idle` is `waiting`, which is exactly
- * the model's definition of waiting: the session finished its turn and the
- * ball is with the operator. `done` and `failed` are NOT derivable here and
- * are not invented: a session the operator finished and one they abandoned
- * are both `idle`, and an interactive session that crashed is not listed at
- * all rather than listed as failed.
+ * An INTERACTIVE row carries `status: 'busy' | 'idle' | 'waiting'` against
+ * vam's four statuses. `busy` is `running`; `idle` and the CLI's own literal
+ * `waiting` both land on `waiting`, which is exactly the model's definition:
+ * the session finished its turn and the ball is with the operator. `done` and
+ * `failed` are NOT derivable here and are not invented: a session the
+ * operator finished and one they abandoned are both reported the same way by
+ * the CLI, and an interactive session that crashed is not listed at all
+ * rather than listed as failed.
  *
- * A BACKGROUND row carries `state` instead, and `state` does express the
- * other two (`done`, `failed` both observed). So those two statuses reach the
- * canvas for exactly the sessions that can honestly report them, and for no
- * others.
+ * A BACKGROUND row carries `state` instead of `status` -- IT NEVER CARRIES
+ * `status` AT ALL, which is why the fallback below must not be reached by a
+ * background row: reading an absent field as "not busy" and calling that
+ * `waiting` is sound only because an interactive row's absence of `status`
+ * never happens. Measured against the real CLI (`claude agents --json
+ * --all`), `state` takes exactly two values in practice: `failed`, and
+ * `stopped` -- the CLI's own word for a background session that ended
+ * without failing. `done` is handled below because a background row is the
+ * only kind that could honestly report it, but it was NOT observed; the
+ * earlier version of this comment claiming otherwise was never re-checked
+ * against real output. `running` is also accepted for the same reason.
+ *
+ * Anything else -- a `state` word this mapping was not taught, background
+ * only, since only background rows reach this branch at all -- reads as
+ * `failed`, not `waiting` and not `done`. `waiting` is out because it is a
+ * demand ("the ball is with you") that no background row can honestly make.
+ * `done` is out for the same reason the file's own `AgentsResult` never folds
+ * an unresolved question into "no sessions": a value this mapping does not
+ * recognise is not a quiet success it can vouch for, so it reads as something
+ * to go look at instead. `running` is out because it would send `stopSession`
+ * straight to a CLI call the row may no longer back, which is the exact
+ * failure this mapping exists to stop making. Whatever the CLI adds next,
+ * this is the one answer that stays honest without having been taught the
+ * new word first.
  */
-function statusOf(row: Record<string, unknown>): SessionStatus {
+function statusOf(row: Record<string, unknown>, kind: 'interactive' | 'background'): SessionStatus {
   const state = str(row['state']);
   if (state === 'done' || state === 'failed' || state === 'running') return state;
+  if (state === 'stopped') return 'done';
+  if (kind === 'background') return 'failed';
   return str(row['status']) === 'busy' ? 'running' : 'waiting';
 }
 
@@ -134,7 +158,7 @@ export function parseAgentRows(stdout: string, nowMs: number = Date.now()): read
       sessionId,
       name: str(row['name']),
       cwd,
-      status: statusOf(row),
+      status: statusOf(row, kind),
       kind,
       startedAt,
       pid,

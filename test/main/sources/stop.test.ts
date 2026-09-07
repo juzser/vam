@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
 import { registerSourceIpc } from '../../../src/main/ipc/handlers.js';
+import { parseAgentRows } from '../../../src/main/sources/claude-code/agents.js';
 import { projectIdOf } from '../../../src/main/sources/claude-code/project-id.js';
 import { CLAUDE_CODE_SOURCE } from '../../../src/main/sources/claude-code/source.js';
 import {
@@ -127,6 +128,35 @@ describe('stopSession short-circuits a background row the source already reporte
     const stop = vi.fn(async () => null);
     await expect(stopSession([background], 'sess-1#4242', stop)).resolves.toBeNull();
     expect(stop).toHaveBeenCalledWith('sess-1');
+  });
+
+  /**
+   * THE ACTUAL BUG, END TO END. The operator's report: a background session
+   * the CLI itself reports `state: 'stopped'` (ended without failing) was
+   * displayed as `waiting`, so Close reached `claude stop`, which answered
+   * "session ... is not a running background job any more" (`session-gone`).
+   * This goes through the real `agents.ts` parser -- not a hand-built
+   * `StoppableAgent` -- so a regression in `statusOf`'s background mapping
+   * fails HERE, not just in `claude-code.test.ts`'s narrower unit test.
+   */
+  it('never calls the CLI for a row the CLI itself reported as `stopped`', async () => {
+    const [row] = parseAgentRows(
+      JSON.stringify([
+        {
+          sessionId: 'sess-1',
+          cwd: '/w/alpha',
+          kind: 'background',
+          name: 'nightly sweep',
+          pid: 4242,
+          state: 'stopped',
+          startedAt: Date.now() - 60_000,
+        },
+      ]),
+    );
+    const stop = vi.fn(async () => null);
+    const error = await stopSession([row as StoppableAgent], row?.key ?? '', stop);
+    expect(stop).not.toHaveBeenCalled();
+    expect(error?.code).toBe('already-finished');
   });
 });
 
