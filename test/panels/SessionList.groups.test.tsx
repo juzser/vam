@@ -301,4 +301,60 @@ describe('group membership', () => {
     );
     expect(container.querySelector('[data-add-to-group="group:1"]')).toBeNull();
   });
+
+  /*
+   * The empty case is the one the hover `+` fails: nothing reveals it because
+   * there is no row content to hover, and a freshly-made folder is silent
+   * about how to fill it. This affordance carries its own words and needs
+   * neither hover nor focus to appear -- it renders straight into the DOM
+   * with no `opacity-0` escape hatch.
+   */
+  it('names the action on an empty group, with no hover and no focus', () => {
+    const onAddToGroup = vi.fn();
+    const empty: Group = { id: 'group:2', name: 'nothing-yet', icon: null, projects: [] };
+    const { container } = render(
+      <SessionList
+        {...baseProps(ungrouped())}
+        groups={[empty]}
+        collapsedGroups={[]}
+        onAddToGroup={onAddToGroup}
+      />,
+    );
+    const add = container.querySelector('[data-add-to-group="group:2"]') as HTMLElement;
+    expect(add).not.toBeNull();
+    expect(add.className).not.toContain('opacity-0');
+    expect(add.textContent?.toLowerCase()).toContain('repo');
+    fireEvent.click(add);
+    expect(onAddToGroup).toHaveBeenCalledWith(empty);
+  });
+
+  it('is a real button, reachable by Tab with no roving tabindex trick', () => {
+    const empty: Group = { id: 'group:2', name: 'nothing-yet', icon: null, projects: [] };
+    const { container } = render(
+      <SessionList
+        {...baseProps(ungrouped())}
+        groups={[empty]}
+        collapsedGroups={[]}
+        onAddToGroup={vi.fn()}
+      />,
+    );
+    const add = container.querySelector('[data-add-to-group="group:2"]') as HTMLElement;
+    expect(add.tagName).toBe('BUTTON');
+    expect(add.getAttribute('tabindex')).toBeNull();
+    expect(add.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('does not give a non-empty group any permanent chrome', () => {
+    const { container } = render(
+      <SessionList
+        {...baseProps(grouped())}
+        groups={[GROUP]}
+        collapsedGroups={[]}
+        onAddToGroup={vi.fn()}
+      />,
+    );
+    const add = container.querySelector('[data-add-to-group="group:1"]') as HTMLElement;
+    // Still the quiet, hover-revealed control -- unhovered here, so opacity-0.
+    expect(add.className).toContain('opacity-0');
+  });
 });

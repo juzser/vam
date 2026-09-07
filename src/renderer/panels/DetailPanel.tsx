@@ -92,6 +92,7 @@ import type {
   PullRequestList,
   SessionAgent,
   SessionStatus,
+  SlashCommand,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { questionKeys } from '../keyboard/question-keys.js';
@@ -351,6 +352,46 @@ export function applyBang(
 ): { readonly text: string; readonly caret: number } {
   const start = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
   const inserted = `!${command}`;
+  return {
+    text: text.slice(0, start) + inserted + text.slice(caret),
+    caret: start + inserted.length,
+  };
+}
+
+/**
+ * `bangQuery`'s counterpart for `/`. SAME RULE, LINE START ONLY: a slash
+ * command is the first thing on its line, per Claude Code's own convention.
+ * Never open together with `bangQuery` -- a token cannot start with both.
+ */
+export function slashCommandQuery(text: string, caret: number): string | null {
+  const before = text.slice(0, Math.max(0, caret));
+  const typed = before.slice(before.lastIndexOf('\n') + 1);
+  if (!typed.startsWith('/')) return null;
+  const query = typed.slice(1);
+  return /\s/.test(query) ? null : query;
+}
+
+/** The provider's commands a query matches, on the name or its description. */
+export function matchSlashCommands(
+  commands: readonly SlashCommand[],
+  query: string,
+): readonly SlashCommand[] {
+  const needle = query.toLowerCase();
+  return commands.filter(
+    (command) =>
+      command.name.toLowerCase().includes(needle) ||
+      (command.description ?? '').toLowerCase().includes(needle),
+  );
+}
+
+/** `applyBang`'s counterpart: keeps the `/` and whatever follows the caret. */
+export function applySlashCommand(
+  text: string,
+  caret: number,
+  name: string,
+): { readonly text: string; readonly caret: number } {
+  const start = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+  const inserted = `/${name}`;
   return {
     text: text.slice(0, start) + inserted + text.slice(caret),
     caret: start + inserted.length,
@@ -2351,13 +2392,12 @@ export function DetailPanel(props: DetailPanelProps) {
   }, [focusKey, output]);
 
   const commands = decision?.commands ?? [];
+  const slashCommands = entry?.session.slashCommands ?? [];
   /**
-   * The `!` typeahead's three pieces of state. `caret` is read off the box on
-   * every change rather than mirrored from the draft: which token is being
-   * typed is a property of where the caret is, and a draft alone cannot say.
-   * `dismissed` is what Escape sets, and any further typing clears -- Escape
-   * puts the list away without touching the text, so the operator can go on
-   * writing their own command.
+   * The typeaheads' shared state. `caret` is read off the box on every
+   * change rather than mirrored from the draft. `!` and `/` share `pick` and
+   * `dismissed` rather than each carrying their own -- only one list can be
+   * open at a time (`slashCommandQuery`'s comment says why).
    */
   const [caret, setCaret] = useState(0);
   const [dismissed, setDismissed] = useState(false);
@@ -2370,6 +2410,16 @@ export function DetailPanel(props: DetailPanelProps) {
   const picked = Math.min(pick, matches.length - 1);
   const acceptSuggestion = (command: Command) => {
     const next = applyBang(draft, caret, command.command);
+    onDraftChange(next.text);
+    setCaret(next.caret);
+    setDismissed(true);
+  };
+  const slashQuery = composing ? slashCommandQuery(draft, caret) : null;
+  const slashMatches = slashQuery === null ? [] : matchSlashCommands(slashCommands, slashQuery);
+  const slashSuggesting = !dismissed && slashMatches.length > 0;
+  const slashPicked = Math.min(pick, slashMatches.length - 1);
+  const acceptSlashSuggestion = (command: SlashCommand) => {
+    const next = applySlashCommand(draft, caret, command.name);
     onDraftChange(next.text);
     setCaret(next.caret);
     setDismissed(true);
@@ -3132,6 +3182,41 @@ export function DetailPanel(props: DetailPanelProps) {
               ))}
             </div>
           )}
+          {slashSuggesting && (
+            <div
+              data-slash-suggest
+              className="flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-panel px-1.5 py-1.5"
+            >
+              <p className="px-1.5 pb-0.5 text-[10px] text-ink-faint">
+                the provider's own commands — Enter picks one, Esc keeps what you typed
+              </p>
+              {slashMatches.map((command, index) => (
+                <button
+                  key={command.id}
+                  type="button"
+                  data-slash-suggestion
+                  data-selected={index === slashPicked ? 'true' : undefined}
+                  onClick={() => acceptSlashSuggestion(command)}
+                  className={[
+                    'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
+                    index === slashPicked ? 'bg-raised' : 'hover:bg-raised',
+                  ].join(' ')}
+                >
+                  <span
+                    data-slash-command
+                    className="max-w-full truncate font-mono text-[11px] text-ink"
+                  >
+                    /{command.name}
+                  </span>
+                  {command.description !== null && (
+                    <span className="max-w-full truncate text-[10.5px] text-ink-dim">
+                      {command.description}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
           <div
             data-prompt-box
             data-action-id="prompt"
@@ -3196,6 +3281,28 @@ export function DetailPanel(props: DetailPanelProps) {
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();
                       acceptSuggestion(suggestion);
+                      return;
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      setDismissed(true);
+                      return;
+                    }
+                  }
+                  // Same collision, same three keys, for the `/` list -- see the
+                  // comment above `slashCommandQuery` for why this can never be
+                  // open at the same time as the `!` block above.
+                  const slashSuggestion = slashSuggesting ? slashMatches[slashPicked] : undefined;
+                  if (slashSuggestion !== undefined) {
+                    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                      event.preventDefault();
+                      const delta = event.key === 'ArrowDown' ? 1 : -1;
+                      setPick(Math.min(Math.max(0, slashPicked + delta), slashMatches.length - 1));
+                      return;
+                    }
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      acceptSlashSuggestion(slashSuggestion);
                       return;
                     }
                     if (event.key === 'Escape') {

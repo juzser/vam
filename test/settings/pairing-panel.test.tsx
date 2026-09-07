@@ -67,6 +67,7 @@ function draw(
     devices: [],
     url: 'https://example-machine.example-tailnet.ts.net',
     allowWrites: false,
+    writesPreference: false,
     nowMs: NOW,
     onRegenerate: vi.fn(),
     onApprove: vi.fn(),
@@ -76,6 +77,7 @@ function draw(
     onCopyUrl: vi.fn(),
     onEnableServe: vi.fn(),
     onDisableServe: vi.fn(),
+    onSetWritesPreference: vi.fn(),
     ...rest,
     serve: { ...SERVE_DEFAULT, ...serveOver },
   };
@@ -120,6 +122,27 @@ describe('the pairing screen', () => {
     cleanup();
     draw({ allowWrites: true });
     expect(screen.getByTestId('pairing-writes').textContent).toMatch(/close sessions|write/i);
+  });
+
+  it('offers a writes-preference toggle, off by default, for the next launch', () => {
+    const props = draw({ writesPreference: false });
+    const toggle = screen.getByRole('button', { name: /turn writes on/i });
+    fireEvent.click(toggle);
+    expect(props.onSetWritesPreference).toHaveBeenCalledWith(true);
+  });
+
+  it('offers to turn a persisted writes preference back off', () => {
+    const props = draw({ writesPreference: true });
+    const toggle = screen.getByRole('button', { name: /turn writes off/i });
+    fireEvent.click(toggle);
+    expect(props.onSetWritesPreference).toHaveBeenCalledWith(false);
+  });
+
+  it('says a changed writes preference applies on the next launch, not this one', () => {
+    draw({ allowWrites: false, writesPreference: true });
+    expect(screen.getByTestId('pairing-writes-preference').textContent).toMatch(
+      /next (time|launch)/i,
+    );
   });
 
   it('mints a code only when asked', () => {

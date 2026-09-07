@@ -342,6 +342,12 @@ export type RemoteApi = {
   enableServe(): Promise<RemoteState>;
   /** Runs `tailscale serve reset`, reversing `enableServe`. */
   disableServe(): Promise<RemoteState>;
+  /**
+   * Persists the write-access preference for the NEXT time vam starts --
+   * write routes are registered once, when this server started, same as
+   * every other part of `RemoteConfig`. See `remote/writes-preference.ts`.
+   */
+  setWrites(next: boolean): Promise<RemoteState>;
 };
 
 export function createRemoteApi(ipc: InvokerLike): RemoteApi {
@@ -356,6 +362,7 @@ export function createRemoteApi(ipc: InvokerLike): RemoteApi {
     revokeAll: () => ask(CHANNELS.deviceRemoveAll),
     enableServe: () => ask(CHANNELS.serveEnable),
     disableServe: () => ask(CHANNELS.serveDisable),
+    setWrites: (next) => ask(CHANNELS.remoteWritesSet, next),
   };
 }
 
