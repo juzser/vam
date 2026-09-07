@@ -107,45 +107,48 @@ function splitBranch(branch: string): { head: string; tail: string } {
 }
 
 /**
- * How many characters `data-branch-tail` may hold before it, too, has to
- * give way — the missing half of `splitBranch`'s own promise. The head is
- * `flex-1`/`truncate`, so it shrinks to nothing under pressure; the tail is
- * `flex-none`, held at its full width with no ceiling at all. Once the head
- * has genuinely shrunk to nothing, a tail longer than this still grows
- * straight past its row's allotment and bleeds into `data-session-age` —
- * the operator's report, "the branch overlaps the timer". A no-slash
- * branch (`main`, a release tag, anything without a `/`) is 100% tail by
- * `splitBranch`'s own rule, so this is not a rare shape.
+ * How many characters `data-branch-tail` prefers to hold before offering an
+ * ellipsis at a readable boundary — an AESTHETIC preference, not the thing
+ * that keeps it off `data-session-age`.
  *
- * DERIVED, not eyeballed, the same way `FILTER_POPOVER_WIDTH` derives its
- * own ceiling from `SIDEBAR_MIN` one comment above — through THIS row's own
- * chrome rather than the filter header's:
+ * IT USED TO BE THE GUARANTEE, and measured wrong. The arithmetic below
+ * budgeted `data-session-age` at 24px on the claim that `relativeTime`
+ * (`src/renderer/adapter/relative-time.ts`) "never emits more than a number
+ * and a letter" — false: its day branch is `` `${Math.floor(ago / DAY)}d` ``
+ * with no upper bound, so a session whose source timestamp is old, or
+ * simply wrong, prints `12345d` or wider, and its own parse-failure branch
+ * returns the raw ISO string verbatim. A character count that assumes a
+ * bounded age was already wrong before a single font metric entered into
+ * it — and measured against the narrower, *realistic* four-character case
+ * (`999d`, the widest a session actually days-old today prints) this
+ * budget still ran 3.27px into the age at `SIDEBAR_MIN`, because `20ch` in
+ * this font is not an even 120px. Two independent ways for a number typed
+ * into a comment to be wrong, and both were: see `e2e/branch-overlap.spec.ts`
+ * for the measurement.
  *
- *   200   SIDEBAR_MIN, the resizer's floor
- *   - 20  the scroller's own `px-2.5` (`OverlayScroll`, 10px each side)
- *   - 20  the row's own `px-2.5` (the session `<button>`, 10px each side)
- *   = 160 the branch/age line's own content width, worst case
- *   -  6  `gap-1.5` between the branch group and the age
- *   - 24  `data-session-age`'s worst case — `relativeTime` never emits more
- *         than a number and a letter, but this leaves room for four
- *         characters ("999d") at roughly 6px each
- *   - 10  the `GitBranch` icon (`size={10}`)
- *   -  4  `gap-1` between the icon and the branch text
- *   = 116px left for `data-branch-head` and `data-branch-tail` TOGETHER,
- *     worst case — and all of it goes to the tail once the head has
- *     shrunk to nothing, which is exactly the priority already in force.
+ * WHAT ACTUALLY STOPS THE OVERLAP NOW: `data-session-branch`'s own
+ * `overflow-hidden`. That element is a flex child already sized correctly
+ * by the row's own flex layout — `min-w-0` lets it shrink to exactly the
+ * space `data-session-age` (flex-none) does not need, computed by the
+ * browser from the age's REAL rendered width, at paint time, in whatever
+ * font actually loaded. `data-branch-tail` inside it is `flex-none` and
+ * happily renders past that box's edge; `overflow-hidden` on the parent is
+ * what refuses to paint the part that would land on the age, at any width,
+ * any age string, any font — no arithmetic to get wrong. `data-branch-head`
+ * shrinks first (plain `truncate`, ordinary flex-shrink), so the tail is
+ * only ever clipped by the hard bound after the head has already given up
+ * everything it has, preserving `splitBranch`'s own priority: the
+ * distinguishing final segment stays whole for as long as it possibly can.
  *
- * `font-mono` at `text-[10px]` runs close to 6px per character (a
- * monospace face's usual ~0.6em advance), so 116px is roughly 19
- * characters. Rounded up to 20 — a character of margin against that
- * estimate, and just past the longer of the two names the test above
- * already proves fit at this width (13 and 19 characters) rather than
- * sitting exactly on the line.
- *
- * Expressed in `ch`, not px, where it is applied: `font-mono` is a
- * monospace face, so 1ch is the exact width of every character in it — the
- * browser measures the real cut point instead of this comment's estimate
- * having to be exact.
+ * WHAT THIS CONSTANT STILL DOES: below it, the tail renders in full; past
+ * it, `truncate` turns on and offers its OWN ellipsis at a chosen character
+ * rather than wherever the hard clip happens to land — nicer to read on an
+ * ordinary long branch, and free to be a little optimistic since a miss
+ * costs nothing but a slightly-later "…" instead of a bare edge. Rounded
+ * from the same 116px-ish budget as before (`SIDEBAR_MIN` minus the row's
+ * chrome minus a REALISTIC, not a bulletproof, age estimate) — kept
+ * approximate on purpose, because getting it exactly right no longer
+ * matters.
  */
 export const BRANCH_TAIL_MAX_CHARS = 20;
 
@@ -2222,7 +2225,17 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                             ? 'this source cannot say which branch the session is on'
                                             : session.branch
                                         }
-                                        className="flex min-w-0 items-center"
+                                        // `overflow-hidden` IS the guarantee (see
+                                        // `BRANCH_TAIL_MAX_CHARS`'s doc comment): this box is
+                                        // already sized correctly by the row's own flex layout
+                                        // (`min-w-0`, shrunk to exactly the space
+                                        // `data-session-age` -- `flex-none` -- does not need,
+                                        // computed by the browser from its REAL rendered width).
+                                        // `data-branch-tail` below is `flex-none` and will
+                                        // happily paint past this box's edge; clipping here is
+                                        // what refuses to let that paint land on the age, at any
+                                        // width, any age string, any font.
+                                        className="flex min-w-0 items-center overflow-hidden"
                                       >
                                         {session.branch === null ? (
                                           '—'
@@ -2231,16 +2244,21 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                             <span data-branch-head className="truncate">
                                               {splitBranch(session.branch).head}
                                             </span>
-                                            {/* `flex-none` below the cap -- untouched, exactly
-                                                as it always rendered for every branch name
-                                                short enough to fit. Past it, `truncate` and an
-                                                inline `maxWidth` turn on TOGETHER: `truncate`
-                                                alone sets no ceiling, and Tailwind's static
-                                                scanner cannot see a class built from
-                                                `BRANCH_TAIL_MAX_CHARS` at build time, so the
-                                                width is inline rather than an arbitrary
-                                                class -- the same reason `popoverWidth` above is
-                                                a `style`, not a class. */}
+                                            {/* `flex-none` always -- the tail never shares in
+                                                the head's shrink, which is the whole point: the
+                                                distinguishing final segment gives way last. Past
+                                                `BRANCH_TAIL_MAX_CHARS`, `truncate` and an inline
+                                                `maxWidth` turn on TOGETHER as a PREFERRED cut
+                                                point -- an early, readable "…" rather than
+                                                whatever character the parent's `overflow-hidden`
+                                                above happens to land on. `truncate` alone sets no
+                                                ceiling, and Tailwind's static scanner cannot see a
+                                                class built from `BRANCH_TAIL_MAX_CHARS` at build
+                                                time, so the width is inline rather than an
+                                                arbitrary class -- the same reason `popoverWidth`
+                                                above is a `style`, not a class. If this estimate
+                                                is ever a few pixels optimistic, the parent's clip
+                                                is the actual backstop, not this. */}
                                             <span
                                               data-branch-tail
                                               className={

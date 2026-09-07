@@ -73,8 +73,9 @@ function collectedFiles(configName: string): string[] {
 describe.skipIf(!harnessInstalled)(
   'e2e Playwright config collection (real --list, not a testMatch string read)',
   () => {
-    it('the default config collects exactly the two .spec.ts specs', () => {
+    it('the default config collects exactly the three .spec.ts specs', () => {
       expect(collectedFiles('playwright.config.ts')).toEqual([
+        'branch-overlap.spec.ts',
         'pane-resize.spec.ts',
         'sse-drop.spec.ts',
       ]);
