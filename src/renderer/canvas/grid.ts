@@ -48,7 +48,7 @@ export function cellOrigin(
 
 /**
  * How many grid columns fit legibly in a canvas pane `widthPx` device pixels
- * wide, drawn at `zoom`.
+ * wide, at a REFERENCE `zoom`.
  *
  * `GRID.columns` cells span, in canvas units, `GRID.padding` once (the
  * leading edge only — `cellOrigin` never adds a matching trailing padding,
@@ -63,6 +63,16 @@ export function cellOrigin(
  * `CELL.width` is fixed on purpose. Below the threshold this returns 1, so
  * every card gets the pane's full width instead of a half that was too
  * narrow to read; at or above it, `GRID.columns`.
+ *
+ * `zoom` MUST be a fixed reference (the caller passes `DEFAULT_VIEWPORT.zoom`,
+ * the canvas's fixed opening zoom — see that constant's own comment in
+ * `Canvas.tsx`), never the live viewport zoom the operator is actively
+ * scrolling. This function stays pure either way, but wiring in a live zoom
+ * would make the ARRANGEMENT depend on how far zoomed in the operator
+ * happens to be: a wheel notch could cross the threshold mid-gesture and
+ * rearrange every node, which is the opening-zoom mistake `DEFAULT_VIEWPORT`
+ * was already corrected for, in the other direction. Zoom scales what is on
+ * screen; it must never decide what is on screen.
  */
 export function columnsForWidth(widthPx: number, zoom: number): number {
   const span = GRID.padding + GRID.columns * CELL.width + (GRID.columns - 1) * GRID.columnGap;

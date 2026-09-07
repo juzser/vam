@@ -1258,30 +1258,28 @@ function CanvasInner({
   }, [model, entries, allEntries]);
 
   /**
-   * Subscribed, not read.
-   *
-   * This was `Math.round(getZoom() * 100)` computed during render. `getZoom()`
-   * is an imperative call into ReactFlow's store: it returns the right number
-   * at the moment it runs, and it does not make the component re-render when
-   * the viewport changes. So the readout only refreshed when something ELSE
-   * caused a render, and scrolling to zoom left it showing a stale figure.
-   * `useStore` subscribes to `transform[2]` — the viewport's scale — so the
-   * number tracks the canvas.
-   *
-   * Read here, ahead of `layout` below, because `columnsForWidth` needs it
-   * too: the canvas pane's width is in device pixels but the grid's geometry
-   * is in canvas units, and `zoom` is the conversion between them.
-   */
-  const zoom = useStore((state) => state.transform[2]);
-
-  /**
    * How many grid columns the canvas pane can show right now.
+   *
+   * `columnsForWidth` is handed `DEFAULT_VIEWPORT.zoom` — the fixed zoom the
+   * canvas OPENS at — never the live one. The arrangement must depend only on
+   * the pane's width, not on the zoom level: `DEFAULT_VIEWPORT`'s own comment
+   * above records that `fitView` was deliberately removed because it made the
+   * opening zoom depend on how much was on screen, and feeding the live zoom
+   * in here would reintroduce that same coupling in the other direction —
+   * scrolling to zoom would re-run this threshold and could rearrange every
+   * node mid-gesture, oscillating across a single wheel notch. Zoom scales
+   * what is drawn; it must never rearrange it. Resizing the PANE is the only
+   * thing that should change `columns` after mount, and it already does, via
+   * `canvasPaneWidth` above.
    *
    * `canvasPaneWidth` is `null` until the pane has been measured once, and a
    * still-mounting canvas stays at the default `GRID.columns` rather than
    * flashing to one column and back — see the ref/effect above.
    */
-  const columns = canvasPaneWidth === null ? GRID.columns : columnsForWidth(canvasPaneWidth, zoom);
+  const columns =
+    canvasPaneWidth === null
+      ? GRID.columns
+      : columnsForWidth(canvasPaneWidth, DEFAULT_VIEWPORT.zoom);
 
   const layout = useMemo(() => layoutCanvas(visibleModel, columns), [visibleModel, columns]);
 
@@ -2728,8 +2726,22 @@ function CanvasInner({
     openSessionIconPicker,
   ]);
 
-  // `zoom` itself is read once, above `layout`, where `columnsForWidth` also
-  // needs it — this is only the percentage the toolbar prints.
+  /**
+   * Subscribed, not read.
+   *
+   * This was `Math.round(getZoom() * 100)` computed during render. `getZoom()`
+   * is an imperative call into ReactFlow's store: it returns the right number
+   * at the moment it runs, and it does not make the component re-render when
+   * the viewport changes. So the readout only refreshed when something ELSE
+   * caused a render, and scrolling to zoom left it showing a stale figure.
+   * `useStore` subscribes to `transform[2]` — the viewport's scale — so the
+   * number tracks the canvas.
+   *
+   * DISPLAY ONLY. `columns` above reads `DEFAULT_VIEWPORT.zoom`, a fixed
+   * reference, not this live subscription — the two must not be conflated:
+   * this one may change every wheel notch, the layout's must not.
+   */
+  const zoom = useStore((state) => state.transform[2]);
   const zoomPct = Math.round(zoom * 100);
 
   // `sidebarProps` feeds a `React.memo`-wrapped `SessionList`; a fresh
