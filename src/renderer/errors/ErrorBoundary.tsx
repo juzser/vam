@@ -48,7 +48,7 @@
  */
 
 import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { copyText } from '../canvas/clipboard.js';
+import { copyText } from '../panels/clipboard.js';
 import { type LoggedEvent, recordFailure } from './log.js';
 import { composeReport, type Report } from './report.js';
 

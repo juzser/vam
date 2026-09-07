@@ -31,7 +31,7 @@
  * Everything here is a pure function of a model and a list. No React.
  */
 
-import type { CanvasModel, Decision, Session } from '../domain/model.js';
+import type { CanvasModel, Decision, Session } from './model.js';
 
 export type PendingPrompt = {
   /** Vam's own id for the painted turn. Never matched against the source's. */

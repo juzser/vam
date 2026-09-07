@@ -1,15 +1,18 @@
 /**
- * Executable form of epic.md section 13 (13.1, 13.2) plus the drag/pin
- * residue instrument, so `vitest run` enforces them permanently instead of
- * as prose duplicated across task specs.
+ * Executable form of epic.md section 13.1, so `vitest run` enforces it
+ * permanently instead of as prose duplicated across task specs.
  *
- * BLIND SPOT: every rule below is a CONTENT SCAN over source text — it cannot
+ * BLIND SPOT: the rule below is a CONTENT SCAN over source text — it cannot
  * distinguish code from prose, and cannot see a dynamic import, a re-export,
- * an aliased identifier or a string-keyed lookup. Not hypothetical: the
- * residue scan reads 3 lines over src/ + test/, all prose comments (hence
- * scoped to src/ only), and 13.1's hex pattern once matched "PR #482 open",
- * a pull-request number, not a colour. No rule claims more than a regex over
- * file content can prove.
+ * an aliased identifier or a string-keyed lookup. Not hypothetical: 13.1's
+ * hex pattern once matched "PR #482 open", a pull-request number, not a
+ * colour. No rule claims more than a regex over file content can prove.
+ *
+ * 0.2 migration, step 2: sections 13.2(a)/(b)/(c) and the drag/pin residue
+ * instrument retired here, along with `grid.ts`, `canvas/*Node.tsx` and
+ * `layoutCanvas` — the geometry, the props-only node contract and the
+ * drag/pin vocabulary those rules pinned all left with the graph. 13.1 (no
+ * literal hex colour) is not a graph rule; it survives verbatim.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -33,16 +36,11 @@ function listSrcFiles(dir: string): string[] {
 }
 
 const allSrcFiles = listSrcFiles(SRC_DIR);
-const nodeFiles = allSrcFiles.filter((f) => /(^|\/)canvas\//.test(f) && /Node\.tsx$/.test(f));
 const cssAndTsFiles = allSrcFiles.filter(
   (f) => !f.endsWith('styles.css') && ['.ts', '.tsx', '.css'].includes(extname(f)),
 );
 
 const at = (f: string, i: number, l: string) => `src/${f}:${i + 1}: ${l.trim()}`;
-const isComment = (t: string) => t.startsWith('//') || t.startsWith('*');
-
-const DRAGGABLE_ALLOWED = /draggable:\s*false\b|nodesDraggable=\{false\}/;
-const IMPORT_LINE = /^\s*import\s+(?:type\s+)?.*\s+from\s+['"]([^'"]+)['"]/;
 
 // Each rule scans one set of files, line by line; a non-null return is a violation
 // with the file, line number and rule it breaks, per the honesty requirement above.
@@ -52,54 +50,6 @@ const RULES: {
   rule: string;
   check: (f: string, l: string, i: number) => string | null;
 }[] = [
-  {
-    // \bPin\b and case-insensitivity are load-bearing (finding b80ce28a): without
-    // them a surviving `Pin` type reads clean. Scope is ALL of src/, never test/,
-    // where the reading is 3 prose comments, not 0.
-    name: 'RESIDUE: no file under src/ matches the removed drag/pin vocabulary',
-    files: allSrcFiles,
-    rule: 'Drag/pin residue under src/ (removed by task-3-undrag):',
-    check: (f, l, i) =>
-      /\b(pinned|unpinAll|onNodeDrag)\b|\bPin\b|\bpin\(/i.test(l) ? at(f, i, l) : null,
-  },
-  {
-    // Shape, never a count: a count still passes when `false` flips to `true`.
-    name: 'DRAGGABLE: every match under src/ is a disabling form or a comment',
-    files: allSrcFiles,
-    rule: 'draggable must be a disabling form or a comment:',
-    check: (f, l, i) => {
-      if (!/draggable/i.test(l)) return null;
-      const t = l.trim();
-      return !isComment(t) && !DRAGGABLE_ALLOWED.test(l) ? at(f, i, l) : null;
-    },
-  },
-  {
-    // Constrains what grid.ts READS, not who reads it; layout.ts importing FROM
-    // it is fine and unaffected.
-    name: '13.2(a): grid.ts has zero import or require statements — geometry stays data',
-    files: ['renderer/canvas/grid.ts'],
-    rule: 'grid.ts must stay pure, zero dependency edges (13.2(a)):',
-    check: (f, l, i) => (/^\s*import\b/.test(l) || /\brequire\(/.test(l) ? at(f, i, l) : null),
-  },
-  {
-    // Observes import specifiers and identifiers only — proves the narrower true
-    // thing named above, not "components never compute layout". Type-only
-    // ../domain/*.js imports are untouched ("domain" matches nothing forbidden).
-    // layoutCanvas stays legal in Canvas.tsx, the canvas host: this rule's files
-    // are *Node.tsx only, never src/canvas/*.tsx.
-    name: '13.2(b)+(c): *Node.tsx imports no grid/layout/actions/source/store, never layoutCanvas',
-    files: nodeFiles,
-    rule: 'Node components stay props-driven, layout stays out of them:',
-    check: (f, l, i) => {
-      const spec = l.match(IMPORT_LINE)?.[1];
-      if (spec !== undefined && /grid|layout|actions|source|store/i.test(spec)) {
-        return `${at(f, i, l)} — 13.2(b) layout import`;
-      }
-      if (!isComment(l.trim()) && /\blayoutCanvas\b/.test(l))
-        return `${at(f, i, l)} — 13.2(c) layoutCanvas`;
-      return null;
-    },
-  },
   {
     // epic.md 13.1's recorded target ("one line", SessionList.tsx:69, a "PR #482"
     // comment) is stale: removed at b7bb3c8 by task-8-sidebar-row while

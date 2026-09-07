@@ -50,8 +50,8 @@
 
 import { Bot, GitPullRequest, type LucideIcon, MessageSquare, SquareTerminal } from 'lucide-react';
 import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react';
-import { orderedInProject } from '../canvas/layout.js';
 import type { Project, Session } from '../domain/model.js';
+import { orderedInProject } from '../domain/selectors.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
 import { SessionList } from '../panels/SessionList.js';
 import { type Tab, visibleTabs } from '../panels/tabs.js';

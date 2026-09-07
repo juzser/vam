@@ -91,10 +91,10 @@ describe('the filter popover beside the sidebar search box', () => {
   it('leaves no second filter control floating on the canvas', () => {
     render(<Canvas model={MODEL} />);
     // The pills are not rendered at all until the popover is opened, and when
-    // they are, they are in the sidebar — never inside ReactFlow's own panel.
+    // they are, they are in the sidebar — never inside the tab-strip column.
     expect(pill('all')).toBeNull();
     openMenu();
-    expect(pill('all')?.closest('.react-flow__panel')).toBeFalsy();
+    expect(pill('all')?.closest('[data-canvas-pane]')).toBeFalsy();
     expect(pill('all')?.closest('aside')).toBeTruthy();
   });
 

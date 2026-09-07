@@ -16,8 +16,8 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { SmithClient } from '../../src/renderer/adapter/client.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import type { CanvasSource } from '../../src/renderer/canvas/source.js';
 import type { CanvasModel } from '../../src/renderer/domain/model.js';
+import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
 const MODEL: CanvasModel = {
   projects: [

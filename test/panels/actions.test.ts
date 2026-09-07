@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildActions, clampIndex } from '../../src/renderer/canvas/actions.js';
+import { buildActions, clampIndex } from '../../src/renderer/panels/actions.js';
 
 describe('buildActions', () => {
   it('is the prompt, and only the prompt', () => {

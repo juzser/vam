@@ -9,7 +9,7 @@
  */
 
 import type { SmithClient } from '../adapter/client.js';
-import type { SessionSource } from '../sources/port.js';
+import type { SessionSource } from './port.js';
 
 export type CanvasSource =
   | {

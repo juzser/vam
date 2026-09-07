@@ -69,7 +69,7 @@ describe('the overlay sheet rules', () => {
     // The command palette and the key sheet are reached by `Ctrl-K` and `?`,
     // and there are no chords on a phone. A sheet geometry would make them
     // look reachable while nothing can open them.
-    expect(read('../../src/renderer/canvas/CommandPalette.tsx')).not.toContain('data-overlay-host');
-    expect(read('../../src/renderer/canvas/KeySheet.tsx')).not.toContain('data-overlay-host');
+    expect(read('../../src/renderer/panels/CommandPalette.tsx')).not.toContain('data-overlay-host');
+    expect(read('../../src/renderer/panels/KeySheet.tsx')).not.toContain('data-overlay-host');
   });
 });

@@ -1,35 +1,28 @@
 /**
  * The three-column shell, and the one place a keypress becomes a move.
  *
- *     [ sessions ] [ ————— canvas ————— ] [ detail + answer ]
+ *     [ sessions ] [ ——— session tabs ——— ] [ detail + answer ]
  *
- * The division of labour is the point: the chord grammar lives in
- * `keyboard/chords.ts`, the geometry in `keyboard/spatial-nav.ts`, the
- * coordinate maths in `canvas/nav-nodes.ts`, the positions in `canvas/layout.ts`
- * — all pure, all tested without a DOM. What is left here is what genuinely
- * needs React: owning the listener, holding focus, and asking ReactFlow where
- * things currently are.
+ * 0.2 migration, step 2: the node-graph canvas is gone. The middle column now
+ * draws a VSCode-shaped tab strip, one tab per open session (`TabStrip`
+ * below) — no more geometry, no more `@xyflow/react`, no more per-decision
+ * cards. The chord grammar still lives in `keyboard/chords.ts`; what used to
+ * live beside it in `keyboard/spatial-nav.ts` and `canvas/nav-nodes.ts` (the
+ * coordinate maths `h`/`l` used to walk a session's own chain of steps) was
+ * deleted with the graph — there is no more per-session geometry to walk, and
+ * `h`/`l` walk the open tab strip instead. See the `move` case of `onKeyDown`
+ * below for the new meaning; the deletion and the re-homing land in the same
+ * commit because `nextNode`'s only caller was that branch.
  *
- * "Currently" is load-bearing. Every move reads `getNodes()` at the moment the
- * key is pressed rather than a list captured at render, which is what lets §4
- * promise that dragging cannot break `hjkl`.
- *
- * **One focus, three views.** The sidebar, the canvas and the detail panel all
- * read the same `focusedNodeId`; none of them owns a cursor of its own. That is
- * why `j` does not have to mean something different depending on which pane you
- * are "in" — there is no such thing as being in a pane. `j`/`k` walk sessions
- * because rows are stacked; `h`/`l` walk a session's chain because its nodes are
- * in a line. Nothing had to be added for the sidebar: it mirrors the same id.
+ * **One focus, three views.** The sidebar, the canvas column and the detail
+ * panel all read the same `focusedSessionId`; none of them owns a cursor of
+ * its own. That is why `j` does not have to mean something different
+ * depending on which pane you are "in" — there is no such thing as being in
+ * a pane. `j`/`k` walk the sidebar's own order, one session at a time.
+ * Nothing had to be added for the sidebar: it mirrors the same id, and the
+ * tab strip's `activeId` is that same id again.
  */
 
-import {
-  type Edge,
-  type Node,
-  ReactFlow,
-  ReactFlowProvider,
-  useNodesState,
-  useReactFlow,
-} from '@xyflow/react';
 import { Box, Factory, FlaskConical, type LucideIcon } from 'lucide-react';
 import {
   Children,
@@ -58,8 +51,15 @@ import type {
   SessionStatus,
   SourceId,
 } from '../domain/model.js';
+import {
+  countTurnsWithInput,
+  type PendingPrompt,
+  reconcile,
+  withPending,
+} from '../domain/optimistic.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import { orderedSessions } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain/session-filter.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
@@ -68,16 +68,20 @@ import { DEMO_PROMPT } from '../fixtures/demo.js';
 import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
-import { nextNode } from '../keyboard/spatial-nav.js';
+import { buildActions, clampIndex } from '../panels/actions.js';
+import { CommandPalette } from '../panels/CommandPalette.js';
 import { ConfirmForceClose } from '../panels/ConfirmForceClose.js';
+import { copyText } from '../panels/clipboard.js';
 import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
 import { GroupPicker, type GroupPickerChoice } from '../panels/GroupPicker.js';
 import { IconPicker } from '../panels/IconPicker.js';
+import { KeySheet } from '../panels/KeySheet.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
 import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { NEW_PROJECT_PENDING, SessionList } from '../panels/SessionList.js';
+import { resolveSessionGlyph } from '../panels/session-icon.js';
 import { visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
@@ -101,10 +105,8 @@ import {
   applyTheme,
   browserStorage,
   createGroup,
-  DEFAULT_FOCUS_SHARE,
   deleteGroup,
   type EffectiveTheme,
-  FOCUS_SHARE_OFF,
   type FocusChoice,
   isGroupCollapsed,
   isProjectHidden,
@@ -135,72 +137,17 @@ import {
 import { SettingsOverlay } from '../settings/SettingsOverlay.js';
 import type { SectionId } from '../settings/sections.js';
 import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/port.js';
-import { buildActions, clampIndex } from './actions.js';
-import { CommandPalette } from './CommandPalette.js';
-import { copyText } from './clipboard.js';
-import { columnsForWidth, GRID } from './grid.js';
-import { KeySheet } from './KeySheet.js';
-import { infoNodeId, layoutCanvas, orderedSessions, sessionBounds } from './layout.js';
-import { type FlowNodeLike, toNavNodes } from './nav-nodes.js';
-import { countTurnsWithInput, type PendingPrompt, reconcile, withPending } from './optimistic.js';
-import { PROVIDER_MARKS } from './provider-marks.js';
-import { SessionFanNode } from './SessionFanNode.js';
-import { SessionInfoNode } from './SessionInfoNode.js';
-import { StepNode } from './StepNode.js';
-import { StepSlotNode } from './StepSlotNode.js';
-import { type CanvasSource, READ_ONLY_SOURCE } from './source.js';
-
-/**
- * A `StepSlotSpec` is emitted for all three of a session's slot positions
- * (layout.ts), including the one a real step already occupies — the fan's
- * scenery ids must be stable regardless of decision count (AC-9's `scenery`
- * set is read straight off `layout.slots`, unfiltered). Only the EMPTY
- * positions get the dashed "no step yet" card; an occupied position renders
- * nothing here, so it does not draw a second "no step yet" behind the real
- * step card it sits under.
- */
-function OccupiedSlot() {
-  return null;
-}
-
-const NODE_TYPES = {
-  info: SessionInfoNode,
-  step: StepNode,
-  fan: SessionFanNode,
-  slot: StepSlotNode,
-  'slot-filled': OccupiedSlot,
-};
-
-/** ReactFlow requires an edges array; there is no custom edge type any more —
- *  the fan is a scenery node (epic.md §5.2). A module-level constant keeps
- *  this a stable reference across renders. */
-const NO_EDGES: Edge[] = [];
+import { PROVIDER_MARKS } from '../sources/provider-marks.js';
+import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
 
 /** `model.groups ?? []` on every render is a fresh reference each keystroke,
- *  defeating `SessionList`'s memo -- stable like `NO_EDGES` above. */
+ *  defeating `SessionList`'s memo -- a module-level constant keeps this a
+ *  stable reference across renders. */
 const EMPTY_GROUPS: readonly Group[] = [];
 
 /** Home-row first: the labels you can hit without looking. */
 const JUMP_KEYS = 'asdfghjkl;qwertyuiop';
 
-/**
- * Where the canvas opens: 80%, centred on the origin until focus moves it.
- *
- * `fitView` used to decide this, which meant the opening zoom depended on how
- * many sessions the workspace happened to have.
- */
-const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 0.8 } as const;
-
-/**
- * How much of the canvas the focused session's row should occupy.
- *
- * The operator asked for this twice with different numbers (70%, then 60%), and
- * said it would become a setting. It now is one: this constant is the DEFAULT,
- * the stored `focusViewportShare` overrides it, and `focusPadding` derives what
- * ReactFlow actually wants from whichever is in force. Keeping the target named
- * rather than folding it into a padding value is what let the settings pane
- * write to it without anyone re-deriving the formula.
- */
 /**
  * Token counts at a glance: `578k`, `4.2M`.
  *
@@ -297,31 +244,6 @@ export function StatusCell({ text }: { readonly text: string }) {
       </span>
     </Note>
   );
-}
-
-/** Now the DEFAULT of a stored preference rather than the value itself: the
- *  settings overlay writes `prefs.focusViewportShare`, and this is what a
- *  browser with nothing stored falls back to. Still 0.6, still one literal. */
-export const FOCUS_VIEWPORT_SHARE = DEFAULT_FOCUS_SHARE;
-
-/**
- * ReactFlow's fitting `padding` for a target share of the viewport.
- *
- * A numeric padding is resolved by the library as `(v - v / (1 + p)) / 2`
- * pixels on each side of the axis of length `v`, which leaves the content
- * spanning `1 / (1 + p)` of it. Inverting THAT gives p = 1/share - 1; at 0.6
- * the padding is 0.667.
- *
- * It used to be `(1/share - 1) / 2`, from a reading of `padding` as a fraction
- * of the fitted BOUNDS added to each side -- content at `1 / (1 + 2p)`. That
- * is not what the installed ReactFlow does, and the difference is not
- * academic: at the shipped 60% target it framed the session at 75%. Nothing
- * caught it because the value it fed was only ever asserted against the same
- * wrong model. `grid.test.ts` now measures the result through
- * `getViewportForBounds`, the library's own arithmetic.
- */
-export function focusPadding(share: number): number {
-  return 1 / share - 1;
 }
 
 function jumpLabels(ids: readonly string[]): Map<string, string> {
@@ -559,15 +481,11 @@ function CanvasColumn({
  * `openTabs` owns (drag-reordering, when it ships, only ever has to change
  * that one array) — never re-sorted here by title or status.
  *
- * No drag yet: the `×` and the click are the whole surface. Dragging was
- * deliberately removed from the CANVAS once (`nodesDraggable={false}`,
- * `topology-constraints.test.ts` rule 1) — that ban is about NODES and does
- * not extend to tabs, but this task ships only the non-draggable case either
- * way.
+ * No drag yet: the `×` and the click are the whole surface. Step 1 shipped
+ * only the non-draggable case on purpose, ahead of A1.5's drag-to-reorder.
  */
 /** The literal class strings, not a template literal, so Tailwind's static
- *  scanner can see them — the same reason `SessionInfoNode.tsx`'s own
- *  `STATUS_INK` is a lookup rather than `` `text-${status}` ``. */
+ *  scanner can see them rather than a computed `` `text-${status}` ``. */
 const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
   running: 'text-running',
   waiting: 'text-waiting',
@@ -611,6 +529,15 @@ function TabStrip({
     >
       {tabs.map((entry) => {
         const active = entry.session.id === activeId;
+        // The chain (`panels/session-icon.ts`): the session's own choice, else
+        // its project's, else nothing drawn -- deliberately not the module's
+        // own placeholder glyph, which would put a Monitor icon on every tab
+        // nobody has picked one for. Adopting the chain is the point: this
+        // used to read `entry.session.icon` alone, so a tab never fell back
+        // to its project's glyph the way the (now-deleted) canvas root node
+        // already did, and the two surfaces disagreed the moment one carried
+        // a project icon and no session icon of its own.
+        const glyph = resolveSessionGlyph(entry);
         return (
           <div
             key={entry.session.id}
@@ -624,8 +551,12 @@ function TabStrip({
               onClick={() => onSelect(entry.session.id)}
               className={`max-w-[160px] truncate py-1.5 ${active ? TAB_STATUS_INK[entry.session.status] : ''}`}
             >
-              {entry.session.icon !== null && entry.session.icon !== undefined && (
-                <span aria-hidden="true">{entry.session.icon} </span>
+              {glyph !== null && (
+                <>
+                  <span data-session-icon={entry.session.id} aria-hidden="true">
+                    {glyph}
+                  </span>{' '}
+                </>
               )}
               {entry.session.title}
             </button>
@@ -783,38 +714,6 @@ function CanvasInner({
   // The canvas is a strip exactly when it is drawn but is not the main column.
   const canvasStrip = visible.canvas && !canvasIsMain(visible);
 
-  /**
-   * The canvas pane's OWN width, watched directly rather than derived from
-   * `viewportWidth` and the two side panes' widths.
-   *
-   * A pane-resizer drag (or a layout preset moving the strip) changes what
-   * the canvas pane measures without ever firing a window `resize` event --
-   * `viewportWidth` above would not move. `TerminalTab.tsx`'s own pane-size
-   * effect already hits exactly this gap for the SAME reason (a resizer drag
-   * resizing its pane) and works around it the same way: a `ResizeObserver`
-   * on the pane element itself, not a window listener. `clientWidth` is that
-   * file's own measurement, reused here rather than a second unit.
-   *
-   * `null` until the first observation -- "not yet measured", not "very
-   * narrow" -- which is what keeps a still-mounting canvas at the default
-   * `GRID.columns` instead of collapsing to one column for a render or two
-   * before anything has actually been laid out.
-   */
-  const canvasPaneRef = useRef<HTMLDivElement | null>(null);
-  const [canvasPaneWidth, setCanvasPaneWidth] = useState<number | null>(null);
-  useEffect(() => {
-    const el = canvasPaneRef.current;
-    if (!visible.canvas || el === null) {
-      return;
-    }
-    const measure = () => setCanvasPaneWidth(el.clientWidth);
-    // `observe` delivers the element's initial size, so this is also the
-    // first measurement.
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [visible.canvas]);
-
   const { sidebar: sidebarWidth, detail: detailWidth } = layoutWidths(
     visible,
     { sidebar: storedSidebar, detail: storedDetail },
@@ -882,9 +781,9 @@ function CanvasInner({
    * The replies sent but not yet reported back by the source (`optimistic.ts`).
    *
    * Held here, one level above `model`, so every pane draws a pending reply
-   * exactly as it draws a real turn -- the sidebar, the step nodes and the
-   * detail panel all read `model` and none of them learns that a turn can be
-   * vam's own, which is the same rule the rename above follows.
+   * exactly as it draws a real turn -- the sidebar and the detail panel both
+   * read `model` and neither learns that a turn can be vam's own, which is
+   * the same rule the rename above follows.
    */
   const [pending, setPending] = useState<readonly PendingPrompt[]>([]);
   const pendingSeq = useRef(0);
@@ -916,16 +815,19 @@ function CanvasInner({
   const allEntries = useMemo(() => orderedSessions(model), [model]);
 
   /**
-   * `null` until there is a layout to point at.
+   * The one session the keyboard is pointed at — `null` until there is
+   * something real to point at.
    *
-   * This used to seed itself from `layout.nodes[0]`, which was only possible
-   * while the layout came straight from the model. It is now built from the
-   * FILTERED model, and that cannot be computed above the filter state
-   * declared below. Nothing is lost: the "land focus on something real" effect
+   * Before the 0.2 migration this held a ReactFlow NODE id (an info card or a
+   * step), and the session it belonged to was derived a level down. With the
+   * graph gone there is no second granularity left inside a session to
+   * distinguish, so this is now the session id directly — the state IS the
+   * derived value the rest of the file used to compute from it. Nothing is
+   * lost by seeding it `null`: the "land focus on something real" effect
    * already had to cover the live case, where the first model arrives after
-   * mount and the first layout is empty whatever this says.
+   * mount and the first `entries` list is empty whatever this says.
    */
-  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
   const [jumping, setJumping] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -1127,7 +1029,6 @@ function CanvasInner({
   const [hiddenSourceless, setHiddenSourceless] = useState<readonly string[]>([]);
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
-  const { getNodes, zoomIn, zoomOut, fitView, fitBounds, setCenter } = useReactFlow();
 
   const matches = useMemo(() => searchMatches(allEntries, query), [allEntries, query]);
 
@@ -1387,119 +1288,42 @@ function CanvasInner({
   }, [allEntries]);
 
   /**
-   * The model the canvas draws: `model`, minus whatever the filter excluded.
-   *
-   * Re-filters `model.projects` rather than rebuilding a model out of
-   * `entries`, so every project keeps its identity — id, name and source — and
-   * only its membership changes. A project the filter empties drops out
-   * entirely instead of drawing a heading over nothing. Unfiltered, the very
-   * same object comes back, so the layout memo below does not recompute for a
-   * filter nobody set.
+   * What `hjkl`, `f` and `gg` may land on: every session in view, no filter
+   * of its own. The set is narrowed once, at `entries` above, and the sidebar
+   * and the tab strip are both drawn from the result — so a second narrowing
+   * here is what would put the cursor and the picture back out of step.
    */
-  const visibleModel = useMemo<CanvasModel>(() => {
-    const kept = new Set(entries.map((e) => e.session.id));
-    if (kept.size === allEntries.length) {
-      return model;
-    }
-    const narrow = (projects: readonly Project[]) =>
-      projects
-        .map((project) => ({
-          ...project,
-          sessions: project.sessions.filter((s) => kept.has(s.id)),
-        }))
-        .filter((project) => project.sessions.length > 0);
-    // The grouped half is narrowed the same way and by the same set. Dropping
-    // it here instead would make a filter delete every grouped card from the
-    // canvas -- the "drawn but unreachable" defect this memo's own comment
-    // describes, in reverse.
-    const groups = model.groups?.map((group) => ({ ...group, projects: narrow(group.projects) }));
-    return { projects: narrow(model.projects), ...(groups === undefined ? {} : { groups }) };
-  }, [model, entries, allEntries]);
+  const sessionIds = useMemo(() => entries.map((e) => e.session.id), [entries]);
 
   /**
-   * How many grid columns the canvas pane can show right now.
+   * Every session focus could land on.
    *
-   * `columnsForWidth` is handed `DEFAULT_VIEWPORT.zoom` — the fixed zoom the
-   * canvas OPENS at — never the live one. The arrangement must depend only on
-   * the pane's width, not on the zoom level: `DEFAULT_VIEWPORT`'s own comment
-   * above records that `fitView` was deliberately removed because it made the
-   * opening zoom depend on how much was on screen, and feeding the live zoom
-   * in here would reintroduce that same coupling in the other direction —
-   * scrolling to zoom would re-run this threshold and could rearrange every
-   * node mid-gesture, oscillating across a single wheel notch. Zoom scales
-   * what is drawn; it must never rearrange it. Resizing the PANE is the only
-   * thing that should change `columns` after mount, and it already does, via
-   * `canvasPaneWidth` above.
-   *
-   * `canvasPaneWidth` is `null` until the pane has been measured once, and a
-   * still-mounting canvas stays at the default `GRID.columns` rather than
-   * flashing to one column and back — see the ref/effect above.
-   */
-  const columns =
-    canvasPaneWidth === null
-      ? GRID.columns
-      : columnsForWidth(canvasPaneWidth, DEFAULT_VIEWPORT.zoom);
-
-  const layout = useMemo(() => layoutCanvas(visibleModel, columns), [visibleModel, columns]);
-
-  /**
-   * What `hjkl`, `f` and `gg` may land on: every node on the canvas, no filter
-   * of its own. The set is narrowed once, at `entries` above, and the canvas is
-   * drawn from the result — so a second narrowing here is what would put the
-   * cursor and the picture back out of step.
-   */
-  const nodeIds = useMemo(() => layout.nodes.map((n) => n.id), [layout]);
-
-  /**
-   * A click lands the cursor where the click landed, exactly as `j`/`k`
-   * would have -- the mouse is a shortcut through the same door `nodeIds`
-   * already gates, never a second one.
-   *
-   * MEMOISED, AND THAT IS THE POINT. `<ReactFlow>`'s node renderer
-   * (`GraphView`) is wrapped in `React.memo`, so a keystroke that leaves
-   * `nodes`/`edges` untouched should cost that subtree nothing -- but a
-   * fresh closure here on every render is itself a prop that changed, which
-   * defeats the memo and re-renders every drawn node on every keystroke.
-   * Measured: at 200 nodes that turned a draft keystroke into ~110ms; see
-   * `Canvas.keystroke-scaling.test.tsx`.
-   */
-  const onNodeClick: ComponentProps<typeof ReactFlow>['onNodeClick'] = useCallback(
-    (_event, node) => {
-      if (nodeIds.includes(node.id)) {
-        setFocusedId(node.id);
-      }
-    },
-    [nodeIds],
-  );
-
-  /**
-   * Every node focus could land on, paired with the SESSION it draws.
-   *
-   * The pairing is the point. A remembered focus stores a session id under its
-   * source, never a node id: node ids are derived from the layout, so they are
-   * rebuilt whenever the model, the filters or the fold state change and a
-   * stored one would go stale between launches without anything having ended.
-   * This is where the two vocabularies meet (`prefs/focus.ts`).
+   * A remembered focus stores a session id under its source, never anything
+   * derived from a graph: candidates are rebuilt whenever the model, the
+   * filters or the fold state change, so a stored one goes stale rather than
+   * pointing at a session that has since ended. This is where the two
+   * vocabularies meet (`prefs/focus.ts`) — `nodeId` and `session` are the
+   * same string now that there is no more per-decision node to distinguish a
+   * session from, kept as two fields because `FocusCandidate`'s shape is
+   * shared, project-wide, protected code this task does not touch.
    */
   const focusCandidates: readonly FocusCandidate[] = useMemo(
     () =>
-      layout.nodes.map((n) => ({
-        nodeId: n.id,
-        source: sourceKeyOf(n.entry),
-        session: n.entry.session.id,
+      entries.map((e) => ({
+        nodeId: e.session.id,
+        source: sourceKeyOf(e),
+        session: e.session.id,
       })),
-    [layout],
+    [entries],
   );
 
-  /** Which session the focused node belongs to — the id all three panes share. */
-  const focusedSpec = useMemo(
-    () => layout.nodes.find((n) => n.id === focusedId) ?? null,
-    [layout, focusedId],
+  /** The focused session's own entry, from the FILTERED set — `null` once a
+   *  filter or a refresh has made the pointer unreachable, the same rule
+   *  `sessionIds` above enforces for `hjkl`. */
+  const focusedEntry: SessionEntry | null = useMemo(
+    () => entries.find((e) => e.session.id === focusedSessionId) ?? null,
+    [entries, focusedSessionId],
   );
-  const focusedEntry: SessionEntry | null = focusedSpec?.entry ?? null;
-  /** Which session the focus sits in — the id the strip filter and the
-   *  sidebar cursor both read. */
-  const focusedSessionId = focusedSpec?.entry.session.id ?? null;
 
   /**
    * Composer state, bound to whichever session is the ACTIVE TAB.
@@ -1605,8 +1429,8 @@ function CanvasInner({
   /**
    * Opening a session from the sidebar opens a tab — and so does every other
    * way focus can land somewhere new (a chord, a jump, a search, the
-   * palette). All of those already move through `setFocusedId` below, so this
-   * watches the RESULT, exactly as the "record where focus is" effect one
+   * palette). All of those already move through `setFocusedSessionId` below,
+   * so this watches the RESULT, exactly as the "record where focus is" effect one
    * screen down does for `lastFocus`, rather than re-deriving "opened a tab"
    * separately at each of the eight places focus can move from. It only ever
    * ADDS a session; only the strip's own close button removes one.
@@ -1659,112 +1483,19 @@ function CanvasInner({
   }, [openTabsReady, openTabs, allEntries, prefs, savePrefs]);
 
   /**
-   * The viewport follows focus, and frames a session when you arrive in one.
+   * What the detail panel expands: the focused session's newest decision.
    *
-   * `j`/`k` can walk to a session that is off screen, and before any of this
-   * the canvas simply did not move — the sidebar and the detail panel updated
-   * while the cards stayed put, so the one pane that shows a session's SHAPE
-   * was the one pane that did not follow you.
-   *
-   * WHEN IT FRAMES IS THE WHOLE DESIGN, and it is a correction of a mistake
-   * this file has already made once. A previous version fitted on every focus
-   * move; the operator asked for it to be removed, and the comment that came
-   * with it admitted it deliberately overrode a zoom they had set by hand. The
-   * fault was not the fit, it was the frequency. Inside one session the
-   * framing is already right — every node of it is on screen — so a re-fit
-   * there can do nothing except undo whatever the operator just did with the
-   * zoom controls. Between sessions there is a new thing to look at and the
-   * old framing was chosen for something else.
-   *
-   * So: arriving in a DIFFERENT session frames that session, whole — root card
-   * and step nodes, `sessionBounds` — at the operator's own share of the
-   * canvas width. Moving about inside one pans and nothing else, with the zoom
-   * argument omitted so `setCenter` keeps the scale exactly where it was.
-   *
-   * The share can be turned OFF (`FOCUS_SHARE_OFF`), and then this is a pan
-   * and only a pan, which is precisely the behaviour that shipped between the
-   * two asks. Somebody who wants that back should not have to ask for code to
-   * be deleted a second time.
-   *
-   * The FIRST landing is not a move between sessions and does not frame: focus
-   * settles on a session shortly after mount without anyone moving it, and the
-   * opening viewport belongs to `DEFAULT_VIEWPORT`, not to this effect.
+   * Before the 0.2 migration this could also be a specific STEP the cursor
+   * had walked onto via `h`/`l` and the graph's own per-decision cards; with
+   * the graph gone there is no finer cursor than the session itself, so the
+   * newest decision is now the only answer there is. Focusing the session
+   * head should still show you something — an empty panel next to a selected
+   * session reads as broken.
    */
-  // Lifted out of the effect so the dependency array names exactly what the
-  // effect reads. Depending on `focusedSpec` itself would re-centre on every
-  // layout rebuild — the object is rebuilt each render — and fight a manual pan.
-  const focusCenterX =
-    focusedSpec === null ? null : focusedSpec.position.x + focusedSpec.size.width / 2;
-  const focusCenterY =
-    focusedSpec === null ? null : focusedSpec.position.y + focusedSpec.size.height / 2;
-
-  // Same rule, and the same reason, for the session's frame: four numbers the
-  // geometry makes deterministic rather than one object identity that changes
-  // whenever the model is polled.
-  const frame = useMemo(
-    () => (focusedSessionId === null ? null : sessionBounds(layout, focusedSessionId)),
-    [layout, focusedSessionId],
+  const focusedDecision: Decision | null = useMemo(
+    () => focusedEntry?.session.decisions[0] ?? null,
+    [focusedEntry],
   );
-  const frameX = frame?.x ?? null;
-  const frameY = frame?.y ?? null;
-  const frameWidth = frame?.width ?? null;
-  const frameHeight = frame?.height ?? null;
-
-  /** The session last framed, so "a different session" is a comparison and not
-   *  a guess. `undefined` until focus first lands, which is what keeps the
-   *  opening render out of it. */
-  const framedSession = useRef<string | null | undefined>(undefined);
-  const focusShare = prefs.focusViewportShare;
-
-  useEffect(() => {
-    if (focusCenterX === null || focusCenterY === null) {
-      return;
-    }
-    // Re-frame when the SHARE changes too: the operator is looking at the
-    // canvas while they turn the stepper, and a setting whose effect waits for
-    // the next keypress reads as a setting that did nothing.
-    const key = focusedSessionId === null ? null : `${focusedSessionId}:${focusShare}`;
-    const arrived = framedSession.current !== undefined && framedSession.current !== key;
-    framedSession.current = key;
-    if (
-      arrived &&
-      focusShare !== FOCUS_SHARE_OFF &&
-      frameX !== null &&
-      frameY !== null &&
-      frameWidth !== null &&
-      frameHeight !== null
-    ) {
-      void fitBounds(
-        { x: frameX, y: frameY, width: frameWidth, height: frameHeight },
-        { padding: focusPadding(focusShare), duration: 220 },
-      );
-      return;
-    }
-    setCenter(focusCenterX, focusCenterY, { duration: 220 });
-  }, [
-    focusCenterX,
-    focusCenterY,
-    focusedSessionId,
-    focusShare,
-    frameX,
-    frameY,
-    frameWidth,
-    frameHeight,
-    fitBounds,
-    setCenter,
-  ]);
-
-  /**
-   * What the detail panel expands: the focused step if a step is focused, else
-   * the session's newest step. Focusing the session head should still show you
-   * something — an empty panel next to a selected session reads as broken.
-   */
-  const focusedDecision: Decision | null = useMemo(() => {
-    if (focusedSpec?.kind === 'step') {
-      return focusedSpec.decision;
-    }
-    return focusedEntry?.session.decisions[0] ?? null;
-  }, [focusedSpec, focusedEntry]);
 
   /**
    * The command row whose copy control `i` has just asked for. Cleared by the
@@ -1782,132 +1513,40 @@ function CanvasInner({
   const actions = useMemo(() => buildActions(), []);
 
   const labels = useMemo(
-    () => (jumping ? jumpLabels(nodeIds) : new Map<string, string>()),
-    [jumping, nodeIds],
+    () => (jumping ? jumpLabels(sessionIds) : new Map<string, string>()),
+    [jumping, sessionIds],
   );
-
-  const initialNodes = useMemo<Node[]>(
-    () => [
-      // Scenery first, painted behind the navigable nodes (epic.md §5.2).
-      // Never a `j`/`k` destination: draggable/selectable/focusable are each
-      // explicit — omitted, they'd default true (@xyflow/react board level).
-      ...layout.fans.map((spec) => ({
-        id: spec.id,
-        type: 'fan',
-        position: spec.position,
-        width: spec.size.width,
-        height: spec.size.height,
-        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
-        draggable: false,
-        selectable: false,
-        focusable: false,
-        data: {
-          sessionId: spec.sessionId,
-          baseOpacity: spec.opacity,
-          sessionStatus: spec.sessionStatus,
-          branchStatuses: spec.branchStatuses,
-          totalSteps: spec.totalSteps,
-        },
-      })),
-      ...layout.slots.map((spec) => ({
-        id: spec.id,
-        type: spec.placeholder ? 'slot' : 'slot-filled',
-        position: spec.position,
-        width: spec.size.width,
-        height: spec.size.height,
-        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
-        draggable: false,
-        selectable: false,
-        focusable: false,
-        data: { sessionId: spec.sessionId, baseOpacity: spec.opacity },
-      })),
-      ...layout.nodes.map((spec) => ({
-        id: spec.id,
-        type: spec.kind,
-        position: spec.position,
-        // `width`/`height` as well as `style`: we know these sizes, and stating
-        // them means the very first keypress navigates correctly instead of
-        // falling back to a zero rectangle before ReactFlow has measured.
-        width: spec.size.width,
-        height: spec.size.height,
-        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
-        data: {
-          ...(spec.kind === 'info'
-            ? { entry: spec.entry, onPickIcon: openSessionIconPicker }
-            : { entry: spec.entry, decision: spec.decision, recall: spec.recall }),
-          focused: false,
-          jumpLabel: null,
-          sessionId: spec.entry.session.id,
-          baseOpacity: spec.opacity,
-        },
-      })),
-    ],
-    [layout, openSessionIconPicker],
-  );
-
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-
-  /**
-   * What the canvas column actually draws.
-   *
-   * The full canvas draws every session, which is what makes it a canvas. The
-   * strip draws the focused session and nothing else — that is the "less
-   * detail" half of demoting it, and it is a RENDERING decision, not a width
-   * one: a 300px column showing every fan would be a canvas you cannot read,
-   * whereas one row of cards at 300px is exactly the amount of graph a person
-   * glances at while reading the response beside it. Filtered here rather than
-   * in `initialNodes` so `nodeIds` — the set the cursor may land on — stays the
-   * whole model in every layout: the strip narrows what is DRAWN, never what
-   * `j`/`k` can reach, and the sidebar still lists them all.
-   */
-  const drawnNodes = useMemo(
-    () => (canvasStrip ? nodes.filter((node) => node.data.sessionId === focusedSessionId) : nodes),
-    [canvasStrip, nodes, focusedSessionId],
-  );
-
-  /**
-   * Keep the drawn nodes in step with the model.
-   *
-   * `useNodesState` takes its argument as INITIAL state and never looks at it
-   * again. Against a fixture that is invisible — the model never changes — but
-   * against a live factory the first render happens before the first fetch
-   * answers, so the canvas latched onto an empty layout and stayed empty
-   * forever while the sidebar filled in beside it. Positions are a pure
-   * function of the model, so every render simply re-applies the layout.
-   */
-  useEffect(() => {
-    setNodes(initialNodes);
-  }, [initialNodes, setNodes]);
 
   /**
    * Land focus on something real once there is something real.
    *
    * The first model arrives after mount, so the initial focus is null; and a
-   * filter can strip the node under the cursor. Both end with a canvas nobody
-   * is pointing at, which makes the first keypress do nothing.
+   * filter can strip the session under the cursor. Both end with nothing
+   * pointed at, which makes the first keypress do nothing.
    */
   useEffect(() => {
     if (focusCandidates.length === 0) {
       return;
     }
-    if (focusedId === null || !nodeIds.includes(focusedId)) {
-      setFocusedId(resolveFocusNodeId(prefs.lastFocus, focusCandidates));
+    if (focusedSessionId === null || !sessionIds.includes(focusedSessionId)) {
+      setFocusedSessionId(resolveFocusNodeId(prefs.lastFocus, focusCandidates));
     }
-  }, [nodeIds, focusCandidates, focusedId, prefs.lastFocus]);
+  }, [sessionIds, focusCandidates, focusedSessionId, prefs.lastFocus]);
 
   /**
    * The other half: record where focus is, so the next launch can ask.
    *
-   * ONE EFFECT RATHER THAN A WRITE AT EVERY `setFocusedId`. Focus is moved from
-   * eight places -- the chords, a click on a card, a click on a sidebar row,
-   * search landing and search escaping -- and a write bolted onto each is
-   * seven chances to add a ninth that forgets. Watching the resulting entry
-   * catches all of them, including the ones this file has not grown yet.
+   * ONE EFFECT RATHER THAN A WRITE AT EVERY `setFocusedSessionId`. Focus is
+   * moved from eight places -- the chords, a click on a card, a click on a
+   * sidebar row, search landing and search escaping -- and a write bolted
+   * onto each is seven chances to add a ninth that forgets. Watching the
+   * resulting entry catches all of them, including the ones this file has
+   * not grown yet.
    *
    * The equality guard is what stops it looping: `savePrefs` replaces `prefs`,
    * which re-runs this effect, which finds the stored pointer already says what
    * it was about to write and returns. A focus that lands on nothing keeps the
-   * last pointer rather than clearing it -- an empty canvas is a filter or a
+   * last pointer rather than clearing it -- an empty screen is a filter or a
    * still-loading model, not the operator telling us to forget where they were.
    */
   useEffect(() => {
@@ -1924,38 +1563,11 @@ function CanvasInner({
     savePrefs(setLastFocus(prefs, next));
   }, [focusedEntry, prefs, savePrefs]);
 
-  // Focus, jump labels and the focused-cell opacity override are all
-  // presentation, written onto the existing nodes rather than rebuilding
-  // them: `layoutCanvas` is a pure function of the model and cannot see
-  // focus, so it can only ever emit the status opacity read from
-  // `data.baseOpacity` (stamped once in `initialNodes`).
-  useEffect(() => {
-    const focusedSessionId = focusedEntry?.session.id ?? null;
-    setNodes((current) =>
-      current.map((node) => {
-        const data = node.data as { sessionId?: string; baseOpacity?: number };
-        const opacity =
-          data.sessionId !== undefined && data.sessionId === focusedSessionId
-            ? 1
-            : (data.baseOpacity ?? 1);
-        return {
-          ...node,
-          style: { ...node.style, opacity },
-          data: {
-            ...node.data,
-            focused: node.id === focusedId,
-            jumpLabel: labels.get(node.id) ?? null,
-          },
-        };
-      }),
-    );
-  }, [focusedId, focusedEntry, labels, setNodes]);
-
   /** Move focus to a session by id — what the sidebar and the palette do.
    *  Opening a tab piggybacks on this (see the effect above): every one of
    *  this function's callers already means "look at this session now". */
   const focusSession = useCallback((sessionId: string) => {
-    setFocusedId(infoNodeId(sessionId));
+    setFocusedSessionId(sessionId);
   }, []);
 
   /**
@@ -1980,7 +1592,7 @@ function CanvasInner({
       if (fallback !== null) {
         focusSession(fallback);
       } else {
-        setFocusedId(null);
+        setFocusedSessionId(null);
       }
     },
     [focusedSessionId, openTabs, focusSession],
@@ -2595,7 +2207,7 @@ function CanvasInner({
         const hit = [...labels.entries()].find(([, label]) => label === key);
         setJumping(false);
         if (hit !== undefined) {
-          setFocusedId(hit[0]);
+          setFocusedSessionId(hit[0]);
         }
         return;
       }
@@ -2638,32 +2250,28 @@ function CanvasInner({
             // leaving it to a DOM focus that can be dropped.
             return;
           }
-          // The cursor can be left on a node the filter has just made
+          // The cursor can be left on a session the filter has just made
           // unreachable. Land on the first survivor rather than navigating from
-          // a node that is no longer in the set — `nextNode` throws on an origin
-          // it cannot find, and rightly so.
-          if (focusedId === null || !nodeIds.includes(focusedId)) {
-            const first = nodeIds[0] ?? null;
+          // a session that is no longer in the set.
+          if (focusedSessionId === null || !sessionIds.includes(focusedSessionId)) {
+            const first = sessionIds[0] ?? null;
             if (first === null) {
               setStatus('no session matches');
               return;
             }
-            setFocusedId(first);
+            setFocusedSessionId(first);
             return;
           }
           /**
-           * Vertical is the LIST; horizontal is the canvas.
+           * Vertical is the LIST; horizontal is the TAB STRIP.
            *
            * `j`/`k` walk the sidebar's own order, one session at a time, and
-           * land on that session's card. They used to walk canvas geometry,
-           * which is a different order: with two projects side by side, `j`
+           * land on that session's row. They used to walk canvas geometry,
+           * which was a different order: with two projects side by side, `j`
            * from the first session went to the one physically below it — in
            * the other column — rather than to the next row in the list you are
            * reading. The sidebar is how sessions are enumerated, so it is what
            * "next session" has to mean.
-           *
-           * `h`/`l` keep the spatial walk, which is what they are for: moving
-           * along a session's own row, card to step to step.
            */
           if (action.direction === 'down' || action.direction === 'up') {
             const at = entries.findIndex((e) => e.session.id === focusedSessionId);
@@ -2681,33 +2289,49 @@ function CanvasInner({
             focusSession(next.session.id);
             return;
           }
-          // Live geometry, read now — not a list captured at render time —
-          // over the WHOLE laid-out set, not only what the canvas draws.
-          // `getNodes` returns what ReactFlow was given, which in the strip is
-          // the focused session alone; navigating that would make `l` answer
-          // "nothing lies right" at the edge of a cell while the sidebar still
-          // lists the session sitting beside it. The strip narrows what is
-          // drawn, never what the model holds, so the undrawn nodes fall back
-          // to their laid-out rectangles — the same ones `layoutCanvas`
-          // computed for them — and every other consumer's rule holds here too.
-          const drawn = new Map(
-            (getNodes() as unknown as FlowNodeLike[]).map((node) => [node.id, node]),
-          );
-          const live = toNavNodes(
-            (initialNodes as unknown as FlowNodeLike[]).map((node) => drawn.get(node.id) ?? node),
-            nodeIds,
-          );
-          const landed = nextNode(live, focusedId, action.direction);
-          if (landed === null) {
-            setStatus(`nothing lies ${action.direction}`);
-          } else {
-            setFocusedId(landed);
+          /**
+           * `h`/`l` used to keep a spatial walk along a session's own row of
+           * graph cards; the graph is gone, and this branch is re-homed in
+           * the SAME commit as its deletion, not left for later: `nextNode`'s
+           * only caller was this branch, so the code that walked the
+           * geometry and the geometry itself have to leave together.
+           *
+           * Previous/next SESSION TAB, Select mode only (the `mode ===
+           * 'insert'` branches above already returned).
+           *
+           * WRAPPING FOLLOWS THE THING TRAVERSED, NOT THE KEY. `j`/`k`, just
+           * above, walk an open-ended list where "the last one" is a real
+           * place worth stopping at and announcing, so they do not wrap.
+           * `h`/`l` walk a closed ring of open tabs, the same shape every tab
+           * strip's own arrow keys already have, so they do — including the
+           * degenerate one-tab ring, which wraps to the tab already focused
+           * rather than refusing. An EMPTY strip is the one case with no
+           * ring to wrap around, so that is what gets a status message.
+           */
+          if (openTabs.length === 0) {
+            setStatus('no tabs open');
+            return;
+          }
+          const at = focusedSessionId === null ? -1 : openTabs.indexOf(focusedSessionId);
+          if (at === -1) {
+            const first = openTabs[0] as string;
+            focusSession(first);
+            return;
+          }
+          const delta = action.direction === 'right' ? 1 : -1;
+          const nextTab = openTabs[(at + delta + openTabs.length) % openTabs.length];
+          if (nextTab !== undefined) {
+            focusSession(nextTab);
           }
           return;
         }
-        case 'first':
-          setFocusedId(nodeIds[0] ?? null);
+        case 'first': {
+          const first = entries[0];
+          if (first !== undefined) {
+            focusSession(first.session.id);
+          }
           return;
+        }
         case 'last': {
           const lastEntry = entries[entries.length - 1];
           if (lastEntry !== undefined) {
@@ -2780,7 +2404,7 @@ function CanvasInner({
           void copyAllCommands();
           return;
         case 'search':
-          searchOrigin.current = focusedId;
+          searchOrigin.current = focusedSessionId;
           setQuery('');
           setFiltering(true);
           return;
@@ -2941,16 +2565,16 @@ function CanvasInner({
           );
           return;
         case 'zoom':
-          // The same two functions the zoom buttons already call — no second
-          // path, just a key reaching the one that exists.
-          if (action.delta === 1) {
-            zoomIn();
-          } else {
-            zoomOut();
-          }
+          // The zoom controls left with the graph they scaled. Unlike `h`/`l`
+          // just above, nothing in the tab strip needs a zoom-shaped meaning,
+          // so this chord stays a binding with no home yet rather than being
+          // re-homed here: it still fires, and reports the honest fact that
+          // there is nothing left to zoom. Step 3 decides what, if anything,
+          // it becomes.
+          setStatus('nothing to zoom — the canvas view is gone');
           return;
         case 'fitView':
-          fitView();
+          setStatus('nothing to fit — the canvas view is gone');
           return;
         case 'layout': {
           const next = setLayout(prefs, action.name);
@@ -3041,16 +2665,11 @@ function CanvasInner({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     phone,
-    focusedId,
     focusedEntry,
     focusedSessionId,
-    nodeIds,
-    initialNodes,
+    openTabs,
+    sessionIds,
     entries,
-    getNodes,
-    zoomIn,
-    zoomOut,
-    fitView,
     jumping,
     labels,
     matches,
@@ -3094,9 +2713,9 @@ function CanvasInner({
   // compare, so every handler `sidebarProps` used to build inline is a
   // `useCallback` instead -- bodies unchanged, only the wrapping is new.
   const onSidebarOpenFilter = useCallback(() => {
-    searchOrigin.current = focusedId;
+    searchOrigin.current = focusedSessionId;
     setFiltering(true);
-  }, [focusedId]);
+  }, [focusedSessionId]);
 
   const onSidebarFilterChange = useCallback(
     (next: string) => {
@@ -3122,7 +2741,7 @@ function CanvasInner({
   const onSidebarFilterCancel = useCallback(() => {
     setFiltering(false);
     setQuery('');
-    setFocusedId(searchOrigin.current);
+    setFocusedSessionId(searchOrigin.current);
   }, []);
 
   const onSidebarRenameCancel = useCallback(() => {
@@ -3361,11 +2980,11 @@ function CanvasInner({
     decision: focusedDecision,
     // The panel's own cursor-vs-refresh signal (`DetailPanel.tsx`'s own doc
     // on the prop explains why `decision` alone stopped being enough once
-    // turn ids became content-derived): `focusedId` is exactly "which node
-    // the cursor sits on", changed only by `setFocusedId`, which this file
-    // calls only from an explicit navigation -- a click, a chord, a jump --
-    // never from a model refresh landing on the same node.
-    focusNodeId: focusedId,
+    // turn ids became content-derived): `focusedSessionId` is exactly "which
+    // session the cursor sits on", changed only by `setFocusedSessionId`,
+    // which this file calls only from an explicit navigation -- a click, a
+    // chord, a jump -- never from a model refresh landing on the same session.
+    focusNodeId: focusedSessionId,
     delivers: source.kind === 'session' && source.source.capabilities.deliverPrompt,
     // Present only for a source whose `write` surface actually carries it --
     // `promptAttachments`, read the same way `delivers` reads its own flag.
@@ -3468,7 +3087,7 @@ function CanvasInner({
         <SidebarSlot key="sidebar" show={visible.sidebar} {...sidebarProps} />
 
         <CanvasColumn key="canvas" show={visible.canvas} strip={canvasStrip}>
-          {/* Step 1 of the 0.2 migration: the graph is gone from this column,
+          {/* 0.2 migration step 2: the graph is gone from this column,
               replaced by the session tab strip. The toolbar this used to be
               — "Canvas" label, zoom controls, fit-view, the "layout:
               automatic" note — went with it; every one of those buttons
@@ -3489,50 +3108,16 @@ function CanvasInner({
             </div>
           </div>
 
-          {/* `data-canvas-viewport` is the element `columnsForWidth` measures
-              — a test hook, same as `data-canvas-pane` one level up. It stays
-              a normally laid-out (not `display:none`) element on purpose: a
-              hidden element measures 0 wide, and `columnsForWidth` feeds the
-              layout `nodeIds`/h-l navigation still reads (see below). It now
-              draws nothing itself — the stub the graph column has become —
-              other than the invisible `ReactFlow` mount inside it. */}
-          <div
-            ref={canvasPaneRef}
-            data-canvas-viewport
-            data-canvas-stub
-            className="relative min-h-0 flex-1"
-          >
-            {/*
-             * `ReactFlow` STAYS MOUNTED, invisibly, rather than being deleted
-             * here — a deliberate step-1 choice, not an oversight. The
-             * highest-risk edit in this epic is the 25-case `onKeyDown`
-             * switch a few hundred lines down, and its `h`/`l` chain-walk
-             * case reads `getNodes()` from `useReactFlow()`. Removing this
-             * element would make that call meaningless (and `useReactFlow()`
-             * itself needs a live `<ReactFlow>` under `ReactFlowProvider` to
-             * mean anything), forcing an edit to the very switch the epic
-             * says to leave whole if it cannot be split safely. Every other
-             * graph file (`layout.ts`, `nav-nodes.ts`, the `*Node.tsx`
-             * components) is unchanged and unrendered visually for the same
-             * reason: they stay imported and wired until step 2 deletes
-             * `@xyflow/react` and rewrites this switch for real. `Background`
-             * and `MiniMap` are dropped — pure chrome, worth nothing hidden.
-             */}
-            <div style={{ display: 'none' }} aria-hidden="true">
-              <ReactFlow
-                nodes={drawnNodes}
-                edges={NO_EDGES}
-                onNodesChange={onNodesChange}
-                nodesDraggable={false}
-                onNodeClick={onNodeClick}
-                nodeTypes={NODE_TYPES}
-                defaultViewport={DEFAULT_VIEWPORT}
-                minZoom={0.2}
-                maxZoom={2}
-                proOptions={{ hideAttribution: true }}
-              />
-            </div>
-          </div>
+          {/* The body below the tab strip draws nothing of its own — the
+              graph it used to hold (`layoutCanvas`, the four `*Node.tsx`
+              components, `@xyflow/react` itself) is deleted, not hidden, as
+              of this task. `data-canvas-pane` one level up is what
+              `Canvas.pane-visibility.test.tsx` and its neighbours measure;
+              this inner element is kept only so the column still fills its
+              vertical space instead of collapsing to the toolbar's height —
+              whatever comes next in this space (step 4 onward) fills it in,
+              this task does not decide it. */}
+          <div data-canvas-viewport className="relative min-h-0 flex-1" />
         </CanvasColumn>
 
         <DetailSlot key="detail" show={visible.detail} {...detailProps} />
@@ -3638,8 +3223,8 @@ function CanvasInner({
               member
                 ? // MOVES it, at most one group per project: a project in two
                   // groups walks its sessions twice and mints duplicate
-                  // `info:<sessionId>` node ids, which break ReactFlow and the
-                  // id `j`/`k` navigates by (`to-canvas.ts:312`).
+                  // session entries, which breaks the sidebar's own React
+                  // keys and the id `j`/`k` navigates by (`to-canvas.ts:312`).
                   addProjectToGroup(
                     prefs,
                     pickingMembersFor.source,
@@ -3983,11 +3568,6 @@ function SourceGlyph({ source }: { readonly source: SourceId | null }) {
   );
 }
 
-// `minimapChipColor` (the MiniMap's per-node fill) was here and is deleted
-// with the MiniMap it painted — pure chrome, worth nothing hidden, unlike
-// `ReactFlow` itself a few hundred lines up, which stays mounted for
-// `getNodes()`/the `onKeyDown` h/l case. See that block's own comment.
-
 export function Canvas({
   model,
   source = READ_ONLY_SOURCE,
@@ -3996,12 +3576,11 @@ export function Canvas({
   readonly source?: CanvasSource;
 }) {
   return (
-    <ReactFlowProvider>
-      {/* One tooltip group for the whole chrome: once one is open, the button
-          beside it opens with no second delay. */}
-      <TipProvider>
-        <CanvasInner model={model} source={source} />
-      </TipProvider>
-    </ReactFlowProvider>
+    // One tooltip group for the whole chrome: once one is open, the button
+    // beside it opens with no second delay. No more `ReactFlowProvider` —
+    // `CanvasInner` no longer calls `useReactFlow()` for anything.
+    <TipProvider>
+      <CanvasInner model={model} source={source} />
+    </TipProvider>
   );
 }

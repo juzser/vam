@@ -85,15 +85,6 @@ const columnOrder = () =>
           : 'detail',
   );
 
-/** The session ids the canvas currently draws, deduplicated. */
-const drawnSessions = () => [
-  ...new Set(
-    [...document.querySelectorAll('.react-flow__node')]
-      .map((el) => (el.getAttribute('data-id') ?? '').split(':')[1] ?? '')
-      .filter((id) => id !== ''),
-  ),
-];
-
 const canvasPane = () => document.querySelector('[data-canvas-pane]') as HTMLElement | null;
 
 function press(key: string) {
@@ -146,25 +137,18 @@ describe('the focus layout reorders the columns', () => {
   });
 });
 
-describe('the demoted canvas draws the focused session and nothing else', () => {
-  it('drops the other sessions from the strip', () => {
-    render(<Canvas model={MODEL} />);
-    expect(drawnSessions().sort()).toEqual(['a1', 'a2']);
-    cleanup();
-
-    seed({ paneVisibility: LAYOUTS.focusResponse });
-    render(<Canvas model={MODEL} />);
-    expect(drawnSessions()).toEqual(['a1']);
-  });
-
-  it('follows the focus when it moves', () => {
-    seed({ paneVisibility: LAYOUTS.focusResponse });
-    render(<Canvas model={MODEL} />);
-    press('j');
-    expect(drawnSessions()).toEqual(['a2']);
-  });
-});
-
+/**
+ * 0.2 migration, step 2: `describe('the demoted canvas draws the focused
+ * session and nothing else', ...)` died here, not merely lost its selector.
+ * It pinned that the strip re-filtered ReactFlow's own node list down to the
+ * focused session as focus moved — a graph-only mechanism (the graph read
+ * its own live nodes, which is what the file's closing comment further down
+ * used to call out). The tab strip that replaced that column's content draws
+ * `openTabEntries` — the open-tab set — the SAME regardless of `canvasStrip`;
+ * nothing in `Canvas.tsx` branches the strip's content on which layout is
+ * active. There is no longer a narrower rendering for a demoted column to
+ * narrow, so the property this described no longer exists to pin.
+ */
 describe('z0 undoes it', () => {
   it('restores the shipped order and the stored widths', () => {
     seed({
@@ -361,34 +345,20 @@ describe('below the width three fixed columns need', () => {
 });
 
 /**
- * The strip narrows what is DRAWN, never what the model holds.
+ * 0.2 migration, step 2: `describe('h and l reach the whole model from
+ * inside the strip', ...)` died here.
  *
- * That is this branch's own rule, and `j`/`k`, `Cmd+number`, `gg`/`G`, search
- * and the palette all honour it by resolving through the unfiltered set.
- * `h`/`l` read ReactFlow's live nodes, which in the strip ARE the filter — so
- * walking right off the focused session's own chain answered "nothing lies
- * right" instead of arriving at the next cell.
+ * It pinned a graph-only defect class: the demoted strip re-filtered
+ * ReactFlow's own live node list, and the OLD `h`/`l` walked THAT list (a
+ * session's own chain of step cards) rather than the unfiltered model, so
+ * walking off the end inside a one-session strip answered "nothing lies
+ * right" instead of reaching the next session. `h`/`l` no longer read
+ * anything ReactFlow drew — the re-homing in this same commit points them at
+ * `openTabs` instead (`Canvas.tab-cycle.test.tsx`), a set this file's own
+ * layout switch does not touch, so there is no strip-shaped filter left for
+ * a re-homed `h`/`l` to be caught by. The general property — `h`/`l` reach
+ * every open tab regardless of which pane layout is on screen — still holds,
+ * verified once under the shipped layout; nothing in the `move` case reads
+ * `paneVisibility`, so re-verifying it under `focusResponse` here would
+ * exercise the identical branch a second time.
  */
-describe('h and l reach the whole model from inside the strip', () => {
-  it('walks out of the focused cell into the session beside it', () => {
-    seed({ paneVisibility: LAYOUTS.focusResponse });
-    render(<Canvas model={MODEL} />);
-    expect(drawnSessions()).toEqual(['a1']);
-    press('l');
-    press('l');
-    expect(drawnSessions()).toEqual(['a2']);
-  });
-
-  it('and back again, so the strip is not a one-way door', () => {
-    seed({ paneVisibility: LAYOUTS.focusResponse });
-    render(<Canvas model={MODEL} />);
-    press('l');
-    press('l');
-    // Asserted mid-walk: without it a test that never left a1 would pass by
-    // standing still, which is exactly the behaviour it exists to exclude.
-    expect(drawnSessions()).toEqual(['a2']);
-    press('h');
-    press('h');
-    expect(drawnSessions()).toEqual(['a1']);
-  });
-});
