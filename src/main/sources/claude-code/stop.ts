@@ -25,6 +25,8 @@
  */
 
 import { execFile } from 'node:child_process';
+import { access } from 'node:fs/promises';
+import { join } from 'node:path';
 import { cliMissingMessage } from '../../env/cli-missing.js';
 import type { SourceError } from '../../ipc/channels.js';
 import { killSessionArgv } from '../tmux/argv.js';
@@ -152,6 +154,27 @@ export type StopFn = (sessionId: string) => Promise<SourceError | null>;
  */
 export type ForceKillFn = (pid: number) => Promise<SourceError | null>;
 
+/**
+ * Re-checks a pid IMMEDIATELY BEFORE signalling it, answering whether it
+ * still looks like a Claude Code session rather than whatever the OS has
+ * recycled the number onto since `claude agents --json` was last polled.
+ *
+ * THE WINDOW THIS CLOSES. `row.pid` is up to ~10s stale by the time a
+ * confirmation dialog resolves -- long enough for a session to exit and its
+ * pid to be reassigned to an unrelated process. `process.kill` cannot tell
+ * the difference; `ESRCH` only fires when NOTHING holds the pid, not when
+ * something else does. So the check that actually matters here happens at
+ * kill time, not at listing time, and is injectable for the reason
+ * `ForceKillFn` is: a test that touched a real pid would be asserting
+ * against whatever process the test runner happened to be.
+ *
+ * Resolves `true` when the pid still looks like one of vam's Claude Code
+ * sessions, `false` when vam can no longer say so. A caller that passes none
+ * keeps the old, unchecked behaviour -- see `stopSession`'s own doc for why
+ * that is still an honest default rather than a silent hole.
+ */
+export type PidStillAlive = (pid: number) => Promise<boolean>;
+
 const nameOf = (row: StoppableAgent): string => row.name ?? row.sessionId;
 
 /**
@@ -197,8 +220,9 @@ async function unresolvedInteractive(input: {
   row: StoppableAgent;
   force: boolean;
   killPid: ForceKillFn | undefined;
+  verifyPid: PidStillAlive | undefined;
 }): Promise<SourceError | null> {
-  const { code, kind, reason, row, force, killPid } = input;
+  const { code, kind, reason, row, force, killPid, verifyPid } = input;
   const pid = row.pid;
   const canForce = killPid !== undefined && pid !== null && pid !== undefined;
   if (force) {
@@ -207,6 +231,22 @@ async function unresolvedInteractive(input: {
         kind: 'refused',
         code: 'force-unavailable',
         message: `vam has no process id for "${nameOf(row)}", so it cannot force it closed.`,
+      };
+    }
+    // RE-CHECKED HERE, NOT AT LISTING TIME. `pid` is up to one poll old, and
+    // the operator's own confirmation click widens that window further -- the
+    // OS is free to have recycled it onto an unrelated process in between,
+    // and `ESRCH` would never fire for that: something DOES hold the pid, it
+    // is simply not this session any more. `verifyPid` is optional only for
+    // callers that genuinely have nothing to check with; the production wiring
+    // in `source.ts` always supplies one, so this is never the silent hole it
+    // would be if that were not true.
+    const stillAlive = verifyPid === undefined ? true : await verifyPid(pid);
+    if (!stillAlive) {
+      return {
+        kind: 'refused',
+        code: 'pid-unverifiable',
+        message: `vam can no longer confirm that process ${pid} is "${nameOf(row)}"; it may have exited. Nothing was signalled.`,
       };
     }
     return killPid(pid);
@@ -258,6 +298,8 @@ export async function stopSession(
   panes?: ReadonlyMap<string, string>,
   force = false,
   killPid?: ForceKillFn,
+  /** Re-checked at the moment of a confirmed kill -- see `PidStillAlive`. */
+  verifyPid?: PidStillAlive,
 ): Promise<SourceError | null> {
   const sessionId = sessionIdOf(rowId);
   const row = agents.find((a) => a.key === rowId) ?? agents.find((a) => a.sessionId === sessionId);
@@ -283,6 +325,7 @@ export async function stopSession(
       row,
       force,
       killPid,
+      verifyPid,
     });
   }
 
@@ -295,6 +338,7 @@ export async function stopSession(
       row,
       force,
       killPid,
+      verifyPid,
     });
   }
 
@@ -326,6 +370,7 @@ export async function stopSession(
     row,
     force,
     killPid,
+    verifyPid,
   });
 }
 
@@ -355,4 +400,34 @@ export function killPidViaSignal(pid: number): Promise<SourceError | null> {
       };
     }
   });
+}
+
+/**
+ * The real `PidStillAlive`: does a Claude Code session file still exist for
+ * this pid, checked at the moment force is about to signal it.
+ *
+ * `agents.ts` documents `~/.claude/sessions/<pid>.json` as the file a live
+ * process owns, named for its own pid -- existence is decent, cheap evidence
+ * that the number still names a Claude Code session rather than whatever the
+ * OS has recycled it onto since the last poll. It is not proof the SAME
+ * session is still behind it -- a session could exit and another start with
+ * the identical pid inside one poll window, and its file would exist too --
+ * but that residual is a Claude Code process at worst, never an arbitrary
+ * stranger's, which is the actual failure mode this guards against.
+ *
+ * CONTENTS ARE NEVER READ. Existence is the whole check: `access` answers it
+ * without opening the file, and `session-pane.ts` already documents sibling
+ * `.key` files in this same directory as secret material nothing here may
+ * touch. A `readFile` this function does not need is a `readFile` it must
+ * not have.
+ */
+export function pidHasClaudeSessionFile(sessionsRoot: string): PidStillAlive {
+  return async (pid) => {
+    try {
+      await access(join(sessionsRoot, `${pid}.json`));
+      return true;
+    } catch {
+      return false;
+    }
+  };
 }

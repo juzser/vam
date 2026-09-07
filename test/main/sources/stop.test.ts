@@ -7,7 +7,10 @@
  * as `deliver.test.ts`'s subject is split.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
 import { registerSourceIpc } from '../../../src/main/ipc/handlers.js';
 import { projectIdOf } from '../../../src/main/sources/claude-code/project-id.js';
@@ -15,6 +18,7 @@ import { CLAUDE_CODE_SOURCE } from '../../../src/main/sources/claude-code/source
 import {
   classifyStopFailure,
   killPidViaSignal,
+  pidHasClaudeSessionFile,
   type StoppableAgent,
   stopArgv,
   stopSession,
@@ -568,5 +572,105 @@ describe('killPidViaSignal', () => {
     } finally {
       process.kill = original;
     }
+  });
+});
+
+/**
+ * The window `killPidViaSignal` alone cannot close: `row.pid` is stale by
+ * the time a confirmation resolves, and the OS is free to have recycled it
+ * onto an unrelated process by then. `stopSession` re-checks with a
+ * `PidStillAlive` immediately before signalling, and this pins that it
+ * actually refuses rather than trusting the poll.
+ */
+describe('re-verifying the pid at the moment of a confirmed kill', () => {
+  const row: StoppableAgent = {
+    key: 'sess-v#7',
+    sessionId: 'sess-v',
+    kind: 'interactive',
+    name: 'stale-pid',
+    cwd: '/w/stale',
+    pid: 424242,
+  };
+
+  it('refuses distinctly from `kill-failed` when the session file is gone, and signals nothing', async () => {
+    const killPid = vi.fn(async () => null);
+    const verifyPid = vi.fn(async () => false);
+    const error = await stopSession(
+      [row],
+      'sess-v#7',
+      vi.fn(async () => null),
+      undefined,
+      undefined,
+      true,
+      killPid,
+      verifyPid,
+    );
+    expect(verifyPid).toHaveBeenCalledWith(424242);
+    expect(killPid).not.toHaveBeenCalled();
+    expect(error?.code).toBe('pid-unverifiable');
+    expect(error?.code).not.toBe('kill-failed');
+    expect(error?.message).toMatch(/may have exited/i);
+  });
+
+  it('signals only once the pid is re-confirmed alive', async () => {
+    const killPid = vi.fn(async () => null);
+    const verifyPid = vi.fn(async () => true);
+    const error = await stopSession(
+      [row],
+      'sess-v#7',
+      vi.fn(async () => null),
+      undefined,
+      undefined,
+      true,
+      killPid,
+      verifyPid,
+    );
+    expect(verifyPid).toHaveBeenCalledWith(424242);
+    expect(killPid).toHaveBeenCalledWith(424242);
+    expect(error).toBeNull();
+  });
+
+  it('a caller with no verifier keeps the old, unchecked route rather than refusing for an unasked reason', async () => {
+    const killPid = vi.fn(async () => null);
+    const error = await stopSession(
+      [row],
+      'sess-v#7',
+      vi.fn(async () => null),
+      undefined,
+      undefined,
+      true,
+      killPid,
+      // `verifyPid` omitted entirely.
+    );
+    expect(killPid).toHaveBeenCalledWith(424242);
+    expect(error).toBeNull();
+  });
+});
+
+describe('pidHasClaudeSessionFile', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'vam-cc-force-close-'));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('answers true when the pid file exists', async () => {
+    writeFileSync(join(root, '424242.json'), '{"sessionId":"whatever","tmux":null}');
+    await expect(pidHasClaudeSessionFile(root)(424242)).resolves.toBe(true);
+  });
+
+  it('answers false when it does not, without throwing', async () => {
+    await expect(pidHasClaudeSessionFile(root)(999999)).resolves.toBe(false);
+  });
+
+  it('never reads the file -- deleting its contents mid-flight changes nothing', async () => {
+    // A file that exists but whose contents are garbage (or a `.key` file's
+    // binary secret material) must still answer `true`: existence is the
+    // whole check, and nothing here parses what is inside.
+    writeFileSync(join(root, '424242.json'), '{not json at all');
+    await expect(pidHasClaudeSessionFile(root)(424242)).resolves.toBe(true);
   });
 });

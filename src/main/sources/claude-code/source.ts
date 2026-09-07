@@ -52,7 +52,12 @@ import { paneForRow, replyToSession } from './reply.js';
 import { createBranchLookup } from './repo-branch.js';
 import { readPublishedPanes, readPublishedPanesAndProcessFacts } from './session-pane.js';
 import { defaultSessionsRoot } from './session-status.js';
-import { killPidViaSignal, stopSession, stopSessionViaCli } from './stop.js';
+import {
+  killPidViaSignal,
+  pidHasClaudeSessionFile,
+  stopSession,
+  stopSessionViaCli,
+} from './stop.js';
 import {
   compactAge,
   EMPTY_FACTS,
@@ -507,6 +512,11 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       // `claude agents --json` reported, for the row a tmux route could not
       // verify at all. See `stop.ts` for what it will and will not do.
       killPidViaSignal,
+      // Re-checked at the moment force actually signals, not at this poll --
+      // `row.pid` is already stale by the time it gets here. See
+      // `pidHasClaudeSessionFile`'s own doc for what the check does and does
+      // not prove.
+      pidHasClaudeSessionFile(defaultSessionsRoot()),
     );
   },
   /**
