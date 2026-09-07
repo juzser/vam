@@ -27,8 +27,30 @@ import type { AgentQuestion, Decision } from '../../../renderer/domain/model.js'
 import { extractCommands } from './commands.js';
 import { collectQuestions } from './questions.js';
 
-/** The canvas shows three; carrying more costs parsing and buys nothing. */
-const MAX_DECISIONS = 3;
+/**
+ * How many turns the window can hold, worst case.
+ *
+ * NOT the canvas's slot count -- `selectors.ts`'s `VISIBLE_DECISION_COUNT` is
+ * that, a display decision with nothing to do with parsing. This used to be
+ * `MAX_DECISIONS = 3`, borrowed straight from the canvas's three step slots,
+ * and it silently discarded every turn past the newest three before
+ * `session.decisions` ever left this file: a fourth request pushed the first
+ * answer out of vam's model entirely -- not scrolled away, not collapsed,
+ * never loaded.
+ *
+ * The real budget already exists one file over: `source.ts`'s `TAIL_BYTES`
+ * (128 KiB = 131072 bytes) is the whole of what this function is ever
+ * handed, so the number of turns the window could possibly carry is already
+ * bounded by that byte budget divided by the smallest line able to open one
+ * -- `{"type":"last-prompt","lastPrompt":"x"}`, 39 bytes on the wire plus its
+ * newline, 40 total. 131072 / 40 = 3276.8, floored to 3276. A real
+ * transcript's lines run to hundreds of bytes each and most of the window is
+ * spent on assistant text besides, so no real session is expected to reach
+ * this; it is a BACKSTOP against a pathological or adversarial tail, sized to
+ * hold every turn the window can possibly contain rather than an arbitrary
+ * smaller one.
+ */
+const MAX_DECISIONS = 3276;
 
 /** One line's worth of meaning, per `Session.activity`. */
 const ACTIVITY_LIMIT = 80;

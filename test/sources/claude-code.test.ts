@@ -313,6 +313,47 @@ describe('summarizeTranscript', () => {
     const facts = summarizeTranscript(`{"type":"assis\n${jsonl(reply('hi'))}\nnot json`, 'k');
     expect(facts.branch).toBe('main');
   });
+
+  /**
+   * The defect this whole change fixes: a fourth request used to push the
+   * first answer out of `decisions` entirely, before it ever reached the
+   * canvas or the detail panel. Six turns, so "the newest three" (the OLD
+   * cap, borrowed from the canvas's slot count) and "all of them" are
+   * different lists -- this fails against the code this replaces.
+   */
+  it('keeps every turn the window holds, not just the newest three', () => {
+    const lines: unknown[] = [];
+    for (let i = 0; i < 6; i++) {
+      lines.push(userPrompt(`ask ${i}`), reply(`answer ${i}`));
+    }
+    const facts = summarizeTranscript(jsonl(...lines), 'k');
+    expect(facts.decisions).toHaveLength(6);
+    // Newest first, unchanged.
+    expect(facts.decisions[0]?.input).toBe('ask 5');
+    expect(facts.decisions[5]?.input).toBe('ask 0');
+  });
+
+  /**
+   * Not uncapped, either -- a byte-derived backstop, not the removal of one.
+   * `source.ts`'s `TAIL_BYTES` (128 KiB) already bounds the whole window this
+   * function is ever handed, so the number of turns it could possibly carry
+   * is already bounded by that budget divided by the smallest line able to
+   * open one: `{"type":"last-prompt","lastPrompt":"x"}` is 39 bytes on the
+   * wire, 40 with its newline, and 131072 / 40 = 3276.8, floored to 3276.
+   *
+   * 3300 alternating one-character prompts -- alternating so no two adjacent
+   * ones dedupe into a single turn, per `summarizeTranscript`'s own rule --
+   * is comfortably past that, so this is the backstop actually binding, not
+   * the input running out first.
+   */
+  it('still bounds the window -- a pathological tail cannot grow it without limit', () => {
+    const lines: string[] = [];
+    for (let i = 0; i < 3300; i++) {
+      lines.push(JSON.stringify({ type: 'last-prompt', lastPrompt: i % 2 === 0 ? 'a' : 'b' }));
+    }
+    const facts = summarizeTranscript(lines.join('\n'), 'k');
+    expect(facts.decisions).toHaveLength(3276);
+  });
 });
 
 describe('loadClaudeCodeProjects', () => {

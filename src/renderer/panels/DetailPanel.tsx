@@ -971,13 +971,31 @@ const IN_LINES = 2;
 const IN_MAX_HEIGHT = Math.round(IN_BODY_PX * IN_LEADING * IN_LINES) + 22;
 
 /**
- * How many turns `progress` shows once opened — the five most recent.
+ * How many turns' worth of height `progress` opens to before it scrolls.
  *
  * Collapsed it shows NONE: it is context, and the operator asked for the whole
- * region to cost only its own header until it is asked for. Five is what opens
- * behind the toggle, and the list scrolls past that rather than growing.
+ * region to cost only its own header until it is asked for.
+ *
+ * USED TO BE A DATA CAP -- `orderedTurns.slice(-PROGRESS_LINES)` -- which
+ * discarded every turn past the newest five from the LIST ITSELF, not merely
+ * from view. That was dead code for as long as the parser kept at most three
+ * turns (`transcript.ts`'s old `MAX_DECISIONS`), and it would have been the
+ * exact same bug as the one this whole change fixes the moment the parser
+ * stopped discarding: an operator could open this list and still never reach
+ * the turn they were looking for. Now that the list can genuinely hold more
+ * than five, the constant sizes the BOX instead (the same move `IN_MAX_HEIGHT`
+ * above makes, and for the same reason -- a promise about the text, not about
+ * the window): five rows are visible without scrolling, matching how compact
+ * `in`'s two lines and `out`'s own space already are, and every turn beyond
+ * that is one scroll away rather than gone.
  */
+const PROGRESS_ROW_PX = 10; // the list's own `text-[10px]`
+const PROGRESS_ROW_LEADING = 1.5; // close to `IN_LEADING`, for the same single-line rows
+const PROGRESS_ROW_GAP_PX = 6; // `gap-1.5` between rows
 const PROGRESS_LINES = 5;
+const PROGRESS_MAX_HEIGHT =
+  Math.round(PROGRESS_LINES * PROGRESS_ROW_PX * PROGRESS_ROW_LEADING) +
+  (PROGRESS_LINES - 1) * PROGRESS_ROW_GAP_PX;
 
 /** What `to-canvas.ts` joins each summarised answer with, and splits on here. */
 const ANSWER_SEPARATOR = ' · ';
@@ -2022,7 +2040,7 @@ function QuestionCard({
 export function DetailPanel(props: DetailPanelProps) {
   const {
     entry,
-    decision,
+    decision: canvasDecision,
     draft,
     onDraftChange,
     onSubmit,
@@ -2044,6 +2062,51 @@ export function DetailPanel(props: DetailPanelProps) {
   } = props;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * WHICH TURN THIS PANEL IS READING, independent of which one the canvas
+   * itself is focused on.
+   *
+   * `canvasDecision` is the canvas's own pick: the newest turn by default, or
+   * whichever of its three visible slots `h`/`l` has moved to (`Canvas.tsx`).
+   * This panel used to have no memory of its own -- every render drew exactly
+   * that decision -- which was fine while the canvas's cap of three and the
+   * model's cap of three were the same number, but the parser now keeps every
+   * turn a session has (`transcript.ts`), so the progress list below can hold
+   * turns the canvas never shows at all. `selectedId` is this panel's own
+   * answer to "which turn am I looking at": it starts on the canvas's pick
+   * and moves only when a progress row is clicked (below), or when
+   * `canvasDecision` itself changes -- a session refocused, or the canvas
+   * cursor moved to a different slot -- which is what "follows it" means.
+   *
+   * COMPARED DURING RENDER, THE SAME TRICK `cycleAbout`/`noteFor` ABOVE
+   * ALREADY USES for the identical shape of problem: this state belongs to a
+   * subject (the canvas's current pick) and the subject just changed under
+   * it. An effect would draw one frame of the OLD turn before catching up --
+   * exactly the half-read flash `focusKey` below already exists to avoid for
+   * a genuine focus change.
+   */
+  const canvasDecisionId = canvasDecision?.id ?? null;
+  const [selectedId, setSelectedId] = useState<string | null>(canvasDecisionId);
+  const canvasIdRef = useRef(canvasDecisionId);
+  if (canvasIdRef.current !== canvasDecisionId) {
+    canvasIdRef.current = canvasDecisionId;
+    if (selectedId !== canvasDecisionId) setSelectedId(canvasDecisionId);
+  }
+  /**
+   * RENDERED FROM THE PROP WHEN IT MATCHES, RATHER THAN RE-FOUND BY ID. While
+   * this panel is following the canvas's own pick (the common case),
+   * `canvasDecision` is already the freshest object this render has -- built
+   * from this same `entry.session.decisions` -- so using it as given is what
+   * keeps a streaming answer on the newest turn live. A re-lookup would still
+   * find the same id, but there is no reason to add one. Only once the
+   * operator has picked something else does this reach into
+   * `entry.session.decisions` for it, which is the one place that turn's
+   * current content actually lives.
+   */
+  const decision: Decision | null =
+    selectedId === canvasDecisionId
+      ? canvasDecision
+      : (entry?.session.decisions.find((d) => d.id === selectedId) ?? canvasDecision);
   /**
    * WHAT THE LAST SHIFT-TAB DID, in flight and afterwards, or `null` at rest.
    *
@@ -2601,13 +2664,28 @@ export function DetailPanel(props: DetailPanelProps) {
    * printed rather than printed as zeros.
    */
   const liveAge = outIsLive ? entry.session.age : null;
-  const total = entry?.session.decisions.length ?? 0;
+  /**
+   * HOW MANY TURNS VAM READ -- not how many the session has had. The source's
+   * transcript reader only ever opens the newest `TAIL_BYTES` of the file
+   * (`source.ts`), so on a session whose transcript has grown past that, an
+   * older turn may sit outside the window vam looked at and `decisions` never
+   * carried it in the first place. That is a fact about what was READ, not
+   * about what happened, so this cannot be worded as the session's total --
+   * see the label below, which says "read" rather than a bare count for
+   * exactly this reason.
+   */
+  const turnsRead = entry?.session.decisions.length ?? 0;
   // Oldest first: `decisions` arrives newest first. That
   // ordering is what makes "the last line" and "the newest turn" the same
   // line, so the ones kept are taken off the end.
   const orderedTurns = [...(entry?.session.decisions ?? [])].reverse();
-  // Nothing while closed — not a shorter list, no list at all.
-  const visibleTurns = progressOpen ? orderedTurns.slice(-PROGRESS_LINES) : [];
+  // Nothing while closed — not a shorter list, no list at all. Open, this is
+  // now EVERY turn vam read, not the newest `PROGRESS_LINES` of them: that
+  // slice used to discard the very history this change exists to keep
+  // reachable, and it was dead code besides -- see `PROGRESS_LINES`'s own
+  // comment for why the box still only shows about that many without a
+  // scroll.
+  const visibleTurns = progressOpen ? orderedTurns : [];
 
   /**
    * What the composer's button claims, in the words the SOURCE earns.
@@ -2857,15 +2935,19 @@ export function DetailPanel(props: DetailPanelProps) {
             {/* Closed, this is a rule and a toggle and nothing else. The three
                 regions compete for one pane's height and a turn list is the
                 least of the three to read, so it costs its own header until it
-                is asked for — and then it costs the newest five lines, scrolled.
+                is asked for — and then it costs about five lines' worth of
+                height, with the rest of it (now every turn vam read, not
+                only the newest few) one scroll away rather than gone.
                 A real <button>, not a new key: Enter and Space already activate
                 one, it is reachable by Tab from the composer, and the modal
-                keymap loses nothing to it. */}
+                keymap loses nothing to it. Each ROW is now a control too --
+                see `data-progress-select` below -- so this is the turn you
+                are reading, not only the turn the canvas is. */}
             <section
               data-detail-block="progress"
               className={[
                 'flex flex-none flex-col',
-                progressOpen ? 'max-h-[22%] min-h-[56px] gap-1.5' : '',
+                progressOpen ? 'min-h-[56px] gap-1.5' : '',
               ].join(' ')}
             >
               <Rule
@@ -2878,7 +2960,13 @@ export function DetailPanel(props: DetailPanelProps) {
                     onClick={() => setProgressOpen((open) => !open)}
                     className="vam-tap flex cursor-pointer items-center gap-1 rounded-[var(--radius-sm)] px-1 py-0.5 text-ink-faint hover:bg-raised hover:text-ink"
                   >
-                    {total} turns
+                    {/* "read", not a bare count: `source.ts` only ever opens
+                        the newest `TAIL_BYTES` of the transcript, so on a
+                        session bigger than that window this is what vam
+                        FOUND, not a provable total for the session's whole
+                        life. Wording it as an action rather than a fact is
+                        what keeps it true either way. */}
+                    read {turnsRead} turns
                     {progressOpen ? (
                       <ChevronDown size={11} strokeWidth={1.7} />
                     ) : (
@@ -2894,15 +2982,30 @@ export function DetailPanel(props: DetailPanelProps) {
                 icon={<GitCommitVertical size={12} strokeWidth={1.7} />}
               />
               {progressOpen && (
-                <ul className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-0.5 font-mono text-[10px] text-ink-faint">
+                <ul
+                  style={{ maxHeight: PROGRESS_MAX_HEIGHT }}
+                  className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-0.5 font-mono text-[10px] text-ink-faint"
+                >
                   {visibleTurns.map((d) => (
                     <li key={d.id} data-progress-turn className="flex items-center gap-2">
-                      <span className={d.output === null ? 'text-waiting' : 'text-ink-quiet'}>
-                        {d.output === null ? '◌' : '✓'}
-                      </span>
-                      <span className={`truncate ${d.id === decision.id ? 'text-ink-dim' : ''}`}>
-                        {d.label}
-                      </span>
+                      {/* The control that reads an older turn without ever
+                          leaving this panel -- `decision` above already
+                          resolves to whichever one was clicked here, so
+                          nothing downstream has to know this exists. */}
+                      <button
+                        type="button"
+                        data-progress-select
+                        onClick={() => setSelectedId(d.id)}
+                        aria-current={d.id === decision?.id ? 'true' : undefined}
+                        className="vam-tap flex min-w-0 flex-1 items-center gap-2 rounded-[var(--radius-sm)] py-0.5 text-left hover:bg-raised hover:text-ink"
+                      >
+                        <span className={d.output === null ? 'text-waiting' : 'text-ink-quiet'}>
+                          {d.output === null ? '◌' : '✓'}
+                        </span>
+                        <span className={`truncate ${d.id === decision?.id ? 'text-ink-dim' : ''}`}>
+                          {d.label}
+                        </span>
+                      </button>
                     </li>
                   ))}
                 </ul>
