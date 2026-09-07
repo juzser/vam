@@ -137,8 +137,21 @@ export function PaneResizer(props: PaneResizerProps) {
    * A key press COMMITS immediately, with no drag-shaped `onChange` phase:
    * there is nothing transient to preview, so the width is persisted the way
    * `onPointerUp` persists a drag's final position.
+   *
+   * Meta/Ctrl/Alt leave before the switch, because none of them is this
+   * handle's key: its bindings are the bare arrows plus Home/End, with Shift
+   * as the magnitude modifier and nothing else. Matching a modified arrow
+   * against an unmodified case would not just resize by mistake — the
+   * `preventDefault()` below is exactly what the keyboard grammar's window
+   * handler tests (`Canvas.tsx`, `if (event.defaultPrevented) return`), which
+   * is the mechanism by which a widget declines what it does not own so the
+   * event still reaches whoever does. Claiming those keys would swallow them
+   * for as long as focus sits here.
    */
   function onKeyDown(event: React.KeyboardEvent<HTMLHRElement>) {
+    if (event.metaKey || event.ctrlKey || event.altKey) {
+      return;
+    }
     switch (event.key) {
       case 'ArrowLeft':
       case 'ArrowRight': {
