@@ -102,6 +102,42 @@ describe('parseAgentRows', () => {
     expect(rows.map((r) => r.status)).toEqual(['done', 'failed', 'running']);
   });
 
+  it("reads a background `stopped` state as done -- the CLI's own word for a background session that ended without failing", () => {
+    const rows = parseAgentRows(
+      JSON.stringify([row({ kind: 'background', state: 'stopped', status: undefined })]),
+      NOW,
+    );
+    expect(rows.map((r) => r.status)).toEqual(['done']);
+  });
+
+  it('NEVER reads an unrecognised background state as waiting -- background rows carry no `status` field at all, so the fallback that reads busy/idle would silently see nothing and default to the one status that means "the ball is with you", for a row that never handed anyone a ball', () => {
+    const rows = parseAgentRows(
+      JSON.stringify([
+        row({
+          kind: 'background',
+          state: 'some-future-word-this-mapping-does-not-know',
+          status: undefined,
+        }),
+      ]),
+      NOW,
+    );
+    expect(rows[0]?.status).not.toBe('waiting');
+    // The concrete choice: flagged for attention, not folded into a quiet
+    // "done" this mapping cannot actually vouch for. See `statusOf`'s doc.
+    expect(rows[0]?.status).toBe('failed');
+  });
+
+  it('still maps an interactive row through busy/idle, unaffected by the background fallback change', () => {
+    const rows = parseAgentRows(
+      JSON.stringify([
+        row({ kind: 'interactive', status: 'busy' }),
+        row({ kind: 'interactive', status: 'idle' }),
+      ]),
+      NOW,
+    );
+    expect(rows.map((r) => r.status)).toEqual(['running', 'waiting']);
+  });
+
   it('keeps two processes that resumed one session as two rows with distinct keys', () => {
     const rows = parseAgentRows(
       JSON.stringify([row({ pid: 1, name: 'first' }), row({ pid: 2, name: 'second' })]),
