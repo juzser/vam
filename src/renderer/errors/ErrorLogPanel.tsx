@@ -19,7 +19,7 @@
  */
 
 import { useState, useSyncExternalStore } from 'react';
-import { copyText } from '../canvas/clipboard.js';
+import { copyText } from '../panels/clipboard.js';
 import { clearEvents, type LoggedEvent, loggedEvents, subscribeEvents } from './log.js';
 import { composeReport, type Report } from './report.js';
 

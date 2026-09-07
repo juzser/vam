@@ -13,7 +13,17 @@
  */
 
 import type { LayoutName } from '../prefs/panes.js';
-import type { Direction } from './spatial-nav.js';
+
+/**
+ * `h` `j` `k` `l`, spelled out.
+ *
+ * Used to live in `keyboard/spatial-nav.ts` alongside the geometry that
+ * turned a direction into a canvas node — the 0.2 migration deleted that
+ * module with the graph, but the grammar's own `move` action still needs the
+ * four-way vocabulary regardless of what interprets it, so the alias moved
+ * here rather than dying with its old neighbour.
+ */
+export type Direction = 'left' | 'down' | 'up' | 'right';
 
 /** A `KeyboardEvent`, narrowed to what the grammar reads. */
 export type KeyEventLike = {
