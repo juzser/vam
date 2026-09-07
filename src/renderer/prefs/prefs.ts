@@ -285,6 +285,25 @@ export type Prefs = {
    */
   readonly projectIcons: Readonly<Record<string, IconsBySession>>;
   /**
+   * Source id → project id → the name you gave that project's heading, or
+   * nothing for "use the source's own name".
+   *
+   * Same idiom as `projectIcons`, one field over rather than one level up:
+   * both are keyed `sourceId → projectId → …` for the same reason -- a
+   * project id is unique only within its source. The leaf is `RenameChoice`
+   * (`{title, at}`), the same shape `renames` already uses one level up, not
+   * `IconChoice`: this is a name, not a glyph. Same TTL as `renames` and
+   * `projectIcons`, for the same reason a name for a project nobody has
+   * touched in thirty days is not worth keeping either. There is no legacy
+   * flat shape to migrate here, exactly like `projectIcons` -- this key never
+   * shipped before this field existed.
+   *
+   * The project's `id` is never touched by a rename here, on purpose: icons,
+   * collapse state, group membership and hidden-project state all key off it,
+   * and a rename that changed it would orphan every one of them.
+   */
+  readonly projectNames: Readonly<Record<string, Readonly<Record<string, RenameChoice>>>>;
+  /**
    * The filter popover's two origin toggles. Exempt from the icon TTL for the
    * same reason `theme` and `panes` are: it describes the person, not a
    * session that may have stopped existing.
@@ -452,6 +471,7 @@ export const EMPTY_PREFS: Prefs = {
   panes: DEFAULT_PANES,
   paneVisibility: ALL_VISIBLE,
   projectIcons: {},
+  projectNames: {},
   filters: DEFAULT_SESSION_FILTERS,
   collapsedProjects: {},
   hiddenProjects: {},
@@ -533,6 +553,7 @@ function parsePrefs(
     panes?: unknown;
     paneVisibility?: unknown;
     projectIcons?: unknown;
+    projectNames?: unknown;
     filters?: unknown;
     collapsedProjects?: unknown;
     hiddenProjects?: unknown;
@@ -580,6 +601,21 @@ function parsePrefs(
     projectIcons: pruneBuckets(
       migrateSourceKey(
         readProjectIcons(record.projectIcons),
+        LEGACY_HTTP_SOURCE_ID,
+        migrateSource,
+        mergeTimestamped,
+      ),
+      cutoff,
+    ),
+    // Same TTL and shape as `renames`, one field over rather than one level
+    // up -- see the field's own comment. `readBuckets` rather than a
+    // dedicated `readProjectNames`: every top-level entry here is already
+    // `projectId → RenameChoice`, exactly what `readBuckets` already reads
+    // for `renames`, so there is no flat legacy shape of its own to special-
+    // case the way `readIcons` does for `icons`.
+    projectNames: pruneBuckets(
+      migrateSourceKey(
+        readBuckets(record.projectNames, readRename),
         LEGACY_HTTP_SOURCE_ID,
         migrateSource,
         mergeTimestamped,
@@ -1346,25 +1382,72 @@ export function setRename(
 }
 
 /**
+ * An empty title CLEARS the override, restoring the source's own name --
+ * exactly `setRename`, one field over rather than one level up. The
+ * project's `id` is never the thing being written here: this only ever
+ * touches `projectNames`, so nothing that keys off the id (icons, collapse
+ * state, group membership, hidden-project state) can be disturbed by a
+ * rename.
+ */
+export function setProjectRename(
+  prefs: Prefs,
+  sourceId: SourceId,
+  projectId: string,
+  title: string,
+  now: Date,
+): Prefs {
+  const bucket = prefs.projectNames[sourceId] ?? emptyMap<RenameChoice>();
+  const trimmed = title.trim();
+  const nextBucket =
+    trimmed === ''
+      ? withoutEntry(bucket, projectId)
+      : withEntry(bucket, projectId, { title: trimmed, at: now.toISOString() });
+  const projectNames =
+    Object.keys(nextBucket).length > 0
+      ? withEntry(prefs.projectNames, sourceId, nextBucket)
+      : withoutEntry(prefs.projectNames, sourceId);
+  return { ...prefs, projectNames };
+}
+
+/**
  * Put the stored names onto the model, once, before anything reads it -- the
  * same trick `applyIcons` plays one field over, and for the same reason: the
  * sidebar, the canvas node and the detail panel all render `session.title`,
  * and none of them should have to know that a title can be local.
+ *
+ * `projectNames` defaults to `{}` for the same reason `applyIcons`'
+ * `projectIcons` argument does: every existing two-argument call site
+ * (session renames only) still compiles. Applied to `project.name` --
+ * never `project.id`, which every one of `applyIcons`, `isProjectCollapsed`,
+ * `isProjectHidden` and the group layer keys off and which a rename must
+ * leave alone.
  */
-export function applyRenames(model: CanvasModel, renames: Prefs['renames']): CanvasModel {
-  if (Object.keys(renames).length === 0) {
+export function applyRenames(
+  model: CanvasModel,
+  renames: Prefs['renames'],
+  projectNames: Prefs['projectNames'] = {},
+): CanvasModel {
+  if (Object.keys(renames).length === 0 && Object.keys(projectNames).length === 0) {
     return model;
   }
   return {
     ...model,
     projects: model.projects.map((project) => {
-      const bucket = project.source === undefined ? undefined : renames[project.source];
-      if (bucket === undefined) {
+      // A project with no source has no bucket to look either override up
+      // in -- the same "cannot store under an unknown source" rule
+      // `setRename`/`setProjectRename`'s callers already follow.
+      if (project.source === undefined) {
         return project;
       }
+      const nameChoice = projectNames[project.source]?.[project.id];
+      const withName = nameChoice === undefined ? project : { ...project, name: nameChoice.title };
+      const bucket = renames[project.source];
+      if (bucket === undefined) {
+        return withName;
+      }
       return {
-        ...project,
-        sessions: project.sessions.map((session) => {
+        ...withName,
+        sessions: withName.sessions.map((session) => {
           const choice = bucket[session.id];
           return choice === undefined ? session : { ...session, title: choice.title };
         }),
