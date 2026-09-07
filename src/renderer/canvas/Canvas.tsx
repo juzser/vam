@@ -3036,14 +3036,24 @@ function CanvasInner({
             <span className="flex-1" />
 
             {/* Positions are a pure function of the model, always — there is
-                no drag to opt a node out of it, so this has nothing to
-                report but "on". */}
-            <span
-              data-auto-layout
-              className="flex h-[26px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim"
-            >
-              auto-layout <span className="text-running">on</span>
-            </span>
+                no drag to opt a node out of it. It used to read "auto-layout
+                on", bordered and boxed exactly like the zoom/fit buttons to
+                its right, and an operator reasonably read it as one: they
+                pressed it expecting a rearrange, and nothing happened,
+                because there was never a handler to press. Two fixes, not
+                one: no border/box/hover — nothing here should look clickable
+                next to controls that are — and no word implying an "off"
+                that cannot exist, since dragging and pinning were removed
+                (2944843). `Note` carries the actual answer to what someone
+                clicking this was asking: why nodes cannot be dragged. */}
+            <Note text="nodes arrange themselves by status; they cannot be dragged">
+              <span
+                data-auto-layout
+                className="flex h-[26px] shrink-0 cursor-default items-center whitespace-nowrap font-mono text-[10px] text-ink-quiet"
+              >
+                layout: automatic
+              </span>
+            </Note>
 
             <div className="flex h-[26px] shrink-0 items-center overflow-hidden rounded-[7px] border border-line text-ink-dim">
               {/* `action` is read from the live grammar (`activeBindings`),
