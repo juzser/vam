@@ -15,6 +15,7 @@
 
 import { type ExecFileException, execFile } from 'node:child_process';
 import type { SessionStatus } from '../../../renderer/domain/model.js';
+import { cliMissingMessage } from '../../env/cli-missing.js';
 
 /** One live process, normalised. Not one session -- see `key`. */
 export type LiveAgent = {
@@ -171,10 +172,7 @@ const UNREADABLE_OUTPUT = 'the `claude` CLI answered, but vam could not parse wh
 /** Turn a failed spawn into a distinct, honest reason. */
 function classifyExecFailure(error: ExecFileException, stderr: string): AgentsResult {
   if (error.code === 'ENOENT') {
-    return unavailable(
-      'cli-missing',
-      'the `claude` command was not found, so vam cannot see live sessions',
-    );
+    return unavailable('cli-missing', cliMissingMessage('claude', 'vam cannot see live sessions'));
   }
   if (error.killed === true) {
     return unavailable(

@@ -9,6 +9,7 @@
 
 import { execFile, spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell } from 'electron';
@@ -16,6 +17,7 @@ import { registerClipboardIpc } from './clipboard/ipc.js';
 import { contentSecurityPolicy } from './csp.js';
 import { registerAttachImageIpc } from './dialog/attach-image.js';
 import { registerDialogIpc } from './dialog/ipc.js';
+import { applyLoginShellPath, probeLoginShellPath } from './env/resolve-path.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { releaseCloseAccelerator } from './menu.js';
 import { isSameOrigin } from './origin.js';
@@ -371,7 +373,18 @@ function spawnTailscaleServe(
   return { exit, kill: () => child.kill() };
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
+  // FIRST, BEFORE ANYTHING ELSE SPAWNS A CHILD PROCESS. A GUI launch (Finder,
+  // Dock, Spotlight) does not inherit the operator's shell PATH -- only
+  // `/usr/local/bin:/bin:/usr/bin:/usr/sbin:/sbin` or similar -- so `claude`,
+  // `gh` and `tmux` are routinely unreachable even though `pnpm run dev:app`
+  // (which inherits the terminal's PATH) never shows it. See
+  // `./env/resolve-path.ts` for the probe, its bound and its fallback.
+  await applyLoginShellPath(process.env, {
+    platform: process.platform,
+    home: homedir(),
+    probe: probeLoginShellPath,
+  });
   registerPermissionPolicy();
   registerContentSecurityPolicy();
   // Cmd+W belongs to the canvas here: it closes the focused SESSION, not the

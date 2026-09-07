@@ -22,6 +22,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { cliMissingMessage } from '../../env/cli-missing.js';
 import type { SourceError } from '../../ipc/channels.js';
 import { killSessionArgv } from '../tmux/argv.js';
 import { classifyTmuxFailure, listVamSessions, type TmuxRun } from '../tmux/spawn.js';
@@ -77,7 +78,7 @@ export function classifyStopFailure(input: {
     return {
       kind: 'unreachable',
       code: 'cli-missing',
-      message: `the \`claude\` command was not found, so vam cannot stop session ${sessionId}`,
+      message: cliMissingMessage('claude', `vam cannot stop session ${sessionId}`),
     };
   }
   if (failure.killed === true) {
