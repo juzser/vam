@@ -16,7 +16,7 @@
  * reinvented).
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PaneResizer, type PaneResizerProps } from '../../src/renderer/panels/PaneResizer.js';
@@ -116,5 +116,59 @@ describe('PaneResizer keyboard support', () => {
     const handle = renderHandle('sidebar', (_, w) => commits.push(w));
     fireEvent.keyDown(handle, { key: 'a' });
     expect(commits).toEqual([]);
+  });
+});
+
+/**
+ * A modifier-carrying arrow belongs to whoever bound it, not to this handle.
+ *
+ * The keyboard grammar in `Canvas.tsx` reads `event.defaultPrevented` on the
+ * window and returns early when it is set — that is how a sub-widget declines
+ * a key without `stopPropagation`, so the keys it does NOT own remain the way
+ * out of it. A handle that answers `Mod-Alt-Arrow` therefore does not merely
+ * resize by mistake: it swallows the binding, silently, for as long as focus
+ * sits on it.
+ */
+describe('PaneResizer declines keys it does not own', () => {
+  const modified = [
+    ['Cmd+Alt+ArrowLeft', { key: 'ArrowLeft', metaKey: true, altKey: true }],
+    ['Ctrl+ArrowRight', { key: 'ArrowRight', ctrlKey: true }],
+    ['Alt+ArrowLeft', { key: 'ArrowLeft', altKey: true }],
+  ] as const;
+
+  for (const [name, init] of modified) {
+    it(`${name} neither resizes nor calls preventDefault`, () => {
+      const commits: number[] = [];
+      const handle = renderHandle('sidebar', (_, w) => commits.push(w));
+      const event = createEvent.keyDown(handle, init);
+      fireEvent(handle, event);
+      expect(commits).toEqual([]);
+      expect(event.defaultPrevented).toBe(false);
+    });
+  }
+
+  it('leaves the rendered width alone through the controlled loop', () => {
+    render(<ControlledResizer />);
+    const handle = screen.getByRole('separator', { name: 'resize sessions panel' });
+    fireEvent.keyDown(handle, { key: 'ArrowLeft', metaKey: true, altKey: true });
+    expect(handle.getAttribute('aria-valuenow')).toBe('264');
+  });
+
+  it('still owns the bare and Shift-held arrows, and Home/End', () => {
+    const commits: number[] = [];
+    const handle = renderHandle('sidebar', (_, w) => commits.push(w), LAYOUTS.focusResponse);
+    for (const init of [
+      { key: 'ArrowRight' },
+      { key: 'ArrowRight', shiftKey: true },
+      { key: 'Home' },
+      { key: 'End' },
+    ]) {
+      const event = createEvent.keyDown(handle, init);
+      fireEvent(handle, event);
+      expect(event.defaultPrevented).toBe(true);
+    }
+    expect(commits[0]).toBe(264 + PANE_RESIZE_STEP);
+    expect(commits[1]).toBeGreaterThan(264 + PANE_RESIZE_STEP);
+    expect(commits.slice(2)).toEqual([SIDEBAR_MIN, SIDEBAR_MAX]);
   });
 });
