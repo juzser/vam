@@ -90,56 +90,26 @@ const PROJECT: Project = { id: 'p1', name: 'atlas', sessions: [SESSION] };
 const ENTRY: SessionEntry = { project: PROJECT, session: SESSION };
 
 /**
- * The header dot is the pane's only status channel, and it used to have two
- * values for four states plus an empty one: `needsYou ? waiting : running`.
- * So a `done` session, a `failed` session, AND no session at all were all
- * painted as RUNNING -- the last of those putting a live-looking dot beside
- * the words "No session selected".
+ * RETIRED (A12.2): `describe('the pane header names the session status it
+ * actually has', ...)` — three cases ("paints each of the four statuses with
+ * its own token", "breathes only for the status that is asking for
+ * something", "shows no status colour at all when no session is selected").
+ *
+ * The header, and the `[data-pane-status]` dot it drew, are gone. This pane
+ * no longer has a status channel of its own to test — `SessionList.tsx`'s own
+ * `STATUS_DOT` (unchanged by this commit) is the map that used to be
+ * duplicated here, per the removed constant's own doc ("the same tokens, so
+ * the two panes cannot disagree"); this file does not re-assert a fact that
+ * was never this pane's to own. What is genuinely new here — whether the
+ * turn on screen is still being worked — is the `out` rule's `outIsLive`,
+ * covered at length below ("the out region shows live work while the
+ * session is running", "the live line stands beside the answer").
+ * The third case was already vacuous before this change: `dotClass()`
+ * returns `''` for a missing element exactly as it does for a colourless
+ * one, so "shows no status colour" was passing whether or not the dot
+ * existed at all — it proved nothing, on its own terms, well before this
+ * commit removed the element it was written against.
  */
-describe('the pane header names the session status it actually has', () => {
-  const dotClass = () => document.querySelector('[data-pane-status]')?.getAttribute('class') ?? '';
-
-  it('paints each of the four statuses with its own token', () => {
-    for (const [status, token] of [
-      ['waiting', 'bg-waiting'],
-      ['running', 'bg-running'],
-      ['done', 'bg-done'],
-      ['failed', 'bg-failed'],
-    ] as const) {
-      cleanup();
-      draw({ entry: { project: PROJECT, session: { ...SESSION, status } } });
-      expect(dotClass(), `status ${status}`).toContain(token);
-      // Each token appears for exactly its own status, so a map collapsing two
-      // of them together fails rather than passing on a shared colour.
-      for (const other of ['bg-waiting', 'bg-running', 'bg-done', 'bg-failed']) {
-        if (other !== token)
-          expect(dotClass(), `${status} must not be ${other}`).not.toContain(other);
-      }
-    }
-  });
-
-  it('breathes only for the status that is asking for something', () => {
-    for (const [status, breathes] of [
-      ['waiting', true],
-      ['running', true],
-      ['done', false],
-      ['failed', false],
-    ] as const) {
-      cleanup();
-      draw({ entry: { project: PROJECT, session: { ...SESSION, status } } });
-      expect(dotClass().includes('vam-breathe'), `status ${status}`).toBe(breathes);
-    }
-  });
-
-  it('shows no status colour at all when no session is selected', () => {
-    // The dot claimed a running session while the title said none was picked.
-    draw({ entry: null, decision: null });
-    for (const token of ['bg-waiting', 'bg-running', 'bg-done', 'bg-failed']) {
-      expect(dotClass()).not.toContain(token);
-    }
-    expect(dotClass()).not.toContain('vam-breathe');
-  });
-});
 
 /**
  * In-flight delivery.
@@ -347,12 +317,26 @@ function drawFor(over: Partial<DetailPanelProps> = {}) {
 const q = <T extends Element>(selector: string) => document.querySelector<T>(selector);
 const all = (selector: string) => [...document.querySelectorAll(selector)];
 const progress = () => q<HTMLElement>('[data-detail-block="progress"]');
-const turns = () => all('[data-progress-turn]');
-const toggle = () => q<HTMLButtonElement>('[data-progress-toggle]');
+/**
+ * A12.2: `progress` collapsed from a toggle-and-list into a single
+ * `<select>` — one control regardless of how many turns exist. `jump()` is
+ * that control; `turnLabels()` reads its options oldest-first (unchanged
+ * ordering), and `pickTurn` drives it the way an operator would, with a
+ * `change` event rather than a click (native `<select>`s are not clicked
+ * open in a test environment the way a styled row-button was).
+ */
+const jump = () => q<HTMLSelectElement>('[data-progress-jump]');
+const turnLabels = () => [...(jump()?.querySelectorAll('option') ?? [])].map((o) => o.textContent);
+function pickTurn(id: string) {
+  const select = jump();
+  if (select === null)
+    throw new Error('no progress select to change — is there more than one turn?');
+  fireEvent.change(select, { target: { value: id } });
+}
 
 afterEach(cleanup);
 
-describe('the progress region shows nothing until it is opened', () => {
+describe('the progress region is a single step, not a list of rows (A12.2)', () => {
   // Seven turns, so "the newest five" and "all of them" are different lists.
   const MANY = ['d7', 'd6', 'd5', 'd4', 'd3', 'd2', 'd1'].map((id) => decision(id));
   const manyEntry: SessionEntry = {
@@ -360,48 +344,74 @@ describe('the progress region shows nothing until it is opened', () => {
     session: { ...SESSION, decisions: MANY },
   };
 
-  it('draws no turn collapsed, every turn expanded, and says which it is', () => {
+  /**
+   * RETIRED: `'draws no turn collapsed, every turn expanded, and says which
+   * it is'` (toggle open/closed, a `<ul>` of `<li data-progress-turn>` rows).
+   * The toggle-and-list shape it pinned no longer exists — A12.2 collapses
+   * `progress` into a single `<select>`, always present, never a list of
+   * rendered rows. The replacement below pins the same underlying facts
+   * (every turn reachable, oldest first, the newest one included) against
+   * the new shape rather than the old one.
+   */
+  it('offers every turn as one option each, oldest first, with none rendered as its own row', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
-    // Zero, per the operator: collapsed, `progress` is its rule and its toggle
-    // and nothing else, so the height it costs goes to `out`.
-    expect(turns()).toHaveLength(0);
-    // And no empty box either — the list is not rendered at all, so the
-    // section cannot leave a bordered gap where its content would be.
+    // No list of rows exists at all, collapsed or otherwise — collapsing IS
+    // the point, not a state the control toggles into and out of.
+    expect(all('[data-progress-turn]')).toHaveLength(0);
     expect(progress()?.querySelector('ul')).toBeNull();
-    expect(toggle()?.getAttribute('aria-expanded')).toBe('false');
-
-    act(() => toggle()?.click());
-    // ALL SEVEN, not the newest five: `PROGRESS_LINES` used to slice the data
-    // itself, which is exactly the defect this change fixes at the parser --
-    // an artificial ceiling discarding turns nothing forced it to discard.
-    // The oldest turn (d1) has to be REACHABLE, or the fix one file over
-    // bought nothing an operator can actually use. Ordered oldest-first like
-    // the ribbon: the last line is the newest turn.
-    expect(turns()).toHaveLength(7);
-    expect(turns()[0]?.textContent).toContain('step d1');
-    expect(turns()[6]?.textContent).toContain('step d7');
-    expect(toggle()?.getAttribute('aria-expanded')).toBe('true');
-
-    act(() => toggle()?.click());
-    expect(turns()).toHaveLength(0);
+    // ALL SEVEN, not the newest five: `PROGRESS_LINES` used to slice the
+    // data itself at the parser, which was the defect this whole change
+    // fixes. The oldest turn (d1) has to be REACHABLE, or the fix one file
+    // over bought nothing an operator can actually use. Oldest first, same
+    // ordering the old list used.
+    const labels = turnLabels();
+    expect(labels).toHaveLength(7);
+    expect(labels[0]).toContain('step d1');
+    expect(labels[6]).toContain('step d7');
+    // The canvas's own pick (the newest turn) is what the control shows.
+    expect(jump()?.value).toBe('d7');
   });
 
-  it('keeps the three-region structure the pane already earned', () => {
+  /**
+   * RETIRED: `'keeps the three-region structure the pane already earned'`
+   * — it asserted `toggle()?.tagName === 'BUTTON'` and that the OPENED list
+   * carried its own `overflow-y-auto` scroller. Neither survives: there is
+   * no toggle button any more (a `<select>` is the whole control, native
+   * and unstyled by this file), and there is no separate scroller for
+   * `progress` either — it is a flow child of the merged column now (see
+   * `describe('`in` still caps its own text, ...')` above for that
+   * region's own coverage). The one fact worth restating here is that
+   * `progress` is still `flex-none`: it must not stretch to fill the
+   * column the way `out` is allowed to.
+   */
+  it('is still flex-none — it does not stretch to fill the column', () => {
     draw();
-    // A real <button>, so Enter and Space work with no new global binding and
-    // no key stolen from the modal keymap.
-    expect(toggle()?.tagName).toBe('BUTTON');
-    // Regressions guarded elsewhere, restated here because this change is the
-    // one most likely to eat them: still flex-none, and once open the list is
-    // its own scroller rather than growing the pane.
     expect(progress()?.className).toContain('flex-none');
-    act(() => toggle()?.click());
-    expect(progress()?.querySelector('.vam-no-scrollbar')?.className).toContain('overflow-y-auto');
+  });
+
+  it('is a real, labelled control reachable by keyboard, not a styled row', () => {
+    draw({ entry: manyEntry, decision: MANY[0] as Decision });
+    const select = jump();
+    expect(select?.tagName).toBe('SELECT');
+    expect(select?.getAttribute('aria-label')).toBe('jump to a turn');
+  });
+
+  /**
+   * With only ONE turn there is nothing to jump between, so the control
+   * costs no DOM at all rather than a dead dropdown holding a single choice.
+   */
+  it('draws no jump control at all with only one turn to show', () => {
+    const one: SessionEntry = {
+      project: PROJECT,
+      session: { ...SESSION, decisions: [DECISIONS[0] as Decision] },
+    };
+    draw({ entry: one, decision: DECISIONS[0] as Decision });
+    expect(jump()).toBeNull();
   });
 
   it('says how many turns vam read, not a bare total it cannot prove', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
-    const text = toggle()?.textContent ?? '';
+    const text = q<HTMLElement>('[data-progress-count]')?.textContent ?? '';
     // Not the bare "N turns" the operator's bug report was about: on a
     // session whose transcript outgrows the tail window vam reads
     // (`source.ts`'s `TAIL_BYTES`), `decisions.length` is what vam FOUND in
@@ -429,32 +439,35 @@ describe('the panel remembers which turn you are reading, independent of the can
   const MANY = ['d7', 'd6', 'd5', 'd4', 'd3', 'd2', 'd1'].map((id) => decision(id));
   const manyEntry: SessionEntry = { project: PROJECT, session: { ...SESSION, decisions: MANY } };
 
-  /** Clicks the progress row whose id is `id`, opening the list first. */
-  function pick(id: string) {
-    if (toggle()?.getAttribute('aria-expanded') !== 'true') act(() => toggle()?.click());
-    const row = turns().find((t) => t.textContent?.includes(`step ${id}`));
-    const button = row?.querySelector<HTMLButtonElement>('[data-progress-select]');
-    act(() => button?.click());
-  }
+  // A12.2: picking a turn out of history is now a `change` on the single
+  // `<select>` (`pickTurn`, declared beside `jump()` near the top of this
+  // file) rather than a click on a list row opened by a toggle first.
+  const pick = pickTurn;
 
   const inText = () => q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '';
-  const stepLabel = () => q<HTMLElement>('[data-detail-step]')?.textContent ?? '';
+  // A12.2: the removed header's `[data-detail-step]` chip moved into the
+  // `in` rule's own meta, beside "you" (`you · step d7`) — see the
+  // header-removal comment in `DetailPanel.tsx`. `stepLabel` reads that.
+  const stepLabel = () =>
+    q<HTMLElement>('[data-detail-block="in"] [data-rule-meta]')?.textContent ?? '';
 
   it('shows the canvas’s own pick by default', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
     expect(inText()).toContain('ask d7');
-    expect(stepLabel()).toBe('step d7');
+    expect(stepLabel()).toContain('step d7');
   });
 
-  it('draws a turn the canvas never focused once its own row is clicked', () => {
+  it('draws a turn the canvas never focused once picked from the jump control', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
     pick('d1');
     expect(inText()).toContain('ask d1');
-    expect(stepLabel()).toBe('step d1');
-    // The picked row marks itself, the same way the canvas's own newest-turn
-    // row already did before this change.
-    const row = turns().find((t) => t.textContent?.includes('step d1'));
-    expect(row?.querySelector('span')?.className ?? '').not.toBe('');
+    expect(stepLabel()).toContain('step d1');
+    // RETIRED half: "the picked row marks itself" checked a `<li>` row's own
+    // marking `<span>` class, which no longer exists (no rows at all). The
+    // equivalent fact for a native control is simply its OWN value, which
+    // every other assertion in this block already exercises via `inText`/
+    // `stepLabel`; restated once, directly, rather than duplicated per test.
+    expect(jump()?.value).toBe('d1');
   });
 
   it('keeps the picked turn across a re-render the canvas did not cause', () => {
@@ -480,7 +493,7 @@ describe('the panel remembers which turn you are reading, independent of the can
       focusNodeId: 'info:s1',
     });
     expect(inText()).toContain('ask d1');
-    expect(stepLabel()).toBe('step d1');
+    expect(stepLabel()).toContain('step d1');
   });
 
   it('defers back to the canvas the moment the canvas’s own cursor moves', () => {
@@ -502,7 +515,7 @@ describe('the panel remembers which turn you are reading, independent of the can
       focusNodeId: 'step:s1:d6',
     });
     expect(inText()).toContain('ask d6');
-    expect(stepLabel()).toBe('step d6');
+    expect(stepLabel()).toContain('step d6');
   });
 
   it('defers back to the canvas on a plain session refocus too, with no step cursor at all', () => {
@@ -526,7 +539,7 @@ describe('the panel remembers which turn you are reading, independent of the can
       focusNodeId: 'info:s2',
     });
     expect(inText()).toContain('ask d7');
-    expect(stepLabel()).toBe('step d7');
+    expect(stepLabel()).toContain('step d7');
   });
 
   it('turns off the live turn markers for a turn picked out of history', () => {
@@ -585,6 +598,9 @@ describe('a selected historical turn survives a poll that delivers a new one', (
     session: { ...SESSION, id: 'sess-1', decisions },
   });
   const inText = () => q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '';
+  /** The `<option>` at oldest-first position `index` in the jump control. */
+  const optionAt = (index: number) =>
+    [...(jump()?.querySelectorAll('option') ?? [])][index] as HTMLOptionElement | undefined;
 
   it('keeps the same turn on screen after the source delivers one more turn', () => {
     // A real parse: two turns, oldest-first "ask 0" then "ask 1".
@@ -592,10 +608,9 @@ describe('a selected historical turn survives a poll that delivers a new one', (
     const view = drawFor({ entry: entryWith(before), decision: before[0] as Decision });
 
     // Read the OLDEST turn, which the canvas never focuses by default.
-    act(() => toggle()?.click());
-    const oldestRow = turns()[0]?.querySelector<HTMLButtonElement>('[data-progress-select]');
-    expect(oldestRow, 'fixture has no oldest row to click').not.toBeNull();
-    act(() => oldestRow?.click());
+    const oldest = optionAt(0);
+    expect(oldest, 'fixture has no oldest option to pick').not.toBeUndefined();
+    pickTurn((oldest as HTMLOptionElement).value);
     expect(inText()).toContain('ask 0');
 
     // The poll: the source is asked again and now reports THREE turns --
@@ -617,12 +632,11 @@ describe('a selected historical turn survives a poll that delivers a new one', (
     const before = turnsFor(['continue', 'something else', 'continue']);
     const view = drawFor({ entry: entryWith(before), decision: before[0] as Decision });
 
-    act(() => toggle()?.click());
-    // Both "continue" rows exist; the SECOND occurrence (newer) is what is
-    // opened here, oldest-first so it is the last of the three rows.
-    const secondContinue = turns()[2]?.querySelector<HTMLButtonElement>('[data-progress-select]');
-    expect(secondContinue, 'fixture has no second "continue" row to click').not.toBeNull();
-    act(() => secondContinue?.click());
+    // Both "continue" options exist; the SECOND occurrence (newer) is what is
+    // picked here, oldest-first so it is the last of the three options.
+    const secondContinue = optionAt(2);
+    expect(secondContinue, 'fixture has no second "continue" option to pick').not.toBeUndefined();
+    pickTurn((secondContinue as HTMLOptionElement).value);
     expect(inText()).toContain('continue');
     expect(outText()).toContain('answer 2'); // the third turn's own reply
 
@@ -655,9 +669,7 @@ describe('a turn that has genuinely scrolled out of the window', () => {
       decision: MANY[0] as Decision,
       focusNodeId: 'info:s1',
     });
-    act(() => toggle()?.click());
-    const oldestRow = turns()[0]?.querySelector<HTMLButtonElement>('[data-progress-select]');
-    act(() => oldestRow?.click());
+    pickTurn('d1');
     expect(q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '').toContain('ask d1');
 
     // The window no longer carries `d1` at all -- every id in the new
@@ -682,9 +694,7 @@ describe('a turn that has genuinely scrolled out of the window', () => {
       decision: MANY[0] as Decision,
       focusNodeId: 'info:s1',
     });
-    act(() => toggle()?.click());
-    const oldestRow = turns()[0]?.querySelector<HTMLButtonElement>('[data-progress-select]');
-    act(() => oldestRow?.click());
+    pickTurn('d1');
 
     const REPLACED = ['d5', 'd4'].map((id) => decision(id));
     view.rerender({
@@ -702,17 +712,16 @@ describe('a turn that has genuinely scrolled out of the window', () => {
 });
 
 describe('the pane drops the status line under the tab bar', () => {
-  it('says nothing in prose, and still says it with the status dot', () => {
+  it('says nothing in prose', () => {
+    // The operator asked for the banner under the tabs to go, and it stays
+    // gone. What USED to follow -- "and still says it with the status dot,
+    // two lines above where the sentence used to be" -- no longer applies:
+    // A12.2 removed that dot along with the rest of the header. See the
+    // retirement note near the top of this file (where `describe('the pane
+    // header names the session status it actually has', ...)` used to be)
+    // for where the status fact went instead.
     draw();
-    // The operator asked for the banner under the tabs to go. Nothing is lost
-    // with it: the same `waiting` status is what makes the header dot amber
-    // and breathe, two lines above where the sentence used to be.
     expect(document.body.textContent).not.toContain('waiting on you');
-    expect(q<HTMLElement>('.vam-breathe.bg-waiting')).not.toBeNull();
-
-    cleanup();
-    draw({ entry: { project: PROJECT, session: { ...SESSION, status: 'running' } } });
-    expect(q<HTMLElement>('.vam-breathe.bg-waiting')).toBeNull();
   });
 });
 
@@ -1165,24 +1174,60 @@ describe('there is a way out of the prompt box without a mouse', () => {
   });
 });
 
-describe('the regions are capped in lines, and `out` gets what they give up', () => {
+describe('`in` still caps its own text, inside one merged scrolling column (A12.2)', () => {
   it('caps `in` at two rendered lines of its own body text', () => {
     draw();
     const box = q<HTMLElement>('[data-detail-scroll="in"]');
     expect(box).not.toBeNull();
     // Two lines of 12px/1.55 plus the box's own 10px padding and 1px border.
     // A number, not a percentage: "two lines" is a promise about the text,
-    // and a percentage of the pane is a promise about the window.
+    // and a percentage of the pane is a promise about the window. This is
+    // the one region-shaped thing A12.2 keeps: `in` still clamps to its own
+    // two lines, which is what makes pinning it with `position: sticky`
+    // (below) a small, useful anchor rather than an unbounded block.
     expect(box?.style.maxHeight).toBe('59px');
     // Still a scroller — capped, not clipped: the rest is one drag away.
     expect(box?.className).toContain('overflow-y-auto');
   });
 
-  it('gives `out` the height the other two gave up', () => {
+  /**
+   * RETIRED: `'gives `out` the height the other two gave up'` — it asserted
+   * `[data-detail-block="out"]` carries `flex-1`, the fact that made `out`
+   * the one region with its OWN scrollbar under the old three-fixed-pane
+   * layout. A12.2 removes that layout outright: `in`, `progress` and `out`
+   * are now flow children of ONE scrolling column
+   * (`[data-detail-column]`, asserted below), and `out` no longer needs or
+   * carries `flex-1` — it just grows with its content like any other block.
+   * Not a coverage loss with nothing to show for it: the replacement test
+   * below asserts the column that took over the job.
+   */
+  it('scrolls `in`, `progress` and `out` together as one column, not `out` alone', () => {
     draw();
+    const column = q<HTMLElement>('[data-detail-column]');
+    expect(column).not.toBeNull();
+    expect(column?.className).toContain('overflow-y-auto');
+    expect(column?.className).toContain('flex-1');
+    // All three sections live INSIDE the one scrolling column now.
+    for (const block of ['in', 'progress', 'out']) {
+      expect(column?.querySelector(`[data-detail-block="${block}"]`), block).not.toBeNull();
+    }
+    // `out` itself no longer claims its own scroller or its own share of the
+    // pane's height — the column does both for it now.
     const out = q<HTMLElement>('[data-detail-block="out"]');
-    expect(out?.className).toContain('flex-1');
-    expect(q<HTMLElement>('[data-detail-scroll="out"]')).not.toBeNull();
+    expect(out?.className).not.toContain('flex-1');
+    expect(q<HTMLElement>('[data-detail-scroll="out"]')?.className ?? '').not.toContain(
+      'overflow-y-auto',
+    );
+  });
+
+  it('pins `in` to the top of the column with `position: sticky`', () => {
+    draw();
+    const inBlock = q<HTMLElement>('[data-detail-block="in"]');
+    expect(inBlock?.className).toContain('sticky');
+    expect(inBlock?.className).toContain('top-0');
+    // Opaque, or `out` text scrolling underneath would show through the two
+    // pinned lines of `in`.
+    expect(inBlock?.className).toContain('bg-sidebar');
   });
 });
 
@@ -1702,13 +1747,115 @@ describe('the empty tabs carry no tooltip, and the other notes stay', () => {
     // Each became a real control as it got a source, and none of them ever
     // carried a note explaining an emptiness.
     expect(all('[data-placeholder^="tab-"]')).toHaveLength(0);
-    for (const tab of all('[data-tab]')) {
+    for (const tab of all('[data-view]')) {
       expect(tab.closest('[data-note]')).toBeNull();
     }
     // The three the operator asked to KEEP.
     expect(q<HTMLElement>('[data-attach]')?.getAttribute('data-note')).not.toBeNull();
     expect(q<HTMLElement>('[data-model-request]')?.getAttribute('data-note')).not.toBeNull();
     expect(q<HTMLElement>('[data-mode-row] [data-note]')).not.toBeNull();
+  });
+});
+
+/**
+ * A12.2, A2.5, A5.4: the four views are icons now, and each carries its own
+ * `Alt+<digit>`. Two things are pinned here that nothing else in this file
+ * does: an icon-only control still needs a REAL accessible name (a tooltip
+ * is not one), and the digit resolves by NAME through `visibleTabs`, never
+ * by indexing `TABS` — the exact bug `panels/tabs.ts`'s own header
+ * describes, falsified directly with Terminal withdrawn.
+ */
+describe('Alt+<digit> picks a view by name, through visibleTabs, never by position', () => {
+  const press = (digit: number, modifiers: Partial<globalThis.KeyboardEventInit> = {}) => {
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: String(digit),
+          code: `Digit${digit}`,
+          altKey: true,
+          bubbles: true,
+          ...modifiers,
+        }),
+      );
+    });
+  };
+  const note = () => q<HTMLElement>('[data-view-note]');
+
+  it('every icon is a real <button>, in the tab order, named beyond a tooltip', () => {
+    draw();
+    for (const icon of all('[data-view]') as HTMLButtonElement[]) {
+      expect(icon.tagName).toBe('BUTTON');
+      // Reachable by Tab: no explicit removal from the tab order.
+      expect(icon.getAttribute('tabindex')).not.toBe('-1');
+      // The accessible name is `aria-label`, not merely `title` — a screen
+      // reader is not required to read `title`, and it never opens on
+      // keyboard focus at all, which is the exact defect this file already
+      // refused once for the old pill row.
+      const label = icon.getAttribute('aria-label');
+      expect(label, 'icon must carry its own aria-label').not.toBeNull();
+      expect(label).not.toBe('');
+      expect(icon.getAttribute('title')).toBe(label);
+    }
+  });
+
+  it('Alt-3 opens Terminal by name when all four views are drawn', () => {
+    draw({ terminal: true });
+    press(3);
+    expect(q<HTMLElement>('[data-view="terminal"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(note()).toBeNull();
+  });
+
+  /**
+   * THE BUG ITSELF, falsified against the real component: with Terminal
+   * withdrawn the bar reads Response · PRs · Agents, so `Alt-3` must resolve
+   * to Agents (the third DRAWN view) — an indexer that counted `TABS`
+   * instead would land on Terminal, which the source just said it does not
+   * have, exactly the defect `tabs.ts`'s own header records.
+   */
+  it('Alt-3 opens Agents, not Terminal, once Terminal is withdrawn', () => {
+    draw({ terminal: false });
+    press(3);
+    expect(q<HTMLElement>('[data-view="agents"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(q('[data-view="terminal"]')).toBeNull();
+    expect(note()).toBeNull();
+  });
+
+  it('refuses aloud, and changes nothing, for a digit past the last drawn view', () => {
+    draw({ terminal: false }); // three views drawn: Response, PRs, Agents
+    press(4);
+    // Still on Response -- the request did not fall through to it either.
+    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(note()?.getAttribute('role')).toBe('status');
+    expect(note()?.textContent ?? '').toContain('no view 4');
+    expect(note()?.textContent ?? '').toContain('only 3 shown');
+  });
+
+  it('leaves a modifier-free digit and a differently-modified one alone', () => {
+    draw({ terminal: false });
+    press(3, { altKey: false });
+    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
+    press(3, { metaKey: true });
+    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
+    press(3, { shiftKey: true });
+    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('leaves typing in the composer alone entirely', () => {
+    draw({ terminal: false, composing: true });
+    const box = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
+    expect(box).not.toBeNull();
+    act(() => {
+      box?.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: '3',
+          code: 'Digit3',
+          altKey: true,
+          bubbles: true,
+        }),
+      );
+    });
+    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(note()).toBeNull();
   });
 });
 
@@ -1727,7 +1874,7 @@ describe('the Agents tab', () => {
     session: { ...SESSION, agents },
   });
 
-  const agentsTab = () => q<HTMLButtonElement>('[data-tab="agents"]');
+  const agentsTab = () => q<HTMLButtonElement>('[data-view="agents"]');
   const openAgents = () => {
     const button = agentsTab();
     if (button === null) throw new Error('no Agents tab to click');
@@ -1740,7 +1887,7 @@ describe('the Agents tab', () => {
     expect(agentsTab()?.tagName).toBe('BUTTON');
     // `PRs` and `Terminal` have since become controls of their own, so the bar
     // holds four buttons and no inert label.
-    expect(all('[data-tab]').map((t) => t.tagName)).toEqual([
+    expect(all('[data-view]').map((t) => t.tagName)).toEqual([
       'BUTTON',
       'BUTTON',
       'BUTTON',
@@ -1761,7 +1908,7 @@ describe('the Agents tab', () => {
     expect(q('[data-detail-block="in"]')).toBeNull();
     expect(agentsTab()?.getAttribute('aria-pressed')).toBe('true');
 
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="response"]') as HTMLButtonElement);
     expect(q('[data-detail-block="out"]')).not.toBeNull();
     expect(q('[data-agents]')).toBeNull();
   });
@@ -2684,7 +2831,7 @@ describe('the PRs tab', () => {
     session: { ...SESSION, ...(pullRequests === undefined ? {} : { pullRequests }) },
   });
 
-  const prsTab = () => q<HTMLButtonElement>('[data-tab="prs"]');
+  const prsTab = () => q<HTMLButtonElement>('[data-view="prs"]');
   const openPrs = () => {
     const button = prsTab();
     if (button === null) throw new Error('no PRs tab to click');
@@ -2726,7 +2873,7 @@ describe('the PRs tab', () => {
     expect(q('[data-agents]')).toBeNull();
     expect(prsTab()?.getAttribute('aria-pressed')).toBe('true');
 
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="response"]') as HTMLButtonElement);
     expect(q('[data-prs]')).toBeNull();
     expect(q('[data-detail-block="out"]')).not.toBeNull();
   });
@@ -2841,8 +2988,8 @@ describe('the Terminal tab costs nothing until it is opened', () => {
     // Response, then every other tab that is not Terminal. None of them may
     // reach tmux.
     draw();
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="agents"]') as HTMLButtonElement);
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="prs"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="agents"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="prs"]') as HTMLButtonElement);
     await act(async () => {
       await Promise.resolve();
     });
@@ -2863,7 +3010,7 @@ describe('the Terminal tab costs nothing until it is opened', () => {
     draw();
 
     await act(async () => {
-      fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
+      fireEvent.click(q<HTMLButtonElement>('[data-view="terminal"]') as HTMLButtonElement);
       await Promise.resolve();
     });
     // BY PROJECT ID AND ROW, never by the session title. The project alone
@@ -2875,7 +3022,7 @@ describe('the Terminal tab costs nothing until it is opened', () => {
     expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).toContain('the pane');
 
     const whileOpen = read.mock.calls.length;
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="response"]') as HTMLButtonElement);
     await act(async () => {
       await Promise.resolve();
     });
@@ -2906,7 +3053,7 @@ describe('the Terminal tab costs nothing until it is opened', () => {
     draw();
 
     await act(async () => {
-      fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
+      fireEvent.click(q<HTMLButtonElement>('[data-view="terminal"]') as HTMLButtonElement);
       await Promise.resolve();
     });
     const pane = q<HTMLElement>('[data-terminal-pane]');
@@ -2928,13 +3075,13 @@ describe('the Terminal tab costs nothing until it is opened', () => {
 describe('the Terminal tab is offered only by a source that has one', () => {
   it('drops the tab entirely for a source that says it has no terminal', () => {
     draw({ terminal: false });
-    expect(q('[data-tab="terminal"]')).toBeNull();
-    expect(all('[data-tab]').map((t) => t.getAttribute('data-tab'))).not.toContain('terminal');
+    expect(q('[data-view="terminal"]')).toBeNull();
+    expect(all('[data-view]').map((t) => t.getAttribute('data-view'))).not.toContain('terminal');
   });
 
   it('keeps it for a source that has one', () => {
     draw({ terminal: true });
-    expect(q('[data-tab="terminal"]')).not.toBeNull();
+    expect(q('[data-view="terminal"]')).not.toBeNull();
   });
 
   it('falls back to Response when the showing tab is withdrawn', () => {
@@ -2942,11 +3089,11 @@ describe('the Terminal tab is offered only by a source that has one', () => {
     // from a source without one. A tab bar with nothing selected and a pane
     // drawing a withdrawn tab is the state this prevents.
     const { rerender } = drawFor({ terminal: true });
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="terminal"]') as HTMLButtonElement);
     expect(q('[data-terminal]')).not.toBeNull();
     rerender({ terminal: false });
     expect(q('[data-terminal]')).toBeNull();
-    expect(q<HTMLElement>('[data-tab="response"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
   });
 });
 
@@ -2979,7 +3126,7 @@ describe('the composer is hidden while the Terminal tab is open', () => {
   });
 
   const openTerminal = () =>
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="terminal"]') as HTMLButtonElement);
 
   it('draws the prompt box, the mode row and the attach button on Response', () => {
     withBridge();
@@ -3015,7 +3162,7 @@ describe('the composer is hidden while the Terminal tab is open', () => {
       openTerminal();
       await Promise.resolve();
     });
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="response"]') as HTMLButtonElement);
     // The draft lives above this pane, so leaving the tab cannot have eaten
     // it: hiding the box may not cost the operator what they had typed.
     expect(q<HTMLTextAreaElement>('textarea')?.value).toBe('half a sentence');
@@ -3026,9 +3173,9 @@ describe('the composer is hidden while the Terminal tab is open', () => {
     // and nothing about them makes the prompt box the wrong place to type.
     withBridge();
     draw();
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="prs"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="prs"]') as HTMLButtonElement);
     expect(q('[data-prompt-box]')).not.toBeNull();
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="agents"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="agents"]') as HTMLButtonElement);
     expect(q('[data-prompt-box]')).not.toBeNull();
   });
 });

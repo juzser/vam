@@ -46,10 +46,14 @@ const MODEL: CanvasModel = {
   ],
 };
 
-const focusedTitle = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
+const focusedTitle = () =>
+  document
+    .querySelector('[data-row-cursor]')
+    ?.closest('[data-session-row]')
+    ?.querySelector('[data-row-title]')?.textContent ?? '';
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
 const selectedTab = () =>
-  document.querySelector('[data-tab][aria-pressed="true"]')?.getAttribute('data-tab') ?? null;
+  document.querySelector('[data-view][aria-pressed="true"]')?.getAttribute('data-view') ?? null;
 const sheet = () => document.querySelector('[data-key-sheet]');
 const revealed = (project: string) =>
   document

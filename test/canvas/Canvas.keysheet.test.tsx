@@ -40,7 +40,11 @@ const MODEL: CanvasModel = {
 
 const sheet = () => document.querySelector('[data-key-sheet]');
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
-const focusedTitle = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
+const focusedTitle = () =>
+  document
+    .querySelector('[data-row-cursor]')
+    ?.closest('[data-session-row]')
+    ?.querySelector('[data-row-title]')?.textContent ?? '';
 
 function press(key: string, modifiers: KeyboardEventInit = {}) {
   act(() => {

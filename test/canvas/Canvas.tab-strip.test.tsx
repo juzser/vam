@@ -47,7 +47,11 @@ function session(id: string, icon: string | null = null): Session {
 const tabIcon = (id: string) =>
   document.querySelector(`[data-session-tab] [data-session-icon="${id}"]`);
 
-const focusedTitle = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
+const focusedTitle = () =>
+  document
+    .querySelector('[data-row-cursor]')
+    ?.closest('[data-session-row]')
+    ?.querySelector('[data-row-title]')?.textContent ?? '';
 /** The tab strip's own select button for a session, found by its title —
  *  the button carries no id of its own, only the strip's `key`. */
 const tabSelect = (title: string) =>

@@ -88,7 +88,7 @@ describe('the phone session screen', () => {
     // Terminal tab is offered only by a source that has one' -- and the
     // withdrawal reaches the topbar because both read `visibleTabs`.
     expect(document.querySelector('[data-view-tabs]')).toBeNull();
-    expect(document.querySelectorAll('[data-tab]')).toHaveLength(0);
+    expect(document.querySelectorAll('[data-view]')).toHaveLength(0);
     expect(views().map((b) => b.getAttribute('data-phone-view'))).toEqual([
       'response',
       'prs',

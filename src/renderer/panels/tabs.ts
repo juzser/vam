@@ -27,3 +27,17 @@ export type Tab = (typeof TABS)[number];
 export function visibleTabs(terminal: boolean): readonly Tab[] {
   return TABS.filter((name) => name !== 'Terminal' || terminal);
 }
+
+/**
+ * `Alt+<digit>` turned into a view — the one and only way a keypress may pick
+ * one, per the same rule `visibleTabs` states above.
+ *
+ * It takes the DRAWN list, never `TABS`: there is no overload that accepts
+ * the unfiltered constant, so a caller cannot reintroduce the bug this
+ * module's header describes by passing the wrong array. `undefined` past the
+ * end is the caller's cue to refuse aloud rather than fall through to
+ * something the operator did not ask for.
+ */
+export function tabForDigit(visible: readonly Tab[], digit: number): Tab | undefined {
+  return visible[digit - 1];
+}

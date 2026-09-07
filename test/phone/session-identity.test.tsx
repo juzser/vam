@@ -95,7 +95,21 @@ describe('the phone session screen’s identity', () => {
 });
 
 describe('the detail pane on a desktop, which shares this component', () => {
-  it('still draws its header card, title, project, epic and all', () => {
+  /**
+   * RETIRED: `'still draws its header card, title, project, epic and all'`.
+   * At the time this file was written, the phone had already dropped its
+   * copy of the identity block and the desktop had not — this test was the
+   * control proving the desktop side was untouched. A12.2 removes the
+   * desktop header too (`[data-prompt-target]`, `[data-prompt-project]` and
+   * `[data-pane-status]` are all gone from `DetailPanel.tsx`), so the two
+   * sides converge and this file's own premise — "one shares the component,
+   * one does not" — is no longer true for the header. The replacement below
+   * pins what actually survived: project and epic move into the scrolling
+   * column's identity line (`[data-detail-identity]`), gated on there being
+   * a turn to show, exactly as the header-removal comment in
+   * `DetailPanel.tsx` describes.
+   */
+  it('carries project and epic in the column now, not in a header card', () => {
     const project: Project = { id: 'p1', name: 'factory', sessions: [SESSION] };
     const entry: SessionEntry = { project, session: SESSION };
     render(
@@ -116,12 +130,15 @@ describe('the detail pane on a desktop, which shares this component', () => {
         answer={async () => ({ kind: 'sent', answer: 'x' })}
       />,
     );
-    expect(document.querySelector('[data-prompt-target]')?.textContent).toBe('factory-sse-1');
-    expect(document.querySelector('[data-prompt-project]')?.textContent).toBe('factory');
-    expect(document.querySelector('[data-pane-status]')).not.toBeNull();
+    expect(document.querySelector('[data-prompt-target]')).toBeNull();
+    expect(document.querySelector('[data-pane-status]')).toBeNull();
+    expect(document.querySelector('[data-detail-identity]')?.textContent).toContain('factory');
+    expect(document.querySelector('[data-detail-identity]')?.textContent).toContain(
+      'ui-server-sse',
+    );
   });
 
-  it('keeps the view tab bar, which only the phone lost', () => {
+  it('keeps the view icon row, which only the phone lost', () => {
     const project: Project = { id: 'p1', name: 'factory', sessions: [SESSION] };
     const entry: SessionEntry = { project, session: SESSION };
     render(
@@ -143,10 +160,10 @@ describe('the detail pane on a desktop, which shares this component', () => {
       />,
     );
     // The removal is `phone`-gated, not a deletion: PRs and Agents are still
-    // one tap away wherever there is room for a canvas.
+    // one press away wherever there is room for it.
     expect(document.querySelector('[data-view-tabs]')).not.toBeNull();
     expect(
-      [...document.querySelectorAll('[data-tab]')].map((t) => t.getAttribute('data-tab')),
+      [...document.querySelectorAll('[data-view]')].map((t) => t.getAttribute('data-view')),
     ).toContain('prs');
   });
 });

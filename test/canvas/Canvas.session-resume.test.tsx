@@ -67,10 +67,14 @@ function stored(): Record<string, unknown> {
 
 /** Which session the keyboard is on, read off the detail pane's header -- the
  *  same hook `Canvas.keyboard.test.tsx` reads, for its reason. */
-const focused = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
+const focused = () =>
+  document
+    .querySelector('[data-row-cursor]')
+    ?.closest('[data-session-row]')
+    ?.querySelector('[data-row-title]')?.textContent ?? '';
 
 const currentTab = () =>
-  document.querySelector('[data-tab][aria-pressed="true"]')?.getAttribute('data-tab') ?? null;
+  document.querySelector('[data-view][aria-pressed="true"]')?.getAttribute('data-view') ?? null;
 
 function press(key: string) {
   act(() => {
@@ -199,7 +203,7 @@ describe('the detail tab, across a relaunch', () => {
     render(<Canvas model={MODEL} />);
     expect(currentTab()).toBe('response');
     act(() => {
-      fireEvent.click(document.querySelector('[data-tab="agents"]') as HTMLElement);
+      fireEvent.click(document.querySelector('[data-view="agents"]') as HTMLElement);
     });
     expect(currentTab()).toBe('agents');
     expect(stored().detailTab).toBe('Agents');
