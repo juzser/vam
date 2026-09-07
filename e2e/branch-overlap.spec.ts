@@ -1,72 +1,93 @@
 /**
- * The measurement PR #250 shipped without: real pixel geometry proving the
- * sidebar's branch label (`data-session-branch`) can never overlap the
- * session's age (`data-session-age`), at the sidebar's own narrowest width.
+ * Real pixel geometry proving the sidebar's branch label
+ * (`data-session-branch`) can never overlap the session's age
+ * (`data-session-age`), at the sidebar's own narrowest width -- and, since
+ * this test's first draft, the reason the fix is a structural CSS clip
+ * rather than a character budget.
  *
- * PR #250 (`src/renderer/panels/SessionList.tsx`) fixed the operator's
- * report -- "the branch overlaps the timer" -- with `BRANCH_TAIL_MAX_CHARS`,
- * a budget derived arithmetically from `SIDEBAR_MIN` minus the row's own
- * chrome (see that constant's doc comment). Its own unit tests
+ * PR #250 (`src/renderer/panels/SessionList.tsx`) first fixed the
+ * operator's report -- "the branch overlaps the timer" -- with
+ * `BRANCH_TAIL_MAX_CHARS`, a budget derived arithmetically from
+ * `SIDEBAR_MIN` minus the row's own chrome. Its own unit tests
  * (`test/panels/SessionList.test.tsx`) assert the `truncate` class and an
- * inline `maxWidth` got applied, and that `data-session-age`'s TEXT survives
- * intact -- both necessary, neither the actual claim. `happy-dom`, which
- * those tests run under, computes no real layout at all: it cannot say
- * whether two boxes overlap, only whether a class name is present. This is
- * the one gate that can.
+ * inline `maxWidth` got applied, and that `data-session-age`'s TEXT
+ * survives intact -- both necessary, neither the actual claim: `happy-dom`
+ * computes no real layout, so nothing there can say whether two boxes
+ * overlap. This is the one gate that can, and measured, the character
+ * budget did not hold: `relativeTime` (`src/renderer/adapter/relative-time.ts`)
+ * is UNBOUNDED in its day branch and can also return a raw ISO string
+ * verbatim on a parse failure, so "the widest age is four characters" was
+ * false on its face -- and even against the realistic four-character case
+ * (`999d`) the 20-character budget measured 3.27px into the age at
+ * `SIDEBAR_MIN`, because `20ch` does not render as an even 120px in this
+ * font. See `BRANCH_TAIL_MAX_CHARS`'s doc comment in `SessionList.tsx` for
+ * the fix this drove: `data-session-branch` now carries `overflow-hidden`,
+ * a hard clip bounded by the row's own flex layout (computed from the
+ * age's REAL rendered width, at paint time, in whatever font actually
+ * loaded) -- correct at any width, any age string, any font, with no
+ * arithmetic that can be wrong. `BRANCH_TAIL_MAX_CHARS` still exists, but
+ * only as a PREFERRED ellipsis point now, not the guarantee.
  *
  * THE FIXTURE PROBLEM. `?demo=1` renders `DEMO_MODEL`
  * (`src/renderer/fixtures/demo.ts`), whose four sessions all carry
  * `branch: null` -- there is no way to ask the demo route for a branch name
- * without editing source, which this task is scoped never to do (see
- * `e2e/README.md`'s neighbours on why `e2e/` stays outside the app's own
- * gates). So this intercepts vite's OWN dev-server response for that one
- * module -- `page.route('**\/fixtures/demo.ts', ...)`, the same technique
+ * without editing that file, and this test is scoped to add a test only
+ * (`SessionList.tsx`'s own fix is the one source change this PR makes, and
+ * it is the structural clip above, never a tuned constant). So this
+ * intercepts vite's OWN dev-server response for that one module --
+ * `page.route('**\/fixtures/demo.ts', ...)`, the same technique
  * `phone-shell.pw.ts` already uses for `/api/**` -- and rewrites three
  * `branch: null` fields (and one `age` string) to synthetic values before
  * the module ever reaches the page. No app file changes; the served TEXT
  * does, for the lifetime of this one page.
  *
- * THE THREE SHAPES, chosen per the epic's own worst-case comment
- * (`BRANCH_TAIL_MAX_CHARS`'s doc, `SessionList.tsx`):
+ * THE THREE SHAPES, chosen per `BRANCH_TAIL_MAX_CHARS`'s own doc comment
+ * (`SessionList.tsx`):
  *
  *   - `factory-sse-1` -- a branch with NO slash. `splitBranch` makes a
  *     no-slash name 100% tail, the worst case per that function's own
  *     comment, and an ordinary one (a release tag, `main`, anything
  *     unqualified).
- *   - `crosscheck-2` -- several slashes, a long FINAL segment. The head can
- *     shrink to nothing (`flex-1`/`truncate`); only the tail's own cap
- *     stands between this and the age.
- *   - `dogfood-4` -- a long branch AND a wide age string (`999d`, the
- *     four-character worst case the budget's own comment reserves 24px
- *     for) together, so a branch that just barely fits against a SHORT age
- *     cannot pass by accident when the age it will actually sit beside on a
- *     stale session is wider.
+ *   - `crosscheck-2` -- several slashes, a long FINAL segment. The head
+ *     (plain `truncate`, ordinary flex-shrink) gives way first; only the
+ *     tail's own clip stands between this and the age.
+ *   - `dogfood-4` -- a long branch AND `999d`, the widest age the source
+ *     realistically emits day-to-day (see the header above for why the
+ *     TRUE ceiling is actually unbounded) -- together, so a branch that
+ *     just barely clears a SHORT age cannot pass by accident when the age
+ *     it will actually sit beside on a stale session is wider.
  *
  * Run on its own (never inside the git tree that carries live findings, and
  * outside vam's own gates -- see `e2e/README.md`):
  *
  *   e2e/node_modules/.bin/playwright test --config=e2e/playwright.config.ts e2e/branch-overlap.spec.ts
  *
- * MEASURED RESULT, at the shipped `BRANCH_TAIL_MAX_CHARS = 20`: this test is
- * RED, not green. Two of the three cases clear the age with a few pixels to
- * spare (no-slash: +4.7px, long-final-segment: +2.5px), but the third --
- * a capped tail beside `999d`, the age string the budget's own comment
- * reserves 24px for -- overlaps it by a measured 3.27px
- * (`branch.right = 157.17`, `age.left = 153.91`). The 20-character budget
- * was derived against a SHORT age ("12m" in the unit fixture,
- * `test/panels/SessionList.test.tsx`) and does not hold against the
- * longest age the source can actually emit. This is a real, reproducible
- * finding (deterministic across repeated runs, not a rounding artifact) and
- * is reported rather than silently fixed -- this task is scoped to add a
- * test, never to touch `SessionList.tsx`. See the PR description for the
- * numbers and the falsification transcript that surfaced it: the first
- * draft of this test measured `[data-session-branch]`'s own box, which
- * stayed green even with the cap effectively disabled
- * (`BRANCH_TAIL_MAX_CHARS = 80`) because CSS overflow that is not clipped
- * paints past a flex parent's box without ever enlarging it -- the parent's
- * `getBoundingClientRect()` does not grow. Measuring `[data-branch-tail]`
- * itself, the actual right-most painted content, is what turned the
- * falsification genuinely red, and what turned up this real edge case.
+ * WHAT THIS TEST MEASURES AND WHY. `getBoundingClientRect()` on a CHILD
+ * element is unaffected by an ancestor's `overflow-hidden` -- the child's
+ * own layout box stays whatever its content demands; only what PAINTS
+ * changes. Two false starts before this test measured the right thing:
+ *
+ *   1. First draft measured `[data-session-branch]`'s own box before the
+ *      structural fix existed, when that box had no `overflow-hidden` at
+ *      all. It stayed green even with the character cap disabled
+ *      (`BRANCH_TAIL_MAX_CHARS = 80`) because the box does not enlarge to
+ *      contain an overflowing child -- a false pass.
+ *   2. Second draft switched to `[data-branch-tail]`, the overflowing
+ *      child itself, which correctly went red both before AND after the
+ *      structural `overflow-hidden` fix landed on the parent -- because a
+ *      CHILD's own `getBoundingClientRect()` does not shrink when an
+ *      ancestor clips its paint. Measuring it after the fix would report a
+ *      permanent, un-fixable "overlap" that no longer exists on screen.
+ *
+ * This final version measures `[data-session-branch]` -- the ANCESTOR that
+ * now actually carries `overflow-hidden` -- because once painting is
+ * clipped there, that ancestor's own box IS the true visible right edge:
+ * nothing paints past it anymore, by construction. A `elementFromPoint`
+ * hit-test just past that edge is added as an independent proof the clip
+ * is real (not merely that the numbers happen to line up): the point must
+ * resolve to the age or the gap between them, never to
+ * `[data-branch-tail]`, which is exactly what CSS `overflow-hidden` also
+ * does to hit-testing.
  */
 
 import { expect, type Page, type Route, test } from '@playwright/test';
@@ -138,9 +159,8 @@ async function gotoDemoWithBranches(page: Page, overrides: readonly Override[]):
 
 // The three worst-case shapes `BRANCH_TAIL_MAX_CHARS`'s own doc comment
 // argues from — see the file header. Every tail below is well past the
-// shipped 20-character budget, so a correctly-working cap must engage on
-// all three; falsifying the cap (see the PR description) turns every one
-// of these red.
+// shipped 20-character preferred cut point, so the structural clip is what
+// this test is actually proving holds, on all three.
 const NO_SLASH_TAIL = 'release-no-slash-branch-name-well-past-budget';
 const LONG_FINAL_SEGMENT = 'smith/specs/vam-canvas-topology-constraints-and-more-detail-past-budget';
 const WIDE_AGE_BRANCH = 'smith/specs/another-quite-long-final-segment-name-here-too';
@@ -162,7 +182,7 @@ const CASES: readonly { readonly name: string; readonly override: Override }[] =
 ];
 
 test.describe('sidebar branch label never overlaps the session age — real geometry (PR #250 follow-up)', () => {
-  test('at SIDEBAR_MIN, the branch\'s right edge never crosses the age\'s left edge, for every worst-case shape', async ({
+  test('at SIDEBAR_MIN, the clipped branch never crosses the age, for every worst-case shape', async ({
     page,
   }) => {
     await gotoDemoWithBranches(
@@ -190,18 +210,14 @@ test.describe('sidebar branch label never overlaps the session age — real geom
       await expect(row).toBeVisible();
       const rowBox = await requireBox(row);
 
-      // NOT `[data-session-branch]`'s own box. Falsified first (see the PR
-      // description): with the cap defeated, `data-branch-tail` overflows
-      // its flex parent WITHOUT changing the parent's own
-      // `getBoundingClientRect()` — CSS overflow that is not clipped paints
-      // past a box without ever enlarging it. Measuring the parent's box
-      // stayed green at `BRANCH_TAIL_MAX_CHARS = 80` even while the tail
-      // visibly ran into the age, which is exactly the false pass this
-      // falsification step exists to catch. `data-branch-tail` is the
-      // right-most content span and always rendered once `branch !== null`
-      // (both the capped and uncapped paths draw it — only the class/style
-      // differ), so its own box is the real painted right edge.
-      const branchBox = await requireBox(row.locator('[data-branch-tail]'));
+      // `[data-session-branch]` — now carrying `overflow-hidden`
+      // (`SessionList.tsx`) — not `[data-branch-tail]`. See the file header
+      // for why the tail's own box is the WRONG element to measure once the
+      // clip exists: a child's `getBoundingClientRect()` does not shrink
+      // when an ancestor clips its paint, so it would report a permanent,
+      // un-fixable "overlap" for content nothing on screen actually shows
+      // anymore. The clipping ancestor's own box is the true visible edge.
+      const branchBox = await requireBox(row.locator('[data-session-branch]'));
       const ageBox = await requireBox(row.locator('[data-session-age]'));
 
       // The actual claim: the branch's right edge stops before the age's
@@ -223,6 +239,20 @@ test.describe('sidebar branch label never overlaps the session age — real geom
       expect(ageBox.y + ageBox.height, `${name}: age bottom edge inside row`).toBeLessThanOrEqual(
         rowBox.y + rowBox.height + 0.5,
       );
+
+      // Independent proof the clip is REAL, not a coincidence of these
+      // particular numbers: a point 2px to the right of the branch box's
+      // own edge — still left of the age — must not hit-test into
+      // `[data-branch-tail]`. `overflow-hidden` clips hit-testing exactly
+      // as it clips paint, so if the tail's oversized content were still
+      // reachable there, the clip would not be doing what this test claims.
+      const probeX = branchBox.x + branchBox.width + 2;
+      const probeY = branchBox.y + branchBox.height / 2;
+      const hitTail = await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x, y)?.closest('[data-branch-tail]') !== null,
+        [probeX, probeY] as const,
+      );
+      expect(hitTail, `${name}: a point just past the clip must not hit the tail`).toBe(false);
     }
 
     // Printed for the record — the PR description quotes this run's numbers.
