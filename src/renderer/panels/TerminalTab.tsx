@@ -15,9 +15,13 @@
  * while the tab is shut -- the effect below is the only thing that ever asks,
  * and it does not exist until this component does.
  *
- * The three empty answers are kept apart on purpose (`shared/terminal.ts`).
- * One blank pane meaning both "vam started nothing here" and "vam could not
- * reach tmux" is the exact conflation the provider was built to prevent.
+ * The `PaneView` answers are kept apart on purpose (`shared/terminal.ts`). One
+ * blank pane meaning both "vam started nothing here" and "vam could not reach
+ * tmux" is the exact conflation the provider was built to prevent -- and a
+ * FOURTH thing this component distinguishes on its own: an `ok` screen whose
+ * text is blank. That is not `not-vam` (no pane at all) or `unavailable` (vam
+ * could not ask); it is a pane vam DID reach that has nothing drawn on it yet,
+ * and it gets its own line rather than being folded into either.
  */
 
 import {
@@ -610,6 +614,22 @@ export function TerminalTab({
        so it goes back to vam's own keyboard (see `onKeyDown`), and a refusal
        still draws its own line, which is not one of the two removed. */
     <div data-terminal className="relative flex min-h-0 flex-1 flex-col gap-1.5">
+      {/* THE THIRD EMPTY CASE, and the one `not-vam`/`unavailable` do not
+          cover: a pane vam DID reach, showing nothing. That is a real screen
+          -- the session exists, tmux answered, and the pane below is live and
+          will take focus and keys -- so it is drawn as usual and not folded
+          into `not-vam`'s "no screen to show". Without this line an empty
+          capture and a broken read look identical: a blank rectangle with
+          nothing said about it, which is the exact silence this tab exists to
+          replace. `trim` because tmux pads every row to the pane's width, so
+          a screen of only spaces is the same fact as an empty string. */}
+      {view.text.trim() === '' && (
+        <p data-terminal-blank className="flex-none text-[10px] text-ink-faint">
+          {
+            "This session's screen is empty right now — vam reached the pane, there is just nothing drawn on it yet."
+          }
+        </p>
+      )}
       {/* WHERE THE KEYS GO, said on the surface. A box that takes focus and
           swallows what is typed is worse than one that will not take focus,
           and there are two ways for this one to swallow: a build with no

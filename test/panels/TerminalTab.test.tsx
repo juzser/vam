@@ -88,6 +88,44 @@ describe('the Terminal tab shows the focused session pane', () => {
     );
     expect(q('[data-terminal-name]')).toBeNull();
   });
+
+  it('says the screen is blank rather than drawing an unexplained empty box', async () => {
+    // `ok` with no text is a THIRD thing this tab can be shown -- distinct
+    // from `not-vam` (no pane at all) and `unavailable` (vam could not ask).
+    // A captured pane with nothing on it yet is real: the session exists and
+    // vam reached it, so the pane still takes focus and keys, but a blank
+    // rectangle with no caption reads exactly like the tab having failed
+    // silently, which is the one thing this component exists to never do.
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok(''))}
+        resize={undefined}
+        send={undefined}
+      />,
+    );
+    await settle();
+
+    expect(q<HTMLElement>('[data-terminal-pane]')).not.toBeNull();
+    expect(q<HTMLElement>('[data-terminal-blank]')?.textContent).toMatch(/empty/i);
+    expect(q('[data-terminal-empty]')).toBeNull();
+    expect(q('[data-terminal-unavailable]')).toBeNull();
+  });
+
+  it('says nothing extra once the same pane draws real text', async () => {
+    // A screen that is only whitespace -- tmux pads every row to the pane's
+    // width -- is the same fact as an empty string and gets the same note.
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok('   \n   '))}
+        resize={undefined}
+        send={undefined}
+      />,
+    );
+    await settle();
+    expect(q('[data-terminal-blank]')).not.toBeNull();
+  });
 });
 
 /**
