@@ -164,6 +164,7 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
     }),
   },
   revealProject: { group: 'navigation', label: () => 'reveal this session’s project' },
+  moveToGroup: { group: 'session', label: () => 'move this project into a folder' },
   search: { group: 'navigation', label: () => 'search sessions' },
   searchNext: { group: 'navigation', label: () => 'next match' },
   searchPrev: { group: 'navigation', label: () => 'previous match' },
