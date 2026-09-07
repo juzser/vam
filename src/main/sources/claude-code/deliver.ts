@@ -26,6 +26,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { cliMissingMessage } from '../../env/cli-missing.js';
 import type { SourceError } from '../../ipc/channels.js';
 
 /** How long the CLI gets. A resumed turn is a model call, so this is not short. */
@@ -114,7 +115,7 @@ export function classifyDeliverFailure(input: {
     return {
       kind: 'unreachable',
       code: 'cli-missing',
-      message: `the \`claude\` command was not found, so vam cannot reach session ${sessionId}`,
+      message: cliMissingMessage('claude', `vam cannot reach session ${sessionId}`),
     };
   }
   // A kill is TWO different facts, and `killed` is not the flag that tells

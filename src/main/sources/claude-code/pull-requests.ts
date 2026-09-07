@@ -31,6 +31,7 @@ import type {
   PullRequestChecks,
   PullRequestList,
 } from '../../../renderer/domain/model.js';
+import { cliMissingMessage } from '../../env/cli-missing.js';
 
 /**
  * How long `gh` gets. This is a single API query, not a model call, so it is
@@ -134,7 +135,7 @@ export function classifyGhFailure(input: {
   if (failure.code === 'ENOENT') {
     return unavailable(
       'cli-missing',
-      'the `gh` command was not found, so vam cannot ask GitHub about this branch',
+      cliMissingMessage('gh', 'vam cannot ask GitHub about this branch'),
     );
   }
   if (failure.killed === true) {
