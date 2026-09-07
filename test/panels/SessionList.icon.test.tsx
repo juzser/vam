@@ -8,8 +8,10 @@
  * a repeated literal. The operator removed that display ("bo icon o truoc
  * session name trong sidebar, chi de o project"), so the subject here is now
  * its absence, on both row shapes -- the ordinary row and the rename editor,
- * which drew the same slot. The chain itself did not go away; it is pinned
- * beside the canvas root node, the one surface that still draws it.
+ * which drew the same slot. The chain itself did not go away; it is pinned in
+ * isolation at `test/panels/session-icon.test.ts` and live at the tab strip
+ * (`test/canvas/Canvas.tab-strip.test.tsx`), the surface that draws it since
+ * the 0.2 migration retired the canvas root node.
  *
  * The project heading's icon is a different control with its own picker and
  * its own placeholder, and it is asserted here so that "the sidebar shows no

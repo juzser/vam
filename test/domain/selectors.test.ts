@@ -4,6 +4,7 @@ import {
   allSessions,
   copyableCommands,
   decisionAwaitingYou,
+  orderedSessions,
   runningAgentTotal,
   visibleDecisions,
   waitingCount,
@@ -205,5 +206,111 @@ describe('the ungrouped path', () => {
       ['p-bs', 'D-263'],
       ['p-vam', 'epic-1'],
     ]);
+  });
+});
+
+/**
+ * Relocated from `test/canvas/layout.test.ts` (0.2 migration step 2):
+ * `orderedSessions` was always list-ordering logic with no graph dependency
+ * of its own, and this is the single sequence `j`/`k` walks and the sidebar
+ * prints. Only `orderedForCanvas` (the canvas's own urgency-first,
+ * project-blind arrangement) and `layoutCanvas` itself stayed behind and
+ * died with the graph.
+ */
+describe('orderedSessions', () => {
+  it('puts what is waiting on you first, then what is running, then what is over', () => {
+    const model: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'repo',
+          source: 'factory',
+          sessions: [
+            session('done-1', { status: 'done' }),
+            session('running-1', { status: 'running' }),
+            session('waiting-1', { status: 'waiting' }),
+          ],
+        },
+      ],
+    };
+    expect(orderedSessions(model).map((e) => e.session.id)).toEqual([
+      'waiting-1',
+      'running-1',
+      'done-1',
+    ]);
+  });
+
+  it('keeps the source order inside a tier, so nothing jumps for no reason', () => {
+    const model: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'repo',
+          source: 'factory',
+          sessions: [session('a', { status: 'waiting' }), session('b', { status: 'waiting' })],
+        },
+      ],
+    };
+    expect(orderedSessions(model).map((e) => e.session.id)).toEqual(['a', 'b']);
+  });
+
+  it('ranks a failed session with the finished ones, not with the urgent ones', () => {
+    const model: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'repo',
+          source: 'factory',
+          sessions: [
+            session('failed', { status: 'failed' }),
+            session('waiting', { status: 'waiting' }),
+          ],
+        },
+      ],
+    };
+    expect(orderedSessions(model).map((e) => e.session.id)).toEqual(['waiting', 'failed']);
+  });
+
+  it('keeps a project’s sessions contiguous, so a group heading is never interrupted', () => {
+    // The price of grouping: a waiting session in the second project can no
+    // longer jump ahead of the first project's idle ones. It rises within its
+    // own group instead, and its project rises as a whole.
+    const two: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'factory',
+          sessions: [
+            session('a-idle', { status: 'done' }),
+            session('a-run', { status: 'running' }),
+          ],
+        },
+        {
+          id: 'p2',
+          name: 'beta',
+          source: 'orca',
+          sessions: [session('b-idle', { status: 'done' })],
+        },
+      ],
+    };
+    expect(orderedSessions(two).map((e) => e.session.id)).toEqual(['a-run', 'a-idle', 'b-idle']);
+  });
+
+  it('floats the project holding the most urgent session to the top', () => {
+    // The half of the flat ordering worth keeping: what needs you still rises,
+    // just as a whole project rather than as a loose session.
+    const two: CanvasModel = {
+      projects: [
+        { id: 'p1', name: 'calm', source: 'factory', sessions: [session('c', { status: 'done' })] },
+        {
+          id: 'p2',
+          name: 'urgent',
+          source: 'orca',
+          sessions: [session('u', { status: 'waiting' })],
+        },
+      ],
+    };
+    expect(orderedSessions(two).map((e) => e.project.name)).toEqual(['urgent', 'calm']);
   });
 });

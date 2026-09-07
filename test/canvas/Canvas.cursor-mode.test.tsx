@@ -353,17 +353,21 @@ describe('walking to the next question keeps the option cursor', () => {
  * The root cause, reachable without walking a step at all: press `I` with no
  * question open. Nothing takes the option cursor, focus stays on the body, and
  * `l` used to fall past both Insert guards to the canvas spatial walk -- which
- * moved the cursor onto another session's card under a pane being read.
- *
- * The Select case is asserted first, so this cannot pass by the walk having
- * had nowhere to go: two `l` presses cross a1's own step and land on a2.
+ * moved the cursor onto another session's card under a pane being read. 0.2
+ * migration, step 2: that walk is now the open-tab cycle (`h`/`l` re-homed in
+ * the same commit as its deletion — `Canvas.tab-cycle.test.tsx`), so the Select
+ * case below opens a2's tab with `j` first: with only a1's tab open, `l`
+ * degenerately wraps to itself, which would prove nothing about Insert owning
+ * the key. Two tabs open, one `l` press wraps the ring — the smallest fixture
+ * that still shows Select's `l` moving the cursor at all.
  */
 describe('Insert owns the horizontal keys even with no question open', () => {
   it('walks the canvas with l in Select, as it always has', () => {
     render(<Canvas model={QUIET} />);
-    press('l');
-    press('l');
+    press('j'); // opens a2's tab too, landing focus on it
     expect(focusedSession()).toBe('a2');
+    press('l');
+    expect(focusedSession()).toBe('a1');
   });
 
   it('does not walk the canvas with l when nothing holds the option cursor', () => {

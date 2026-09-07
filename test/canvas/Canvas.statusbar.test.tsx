@@ -17,7 +17,7 @@
 
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { Canvas, StatusCell } from '../../src/renderer/canvas/Canvas.js';
+import { Canvas, compactTokens, StatusCell } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import { clearEvents, recordFailure, recordRefusal } from '../../src/renderer/errors/log.js';
 import { describeFailure } from '../../src/renderer/sources/port.js';
@@ -251,5 +251,41 @@ describe('the failure cell', () => {
     recordRefusal('new project', 'this source cannot start sessions');
     render(<Canvas model={MODEL} />);
     expect(statusBar()?.querySelector('[data-error-log-button]')).toBeNull();
+  });
+});
+
+/**
+ * Token counts at a glance: `578k`, `4.2M`.
+ *
+ * Relocated from `test/canvas/grid.test.ts` (0.2 migration step 2): the rest
+ * of that file was the graph's own geometry constants and died with it, but
+ * `compactTokens` is this bar's own formatter and has nothing to do with the
+ * canvas — it rendered a hardcoded `today — · — / — cap` for as long as the
+ * adapter ignored the two fields that carry the numbers, and the fix must not
+ * swap one untrue caption for a quieter one. Two things are pinned: the
+ * formatter's output width, and the fact that a payload with no budget stays
+ * distinguishable from a factory that has spent nothing.
+ */
+describe('compactTokens keeps the status bar cell narrow', () => {
+  it('abbreviates thousands and millions', () => {
+    expect(compactTokens(578_346)).toBe('578k');
+    expect(compactTokens(4_200_000)).toBe('4.2M');
+    expect(compactTokens(999)).toBe('999');
+  });
+
+  it('switches unit exactly at the boundaries, not near them', () => {
+    expect(compactTokens(999)).toBe('999');
+    expect(compactTokens(1_000)).toBe('1k');
+    expect(compactTokens(999_999)).toBe('1000k');
+    expect(compactTokens(1_000_000)).toBe('1.0M');
+  });
+
+  it('never returns a localised suffix', () => {
+    // `Intl.NumberFormat`'s compact notation localises the suffix, which makes
+    // the cell's width depend on the viewer's locale in a bar that has one
+    // line and seven cells. This formatter is deliberately not that.
+    for (const n of [1_500, 2_400_000, 12, 0]) {
+      expect(compactTokens(n)).toMatch(/^[0-9.]+[kM]?$/);
+    }
   });
 });

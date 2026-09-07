@@ -9,8 +9,12 @@
  * `Canvas` is what holds prefs, the other two views and the in-flight guard:
  *
  *   - it is PERSISTED, or the project returns on the next reload;
- *   - it applies to the CANVAS AND THE CURSOR, not the sidebar alone, or the
- *     cards stay drawn and `j` steps onto a session with no row; and
+ *   - it applies to the CURSOR, not the sidebar alone, or `j` steps onto a
+ *     session with no row (0.2 migration, step 2: it no longer also has to
+ *     apply to a canvas — the tab strip that replaced it deliberately does
+ *     not re-derive from the filtered set, so there is nothing left there
+ *     for a removal to agree with; see `openTabEntries`'s own doc comment
+ *     in `Canvas.tsx`); and
  *   - it does not half-happen while another close is in flight.
  *
  * Nothing spawns: the close path is asserted through the port's
@@ -20,9 +24,9 @@
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import type { CanvasSource } from '../../src/renderer/canvas/source.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
+import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
 function session(id: string, over: Partial<Session> = {}): Session {
   return {
@@ -73,7 +77,6 @@ const MODEL: CanvasModel = {
   ],
 };
 
-const canvasText = () => document.querySelector('[data-canvas-pane]')?.textContent ?? '';
 /** The project's HEADING. Not the sidebar's text: a removed project is still
  *  named there, by the strip that brings it back. */
 const heading = (id: string) => document.querySelector(`[data-project-id="${id}"]`);
@@ -164,13 +167,18 @@ describe('removing a project, through Canvas', () => {
     expect(heading('p2')).not.toBeNull();
   });
 
-  it('takes the project off the canvas and out of the cursor, not just the list', async () => {
+  it('takes the project off the cursor, not just the list', async () => {
     render(<Canvas model={MODEL} source={sourceWith(async () => {})} />);
-    expect(canvasText()).toContain('alpha');
     await removeProject('p1');
 
-    // The three views agree on the SET -- the rule the entries memo states.
-    expect(canvasText()).not.toContain('alpha');
+    // The cursor agrees with the sidebar's own set -- `entries`, the memo
+    // `sessionIds`/`focusCandidates` both derive from. 0.2 migration, step 2:
+    // this used to also assert the canvas agreed (`canvasText()`), because the
+    // graph drew every VISIBLE session as a card. The tab strip that replaced
+    // it deliberately does not re-derive from the filtered set — an
+    // already-open tab survives a project being hidden the same way it
+    // survives a status filter, per `openTabEntries`'s own doc comment — so
+    // there is no second, filtered view left for a removal to agree with.
     press('g');
     press('g');
     expect(focusedTitle()).toBe('b1');
@@ -179,14 +187,13 @@ describe('removing a project, through Canvas', () => {
     expect(focusedTitle()).toBe('b1');
   });
 
-  it('restores it, on the canvas as well as in the list', async () => {
+  it('restores it, in the list', async () => {
     render(<Canvas model={MODEL} source={sourceWith(async () => {})} />);
     await removeProject('p1');
     await act(async () => {
       fireEvent.click(restore('p1') as HTMLElement);
     });
     expect(heading('p1')).not.toBeNull();
-    expect(canvasText()).toContain('alpha');
     // And the store is back to a fresh install's shape, not an empty bucket.
     expect(JSON.parse(stored()).hiddenProjects).toEqual({});
   });
@@ -339,7 +346,6 @@ describe('a removal that could not end a session says so, and hides nothing', ()
     // THE LOAD-BEARING ASSERTION: the session vam failed to close is still on
     // screen. A hidden project is a running session with no row to reach it by.
     expect(heading('p1')).not.toBeNull();
-    expect(canvasText()).toContain('alpha');
     expect(stored()).not.toContain('p1');
 
     // And the sentence is about what happened, not about the plan.

@@ -20,15 +20,15 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
+import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
 import {
   countTurnsWithInput,
   type PendingPrompt,
   reconcile,
   withPending,
-} from '../../src/renderer/canvas/optimistic.js';
-import type { CanvasSource } from '../../src/renderer/canvas/source.js';
-import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
+} from '../../src/renderer/domain/optimistic.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
+import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
 afterEach(cleanup);
 
@@ -156,8 +156,14 @@ const promptInput = () =>
 const inBlock = () => document.querySelector('[data-detail-scroll="in"]')?.textContent ?? '';
 const runningWord = () => document.querySelector('[data-out-running-word]');
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
-const stepInputs = () =>
-  [...document.querySelectorAll('[data-step-input]')].map((el) => el.textContent ?? '');
+// Relocated from `stepInputs()` (0.2 migration step 2): the graph drew one
+// card per decision, so counting how many carried "ship it" caught a
+// reconciled model that still held a duplicate. The shell's `in` block shows
+// only the focused decision, but the progress toggle's count is drawn
+// straight off `entry.session.decisions.length` — a direct read of the same
+// array, not an incidental side effect of what one region happens to paint.
+const turnsRead = () =>
+  Number(document.querySelector('[data-progress-toggle]')?.textContent?.match(/^\d+/)?.[0] ?? -1);
 
 function press(key: string) {
   act(() => {
@@ -195,7 +201,7 @@ describe('the canvas reacts to a reply before the write has landed', () => {
     return { release, done };
   }
 
-  it('shows the words in the pane and on a step node while the write is in flight', async () => {
+  it('shows the words in the pane while the write is in flight', async () => {
     const { release, done } = gate();
     const source = gatedSource(false, async () => {
       await done;
@@ -204,7 +210,6 @@ describe('the canvas reacts to a reply before the write has landed', () => {
     sendWithoutWaiting('ship it');
 
     expect(inBlock()).toContain('ship it');
-    expect(stepInputs().some((text) => text.includes('ship it'))).toBe(true);
     // And the composer is already empty, so the operator is not looking at
     // their own words in two places at once.
     expect(promptInput()?.value).toBe('');
@@ -263,7 +268,6 @@ describe('the canvas reacts to a reply before the write has landed', () => {
     });
 
     expect(statusBar()).toContain('session-running');
-    expect(stepInputs().some((text) => text.includes('ship it'))).toBe(false);
     expect(inBlock()).not.toContain('ship it');
     expect(runningWord()).toBeNull();
     expect(promptInput()?.value).toBe('ship it');
@@ -280,7 +284,7 @@ describe('the canvas reacts to a reply before the write has landed', () => {
     // A poll answering while the write is still in flight. It cannot carry the
     // new turn yet, so the paint must survive it.
     rerender(<Canvas model={modelOf(session('a1', { title: 'nightly sweep' }))} source={source} />);
-    expect(stepInputs().filter((text) => text.includes('ship it'))).toHaveLength(1);
+    expect(turnsRead()).toBe(1);
 
     await act(async () => {
       release();
@@ -298,6 +302,6 @@ describe('the canvas reacts to a reply before the write has landed', () => {
     await act(async () => {
       rerender(<Canvas model={real} source={source} />);
     });
-    expect(stepInputs().filter((text) => text.includes('ship it'))).toHaveLength(1);
+    expect(turnsRead()).toBe(1);
   });
 });

@@ -1,25 +1,18 @@
-// @vitest-environment happy-dom
-
 /**
- * The root node's icon: one fallback chain, one picker.
+ * The fallback chain, in isolation: session glyph -> project glyph -> null.
  *
- * The chain is session glyph -> project glyph -> a drawn placeholder, and it
- * lives in one module because it states what a session's glyph IS. It was
- * adopted by two call sites; the sidebar's was removed at the operator's
- * request, so this node is the only surface that draws it and these tests are
- * the only place the drawn end of the chain is asserted. They pin the chain
- * itself, the two ways a session's own choice can go away (cleared by hand,
- * pruned by the TTL), and the fact that the node's icon is a control that
- * opens the picker the `s` chord opens.
+ * Relocated from `test/canvas/root-node-icon.test.tsx` (0.2 migration step
+ * 2): `resolveSessionGlyph` never rendered anything and never depended on the
+ * graph — only the two tests that rendered `SessionInfoNode` through it died
+ * with that node. The chain's own drawn end (`SessionIcon`'s `Monitor`
+ * placeholder) is exercised where it is actually mounted now: the tab strip,
+ * in `test/canvas/Canvas.tab-strip.test.tsx`.
  */
 
-import { cleanup, fireEvent, render } from '@testing-library/react';
-import { ReactFlowProvider } from '@xyflow/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SessionInfoNode } from '../../src/renderer/canvas/SessionInfoNode.js';
-import { resolveSessionGlyph } from '../../src/renderer/canvas/session-icon.js';
+import { describe, expect, it } from 'vitest';
 import type { CanvasModel, Project, Session, SourceId } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
+import { resolveSessionGlyph } from '../../src/renderer/panels/session-icon.js';
 import {
   applyIcons,
   readPrefs,
@@ -27,8 +20,6 @@ import {
   setIcon,
   setProjectIcon,
 } from '../../src/renderer/prefs/prefs.js';
-
-afterEach(cleanup);
 
 const SOURCE = 'factory' as SourceId;
 
@@ -71,37 +62,6 @@ function storageOf(payload: unknown): StorageLike {
     getItem: () => JSON.stringify(payload),
     setItem: () => undefined,
   };
-}
-
-const FLOW_PROPS = {
-  selected: false,
-  dragging: false,
-  draggable: false,
-  selectable: false,
-  deletable: false,
-  type: 'info',
-  zIndex: 0,
-  isConnectable: false,
-  positionAbsoluteX: 0,
-  positionAbsoluteY: 0,
-} as const;
-
-function renderNode(entry: SessionEntry, onPickIcon: (entry: SessionEntry) => void) {
-  const { container } = render(
-    <ReactFlowProvider>
-      <SessionInfoNode
-        id="info"
-        data={{ entry, focused: false, jumpLabel: null, onPickIcon }}
-        {...FLOW_PROPS}
-      />
-    </ReactFlowProvider>,
-  );
-  const button = container.querySelector<HTMLButtonElement>('[data-session-icon]');
-  expect(
-    button,
-    'the root node drew no icon control; every assertion below would be vacuous',
-  ).not.toBe(null);
-  return { container, button: button as HTMLButtonElement };
 }
 
 describe('the fallback chain is stated once', () => {
@@ -148,24 +108,5 @@ describe('a pruned session choice falls back rather than going blank', () => {
     expect(prefs.icons[SOURCE]?.s1).toBeUndefined();
     const entry = entryFrom(applyIcons(modelOf(entryOf(null)), prefs.icons, prefs.projectIcons));
     expect(resolveSessionGlyph(entry)).toBe('🏭');
-  });
-});
-
-describe('the root node draws the icon before the title, and it opens the picker', () => {
-  it('draws the resolved glyph ahead of the session title', () => {
-    const { container, button } = renderNode(entryOf(null, '🏭'), () => undefined);
-    expect(button.textContent).toBe('🏭');
-    const title = container.querySelector('.vam-clamp-2') as HTMLElement;
-    expect(
-      button.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeGreaterThan(0);
-  });
-
-  it('hands the whole entry to the one picker route when clicked', () => {
-    const onPickIcon = vi.fn();
-    const entry = entryOf(null, '🏭');
-    const { button } = renderNode(entry, onPickIcon);
-    fireEvent.click(button);
-    expect(onPickIcon).toHaveBeenCalledWith(entry);
   });
 });

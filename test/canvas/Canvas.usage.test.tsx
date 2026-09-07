@@ -341,10 +341,12 @@ describe('the status bar no longer states which session is focused', () => {
     render(<Canvas model={model} />);
     await act(async () => {});
 
-    // `alpha/a1` is the string that read like a git ref. The canvas card still
-    // says which session is focused; the footer no longer repeats it.
+    // `alpha/a1` is the string that read like a git ref. The active tab still
+    // says which session is focused (0.2 migration, step 2: it used to be the
+    // canvas card's own `[data-focus-indicator]`); the footer no longer
+    // repeats it.
     expect(document.querySelector('[data-status-bar] [data-focus]')).toBeNull();
     expect(document.querySelector('[data-status-bar]')?.textContent).not.toContain('alpha/a1');
-    expect(document.querySelectorAll('[data-focus-indicator]')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-session-tab][data-active="true"]')).toHaveLength(1);
   });
 });
