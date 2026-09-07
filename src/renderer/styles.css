@@ -1,5 +1,4 @@
 @import 'tailwindcss';
-@import '@xyflow/react/dist/style.css';
 
 /*
  * Vam's visual language, taken from the ADE session-canvas mockup
@@ -730,58 +729,14 @@ body {
 }
 
 /*
- * The glow, and what it now means.
- *
- * Its shape is still the mockup's `omGlow` — a 1px ring that never leaves and a
- * halo breathing 18px -> 34px behind it. What changed is who wears it, and in
- * what colour. The mockup keys the halo to NEEDS YOU (proved: each artboard has
- * one FOCUSED tag but two glowing cards, and the second is needs-you and
- * unfocused). The operator overrode that: on a keyboard tool the loudest thing
- * on the canvas should be where the cursor is, which a static artboard has no
- * way to say. So the halo marks FOCUS.
- *
- * The halo is the mockup's own amber `omGlow`, moved from needs-you to focus.
- *
- * ONE DEPARTURE FROM `omGlow`, and it is measured: the 1px ring no longer
- * breathes with the halo. The mockup pulses both, which paints the ring at 60%
- * of its colour for half of every cycle -- 1.59:1 against the light canvas,
- * where the token itself reads 5.02. No value of the token fixes that; an amber
- * dark enough to clear 3:1 through 60% alpha on white collapses the dark
- * theme's own 60% state to 1.69. So the ring, which is the part carrying the
- * signal, is at full strength at every instant, and the halo keeps the whole
- * animation: 18px at 10% -> 34px at 26% and back. The pulse is still what you
- * see; what changed is that the thing saying WHERE stopped fading out. See
- * issue 188.
- *
- * An earlier version made it achromatic, reasoning that colour belongs to
- * states that cost a person something and focus is not one. The operator
- * overruled it: the amber halo is the mockup's signature and it should follow
- * the cursor. So needs-you keeps its breathing amber DOT and its amber word,
- * and gives up its edge — no node carries a coloured border any more, which is
- * what stops the halo and a border competing to mean two different things.
+ * `.vam-cursor-glow` and its `omGlow`-derived halo — the amber ring the
+ * mockup drew around a NEEDS-YOU card, moved to mark FOCUS instead — were
+ * graph node styling: `SessionInfoNode`/`StepNode` were the only consumers of
+ * the class, and both deleted in the 0.2 migration's step 2. Removed here
+ * with them, and `--vam-cursor-ring`/`--color-cursor-ring` left in place —
+ * the custom property VALUES are independent of which rule reads them, and
+ * `token-contrast.test.ts` pins them directly.
  */
-@keyframes vam-cursor-glow {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 1px var(--color-cursor-ring),
-      0 0 18px color-mix(in srgb, var(--color-cursor-ring) 10%, transparent);
-  }
-  50% {
-    box-shadow:
-      0 0 0 1px var(--color-cursor-ring),
-      0 0 34px color-mix(in srgb, var(--color-cursor-ring) 26%, transparent);
-  }
-}
-
-.vam-cursor-glow {
-  /* The resting frame, spelled out: a node rendered before its animation
-     starts, or with animations off for any reason, still wears the ring. */
-  box-shadow:
-    0 0 0 1px var(--color-cursor-ring),
-    0 0 18px color-mix(in srgb, var(--color-cursor-ring) 10%, transparent);
-  animation: vam-cursor-glow 2.4s ease-in-out infinite;
-}
 
 @media (prefers-reduced-motion: reduce) {
   .vam-spin,
@@ -796,8 +751,7 @@ body {
      every minute the window is open -- which is the thing the preference
      exists to stop. */
   .vam-focus-edge::after,
-  .vam-focus-glow,
-  .vam-cursor-glow {
+  .vam-focus-glow {
     animation: none;
   }
   /* Dots frozen mid-wave are two faint marks and one solid one, which reads as
@@ -824,14 +778,6 @@ body {
   .vam-running-word {
     background-image: none;
     color: var(--color-running);
-  }
-  /* The halo carried the signal; with motion off, a static ring has to — the
-     shape the mockup itself freezes to on its non-animating boards, a
-     full-strength 1px ring with a 24px halo behind it. */
-  .vam-cursor-glow {
-    box-shadow:
-      0 0 0 1px var(--color-cursor-ring),
-      0 0 24px color-mix(in srgb, var(--color-cursor-ring) 18%, transparent);
   }
   /* A bar that has stopped travelling is a bar parked at 34% of one edge, which
      reads as damage rather than as progress. So: the full width, dimmed, and
