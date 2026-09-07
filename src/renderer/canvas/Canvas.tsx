@@ -2843,6 +2843,18 @@ function CanvasInner({
    * so there is one assembly of each panel’s props and not a second one that
    * could drift from it.
    */
+  // Still asking for the FIRST answer, on whichever transport this canvas has:
+  // 'connecting' and 'session' carry it from `useSourceModel`, 'live' has its
+  // own `status`, 'demo' never loads.
+  const sidebarLoading =
+    source.kind === 'connecting'
+      ? source.error === undefined || source.error === null
+      : source.kind === 'session'
+        ? source.loading === true
+        : source.kind === 'live'
+          ? source.status === 'loading'
+          : false;
+
   const sidebarProps: ComponentProps<typeof SessionList> = {
     // The line at this column's top edge, off the SAME `mode` the status
     // bar's word reads. Select is the sidebar's mode and only the
@@ -2852,6 +2864,7 @@ function CanvasInner({
     // already is that test.
     keyboardHere: mode === 'select',
     entries: entries,
+    loading: sidebarLoading,
     // The UNFILTERED set, for the two things about removing a project
     // that must not read a narrowed list -- see `allEntries` on
     // `SessionListProps`. `entries` above has already been through

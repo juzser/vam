@@ -37,6 +37,9 @@ export type CanvasSource =
        * left contradicting itself.
        */
       readonly error?: string | null;
+      /** True while the FIRST read of `source` is still out. Optional,
+       *  defaulting to `false` — see `useSourceModel`. */
+      readonly loading?: boolean;
       /** Called after a successful write so the next load is not waited for. */
       readonly onWrote: () => void;
     }

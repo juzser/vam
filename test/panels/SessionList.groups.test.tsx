@@ -167,11 +167,11 @@ describe('the group lifecycle', () => {
           : 'other',
     );
     expect(controls.indexOf('new-group')).toBeLessThan(controls.indexOf('new-project'));
-    expect(header.querySelector('[data-new-group]')?.getAttribute('title')).toBe('New project');
-    // The only route to a repository vam has never seen keeps its own title.
-    expect(header.querySelector('[data-new-project]')?.getAttribute('title')).toBe(
-      'Choose a directory and start a session in it',
-    );
+    // Neither control carries a native `title` — Radix's ShortcutTip replaces
+    // it, because no browser opens a `title` on keyboard focus. See
+    // shortcut-tip.test.tsx for the tooltip text itself.
+    expect(header.querySelector('[data-new-group]')?.getAttribute('title')).toBeNull();
+    expect(header.querySelector('[data-new-project]')?.getAttribute('title')).toBeNull();
   });
 
   it('draws no "New project" control for a caller with nowhere to store one', () => {
@@ -275,6 +275,38 @@ describe('the group lifecycle', () => {
     fireEvent.click(container.querySelector('[data-project-menu="p1"]') as Element);
     const remove = container.querySelector('[data-project-menu-item="remove"]') as HTMLElement;
     expect(remove.className).toContain('text-danger');
+  });
+
+  it('closes the group action menu on a press outside it, and returns focus to its toggle', () => {
+    const { container } = render(
+      <SessionList
+        {...baseProps(grouped())}
+        groups={[GROUP]}
+        collapsedGroups={[]}
+        onUngroup={noop}
+      />,
+    );
+    fireEvent.click(container.querySelector('[data-group-menu="group:1"]') as Element);
+    expect(container.querySelector('[data-group-menu-panel="group:1"]')).not.toBeNull();
+    const outside = container.querySelector('[data-project-id="p3"]') as HTMLElement;
+    fireEvent.pointerDown(outside);
+    expect(container.querySelector('[data-group-menu-panel]')).toBeNull();
+    expect(document.activeElement).toBe(container.querySelector('[data-group-menu="group:1"]'));
+  });
+
+  it('does not reopen the group menu when the outside press is its own toggle', () => {
+    const { container } = render(
+      <SessionList
+        {...baseProps(grouped())}
+        groups={[GROUP]}
+        collapsedGroups={[]}
+        onUngroup={noop}
+      />,
+    );
+    const toggle = container.querySelector('[data-group-menu="group:1"]') as HTMLElement;
+    fireEvent.click(toggle);
+    fireEvent.pointerDown(toggle);
+    expect(container.querySelector('[data-group-menu-panel="group:1"]')).not.toBeNull();
   });
 });
 

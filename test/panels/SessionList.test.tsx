@@ -1065,6 +1065,32 @@ describe('SessionList project menu', () => {
     expect(document.activeElement).toBe(container.querySelector('[data-project-menu="p1"]'));
   });
 
+  it('closes on a press outside it, without also activating what was under the press', () => {
+    const { container } = mount(twoProjects());
+    openMenu(container);
+    const outside = container.querySelector('[data-project-id="p2"]') as HTMLElement;
+    act(() => {
+      fireEvent.pointerDown(outside);
+    });
+    expect(container.querySelector('[data-project-menu-panel]')).toBeNull();
+    // Focus returns to the toggle -- same contract as Escape, just a
+    // different way in.
+    expect(document.activeElement).toBe(container.querySelector('[data-project-menu="p1"]'));
+  });
+
+  it('does not close-then-reopen when the outside press IS the toggle button itself', () => {
+    const { container } = mount(twoProjects());
+    openMenu(container);
+    const toggle = container.querySelector('[data-project-menu="p1"]') as HTMLElement;
+    act(() => {
+      fireEvent.pointerDown(toggle);
+    });
+    // The dismiss listener must not have closed it out from under the
+    // button's own click handler, which fires next and would reopen it --
+    // reading as a dead button on the first real press.
+    expect(container.querySelector('[data-project-menu-panel="p1"]')).not.toBeNull();
+  });
+
   it('folds the project from its menu item, then says Expand', () => {
     const { container } = mount(twoProjects());
     openMenu(container);
@@ -1127,7 +1153,10 @@ describe('SessionList new-project control', () => {
       newSessionDecline: 'factory has no new-session command',
     });
     const add = container.querySelector<HTMLButtonElement>('[data-new-project]');
-    expect(add?.getAttribute('title')).toBe('factory has no new-session command');
+    // No native `title` any more — the refusal now surfaces through the
+    // Radix ShortcutTip, asserted in shortcut-tip.test.tsx, so it opens on
+    // keyboard focus too.
+    expect(add?.getAttribute('title')).toBeNull();
   });
 
   it('captions the per-project `+` with what it does, and no longer calls it a placeholder', () => {

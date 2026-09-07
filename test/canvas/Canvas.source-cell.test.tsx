@@ -18,7 +18,7 @@
  * and it was the green dot beside it that contradicted it.
  */
 
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasSource } from '../../src/renderer/canvas/source.js';
@@ -116,9 +116,14 @@ describe('the source cell', () => {
     render(<Canvas model={MODEL} source={{ kind: 'connecting', error: failed }} />);
     expect(cell().textContent).toContain(failed);
 
+    // The refusal now surfaces through the Radix ShortcutTip (no native
+    // `title` any more — see SessionList.tsx), so it is read by opening the
+    // tooltip on focus rather than off the `title` attribute.
     const plus = screen.getByLabelText('new project') as HTMLButtonElement;
-    expect(plus.title).toContain(failed);
-    expect(plus.title).not.toMatch(/still connecting/i);
+    fireEvent.focus(plus);
+    const tipText = screen.getByRole('tooltip').textContent ?? '';
+    expect(tipText).toContain(failed);
+    expect(tipText).not.toMatch(/still connecting/i);
 
     await act(async () => {
       plus.click();
