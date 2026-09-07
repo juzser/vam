@@ -85,6 +85,51 @@ describe('stopSession', () => {
   });
 });
 
+/**
+ * A background row the source ALREADY REPORTS as ended (`agents.ts`:
+ * `done`/`failed` are the two statuses only a background row can honestly
+ * carry) is never handed to `claude stop` at all -- there is no job left for
+ * the CLI to find, so asking it is not a stop that failed, it is a stop that
+ * was never on offer. This is the trigger the operator actually hit: the row
+ * stays offering Close for up to `BACKGROUND_WINDOW_MS`, and every attempt
+ * repeats the same refusal, in vam's own words rather than the CLI's.
+ */
+describe('stopSession short-circuits a background row the source already reported as ended', () => {
+  it('refuses a `done` row without calling the CLI', async () => {
+    const finished: StoppableAgent = { ...background, status: 'done' };
+    const stop = vi.fn(async () => null);
+    const error = await stopSession([finished], 'sess-1#4242', stop);
+    expect(stop).not.toHaveBeenCalled();
+    expect(error?.kind).toBe('refused');
+    expect(error?.code).toBe('already-finished');
+    expect(error?.message).toContain('nightly sweep');
+  });
+
+  it('refuses a `failed` row without calling the CLI', async () => {
+    const finished: StoppableAgent = { ...background, status: 'failed' };
+    const stop = vi.fn(async () => null);
+    const error = await stopSession([finished], 'sess-1#4242', stop);
+    expect(stop).not.toHaveBeenCalled();
+    expect(error?.kind).toBe('refused');
+    expect(error?.code).toBe('already-finished');
+  });
+
+  it('still calls the CLI for a background row reported `running`', async () => {
+    const running: StoppableAgent = { ...background, status: 'running' };
+    const stop = vi.fn(async () => null);
+    await expect(stopSession([running], 'sess-1#4242', stop)).resolves.toBeNull();
+    expect(stop).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('still calls the CLI for a background row with no status reported at all', async () => {
+    // `background` itself carries no `status` -- the shape most existing
+    // tests use, and a caller that genuinely has none to give.
+    const stop = vi.fn(async () => null);
+    await expect(stopSession([background], 'sess-1#4242', stop)).resolves.toBeNull();
+    expect(stop).toHaveBeenCalledWith('sess-1');
+  });
+});
+
 describe('classifyStopFailure', () => {
   it('calls a missing binary unreachable', () => {
     expect(
@@ -112,6 +157,45 @@ describe('classifyStopFailure', () => {
     expect(error.kind).toBe('refused');
     expect(error.code).toBe('cli-failed');
     expect(error.message).toContain('no such background session');
+  });
+
+  /**
+   * The exact string measured against the real CLI: `claude stop <id>` on a
+   * session id no background job matches answers
+   * "No job matching '<id>'. Run 'claude agents' to list running sessions."
+   * on stderr, exit 1. That is CLI-speak, aimed at a terminal user with a
+   * `claude` binary on their PATH -- vam's own operator may be looking at a
+   * GUI with neither, and republishing it verbatim (the previous behaviour,
+   * via the `cli-failed` catch-all below) is the exact bug report this pins.
+   */
+  it('classifies a "No job matching" answer as a session already gone, not a generic CLI failure', () => {
+    const error = classifyStopFailure({
+      failure: {
+        message: 'Command failed: claude stop 00000000-0000-4000-8000-000000000000',
+        code: 1,
+      },
+      stderr:
+        "No job matching '00000000-0000-4000-8000-000000000000'. Run 'claude agents' to list running sessions.",
+      sessionId: '00000000-0000-4000-8000-000000000000',
+    });
+    expect(error.kind).toBe('refused');
+    expect(error.code).toBe('session-gone');
+    // The one sentence this exists to stop reaching a GUI operator.
+    expect(error.message).not.toMatch(/run 'claude agents'/i);
+    expect(error.message).not.toMatch(/no job matching/i);
+    expect(error.message).toMatch(/already|no longer|not.*running/i);
+    // `claude stop --help`: the conversation survives a stop. It survives
+    // just as much not being stopped, and the operator should hear that.
+    expect(error.message).toMatch(/nothing (was )?(lost|stopped)|conversation.*kept/i);
+  });
+
+  it('leaves an unrelated stderr on the generic `cli-failed` path, not the new one', () => {
+    const error = classifyStopFailure({
+      failure: { message: 'exit 1', code: 1 },
+      stderr: 'permission denied',
+      sessionId: 's',
+    });
+    expect(error.code).toBe('cli-failed');
   });
 
   it("says so plainly when the CLI said nothing, without republishing node's argv", () => {
