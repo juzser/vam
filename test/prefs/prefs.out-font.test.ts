@@ -38,9 +38,13 @@ function fake(initial: string | null = null): StorageLike & { value: string | nu
 const stored = (payload: object) => readPrefs(fake(JSON.stringify(payload)));
 
 describe('the out text size round-trips', () => {
-  it('has a real range, defaulting to the size the body already gives out', () => {
-    // `styles.css` says `body { font-size: 12px }` and `out` inherited it.
-    expect(DEFAULT_OUT_FONT_SIZE).toBe(12);
+  it('has a real range, defaulting to a size chosen for reading, not inherited', () => {
+    // Was 12, matching `body { font-size: 12px }`, so that shipping the
+    // setting resized nobody. Now 13 by deliberate choice: `out` is the pane
+    // read longest and set densest. Pinned so the default cannot drift
+    // silently -- a changed default moves every operator who never opened the
+    // picker, which is exactly why it should take an edit here to do it.
+    expect(DEFAULT_OUT_FONT_SIZE).toBe(13);
     expect(OUT_FONT_SIZE_MIN).toBeLessThan(DEFAULT_OUT_FONT_SIZE);
     expect(OUT_FONT_SIZE_MAX).toBeGreaterThan(DEFAULT_OUT_FONT_SIZE);
   });

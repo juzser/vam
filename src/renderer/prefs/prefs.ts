@@ -159,10 +159,20 @@ export function nudgeFocusShare(current: number, next: number): number {
   return current === FOCUS_SHARE_OFF ? FOCUS_SHARE_MIN : FOCUS_SHARE_OFF;
 }
 
-/** The root text size of the `out` pane, in px. 12 because `styles.css` says
- *  `body { font-size: 12px }` and `out` inherited it: any other default would
- *  resize the pane for everyone merely by shipping the setting. */
-export const DEFAULT_OUT_FONT_SIZE = 12;
+/** The root text size of the `out` pane, in px.
+ *
+ *  It was 12 to match `styles.css`'s `body { font-size: 12px }`, which `out`
+ *  inherited -- so that merely SHIPPING the setting resized nobody's pane.
+ *  That reasoning was about the moment the setting landed, and it has served
+ *  its purpose: 13 is now a deliberate choice about reading agent output for
+ *  hours, not an accident of inheritance. `out` is the pane an operator reads
+ *  most and the one whose text is densest, and the operator asked for a point
+ *  more.
+ *
+ *  It moves for everyone who never touched the picker, which is the intent.
+ *  Anyone who DID choose a size keeps it: a stored value is read back and
+ *  clamped, and this default is only consulted when there is none. */
+export const DEFAULT_OUT_FONT_SIZE = 13;
 
 /** The range the picker offers and every read clamps into. `out`'s smallest
  *  member — the `(href)` hint — is 0.875 of this root, so below 10 it drops
