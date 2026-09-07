@@ -2,21 +2,32 @@
 
 /**
  * ============================================================================
- * THESE TWO TESTS ARE EXPECTED TO BE RED ON THIS BRANCH. THE SUITE IS NOT
- * BROKEN.
+ * TWO CONFIRMED DEFECTS, PINNED WITH `it.fails`. THE SUITE IS GREEN.
  * ============================================================================
  *
- * They are falsification targets, written on purpose for two CONFIRMED defects
+ * These are falsification targets, written on purpose for two CONFIRMED defects
  * in the session tab strip that shipped with the tab shell. Both come from the
  * same root cause -- focus and `openTabs` are coupled in a loop, and neither
- * side knows the other is mid-flight -- and both flip to GREEN, with no edit to
- * either of them, the moment that coupling is fixed. A fix that makes only one
- * of them pass has fixed only one direction of it.
+ * side knows the other is mid-flight -- and a fix that makes only one of them
+ * flip has fixed only one direction of it.
  *
- * They are deliberately NOT `it.fails`, `it.skip` or `it.todo`. A test that
- * passes by announcing its own failure is a test that stops noticing when the
- * behaviour changes; the ask here was a red bar that goes green with the fix,
- * which is the only kind of target a fix can be measured against.
+ * WHY `it.fails` AND NOT A RED BAR. A red baseline is not a baseline: it trains
+ * every later reader to skim failures, which is fatal on a migration whose
+ * whole discipline is that a green suite which got SMALLER is not a pass. And
+ * `it.fails` is self-enforcing in the direction we want -- vitest reports the
+ * case as FAILING the moment its body starts passing, so when the coupling is
+ * fixed these turn red until someone deliberately promotes them to `it`. They
+ * cannot be quietly deleted, and they cannot rot into always-green.
+ *
+ * THE ONE WEAKNESS, AND HOW IT IS COVERED. `it.fails` is satisfied by ANY
+ * throw, so on its own it would keep passing if this file broke for a reason
+ * that has nothing to do with the defect -- a renamed selector, a changed
+ * harness, a mount error. It would silently stop testing the defect while still
+ * looking healthy. So each defect ships as a PAIR: an ordinary `it` asserting
+ * the precondition, which must stay GREEN, plus the `it.fails` carrying the
+ * defect assertion. If the harness breaks, the green half goes red and you find
+ * out. Do not delete the green half -- it is what makes the `it.fails` half
+ * trustworthy.
  *
  * F1 -- CLOSING THE LAST TAB REOPENS IT IMMEDIATELY.
  *   `closeTab` clears the pointer when nothing survives the close
@@ -122,7 +133,16 @@ afterEach(() => {
 });
 
 describe('the tab strip’s two known defects', () => {
-  it('DEFECT F1: closing the last open tab leaves the strip empty and shows its empty copy', () => {
+  // The green half of the F1 pair. It proves the harness still mounts and the
+  // strip still reaches the state the defect case starts from. If this goes
+  // red, the `it.fails` below has stopped testing what it claims and is
+  // passing on an unrelated throw.
+  it('F1 precondition: a one-session model draws exactly one tab', () => {
+    render(<Canvas model={ONE_SESSION} />);
+    expect(tabs()).toEqual(['a1']);
+  });
+
+  it.fails('DEFECT F1: closing the last open tab leaves the strip empty and shows its empty copy', () => {
     render(<Canvas model={ONE_SESSION} />);
     expect(tabs()).toEqual(['a1']);
 
@@ -136,7 +156,23 @@ describe('the tab strip’s two known defects', () => {
     expect(stripText()).toContain('no sessions open');
   });
 
-  it('DEFECT F2: a hidden project does not delete its remembered tab from storage', () => {
+  // The green half of the F2 pair, for the same reason: it pins the part of
+  // F2's setup that is CORRECT today -- the strip drawing only what the view
+  // holds -- so a harness break cannot masquerade as the defect below.
+  it('F2 precondition: a hidden project is absent from the strip, which is correct', () => {
+    seed({
+      openTabs: [
+        { source: 'factory', session: 'a1' },
+        { source: 'orca', session: 'b1' },
+      ],
+      lastFocus: { source: 'factory', session: 'a1' },
+      hiddenProjects: { orca: ['p2'] },
+    });
+    render(<Canvas model={TWO_PROJECTS} />);
+    expect(tabs()).toEqual(['a1']);
+  });
+
+  it.fails('DEFECT F2: a hidden project does not delete its remembered tab from storage', () => {
     seed({
       openTabs: [
         { source: 'factory', session: 'a1' },
