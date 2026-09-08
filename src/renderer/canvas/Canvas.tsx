@@ -559,6 +559,7 @@ function NewTabButton({
 const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
   running: 'text-running',
   waiting: 'text-waiting',
+  idle: 'text-idle',
   done: 'text-done',
   failed: 'text-failed',
 };
@@ -584,6 +585,7 @@ const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
 const TAB_STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   running: 'bg-running',
   waiting: 'bg-waiting',
+  idle: 'bg-idle',
   done: 'bg-done',
   failed: 'bg-failed',
 };
@@ -1754,6 +1756,7 @@ function CanvasInner({
       all: allEntries.length,
       running: of('running'),
       waiting: of('waiting'),
+      idle: of('idle'),
       done: of('done'),
       failed: of('failed'),
     };

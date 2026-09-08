@@ -84,7 +84,7 @@ export function baseProps(entries: readonly SessionEntry[]): SessionListProps {
     // went red while `typecheck:test` in CI did.
     statusFilter: 'all',
     onStatusFilter: noop,
-    statusTally: { all: entries.length, running: 0, waiting: 0, done: 0, failed: 0 },
+    statusTally: { all: entries.length, running: 0, waiting: 0, idle: 0, done: 0, failed: 0 },
     filterMenuOpen: false,
     onFilterMenuToggle: noop,
     originFilters: { hideAgentStarted: false, onlyPrompted: false },

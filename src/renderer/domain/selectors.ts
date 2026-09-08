@@ -145,12 +145,17 @@ export function copyableCommands(session: Session): readonly Command[] {
  * `failed` sits with the finished ones on purpose. It is worth a colour because
  * you want to spot it, but not a place at the front — the front is reserved for
  * sessions still asking for something, and a failed run is not asking.
+ *
+ * `idle` is not asking either, so it does not go to the front — but it sits
+ * ABOVE the finished ones, because an idle session is alive and attached and a
+ * done or failed one is over. It is the last rung you can still type into.
  */
 const STATUS_RANK: Readonly<Record<Session['status'], number>> = {
   waiting: 0,
   running: 1,
-  done: 2,
-  failed: 2,
+  idle: 2,
+  done: 3,
+  failed: 3,
 };
 
 /** A project's rank is its most urgent session's. An empty project ranks last. */

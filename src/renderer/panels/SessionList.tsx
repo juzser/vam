@@ -83,6 +83,7 @@ const NEW_SESSION_ACTION: KeyAction = { kind: 'newSession' };
 const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   running: 'bg-running',
   waiting: 'bg-waiting',
+  idle: 'bg-idle',
   done: 'bg-done',
   failed: 'bg-failed',
 };
