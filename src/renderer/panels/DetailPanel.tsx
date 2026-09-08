@@ -66,9 +66,12 @@ import {
   CircleSlash,
   GitCommitVertical,
   GitPullRequest,
+  Hand,
   Image as ImageIcon,
+  ListChecks,
   MessageSquare,
   Paperclip,
+  Sparkles,
   SquareTerminal,
   User,
   Users,
@@ -599,12 +602,31 @@ export type DetailPanelProps = {
 export { TABS, type Tab } from './tabs.js';
 
 /**
- * The mockup's mode segments, and which one it draws as current. Presentation
- * only: the factory exposes no per-session mode, so these are drawn and
- * labelled as placeholders in the same way the icon row's three empty views
- * once were.
+ * The three modes, and which one the draft says is current.
+ *
+ * They were a row of pills under the prompt input; the operator asked for one
+ * ICON, beside the model field, showing only the mode that is current. The
+ * list stays whole because all three must still be REACHABLE — the icon opens
+ * a small popover over it, the pattern the provider picker beside it already
+ * set, rather than a second idea of what a chooser looks like in this row.
  */
 const MODES = ['Auto', 'Manual', 'Plan'] as const;
+
+type Mode = (typeof MODES)[number];
+
+/**
+ * One glyph per mode, chosen for what the mode MEANS and not for decoration —
+ * the icon is the only thing on screen that says which mode is current, so two
+ * that read alike would make the control unreadable at a glance.
+ *
+ * Auto: the agent decides its own next step. Manual: a hand on each one. Plan:
+ * it writes the list before it touches anything.
+ */
+const MODE_ICON: Readonly<Record<Mode, typeof Sparkles>> = {
+  Auto: Sparkles,
+  Manual: Hand,
+  Plan: ListChecks,
+};
 
 /** One glyph per view — chosen for what each shows, not decoration. */
 const VIEW_ICON: Readonly<Record<Tab, typeof MessageSquare>> = {
@@ -1523,56 +1545,6 @@ const KEY_STRIP: readonly {
     ariaLabel: 'press Space in the session',
   },
 ];
-
-/**
- * What a session says it is waiting on, and whether vam can do anything about
- * it.
- *
- * WHY THIS IS SEPARATE FROM THE QUESTION CARD. The card is drawn from
- * `AskUserQuestion` records in the transcript. The commonest thing a session
- * actually blocks on -- a tool-approval prompt -- has no transcript record
- * while it is open, so `questions` is empty for it, no card is drawn, and the
- * pane used to show NOTHING for a session that was stuck. This is drawn from
- * the session's own per-process file, which is the only surface that says so
- * (`waitingFor` in `model.ts`).
- *
- * THE ASYMMETRY IS STATED, NOT HIDDEN. vam can SEE any session waiting; it can
- * only type into one it started. So the second line names which of the three
- * cases this row is in, and the third state -- vam never got to ask tmux -- is
- * kept apart from "vam did not start this", because a refusal that names the
- * wrong cause sends the operator somewhere the answer is not.
- */
-function WaitingNote({
-  waitingFor,
-  vamControlled,
-}: {
-  readonly waitingFor: string | null;
-  readonly vamControlled: boolean | undefined;
-}) {
-  const reach =
-    vamControlled === true ? 'answerable' : vamControlled === false ? 'unreachable' : 'unknown';
-  const remedy =
-    reach === 'answerable'
-      ? 'vam started this session — the Terminal tab types into its pane'
-      : reach === 'unreachable'
-        ? 'vam did not start this session, so it cannot type into it — answer it in the terminal it is running in'
-        : 'vam could not ask tmux which pane this is, so it cannot say whether it could reach it';
-  return (
-    <div
-      data-session-waiting
-      data-waiting-reach={reach}
-      className="flex flex-col gap-1 rounded-[10px] border border-waiting bg-panel px-2.5 py-2"
-    >
-      <p className="text-[12.5px] text-ink">
-        {/* The cause VERBATIM. The observed values are a sample of an open set,
-          so an unrecognised one is printed rather than swallowed -- a session
-          waiting on something vam has no word for is still waiting. */}
-        waiting on you — {waitingFor ?? 'the session did not say what for'}
-      </p>
-      <p className="text-[11.5px] text-ink-faint">{remedy}</p>
-    </div>
-  );
-}
 
 function QuestionCard({
   questions,
@@ -2529,6 +2501,19 @@ export function DetailPanel(props: DetailPanelProps) {
    * itself.
    */
   const [providerPickerOpen, setProviderPickerOpen] = useState(false);
+  /**
+   * The mode popover's open/closed state — per pane, for the same reason the
+   * provider one above is, and NOT a copy of the mode itself: the mode lives
+   * in the draft, which is the text that actually gets recorded.
+   */
+  const [modePickerOpen, setModePickerOpen] = useState(false);
+  /**
+   * The mode ON SCREEN, read back out of the draft on every render. A draft
+   * carrying some other word on its `mode:` line reads as the default: only
+   * these three can be picked here, and an icon has no way to draw a fourth.
+   */
+  const currentMode: Mode = MODES.find((mode) => mode === readModeRequest(draft)) ?? DEFAULT_MODE;
+  const ModeGlyph = MODE_ICON[currentMode];
   const currentProvider = resolveProvider(defaultProvider);
   const pickImage = async () => {
     if (pickImageAttachment === undefined || entry === null) return;
@@ -3298,7 +3283,11 @@ export function DetailPanel(props: DetailPanelProps) {
         off the composer's so the composer could stand down while a question is
         open, and a block that outlived its contents would be a doubled seam
         and 25px of dead height in the pane's most common state. */}
-      {current !== 'Terminal' && (newestQuestion !== null || waitingFor !== undefined) && (
+      {/* Drawn for a QUESTION and nothing else now. It used to open on
+        `waitingFor` too, for the notice above the prompt input the operator
+        asked to remove; keeping that disjunct would draw a bordered empty
+        block on every waiting session -- a seam with nothing behind it. */}
+      {current !== 'Terminal' && newestQuestion !== null && (
         <div
           data-question-bar
           className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3"
@@ -3319,27 +3308,6 @@ export function DetailPanel(props: DetailPanelProps) {
             turn a pane into a queue. It answers nothing; see `QuestionCard`.
             A session that asked none, or asked outside the tail vam reads
             (`TAIL_BYTES`), draws nothing here rather than an empty box. */}
-          {/* Above the card, because it is the more general fact: the card is
-            one shape of ask, this is "somebody is blocked on you" whatever the
-            shape. A session can be both -- a question on screen IS a waiting
-            state -- and then the note says which pane can answer it.
-
-            EXCEPT while a card with an open step is drawn: `data-question-note`
-            states a route of its own in BOTH branches, delivering or not, so
-            drawing the note over an open card duplicated the remedy line --
-            and in the approval case (pull request 211) the two sentences
-            named DIFFERENT routes and contradicted each other: the note said
-            the Terminal tab, the card said "type your choice in the box
-            below" (`permission-prompt-desktop.png`). While the card is open
-            it IS the waiting surface -- the ask, the options and the route
-            sentence, whether or not vam can deliver the pick. The note
-            returns once nothing on screen carries a route: no card at all, or
-            every step already resolved (`openQuestion` false), where a
-            `waitingFor` still set is an ask the settled card does not
-            represent. */}
-          {waitingFor !== undefined && (newestQuestion === null || !openQuestion) && (
-            <WaitingNote waitingFor={waitingFor} vamControlled={entry?.session.vamControlled} />
-          )}
           {newestQuestion !== null && (
             <QuestionCard
               key={setId}
@@ -3622,7 +3590,11 @@ export function DetailPanel(props: DetailPanelProps) {
               </p>
             )}
 
-            <div className="flex items-center gap-2">
+            {/* The tools row: attach, provider, model, mode — everything the
+              prompt carries besides its text, on one line under the box. The
+              hook is what lets a test say "beside the model field" without a
+              layout engine. */}
+            <div data-prompt-tools className="flex items-center gap-2">
               {/* The attachment button, doing the only honest thing there is to
               do here: vam's write is a string, so the file is read in the
               renderer and its text becomes part of the prompt that gets
@@ -3816,6 +3788,105 @@ export function DetailPanel(props: DetailPanelProps) {
                   className="vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[11px] text-ink-dim outline-none placeholder:text-ink-quiet focus:text-ink"
                 />
               </Note>
+              {/* The mode, beside the model field the operator asked to put it
+              next to, as ONE icon showing only the mode that is current —
+              the three pills below the input are gone with the row they sat
+              in.
+
+              STILL ABSENT, NOT DIMMED, where no mode can be chosen
+              (`canCycleMode`): a switcher over a session vam did not start
+              is a control that lies, which is why the row was gated this way
+              in the first place and why shrinking it does not get to spend
+              that.
+
+              ICON-ONLY DOES NOT MEAN UNLABELLED — `ViewIcons` states this
+              file's rule and refuses a bare `title`: the accessible name
+              carries the mode's NAME and the chord, so the one thing the
+              glyph says to an eye is said to a screen reader too.
+
+              The draft stays the single source of truth: read back out of it
+              on every render, never mirrored in state, because a mirror is a
+              thing that can disagree with the text actually recorded. */}
+              {canCycleMode && (
+                <div className="relative flex-none">
+                  <Note text="the mode belongs to the session — this writes your choice into the prompt text that gets recorded, and Shift+Tab presses the session's own chord in the pane vam started">
+                    <button
+                      type="button"
+                      data-mode-toggle
+                      aria-haspopup="listbox"
+                      aria-expanded={modePickerOpen}
+                      aria-label={`mode: ${currentMode} — change, or ⇧Tab to cycle the session's own`}
+                      onClick={() => setModePickerOpen((open) => !open)}
+                      className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
+                    >
+                      <span
+                        aria-hidden="true"
+                        data-tap-skin
+                        className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-panel hover:bg-raised"
+                      >
+                        <ModeGlyph size={12} strokeWidth={1.7} />
+                      </span>
+                    </button>
+                  </Note>
+                  {modePickerOpen && (
+                    <div
+                      data-mode-picker
+                      role="listbox"
+                      aria-label="mode for this prompt"
+                      className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-panel p-1 shadow-sm"
+                    >
+                      {MODES.map((mode) => {
+                        const selected = mode === currentMode;
+                        const Glyph = MODE_ICON[mode];
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            data-mode-option={mode.toLowerCase()}
+                            role="option"
+                            aria-selected={selected}
+                            onClick={() => {
+                              onDraftChange(setModeRequest(draft, mode));
+                              setModePickerOpen(false);
+                            }}
+                            className={[
+                              'flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-[12px]',
+                              selected
+                                ? 'bg-raised text-ink'
+                                : 'text-ink-dim hover:bg-raised hover:text-ink',
+                            ].join(' ')}
+                          >
+                            <Glyph size={12} strokeWidth={1.7} />
+                            {mode}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* WHAT THE ⇧Tab PRESS DID, and the only channel that says so:
+              sent, still out, or refused by tmux. It kept a home when the row
+              around it was deleted, because a refusal shown as silence is
+              this pane's oldest defect, not a tidy-up — the operator would be
+              left believing a mode moved that did not.
+
+              Drawn only when there is something to say (the resting caption
+              moved into the icon's accessible name), so it costs no width at
+              rest and the row does not reflow for a caption nobody reads. */}
+              {cycleNote !== null && (
+                <span
+                  data-mode-cycle
+                  data-mode-cycle-state={cycleNote.kind}
+                  data-mode-refusal={cycleNote.kind === 'refused' ? 'true' : undefined}
+                  className={[
+                    'min-w-0 flex-1 truncate whitespace-nowrap font-mono text-[10.5px]',
+                    cycleNote.kind === 'refused' ? 'text-waiting' : 'text-ink-dim',
+                  ].join(' ')}
+                >
+                  {cycleNote.text}
+                </span>
+              )}
               {/* The way OUT, shown only while you are in — the moment it is the
               thing you need, and no width the rest of the time. It replaces
               the `i` / `I` notes the operator asked to lose: those advertised
@@ -3853,80 +3924,6 @@ export function DetailPanel(props: DetailPanelProps) {
               </button>
             </div>
           </div>
-
-          {/* The mockup's mode row — drawn ONLY where a mode can actually be
-            chosen (`canCycleMode`), and gone entirely otherwise, which is the
-            operator's own request: a switcher for a session whose model the
-            factory picked and vam cannot touch is a control that lies, and
-            dimming it would still say a choice lives here.
-
-            The pills write the choice into the prompt as a leading `mode:`
-            line, so what was selected is in the recorded text; Shift+Tab
-            presses the session's OWN chord in the pane vam started, which is
-            what makes the row more than a highlight. Selecting Auto clears
-            the line. The well's geometry is the mockup's: 2px on `raised`,
-            24px pills at 11.5px, the current one filled with `segment-on`. */}
-          {canCycleMode && (
-            <div data-mode-row className="flex items-center gap-2">
-              {/* The note hangs off the MODE label, and the label is a <button> so
-              that a keyboard can reach it. A span with a tabIndex reads as a
-              control to a screen reader without behaving like one. */}
-              <Note text="the mode belongs to the session — Shift+Tab presses its own chord in the pane vam started, and the pills write the choice into the prompt text that gets recorded">
-                <button
-                  type="button"
-                  className="flex-none cursor-default font-mono text-[10.5px] tracking-[0.1em] text-ink-faint"
-                >
-                  MODE
-                </button>
-              </Note>
-              <div className="flex items-center gap-0.5 rounded-[8px] border border-line-strong bg-raised p-0.5">
-                {MODES.map((mode) => {
-                  // Derived from the draft, never a second copy of it: a mirror
-                  // in component state is a thing that can disagree with the text
-                  // actually being recorded.
-                  const selected = mode === (readModeRequest(draft) || DEFAULT_MODE);
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      data-mode-pill={mode.toLowerCase()}
-                      aria-pressed={selected}
-                      onClick={() => onDraftChange(setModeRequest(draft, mode))}
-                      className={[
-                        'flex h-6 cursor-pointer items-center rounded-[6px] px-2.5 text-[12.5px]',
-                        selected
-                          ? 'bg-segment-on font-medium text-ink'
-                          : 'text-ink-dim hover:text-ink',
-                      ].join(' ')}
-                    >
-                      {mode}
-                    </button>
-                  );
-                })}
-              </div>
-              {/* The tip, at the right-hand end as the mockup draws it, with the
-                refusal in its place when the last press did not land. It names
-                a chord the prompt box really binds, and it exists only where
-                that binding does — this caption was deleted once for naming a
-                key no table answered to, on the stated terms that a real
-                binding may bring it back and the caption alone may not. */}
-              <span
-                data-mode-cycle
-                data-mode-cycle-state={cycleNote?.kind ?? 'resting'}
-                data-mode-refusal={cycleNote?.kind === 'refused' ? 'true' : undefined}
-                className={[
-                  'ml-auto flex-none whitespace-nowrap font-mono text-[10.5px]',
-                  cycleNote === null ? 'text-ink-faint' : '',
-                  cycleNote?.kind === 'refused' ? 'text-waiting' : '',
-                  cycleNote !== null && cycleNote.kind !== 'refused' ? 'text-ink-dim' : '',
-                ]
-                  .filter((part) => part !== '')
-                  .join(' ')}
-              >
-                {cycleNote?.text ?? '⇧Tab · cycle mode'}
-              </span>
-            </div>
-          )}
         </div>
       )}
     </aside>
