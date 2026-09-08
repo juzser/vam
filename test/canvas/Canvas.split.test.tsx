@@ -1,0 +1,307 @@
+// @vitest-environment happy-dom
+
+/**
+ * A15.1 — splitting a tab, horizontally or vertically, by dragging or by
+ * keyboard, same project only.
+ *
+ * The pure tree mechanics (`splitPane`/`closePane`/`stepPane`/`nearestEdge`)
+ * are pinned in isolation at `test/canvas/split.test.ts`. This file proves
+ * the wiring: a real keydown or a real drag sequence actually reaches
+ * `Canvas.tsx`'s handlers and produces the DOM this feature promises —
+ * `[data-split]`, `[data-split-pane]`, `[data-split-focused]` — and that the
+ * cross-project refusal is ALOUD (a status-bar message), never a drop that
+ * silently does nothing.
+ *
+ * happy-dom carries no real layout engine (`getBoundingClientRect` is
+ * always zeroed, per `PaneResizer.test.tsx`'s own note — worked around here
+ * the same way, by stubbing it) and IMPLEMENTS NO `DragEvent` CLASS AT ALL
+ * (verified by reading `happy-dom/src/event/events/` — there is a
+ * `MouseEvent.ts` and a `PointerEvent.ts`, no `DragEvent.ts`). Two
+ * consequences, both proven by running throwaway probes before writing this
+ * file for real:
+ *
+ * 1. `fireEvent.dragStart`/`dragOver`/`drop` dispatch SOMETHING with the
+ *    right `type`, but whatever global `DragEvent` happy-dom falls back to
+ *    carries no `dataTransfer` and, worse, no `clientX`/`clientY` at all —
+ *    every coordinate reads back `undefined`. `Canvas.tsx`'s own drop
+ *    handler already does not depend on (1): the dragged session id
+ *    travels in React state (`draggingSessionId`), not `dataTransfer`.
+ * 2. For (2) — the edge a drop lands near — this file dispatches a genuine
+ *    `MouseEvent` typed `"dragover"`/`"drop"` directly, via `el.dispatchEvent`
+ *    rather than `fireEvent`: happy-dom's `MouseEvent` DOES implement
+ *    `clientX`/`clientY` correctly, and React's delegated listener at the
+ *    root only cares that `event.type` matches — it reads `clientX` off
+ *    whatever object bubbles up, never checks its constructor.
+ */
+
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import { Canvas } from '../../src/renderer/canvas/Canvas.js';
+import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
+
+function decision(id: string, over: Partial<Decision> = {}): Decision {
+  return { id, label: id, input: `in-${id}`, output: `out-${id}`, commands: [], ...over };
+}
+
+function session(id: string, over: Partial<Session> = {}): Session {
+  return {
+    id,
+    title: id,
+    icon: null,
+    epic: null,
+    branch: null,
+    status: 'done',
+    runningAgents: 0,
+    activity: null,
+    age: null,
+    decisions: [decision(`d-${id}`)],
+    ...over,
+  };
+}
+
+/** Two projects, so a drag between them is the refusal case; two sessions in
+ *  the first project, so a same-project drag has a second pane to land on. */
+const MODEL: CanvasModel = {
+  projects: [
+    { id: 'p1', name: 'alpha', source: 'claude-code', sessions: [session('a1'), session('a2')] },
+    { id: 'p2', name: 'beta', source: 'claude-code', sessions: [session('b1')] },
+  ],
+};
+
+afterEach(cleanup);
+
+function press(key: string) {
+  act(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+  });
+}
+
+function pressChord(prefix: string, key: string) {
+  press(prefix);
+  press(key);
+}
+
+const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
+const splitPanes = () => [...document.querySelectorAll('[data-split-pane]')];
+const focusedPane = () => document.querySelector('[data-split-focused="true"]');
+const splitContainer = () => document.querySelector('[data-split]');
+const paneFor = (id: string) => document.querySelector(`[data-split-pane="${id}"]`);
+const tabSelect = (title: string) =>
+  [...document.querySelectorAll<HTMLButtonElement>('[data-tab-select]')].find(
+    (el) => el.textContent === title,
+  );
+const promptInputIn = (paneEl: Element | null) =>
+  paneEl?.querySelector<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]') ?? null;
+/** A12.2 removed `DetailPanel`'s own header, so the session's NAME is not
+ *  drawn inside the pane at all any more — the tab strip is the only place
+ *  that names it. What each pane's `in` block DOES still carry is that
+ *  session's own decision text, which this file's `session()`/`decision()`
+ *  helpers make unique per session (`in-d-<id>`), so it doubles as a content
+ *  fingerprint for "which session is THIS pane actually showing". */
+const inBlockIn = (paneEl: Element | null | undefined) =>
+  paneEl?.querySelector('[data-detail-scroll="in"]')?.textContent ?? '';
+
+function typeInto(input: HTMLTextAreaElement, text: string) {
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set as (
+      this: HTMLElement,
+      v: string,
+    ) => void;
+    setter.call(input, text);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+/** Gives an element a fixed, non-zero rect — happy-dom's own is always
+ *  zeroed, per `PaneResizer.test.tsx`'s note, so a drop's edge math needs a
+ *  real one to test against. */
+function stubRect(el: Element, rect: { left: number; top: number; width: number; height: number }) {
+  (el as HTMLElement).getBoundingClientRect = () =>
+    ({
+      ...rect,
+      right: rect.left + rect.width,
+      bottom: rect.top + rect.height,
+      x: rect.left,
+      y: rect.top,
+      toJSON: () => rect,
+    }) as DOMRect;
+}
+
+/** See the file header: a genuine `MouseEvent` typed `dragover`/`drop`,
+ *  dispatched directly, because happy-dom's own `DragEvent` fallback carries
+ *  no `clientX`/`clientY` through `fireEvent`. */
+function dragAt(el: Element, type: 'dragover' | 'drop', clientX: number, clientY: number) {
+  const event = new MouseEvent(type, { clientX, clientY, bubbles: true, cancelable: true });
+  act(() => {
+    el.dispatchEvent(event);
+  });
+}
+
+describe('keyboard: zs / zv split the focused pane, zc closes it, zw/zW move between them', () => {
+  it('starts as a single, unsplit pane', () => {
+    render(<Canvas model={MODEL} />);
+    expect(splitPanes()).toHaveLength(1);
+    expect(splitContainer()).toBeNull();
+  });
+
+  it('zv splits vertically — a row, side by side — and focuses the new pane', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 'v');
+    expect(splitPanes()).toHaveLength(2);
+    expect(splitContainer()?.getAttribute('data-split-orientation')).toBe('row');
+    // The new pane, not the old one, now holds the keyboard.
+    const focusedId = focusedPane()?.getAttribute('data-split-pane');
+    expect(focusedId).not.toBeNull();
+    expect(splitPanes().map((p) => p.getAttribute('data-split-pane'))).toContain(focusedId);
+  });
+
+  it('zs splits horizontally — a column, stacked', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 's');
+    expect(splitPanes()).toHaveLength(2);
+    expect(splitContainer()?.getAttribute('data-split-orientation')).toBe('column');
+  });
+
+  it('the new pane starts as a mirror of the one it split from', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 'v');
+    const [first, second] = splitPanes();
+    expect(promptInputIn(first as Element)).not.toBeNull();
+    expect(promptInputIn(second as Element)).not.toBeNull();
+  });
+
+  it('zc closes the focused split — the other pane survives, unsplit', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 'v');
+    expect(splitPanes()).toHaveLength(2);
+    pressChord('z', 'c');
+    expect(splitPanes()).toHaveLength(1);
+    expect(splitContainer()).toBeNull();
+  });
+
+  it('zc refuses aloud with only one pane — it does not close the session', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 'c');
+    expect(splitPanes()).toHaveLength(1);
+    expect(statusBar()).toContain('only one pane open');
+  });
+
+  it('zw and zW cycle focus between two panes, wrapping', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 'v');
+    const afterSplit = focusedPane()?.getAttribute('data-split-pane');
+    pressChord('z', 'w');
+    const afterNext = focusedPane()?.getAttribute('data-split-pane');
+    expect(afterNext).not.toBe(afterSplit);
+    // Two panes: one more step wraps back to where the split left off.
+    pressChord('z', 'w');
+    expect(focusedPane()?.getAttribute('data-split-pane')).toBe(afterSplit);
+    pressChord('z', 'W');
+    expect(focusedPane()?.getAttribute('data-split-pane')).toBe(afterNext);
+  });
+
+  it('zw refuses aloud with only one pane', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 'w');
+    expect(statusBar()).toContain('only one pane open');
+  });
+});
+
+describe('dragging a tab splits — same project only, refused aloud otherwise', () => {
+  it('dropping near the right edge makes a row split holding the DRAGGED session', () => {
+    render(<Canvas model={MODEL} />);
+    // pane-1 shows a1 (focus lands there on mount, first entry).
+    const targetPane = paneFor('pane-1') as HTMLElement;
+    stubRect(targetPane, { left: 0, top: 0, width: 200, height: 100 });
+    const tab = tabSelect('a2') as HTMLButtonElement;
+    fireEvent.dragStart(tab);
+    dragAt(targetPane, 'dragover', 190, 50);
+    dragAt(targetPane, 'drop', 190, 50);
+    expect(splitPanes()).toHaveLength(2);
+    expect(splitContainer()?.getAttribute('data-split-orientation')).toBe('row');
+    const [first, second] = splitPanes();
+    expect(inBlockIn(first)).toContain('in-d-a1'); // untouched
+    expect(inBlockIn(second)).toContain('in-d-a2'); // the dragged one, freshly split in
+  });
+
+  it('dropping near the top edge makes a column split', () => {
+    render(<Canvas model={MODEL} />);
+    const targetPane = paneFor('pane-1') as HTMLElement;
+    stubRect(targetPane, { left: 0, top: 0, width: 200, height: 100 });
+    const tab = tabSelect('a2') as HTMLButtonElement;
+    fireEvent.dragStart(tab);
+    dragAt(targetPane, 'dragover', 100, 2);
+    dragAt(targetPane, 'drop', 100, 2);
+    expect(splitContainer()?.getAttribute('data-split-orientation')).toBe('column');
+  });
+
+  it('a cross-project drop is refused ALOUD, and nothing splits', () => {
+    render(<Canvas model={MODEL} />);
+    // A cross-project attempt needs TWO panes that disagree on project —
+    // with only one pane, that pane IS whatever the strip shows, so
+    // dragging one of the strip's own (necessarily same-project, A13.1)
+    // tabs onto it can never disagree with itself. Split first, so pane-1
+    // keeps showing project alpha while pane-2's own focus moves elsewhere.
+    pressChord('z', 'v'); // pane-1: a1 (alpha) | pane-2: a1 (alpha, focused)
+    const targetPane = paneFor('pane-1') as HTMLElement; // stays on alpha throughout
+    stubRect(targetPane, { left: 0, top: 0, width: 200, height: 100 });
+    // Move the FOCUSED pane (pane-2) onto b1 — project beta — by clicking
+    // its sidebar row directly, the same real gesture `focusSession` names
+    // as its own caller. `rows()` lists a1, a2, b1 in source order.
+    const betaRow = [...document.querySelectorAll('[data-session-row]')][2] as HTMLElement;
+    act(() => betaRow.click());
+    // The strip now shows project beta (pane-2's own project), so b1 is
+    // what a real drag would pick up.
+    const betaTab = tabSelect('b1') as HTMLButtonElement;
+    expect(betaTab).toBeDefined();
+    fireEvent.dragStart(betaTab);
+    dragAt(targetPane, 'dragover', 190, 50);
+    dragAt(targetPane, 'drop', 190, 50);
+    // Refused: still the same two panes as before the drop, pane-1 untouched.
+    expect(splitPanes()).toHaveLength(2);
+    expect(inBlockIn(targetPane)).toContain('in-d-a1');
+    expect(statusBar()).toContain("can't split across projects");
+    expect(statusBar()).toContain('alpha');
+    expect(statusBar()).toContain('beta');
+  });
+});
+
+describe('per-pane isolation — the composer draft is per SESSION, and two panes never share one', () => {
+  it('two panes showing the SAME session share its one draft — a mirror, not two copies', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 'v');
+    const [first, second] = splitPanes();
+    const firstInput = promptInputIn(first as Element) as HTMLTextAreaElement;
+    const secondInput = promptInputIn(second as Element) as HTMLTextAreaElement;
+    typeInto(firstInput, 'shared, because it is one session');
+    expect(secondInput.value).toBe('shared, because it is one session');
+  });
+
+  it('two panes showing DIFFERENT sessions never leak a draft between them', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 'v'); // pane-1: a1 (unfocused) | pane-2: a1 (focused, mirror)
+    // Point the now-focused second pane at a DIFFERENT session, the same
+    // way an operator would — clicking its own tab in the strip.
+    act(() => tabSelect('a2')?.click());
+    const [first, second] = splitPanes();
+    const firstInput = promptInputIn(first as Element) as HTMLTextAreaElement; // a1
+    const secondInput = promptInputIn(second as Element) as HTMLTextAreaElement; // a2
+    typeInto(firstInput, 'a1’s own words');
+    typeInto(secondInput, 'a2’s own words');
+    expect(firstInput.value).toBe('a1’s own words');
+    expect(secondInput.value).toBe('a2’s own words');
+  });
+});
+
+describe('the default-provider picker (#261) is wired to every pane, not only the focused one', () => {
+  it('renders its toggle inside a background (non-focused) split pane too', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 'v'); // pane-1 (unfocused) | pane-2 (focused, mirror)
+    const [first] = splitPanes();
+    // `defaultProvider`/`onSetDefaultProvider` are global-preference props,
+    // identical for every pane (A15.4's own contract) — proving the
+    // BACKGROUND pane draws the control is the one case a focused-pane-only
+    // wiring mistake would miss.
+    expect(first?.querySelector('[data-provider-picker-toggle]')).not.toBeNull();
+  });
+});

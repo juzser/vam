@@ -221,6 +221,9 @@ Chord prefixes — press the first key, then the second:
 | `gm` | Move the focused session's project into a folder, or out of one |
 | `yy` | Copy the focused step's commands |
 | `z0` | Reset both panes to their default widths and bring back any hidden pane |
+| `zs` / `zv` | Split the focused tab — `zs` horizontally (stacked), `zv` vertically (side by side); dragging a tab onto the detail pane does the same, and only within one project |
+| `zc` | Close the focused split — the session keeps running |
+| `zw` / `zW` | Move the keyboard to the next / previous split |
 
 ## Development
 
