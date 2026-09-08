@@ -237,4 +237,232 @@ await page.screenshot({ path: `${outDir}/tab-strip-two-panes.png` });
 console.log(`${outDir}/tab-strip-two-panes.png`);
 console.log(`${outDir}/tab-strip-marks.png`);
 
+/**
+ * --- 6-8. THE OVERFLOWING STRIP, on a page of its own.
+ *
+ * HOW OVERFLOW IS PRODUCED: a narrow window, not a fixture. The demo's
+ * largest project has three sessions, ~412px of tabs; at a 620px viewport the
+ * pane's strip is ~310px wide, so the last tab is off its end. 620 is
+ * deliberately above `PHONE_MAX_WIDTH` (519) — under it this would be
+ * measuring the phone shell, which draws no strip. And every check below is
+ * preceded by `scrollWidth > clientWidth`: a strip that fits sits at 0 and
+ * passes every position assertion trivially.
+ */
+const narrow = await browser.newPage({ viewport: { width: 620, height: 620 } });
+narrow.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+await narrow.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+await narrow.waitForSelector('[data-session-tab]');
+await narrow.waitForTimeout(250);
+
+const slack = await narrow.evaluate(() => {
+  const s = document.querySelector('[data-tab-strip]');
+  return { scrollWidth: s.scrollWidth, clientWidth: s.clientWidth, tabs: s.querySelectorAll('[data-session-tab]').length };
+});
+console.log(`narrow strip: ${slack.tabs} tabs, ${slack.scrollWidth}px of them in ${slack.clientWidth}px`);
+if (slack.scrollWidth <= slack.clientWidth + 1) {
+  throw new Error(
+    `the strip did not overflow at this viewport (${slack.scrollWidth} <= ${slack.clientWidth}); ` +
+      `every check below would pass on a strip that never had to scroll.`,
+  );
+}
+
+/** Where the active tab sits relative to the box that is supposed to show it. */
+const readActive = () =>
+  narrow.evaluate(() => {
+    const s = document.querySelector('[data-tab-strip]');
+    const tab = s.querySelector('[data-session-tab][data-active="true"]');
+    if (tab === null) return null;
+    const sr = s.getBoundingClientRect();
+    const tr = tab.getBoundingClientRect();
+    return {
+      title: tab.querySelector('[data-tab-select]').textContent,
+      scrollLeft: s.scrollLeft,
+      leftOfView: sr.left - tr.left,
+      rightOfView: tr.right - sr.right,
+    };
+  });
+
+// --- 6. WALK TO THE LAST TAB: `l` is next-tab, two presses from the first of
+//        three lands furthest into the overflow.
+await narrow.keyboard.press('l');
+await narrow.keyboard.press('l');
+await narrow.waitForTimeout(250);
+const onLast = await readActive();
+console.log('active tab after two l:', JSON.stringify(onLast));
+if (onLast === null) throw new Error('no active tab in the narrow strip');
+if (onLast.scrollLeft <= 0) {
+  throw new Error(
+    `the strip never scrolled (scrollLeft ${onLast.scrollLeft}) while the active tab moved ` +
+      `into the overflow — the operator's only cue for which session is on screen is off it.`,
+  );
+}
+// One pixel of tolerance for sub-pixel layout and no more.
+if (onLast.leftOfView > 1 || onLast.rightOfView > 1) {
+  throw new Error(
+    `the active tab is outside the strip's own box (${Math.round(onLast.leftOfView)}px past its ` +
+      `left, ${Math.round(onLast.rightOfView)}px past its right)`,
+  );
+}
+await narrow.screenshot({ path: `${outDir}/tab-strip-overflow.png` });
+console.log(`${outDir}/tab-strip-overflow.png`);
+
+// --- 6b. A HELD POINTER PINS THE STRIP: scrolling out from under a
+//         stationary pointer moves the target of the click being made.
+await narrow.keyboard.press('h');
+await narrow.keyboard.press('h');
+await narrow.waitForTimeout(200);
+const atStart = await readActive();
+if (atStart.scrollLeft !== 0) throw new Error(`expected the strip back at 0, got ${atStart.scrollLeft}`);
+const stripBox = await narrow.locator('[data-tab-strip]').boundingBox();
+await narrow.mouse.move(stripBox.x + 12, stripBox.y + stripBox.height / 2);
+await narrow.mouse.down();
+await narrow.keyboard.press('l');
+await narrow.keyboard.press('l');
+await narrow.waitForTimeout(200);
+const held = await readActive();
+console.log('active tab while a pointer is held:', JSON.stringify(held));
+if (held.scrollLeft !== 0) {
+  throw new Error(
+    `the strip moved ${held.scrollLeft}px under a pointer that was still down — the click in ` +
+      `progress would land on a different tab than the one aimed at.`,
+  );
+}
+await narrow.mouse.up();
+await narrow.waitForTimeout(200);
+
+// --- 7. A VERTICAL WHEEL SCROLLS A HORIZONTAL-ONLY STRIP. Without it an
+//        ordinary mouse cannot reach an overflowed tab at all: the strip
+//        draws no scrollbar to drag. Put back to its start by hand, not by
+//        another key walk — the wheel is what is under test, and a start
+//        position inherited from the section above is not a known one.
+await narrow.evaluate(() => {
+  document.querySelector('[data-tab-strip]').scrollLeft = 0;
+});
+const beforeWheel = await narrow.evaluate(() => document.querySelector('[data-tab-strip]').scrollLeft);
+if (beforeWheel !== 0) throw new Error(`could not put the strip back at 0 (${beforeWheel})`);
+await narrow.mouse.move(stripBox.x + stripBox.width / 2, stripBox.y + stripBox.height / 2);
+await narrow.mouse.wheel(0, 200);
+await narrow.waitForTimeout(250);
+const afterWheel = await narrow.evaluate(() => document.querySelector('[data-tab-strip]').scrollLeft);
+console.log(`wheel over the strip: scrollLeft ${beforeWheel} -> ${afterWheel}`);
+if (afterWheel <= beforeWheel) {
+  throw new Error(
+    `a vertical wheel over the strip moved it from ${beforeWheel} to ${afterWheel}: a ` +
+      `horizontal-only scroller that ignores deltaY cannot be scrolled by a normal mouse.`,
+  );
+}
+
+/**
+ * --- 8. EVERY TAB REPORTS ITS STATUS, and the mark survives the dimming.
+ *
+ * The status ink was applied only to the ACTIVE tab, so three of its four
+ * statuses could never be seen. The dot is measured, not read off a class:
+ * its box, its composited colour against the strip's ground at the inactive
+ * tab's `opacity-85`, and that it is the element actually painted at its own
+ * centre — an indicator hidden under a sibling is an indicator nobody sees.
+ */
+// BACK TO THE FIRST TAB BY THE SIDEBAR — the other route that changes which
+// tab is active, and the one that carries no key repeat to lean on. It puts
+// the strip in a known place (its start) for the measurement and the shot.
+// The last session FIRST, so the click that follows is guaranteed to change
+// which tab is active whatever the sections above left behind: an assertion
+// about a strip following a click that selected the tab already active is an
+// assertion about nothing.
+await narrow.locator('[data-session-row="dogfood-4"]').click();
+await narrow.waitForTimeout(250);
+const toLastBySidebar = await readActive();
+console.log('active tab after a sidebar click on the last session:', JSON.stringify(toLastBySidebar));
+if (toLastBySidebar.scrollLeft <= 0 || toLastBySidebar.rightOfView > 1) {
+  throw new Error(
+    `a sidebar click landed on a tab in the overflow and the strip stayed put (scrollLeft ` +
+      `${toLastBySidebar.scrollLeft}, ${Math.round(toLastBySidebar.rightOfView)}px past its right edge)`,
+  );
+}
+await narrow.locator('[data-session-row="factory-sse-1"]').click();
+await narrow.waitForTimeout(250);
+const bySidebar = await readActive();
+console.log('active tab after a sidebar click back to the first:', JSON.stringify(bySidebar));
+if (!bySidebar.title.includes('factory-sse-1')) {
+  throw new Error(`a sidebar click did not make its session the active tab (${bySidebar.title})`);
+}
+if (bySidebar.scrollLeft !== 0 || bySidebar.leftOfView > 1 || bySidebar.rightOfView > 1) {
+  throw new Error(
+    `the strip did not follow a sidebar click back to the first tab (scrollLeft ` +
+      `${bySidebar.scrollLeft}, ${Math.round(bySidebar.leftOfView)}px past its left edge)`,
+  );
+}
+
+// Off the strip: a hovered tab is at full opacity, and the DIMMED one is the
+// point of the measurement.
+await narrow.mouse.move(stripBox.x + stripBox.width / 2, stripBox.y + 300);
+await narrow.waitForTimeout(150);
+const dots = await narrow.evaluate(() => {
+  const parse = (s) => s.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number);
+  return [...document.querySelectorAll('[data-session-tab]')].map((tab) => {
+    const dot = tab.querySelector('[data-tab-status]');
+    if (dot === null) return { status: null };
+    const r = dot.getBoundingClientRect();
+    const sr = tab.closest('[data-tab-strip]').getBoundingClientRect();
+    const row = tab.closest('[data-tab-strip-row]');
+    const rowGround = getComputedStyle(row).backgroundColor;
+    const ground = rowGround.startsWith('rgba(0, 0, 0, 0')
+      ? getComputedStyle(document.body).backgroundColor
+      : rowGround;
+    return {
+      active: tab.getAttribute('data-active') === 'true',
+      status: dot.getAttribute('data-tab-status'),
+      opacity: Number.parseFloat(getComputedStyle(tab).opacity),
+      colour: parse(getComputedStyle(dot).backgroundColor),
+      ground: parse(ground),
+      width: r.width,
+      height: r.height,
+      // Only meaningful for a dot the strip is showing: one scrolled past the
+      // scroller's end is clipped, and `elementFromPoint` then answers about
+      // the strip rather than about the dot.
+      visible: r.left >= sr.left - 0.5 && r.right <= sr.right + 0.5,
+      onTop: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === dot,
+    };
+  });
+});
+console.log('status dots:', JSON.stringify(dots));
+if (dots.length < 2) throw new Error('need more than one tab to prove the inactive ones are marked');
+if (dots.some((d) => d.status === null)) {
+  throw new Error('a tab carries no status mark — the strip is the densest status surface here');
+}
+const inactiveDots = dots.filter((d) => !d.active);
+if (inactiveDots.length === 0) throw new Error('no inactive tab to measure the dimmed dot on');
+if (!inactiveDots.some((d) => d.visible)) {
+  throw new Error('no inactive dot was inside the strip to measure — the check saw nothing');
+}
+if (!inactiveDots.some((d) => d.opacity < 1)) {
+  throw new Error(
+    'every inactive tab measured at full opacity, so the contrast below was never checked ' +
+      'against the dimming it exists to survive',
+  );
+}
+for (const dot of inactiveDots) {
+  if (dot.width < 4 || dot.height < 4) {
+    throw new Error(`a ${dot.width}x${dot.height} status dot is not a mark anyone can see`);
+  }
+  if (dot.visible && !dot.onTop) {
+    throw new Error('the status dot is not the element painted at its own centre');
+  }
+  // Composited over the strip's ground at the tab's own opacity — the pixel a
+  // reader actually gets. 3:1 is WCAG 1.4.11: the dot is a graphical object
+  // carrying information, not text.
+  const blended = dot.colour.map((c, i) => c * dot.opacity + dot.ground[i] * (1 - dot.opacity));
+  const dotRatio =
+    (Math.max(luminance(blended), luminance(dot.ground)) + 0.05) /
+    (Math.min(luminance(blended), luminance(dot.ground)) + 0.05);
+  console.log(`dimmed ${dot.status} dot contrast: ${dotRatio.toFixed(2)}:1 (at opacity ${dot.opacity})`);
+  if (dotRatio < 3) {
+    throw new Error(
+      `the ${dot.status} dot lands at ${dotRatio.toFixed(2)}:1 against the strip once dimmed, ` +
+        `under the 3:1 floor for a non-text indicator`,
+    );
+  }
+}
+await narrow.screenshot({ path: `${outDir}/tab-strip-status-dots.png` });
+console.log(`${outDir}/tab-strip-status-dots.png`);
+
 await browser.close();
