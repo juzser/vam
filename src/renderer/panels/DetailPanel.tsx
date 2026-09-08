@@ -522,6 +522,24 @@ export type DetailPanelProps = {
    * Both optional, and the pane works with neither: without them the tab is
    * component state that starts at the default, exactly as it was.
    */
+  /**
+   * Whether THIS pane is the one holding the keyboard -- the canvas's own
+   * `focusedPaneId`, passed down rather than re-derived, because a second
+   * notion of focus in this file could disagree with the ring the canvas
+   * paints (`data-split-focused`).
+   *
+   * It gates ONE thing: whether the view-icon overlay is drawn. Operator
+   * instruction -- the four icons repeated in every pane of a split, over
+   * content whose Alt+digit the background pane cannot consume anyway
+   * (`tabRequest` is already focused-only). Hidden means NOT DRAWN, never
+   * drawn-and-inert: `ViewIcons`' promise that each icon is a real button Tab
+   * reaches is kept whole in the pane that has focus, and an invisible row
+   * still catching clicks would be the worse trade.
+   *
+   * Defaults to `true`: an unsplit shell is the focused pane, and so is the
+   * desktop detail column, which has no pane identity at all.
+   */
+  readonly paneFocused?: boolean;
   readonly initialTab?: string | null;
   readonly onTabChange?: (tab: string) => void;
   /**
@@ -2057,6 +2075,7 @@ export function DetailPanel(props: DetailPanelProps) {
     phone = false,
     defaultProvider,
     onSetDefaultProvider,
+    paneFocused = true,
   } = props;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -2943,7 +2962,8 @@ export function DetailPanel(props: DetailPanelProps) {
         moment the reader scrolls, defeating the one thing an "always
         reachable" shortcut promises.
       */}
-      {!phone && (
+      {/* FOCUSED PANE ONLY -- see `paneFocused`. */}
+      {!phone && paneFocused && (
         <div
           data-view-overlay
           className="pointer-events-none absolute top-2 right-2.5 z-20 flex max-w-[calc(100%-1.25rem)] items-center justify-end gap-1.5"

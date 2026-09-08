@@ -3526,6 +3526,11 @@ function CanvasInner({
         // A one-shot ask only the FOCUSED pane may consume — see the doc
         // comment above.
         tabRequest: isFocused ? tabRequest : null,
+        // The view icons are drawn in the focused pane and nowhere else
+        // (operator instruction) — the SAME fact `tabRequest` above is gated
+        // on, which is the point: a pane that cannot consume an `Alt+<digit>`
+        // should not be showing the row that names one.
+        paneFocused: isFocused,
         initialTab: prefs.detailTab,
         onTabChange: (next) => {
           if (next !== prefs.detailTab) {
