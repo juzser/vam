@@ -2826,6 +2826,14 @@ export function DetailPanel(props: DetailPanelProps) {
   // the source's own sentence for the refusal is carried in `declines`.
   const composerHidden = records === false || (openQuestion && chattingAbout !== setId);
   /**
+   * Is the corner overlay on screen? Two things need the answer: the overlay
+   * itself, and the top of the column, which has to RESERVE the corner the
+   * overlay is about to paint on (audit F1). Derived once so the two cannot
+   * drift apart — a reserved corner in a pane that draws no icons is wasted
+   * width, and icons over an unreserved corner is the defect.
+   */
+  const cornerOverlay = !phone && paneFocused;
+  /**
    * The phone keystroke strip's own gate -- structurally the SAME boolean
    * `canCycleMode` already is, shared rather than re-derived, AND the card
    * must not be live: `newestQuestion === null || !openQuestion` is
@@ -2968,10 +2976,25 @@ export function DetailPanel(props: DetailPanelProps) {
           so it never shadows a click meant for the content underneath.
         - IT MUST NOT BALLOON AT A NARROW WIDTH. Sized to its own content
           (no `inset-x-0`/`w-full`) and capped by `max-w-` against the pane's
-          own width, so in a narrow split it can only ever cover the few
-          pixels its glyphs occupy — never the whole line of text beneath
-          it. The refusal note is capped and truncated the same way, so a
-          long one grows the ellipsis, never the overlay.
+          own width. The refusal note is capped and truncated the same way,
+          so a long one grows the ellipsis, never the overlay.
+
+          THIS USED TO SAY the overlay "can only ever cover the few pixels
+          its glyphs occupy — never the whole line of text beneath it". That
+          was true of the WRAPPER, which is `pointer-events-none` and
+          transparent, and false of the filled pill inside it, which is
+          opaque: measured at a 253px pane, the nav ran x 924–1014 over an
+          identity line running to x 1010, so its last 86px — project and
+          epic, the two facts the removed header relocated there — were laid
+          out, measured as visible by `truncate`, and then painted over
+          (audit F1). An overlay owes a FOURTH property, and it cannot be
+          discharged from here: WHAT IT FLOATS OVER MUST RESERVE ITS CORNER.
+          `cornerOverlay` below is that reservation, and
+          `e2e/narrow-pane-overlay-shots.mjs` measures it by asking which
+          element is on top rather than by reading a class back.
+
+          A comment asserting a property the code does not have is worse than
+          no comment: it is how this defect passed review.
         - IT MUST NOT TRAP FOCUS. `position` is a paint property; a browser's
           default Tab order follows DOM order, not screen position, so
           moving the icons out of the flow cannot create the kind of focus
@@ -2987,7 +3010,7 @@ export function DetailPanel(props: DetailPanelProps) {
         reachable" shortcut promises.
       */}
       {/* FOCUSED PANE ONLY -- see `paneFocused`. */}
-      {!phone && paneFocused && (
+      {cornerOverlay && (
         <div
           data-view-overlay
           className="pointer-events-none absolute top-2 right-2.5 z-20 flex max-w-[calc(100%-1.25rem)] items-center justify-end gap-1.5"
@@ -3167,7 +3190,15 @@ export function DetailPanel(props: DetailPanelProps) {
               <span className="sr-only">in</span>
               <div
                 data-detail-identity
-                className="flex items-center gap-[5px] font-mono text-[10.5px] text-ink-faint"
+                /* The reserved corner (audit F1). `truncate` computes its
+                   ellipsis against this box, so reserving here is what makes
+                   the ellipsis land where the pill starts instead of under
+                   it. Only when the overlay is actually drawn: an unfocused
+                   pane would otherwise give up 7rem of a narrow line for
+                   nothing. */
+                className={`flex items-center gap-[5px] font-mono text-[10.5px] text-ink-faint ${
+                  cornerOverlay ? 'pr-[7rem]' : ''
+                }`}
               >
                 <span className="truncate text-ink-dim">{entry?.project.name ?? '—'}</span>
                 <span>·</span>
