@@ -91,6 +91,25 @@ async function sidebarOrder() {
   );
 }
 
+// --- A11.1, THE OPENING STATE: every session of the active project is
+// already a tab, with nothing opened by hand. The operator opened a project
+// holding two sessions, saw one tab and asked "right from the start,
+// shouldn't it show both tabs of a project at once?" — and had answered the
+// same question earlier in this epic with "all of them, always". The demo's
+// active project (factory) holds three, so three is what the first paint owes
+// them. Asserted BEFORE any click, because "on load" is the whole claim.
+const opening = await tabTitlesInPane(0);
+console.log('the opening state draws:', opening);
+if (opening.length !== 3) {
+  throw new Error(
+    `the shell opened with ${opening.length} tab(s) (${opening.join(', ')}) for a project that ` +
+      'holds 3 sessions. Every session of the active project is a tab from the first paint.',
+  );
+}
+await assertStripPerPane('opening');
+await page.screenshot({ path: `${outDir}/every-session-is-a-tab.png` });
+console.log(`${outDir}/every-session-is-a-tab.png`);
+
 // --- The tab ORDER in a pane. The operator: "the way tabs are arranged in
 // the pane still isn't right — when I focus a session in the sidebar, the
 // tabs shown in the pane get jumbled." The strip drew the leaf's own
@@ -128,8 +147,11 @@ if (JSON.stringify(stripOrder) !== JSON.stringify(listOrder)) {
 await page.screenshot({ path: `${outDir}/pane-tab-order.png` });
 console.log(`${outDir}/pane-tab-order.png`);
 
-// Back to the two-tab shape the rest of this script is written against:
-// drop dogfood-4's tab and leave crosscheck-2 in front.
+// --- What A11.1 does to a tab's own `×`: it cannot leave a live session
+// without a tab, so it refuses ALOUD rather than closing one the adoption
+// would put straight back. (This step used to close dogfood-4's tab to get
+// down to two; the refusal is what happens there now, so the same gesture
+// pins the new rule instead.)
 //
 // HOVER THE TAB FIRST. The `×` on an inactive tab is `pointer-events: none`
 // until its tab is hovered (audit F4: `opacity: 0` removed no pointer events,
@@ -143,6 +165,21 @@ await page
   .hover();
 await page.getByLabel('close dogfood-4 tab').click();
 await page.waitForTimeout(150);
+const refused = (await page.locator('[data-status-bar]').innerText()) ?? '';
+const afterRefusal = await tabTitlesInPane(0);
+console.log('after pressing a tab’s ×:', afterRefusal, '| status:', refused);
+if (afterRefusal.length !== 3) {
+  throw new Error(
+    `a tab’s × left ${afterRefusal.length} tab(s) (${afterRefusal.join(', ')}) — every session ` +
+      'of the active project is a tab, so the × must change nothing.',
+  );
+}
+if (!refused.includes('close the session with x')) {
+  throw new Error(
+    `pressing a tab’s × said "${refused}" — it must refuse aloud and name the key that does ` +
+      'close a session, never silently do nothing.',
+  );
+}
 await page.locator('[data-session-row="crosscheck-2"]').click();
 await page.waitForTimeout(150);
 console.log('start panes:', await paneCount());
@@ -156,12 +193,13 @@ await assertStripPerPane('after zv');
 // operator asked for made visible in one shot.
 const [leftTabs, rightTabs] = [await tabsInPane(0), await tabsInPane(1)];
 console.log('tabs per pane after zv:', leftTabs, rightTabs);
-// The split MOVES the active tab: the source pane had two and keeps one, the
-// new pane holds the one it took. This is the operator's report made
-// checkable — the old rule put `crosscheck-2` in BOTH lists here.
-if (leftTabs.length !== 1 || rightTabs.length !== 1) {
+// The split MOVES the active tab: the source pane held all three of the
+// project's sessions (A11.1) and keeps two, the new pane holds the one it
+// took. This is the operator's report made checkable — the old rule put
+// `crosscheck-2` in BOTH lists here.
+if (leftTabs.length !== 2 || rightTabs.length !== 1) {
   throw new Error(
-    `after zv the source pane should be left with 1 tab and the new pane hold the 1 it ` +
+    `after zv the source pane should be left with 2 tabs and the new pane hold the 1 it ` +
       `took, got ${leftTabs.length} and ${rightTabs.length}.`,
   );
 }
@@ -181,11 +219,20 @@ await page.screenshot({ path: `${outDir}/a15-5-split-vertical-tabs.png` });
 console.log(`${outDir}/a15-5-split-vertical-tabs.png`);
 
 // Back to one pane before the next shot, so each is the SAME starting shape.
-// `zc` closes the focused pane AND the tab it took, so crosscheck-2 is
-// re-opened from the sidebar to get back to the two-tab shape `zs` needs.
+// `zc` closes the focused pane, and the tab it took is ADOPTED back by the
+// surviving pane rather than lost — A11.1 again, and the reason nothing has
+// to be re-opened from the sidebar here. `crosscheck-2` is picked only to put
+// it back in front, which is the tab `zs` will move.
 await chord('z', 'c', 'close', 1);
 await page.locator('[data-session-row="crosscheck-2"]').click();
 await page.waitForTimeout(150);
+const afterClosingAPane = await tabTitlesInPane(0);
+if (afterClosingAPane.length !== 3) {
+  throw new Error(
+    `closing a pane left ${afterClosingAPane.length} tab(s) (${afterClosingAPane.join(', ')}) — ` +
+      'the sessions it held belong to a pane, so the survivor must adopt them.',
+  );
+}
 
 // --- Shot 2: horizontal split (zs) — a column, panes stacked. It moves the
 // active tab exactly as zv does, leaving one tab in each half.
@@ -193,9 +240,9 @@ await chord('z', 's', 'split horizontal', 2);
 await assertStripPerPane('after zs');
 const stacked = [await tabsInPane(0), await tabsInPane(1)];
 console.log('tabs per pane after zs:', stacked);
-if (stacked[0].length !== 1 || stacked[1].length !== 1) {
+if (stacked[0].length !== 2 || stacked[1].length !== 1) {
   throw new Error(
-    `zs should move the active tab too, leaving 1 tab in each pane, got ` +
+    `zs should move the active tab too, leaving the source's other 2 above and 1 below, got ` +
       `${JSON.stringify(stacked)}.`,
   );
 }
@@ -379,6 +426,15 @@ if (!landedOn.some((title) => title.includes('crosscheck'))) {
 await chord('z', 'c', 'close', 2);
 await chord('z', 'c', 'close', 1);
 await page.waitForTimeout(150);
+// IN THE OTHER PROJECT, because A11.1 makes a single-tab pane in `factory`
+// impossible — it holds three sessions and every one of them is a tab. `vam`
+// has exactly one session, which is the only shape this case can be built
+// from now, and it is also the sharpest form of the question: an "every
+// session is a tab" rule and an "empty pane is a legitimate state" rule could
+// contradict each other here, and do not, because the split MOVES the tab and
+// leaves nothing without a pane to adopt.
+await page.locator('[data-session-row="vam-build-1"]').click();
+await page.waitForTimeout(200);
 const beforeEmptying = await tabsInPane(0);
 console.log('one pane, before emptying it:', beforeEmptying);
 if (beforeEmptying.length !== 1) {
@@ -401,6 +457,20 @@ if (!emptiedText.includes('no sessions open')) {
   throw new Error(
     `the emptied pane draws "${emptiedText}" — it must stay on screen and say what to do, ` +
       'not sit blank and not be closed.',
+  );
+}
+// And it STAYS empty with the keyboard in it: `zw` back into the pane the
+// split emptied must not be a cue to refill it, or the split would undo
+// itself under whoever made it.
+await chord('z', 'w', 'back into the emptied pane', 2);
+const stillEmpty = await tabsInPane(0);
+const acrossPanes = [...(await tabsInPane(0)), ...(await tabsInPane(1))];
+console.log('with the keyboard back in the emptied pane:', stillEmpty, '| all:', acrossPanes);
+if (stillEmpty.length !== 0 || acrossPanes.length !== 1) {
+  throw new Error(
+    `the pane a split emptied was refilled once the keyboard returned to it ` +
+      `(${JSON.stringify(stillEmpty)}, ${acrossPanes.length} tab(s) in all). An empty pane is a ` +
+      'legitimate state; the invariant only adopts sessions NO pane holds.',
   );
 }
 await page.screenshot({ path: `${outDir}/split-empties-source-pane.png` });

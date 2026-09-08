@@ -175,8 +175,13 @@ describe('keyboard: zs / zv split the focused pane, zc closes it, zw/zW move bet
     // session is in the new pane, and the pane it came from is empty and says
     // so rather than disappearing.
     render(<Canvas model={MODEL} />);
+    // TWICE. A11.1 gives pane-1 both of alpha's sessions, so the first split
+    // leaves it holding the other one; the pane the SECOND split empties is
+    // the one this case is about, and emptying it needs a pane down to a
+    // single tab.
     pressChord('z', 'v');
-    const [first, second] = splitPanes();
+    pressChord('z', 'v');
+    const [, first, second] = splitPanes();
     // Empty means it holds no session, not that it is a blank rectangle: the
     // strip says so, once, and the composer is WITHDRAWN.
     //

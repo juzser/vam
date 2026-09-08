@@ -450,3 +450,52 @@ export function restoreLayout(
   }
   return { tree: setPaneSession(pruned, target.id, sessionId), paneId: target.id };
 }
+
+/**
+ * EVERY SESSION OF A PROJECT IS A TAB OF EXACTLY ONE PANE — the membership
+ * half of it. Every id in `sessionIds` that NO pane holds joins
+ * `targetPaneId`; every id some pane already holds is left exactly where it
+ * is.
+ *
+ * A11.1, the operator's answer to how many of a project's sessions should be
+ * tabs: "all of them, always". PR 263 built per-pane strips and narrowed it
+ * to "every session the pane opened", which is how a project with two
+ * sessions came to open showing one tab. Adopting only what nothing holds is
+ * what lets that rule and PR 268's — a session lives in exactly ONE pane —
+ * be true together: a `zv` MOVES a tab, so it orphans nothing, so the pane
+ * it deliberately emptied stays empty rather than being refilled from under
+ * the split that just made it.
+ *
+ * Appended, never sorted — `Leaf`'s rule, and the strip reads
+ * `orderedPaneTabs` for what the operator actually sees. The tab in FRONT is
+ * left alone: adopting is not a reason to move the keyboard off what it was
+ * pointed at.
+ *
+ * The one place this file's "a lookup that misses returns the input
+ * unchanged" contract would be wrong: a stale `targetPaneId` would silently
+ * leave sessions with no tab anywhere, which is the bug, not a defence
+ * against it. So a target nothing holds falls back to the first leaf — there
+ * is always at least one — and the adoption still happens. Returns the SAME
+ * tree when there is nothing to adopt, so the effect that calls it on every
+ * model refresh cannot churn the render.
+ */
+export function adoptOrphans(
+  tree: SplitTree,
+  sessionIds: readonly string[],
+  targetPaneId: string,
+): SplitTree {
+  const all = leaves(tree);
+  const held = new Set(all.flatMap((leaf) => leaf.sessionIds));
+  const orphans = sessionIds.filter((id) => !held.has(id));
+  if (orphans.length === 0) {
+    return tree;
+  }
+  const target = findLeaf(tree, targetPaneId) ?? all[0];
+  if (target === undefined) {
+    return tree;
+  }
+  return mapLeaf(tree, target.id, (leaf) => ({
+    ...leaf,
+    sessionIds: [...leaf.sessionIds, ...orphans],
+  }));
+}
