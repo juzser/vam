@@ -874,32 +874,23 @@ describe('the composer is multiline, and honest about what its button does', () 
   });
 });
 
-describe('the row under the composer is the mockup’s mode row', () => {
-  it('replaces the slash tags with mode pills', () => {
+/**
+ * RETIRED (the mode control moved into the prompt block, as one icon):
+ *   - 'replaces the slash tags with mode pills' — there are no pills to
+ *     count; the icon shows the CURRENT mode only, pinned in
+ *     `DetailPanel.mode-icon.test.tsx`.
+ *   - 'advertises the chord now that one is bound, at the right-hand end' —
+ *     the resting caption is gone from the DOM by design (it cost width for a
+ *     sentence nobody reads) and now lives in the icon's accessible name,
+ *     asserted there. What that test really guarded — the chord being NAMED
+ *     somewhere a person can find it — survives in the new file.
+ * The one assertion that was about neither is kept below.
+ */
+describe('the slash tags the mode control replaced are still gone', () => {
+  it('draws no /diff placeholder under the composer', () => {
     draw();
-    const row = q<HTMLElement>('[data-mode-row]');
-    expect(row).not.toBeNull();
-    expect(all('[data-mode-pill]').map((el) => el.textContent)).toEqual(['Auto', 'Manual', 'Plan']);
-    // The slash tags this row replaced.
-    expect(row?.textContent).not.toContain('/diff');
     expect(document.querySelector('[data-placeholder="slash-diff"]')).toBeNull();
-  });
-
-  it('advertises the chord now that one is bound, at the right-hand end', () => {
-    // THE CAPTION CAME BACK, on the terms its own deletion set: it went for
-    // naming a chord no table answered to, under a note saying a real binding
-    // may bring it back and the caption alone may not. The binding is the
-    // prompt box's Shift+Tab, which presses the session's own chord in the
-    // pane vam started for it.
-    draw();
-    const tip = q<HTMLElement>('[data-mode-cycle]');
-    expect(tip).not.toBeNull();
-    expect(tip?.textContent).toContain('cycle mode');
-    // On the RIGHT, as the mockup draws it: pushed there by `ml-auto` and
-    // last in the row, which is the only way "on the right" is checkable
-    // without a layout engine.
-    expect(tip?.className).toContain('ml-auto');
-    expect(q<HTMLElement>('[data-mode-row]')?.lastElementChild).toBe(tip);
+    expect(q<HTMLElement>('[data-composer-bar]')?.textContent).not.toContain('/diff');
   });
 });
 
@@ -912,7 +903,7 @@ describe('the row under the composer is the mockup’s mode row', () => {
  * is a pane surface at all. ABSENT, NOT DISABLED -- a dimmed switcher still
  * says a mode is choosable here, which is what the row went for once already.
  */
-describe('the mode row is drawn only where a mode can actually be chosen', () => {
+describe('the mode control is drawn only where a mode can actually be chosen', () => {
   const withBridge = (send: (...args: unknown[]) => Promise<PaneSendResult>) => {
     Object.defineProperty(window, 'api', {
       configurable: true,
@@ -935,8 +926,8 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
 
   it('hides the whole row for a session vam did not start', () => {
     draw({ entry: { project: PROJECT, session: { ...SESSION, vamControlled: false } } });
-    expect(q('[data-mode-row]')).toBeNull();
-    expect(q('[data-mode-pill]')).toBeNull();
+    expect(q('[data-mode-toggle]')).toBeNull();
+    expect(q('[data-mode-picker]')).toBeNull();
     expect(q('[data-mode-cycle]')).toBeNull();
   });
 
@@ -946,18 +937,20 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
     // false one.
     const { vamControlled: _dropped, ...unowned } = SESSION;
     draw({ entry: { project: PROJECT, session: unowned } });
-    expect(q('[data-mode-row]')).toBeNull();
+    expect(q('[data-mode-toggle]')).toBeNull();
   });
 
   it('hides it where the source has no terminal surface at all', () => {
     draw({ terminal: false });
-    expect(q('[data-mode-row]')).toBeNull();
+    expect(q('[data-mode-toggle]')).toBeNull();
   });
 
   it('draws it for a session vam started, on a source that has a terminal', () => {
     draw({ terminal: true });
-    expect(q('[data-mode-row]')).not.toBeNull();
-    expect(all('[data-mode-pill]')).toHaveLength(3);
+    expect(q('[data-mode-toggle]')).not.toBeNull();
+    // ONE control, and all three modes behind it -- see
+    // `DetailPanel.mode-icon.test.tsx` for the popover itself.
+    expect(all('[data-mode-toggle]')).toHaveLength(1);
   });
 
   it('presses the session’s own Shift-Tab, and does not submit the draft', async () => {
@@ -1032,13 +1025,13 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
         }),
     );
     draw();
-    const resting = q<HTMLElement>('[data-mode-cycle]')?.textContent;
+    // Nothing at rest: the caption exists only while it has something to say.
+    expect(q('[data-mode-cycle]')).toBeNull();
     await press(true);
     // NOT resolved yet: this is the state the operator sees while three tmux
     // spawns at ten seconds apiece are still out.
     const inFlight = q<HTMLElement>('[data-mode-cycle]');
     expect(inFlight?.getAttribute('data-mode-cycle-state')).toBe('busy');
-    expect(inFlight?.textContent).not.toBe(resting);
     expect(inFlight?.textContent).toContain('sending');
     expect(q('[data-mode-refusal]')).toBeNull();
     await act(async () => {
@@ -1050,11 +1043,10 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
   it('reports the delivery on success, and claims only what vam knows', async () => {
     withBridge(async () => 'sent');
     draw();
-    const resting = q<HTMLElement>('[data-mode-cycle]')?.textContent;
+    expect(q('[data-mode-cycle]')).toBeNull();
     await press(true);
     const said = q<HTMLElement>('[data-mode-cycle]');
     expect(said?.getAttribute('data-mode-cycle-state')).toBe('sent');
-    expect(said?.textContent).not.toBe(resting);
     expect(said?.textContent).toContain('sent');
     // WHAT IT MAY NOT SAY: vam presses a key into the pane and never reads
     // back which mode resulted, so the delivery is the only true claim here.
@@ -1099,9 +1091,9 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
     act(() => {
       rerender({ entry: { project: PROJECT, session: { ...SESSION, id: 's2', title: 'Other' } } });
     });
-    const said = q<HTMLElement>('[data-mode-cycle]');
-    expect(said?.getAttribute('data-mode-cycle-state')).toBe('resting');
-    expect(said?.textContent).toContain('cycle mode');
+    // GONE, not reset to a resting caption: the note is drawn only when it
+    // has something to say, so "dropped" is now "absent from the document".
+    expect(q('[data-mode-cycle]')).toBeNull();
   });
 
   it('does not land A’s late answer on the session that replaced it', async () => {
@@ -1121,9 +1113,7 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
       land('refused');
       await Promise.resolve();
     });
-    expect(q<HTMLElement>('[data-mode-cycle]')?.getAttribute('data-mode-cycle-state')).toBe(
-      'resting',
-    );
+    expect(q('[data-mode-cycle]')).toBeNull();
   });
 
   it('says so when there is no bridge to press the key with', async () => {
@@ -1748,12 +1738,19 @@ describe('the out region offers the two jumps that would do something', () => {
  * control that only moved vam's own highlight would look like it worked and
  * do nothing.
  */
-describe('the mode pills select, and what they select gets recorded', () => {
-  const pill = (name: string) => q<HTMLButtonElement>(`[data-mode-pill="${name}"]`);
+describe('the mode control selects, and what it selects gets recorded', () => {
+  /** Open the popover -- the icon shows only the current mode until you do. */
+  const open = () => act(() => q<HTMLButtonElement>('[data-mode-toggle]')?.click());
+  /** One of the three options, with the popover already open. */
+  const pill = (name: string) => {
+    if (q('[data-mode-picker]') === null) open();
+    return q<HTMLButtonElement>(`[data-mode-option="${name}"]`);
+  };
 
   it('writes the chosen mode into the draft as a leading line', () => {
     const seen: string[] = [];
     draw({ draft: 'ship it', onDraftChange: (next) => seen.push(next) });
+    open();
     act(() => {
       pill('plan')?.click();
     });
@@ -1763,6 +1760,7 @@ describe('the mode pills select, and what they select gets recorded', () => {
   it('clears the line when the default mode is chosen, rather than writing "unchanged"', () => {
     const seen: string[] = [];
     draw({ draft: 'mode: Plan\nship it', onDraftChange: (next) => seen.push(next) });
+    open();
     act(() => {
       pill('auto')?.click();
     });
@@ -1771,13 +1769,13 @@ describe('the mode pills select, and what they select gets recorded', () => {
 
   it('shows the selection from the draft, not from a copy of it', () => {
     draw({ draft: 'mode: Manual\nship it' });
-    expect(pill('manual')?.getAttribute('aria-pressed')).toBe('true');
-    expect(pill('auto')?.getAttribute('aria-pressed')).toBe('false');
+    expect(pill('manual')?.getAttribute('aria-selected')).toBe('true');
+    expect(pill('auto')?.getAttribute('aria-selected')).toBe('false');
   });
 
   it('reads Auto for a draft with no mode line at all', () => {
     draw({ draft: 'ship it' });
-    expect(pill('auto')?.getAttribute('aria-pressed')).toBe('true');
+    expect(pill('auto')?.getAttribute('aria-selected')).toBe('true');
   });
 
   it('lets a model request and a mode request coexist', () => {
@@ -1814,7 +1812,7 @@ describe('the empty tabs carry no tooltip, and the other notes stay', () => {
     // The three the operator asked to KEEP.
     expect(q<HTMLElement>('[data-attach]')?.getAttribute('data-note')).not.toBeNull();
     expect(q<HTMLElement>('[data-model-request]')?.getAttribute('data-note')).not.toBeNull();
-    expect(q<HTMLElement>('[data-mode-row] [data-note]')).not.toBeNull();
+    expect(q<HTMLElement>('[data-mode-toggle]')?.getAttribute('data-note')).not.toBeNull();
   });
 });
 
@@ -3290,7 +3288,7 @@ describe('the composer is hidden while the Terminal tab is open', () => {
     withBridge();
     draw();
     expect(q('[data-prompt-box]')).not.toBeNull();
-    expect(q('[data-mode-row]')).not.toBeNull();
+    expect(q('[data-mode-toggle]')).not.toBeNull();
     expect(q('[data-attach]')).not.toBeNull();
     expect(q('[data-model-request]')).not.toBeNull();
   });
@@ -3307,7 +3305,7 @@ describe('the composer is hidden while the Terminal tab is open', () => {
     });
     expect(q('[data-terminal]')).not.toBeNull();
     expect(q('[data-prompt-box]')).toBeNull();
-    expect(q('[data-mode-row]')).toBeNull();
+    expect(q('[data-mode-toggle]')).toBeNull();
     expect(q('[data-attach]')).toBeNull();
     expect(q('[data-model-request]')).toBeNull();
     expect(q('textarea')).toBeNull();
@@ -3382,11 +3380,17 @@ describe('the +1px type bump reaches everything in this pane except out', () => 
    */
   const EXPECTED_SIZE_COUNTS: Readonly<Record<string, number>> = {
     '9': 1,
-    '10.5': 9,
+    // -1: the mode row carried two 10.5px captions (`MODE` and the cycle
+    // note); the note kept its size and its home in the prompt block, the
+    // label did not survive the move to an icon.
+    '10.5': 8,
     '11': 14,
-    '11.5': 11,
-    '12': 15,
-    '12.5': 6,
+    // -1: `WaitingNote`'s remedy line, removed with the notice.
+    '11.5': 10,
+    // +1: the mode popover's option rows, at the provider popover's own size.
+    '12': 16,
+    // -2: the three mode pills (one class) and `WaitingNote`'s cause line.
+    '12.5': 4,
     '13': 1,
     '13.5': 1,
   };

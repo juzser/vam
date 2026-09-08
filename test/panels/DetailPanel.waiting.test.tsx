@@ -1,27 +1,40 @@
 // @vitest-environment happy-dom
 
 /**
- * A session that is waiting on a person, and vam is not always able to answer.
+ * A session that is waiting on a person — and what the pane says about it now
+ * that the notice above the prompt input is gone.
  *
- * WHY THIS IS NOT THE QUESTION CARD. The card is drawn from `AskUserQuestion`
- * records in the transcript. The commonest thing a session actually waits on
- * -- a tool-approval prompt -- writes NO transcript record while it is open,
- * so `questions` is empty and the card is absent, and until now the pane drew
- * nothing whatever for a session that was stuck. This block is drawn from the
- * session's own per-process file instead, which is the only surface that says
- * so.
+ * THE NOTICE WAS REMOVED at the operator's request: `WaitingNote`, the amber
+ * `waiting on you — <cause>` block with its reachability line, drew above the
+ * composer on every waiting session and is deleted, component included.
  *
- * THE ASYMMETRY IS THE DESIGN. vam can SEE any session waiting; it can only
- * TYPE INTO one it started. A session it cannot reach must say so and say why,
- * rather than looking identical to one it can drive.
+ * RETIRED WITH IT (each asserted the removed element, and would now pass by
+ * asserting nothing):
+ *   - 'is absent for a session nothing says is waiting on a person'
+ *   - 'is drawn for a session with no question at all -- which is the whole case'
+ *   - 'prints a cause it has never seen rather than dropping the session'
+ *   - 'says the session did not name a cause, rather than inventing one'
+ *   - 'offers the terminal only for a session vam started'
+ *   - 'names the reason it cannot answer one vam did not start'
+ *   - 'does not claim it cannot reach a session it never got to ask about'
+ *   - 'stands down once a card with an open step is drawn, delivering or not'
+ *   - 'stands down for the very same open card when it cannot deliver'
+ * The last two pinned the note STANDING DOWN under an open card; with no note
+ * to stand down they are true of an empty document.
+ *
+ * WHAT IS LEFT, and is still this pane's own: the QuestionCard's amber, which
+ * is the pane's remaining "somebody is blocked on you" colour, and the rule
+ * that a waiting session with no question draws no empty bar where the notice
+ * used to be. Outside this pane a waiting session is still visible in the
+ * sidebar row (`data-row-needs-you`), its group count, the command palette and
+ * the phone list — what is gone with the notice is the CAUSE and the
+ * reachability sentence, which nothing else has ever drawn.
  */
-
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
-import type { PromptView } from '../../src/shared/answer.js';
 
 const SESSION: Session = {
   id: 's1',
@@ -60,93 +73,25 @@ function draw(over: Partial<Session> = {}, props: Partial<DetailPanelProps> = {}
 }
 
 const note = () => document.querySelector<HTMLElement>('[data-session-waiting]');
-const text = () => note()?.textContent ?? '';
 const card = () => document.querySelector<HTMLElement>('[data-question]');
-
-const PROMPT: PromptView = {
-  kind: 'prompt',
-  prompt: { title: 'Do you want to run this command?', options: ['Yes', 'No'] },
-};
 
 afterEach(cleanup);
 
-describe('the waiting note', () => {
-  it('is absent for a session nothing says is waiting on a person', () => {
-    // `status: waiting` is NOT this fact: it covers every session that is not
-    // running, most of which are sitting idle with nobody blocked.
-    draw();
+describe('the removed waiting notice', () => {
+  it('draws no waiting note for a session that is waiting on a person', () => {
+    draw({ waitingFor: 'permission prompt', vamControlled: true, questions: [] });
     expect(note()).toBeNull();
   });
 
-  it('is drawn for a session with no question at all -- which is the whole case', () => {
-    draw({ waitingFor: 'permission prompt', questions: [] });
-    expect(note()).not.toBeNull();
-    expect(text()).toContain('permission prompt');
+  it('leaves no empty bar where the notice used to be', () => {
+    // The block around the notice was drawn on `waitingFor !== undefined`
+    // too. Removing only the notice would have left 25px of bordered nothing
+    // on every waiting session -- the seam without the thing it seams.
+    draw({ waitingFor: 'permission prompt', vamControlled: true, questions: [] });
+    expect(document.querySelector('[data-question-bar]')).toBeNull();
   });
 
-  it('prints a cause it has never seen rather than dropping the session', () => {
-    // Two values were observed on one machine. Anything else -- plan approval,
-    // whatever the CLI adds next -- still means the operator is being waited
-    // on, and the CLI's own word beats an empty pane.
-    draw({ waitingFor: 'plan approval' });
-    expect(text()).toContain('plan approval');
-  });
-
-  it('says the session did not name a cause, rather than inventing one', () => {
-    draw({ waitingFor: null });
-    expect(note()).not.toBeNull();
-    expect(text()).not.toContain('null');
-    expect(text().toLowerCase()).toContain('did not say');
-  });
-
-  it('offers the terminal only for a session vam started', () => {
-    draw({ waitingFor: 'permission prompt', vamControlled: true });
-    expect(note()?.dataset['waitingReach']).toBe('answerable');
-    expect(text()).toContain('Terminal');
-  });
-
-  it('names the reason it cannot answer one vam did not start', () => {
-    draw({ waitingFor: 'permission prompt', vamControlled: false });
-    expect(note()?.dataset['waitingReach']).toBe('unreachable');
-    // A bare "cannot" is the refusal this codebase keeps having to fix.
-    expect(text()).toContain('did not start');
-  });
-
-  it('does not claim it cannot reach a session it never got to ask about', () => {
-    // vamControlled ABSENT is "vam could not ask tmux", which is not "vam did
-    // not start this". Collapsing the two states is how a pane starts telling
-    // the operator a fact it never established.
-    draw({ waitingFor: 'permission prompt' });
-    expect(note()?.dataset['waitingReach']).toBe('unknown');
-    expect(text()).not.toContain('did not start');
-  });
-
-  it('stands down once a card with an open step is drawn, delivering or not (approval case, pull request 211)', async () => {
-    // The old pairing drew BOTH: the note's remedy line pointed at the
-    // Terminal tab while the card's own `data-question-note` stated a
-    // DIFFERENT route ("type your choice in the box below") inches below
-    // it -- two sentences, two routes, on one ask
-    // (`permission-prompt-desktop.png`). An open card IS the waiting
-    // surface; it carries a route sentence of its own either way.
-    draw(
-      { waitingFor: 'permission prompt', vamControlled: true, questions: [] },
-      {
-        delivers: true,
-        prompt: async () => PROMPT,
-        answer: async () => ({ kind: 'sent', answer: 'Yes' }),
-      },
-    );
-    await waitFor(() => expect(card()).not.toBeNull());
-    expect(note()).toBeNull();
-    expect(card()?.dataset.questionWaiting).toBe('true');
-  });
-
-  it('stands down for the very same open card when it cannot deliver -- the demo default', () => {
-    // The demo fixture (`?demo=1`) never delivers, so this is the state
-    // `permission-prompt-desktop.png` itself was taken from: `onAnswer` is
-    // `null`, but the card is still open, still carries the ask and its own
-    // route sentence ("vam cannot answer this for you ... type your choice
-    // in the box below"). Suppression keys on `open`, not on `onAnswer`.
+  it('still draws the bar when there is a question to put in it', () => {
     draw({
       waitingFor: 'permission prompt',
       vamControlled: true,
@@ -161,11 +106,12 @@ describe('the waiting note', () => {
         },
       ],
     });
+    expect(document.querySelector('[data-question-bar]')).not.toBeNull();
     expect(card()).not.toBeNull();
-    expect(note()).toBeNull();
-    expect(card()?.dataset.questionWaiting).toBe('true');
   });
+});
 
+describe('the question card keeps the pane’s remaining waiting colour', () => {
   it('does not spend the amber on a fully-resolved set nothing is blocked on', () => {
     // `onAnswer !== null` alone is not "live" -- a resolved set keeps a
     // delivering, vam-controlled card long after its last step settled, and
