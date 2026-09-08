@@ -3484,9 +3484,12 @@ export function DetailPanel(props: DetailPanelProps) {
                     HERE, not above the composer: the bordered "waiting on you"
                     notice was removed at the operator's request and is not
                     coming back. This is the same fact in the space this line
-                    already spends on `activity`, and the two cannot crowd each
-                    other -- `activity` is drawn only while the session is
-                    RUNNING, and a cause exists only while it is not.
+                    already spends on `activity`, and it can sit beside one:
+                    `activity` is drawn for the newest turn whatever the status
+                    is, so a session whose last known action is still on record
+                    shows both, each behind its own middot -- what it was doing,
+                    then what stopped it. Reading order, and the cause last,
+                    because that is the half the operator came for.
                     VERBATIM, because the observed causes are a sample of an
                     open set (`session-status.ts`): a value vam has never seen
                     is still the truest thing anyone can say about that row. */}
