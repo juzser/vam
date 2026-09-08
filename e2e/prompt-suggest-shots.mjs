@@ -58,9 +58,27 @@ if (!(placeholder ?? '').includes('Tab')) {
 await page.screenshot({ path: `${outDir}/prompt-suggestion-offered.png` });
 console.log(`${outDir}/prompt-suggestion-offered.png`);
 
+/**
+ * Pick an option WITH A MOUSE, through the fold.
+ *
+ * A pointer pick on a single-select question now folds the option list away
+ * behind its own mark (operator request: "after choosing an option, shouldn't
+ * the option panel hide?"), so a second pick goes through `change` first —
+ * which is exactly the route a person has, and worth driving here because the
+ * fold must never be a dead end.
+ */
+async function pick(index) {
+  const back = page.locator('[data-question-expand]');
+  if ((await back.count()) > 0) {
+    await back.click();
+    await page.waitForTimeout(80);
+  }
+  await page.locator('[data-question-option]').nth(index).click();
+  await page.waitForTimeout(120);
+}
+
 // The mark moves the offer: picking the third option must re-aim it.
-await page.locator('[data-question-option]').nth(2).click();
-await page.waitForTimeout(120);
+await pick(2);
 const remarked = await boxEl.getAttribute('data-prompt-suggestion');
 if (remarked !== 'Web socket') {
   fail(`after marking the third option the box offers "${remarked}", expected "Web socket".`);
@@ -69,8 +87,13 @@ if (remarked !== 'Web socket') {
 // Back to the first option, then Tab. A real browser press, not a synthetic
 // keydown: Tab is also the browser's own focus move, and the whole point of
 // the binding is that it is intercepted HERE and only while an offer stands.
-await page.locator('[data-question-option]').nth(0).click();
-await page.waitForTimeout(120);
+await pick(0);
+// AND THE FOLD IS HONEST: the mark is still named, and the card still says a
+// mark is not a delivery. A list that vanished silently would read as sent.
+const marked = await page.locator('[data-question-marked]').innerText();
+if (!marked.includes('Server-sent events') || !marked.includes('not sent')) {
+  fail(`the folded row reads "${marked}" — it must name the mark and deny the delivery.`);
+}
 await boxEl.click();
 await page.keyboard.press('Tab');
 await page.waitForTimeout(150);
