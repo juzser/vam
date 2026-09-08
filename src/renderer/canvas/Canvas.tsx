@@ -38,6 +38,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -607,6 +608,76 @@ function TabStrip({
   ) => (event: ReactDragEvent<HTMLButtonElement>) => void;
   readonly onTabDragEnd?: () => void;
 }) {
+  /** STATE, not `useRef`: until the strip has tabs it renders a placeholder
+   *  div with no scroller at all, so a ref read by an effect that runs once
+   *  on mount is null for good and the wheel listener below is never
+   *  attached. State re-runs both effects when the real scroller appears. */
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
+  /** Is a pointer down on the strip? A press in progress PINS it: scrolling
+   *  out from under a stationary pointer moves the target of the click that
+   *  pointer is in the middle of making. A ref, not state — nothing renders
+   *  from it, and the layout effect must read it in the same commit. */
+  const pressed = useRef(false);
+
+  useEffect(() => {
+    // On the window: a pointer released outside the strip (the common case)
+    // still ends the press, and a `pressed` stuck true freezes it for good.
+    const release = () => {
+      pressed.current = false;
+    };
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
+    return () => {
+      window.removeEventListener('pointerup', release);
+      window.removeEventListener('pointercancel', release);
+    };
+  }, []);
+
+  /**
+   * THE ACTIVE TAB IS ON SCREEN. Every session of the active project is a tab
+   * of one pane, appended and never sorted, so a project with a dozen
+   * sessions overflows a split pane on first paint — and every route that
+   * moves the active tab (`Mod-<digit>`, `h`/`l`, a sidebar click through
+   * `paneHolding`, `restoreLayout`) could land on a tab scrolled out of view
+   * while the strip stayed put. The comment on the scroller below reasons
+   * carefully about where the `+` goes when the tabs overflow and never about
+   * where the ACTIVE TAB goes; this is that gap.
+   *
+   * A LAYOUT effect, so the strip is in place at the paint that made the tab
+   * active rather than jumping a frame later. `nearest` ON BOTH AXES is one
+   * call for both orientations: it moves the minimum on whichever axis has
+   * slack (`inline` horizontal, `block` for the `flex-col` strip) and leaves
+   * a tab already in view where it is.
+   */
+  useLayoutEffect(() => {
+    if (activeId === null || pressed.current) return;
+    scroller
+      ?.querySelector('[data-session-tab][data-active="true"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [activeId, scroller]);
+
+  /**
+   * A VERTICAL WHEEL SCROLLS THE HORIZONTAL STRIP. A scroller with slack on
+   * one axis only is unreachable with an ordinary mouse or a trackpad flick,
+   * both of which send `deltaY`, and the strip draws no scrollbar to drag.
+   *
+   * A native listener rather than `onWheel`: React registers `wheel` at the
+   * root as PASSIVE, where `preventDefault` is ignored, and without it the
+   * page takes the scroll as well. Only when the strip has somewhere to go —
+   * otherwise a wheel over a strip that fits swallows the page's own scroll.
+   */
+  useEffect(() => {
+    if (scroller === null || orientation !== 'horizontal') return;
+    const onWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      if (scroller.scrollWidth <= scroller.clientWidth) return;
+      scroller.scrollLeft += event.deltaY;
+      event.preventDefault();
+    };
+    scroller.addEventListener('wheel', onWheel, { passive: false });
+    return () => scroller.removeEventListener('wheel', onWheel);
+  }, [orientation, scroller]);
+
   if (tabs.length === 0) {
     return (
       <div
@@ -622,6 +693,10 @@ function TabStrip({
     <div
       data-tab-strip
       data-orientation={orientation}
+      ref={setScroller}
+      onPointerDown={() => {
+        pressed.current = true;
+      }}
       /*
         NOT `flex-1` on the horizontal strip any more (operator: "put the new
         tab button next to the last tab, instead of on the right"). `shrink`

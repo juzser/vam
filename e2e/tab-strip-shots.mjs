@@ -237,4 +237,119 @@ await page.screenshot({ path: `${outDir}/tab-strip-two-panes.png` });
 console.log(`${outDir}/tab-strip-two-panes.png`);
 console.log(`${outDir}/tab-strip-marks.png`);
 
+/**
+ * --- 6-8. THE OVERFLOWING STRIP, on a page of its own.
+ *
+ * HOW OVERFLOW IS PRODUCED: a narrow window, not a fixture. The demo's
+ * largest project has three sessions, ~412px of tabs; at a 620px viewport the
+ * pane's strip is ~310px wide, so the last tab is off its end. 620 is
+ * deliberately above `PHONE_MAX_WIDTH` (519) — under it this would be
+ * measuring the phone shell, which draws no strip. And every check below is
+ * preceded by `scrollWidth > clientWidth`: a strip that fits sits at 0 and
+ * passes every position assertion trivially.
+ */
+const narrow = await browser.newPage({ viewport: { width: 620, height: 620 } });
+narrow.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+await narrow.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+await narrow.waitForSelector('[data-session-tab]');
+await narrow.waitForTimeout(250);
+
+const slack = await narrow.evaluate(() => {
+  const s = document.querySelector('[data-tab-strip]');
+  return { scrollWidth: s.scrollWidth, clientWidth: s.clientWidth, tabs: s.querySelectorAll('[data-session-tab]').length };
+});
+console.log(`narrow strip: ${slack.tabs} tabs, ${slack.scrollWidth}px of them in ${slack.clientWidth}px`);
+if (slack.scrollWidth <= slack.clientWidth + 1) {
+  throw new Error(
+    `the strip did not overflow at this viewport (${slack.scrollWidth} <= ${slack.clientWidth}); ` +
+      `every check below would pass on a strip that never had to scroll.`,
+  );
+}
+
+/** Where the active tab sits relative to the box that is supposed to show it. */
+const readActive = () =>
+  narrow.evaluate(() => {
+    const s = document.querySelector('[data-tab-strip]');
+    const tab = s.querySelector('[data-session-tab][data-active="true"]');
+    if (tab === null) return null;
+    const sr = s.getBoundingClientRect();
+    const tr = tab.getBoundingClientRect();
+    return {
+      title: tab.querySelector('[data-tab-select]').textContent,
+      scrollLeft: s.scrollLeft,
+      leftOfView: sr.left - tr.left,
+      rightOfView: tr.right - sr.right,
+    };
+  });
+
+// --- 6. WALK TO THE LAST TAB: `l` is next-tab, two presses from the first of
+//        three lands furthest into the overflow.
+await narrow.keyboard.press('l');
+await narrow.keyboard.press('l');
+await narrow.waitForTimeout(250);
+const onLast = await readActive();
+console.log('active tab after two l:', JSON.stringify(onLast));
+if (onLast === null) throw new Error('no active tab in the narrow strip');
+if (onLast.scrollLeft <= 0) {
+  throw new Error(
+    `the strip never scrolled (scrollLeft ${onLast.scrollLeft}) while the active tab moved ` +
+      `into the overflow — the operator's only cue for which session is on screen is off it.`,
+  );
+}
+// One pixel of tolerance for sub-pixel layout and no more.
+if (onLast.leftOfView > 1 || onLast.rightOfView > 1) {
+  throw new Error(
+    `the active tab is outside the strip's own box (${Math.round(onLast.leftOfView)}px past its ` +
+      `left, ${Math.round(onLast.rightOfView)}px past its right)`,
+  );
+}
+await narrow.screenshot({ path: `${outDir}/tab-strip-overflow.png` });
+console.log(`${outDir}/tab-strip-overflow.png`);
+
+// --- 6b. A HELD POINTER PINS THE STRIP: scrolling out from under a
+//         stationary pointer moves the target of the click being made.
+await narrow.keyboard.press('h');
+await narrow.keyboard.press('h');
+await narrow.waitForTimeout(200);
+const atStart = await readActive();
+if (atStart.scrollLeft !== 0) throw new Error(`expected the strip back at 0, got ${atStart.scrollLeft}`);
+const stripBox = await narrow.locator('[data-tab-strip]').boundingBox();
+await narrow.mouse.move(stripBox.x + 12, stripBox.y + stripBox.height / 2);
+await narrow.mouse.down();
+await narrow.keyboard.press('l');
+await narrow.keyboard.press('l');
+await narrow.waitForTimeout(200);
+const held = await readActive();
+console.log('active tab while a pointer is held:', JSON.stringify(held));
+if (held.scrollLeft !== 0) {
+  throw new Error(
+    `the strip moved ${held.scrollLeft}px under a pointer that was still down — the click in ` +
+      `progress would land on a different tab than the one aimed at.`,
+  );
+}
+await narrow.mouse.up();
+await narrow.waitForTimeout(200);
+
+// --- 7. A VERTICAL WHEEL SCROLLS A HORIZONTAL-ONLY STRIP. Without it an
+//        ordinary mouse cannot reach an overflowed tab at all: the strip
+//        draws no scrollbar to drag. Put back to its start by hand, not by
+//        another key walk — the wheel is what is under test, and a start
+//        position inherited from the section above is not a known one.
+await narrow.evaluate(() => {
+  document.querySelector('[data-tab-strip]').scrollLeft = 0;
+});
+const beforeWheel = await narrow.evaluate(() => document.querySelector('[data-tab-strip]').scrollLeft);
+if (beforeWheel !== 0) throw new Error(`could not put the strip back at 0 (${beforeWheel})`);
+await narrow.mouse.move(stripBox.x + stripBox.width / 2, stripBox.y + stripBox.height / 2);
+await narrow.mouse.wheel(0, 200);
+await narrow.waitForTimeout(250);
+const afterWheel = await narrow.evaluate(() => document.querySelector('[data-tab-strip]').scrollLeft);
+console.log(`wheel over the strip: scrollLeft ${beforeWheel} -> ${afterWheel}`);
+if (afterWheel <= beforeWheel) {
+  throw new Error(
+    `a vertical wheel over the strip moved it from ${beforeWheel} to ${afterWheel}: a ` +
+      `horizontal-only scroller that ignores deltaY cannot be scrolled by a normal mouse.`,
+  );
+}
+
 await browser.close();
