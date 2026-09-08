@@ -59,12 +59,12 @@
 
 import {
   ArrowUp,
-  Bot,
   Box,
+  ChevronDown,
+  ChevronRight,
   ChevronsDown,
   ChevronsUp,
   CircleSlash,
-  GitCommitVertical,
   GitPullRequest,
   Hand,
   Image as ImageIcon,
@@ -73,7 +73,6 @@ import {
   Paperclip,
   Sparkles,
   SquareTerminal,
-  User,
   Users,
   X,
 } from 'lucide-react';
@@ -954,87 +953,53 @@ function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | unde
   );
 }
 
-/** A section rule: `IN ────────── you · 12m`. The mockup's own divider. */
 /**
- * A section rule: an icon, a hairline, and the section's own metadata.
+ * THE THREE BAND SEPARATORS ARE GONE (the `Rule` component with them).
  *
- * The icon replaced the words IN / OUT / PROGRESS. The mockup has no such
- * block at all — input and output are vam's own construct, because a
- * factory decision has both and the ADE design never modelled one — so
- * this follows the mockup's IDIOM rather than copying a specific glyph: it
- * labels small repeated things with an icon, not a word, and reserves letter-
- * spaced capitals for state (NEEDS YOU, RUNNING, DONE).
+ * `in`, `progress` and `out` each used to open with a rule: a coloured glyph,
+ * the region's word in letter-spaced capitals, a hairline across the pane and
+ * a meta slot on the right. The operator asked for all three to go, for the
+ * content to run out full, and for progress to condense -- the shape the
+ * Claude Code plugin for VSCode has, where the prompt and the answer read as
+ * continuous prose and the intermediate work collapses into one line you can
+ * open.
  *
- * The three glyphs are a head-and-shoulders, a commit line and a bot, measured
- * off the Response artboards in #53 — which replaced the opposing arrows vam
- * started with, so the paragraph here that still described arrows was wrong
- * and is gone. `aria-label` carries the word that was removed, and
- * `role="img"` is what makes that label announced at all — a bare <span> has
- * no implicit role and would drop it silently, which this codebase has already
- * shipped once.
+ * A separator can go; what it carried cannot. Each of the three meta slots
+ * held something real, and each has a home below:
+ *  - `in` held `you · <turn label>`, which joins the identity line that was
+ *    already directly above it (project, epic) -- one row instead of two;
+ *  - `progress` held the turns-read count and the jump `<select>`, which are
+ *    now the condensed progress line itself;
+ *  - `out` held the session's current activity and the two scroll-to-edge
+ *    buttons, which move to that same line -- the one row of chrome the
+ *    column has left, and the only place they stay reachable without a
+ *    heading to hang off.
  *
- * `tone` colours the ICON only, and only the icon. Three faint-grey headings
- * were indistinguishable at a glance, which is what the operator reported; the
- * label stays `text-ink-faint` because letter-spaced capitals are this
- * design's idiom for STATE (NEEDS YOU, RUNNING, DONE) and three coloured ones
- * would make a region heading read as a session status. The hairline and the
- * meta stay grey too: the hairline is the structure all three share and
- * colouring it would triple the pane's colour weight while adding no
- * distinction, and the meta carries VALUES (`you`, `12 turns`, the activity),
- * which are data, not a label. Colour is added to the glyph and the announced
- * label, never substituted for either — a colour-only distinction is no
- * distinction to a colour-blind operator.
+ * The words survive as screen-reader-only region names (`sr-only` spans on
+ * each section). A sighted reader still has the prompt's box, the spacing and
+ * the prose to tell the three apart; a screen-reader user had only those
+ * three words, and dropping them would trade a visual tidy-up for a real
+ * loss -- this pane's own three-states reasoning (`noAnswerNote`, model.ts)
+ * exists precisely so a region never goes silent about what it knows.
  */
-function Rule({
-  label,
-  meta,
-  icon,
-  iconLabel,
-  tone,
-}: {
-  readonly label: string;
-  /** Usually a value; `progress` puts its expand control here instead. */
-  readonly meta: ReactNode;
-  readonly icon: ReactNode;
-  /**
-   * What a screen reader says for the glyph — `you`, not `in`. It is a
-   * separate prop, and required, so that adding a section cannot ship a
-   * silent icon: `progress` had exactly that gap, drawing its glyph outside
-   * any `role="img"` and announcing nothing.
-   */
-  readonly iconLabel: string;
-  /** The section's own colour token, worn by the icon and nothing else. */
-  readonly tone: string;
-}) {
-  return (
-    <div className="flex items-center gap-[7px]">
-      <span className="flex flex-none items-center gap-[5px] text-ink-faint">
-        <span role="img" aria-label={iconLabel} className={`flex ${tone}`}>
-          {icon}
-        </span>
-        <span className="font-mono text-[10.5px] tracking-[0.12em] uppercase">{label}</span>
-      </span>
-      <span className="h-px flex-1 bg-line" />
-      <span data-rule-meta className="font-mono text-[10.5px] text-ink-faint">
-        {meta}
-      </span>
-    </div>
-  );
-}
 
 /**
- * How tall two lines of `in` are, in pixels.
+ * `in` USED TO CAP ITSELF AT TWO LINES (`IN_BODY_PX`, `IN_LEADING`,
+ * `IN_LINES`, `IN_MAX_HEIGHT`, all gone with the box that wore them).
  *
- * The operator asked for two lines of `in`, with the height it gives up going
- * to `out`. A percentage of the pane would be a promise about the window
- * instead of a promise about the text, so this is derived from the type it
- * caps: two lines of the 12px/1.55 body, plus the box's own 10px padding top
- * and bottom and its 1px border.
+ * The cap came with its own scrollbar and its own bordered panel, and that
+ * combination is what the operator was still reading as a separate block once
+ * the band labels came off: a boxed, independently scrolling prompt stacked
+ * on top of an answer is two panels however few captions it has. So the
+ * prompt is prose in the one column now -- full length, no border, no
+ * scroller -- and it stays readable while you scroll by STICKING to the top
+ * of that column instead of by reserving height forever.
+ *
+ * The pathological case is honest to name: a very long prompt now sticks at
+ * full length and can cover the pane. Capping it again would restore exactly
+ * the seam this removes, and clipping it would hide text; the operator asked
+ * for the content to run out full, so it does.
  */
-const IN_BODY_PX = 12;
-const IN_LEADING = 1.55;
-const IN_LINES = 2;
-const IN_MAX_HEIGHT = Math.round(IN_BODY_PX * IN_LEADING * IN_LINES) + 22;
 
 /**
  * `progress` used to open into a scrollable list of turns, capped to about
@@ -2099,6 +2064,14 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const canvasDecisionId = canvasDecision?.id ?? null;
   const [selectedId, setSelectedId] = useState<string | null>(canvasDecisionId);
+  /**
+   * Whether the condensed progress line is open into its list of turns.
+   * Closed by default: the intermediate work is what an operator scrolls past
+   * to read the answer, so it costs one line until it is asked for. Local to
+   * the pane, and deliberately not reset when the turn changes -- an operator
+   * walking history with the list open wants it to stay open.
+   */
+  const [progressOpen, setProgressOpen] = useState(false);
   const sessionKey = entry?.session.id ?? null;
   const sessionKeyRef = useRef(sessionKey);
   const focusNodeRef = useRef(focusNodeId);
@@ -3069,6 +3042,9 @@ export function DetailPanel(props: DetailPanelProps) {
               data-detail-block="in"
               className="sticky top-0 z-10 flex flex-none flex-col gap-1 bg-sidebar pb-1.5"
             >
+              {/* The region's name, announced and not drawn -- see the
+                  band-removal note above `IN_BODY_PX`. */}
+              <span className="sr-only">in</span>
               <div
                 data-detail-identity
                 className="flex items-center gap-[5px] font-mono text-[10.5px] text-ink-faint"
@@ -3076,28 +3052,22 @@ export function DetailPanel(props: DetailPanelProps) {
                 <span className="truncate text-ink-dim">{entry?.project.name ?? '—'}</span>
                 <span>·</span>
                 <span className="truncate">{entry?.session.epic ?? '—'}</span>
+                <span>·</span>
+                {/* `you`, and no time. `Decision` carries no timestamp, so
+                    nothing here can say when this turn happened -- and
+                    `session.age` is the session's LAST ACTIVITY, usually the
+                    agent's most recent write rather than when you typed this.
+                    Walk back a turn with `h` and the old caption went on
+                    describing the present. The session's age is on its sidebar
+                    row, where it is true. The turn's own label (the removed
+                    header's `data-detail-step` chip, informally "which round")
+                    rides beside it, since both are facts about THIS turn. This
+                    is the `in` rule's whole meta slot, one line up. */}
+                <span data-detail-turn className="truncate">
+                  {decision.label === '' ? 'you' : `you · ${decision.label}`}
+                </span>
               </div>
-              <Rule
-                label="in"
-                // `you`, and no time. `Decision` carries no timestamp, so
-                // nothing here can say when this turn happened -- and
-                // `session.age` is the session's LAST ACTIVITY, usually the
-                // agent's most recent write rather than when you typed this.
-                // Walk back a turn with `h` and the old caption went on
-                // describing the present. The session's age is on its sidebar
-                // row, where it is true. The turn's own label (the removed
-                // header's `data-detail-step` chip, informally "which round")
-                // rides beside it now, since both are facts about THIS turn.
-                meta={decision.label === '' ? 'you' : `you · ${decision.label}`}
-                iconLabel="you"
-                tone="text-rule-in"
-                icon={<User size={13} strokeWidth={1.6} />}
-              />
-              <div
-                data-detail-scroll="in"
-                style={{ maxHeight: IN_MAX_HEIGHT }}
-                className="vam-no-scrollbar min-h-0 overflow-y-auto rounded-[9px] border border-line bg-panel px-3 py-2.5"
-              >
+              <div data-detail-scroll="in" className="min-w-0">
                 <p className="whitespace-pre-wrap break-words text-[13px] text-ink-dim leading-[1.55]">
                   {decision.input}
                 </p>
@@ -3115,87 +3085,148 @@ export function DetailPanel(props: DetailPanelProps) {
                 (3,276, not 3): only the SELECTED turn's `in`/`out` is ever
                 rendered in full; every other turn costs one line of text in
                 a control the browser itself manages. */}
-            <section data-detail-block="progress" className="flex flex-none flex-col">
-              <Rule
-                label="progress"
-                meta={
-                  <span className="flex items-center gap-1.5">
-                    {/* "read", not a bare count: `source.ts` only ever opens
-                        the newest `TAIL_BYTES` of the transcript, so on a
-                        session bigger than that window this is what vam
-                        FOUND, not a provable total for the session's whole
-                        life. Trailing, not leading: "read 7 turns" is an
-                        imperative -- a command this button does not carry
-                        out -- while "7 turns read" is what it actually is, a
-                        count with its qualifier attached, the same shape as
-                        every other reading on this pane. */}
-                    <span data-progress-count>{turnsRead} turns read</span>
-                    {orderedTurns.length > 1 && (
-                      <select
-                        data-progress-jump
-                        aria-label="jump to a turn"
-                        value={decision.id}
-                        onChange={(event) => setSelectedId(event.target.value)}
-                        className="max-w-[130px] cursor-pointer truncate rounded-[var(--radius-sm)] border border-line-strong bg-panel px-1 py-0.5 font-mono text-[10.5px] text-ink-faint outline-none hover:text-ink"
-                      >
-                        {orderedTurns.map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {d.output === null ? '◌' : '✓'} {d.label}
-                          </option>
-                        ))}
-                      </select>
+            <section data-detail-block="progress" className="flex flex-none flex-col gap-1">
+              {/* Announced, not drawn -- the band-removal note above
+                  `IN_BODY_PX` carries the reasoning. */}
+              <span className="sr-only">progress</span>
+              {/* ONE LINE, the whole time. Collapsed it is a count, a picker
+                  and whatever the session is doing; open it is the same line
+                  with the picker swapped for the full list of turns. That is
+                  the VSCode plugin's own idiom for intermediate work, and it
+                  is the only chrome left between the prompt and the answer. */}
+              <div
+                data-progress-line
+                className="flex items-center gap-1.5 font-mono text-[10.5px] text-ink-faint"
+              >
+                {orderedTurns.length > 1 && (
+                  <button
+                    type="button"
+                    data-progress-expand
+                    aria-expanded={progressOpen}
+                    aria-label={progressOpen ? 'collapse the turn list' : 'expand the turn list'}
+                    onClick={() => setProgressOpen((open) => !open)}
+                    className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
+                  >
+                    {progressOpen ? (
+                      <ChevronDown size={12} strokeWidth={1.8} />
+                    ) : (
+                      <ChevronRight size={12} strokeWidth={1.8} />
                     )}
-                  </span>
-                }
-                // `turns`, not `progress`: the visible label already says
-                // progress, and a glyph that only repeats it is a word said
-                // twice. The commit line means the session's turns.
-                iconLabel="turns"
-                tone="text-rule-progress"
-                icon={<GitCommitVertical size={12} strokeWidth={1.7} />}
-              />
+                  </button>
+                )}
+                {/* "read", not a bare count: `source.ts` only ever opens the
+                    newest `TAIL_BYTES` of the transcript, so on a session
+                    bigger than that window this is what vam FOUND, not a
+                    provable total for the session's whole life. Trailing, not
+                    leading: "read 7 turns" is an imperative -- a command this
+                    line does not carry out -- while "7 turns read" is what it
+                    actually is, a count with its qualifier attached. */}
+                <span data-progress-count>{turnsRead} turns read</span>
+                {/* ONE PICKER AT A TIME. The `<select>` is the condensed form
+                    and the list below is the open one; they drive the same
+                    `setSelectedId` off the same turns, and drawing both would
+                    be two controls for one job -- which is how they come to
+                    disagree. */}
+                {!progressOpen && orderedTurns.length > 1 && (
+                  <select
+                    data-progress-jump
+                    aria-label="jump to a turn"
+                    value={decision.id}
+                    onChange={(event) => setSelectedId(event.target.value)}
+                    className="max-w-[130px] cursor-pointer truncate rounded-[var(--radius-sm)] border border-line-strong bg-panel px-1 py-0.5 font-mono text-[10.5px] text-ink-faint outline-none hover:text-ink"
+                  >
+                    {orderedTurns.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.output === null ? '◌' : '✓'} {d.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {/* `session.activity` is what the session is doing RIGHT NOW,
+                    so it belongs to the turn currently being worked and to no
+                    other -- on an older turn it described the present while
+                    the operator read the past. It used to sit in the `out`
+                    rule's meta with an em dash standing in whenever there was
+                    none; the dash was the price of a heading that had to hold
+                    its row, and with the heading gone an absent activity is
+                    simply absent. Nothing is hidden by that: the region below
+                    still says what it knows about an empty or unfinished turn
+                    (`noAnswerNote`), which is where that silence would matter. */}
+                {isNewestTurn && (entry?.session.activity ?? null) !== null && (
+                  <>
+                    {/* The line's own middot, so the count and the activity do
+                        not run together into one phrase when the picker is not
+                        between them (the one-turn case, and while the list is
+                        open). Decorative: a screen reader reads two values. */}
+                    <span aria-hidden="true">·</span>
+                    <span data-progress-activity className="min-w-0 truncate">
+                      {entry?.session.activity}
+                    </span>
+                  </>
+                )}
+                <span className="flex-1" />
+                {/* The scroll-to-edge buttons the `out` rule used to carry.
+                    Each is drawn only while it would actually move the column
+                    -- a control that scrolls nowhere is worse than no control,
+                    and that rule outlives the rule it sat on. */}
+                {jumps.above && (
+                  <button
+                    type="button"
+                    data-out-to-top
+                    aria-label="scroll out to the top"
+                    onClick={() => jumpTo('top')}
+                    className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
+                  >
+                    <ChevronsUp size={12} strokeWidth={1.8} />
+                  </button>
+                )}
+                {jumps.below && (
+                  <button
+                    type="button"
+                    data-out-to-bottom
+                    aria-label="scroll out to the bottom"
+                    onClick={() => jumpTo('bottom')}
+                    className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
+                  >
+                    <ChevronsDown size={12} strokeWidth={1.8} />
+                  </button>
+                )}
+              </div>
+              {/* At volume this costs what the `<select>` already costs: one
+                  node per turn, which the collapsed form renders as an
+                  `<option>` on every render anyway. The difference is that
+                  these are only here while the operator asked for them. */}
+              {progressOpen && (
+                <ul
+                  data-progress-turns
+                  className="vam-no-scrollbar max-h-[132px] min-h-0 overflow-y-auto"
+                >
+                  {orderedTurns.map((d) => (
+                    <li key={d.id}>
+                      <button
+                        type="button"
+                        data-progress-turn
+                        aria-current={d.id === decision.id ? 'true' : undefined}
+                        onClick={() => setSelectedId(d.id)}
+                        className={[
+                          'flex w-full cursor-pointer items-center gap-1.5 rounded-[var(--radius-sm)] px-1 py-0.5 text-left font-mono text-[10.5px] hover:bg-raised hover:text-ink',
+                          d.id === decision.id ? 'bg-raised text-ink' : 'text-ink-faint',
+                        ].join(' ')}
+                      >
+                        {/* Answered or still open, the same two marks the
+                            options carry -- decorative, so hidden: the label
+                            is what a screen reader should read. */}
+                        <span aria-hidden="true">{d.output === null ? '\u25cc' : '\u2713'}</span>
+                        <span className="min-w-0 truncate">{d.label}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
 
             <section data-detail-block="out" className="flex flex-none flex-col gap-1.5">
-              <Rule
-                label="out"
-                meta={
-                  <span className="flex items-center gap-1.5">
-                    {/* `session.activity` is what the session is doing RIGHT
-                        NOW, so it belongs to the turn currently being worked
-                        and to no other. On an older turn it described the
-                        present while the operator read the past. The newest
-                        decision is the one in progress (`decisions` is newest
-                        first, per model.ts). */}
-                    {isNewestTurn ? (entry?.session.activity ?? '—') : '—'}
-                    {jumps.above && (
-                      <button
-                        type="button"
-                        data-out-to-top
-                        aria-label="scroll out to the top"
-                        onClick={() => jumpTo('top')}
-                        className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
-                      >
-                        <ChevronsUp size={12} strokeWidth={1.8} />
-                      </button>
-                    )}
-                    {jumps.below && (
-                      <button
-                        type="button"
-                        data-out-to-bottom
-                        aria-label="scroll out to the bottom"
-                        onClick={() => jumpTo('bottom')}
-                        className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
-                      >
-                        <ChevronsDown size={12} strokeWidth={1.8} />
-                      </button>
-                    )}
-                  </span>
-                }
-                iconLabel="agent"
-                tone="text-rule-out"
-                icon={<Bot size={14} strokeWidth={1.75} />}
-              />
+              <span className="sr-only">out</span>
               <div
                 data-detail-scroll="out"
                 className="flex flex-col gap-2 text-[length:var(--vam-out-font-size,12px)]"
