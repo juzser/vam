@@ -136,6 +136,7 @@ import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/po
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
 import {
+  adoptOrphans,
   closePane,
   detachTab,
   type Edge,
@@ -1795,6 +1796,23 @@ function CanvasInner({
     [entries, activeProjectId],
   );
   const projectTabIds = useMemo(() => projectTabs.map((e) => e.session.id), [projectTabs]);
+  /**
+   * EVERY session of the active project, filters and all — the list A11.1's
+   * invariant is stated over. Read from `allEntries` rather than the filtered
+   * `entries` for the reason the prune effect gives: a filter narrows what
+   * the SIDEBAR lists, and must not decide which sessions a pane holds, or
+   * turning one on would silently drop tabs and turning it off would silently
+   * add them.
+   */
+  const activeProjectSessionIds = useMemo(
+    () =>
+      activeProjectId === null
+        ? []
+        : allEntries
+            .filter((entry) => entry.project.id === activeProjectId)
+            .map((entry) => entry.session.id),
+    [allEntries, activeProjectId],
+  );
 
   // The render-phase half of the two mirrors declared beside `panes` above.
   entriesByIdRef.current = entriesById;
@@ -1880,6 +1898,56 @@ function CanvasInner({
     setPanes((tree) => setPaneSession(tree, pendingTab.paneId, arrived.session.id));
     setFocusedPaneId(pendingTab.paneId);
   }, [allEntries, panes, setFocusedPaneId]);
+
+  /**
+   * A11.1 — EVERY SESSION OF THE ACTIVE PROJECT IS A TAB OF EXACTLY ONE
+   * PANE, never zero.
+   *
+   * The operator opened a project holding two sessions and saw one tab:
+   * "right from the start, shouldn't it show both tabs of a project at
+   * once?" Asked earlier in this epic how many of a project's sessions
+   * should be tabs, they had answered "all of them, always". PR 263 built the
+   * per-pane strips and narrowed it to "every session the pane OPENED" —
+   * right for the editor-group model it was building, and it dropped the
+   * rule. This effect is the rule, put back: a session no pane holds is
+   * adopted, one some pane holds is left where it is.
+   *
+   * The reconciliation half of what the prune effect above does, and it runs
+   * over the same four routes at once rather than at each of them: the first
+   * model of a cold start, a session started outside vam, a pane closed with
+   * `zc` giving up its tabs, and a layout restored (A15.7) for a project
+   * whose sessions changed while it was off screen.
+   *
+   * THREE THINGS IT MUST NOT DO, each one a rule this shell already holds:
+   *
+   * 1. It must not populate from an EMPTY model. `activeProjectId` is `null`
+   *    before the first model arrives, and that is the pre-load state rather
+   *    than a project with no sessions — the prune effect's own guard, in the
+   *    opposite direction.
+   * 2. It must not refill a pane a split DELIBERATELY emptied (PR 268/271).
+   *    It cannot: `zv`/`zs` MOVE the tab, so nothing is orphaned by a split
+   *    and there is nothing to put back. That is the whole reason adoption is
+   *    scoped to sessions NO pane holds rather than to the project's list.
+   * 3. It must not beat the per-pane `+`. That path is more specific — the
+   *    session it started belongs in the pane that asked — so the update is
+   *    written as an UPDATER and re-checks membership against the tree it is
+   *    handed. React runs the `+` effect's updater first (it is declared
+   *    above), so by the time this one runs the arrival already has its pane
+   *    and is no longer an orphan. A session vam did not ask for lands in the
+   *    FOCUSED pane instead, which is VSCode's rule for a file opened with no
+   *    group named.
+   *
+   * The `orphans` read off the rendered tree is an early-out, not the
+   * decision: it keeps the common render from touching state at all, while
+   * the updater is what actually decides against the freshest tree.
+   */
+  useEffect(() => {
+    const orphans = activeProjectSessionIds.filter((id) => paneHolding(panes, id) === null);
+    if (orphans.length === 0) {
+      return;
+    }
+    setPanes((tree) => adoptOrphans(tree, orphans, focusedPaneIdRef.current));
+  }, [activeProjectSessionIds, panes]);
 
   /**
    * What the detail panel expands: the focused session's newest decision.
@@ -2111,6 +2179,20 @@ function CanvasInner({
    */
   const closePaneTab = useCallback(
     (paneId: string, sessionId: string) => {
+      // A11.1: a session of this project cannot be left without a tab, so
+      // there is nothing for the `×` to do to a LIVE one — the adoption
+      // effect would put the tab straight back, and a control whose effect
+      // is undone in the same breath reads as broken. It refuses aloud
+      // instead, in the demo `+`'s idiom, and names the key that does close a
+      // session; the destructive verb stays where it already lives.
+      //
+      // The rest of this callback is not dead: a tab whose session has just
+      // ENDED still draws until the next model arrives, and a `×` pressed in
+      // that window is the one close that has real work to do.
+      if (entriesByIdRef.current.has(sessionId)) {
+        setStatus('every session of this project is a tab — close the session with x');
+        return;
+      }
       const next = removeTab(panes, paneId, sessionId);
       if (next === null) {
         setStatus('that is the last tab — close the session with x');

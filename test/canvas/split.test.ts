@@ -20,6 +20,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  adoptOrphans,
   closePane,
   detachTab,
   findLeaf,
@@ -523,5 +524,74 @@ describe('paneHolding', () => {
 
   it('is null for a session no pane holds', () => {
     expect(paneHolding(tree, 's9')).toBeNull();
+  });
+});
+
+/**
+ * A11.1, restored — EVERY SESSION OF A PROJECT IS A TAB OF EXACTLY ONE PANE.
+ *
+ * The operator, asked how many of a project's sessions should be tabs,
+ * answered "all of them, always". PR 263 narrowed that to "every session the
+ * pane opened", which is what made a project with two sessions open showing
+ * one tab. This is the membership half of the answer: a session no pane holds
+ * is ADOPTED, and one some pane already holds is left exactly where it is, so
+ * "always" and PR 268's "exactly one pane" hold at the same time.
+ *
+ * Order is deliberately not asserted beyond appending: the strip reads
+ * `orderedPaneTabs`, and nothing in `split.ts` may sort (see `Leaf`).
+ */
+describe('adoptOrphans', () => {
+  const split: SplitTree = {
+    kind: 'split',
+    id: 'split-1',
+    orientation: 'row',
+    children: [
+      { kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1'] },
+      { kind: 'leaf', id: 'pane-2', sessionId: 's2', sessionIds: ['s2'] },
+    ],
+  };
+
+  it('gives the pre-load pane every session of the project at once', () => {
+    const grown = adoptOrphans(singlePane(null, 'pane-1'), ['s1', 's2', 's3'], 'pane-1');
+    expect(findLeaf(grown, 'pane-1')?.sessionIds).toEqual(['s1', 's2', 's3']);
+  });
+
+  it('leaves a session another pane already holds exactly where it is', () => {
+    const grown = adoptOrphans(split, ['s1', 's2', 's3'], 'pane-1');
+    expect(findLeaf(grown, 'pane-1')?.sessionIds).toEqual(['s1', 's3']);
+    expect(findLeaf(grown, 'pane-2')?.sessionIds).toEqual(['s2']);
+  });
+
+  it('does not move the tab that is in front', () => {
+    const grown = adoptOrphans(split, ['s1', 's2', 's3'], 'pane-1');
+    expect(findLeaf(grown, 'pane-1')?.sessionId).toBe('s1');
+  });
+
+  it('returns the SAME tree when every session already has a pane', () => {
+    expect(adoptOrphans(split, ['s1', 's2'], 'pane-1')).toBe(split);
+  });
+
+  // The pane `zv` emptied is a legitimate state (PR 268/271), and nothing
+  // is orphaned by a MOVE — so the invariant has nothing to put back and the
+  // split it was made by survives.
+  it('leaves a pane a split deliberately emptied empty', () => {
+    const emptied: SplitTree = {
+      kind: 'split',
+      id: 'split-1',
+      orientation: 'row',
+      children: [
+        { kind: 'leaf', id: 'pane-1', sessionId: null, sessionIds: [] },
+        { kind: 'leaf', id: 'pane-2', sessionId: 's1', sessionIds: ['s1'] },
+      ],
+    };
+    expect(adoptOrphans(emptied, ['s1'], 'pane-2')).toBe(emptied);
+  });
+
+  // Totality here must not mean silence: `setPaneSession` and friends return
+  // the input unchanged when the pane id misses, which for an adoption would
+  // mean a session with no tab anywhere — the exact bug this exists to stop.
+  it('falls back to the first pane rather than dropping a session on a stale id', () => {
+    const grown = adoptOrphans(split, ['s1', 's2', 's3'], 'pane-gone');
+    expect(findLeaf(grown, 'pane-1')?.sessionIds).toEqual(['s1', 's3']);
   });
 });

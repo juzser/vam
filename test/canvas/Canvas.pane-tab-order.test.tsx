@@ -126,14 +126,40 @@ describe('a pane lists its tabs the way the sidebar lists them', () => {
     expect(tabsIn(paneFor('pane-1'))).toEqual(['new', 'old']);
   });
 
-  it('a pick that lands in another pane orders THAT pane, not the focused one', () => {
-    render(<Canvas model={MODEL} />);
-    pickInSidebar('old'); // pane-1: new, old
+  // A session ARRIVING is now the only way a pane gains a tab it did not have
+  // (A11.1 hands every session of the project a pane on sight), so that is
+  // what this case orders. `fresh` is appended to the focused pane's
+  // membership and must still be drawn where the sidebar puts it — ahead of
+  // the running `mid`, not after it.
+  it('a session adopted into a pane is ordered by that pane, not by arrival', () => {
+    const { rerender } = render(<Canvas model={MODEL} />);
+    pickInSidebar('mid');
     press('z');
-    press('v'); // pane-2: old | pane-1: new
-    pickInSidebar('mid'); // no pane holds `mid` — it opens in the focused one
-    expect(tabsIn(paneFor('pane-2'))).toEqual(['mid', 'old']);
-    expect(tabsIn(paneFor('pane-1'))).toEqual(['new']);
+    press('v'); // pane-2 TAKES mid and has the keyboard; pane-1 keeps new, old
+    expect(tabsIn(paneFor('pane-2'))).toEqual(['mid']);
+    act(() => {
+      rerender(
+        <Canvas
+          model={{
+            projects: [
+              {
+                id: 'p1',
+                name: 'alpha',
+                source: 'claude-code',
+                sessions: [
+                  session('old', 'done'),
+                  session('mid', 'running'),
+                  session('new', 'waiting'),
+                  session('fresh', 'waiting'),
+                ],
+              },
+            ],
+          }}
+        />,
+      );
+    });
+    expect(tabsIn(paneFor('pane-2'))).toEqual(['fresh', 'mid']);
+    expect(tabsIn(paneFor('pane-1'))).toEqual(['new', 'old']);
   });
 });
 

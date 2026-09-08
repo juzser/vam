@@ -76,24 +76,23 @@ const focusedPane = () => document.querySelector('[data-split-focused="true"]');
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
 const sidebarRow = (at: number) =>
   [...document.querySelectorAll('[data-session-row]')][at] as HTMLElement;
-const tabCloseFor = (title: string) =>
-  [...document.querySelectorAll('[data-session-tab]')]
-    .find((tab) => tab.querySelector('[data-tab-select]')?.textContent === title)
-    ?.querySelector('[data-tab-close]');
 const inBlockIn = (pane: Element | null | undefined) =>
   pane?.querySelector('[data-detail-scroll="in"]')?.textContent ?? '';
 
 /**
- * Two panes — the focused one holding a3, the other a2 — and a1 open in
- * neither, so nothing rescues a stale focus by accident.
+ * Two panes — the focused one holding a3 ALONE, the other a1 and a2 — so that
+ * a model without a3 empties the focused pane and closes it.
+ *
+ * It used to reach that shape by closing a1's tab, leaving a1 open in no pane
+ * at all so nothing could rescue a stale focus by accident. A11.1 makes that
+ * state unreachable (every session of the project is a tab of exactly one
+ * pane), and it is not needed: what the pane that survives holds has never
+ * been what these cases are about.
  */
-function twoPanesWithA1Unheld() {
+function twoPanesWithA3Alone() {
   const view = render(<Canvas model={modelOf(['a1', 'a2', 'a3'])} />);
-  click(sidebarRow(1)); // a2 joins pane-1 and takes the front
-  click(tabCloseFor('a1')); // a1 is now open in no pane at all
-  pressChord('z', 'v'); // the new pane TAKES a2; the old one is left empty
-  pressChord('z', 'w'); // back to the empty pane
-  click(sidebarRow(2)); // which now holds a3, and has the keyboard
+  click(sidebarRow(2)); // a3 to the front of pane-1
+  pressChord('z', 'v'); // the new pane TAKES a3, and has the keyboard
   expect(panes()).toHaveLength(2);
   expect(inBlockIn(focusedPane())).toContain('in-a3');
   return view;
@@ -101,7 +100,7 @@ function twoPanesWithA1Unheld() {
 
 describe('a prune that closes the focused pane moves the keyboard to a surviving one', () => {
   it('leaves a focused pane on screen', () => {
-    const { rerender } = twoPanesWithA1Unheld();
+    const { rerender } = twoPanesWithA3Alone();
     rerender(<Canvas model={modelOf(['a1', 'a2'])} />);
     expect(panes()).toHaveLength(1);
     expect(focusedPane()?.getAttribute('data-split-pane')).toBe(
@@ -110,7 +109,7 @@ describe('a prune that closes the focused pane moves the keyboard to a surviving
   });
 
   it('the keyboard still has a session, so the chords still act', () => {
-    const { rerender } = twoPanesWithA1Unheld();
+    const { rerender } = twoPanesWithA3Alone();
     rerender(<Canvas model={modelOf(['a1', 'a2'])} />);
     pressChord('z', 'v');
     expect(statusBar()).not.toContain('pick a session first');
@@ -118,7 +117,7 @@ describe('a prune that closes the focused pane moves the keyboard to a surviving
   });
 
   it('a sidebar click lands in the surviving pane rather than doing nothing', () => {
-    const { rerender } = twoPanesWithA1Unheld();
+    const { rerender } = twoPanesWithA3Alone();
     rerender(<Canvas model={modelOf(['a1', 'a2'])} />);
     click(sidebarRow(0));
     expect(inBlockIn(focusedPane())).toContain('in-a1');
