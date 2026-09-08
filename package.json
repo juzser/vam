@@ -28,6 +28,7 @@
     "test:e2e:reconnect": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.reconnect.config.ts",
     "test:e2e:phone": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.phone.config.ts",
     "test:e2e:electron": "e2e/node_modules/.bin/playwright test --config=e2e/playwright.electron.config.ts",
+    "test:e2e:web": "node e2e/run-web-guards.mjs",
     "test:app": "vitest run --config vitest.app.config.ts"
   },
   "dependencies": {

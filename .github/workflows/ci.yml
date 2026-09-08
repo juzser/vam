@@ -1,15 +1,23 @@
 # vam CI — the gates that can actually run here.
 #
-# WHAT IS DELIBERATELY ABSENT, and why, so nobody reads a green tick as more
-# than it is: neither e2e spec runs in CI. `e2e/sse-drop.spec.ts` (AC-G1) and
-# `e2e/sse-drop-reconnect.pw.ts` (AC-10) each need a live factory backend — they
-# spawn it via SMITH_CLI_ENTRY, which points into a SIBLING REPOSITORY that is
-# private and not checked out here. They also need a Playwright browser, and
-# `e2e/` has no package.json anywhere in the repo, so its dependency set is not
-# reproducible from a clean clone at all. Three independent blockers, none of
-# them fixable by adding a step to this file. Until they are, the e2e suite is
-# run by hand, per e2e/README.md, and a green run of THIS workflow says nothing
-# about SSE recovery.
+# The `web-guards` job below DOES drive a real Chromium: the four asserting
+# scripts under `e2e/` need nothing but the web bundle, and they carry the only
+# automatic checks on what jsdom cannot see (split/pane ordering, per-project
+# layout restore, focus at the moment of an event, `position: sticky` against
+# real layout). They ran by hand until now, which is to say they mostly did not
+# run.
+#
+# WHAT IS STILL DELIBERATELY ABSENT, and why, so nobody reads a green tick as
+# more than it is: neither SSE e2e spec runs here. `e2e/sse-drop.spec.ts`
+# (AC-G1) and `e2e/sse-drop-reconnect.pw.ts` (AC-10) each need a live factory
+# backend — they spawn it via SMITH_CLI_ENTRY, which points into a SIBLING
+# REPOSITORY that is private and not checked out here. That blocker is not
+# fixable by adding a step to this file, so those two remain hand-run per
+# e2e/README.md and a green run of THIS workflow still says nothing about SSE
+# recovery. Nor do the five screenshot-only scripts
+# (focus-edge-visibility, issue-188-shots, pane-refinements-shots,
+# phone-list-shots, phone-prompt-shots) run anywhere: they assert NOTHING, and
+# wiring shot-takers into CI would buy a slower job and no guard.
 #
 # `e2e/` is also excluded from vitest.config.ts, tsconfig*.json and biome.json,
 # so the jobs below do not typecheck or lint those files either.
@@ -129,3 +137,66 @@ jobs:
       - name: launch harness (Electron, needs a display)
         if: '!cancelled()'
         run: xvfb-run --auto-servernum pnpm run test:app
+
+  # The four asserting e2e scripts, against a real browser. Separate job, so a
+  # unit-suite failure and a real-browser failure are told apart at a glance and
+  # neither waits on the other.
+  web-guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # package.json engines: node >=22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The scripts `import { chromium } from 'playwright-core'`, and
+      # playwright-core is in NO manifest in this repo — locally it resolves
+      # only because a shared node_modules happens to hold it. It cannot be
+      # added to package.json either: the install above is
+      # `--frozen-lockfile`, and pnpm-lock.yaml cannot be regenerated on the
+      # machine this was written on (one shared node_modules serves every
+      # worktree; an install there prunes electron out from under all of them).
+      #
+      # So the driver is installed HERE, into the runner's temp dir, off the
+      # root lockfile entirely, and linked in where Node's ESM resolution will
+      # find it when it walks up from `e2e/*.mjs`. `e2e/node_modules` is
+      # gitignored, so this leaves no repo diff.
+      #
+      # Pinned to 1.62.1 — the version `e2e/node_modules` actually resolves to
+      # today, so CI drives the same browser build a developer does. The
+      # `playwright-core` package has NO install script (checked): it ships no
+      # browser, hence the explicit `install chromium` after it.
+      - name: playwright 1.62.1, outside the root lockfile
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/pw" playwright-core@1.62.1
+          mkdir -p e2e/node_modules
+          ln -sfn "$RUNNER_TEMP/pw/node_modules/playwright-core" e2e/node_modules/playwright-core
+          node "$RUNNER_TEMP/pw/node_modules/playwright-core/cli.js" install --with-deps chromium
+
+      # Builds dist-web, serves it with `vite preview --strictPort`, runs the
+      # four scripts sequentially against it and exits non-zero on the first
+      # assertion that throws — each script's own message reaches this log
+      # unedited. Screenshots go to the runner's temp dir, never docs/ui: CI
+      # must not produce a repo diff.
+      - name: web guards (real Chromium)
+        env:
+          VAM_E2E_OUT: ${{ runner.temp }}/web-guard-shots
+        run: pnpm run test:e2e:web
+
+      # A failed assertion is much easier to read next to the frame it failed on.
+      - name: upload the shots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-guard-shots
+          path: ${{ runner.temp }}/web-guard-shots
+          if-no-files-found: warn
