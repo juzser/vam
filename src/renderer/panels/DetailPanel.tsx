@@ -2752,6 +2752,18 @@ export function DetailPanel(props: DetailPanelProps) {
       ? undefined
       : (entry.session.waitingFor ?? null);
   /**
+   * The cause COLLAPSED TO WORDS OR NOTHING, for the one place that prints it.
+   *
+   * The three states above are what the model owes a reader; a line of text
+   * can only draw one of them. Absent and null both come out as nothing here,
+   * and deliberately the same nothing: "no surface reports a wait" and
+   * "waiting, cause unnamed" differ in what vam KNOWS, not in anything it
+   * could honestly write on that row. Inventing a word for the second -- a
+   * "waiting" or an "unknown" -- would put a cause on screen that no session
+   * ever reported, which is the one failure this field cannot afford.
+   */
+  const waitingCause = typeof waitingFor === 'string' && waitingFor !== '' ? waitingFor : null;
+  /**
    * THE SET, not the question. One `AskUserQuestion` call can carry several,
    * and drawing the newest open one put question TWO of a two-question call on
    * screen with question one nowhere (`panels/question-set.ts`).
@@ -2954,6 +2966,38 @@ export function DetailPanel(props: DetailPanelProps) {
   // ordering is what makes "the last line" and "the newest turn" the same
   // line, so the ones kept are taken off the end.
   const orderedTurns = [...(entry?.session.decisions ?? [])].reverse();
+  /**
+   * How many tool calls failed across the turns ON SCREEN, or `null` when no
+   * turn read carries the field at all.
+   *
+   * NULL AND ZERO ARE DIFFERENT and the difference is the point. `null` is
+   * "no turn here can report failures" -- a source with no such surface, which
+   * must draw nothing, because a confident "0 failed" over data nobody looked
+   * at is the same lie as a false badge. Zero is a reading: vam looked across
+   * every turn in view and found none.
+   *
+   * OVER THE SAME WINDOW as the count it sits beside, which is what lets the
+   * two share a line honestly: both are facts about the turns that were READ.
+   */
+  const failedRead = orderedTurns.reduce<number | null>(
+    (sum, d) => (d.errorCount === undefined ? sum : (sum ?? 0) + d.errorCount),
+    null,
+  );
+  /**
+   * The mark for one turn, and the only place these glyphs are chosen -- the
+   * `<select>` and the expanded list drew the same conditional twice, which is
+   * how they would come to disagree about what a turn is.
+   *
+   * FAILURE OUTRANKS PROGRESS. `◌` says "not finished" and `✓` says
+   * "finished", and both are true of a turn whose tools blew up -- which is
+   * exactly how the fold came to cost the operator the alarm while keeping the
+   * detail. `!` means SOMETHING INSIDE THIS TURN FAILED, which is a narrower
+   * claim than "this turn failed": the count beside the line says how many,
+   * and the turn may well have recovered. It is still the thing worth seeing
+   * from a collapsed row.
+   */
+  const turnMark = (d: Decision): string =>
+    (d.errorCount ?? 0) > 0 ? '!' : d.output === null ? '\u25cc' : '\u2713';
 
   /**
    * What the composer's button claims, in the words the SOURCE earns.
@@ -3375,6 +3419,21 @@ export function DetailPanel(props: DetailPanelProps) {
                     line does not carry out -- while "7 turns read" is what it
                     actually is, a count with its qualifier attached. */}
                 <span data-progress-count>{turnsRead} turns read</span>
+                {/* THE FOLD MAY COST DETAIL, NEVER ALARM. Without this the
+                    line read "12 turns read" over a run where three tools blew
+                    up, because a turn's mark could not say so and the count
+                    did not try.
+                    BESIDE THE QUALIFIER, NOT INSTEAD OF IT. "read" is
+                    load-bearing above -- only the newest `TAIL_BYTES` is ever
+                    opened -- and this is a second fact about that same window,
+                    not a claim about the whole run. Which is also why it is
+                    not folded into the count's own span: that span says what
+                    it says, and this says what it says. */}
+                {failedRead !== null && failedRead > 0 && (
+                  <span data-progress-failed className="text-failed">
+                    · {failedRead} failed
+                  </span>
+                )}
                 {/* ONE PICKER AT A TIME. The `<select>` is the condensed form
                     and the list below is the open one; they drive the same
                     `setSelectedId` off the same turns, and drawing both would
@@ -3390,7 +3449,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   >
                     {orderedTurns.map((d) => (
                       <option key={d.id} value={d.id}>
-                        {d.output === null ? '◌' : '✓'} {d.label}
+                        {turnMark(d)} {d.label}
                       </option>
                     ))}
                   </select>
@@ -3414,6 +3473,31 @@ export function DetailPanel(props: DetailPanelProps) {
                     <span aria-hidden="true">·</span>
                     <span data-progress-activity className="min-w-0 truncate">
                       {entry?.session.activity}
+                    </span>
+                  </>
+                )}
+                {/* WHAT IT IS BLOCKED ON, in the session's own words. The pane
+                    computed `waitingFor` and then spent it as a boolean, so
+                    every waiting session read the same on screen: "it needs
+                    something" and "it needs permission to run rm" were one
+                    picture, and telling them apart cost one open per tab.
+                    HERE, not above the composer: the bordered "waiting on you"
+                    notice was removed at the operator's request and is not
+                    coming back. This is the same fact in the space this line
+                    already spends on `activity`, and it can sit beside one:
+                    `activity` is drawn for the newest turn whatever the status
+                    is, so a session whose last known action is still on record
+                    shows both, each behind its own middot -- what it was doing,
+                    then what stopped it. Reading order, and the cause last,
+                    because that is the half the operator came for.
+                    VERBATIM, because the observed causes are a sample of an
+                    open set (`session-status.ts`): a value vam has never seen
+                    is still the truest thing anyone can say about that row. */}
+                {waitingCause !== null && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span data-progress-waiting className="min-w-0 truncate text-waiting">
+                      {waitingCause}
                     </span>
                   </>
                 )}
@@ -3466,10 +3550,16 @@ export function DetailPanel(props: DetailPanelProps) {
                           d.id === decision.id ? 'bg-raised text-ink' : 'text-ink-faint',
                         ].join(' ')}
                       >
-                        {/* Answered or still open, the same two marks the
-                            options carry -- decorative, so hidden: the label
-                            is what a screen reader should read. */}
-                        <span aria-hidden="true">{d.output === null ? '\u25cc' : '\u2713'}</span>
+                        {/* Answered, still open, or carrying a failure -- the
+                            same marks the options carry, from the same
+                            function. Decorative, so hidden: the label is what
+                            a screen reader should read. */}
+                        <span
+                          aria-hidden="true"
+                          className={(d.errorCount ?? 0) > 0 ? 'text-failed' : undefined}
+                        >
+                          {turnMark(d)}
+                        </span>
                         <span className="min-w-0 truncate">{d.label}</span>
                       </button>
                     </li>

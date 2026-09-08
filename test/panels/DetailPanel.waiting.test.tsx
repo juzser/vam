@@ -27,8 +27,14 @@
  * that a waiting session with no question draws no empty bar where the notice
  * used to be. Outside this pane a waiting session is still visible in the
  * sidebar row (`data-row-needs-you`), its group count, the command palette and
- * the phone list — what is gone with the notice is the CAUSE and the
- * reachability sentence, which nothing else has ever drawn.
+ * the phone list — what went with the notice is the reachability sentence.
+ *
+ * THE CAUSE CAME BACK, elsewhere and much smaller: `data-progress-waiting` on
+ * the condensed progress line here, and `data-row-waiting` on the sidebar row
+ * (`DetailPanel.waiting-cause` / `SessionList.waiting-cause`). That is not the
+ * notice returning — the notice was a bordered amber block with its own seam
+ * above the composer, and the tests below still pin it absent. It is the one
+ * fact that block carried, in the space a line already spends.
  */
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';

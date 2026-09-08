@@ -118,6 +118,14 @@ export const DEMO_MODEL: CanvasModel = {
               output:
                 'Round 1 done: 340-line diff, 6 files, suite green. Reviewer came back with 2 findings (1×S2, 1×S3).',
               commands: [],
+              // A TURN THAT FINISHED AND STILL WENT WRONG, which is the case
+              // the progress line used to fold away entirely: it answered, so
+              // its mark was `✓`, and three failed tool calls left no trace
+              // anywhere on a collapsed row. The demo needs one because a
+              // fixture where nothing ever fails would let the failure mark
+              // and the `· N failed` count ship unseen -- the same reason the
+              // elided turns below are here.
+              errorCount: 3,
             },
             // Everything below here is older than the three the canvas draws. It
             // is in the fixture precisely so the elided link has something to

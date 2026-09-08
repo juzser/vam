@@ -134,6 +134,35 @@ function toolUse(line: Line): string | null {
   return null;
 }
 
+/**
+ * How many `tool_result` parts of this line report a FAILED call.
+ *
+ * `is_error` is written on the result itself, so this is read and not
+ * inferred: nothing here guesses failure from output that merely looks like
+ * an error. Verified against the operator's real transcripts before it was
+ * written -- across 190 files carrying one, all 506 occurrences of
+ * `is_error:true` sat on a `tool_result` part of a `type:'user'` line, with
+ * no exceptions in either direction.
+ *
+ * `=== true` rather than truthy, and the same move `deliver.ts` makes on the
+ * same field: a string, a 1, or a missing value are damaged or adversarial
+ * data, and a failure badge is not worth guessing for. It counts PARTS, not
+ * lines, because one result line can carry several.
+ */
+function toolErrors(line: Line): number {
+  const message = line['message'];
+  if (typeof message !== 'object' || message === null) return 0;
+  const content = (message as Line)['content'];
+  if (!Array.isArray(content)) return 0;
+  let failed = 0;
+  for (const part of content) {
+    if (typeof part !== 'object' || part === null) continue;
+    const p = part as Line;
+    if (p['type'] === 'tool_result' && p['is_error'] === true) failed += 1;
+  }
+  return failed;
+}
+
 /** `2m`, `6h`, `3d` -- the compact form the sidebar right-aligns. */
 export function compactAge(ms: number): string {
   const minutes = Math.max(0, Math.floor(ms / 60_000));
@@ -206,7 +235,7 @@ export function summarizeTranscript(tail: string, decisionIdPrefix: string): Tra
   // that turn, which is what `Decision.output` is defined to be. vam cannot
   // tell an interim narration from a final answer inside a turn still in
   // flight; it shows the newest text and lets `status` carry "still working".
-  const turns: { input: string; output: string | null }[] = [];
+  const turns: { input: string; output: string | null; errors: number }[] = [];
 
   for (const line of lines) {
     branch = str(line['gitBranch']) ?? branch;
@@ -218,7 +247,7 @@ export function summarizeTranscript(tail: string, decisionIdPrefix: string): Tra
       const prompt = str(line['lastPrompt']);
       // Re-emitted on every resume, so an unchanged value is the same turn.
       if (prompt !== null && turns.at(-1)?.input !== prompt) {
-        turns.push({ input: prompt, output: null });
+        turns.push({ input: prompt, output: null, errors: 0 });
       }
     } else if (type === 'assistant') {
       const text = messageText(line);
@@ -227,6 +256,19 @@ export function summarizeTranscript(tail: string, decisionIdPrefix: string): Tra
         if (open !== undefined) turns[turns.length - 1] = { ...open, output: text };
       }
       activity = toolUse(line) ?? activity;
+    } else if (type === 'user') {
+      // A tool result belongs to the turn that was OPEN when it arrived: it
+      // comes after the prompt that opened that turn and before the next one.
+      // With no open turn -- the window began mid-turn, its prompt off the top
+      // -- it is charged to nothing. Attributing it to the next prompt would
+      // blame a turn that had not started; attributing it to a turn vam never
+      // read would mean inventing that turn. Dropping it is the same honesty
+      // `turns read` already carries.
+      const failed = toolErrors(line);
+      const open = turns.at(-1);
+      if (failed > 0 && open !== undefined) {
+        turns[turns.length - 1] = { ...open, errors: open.errors + failed };
+      }
     }
   }
 
@@ -257,6 +299,10 @@ export function summarizeTranscript(tail: string, decisionIdPrefix: string): Tra
       // The prefix is the decision's OWN id, so no two decisions mint the
       // same command id -- the canvas finds a command by id to copy it.
       commands: turn.output === null ? [] : extractCommands(turn.output, turn.id),
+      // Always answered, zero included: this source CAN report tool failures,
+      // so zero here is a reading and not a shrug. Absent is reserved for a
+      // source that cannot look (`Decision.errorCount` in `model.ts`).
+      errorCount: turn.errors,
     }));
 
   // Read off the SAME parsed lines: the questions are a second reading of one

@@ -84,6 +84,32 @@ export type Decision = {
   readonly output: string | null;
   /** Commands this decision is asking you to run by hand — see `yy` in §4. */
   readonly commands: readonly Command[];
+  /**
+   * How many tool calls FAILED inside this turn, of the ones vam read.
+   *
+   * WHY IT EXISTS. A turn's mark on the progress line was binary — working or
+   * answered — so a turn whose tools blew up three times still read `✓`, and
+   * the collapsed line said "12 turns read" over a run that was on fire.
+   * Collapsing intermediate work may cost the operator DETAIL; it must never
+   * cost them ALARM.
+   *
+   * READ, NOT INFERRED. A failed tool call is recorded explicitly: an
+   * `is_error: true` on the `tool_result` part, the same field `deliver.ts`
+   * already reads to tell a refusal from a delivery. Nothing here is derived
+   * from a message that merely correlates with failure — a false badge would
+   * be worse than none, because it teaches the operator to distrust the one
+   * signal that has to be trusted.
+   *
+   * A COUNT OF WHAT WAS READ, like `decisions` itself. The window is the
+   * newest `TAIL_BYTES` of the transcript, so a failure older than that
+   * window was never seen and is not in this number. It sits BESIDE the
+   * "turns read" qualifier and does not weaken it.
+   *
+   * OPTIONAL, and the two states differ: ABSENT is "this source cannot report
+   * tool failures", which must draw nothing. ZERO is a reading — vam looked
+   * and found none.
+   */
+  readonly errorCount?: number;
 };
 
 /**

@@ -2089,6 +2089,17 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       // in the words the session screen's IN region shows.
                       // Newest first, which is the order `decisions` is in.
                       const newestAsk = session.decisions[0]?.input ?? null;
+                      // WHAT THE SESSION SAYS IT IS BLOCKED ON, or nothing.
+                      // Three states collapse to two here for the same reason
+                      // they do in `DetailPanel`: absent ("no surface reports
+                      // a wait") and null ("waiting, cause unnamed") differ in
+                      // what vam knows and not in anything it could honestly
+                      // print, and a word invented for the second would be
+                      // indistinguishable from one a session reported.
+                      const waitingCause =
+                        typeof session.waitingFor === 'string' && session.waitingFor !== ''
+                          ? session.waitingFor
+                          : null;
                       // The SAME notion the close button already wears, applied
                       // to the whole row: closing can take the full stop timeout,
                       // and for those fifteen seconds the row is not something
@@ -2269,14 +2280,38 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                 )}
                                 {/* The waiting row's third line: what is being
                                     asked, rather than only that something is.
-                                    The desktop sidebar sits beside a canvas and
-                                    a detail pane that answer it; this list has
-                                    nothing beside it. */}
-                                {phone && needsYou && newestAsk !== null && (
+                                    NO LONGER PHONE-ONLY. The gate said the
+                                    desktop sidebar "sits beside a canvas and a
+                                    detail pane that answer it" -- and the
+                                    canvas was deleted in 0.2, so half that
+                                    premise no longer exists and the other half
+                                    answers ONE session at a time. Finding the
+                                    row blocked on a Bash approval across four
+                                    tabs cost four opens, which is the cost this
+                                    line exists to remove.
+                                    THE CAUSE LEADS. `newestAsk` is the
+                                    operator's own newest prompt echoed back: it
+                                    says what the session was set going on,
+                                    never what it is stuck on, so a row blocked
+                                    on a permission prompt read exactly like one
+                                    quietly working. `waitingFor` is the only
+                                    surface that names the cause -- so it is
+                                    drawn first, in the waiting amber, and the
+                                    prompt follows it as context. Either alone
+                                    is a line; neither is no line. */}
+                                {needsYou && (waitingCause !== null || newestAsk !== null) && (
                                   <span
                                     data-row-question
                                     className="line-clamp-2 text-[11px] text-ink-dim"
                                   >
+                                    {waitingCause !== null && (
+                                      <span data-row-waiting className="text-waiting">
+                                        {waitingCause}
+                                      </span>
+                                    )}
+                                    {waitingCause !== null && newestAsk !== null && (
+                                      <span aria-hidden="true"> · </span>
+                                    )}
                                     {newestAsk}
                                   </span>
                                 )}
