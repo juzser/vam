@@ -112,6 +112,7 @@ import {
   readPrefs,
   removeProjectFromGroup,
   renameGroup,
+  setDefaultProvider,
   setDetailTab,
   setGroupCollapsed,
   setGroupIcon,
@@ -3222,6 +3223,13 @@ function CanvasInner({
             ? async () => DEMO_PROMPT
             : globalThis.window?.api?.terminal?.prompt,
         terminal: terminalTab,
+        // A15.4 — the GLOBAL "what a new session starts with"
+        // preference, identical for every pane (it names nothing about
+        // THIS session, only the next one created), the same reasoning
+        // `delivers`/`terminal` above already read off `source` once for
+        // every pane rather than per-session.
+        defaultProvider: prefs.defaultProvider,
+        onSetDefaultProvider: (id) => savePrefs(setDefaultProvider(prefs, id)),
         sending: paneWriting,
         // A one-shot ask only the FOCUSED pane may consume — see the doc
         // comment above.

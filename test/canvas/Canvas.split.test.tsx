@@ -292,3 +292,16 @@ describe('per-pane isolation — the composer draft is per SESSION, and two pane
     expect(secondInput.value).toBe('a2’s own words');
   });
 });
+
+describe('the default-provider picker (#261) is wired to every pane, not only the focused one', () => {
+  it('renders its toggle inside a background (non-focused) split pane too', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 'v'); // pane-1 (unfocused) | pane-2 (focused, mirror)
+    const [first] = splitPanes();
+    // `defaultProvider`/`onSetDefaultProvider` are global-preference props,
+    // identical for every pane (A15.4's own contract) — proving the
+    // BACKGROUND pane draws the control is the one case a focused-pane-only
+    // wiring mistake would miss.
+    expect(first?.querySelector('[data-provider-picker-toggle]')).not.toBeNull();
+  });
+});
