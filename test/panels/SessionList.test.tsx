@@ -24,6 +24,7 @@ import {
 import {
   BRANCH_TAIL_MAX_CHARS,
   FILTER_POPOVER_WIDTH,
+  RESTORE_STRIP_VISIBLE_MS,
   SessionList,
   type SessionListProps,
 } from '../../src/renderer/panels/SessionList.js';
@@ -1544,5 +1545,143 @@ describe('removing a project, under a filter', () => {
       />,
     );
     expect(container.querySelector('[data-restore-project="p1"]')?.textContent).toContain('alpha');
+  });
+});
+
+/**
+ * A15.3: the restore strip is a momentary receipt for a momentary action, not
+ * a standing cost. It shows the moment a project is hidden, then lets itself
+ * go — and because it is now the OWN reason a hidden project's only route
+ * back could vanish, the filter menu grows a permanent "Hidden projects"
+ * section that never times out, so restoring stays reachable long after the
+ * strip has gone.
+ */
+describe('A15.3: the restore strip shows for a while, then goes — reachably', () => {
+  const alpha = makeProject({ id: 'p1', name: 'alpha' }, []);
+  const beta = makeProject({ id: 'p2', name: 'beta' }, []);
+  const entries: SessionEntry[] = [
+    { project: alpha, session: makeSession({ id: 'a1', title: 'one' }) },
+    { project: beta, session: makeSession({ id: 'b1', title: 'two' }) },
+  ];
+
+  it('shows the strip right away, then lets it go on its own — without un-hiding the project', async () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(
+        <SessionList {...baseProps(entries)} hiddenProjects={['p1']} onHideProject={noop} />,
+      );
+      expect(
+        container.querySelector('[data-restore-strip] [data-restore-project="p1"]'),
+      ).not.toBeNull();
+      await act(async () => {
+        vi.advanceTimersByTime(RESTORE_STRIP_VISIBLE_MS + 100);
+      });
+      expect(container.querySelector('[data-restore-strip]')).toBeNull();
+      // Gone from the strip, not un-hidden: the project is still absent from
+      // the live list, and `onHideProject` was never called by a timer.
+      expect(container.querySelector('[data-project-id="p1"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives the strip a fresh window when another project is hidden mid-countdown', async () => {
+    vi.useFakeTimers();
+    try {
+      const { container, rerender } = render(
+        <SessionList {...baseProps(entries)} hiddenProjects={['p1']} onHideProject={noop} />,
+      );
+      await act(async () => {
+        vi.advanceTimersByTime(RESTORE_STRIP_VISIBLE_MS - 500);
+      });
+      expect(container.querySelector('[data-restore-strip]'), 'not yet expired').not.toBeNull();
+      // A second project is hidden with the first countdown almost done.
+      rerender(
+        <SessionList {...baseProps(entries)} hiddenProjects={['p1', 'p2']} onHideProject={noop} />,
+      );
+      // Past the FIRST countdown's original deadline -- still showing, both
+      // named, because the second hide reset the clock rather than letting
+      // the first one expire underneath it.
+      await act(async () => {
+        vi.advanceTimersByTime(600);
+      });
+      const strip = container.querySelector('[data-restore-strip]');
+      expect(strip, 'reset by the second hide').not.toBeNull();
+      expect(strip?.querySelector('[data-restore-project="p1"]')).not.toBeNull();
+      expect(strip?.querySelector('[data-restore-project="p2"]')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides the strip immediately once every hidden project is restored, never waiting out the timer', async () => {
+    vi.useFakeTimers();
+    try {
+      const { container, rerender } = render(
+        <SessionList {...baseProps(entries)} hiddenProjects={['p1']} onHideProject={noop} />,
+      );
+      rerender(<SessionList {...baseProps(entries)} hiddenProjects={[]} onHideProject={noop} />);
+      await act(async () => {
+        vi.advanceTimersByTime(0);
+      });
+      expect(container.querySelector('[data-restore-strip]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('carries its own shortcut to the filter menu on the SAME row as the chips, right-aligned', () => {
+    const onFilterMenuToggle = vi.fn();
+    const { container } = render(
+      <SessionList
+        {...baseProps(entries)}
+        hiddenProjects={['p1']}
+        onHideProject={noop}
+        onFilterMenuToggle={onFilterMenuToggle}
+      />,
+    );
+    const strip = container.querySelector('[data-restore-strip]');
+    const chip = strip?.querySelector('[data-restore-project="p1"]');
+    const shortcut = strip?.querySelector('[data-restore-strip-more]');
+    expect(shortcut, 'the shortcut hint').not.toBeNull();
+    // SAME ROW: siblings under the same parent, not a second line stacked
+    // below the chips in a wrapper of its own.
+    expect(shortcut?.parentElement).toBe(chip?.parentElement);
+    fireEvent.click(shortcut as HTMLElement);
+    expect(onFilterMenuToggle).toHaveBeenCalledWith(true);
+  });
+
+  it('lists hidden projects in the filter menu too — the route that survives the strip going away', async () => {
+    vi.useFakeTimers();
+    try {
+      const onHideProject = vi.fn();
+      const { container } = render(
+        <SessionList
+          {...baseProps(entries)}
+          hiddenProjects={['p1']}
+          onHideProject={onHideProject}
+          filterMenuOpen
+        />,
+      );
+      // Let the strip itself expire.
+      await act(async () => {
+        vi.advanceTimersByTime(RESTORE_STRIP_VISIBLE_MS + 100);
+      });
+      expect(container.querySelector('[data-restore-strip]')).toBeNull();
+      // The filter menu's own copy is untimed and still there.
+      const inMenu = container.querySelector('[data-filter-menu] [data-restore-project="p1"]');
+      expect(inMenu, 'the surviving route').not.toBeNull();
+      fireEvent.click(inMenu as HTMLElement);
+      expect(onHideProject.mock.calls).toEqual([[expect.objectContaining({ id: 'p1' }), false]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says nothing about hidden projects in the filter menu when nothing is hidden', () => {
+    const { container } = render(
+      <SessionList {...baseProps(entries)} hiddenProjects={[]} filterMenuOpen />,
+    );
+    expect(container.querySelector('[data-filter-hidden-projects]')).toBeNull();
   });
 });

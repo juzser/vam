@@ -1659,6 +1659,67 @@ describe('the composer draws both controls, and both do something', () => {
   });
 });
 
+/**
+ * A15.4: the default-provider CHOICE moves into the prompt input, beside the
+ * model field it used to be merely named next to. ABSENT, NOT DISABLED
+ * (`pickImageAttachment`'s own rule) governs whether it draws at all —
+ * `onSetDefaultProvider` undefined means the caller has nowhere to put a
+ * change, so no button pretends otherwise.
+ */
+describe('A15.4: the default-provider picker lives beside the model field', () => {
+  it('is absent when the caller has no way to persist a change', () => {
+    draw();
+    expect(q('[data-provider-picker-toggle]')).toBeNull();
+  });
+
+  it('names the current default with a real accessible name, immediately beside the model field', () => {
+    draw({ defaultProvider: 'claude-code', onSetDefaultProvider: () => {} });
+    const toggle = q<HTMLButtonElement>('[data-provider-picker-toggle]');
+    const model = q<HTMLElement>('[data-model-request]');
+    expect(toggle?.tagName).toBe('BUTTON');
+    expect(toggle?.getAttribute('aria-label')).toContain('Claude Code');
+    expect(model).not.toBeNull();
+    // "Beside": immediately before the model field in document order, not
+    // merely somewhere in the same pane.
+    expect(toggle !== null && model !== null).toBe(true);
+    if (toggle !== null && model !== null) {
+      expect(
+        Boolean(toggle.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING),
+      ).toBe(true);
+    }
+  });
+
+  it('opens a real listbox on click, marks the current provider, and closes once one is picked', () => {
+    const seen: string[] = [];
+    draw({
+      defaultProvider: 'claude-code',
+      onSetDefaultProvider: (id) => seen.push(id),
+    });
+    expect(q('[data-provider-picker]'), 'closed at rest').toBeNull();
+    act(() => {
+      q<HTMLButtonElement>('[data-provider-picker-toggle]')?.click();
+    });
+    const list = q<HTMLElement>('[data-provider-picker]');
+    expect(list?.getAttribute('role')).toBe('listbox');
+    const option = q<HTMLButtonElement>('[data-provider-option="claude-code"]');
+    expect(option?.getAttribute('role')).toBe('option');
+    expect(option?.getAttribute('aria-selected')).toBe('true');
+    act(() => {
+      option?.click();
+    });
+    expect(seen).toEqual(['claude-code']);
+    expect(q('[data-provider-picker]'), 'closes once a pick lands').toBeNull();
+  });
+
+  it('reads the default provider from a fresh vam the same way resolveProvider does', () => {
+    // No `defaultProvider` passed at all -- the honest "nothing chosen yet"
+    // case, which must not render a blank or a crash.
+    draw({ onSetDefaultProvider: () => {} });
+    const toggle = q<HTMLButtonElement>('[data-provider-picker-toggle]');
+    expect(toggle?.getAttribute('aria-label')).toContain('Claude Code');
+  });
+});
+
 describe('the out region offers the two jumps that would do something', () => {
   it('offers `to top` only with content above and `to bottom` only with content below', () => {
     expect(hasContentAbove({ scrollTop: 0, scrollHeight: 900, clientHeight: 300 })).toBe(false);
@@ -1806,28 +1867,58 @@ describe('Alt+<digit> picks a view by name, through visibleTabs, never by positi
   });
 
   /**
-   * THE BUG ITSELF, falsified against the real component: with Terminal
-   * withdrawn the bar reads Response · PRs · Agents, so `Alt-3` must resolve
-   * to Agents (the third DRAWN view) — an indexer that counted `TABS`
-   * instead would land on Terminal, which the source just said it does not
-   * have, exactly the defect `tabs.ts`'s own header records.
+   * THE BUG ITSELF, falsified against the real component (A15.6): with
+   * Terminal withdrawn the bar reads Response · PRs · Agents, and `Alt-3`
+   * MUST REFUSE — Terminal is what digit 3 names, always, and the source
+   * just said it has none. The guard this replaces asserted the opposite
+   * (that `Alt-3` should silently open Agents, the third DRAWN view) and
+   * shipped green having tested the exact defect A5.4 exists to forbid.
    */
-  it('Alt-3 opens Agents, not Terminal, once Terminal is withdrawn', () => {
+  it('Alt-3 refuses, aloud, once Terminal is withdrawn — it never falls through to Agents', () => {
     draw({ terminal: false });
     press(3);
-    expect(q<HTMLElement>('[data-view="agents"]')?.getAttribute('aria-pressed')).toBe('true');
+    // Still on Response -- the refused digit changed nothing, and it did
+    // not silently land on whatever now sits third in the drawn bar.
+    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(q<HTMLElement>('[data-view="agents"]')?.getAttribute('aria-pressed')).toBe('false');
     expect(q('[data-view="terminal"]')).toBeNull();
+    expect(note()?.getAttribute('role')).toBe('status');
+    expect(note()?.textContent ?? '').toContain('Terminal');
+  });
+
+  /**
+   * The other half of name-stability: Agents does not inherit Terminal's
+   * digit and does not lose its own. Agents is `TABS[3]` — digit 4 — with or
+   * without Terminal on the bar.
+   */
+  it('Alt-4 still opens Agents once Terminal is withdrawn — every surviving view keeps its own digit', () => {
+    draw({ terminal: false });
+    press(4);
+    expect(q<HTMLElement>('[data-view="agents"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(note()).toBeNull();
   });
 
-  it('refuses aloud, and changes nothing, for a digit past the last drawn view', () => {
+  /**
+   * The label must say the digit that actually reaches it. Naming Agents'
+   * icon "Alt+3" because that is where it happens to sit in the shorter,
+   * drawn bar would be the exact defect A15.6 fixes in `tabForDigit`, just
+   * spoken instead of wired — an operator reading the label and pressing
+   * what it says would land on Response's own refusal note, not Agents.
+   */
+  it('labels each icon with its own fixed Alt-digit, even once Terminal is withdrawn', () => {
+    draw({ terminal: false });
+    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-label')).toContain('Alt+1');
+    expect(q<HTMLElement>('[data-view="prs"]')?.getAttribute('aria-label')).toContain('Alt+2');
+    expect(q<HTMLElement>('[data-view="agents"]')?.getAttribute('aria-label')).toContain('Alt+4');
+  });
+
+  it('refuses aloud, and changes nothing, for a digit past the last named view', () => {
     draw({ terminal: false }); // three views drawn: Response, PRs, Agents
-    press(4);
+    press(5); // past TABS' own length, not merely past what is drawn
     // Still on Response -- the request did not fall through to it either.
     expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(note()?.getAttribute('role')).toBe('status');
-    expect(note()?.textContent ?? '').toContain('no view 4');
-    expect(note()?.textContent ?? '').toContain('only 3 shown');
+    expect(note()?.textContent ?? '').toContain('no view 5');
   });
 
   it('leaves a modifier-free digit and a differently-modified one alone', () => {
@@ -1856,6 +1947,73 @@ describe('Alt+<digit> picks a view by name, through visibleTabs, never by positi
     });
     expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(note()).toBeNull();
+  });
+});
+
+/**
+ * A15.5: the view icons stop drawing their own row and become a corner
+ * overlay instead — a dedicated `border-line border-b` strip cost a full
+ * line of height on every render whether or not the operator ever pressed
+ * one. What survives is everything the row already guaranteed (real
+ * `<button>`s, `aria-pressed`, `aria-label`, reachable by Tab — covered
+ * above) plus two new properties an overlay specifically owes: it must not
+ * steal clicks or hover off the content it floats above, and it must not be
+ * able to balloon wide enough to cover a narrow pane's whole width.
+ */
+describe('A15.5: the view icons are a corner overlay, not a reserved row', () => {
+  it('positions the icon cluster out of flow, so it reserves no row of its own', () => {
+    draw();
+    const overlay = q<HTMLElement>('[data-view-overlay]');
+    expect(overlay, 'the overlay wrapper').not.toBeNull();
+    expect(overlay?.className).toContain('absolute');
+    // The dedicated row this replaces drew a full-width bottom border to
+    // separate itself from the scrolling column below it -- exactly the
+    // reserved space A15.5 asks to stop paying for.
+    expect(overlay?.className ?? '').not.toContain('border-b');
+  });
+
+  it('lets clicks and hover fall through its own empty area to the content underneath', () => {
+    draw();
+    // The wrapper is inert everywhere except where the icons themselves
+    // paint: `pointer-events-none` on the corner box, opted back into on the
+    // nav that actually draws the buttons.
+    expect(q<HTMLElement>('[data-view-overlay]')?.className).toContain('pointer-events-none');
+    expect(q<HTMLElement>('[data-view-tabs]')?.className).toContain('pointer-events-auto');
+  });
+
+  it('caps its own width, so it cannot cover a narrow pane edge to edge', () => {
+    draw();
+    // A corner cluster, not a bar: bounded to its own content plus a fixed
+    // margin from the pane's edge, never `inset-x-0`/`w-full`, which is what
+    // let the old row span the whole pane on purpose.
+    const className = q<HTMLElement>('[data-view-overlay]')?.className ?? '';
+    expect(className).not.toContain('inset-x-0');
+    expect(className).not.toContain('w-full');
+    expect(className).toMatch(/max-w-/);
+  });
+
+  it('still truncates a long refusal instead of growing the overlay past its cap', () => {
+    draw({ terminal: false });
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: '5',
+          code: 'Digit5',
+          altKey: true,
+          bubbles: true,
+        }),
+      );
+    });
+    const note = q<HTMLElement>('[data-view-note]');
+    expect(note).not.toBeNull();
+    expect(note?.className ?? '').toMatch(/max-w-/);
+    expect(note?.className ?? '').toContain('truncate');
+  });
+
+  it('still switches views by click once overlaid — the move did not break the control', () => {
+    draw({ terminal: true });
+    fireEvent.click(q<HTMLButtonElement>('[data-view="terminal"]') as HTMLButtonElement);
+    expect(q<HTMLElement>('[data-view="terminal"]')?.getAttribute('aria-pressed')).toBe('true');
   });
 });
 
@@ -3192,5 +3350,73 @@ describe('the out text size roots on the out container and nowhere else', () => 
     expect(wearing[0]?.getAttribute('data-detail-scroll')).toBe('out');
     // The pane above `out` keeps the sizes it was drawn with.
     expect(q('[data-detail-block="in"]')?.className ?? '').not.toContain(OUT_FONT_SIZE_VAR);
+  });
+});
+
+/**
+ * The fifth operator request on this pane: raise every type size by 1px
+ * EXCEPT `out`, which the operator has already tuned via its own pref
+ * (`DEFAULT_OUT_FONT_SIZE`, `OUT_FONT_SIZE_VAR`) and which must not move a
+ * pixel because of an unrelated change here.
+ *
+ * Two checks, because either alone would pass with the other broken:
+ * - a SOURCE rule counts every literal `text-[Npx]` class in the file and
+ *   compares the WHOLE multiset against the exact bumped scale -- catching a
+ *   single missed spot the same way a reviewer scanning ~60 call sites by
+ *   eye could not. A "the old sizes must be gone" check would NOT do this
+ *   safely here: a contiguous +1px shift overlaps itself heavily (old 11px
+ *   is new 10px's target, so "11" legitimately still appears after a
+ *   correct bump), so presence/absence of individual numbers cannot tell a
+ *   correct bump from a missed one. The exact count per size can.
+ * - a RENDERED check that a representative sibling actually moved while the
+ *   `out` container's own class is byte-for-byte what it was — a test that
+ *   only asserted the sibling grew would still pass with `out` bumped too.
+ */
+describe('the +1px type bump reaches everything in this pane except out', () => {
+  /**
+   * The exact post-bump multiset, one entry per distinct size this file used
+   * before the change (measured against `55a8b2b`, the branch base): 8→9
+   * (1), 9.5→10.5 (9), 10→11 (14), 10.5→11.5 (11), 11→12 (15), 11.5→12.5 (6),
+   * 12→13 (1), 12.5→13.5 (1). Fixed counts, not "at least" — losing a call
+   * site to some other edit should redden this as loudly as a missed bump.
+   */
+  const EXPECTED_SIZE_COUNTS: Readonly<Record<string, number>> = {
+    '9': 1,
+    '10.5': 9,
+    '11': 14,
+    '11.5': 11,
+    '12': 15,
+    '12.5': 6,
+    '13': 1,
+    '13.5': 1,
+  };
+
+  it('SOURCE RULE: every literal text-[Npx] class in this file matches the bumped scale, exactly', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/renderer/panels/DetailPanel.tsx'),
+      'utf8',
+    );
+    // The out container's own `text-[length:var(--vam-out-font-size,12px)]`
+    // and OUT_MARKDOWN's `em`-scaled classes both fail this pattern already
+    // (neither is a bare `text-[<digits>px]`), so excluding them is not
+    // needed — the pattern excludes them by construction.
+    const found = [...source.matchAll(/text-\[(\d+(?:\.\d+)?)px\]/g)].map((m) => m[1] as string);
+    const counts: Record<string, number> = {};
+    for (const size of found) counts[size] = (counts[size] ?? 0) + 1;
+    expect(counts).toEqual(EXPECTED_SIZE_COUNTS);
+  });
+
+  it('RENDERED: a representative sibling moved up while the out container is byte-for-byte unchanged', () => {
+    draw();
+    // `data-model-request` sat beside the composer at 10px; it reads 11px
+    // now. Reverting the bump in `DetailPanel.tsx` alone (leaving this test
+    // untouched) must redden this line.
+    expect(q<HTMLElement>('[data-model-request]')?.className).toContain('text-[11px]');
+    expect(q<HTMLElement>('[data-model-request]')?.className).not.toContain('text-[10px]');
+    // The out container: same exact var()-driven class the pref test above
+    // already pins as the ONLY thing wearing `OUT_FONT_SIZE_VAR` — unchanged
+    // by this bump, because it was never a literal px class to bump.
+    const out = q<HTMLElement>('[data-detail-scroll="out"]');
+    expect(out?.className).toContain('text-[length:var(--vam-out-font-size,12px)]');
   });
 });
