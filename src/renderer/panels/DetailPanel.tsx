@@ -2966,6 +2966,38 @@ export function DetailPanel(props: DetailPanelProps) {
   // ordering is what makes "the last line" and "the newest turn" the same
   // line, so the ones kept are taken off the end.
   const orderedTurns = [...(entry?.session.decisions ?? [])].reverse();
+  /**
+   * How many tool calls failed across the turns ON SCREEN, or `null` when no
+   * turn read carries the field at all.
+   *
+   * NULL AND ZERO ARE DIFFERENT and the difference is the point. `null` is
+   * "no turn here can report failures" -- a source with no such surface, which
+   * must draw nothing, because a confident "0 failed" over data nobody looked
+   * at is the same lie as a false badge. Zero is a reading: vam looked across
+   * every turn in view and found none.
+   *
+   * OVER THE SAME WINDOW as the count it sits beside, which is what lets the
+   * two share a line honestly: both are facts about the turns that were READ.
+   */
+  const failedRead = orderedTurns.reduce<number | null>(
+    (sum, d) => (d.errorCount === undefined ? sum : (sum ?? 0) + d.errorCount),
+    null,
+  );
+  /**
+   * The mark for one turn, and the only place these glyphs are chosen -- the
+   * `<select>` and the expanded list drew the same conditional twice, which is
+   * how they would come to disagree about what a turn is.
+   *
+   * FAILURE OUTRANKS PROGRESS. `◌` says "not finished" and `✓` says
+   * "finished", and both are true of a turn whose tools blew up -- which is
+   * exactly how the fold came to cost the operator the alarm while keeping the
+   * detail. `!` means SOMETHING INSIDE THIS TURN FAILED, which is a narrower
+   * claim than "this turn failed": the count beside the line says how many,
+   * and the turn may well have recovered. It is still the thing worth seeing
+   * from a collapsed row.
+   */
+  const turnMark = (d: Decision): string =>
+    (d.errorCount ?? 0) > 0 ? '!' : d.output === null ? '\u25cc' : '\u2713';
 
   /**
    * What the composer's button claims, in the words the SOURCE earns.
@@ -3387,6 +3419,21 @@ export function DetailPanel(props: DetailPanelProps) {
                     line does not carry out -- while "7 turns read" is what it
                     actually is, a count with its qualifier attached. */}
                 <span data-progress-count>{turnsRead} turns read</span>
+                {/* THE FOLD MAY COST DETAIL, NEVER ALARM. Without this the
+                    line read "12 turns read" over a run where three tools blew
+                    up, because a turn's mark could not say so and the count
+                    did not try.
+                    BESIDE THE QUALIFIER, NOT INSTEAD OF IT. "read" is
+                    load-bearing above -- only the newest `TAIL_BYTES` is ever
+                    opened -- and this is a second fact about that same window,
+                    not a claim about the whole run. Which is also why it is
+                    not folded into the count's own span: that span says what
+                    it says, and this says what it says. */}
+                {failedRead !== null && failedRead > 0 && (
+                  <span data-progress-failed className="text-failed">
+                    · {failedRead} failed
+                  </span>
+                )}
                 {/* ONE PICKER AT A TIME. The `<select>` is the condensed form
                     and the list below is the open one; they drive the same
                     `setSelectedId` off the same turns, and drawing both would
@@ -3402,7 +3449,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   >
                     {orderedTurns.map((d) => (
                       <option key={d.id} value={d.id}>
-                        {d.output === null ? '◌' : '✓'} {d.label}
+                        {turnMark(d)} {d.label}
                       </option>
                     ))}
                   </select>
@@ -3500,10 +3547,16 @@ export function DetailPanel(props: DetailPanelProps) {
                           d.id === decision.id ? 'bg-raised text-ink' : 'text-ink-faint',
                         ].join(' ')}
                       >
-                        {/* Answered or still open, the same two marks the
-                            options carry -- decorative, so hidden: the label
-                            is what a screen reader should read. */}
-                        <span aria-hidden="true">{d.output === null ? '\u25cc' : '\u2713'}</span>
+                        {/* Answered, still open, or carrying a failure -- the
+                            same marks the options carry, from the same
+                            function. Decorative, so hidden: the label is what
+                            a screen reader should read. */}
+                        <span
+                          aria-hidden="true"
+                          className={(d.errorCount ?? 0) > 0 ? 'text-failed' : undefined}
+                        >
+                          {turnMark(d)}
+                        </span>
                         <span className="min-w-0 truncate">{d.label}</span>
                       </button>
                     </li>
