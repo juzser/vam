@@ -3618,7 +3618,6 @@ function CanvasInner({
         : leaf.sessionId === null
           ? null
           : (entriesById.get(leaf.sessionId) ?? null);
-      const splitCount = leaves(panes).length;
       /**
        * THIS PANE's own tabs, in the SIDEBAR's order — the leaf's list
        * resolved against the model through `orderedPaneTabs`, never
@@ -3647,14 +3646,15 @@ function CanvasInner({
         <div
           key={leaf.id}
           data-split-pane={leaf.id}
+          // The attribute stays and is the ONLY thing focus paints on this
+          // element: the ring it used to wear (`ring-1 ring-inset
+          // ring-cursor-ring`, drawn once a second pane existed) is gone at
+          // the operator's request. What says where the keyboard is instead
+          // is the view-icon overlay that draws in the focused pane alone,
+          // and `data-split-focused` is what the tests and the browser guard
+          // read — neither is a class, so neither goes with the ring.
           data-split-focused={isFocused ? 'true' : 'false'}
-          // The ring only draws once a second pane exists — an unsplit shell
-          // must render pixel-identical to before this feature, and a ring
-          // around the one pane that always has the keyboard would be noise
-          // nobody asked for.
-          className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-canvas ${
-            isFocused && splitCount > 1 ? 'ring-1 ring-inset ring-cursor-ring' : ''
-          }`}
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-canvas"
           onMouseDownCapture={() => {
             if (!isFocused) setFocusedPaneId(leaf.id);
           }}
@@ -3713,7 +3713,6 @@ function CanvasInner({
       allEntries,
       entriesById,
       activeProjectId,
-      panes,
       buildDetailProps,
       closePaneTab,
       setFocusedPaneId,

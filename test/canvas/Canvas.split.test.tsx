@@ -300,3 +300,51 @@ describe('the default-provider picker (#261) is wired to every pane, not only th
     expect(first?.querySelector('[data-provider-picker-toggle]')).not.toBeNull();
   });
 });
+
+/**
+ * The focused pane wears NO ring. Operator instruction: "also remove the
+ * focus border on the pane."
+ *
+ * It shipped as `ring-1 ring-inset ring-cursor-ring`, drawn only once a
+ * second pane existed. What answers "which pane has the keyboard" now is the
+ * view-icon overlay, which the pane-focus change already draws in the focused pane and nowhere
+ * else — that is asserted here as well, because removing the last visible
+ * indicator would be a different change from removing one of two, and the
+ * assertion is what keeps this from becoming that quietly.
+ *
+ * `data-split-focused` stays on the element and is untouched: the attribute is
+ * the machine-readable half and this file, the browser guard and
+ * `Canvas.view-icons-focus.test.tsx` all read it.
+ */
+describe('no pane wears a focus ring', () => {
+  it('draws no ring on the focused pane of a split — nor on the other', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 'v');
+    expect(splitPanes()).toHaveLength(2);
+    for (const pane of splitPanes()) {
+      expect(pane.className).not.toMatch(/\bring-/);
+    }
+  });
+
+  it('draws none on the single pane either', () => {
+    render(<Canvas model={MODEL} />);
+    expect(splitPanes()[0]?.className).not.toMatch(/\bring-/);
+  });
+
+  it('still says which pane holds the keyboard, in the attribute and in paint', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 'v');
+    // The machine-readable half, which the browser guard and the tests read.
+    expect(splitPanes().map((pane) => pane.getAttribute('data-split-focused'))).toEqual([
+      'false',
+      'true',
+    ]);
+    // The half an operator can see: the view icons, in the focused pane only.
+    // `visibleTabs` never returns an empty bar, so this overlay is not a
+    // signal that can silently become nothing.
+    const focused = focusedPane();
+    expect(focused?.querySelectorAll('[data-view]').length).toBeGreaterThan(0);
+    const other = splitPanes().find((pane) => pane !== focused);
+    expect(other?.querySelectorAll('[data-view]')).toHaveLength(0);
+  });
+});
