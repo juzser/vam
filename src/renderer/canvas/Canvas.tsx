@@ -3395,7 +3395,6 @@ function CanvasInner({
     // no other column takes this. A hidden column is not rendered at all,
     // so it needs no second test against `visible` here either -- the slot
     // already is that test.
-    keyboardHere: mode === 'select',
     entries: entries,
     loading: sidebarLoading,
     // The UNFILTERED set, for the two things about removing a project

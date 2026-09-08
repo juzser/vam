@@ -55,7 +55,6 @@ import type { KeyAction } from '../keyboard/chords.js';
 import { InlineChord, ShortcutTip } from '../keyboard/ShortcutTip.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
-import { FocusEdge } from './FocusEdge.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { type RemovalPlan, removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
@@ -279,19 +278,11 @@ export type SessionListProps = {
   readonly allEntries?: readonly SessionEntry[];
   readonly focusedSessionId: string | null;
   /**
-   * Whether the keyboard is in this column -- the Select half of the cursor
-   * mode, passed down rather than re-derived, so the line and the status bar's
-   * word are two readings of ONE piece of state and cannot come apart.
-   *
-   * Optional and defaulting to false: every test that renders this pane
-   * directly is about something else, and a required flag would have made this
-   * change edit all of them to say "not focused".
-   */
-  readonly keyboardHere?: boolean;
-  /**
    * Is this pane the whole screen, on a device with no keyboard and no canvas?
    *
-   * Optional and defaulting to false for the same reason as `keyboardHere`.
+   * Optional and defaulting to false, the way every flag on this pane is:
+   * every test that renders it directly is about something else, and a
+   * required flag would have made that change edit all of them.
    * It selects the row variant the UI spec's D1 describes -- not a second
    * component, the same one saying different things, because on a phone this
    * list IS the surface: nothing beside it repeats a status, answers a
@@ -515,7 +506,6 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     loading = false,
     allEntries: unfiltered,
     focusedSessionId,
-    keyboardHere = false,
     phone = false,
     workspace,
     filter,
@@ -1171,7 +1161,6 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
       className={`relative flex h-full min-w-0 flex-col border-line border-r bg-sidebar ${width === undefined ? 'w-full' : 'shrink-0'}`}
       style={width === undefined ? undefined : { width }}
     >
-      {keyboardHere && <FocusEdge />}
       {resizeHandle}
       <div className="flex flex-col gap-2.5 border-line border-b p-3">
         {/* The avatar bar, which used to be the sidebar's footer.

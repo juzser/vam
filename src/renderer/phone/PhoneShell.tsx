@@ -479,7 +479,6 @@ export function PhoneShell({
             {...sidebar}
             width={undefined}
             resizeHandle={null}
-            keyboardHere={false}
             // This list IS the screen here: no canvas repeats a status beside
             // it, no detail pane answers a question, and no cursor has
             // anywhere to be. The row says so itself (UI spec D1).
