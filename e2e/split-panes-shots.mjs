@@ -1,6 +1,7 @@
 /**
- * Screenshots for A15.1 (split panes), A15.2 (shorter tab strip) and A15.5
- * (one tab strip PER PANE, and panes reconciled on a project switch), taken
+ * Screenshots for A15.1 (split panes), A15.2 (shorter tab strip), A15.5
+ * (one tab strip PER PANE), A15.7 (a remembered layout per project) and the
+ * per-pane `+` that starts a session in the pane it belongs to, taken
  * off the WEB build with the demo fixture — the only thing safe to point a
  * public screenshot at (`?demo=1`, App.tsx's own rule). Modelled on
  * `pane-refinements-shots.mjs`.
@@ -108,10 +109,13 @@ await assertStripPerPane('after zs');
 await page.screenshot({ path: `${outDir}/a15-5-split-horizontal-tabs.png` });
 console.log(`${outDir}/a15-5-split-horizontal-tabs.png`);
 
-// --- A15.5, the second report: "after splitting a tab, when I switch
-// project, the old tab still shows and is still split". Picking a session in
-// ANOTHER project collapses the layout to a single pane holding it — nothing
-// of the previous project may be left on screen.
+// --- A15.5's invariant and A15.7's restore, in one gesture. Picking a
+// session in a project this shell has NEVER opened gives a single pane
+// holding it, and nothing of the previous project may be left on screen —
+// the operator's first report. What the layout looked like before the switch
+// is captured here, because the way back is what A15.7 has to reproduce.
+const beforeSwitchPanes = await paneCount();
+const beforeSwitchTabs = [await tabsInPane(0), await tabsInPane(1)];
 await page.locator('[data-session-row="vam-build-1"]').click();
 await page.waitForTimeout(150);
 const afterSwitch = await paneCount();
@@ -130,10 +134,77 @@ if (switchedTabs.some((title) => title.includes('crosscheck') || title.includes(
       'project that is no longer active.',
   );
 }
-// Back to the factory project, and back to two tabs, for the drag below.
-await page.locator('[data-session-row="factory-sse-1"]').click();
-await page.waitForTimeout(150);
+// --- A15.7, the operator's second report: "when I split, switch to another
+// project and then come back, the split state is lost." Coming back must
+// bring the layout back — pane for pane and tab for tab. This is the
+// assertion that counts: a project switch plus a tree reconciliation is
+// exactly the ordering React's eager-state path hides from jsdom.
+//
+// Coming back by clicking `crosscheck-2` — the session the pane that had
+// focus was already showing — so "the same tabs" can be asserted EXACTLY.
+// Clicking any other session in the project restores the layout and then
+// opens that session in the restored focused pane, which is VSCode's rule
+// (a file you click opens in the active group) and would add a tab here.
 await page.locator('[data-session-row="crosscheck-2"]').click();
+await page.waitForTimeout(150);
+const restoredPanes = await paneCount();
+const restoredTabs = [await tabsInPane(0), await tabsInPane(1)];
+console.log('after coming back:', restoredPanes, 'pane(s), tabs:', restoredTabs);
+if (restoredPanes !== beforeSwitchPanes) {
+  throw new Error(
+    `coming back to the project left ${restoredPanes} pane(s), expected ` +
+      `${beforeSwitchPanes} — the layout it was left in must be restored, not collapsed.`,
+  );
+}
+if (JSON.stringify(restoredTabs) !== JSON.stringify(beforeSwitchTabs)) {
+  throw new Error(
+    `coming back restored the panes but not their tabs: ${JSON.stringify(restoredTabs)} ` +
+      `instead of ${JSON.stringify(beforeSwitchTabs)}.`,
+  );
+}
+await assertStripPerPane('after coming back');
+await page.screenshot({ path: `${outDir}/a15-7-layout-restored.png` });
+console.log(`${outDir}/a15-7-layout-restored.png`);
+
+// --- The per-pane `+`: the operator's "there should be a `+` button to
+// create a new tab in each pane, next to the tabs."
+//
+// Under the demo fixture there is NO new-session route (`?demo=1` is not a
+// session source), so what this proves is the other half of the contract: a
+// `+` that cannot create must not sit there doing nothing. It says why, out
+// loud, and no pane's tab list moves. The creating path is asserted in
+// `test/canvas/Canvas.pane-new-tab.test.tsx`, against a source that can.
+const newTabButtons = await page.locator('[data-split-pane] [data-tab-new]').count();
+console.log('per-pane + buttons:', newTabButtons, 'for', await paneCount(), 'pane(s)');
+if (newTabButtons !== (await paneCount())) {
+  throw new Error(
+    `${newTabButtons} new-tab button(s) for ${await paneCount()} pane(s) — every pane's ` +
+      'strip must carry its own.',
+  );
+}
+const tabsBeforePlus = [await tabsInPane(0), await tabsInPane(1)];
+await page.locator('[data-split-pane]').nth(1).locator('[data-tab-new]').click();
+await page.waitForTimeout(200);
+const tabsAfterPlus = [await tabsInPane(0), await tabsInPane(1)];
+const said = (await page.locator('[data-status-bar]').innerText()) ?? '';
+console.log('after pressing + in pane 2:', tabsAfterPlus, '| status:', said);
+if (JSON.stringify(tabsAfterPlus) !== JSON.stringify(tabsBeforePlus)) {
+  throw new Error(
+    `the demo source cannot start a session, yet pressing + changed the tabs: ` +
+      `${JSON.stringify(tabsAfterPlus)} instead of ${JSON.stringify(tabsBeforePlus)}.`,
+  );
+}
+if (!said.includes('no new-session command')) {
+  throw new Error(
+    `pressing + with no new-session route said "${said}" — it must refuse ALOUD, in the ` +
+      'same words the route itself gives, never silently do nothing.',
+  );
+}
+await page.screenshot({ path: `${outDir}/a15-7-pane-new-tab.png` });
+console.log(`${outDir}/a15-7-pane-new-tab.png`);
+
+// Back to one pane, holding both tabs, for the drag below.
+await chord('z', 'c', 'close', 1);
 await page.waitForTimeout(150);
 
 // --- Shot 3: the drag in progress, and the drop-zone highlight it draws.

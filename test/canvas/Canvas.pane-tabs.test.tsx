@@ -250,7 +250,7 @@ describe('closing the last tab in a pane closes the pane', () => {
 });
 
 /**
- * A15.6 — EVERY PROJECT REMEMBERS ITS OWN LAYOUT, and the operator's report
+ * A15.7 — EVERY PROJECT REMEMBERS ITS OWN LAYOUT, and the operator's report
  * that reversed A15.5's answer: "when I split, switch to another project and
  * then come back, the split state is lost."
  *

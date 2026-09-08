@@ -984,7 +984,7 @@ function CanvasInner({
    *  the same reason: it must stay a stably-identified callback. */
   const panesRef = useRef<SplitTree>(panes);
   /**
-   * A15.6 — ONE REMEMBERED LAYOUT PER PROJECT, and which pane in it had the
+   * A15.7 — ONE REMEMBERED LAYOUT PER PROJECT, and which pane in it had the
    * keyboard. Written when the operator leaves a project, read when they come
    * back (`restoreLayout` reconciles it against what is still open). A ref
    * rather than state: nothing renders from it, it must survive the render

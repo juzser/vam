@@ -372,7 +372,7 @@ describe('pruneClosedTabs — a closed session leaves no ghost tab behind', () =
 });
 
 /**
- * A15.6 — what a project's remembered layout is worth when it comes back.
+ * A15.7 — what a project's remembered layout is worth when it comes back.
  *
  * The reason A15.5 deferred per-project layouts: a stored tree can name
  * sessions that ended while their project was off screen. So a restore is a

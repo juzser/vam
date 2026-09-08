@@ -351,7 +351,7 @@ export function nearestEdge(x: number, y: number, width: number, height: number)
 /**
  * A project's remembered layout, brought back — reconciled, never replayed.
  *
- * A15.6, the operator's report: "when I split, switch to another project and
+ * A15.7, the operator's report: "when I split, switch to another project and
  * then come back, the split state is lost." A15.5 collapsed to one pane on
  * every project switch, the smaller of the two answers it named; this is the
  * other one, VSCode's — a layout per workspace, reopened on return.
