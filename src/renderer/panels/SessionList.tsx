@@ -171,6 +171,17 @@ export const BRANCH_TAIL_MAX_CHARS = 20;
  */
 export const FILTER_POPOVER_WIDTH = 288;
 
+/**
+ * How long the restore strip stays on screen after a hide, in either
+ * direction: a fresh hide, or the most recent restore that still leaves
+ * something hidden. A15.3: "a permanent strip is a standing cost for a
+ * momentary action" — 8 seconds is long enough to notice and act on the
+ * receipt, short enough that it does not become furniture. Exported so the
+ * test asserting the auto-dismiss can advance fake timers past the real
+ * value rather than a guessed one.
+ */
+export const RESTORE_STRIP_VISIBLE_MS = 8_000;
+
 /** `px-3` on each side of `data-projects-header`, mirrored as a gutter. */
 const FILTER_POPOVER_GUTTER = 24;
 
@@ -990,6 +1001,46 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     }
   }
 
+  /**
+   * A15.3: the STRIP is momentary; the SET it names is not. `removed` above
+   * is the honest, permanent record of what is hidden -- it has to stay
+   * complete, because the filter menu's own "Hidden projects" section
+   * (below) reads it too and that one must never time out. `stripVisible`
+   * is a second, purely presentational fact layered on top: whether the
+   * receipt for a RECENT hide is still on screen.
+   *
+   * Keyed on the SET of hidden ids, not on `removed`'s own array identity --
+   * the loop above builds a fresh array every render, so depending on
+   * `removed` itself would fire this effect every render regardless of
+   * whether anything actually changed. Sorted before joining so a stable set
+   * drawn in a different order (entries can reorder without a project being
+   * un-hidden or re-hidden) does not read as a change either.
+   */
+  const removedKey = removed
+    .map((project) => project.id)
+    .sort()
+    .join(',');
+  const [stripVisible, setStripVisible] = useState(() => removedKey !== '');
+  // `null` on mount, deliberately: it can never equal a real key (even the
+  // empty string), so the effect below always runs once after the first
+  // paint -- which is what starts the auto-dismiss timer even for a project
+  // that arrived ALREADY hidden (a restored prefs blob), not only for one
+  // hidden during this session. A ref initialised to `removedKey` itself
+  // would read the first render as "nothing changed" and never schedule it.
+  const previousRemovedKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (removedKey === previousRemovedKey.current) return;
+    previousRemovedKey.current = removedKey;
+    if (removedKey === '') {
+      setStripVisible(false);
+      return;
+    }
+    setStripVisible(true);
+    const timer = window.setTimeout(() => setStripVisible(false), RESTORE_STRIP_VISIBLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [removedKey]);
+  const showRestoreStrip = stripVisible && removed.length > 0;
+
   /** The same sections, each carrying the two flags its heading renders from. */
   const folded = sections
     .filter((section) => !hidden.includes(section.project.id))
@@ -1470,6 +1521,38 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                 <span className="flex-none font-mono text-[9.5px] text-ink-faint">−{hides}</span>
               </button>
             ))}
+
+            {/* A15.3: the UNTIMED twin of the restore strip below. That strip
+                shows for a while and then goes; a project it named does not
+                stop being hidden just because the receipt for hiding it
+                expired, so this section carries the exact same list for as
+                long as ANYTHING is hidden -- the surviving route the strip's
+                own "More in Filters" chip points at. Absent, not empty, when
+                nothing is hidden: an always-there heading over a list that is
+                usually blank would be a section for a state that is rarely
+                true. */}
+            {removed.length > 0 && (
+              <>
+                <span className="mt-0.5 font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
+                  Hidden projects
+                </span>
+                <div data-filter-hidden-projects className="flex flex-wrap items-center gap-1.5">
+                  {removed.map((project) => (
+                    <button
+                      key={project.id}
+                      type="button"
+                      data-restore-project={project.id}
+                      aria-label={`restore ${project.name}`}
+                      onClick={() => onHideProject(project, false)}
+                      className="flex cursor-pointer items-center gap-1 rounded-[6px] border border-line px-1.5 py-0.5 text-[10.5px] text-ink-faint hover:border-line-strong hover:text-ink"
+                    >
+                      <RotateCcw size={10} strokeWidth={1.8} />
+                      {project.name}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -2368,13 +2451,26 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
         </ul>
       </OverlayScroll>
 
-      {/* Where a removed project comes back from.
-          Present only while something is removed, and it names each one:
-          a removal that left no visible trace would be indistinguishable from
-          a project that stopped existing, which is the one thing this list
-          must never be ambiguous about. */}
-      {removed.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 border-line border-t px-[11px] py-2">
+      {/* A15.3: where a removed project comes back from, for a WHILE.
+          A permanent strip is a standing cost for a momentary action, so
+          this shows right after a hide and lets itself go
+          (`RESTORE_STRIP_VISIBLE_MS`) rather than sitting in the sidebar for
+          as long as anything, anywhere, is hidden. It still names each
+          project while it is up: a removal that left no visible trace would
+          be indistinguishable from a project that stopped existing, which is
+          the one thing this list must never be ambiguous about.
+
+          Once it times out the route does NOT disappear with it -- the
+          filter menu's own "Hidden projects" section below carries the exact
+          same list, untimed, for exactly this reason. The chip at the end of
+          THIS row points there: same row as the projects, right-aligned,
+          rather than a caption on a line of its own, because this whole
+          change is about not spending an extra line on a receipt. */}
+      {showRestoreStrip && (
+        <div
+          data-restore-strip
+          className="flex flex-wrap items-center gap-1.5 border-line border-t px-[11px] py-2"
+        >
           <span className="w-full font-mono text-[9px] text-ink-dim uppercase tracking-[0.12em]">
             Removed
           </span>
@@ -2391,6 +2487,21 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               {project.name}
             </button>
           ))}
+          <ShortcutTip label="More in Filters" action={FILTER_MENU_ACTION}>
+            <button
+              type="button"
+              data-restore-strip-more
+              aria-label="more hidden projects, in the filter menu"
+              onClick={() => onFilterMenuToggle(true)}
+              className="ml-auto flex flex-none cursor-pointer items-center gap-1 font-mono text-[9.5px] text-ink-faint hover:text-ink"
+            >
+              Filters
+              <InlineChord
+                action={FILTER_MENU_ACTION}
+                className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-[9px]"
+              />
+            </button>
+          </ShortcutTip>
         </div>
       )}
 
