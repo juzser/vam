@@ -1631,7 +1631,25 @@ function CanvasInner({
       paneSeq.current += 1;
       const newId = `pane-${paneSeq.current}`;
       const edge: Edge = orientation === 'row' ? 'right' : 'bottom';
-      setPanes((tree) => splitPane(tree, focusedPaneIdRef.current, edge, focusedSessionId, newId));
+      // Read the ref into a plain local BEFORE `setFocusedPaneId` below moves
+      // it. `setFocusedPaneId` writes `focusedPaneIdRef.current` synchronously
+      // (see its definition above), while a `setPanes` updater is only
+      // guaranteed to run later, in the render phase — so a lazy
+      // `focusedPaneIdRef.current` read INSIDE the updater can see the id this
+      // very call is about to focus rather than the one being split.
+      // `splitPane` then finds no leaf by that id yet and returns the tree
+      // untouched: the split silently does nothing.
+      //
+      // React's eager-state path hides this whenever the fiber has no pending
+      // update — it runs the updater on the spot, before the ref moves — which
+      // is why no jsdom test in this repo reproduces it; every attempt passes
+      // with this fix reverted. Measured in a real Chromium tab instead: with
+      // this read inlined back into the updater, `e2e/split-panes-shots.mjs`
+      // reports `after zv: 1 pane(s)` and then dies looking for the second
+      // pane. That script is this fix's ONLY regression guard — keep its
+      // pane-count assertions.
+      const targetPaneId = focusedPaneIdRef.current;
+      setPanes((tree) => splitPane(tree, targetPaneId, edge, focusedSessionId, newId));
       setFocusedPaneId(newId);
     },
     [focusedSessionId, setFocusedPaneId],
