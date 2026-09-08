@@ -2752,6 +2752,18 @@ export function DetailPanel(props: DetailPanelProps) {
       ? undefined
       : (entry.session.waitingFor ?? null);
   /**
+   * The cause COLLAPSED TO WORDS OR NOTHING, for the one place that prints it.
+   *
+   * The three states above are what the model owes a reader; a line of text
+   * can only draw one of them. Absent and null both come out as nothing here,
+   * and deliberately the same nothing: "no surface reports a wait" and
+   * "waiting, cause unnamed" differ in what vam KNOWS, not in anything it
+   * could honestly write on that row. Inventing a word for the second -- a
+   * "waiting" or an "unknown" -- would put a cause on screen that no session
+   * ever reported, which is the one failure this field cannot afford.
+   */
+  const waitingCause = typeof waitingFor === 'string' && waitingFor !== '' ? waitingFor : null;
+  /**
    * THE SET, not the question. One `AskUserQuestion` call can carry several,
    * and drawing the newest open one put question TWO of a two-question call on
    * screen with question one nowhere (`panels/question-set.ts`).
@@ -3414,6 +3426,28 @@ export function DetailPanel(props: DetailPanelProps) {
                     <span aria-hidden="true">·</span>
                     <span data-progress-activity className="min-w-0 truncate">
                       {entry?.session.activity}
+                    </span>
+                  </>
+                )}
+                {/* WHAT IT IS BLOCKED ON, in the session's own words. The pane
+                    computed `waitingFor` and then spent it as a boolean, so
+                    every waiting session read the same on screen: "it needs
+                    something" and "it needs permission to run rm" were one
+                    picture, and telling them apart cost one open per tab.
+                    HERE, not above the composer: the bordered "waiting on you"
+                    notice was removed at the operator's request and is not
+                    coming back. This is the same fact in the space this line
+                    already spends on `activity`, and the two cannot crowd each
+                    other -- `activity` is drawn only while the session is
+                    RUNNING, and a cause exists only while it is not.
+                    VERBATIM, because the observed causes are a sample of an
+                    open set (`session-status.ts`): a value vam has never seen
+                    is still the truest thing anyone can say about that row. */}
+                {waitingCause !== null && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span data-progress-waiting className="min-w-0 truncate text-waiting">
+                      {waitingCause}
                     </span>
                   </>
                 )}
