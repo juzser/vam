@@ -167,6 +167,16 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
     label: (a) => (a.delta === 1 ? 'zoom in' : 'zoom out'),
   },
   fitView: { group: 'panes', label: () => 'fit the whole canvas in view' },
+  splitPane: {
+    group: 'panes',
+    label: (a) =>
+      a.orientation === 'row' ? 'split vertically (side by side)' : 'split horizontally (stacked)',
+  },
+  closeSplit: { group: 'panes', label: () => 'close this split — the session keeps running' },
+  stepSplit: {
+    group: 'panes',
+    label: (a) => (a.delta === 1 ? 'next split' : 'previous split'),
+  },
   copy: { group: 'review', label: () => 'copy this step’s commands' },
   palette: { group: 'view', label: () => 'command palette' },
   filterMenu: { group: 'view', label: () => 'filter the session list' },

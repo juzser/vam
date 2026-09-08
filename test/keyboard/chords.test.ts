@@ -237,6 +237,48 @@ describe('the new resize chords (AC-5c continued)', () => {
 });
 
 /**
+ * A15.1 — split panes, spelled under `z` the way vim spells its own window
+ * commands: `Ctrl-w s`/`v` split, `Ctrl-w c` closes, `Ctrl-w w`/`W` cycle
+ * focus. One keystroke shorter here because `z` is already the prefix.
+ */
+describe('split-pane chords (A15.1) — zs/zv/zc/zw/zW', () => {
+  it('zs splits horizontally (a column of stacked panes)', () => {
+    expect(type(['z', 's']).actions).toEqual([{ kind: 'splitPane', orientation: 'column' }]);
+  });
+
+  it('zv splits vertically (a row of side-by-side panes)', () => {
+    expect(type(['z', 'v']).actions).toEqual([{ kind: 'splitPane', orientation: 'row' }]);
+  });
+
+  it('zc closes the focused split', () => {
+    expect(type(['z', 'c']).actions).toEqual([{ kind: 'closeSplit' }]);
+  });
+
+  it('zw and zW cycle focus forward and backward between splits', () => {
+    expect(type(['z', 'w']).actions).toEqual([{ kind: 'stepSplit', delta: 1 }]);
+    expect(type(['z', 'W']).actions).toEqual([{ kind: 'stepSplit', delta: -1 }]);
+  });
+
+  it('does not disturb z0, and z alone still just opens the prefix', () => {
+    expect(type(['z', '0']).actions).toEqual([{ kind: 'resetPanes' }]);
+    const pending = type(['z']);
+    expect(pending.actions).toEqual([]);
+    expect(pending.state.pending).toBe('z');
+  });
+
+  it('the bare letters s, v, c, w and W stay unbound at the top level', () => {
+    // Splitting lives entirely under the `z` prefix — a bare `s` must keep
+    // meaning `icon` (SINGLE), and `v`/`c`/`w`/`W` must keep meaning nothing,
+    // exactly as before this change.
+    expect(type(['s']).actions).toEqual([{ kind: 'icon' }]);
+    expect(type(['v']).actions).toEqual([]);
+    expect(type(['c']).actions).toEqual([]);
+    expect(type(['w']).actions).toEqual([]);
+    expect(type(['W']).actions).toEqual([]);
+  });
+});
+
+/**
  * ONE digit family, whose meaning follows the keyboard.
  *
  * Three arrangements in three changes, so this one is written as a RULE

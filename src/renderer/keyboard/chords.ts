@@ -201,6 +201,28 @@ export type KeyAction =
       session-level one like `x` or `r`. `m` for "move" — a folder is
       filled by moving a project into it, never by creating one there. */
   | { readonly kind: 'moveToGroup' }
+  /** `zs` / `zv` — split the focused tab. A15.1: a tab may be split
+      horizontally or vertically, within one project. Under `z`, vam's own
+      "adjust the view" namespace (`AFTER_Z`'s own doc comment names it as
+      the home for whatever the tab shell wants next), spelled the way vim
+      spells its own window split: `Ctrl-w s` for a horizontal split (panes
+      stacked), `Ctrl-w v` for a vertical one (panes side by side) — the
+      same two letters, one keystroke shorter because `z` is already the
+      prefix rather than a chord of its own. `orientation` names the CSS
+      axis the new divider draws on (`row` = side by side, `column` =
+      stacked) so `Canvas.tsx` reads it straight into a flex class, never a
+      second vocabulary translated at the call site. */
+  | { readonly kind: 'splitPane'; readonly orientation: 'row' | 'column' }
+  /** `zc` — close the focused split. Vim's `Ctrl-w c`. Leaves the SESSION
+      running; only the pane goes, the same distinction `x` (close the
+      session) already draws against `Mod-w` before splits existed. Refuses
+      aloud when only one pane is open — closing the last one would leave
+      nothing to show. */
+  | { readonly kind: 'closeSplit' }
+  /** `zw` / `zW` — move the keyboard to the next / previous split, wrapping
+      at both ends, the same ring shape `h`/`l` already give the tab strip.
+      Vim's `Ctrl-w w` and `Ctrl-w W`. Refuses aloud with only one pane. */
+  | { readonly kind: 'stepSplit'; readonly delta: 1 | -1 }
   | { readonly kind: 'cancel' };
 
 export type ChordStep = {
@@ -354,9 +376,18 @@ const AFTER_Y: Readonly<Record<string, KeyAction>> = {
  * restoring both panes' visibility and their default widths in one press —
  * see the `resetPanes` handler in `Canvas.tsx` for why that is one idea, not
  * two.
+ *
+ * A15.1 spends four more letters here on split panes, in vim's own window
+ * spelling: `s`/`v` split (horizontal/vertical), `c` closes the focused
+ * split, `w`/`W` cycle focus between splits. `C` and `f` stay free.
  */
 const AFTER_Z: Readonly<Record<string, KeyAction>> = {
   '0': { kind: 'resetPanes' },
+  s: { kind: 'splitPane', orientation: 'column' },
+  v: { kind: 'splitPane', orientation: 'row' },
+  c: { kind: 'closeSplit' },
+  w: { kind: 'stepSplit', delta: 1 },
+  W: { kind: 'stepSplit', delta: -1 },
 };
 
 function isPrefix(key: string): key is Prefix {
@@ -465,6 +496,10 @@ export function actionId(action: KeyAction): string {
       return `resizePane:${action.delta}`;
     case 'zoom':
       return `zoom:${action.delta}`;
+    case 'splitPane':
+      return `splitPane:${action.orientation}`;
+    case 'stepSplit':
+      return `stepSplit:${action.delta}`;
     default:
       return action.kind;
   }
