@@ -2824,7 +2824,19 @@ export function DetailPanel(props: DetailPanelProps) {
   // and 404s. The box is then not DRAWN, rather than drawn and refused on tap:
   // a control that takes text it cannot deliver is worse than no control, and
   // the source's own sentence for the refusal is carried in `declines`.
-  const composerHidden = records === false || (openQuestion && chattingAbout !== setId);
+  /**
+   * NO SESSION, NO COMPOSER (audit F8). Since PR 268 `zv` MOVES the active
+   * tab, so an empty pane is an ordinary state rather than a cold-start one —
+   * and it was drawing a full composer over nothing: a `readOnly` textarea,
+   * attach, the provider picker, the model field, and an ENABLED record
+   * button whose click did nothing and did not even change the status bar.
+   * Six controls that cannot act, against this file's own first rule:
+   * absent, not dimmed. The withdrawal path already existed for `records ===
+   * false`; the no-session case is the same fact — there is no route from
+   * this box to a session — and now takes the same road.
+   */
+  const composerHidden =
+    entry === null || records === false || (openQuestion && chattingAbout !== setId);
   /**
    * Is the corner overlay on screen? Two things need the answer: the overlay
    * itself, and the top of the column, which has to RESERVE the corner the
@@ -3124,19 +3136,27 @@ export function DetailPanel(props: DetailPanelProps) {
             </button>
           </p>
         ) : decision === null ? (
-          <p className="text-[12px] text-ink-faint">
-            {/* Two different absences. "This session has no steps yet" named a
+          entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip
+          // above it, and an empty strip already says "no sessions open —
+          // pick one from the sidebar". This line said the same thing in
+          // different words 40px below it, in otherwise empty space. The
+          // PHONE has no strip, so there it is the only sentence there is and
+          // it stays.
+          null : (
+            <p className="text-[12px] text-ink-faint">
+              {/* Two different absences. "This session has no steps yet" named a
                 session that did not exist whenever nothing was focused. */}
-            {entry === null
-              ? 'No session selected — pick one in the sidebar.'
-              : entry.session.status === 'failed'
-                ? // Final, not pending. A failed background session has no
-                  // transcript at all -- the CLI lists it while
-                  // `~/.claude/projects/` holds no `.jsonl` for its id -- and
-                  // "no steps yet" promises steps that are never coming.
-                  'This session failed with nothing recorded.'
-                : 'This session has no steps yet.'}
-          </p>
+              {entry === null
+                ? 'No session selected — pick one in the sidebar.'
+                : entry.session.status === 'failed'
+                  ? // Final, not pending. A failed background session has no
+                    // transcript at all -- the CLI lists it while
+                    // `~/.claude/projects/` holds no `.jsonl` for its id -- and
+                    // "no steps yet" promises steps that are never coming.
+                    'This session failed with nothing recorded.'
+                  : 'This session has no steps yet.'}
+            </p>
+          )
         ) : (
           // THE MERGED COLUMN (A12.2). One scrollable region for `in`,
           // `progress` and `out` together — the ref and the scroll handler

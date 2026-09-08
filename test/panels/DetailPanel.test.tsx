@@ -202,13 +202,24 @@ describe('the in and out rules do not date a turn the model cannot date', () => 
     expect(activity()).not.toContain('just now');
   });
 
-  it('says no session is selected rather than that the session has no steps', () => {
+  it('never claims a session that does not exist has no steps', () => {
     // With nothing focused the pane read "This session has no steps yet",
-    // which names a session that does not exist.
+    // which names a session that does not exist. That is still refused.
     draw({ entry: null, decision: null });
-    const body = document.body.textContent ?? '';
-    expect(body).not.toContain('This session has no steps yet');
-    expect(body).toMatch(/no session/i);
+    expect(document.body.textContent ?? '').not.toContain('This session has no steps yet');
+  });
+
+  it('leaves the sentence to the tab strip on a desktop pane, and says it on a phone', () => {
+    // Audit F9: the empty pane stacked "no sessions open — pick one from the
+    // sidebar" (the strip, always drawn above a desktop pane) and "No session
+    // selected — pick one in the sidebar." (here) 40px apart in otherwise
+    // empty space. One sentence, said once, by the surface that is always
+    // there. A PHONE has no tab strip, so there this is that surface.
+    draw({ entry: null, decision: null });
+    expect(document.body.textContent ?? '').not.toMatch(/no session selected/i);
+    cleanup();
+    draw({ entry: null, decision: null, phone: true });
+    expect(document.body.textContent ?? '').toMatch(/no session selected/i);
   });
 });
 
