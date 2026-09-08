@@ -563,6 +563,31 @@ const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
   failed: 'text-failed',
 };
 
+/**
+ * The dot every tab wears, and why the ink above is not simply extended to
+ * the inactive ones.
+ *
+ * `TAB_STATUS_INK` is applied only when a tab is ACTIVE, so three of its four
+ * statuses could never be seen: the tab you are looking at is not the one
+ * that needs to tell you something. And since every session of the project is
+ * a tab, the strip is the densest status surface in the app — after a split
+ * the operator's eyes are here, while the amber "needs you" mark lived only
+ * in the sidebar.
+ *
+ * TWO CHANNELS, KEPT SEPARABLE: colouring an inactive tab's TITLE by status
+ * would put "which tab am I on" and "how is each session doing" in one ink,
+ * colliding with the deliberate three-channel active-tab treatment (accent
+ * underline, ground/ink, `opacity-85` on the neighbours). So the ink stays
+ * the active tab's and status gets a mark of its own on every tab — the
+ * sidebar row's dot, a pixel smaller for an 11px row.
+ */
+const TAB_STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
+  running: 'bg-running',
+  waiting: 'bg-waiting',
+  done: 'bg-done',
+  failed: 'bg-failed',
+};
+
 function TabStrip({
   orientation,
   tabs,
@@ -759,6 +784,14 @@ function TabStrip({
                 : 'border-b-transparent text-ink-dim opacity-85 hover:text-ink hover:opacity-100'
             }`}
           >
+            {/* Decorative to a screen reader, as the sidebar row's dot is:
+                labelling one per tab would read every session's status
+                before any of the titles. */}
+            <span
+              data-tab-status={entry.session.status}
+              aria-hidden="true"
+              className={`h-[6px] w-[6px] flex-none rounded-full ${TAB_STATUS_DOT[entry.session.status]}`}
+            />
             <button
               type="button"
               data-tab-select

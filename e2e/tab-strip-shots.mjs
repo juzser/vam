@@ -352,4 +352,117 @@ if (afterWheel <= beforeWheel) {
   );
 }
 
+/**
+ * --- 8. EVERY TAB REPORTS ITS STATUS, and the mark survives the dimming.
+ *
+ * The status ink was applied only to the ACTIVE tab, so three of its four
+ * statuses could never be seen. The dot is measured, not read off a class:
+ * its box, its composited colour against the strip's ground at the inactive
+ * tab's `opacity-85`, and that it is the element actually painted at its own
+ * centre — an indicator hidden under a sibling is an indicator nobody sees.
+ */
+// BACK TO THE FIRST TAB BY THE SIDEBAR — the other route that changes which
+// tab is active, and the one that carries no key repeat to lean on. It puts
+// the strip in a known place (its start) for the measurement and the shot.
+// The last session FIRST, so the click that follows is guaranteed to change
+// which tab is active whatever the sections above left behind: an assertion
+// about a strip following a click that selected the tab already active is an
+// assertion about nothing.
+await narrow.locator('[data-session-row="dogfood-4"]').click();
+await narrow.waitForTimeout(250);
+const toLastBySidebar = await readActive();
+console.log('active tab after a sidebar click on the last session:', JSON.stringify(toLastBySidebar));
+if (toLastBySidebar.scrollLeft <= 0 || toLastBySidebar.rightOfView > 1) {
+  throw new Error(
+    `a sidebar click landed on a tab in the overflow and the strip stayed put (scrollLeft ` +
+      `${toLastBySidebar.scrollLeft}, ${Math.round(toLastBySidebar.rightOfView)}px past its right edge)`,
+  );
+}
+await narrow.locator('[data-session-row="factory-sse-1"]').click();
+await narrow.waitForTimeout(250);
+const bySidebar = await readActive();
+console.log('active tab after a sidebar click back to the first:', JSON.stringify(bySidebar));
+if (!bySidebar.title.includes('factory-sse-1')) {
+  throw new Error(`a sidebar click did not make its session the active tab (${bySidebar.title})`);
+}
+if (bySidebar.scrollLeft !== 0 || bySidebar.leftOfView > 1 || bySidebar.rightOfView > 1) {
+  throw new Error(
+    `the strip did not follow a sidebar click back to the first tab (scrollLeft ` +
+      `${bySidebar.scrollLeft}, ${Math.round(bySidebar.leftOfView)}px past its left edge)`,
+  );
+}
+
+// Off the strip: a hovered tab is at full opacity, and the DIMMED one is the
+// point of the measurement.
+await narrow.mouse.move(stripBox.x + stripBox.width / 2, stripBox.y + 300);
+await narrow.waitForTimeout(150);
+const dots = await narrow.evaluate(() => {
+  const parse = (s) => s.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number);
+  return [...document.querySelectorAll('[data-session-tab]')].map((tab) => {
+    const dot = tab.querySelector('[data-tab-status]');
+    if (dot === null) return { status: null };
+    const r = dot.getBoundingClientRect();
+    const sr = tab.closest('[data-tab-strip]').getBoundingClientRect();
+    const row = tab.closest('[data-tab-strip-row]');
+    const rowGround = getComputedStyle(row).backgroundColor;
+    const ground = rowGround.startsWith('rgba(0, 0, 0, 0')
+      ? getComputedStyle(document.body).backgroundColor
+      : rowGround;
+    return {
+      active: tab.getAttribute('data-active') === 'true',
+      status: dot.getAttribute('data-tab-status'),
+      opacity: Number.parseFloat(getComputedStyle(tab).opacity),
+      colour: parse(getComputedStyle(dot).backgroundColor),
+      ground: parse(ground),
+      width: r.width,
+      height: r.height,
+      // Only meaningful for a dot the strip is showing: one scrolled past the
+      // scroller's end is clipped, and `elementFromPoint` then answers about
+      // the strip rather than about the dot.
+      visible: r.left >= sr.left - 0.5 && r.right <= sr.right + 0.5,
+      onTop: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === dot,
+    };
+  });
+});
+console.log('status dots:', JSON.stringify(dots));
+if (dots.length < 2) throw new Error('need more than one tab to prove the inactive ones are marked');
+if (dots.some((d) => d.status === null)) {
+  throw new Error('a tab carries no status mark — the strip is the densest status surface here');
+}
+const inactiveDots = dots.filter((d) => !d.active);
+if (inactiveDots.length === 0) throw new Error('no inactive tab to measure the dimmed dot on');
+if (!inactiveDots.some((d) => d.visible)) {
+  throw new Error('no inactive dot was inside the strip to measure — the check saw nothing');
+}
+if (!inactiveDots.some((d) => d.opacity < 1)) {
+  throw new Error(
+    'every inactive tab measured at full opacity, so the contrast below was never checked ' +
+      'against the dimming it exists to survive',
+  );
+}
+for (const dot of inactiveDots) {
+  if (dot.width < 4 || dot.height < 4) {
+    throw new Error(`a ${dot.width}x${dot.height} status dot is not a mark anyone can see`);
+  }
+  if (dot.visible && !dot.onTop) {
+    throw new Error('the status dot is not the element painted at its own centre');
+  }
+  // Composited over the strip's ground at the tab's own opacity — the pixel a
+  // reader actually gets. 3:1 is WCAG 1.4.11: the dot is a graphical object
+  // carrying information, not text.
+  const blended = dot.colour.map((c, i) => c * dot.opacity + dot.ground[i] * (1 - dot.opacity));
+  const dotRatio =
+    (Math.max(luminance(blended), luminance(dot.ground)) + 0.05) /
+    (Math.min(luminance(blended), luminance(dot.ground)) + 0.05);
+  console.log(`dimmed ${dot.status} dot contrast: ${dotRatio.toFixed(2)}:1 (at opacity ${dot.opacity})`);
+  if (dotRatio < 3) {
+    throw new Error(
+      `the ${dot.status} dot lands at ${dotRatio.toFixed(2)}:1 against the strip once dimmed, ` +
+        `under the 3:1 floor for a non-text indicator`,
+    );
+  }
+}
+await narrow.screenshot({ path: `${outDir}/tab-strip-status-dots.png` });
+console.log(`${outDir}/tab-strip-status-dots.png`);
+
 await browser.close();
