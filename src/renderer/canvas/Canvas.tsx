@@ -89,7 +89,7 @@ import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { NEW_PROJECT_PENDING, SessionList } from '../panels/SessionList.js';
 import { resolveSessionGlyph } from '../panels/session-icon.js';
-import { visibleTabs } from '../panels/tabs.js';
+import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
@@ -2986,15 +2986,29 @@ function CanvasInner({
               setStatus('the detail pane is hidden — z0 brings it back');
               return;
             }
-            // THE DRAWN LIST, not the constant. A source with no terminal
-            // has that tab withdrawn and everything after it moves up a
-            // position, so indexing the constant opened a tab that was not
-            // there -- accepted, then silently reverted to Response -- and
-            // refused with a count the operator could see was wrong.
+            // THROUGH `tabForDigit`, the one place a digit becomes a name,
+            // and the same derivation `Alt+<digit>` already uses. Two
+            // mistakes have lived on this line: counting the CONSTANT while
+            // the bar drew a filtered list, and then counting the DRAWN list
+            // positionally -- which is the defect `tabForDigit` was added to
+            // abolish, shipped again here. With Terminal withdrawn it opened
+            // Agents for `Mod-3` while the icon beside it captioned `Alt+4`,
+            // so one digit meant two views depending on the route taken, and
+            // the meaning slid as Terminal came and went.
+            //
+            // Two refusals, because they are two facts -- `DetailPanel`'s
+            // own wording, for the same reason it has two: a digit inside
+            // `TABS` names a real view THIS SOURCE has withdrawn, and a
+            // digit past `TABS` names nothing at all.
             const drawn = visibleTabs(terminalTab);
-            const tab = drawn[action.digit - 1];
+            const tab = tabForDigit(drawn, action.digit);
             if (tab === undefined) {
-              setStatus(`only ${drawn.length} tab${drawn.length === 1 ? '' : 's'}`);
+              const named = TABS[action.digit - 1];
+              setStatus(
+                named === undefined
+                  ? `only ${drawn.length} tab${drawn.length === 1 ? '' : 's'}`
+                  : `${named} — this source has none`,
+              );
               return;
             }
             setTabRequest({ tab });

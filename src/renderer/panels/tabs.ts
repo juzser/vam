@@ -16,7 +16,15 @@
  * Terminal again the moment it came back. A digit must name the SAME view
  * every time, so `tabForDigit` now reads `TABS` -- the one place a name's
  * position is fixed -- and asks `visibleTabs`' output only whether that name
- * is currently drawn. Nothing indexes `visible` directly by digit any more.
+ * is currently drawn.
+ *
+ * "Nothing indexes `visible` directly by digit any more" was written here
+ * while `Canvas.tsx`'s `Mod-<digit>` still did, one route down from the
+ * `Alt-<digit>` this fixed: the same source, the same withdrawn Terminal, and
+ * two different views depending on which key the operator pressed. BOTH
+ * routes resolve through `tabForDigit` now, and that is what makes the
+ * sentence true. A third caller must go through it too -- an index into
+ * `visibleTabs`' return value is the bug, not an implementation detail.
  */
 
 /** Every tab the pane can hold, in bar order. */
