@@ -89,6 +89,7 @@ const TEXT_TOKENS = [
   '--vam-ink-quiet',
   '--vam-running',
   '--vam-waiting',
+  '--vam-idle',
   '--vam-done',
   '--vam-failed',
 ] as const;
@@ -125,9 +126,9 @@ describe('token contrast, per theme', () => {
         const pairs = TEXT_TOKENS.flatMap((token) =>
           TEXT_GROUNDS.map((ground) => [token, ground] as const),
         );
-        // 8 tokens x 5 grounds. The literal is the point: it is what makes
+        // 9 tokens x 5 grounds. The literal is the point: it is what makes
         // deleting a row from either list a failure rather than a quieter pass.
-        expect(measure(pairs, 4.5)).toEqual({ pairs: 40, failing: [] });
+        expect(measure(pairs, 4.5)).toEqual({ pairs: 45, failing: [] });
       });
 
       it('reads the waiting amber against its own tint and wash', () => {

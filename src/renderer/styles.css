@@ -109,6 +109,11 @@
   --color-running: var(--vam-running);
   --color-waiting: var(--vam-waiting);
   --color-cursor-ring: var(--vam-cursor-ring);
+  /* The quiet one. A live session between turns is not news, so it takes a
+     neutral rather than a fifth hue -- the four colours stay spent on states
+     worth reacting to. It is NOT `--color-done`: that is a job that ended,
+     this is one sitting there ready. */
+  --color-idle: var(--vam-idle);
   --color-done: var(--vam-done);
   --color-failed: var(--vam-failed);
 
@@ -242,6 +247,9 @@
 
   --vam-running: #4ade80;
   --vam-waiting: #f59e0b;
+  /* Neutral zinc, 6.99:1 at worst against the five text grounds in this
+     theme. Deliberately not a hue: see `--color-idle`. */
+  --vam-idle: #a1a1aa;
   --vam-done: #60a5fa;
   --vam-failed: #f87171;
 
@@ -368,6 +376,9 @@ html.light {
 
   --vam-running: #166534;
   --vam-waiting: #92400e;
+  /* The same neutral, one end of the ladder to the other: 6.67:1 at worst on
+     the light grounds. */
+  --vam-idle: #52525b;
   --vam-done: #1d4ed8;
   --vam-failed: #b91c1c;
 

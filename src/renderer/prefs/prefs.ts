@@ -1712,6 +1712,7 @@ export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: 
   { token: '--vam-running', label: 'running' },
   { token: '--vam-waiting', label: 'waiting' },
   { token: '--vam-cursor-ring', label: 'cursor ring' },
+  { token: '--vam-idle', label: 'idle' },
   { token: '--vam-done', label: 'done' },
   { token: '--vam-failed', label: 'failed' },
 ];

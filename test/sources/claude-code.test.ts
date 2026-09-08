@@ -79,15 +79,33 @@ describe('parseAgentRows', () => {
     ...over,
   });
 
-  it('maps an interactive session busy/idle onto running/waiting', () => {
-    const [busy, idle] = parseAgentRows(
+  it("keeps the CLI's three interactive words apart: busy is running, idle is idle, and only the CLI's own `waiting` is vam's waiting", () => {
+    const [busy, idle, waiting] = parseAgentRows(
       JSON.stringify([
         row({ status: 'busy', sessionId: 'a' }),
         row({ status: 'idle', sessionId: 'b' }),
+        row({ status: 'waiting', sessionId: 'c' }),
       ]),
     );
     expect(busy?.status).toBe('running');
-    expect(idle?.status).toBe('waiting');
+    // Measured against the real CLI: `idle` is the COMMONEST interactive
+    // value there is (3 of 5 rows on a working machine). Reading it as
+    // `waiting` put an amber "needs you" on every session the operator had
+    // simply finished with, which is the badge going off for nothing --
+    // and a signal that cries wolf is worse than no signal at all.
+    expect(idle?.status).toBe('idle');
+    expect(waiting?.status).toBe('waiting');
+  });
+
+  it('reads an interactive status this mapping was never taught as waiting -- something to go look at, never a quiet idle it cannot vouch for', () => {
+    const rows = parseAgentRows(
+      JSON.stringify([
+        row({ kind: 'interactive', status: 'some-future-word', sessionId: 'a' }),
+        row({ kind: 'interactive', status: undefined, sessionId: 'b' }),
+      ]),
+      NOW,
+    );
+    expect(rows.map((r) => r.status)).toEqual(['waiting', 'waiting']);
   });
 
   it('takes done and failed from a background session, which alone can express them', () => {
@@ -127,7 +145,7 @@ describe('parseAgentRows', () => {
     expect(rows[0]?.status).toBe('failed');
   });
 
-  it('still maps an interactive row through busy/idle, unaffected by the background fallback change', () => {
+  it('still maps an interactive row through its own `status` field, unaffected by the background fallback change', () => {
     const rows = parseAgentRows(
       JSON.stringify([
         row({ kind: 'interactive', status: 'busy' }),
@@ -135,7 +153,18 @@ describe('parseAgentRows', () => {
       ]),
       NOW,
     );
-    expect(rows.map((r) => r.status)).toEqual(['running', 'waiting']);
+    expect(rows.map((r) => r.status)).toEqual(['running', 'idle']);
+  });
+
+  it('never lets a background row reach the interactive branch: `state` decides it, and an absent `status` is not read as idle', () => {
+    const rows = parseAgentRows(
+      JSON.stringify([
+        row({ kind: 'background', state: 'stopped', status: undefined, sessionId: 'a' }),
+        row({ kind: 'background', state: 'failed', status: undefined, sessionId: 'b' }),
+      ]),
+      NOW,
+    );
+    expect(rows.map((r) => r.status)).toEqual(['done', 'failed']);
   });
 
   it('keeps two processes that resumed one session as two rows with distinct keys', () => {

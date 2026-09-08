@@ -82,14 +82,35 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? 
 /**
  * The status mapping, and what it loses.
  *
- * An INTERACTIVE row carries `status: 'busy' | 'idle' | 'waiting'` against
- * vam's four statuses. `busy` is `running`; `idle` and the CLI's own literal
- * `waiting` both land on `waiting`, which is exactly the model's definition:
- * the session finished its turn and the ball is with the operator. `done` and
- * `failed` are NOT derivable here and are not invented: a session the
- * operator finished and one they abandoned are both reported the same way by
- * the CLI, and an interactive session that crashed is not listed at all
- * rather than listed as failed.
+ * An INTERACTIVE row carries `status: 'busy' | 'idle' | 'waiting'`, and each
+ * of the three keeps its own meaning: `busy` is `running`, `idle` is `idle`,
+ * and only the CLI's own `waiting` becomes vam's `waiting`. That last one is
+ * the model's definition -- the session finished its turn and the ball is
+ * with the operator -- and it is a demand, which is why it must not be handed
+ * out to rows that are making none.
+ *
+ * IT USED TO BE HANDED OUT TO ALL OF THEM. This branch read `status ===
+ * 'busy' ? 'running' : 'waiting'`, so every non-busy row was a demand.
+ * Measured against the real CLI, `idle` is the commonest interactive value
+ * there is (three of five rows), so the sidebar's loud "needs you" count was
+ * mostly a count of sessions the operator had simply finished with -- and a
+ * signal that cries wolf is worse than no signal. `idle` is now its own
+ * status; `model.ts` records why it is not folded into `done`.
+ *
+ * `done` and `failed` are still NOT derivable here and are not invented: a
+ * session the operator finished and one they abandoned are both reported the
+ * same way by the CLI, and an interactive session that crashed is not listed
+ * at all rather than listed as failed.
+ *
+ * An interactive `status` this mapping was NOT taught -- a future word, or
+ * the field missing altogether -- reads as `waiting`, and that is the same
+ * principle the background fallback below applies, not an exception to it:
+ * an unrecognised value is never folded into a quiet state vam cannot vouch
+ * for, so it becomes the one that sends the operator to look. The choice
+ * costs nothing at scale precisely because the three known words cover every
+ * row the CLI actually emits; it is `idle` that would be the dishonest
+ * default, since it says "nothing to see here" about a row vam did not
+ * understand. `failed` is not available: the row is listed, so it is alive.
  *
  * A BACKGROUND row carries `state` instead of `status` -- IT NEVER CARRIES
  * `status` AT ALL, which is why the fallback below must not be reached by a
@@ -121,7 +142,9 @@ function statusOf(row: Record<string, unknown>, kind: 'interactive' | 'backgroun
   if (state === 'done' || state === 'failed' || state === 'running') return state;
   if (state === 'stopped') return 'done';
   if (kind === 'background') return 'failed';
-  return str(row['status']) === 'busy' ? 'running' : 'waiting';
+  const status = str(row['status']);
+  if (status === 'busy') return 'running';
+  return status === 'idle' ? 'idle' : 'waiting';
 }
 
 /** Rows out of the CLI's stdout. Anything unexpected yields no rows, never a throw. */

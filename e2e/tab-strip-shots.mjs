@@ -396,34 +396,38 @@ if (bySidebar.scrollLeft !== 0 || bySidebar.leftOfView > 1 || bySidebar.rightOfV
 // point of the measurement.
 await narrow.mouse.move(stripBox.x + stripBox.width / 2, stripBox.y + 300);
 await narrow.waitForTimeout(150);
-const dots = await narrow.evaluate(() => {
-  const parse = (s) => s.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number);
-  return [...document.querySelectorAll('[data-session-tab]')].map((tab) => {
-    const dot = tab.querySelector('[data-tab-status]');
-    if (dot === null) return { status: null };
-    const r = dot.getBoundingClientRect();
-    const sr = tab.closest('[data-tab-strip]').getBoundingClientRect();
-    const row = tab.closest('[data-tab-strip-row]');
-    const rowGround = getComputedStyle(row).backgroundColor;
-    const ground = rowGround.startsWith('rgba(0, 0, 0, 0')
-      ? getComputedStyle(document.body).backgroundColor
-      : rowGround;
-    return {
-      active: tab.getAttribute('data-active') === 'true',
-      status: dot.getAttribute('data-tab-status'),
-      opacity: Number.parseFloat(getComputedStyle(tab).opacity),
-      colour: parse(getComputedStyle(dot).backgroundColor),
-      ground: parse(ground),
-      width: r.width,
-      height: r.height,
-      // Only meaningful for a dot the strip is showing: one scrolled past the
-      // scroller's end is clipped, and `elementFromPoint` then answers about
-      // the strip rather than about the dot.
-      visible: r.left >= sr.left - 0.5 && r.right <= sr.right + 0.5,
-      onTop: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === dot,
-    };
+/** Every tab's dot as the browser paints it, for whichever project is active. */
+const readDots = () =>
+  narrow.evaluate(() => {
+    const parse = (s) => s.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number);
+    return [...document.querySelectorAll('[data-session-tab]')].map((tab) => {
+      const dot = tab.querySelector('[data-tab-status]');
+      if (dot === null) return { status: null };
+      const r = dot.getBoundingClientRect();
+      const sr = tab.closest('[data-tab-strip]').getBoundingClientRect();
+      const row = tab.closest('[data-tab-strip-row]');
+      const rowGround = getComputedStyle(row).backgroundColor;
+      const ground = rowGround.startsWith('rgba(0, 0, 0, 0')
+        ? getComputedStyle(document.body).backgroundColor
+        : rowGround;
+      return {
+        active: tab.getAttribute('data-active') === 'true',
+        status: dot.getAttribute('data-tab-status'),
+        opacity: Number.parseFloat(getComputedStyle(tab).opacity),
+        colour: parse(getComputedStyle(dot).backgroundColor),
+        ground: parse(ground),
+        width: r.width,
+        height: r.height,
+        // Only meaningful for a dot the strip is showing: one scrolled past the
+        // scroller's end is clipped, and `elementFromPoint` then answers about
+        // the strip rather than about the dot.
+        visible: r.left >= sr.left - 0.5 && r.right <= sr.right + 0.5,
+        onTop: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === dot,
+      };
+    });
   });
-});
+
+const dots = await readDots();
 console.log('status dots:', JSON.stringify(dots));
 if (dots.length < 2) throw new Error('need more than one tab to prove the inactive ones are marked');
 if (dots.some((d) => d.status === null)) {
@@ -464,5 +468,50 @@ for (const dot of inactiveDots) {
 }
 await narrow.screenshot({ path: `${outDir}/tab-strip-status-dots.png` });
 console.log(`${outDir}/tab-strip-status-dots.png`);
+
+// --- IDLE IS NOT WAITING, measured as pixels rather than as a class name.
+//
+// The source read every interactive row the CLI did not call `busy` as
+// `waiting`, so the CLI's `idle` -- three of five rows on a real machine --
+// wore the amber that means "the ball is with you". Every finished session
+// went loud, which is the badge crying wolf. The `notes` project holds one of
+// each, so one strip carries both dots and the two have to come back as two
+// different colours: a unit test can only read the class back, and this
+// codebase has shipped a rule that matched nothing before.
+await narrow.locator('[data-session-row="notes-1"]').click();
+await narrow.waitForTimeout(250);
+await narrow.mouse.move(stripBox.x + stripBox.width / 2, stripBox.y + 300);
+await narrow.waitForTimeout(150);
+const quiet = await readDots();
+console.log('the quiet project’s dots:', JSON.stringify(quiet));
+const idleDot = quiet.find((d) => d.status === 'idle');
+const waitingDot = quiet.find((d) => d.status === 'waiting');
+if (idleDot === undefined || waitingDot === undefined) {
+  throw new Error(
+    `this strip must hold an idle tab and a waiting one to tell apart, it holds ` +
+      `${quiet.map((d) => d.status).join(', ')}.`,
+  );
+}
+if (idleDot.colour.join(',') === waitingDot.colour.join(',')) {
+  throw new Error(
+    `the idle dot and the waiting dot are both rgb(${idleDot.colour.join(', ')}) — an idle ` +
+      'session is being painted as a demand, which is the amber meaning nothing.',
+  );
+}
+const idleBlend = idleDot.colour.map(
+  (c, i) => c * idleDot.opacity + idleDot.ground[i] * (1 - idleDot.opacity),
+);
+const idleRatio =
+  (Math.max(luminance(idleBlend), luminance(idleDot.ground)) + 0.05) /
+  (Math.min(luminance(idleBlend), luminance(idleDot.ground)) + 0.05);
+console.log(`idle dot contrast: ${idleRatio.toFixed(2)}:1 (at opacity ${idleDot.opacity})`);
+if (idleRatio < 3) {
+  throw new Error(
+    `the idle dot lands at ${idleRatio.toFixed(2)}:1 against the strip, under the 3:1 floor — ` +
+      'a quiet status still has to be a visible one.',
+  );
+}
+await narrow.screenshot({ path: `${outDir}/tab-strip-idle-vs-waiting.png` });
+console.log(`${outDir}/tab-strip-idle-vs-waiting.png`);
 
 await browser.close();

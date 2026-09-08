@@ -314,5 +314,75 @@ export const DEMO_MODEL: CanvasModel = {
         },
       ],
     },
+    {
+      // A PROJECT OF TWO QUIET SESSIONS, and the only place the two quiet
+      // statuses stand side by side. `idle` is what the CLI calls a live
+      // session between turns -- the commonest thing an operator has open --
+      // and vam painted it `waiting` for as long as the source read every
+      // non-busy row as a demand. A fixture with no idle row would leave the
+      // status untested in every browser guard and absent from every
+      // screenshot, which is how a status drifts back into meaning nothing.
+      // It is a project of its own rather than a fourth session in `factory`,
+      // because the split-pane guards are written around that project holding
+      // exactly three; a status fixture must not buy its visibility by
+      // rewriting the assertions of a guard it has nothing to do with.
+      id: 'notes',
+      name: 'notes',
+      source: 'claude-code',
+      sessions: [
+        {
+          // IDLE: alive, attached, and simply between turns. Note what it is
+          // NOT -- `dogfood-4` is `done`, a job that ENDED, and this one can
+          // be typed into right now. That difference is the reason `idle` is
+          // its own status and not a second name for `done`.
+          vamControlled: true,
+          id: 'notes-1',
+          title: 'notes-1',
+          icon: '🌙',
+          epic: 'd257-verdict',
+          branch: 'smith/d257/verdict-notes',
+          status: 'idle',
+          runningAgents: 0,
+          activity: null,
+          age: '26m',
+          decisions: [
+            {
+              id: 'd-notes',
+              label: 'notes',
+              input: 'Write up what the D-257 verdict actually turned on, then wait for me.',
+              output:
+                'Written. It turned on one unmerged branch, not on the finding count -- the draft is in the epic notes and nothing was pushed. Say the word and I will raise it.',
+              commands: [],
+            },
+          ],
+        },
+        {
+          // Its neighbour, and the whole point of the pairing: one tab strip
+          // holding a session that wants something and one that does not, so
+          // the amber has something to be told apart FROM.
+          waitingFor: 'plan approval',
+          vamControlled: true,
+          id: 'notes-2',
+          title: 'notes-2',
+          icon: '📝',
+          epic: 'd257-verdict',
+          branch: 'smith/d257/ledger-sweep',
+          status: 'waiting',
+          runningAgents: 0,
+          activity: null,
+          age: '3m',
+          decisions: [
+            {
+              id: 'd-ledger',
+              label: 'ledger',
+              input: 'Sweep the findings ledger for the nine that never reached the projection.',
+              output:
+                'Found all nine, and a tenth nobody counted. Plan is to backfill the projection rather than re-raise them -- approve and I will start.',
+              commands: [],
+            },
+          ],
+        },
+      ],
+    },
   ],
 };

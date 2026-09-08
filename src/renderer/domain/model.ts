@@ -24,8 +24,7 @@
 export type SourceId = string;
 
 /**
- * The four states worth a colour on a canvas you read at a glance (§3). A fifth
- * would make the first four mean less.
+ * The states worth a colour on a canvas you read at a glance (§3).
  *
  * `waiting` is the one that earns the canvas its keep, and it means one precise
  * thing: **the session has finished its turn and the ball is with you.** It
@@ -33,8 +32,33 @@ export type SourceId = string;
  * run — and nothing has been sent since. It does NOT mean "an agent inside it
  * is blocked": a session working through its own subagents is `running`, and
  * you are not meant to do anything about it.
+ *
+ * THE FIFTH, AND WHY THIS LIST GREW. This comment said for a long time that a
+ * fifth status "would make the first four mean less". It was four statuses
+ * that were making `waiting` mean less: the Claude Code source read every
+ * interactive row the CLI did not call `busy` as `waiting`, and the CLI's own
+ * word for a live session doing nothing is `idle` — measured, three of five
+ * interactive rows on a working machine. So after a day's work every finished
+ * session was amber, the sidebar's loud count was a count of nothing, and the
+ * one colour that must be believed was the one an operator learns to ignore.
+ *
+ * `idle` is therefore a status of its own and NOT a synonym for `done`. `done`
+ * is a job that ENDED — the only rows that can honestly report it are the
+ * background ones (`main/sources/claude-code/agents.ts`), and `stop.ts`
+ * refuses to stop such a row because there is nothing left running. An idle
+ * session is the opposite: alive, attached, stoppable, and simply between
+ * turns. Folding the two would trade an amber lie for a grey one and lose
+ * "this agent is sitting there ready" from the canvas entirely.
+ *
+ * Its colour is a neutral, deliberately: `idle` is the absence of news, and
+ * the four hues stay spent on states that are news.
+ *
+ * Every surface that paints a status keys a `Record<SessionStatus, …>` off
+ * this union — the tab ink and dot, the sidebar dot, the phone dot, the rank
+ * order, the filter tally. That is the guard against this list growing again
+ * behind someone's back: add a member and the four maps stop compiling.
  */
-export type SessionStatus = 'running' | 'waiting' | 'done' | 'failed';
+export type SessionStatus = 'running' | 'waiting' | 'idle' | 'done' | 'failed';
 
 /**
  * One round trip between you and a session: your words in, its answer out.

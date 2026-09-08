@@ -205,10 +205,11 @@ function ViewIcons({
   );
 }
 
-/** The four status tokens, on a 6px dot -- never borrowed for decoration. */
+/** The status tokens, on a 6px dot -- never borrowed for decoration. */
 const STATUS_DOT: Readonly<Record<Session['status'], string>> = {
   running: 'bg-running',
   waiting: 'bg-waiting',
+  idle: 'bg-idle',
   done: 'bg-done',
   failed: 'bg-failed',
 };
