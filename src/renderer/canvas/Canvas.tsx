@@ -573,7 +573,17 @@ function TabStrip({
   readonly orientation: 'horizontal' | 'vertical';
   readonly tabs: readonly SessionEntry[];
   readonly activeId: string | null;
-  readonly onSelect: (sessionId: string) => void;
+  /**
+   * `viaPointer` is the ACTIVATION SOURCE, carried rather than inferred later
+   * (the operator's "focusing a tab should focus the prompt" is true of a
+   * click and false of a chord — see `Canvas.tab-pointer-focus.test.tsx`).
+   * Its value is `UIEvent.detail`, the click count: the HTML activation
+   * behaviour dispatches a click with `detail` 0 when a focused button is
+   * activated from the keyboard, and a pointer press always reports at least
+   * 1. This is the only place in the shell that can still see the difference,
+   * so it is read here and passed on as a fact.
+   */
+  readonly onSelect: (sessionId: string, viaPointer: boolean) => void;
   readonly onClose: (sessionId: string) => void;
   /**
    * A15.1 — dragging a tab is how a split is made. Optional so every
@@ -631,7 +641,7 @@ function TabStrip({
               draggable={onTabDragStart !== undefined}
               onDragStart={onTabDragStart?.(entry.session.id)}
               onDragEnd={onTabDragEnd}
-              onClick={() => onSelect(entry.session.id)}
+              onClick={(event) => onSelect(entry.session.id, event.detail > 0)}
               className={`max-w-[160px] truncate py-1 ${active ? TAB_STATUS_INK[entry.session.status] : ''}`}
             >
               {glyph !== null && (
@@ -3795,13 +3805,25 @@ function CanvasInner({
               orientation="horizontal"
               tabs={paneTabs}
               activeId={leaf.sessionId}
-              onSelect={(sessionId) => {
+              onSelect={(sessionId, viaPointer) => {
                 // The pane whose strip was clicked is the pane the keyboard
                 // moves to FIRST: `setFocusedPaneId` writes its ref
                 // synchronously, so the `setFocusedSessionId` below lands in
                 // this pane rather than in whichever one held focus before.
                 setFocusedPaneId(leaf.id);
                 setFocusedSessionId(sessionId);
+                // A POINTER said "I am here to type", so the caret goes where
+                // typing goes — the operator's own request, and the reason `i`
+                // stops being the price of a click. A keyboard activation of
+                // the same button does NOT: the operator is mid-grammar and
+                // the next key is likelier to be `zv` than a letter of prose.
+                // `setComposingFor` is named with the session rather than
+                // going through `beginComposing`, which reads the focused id
+                // this call is in the middle of changing.
+                if (viaPointer) {
+                  setMode('insert');
+                  setComposingFor(sessionId, true);
+                }
               }}
               onClose={(sessionId) => closePaneTab(leaf.id, sessionId)}
               onTabDragStart={(sessionId) => onTabDragStart(leaf.id, sessionId)}
@@ -3859,6 +3881,7 @@ function CanvasInner({
       closePaneTab,
       setFocusedPaneId,
       setFocusedSessionId,
+      setComposingFor,
       onTabDragStart,
       onTabDragEnd,
       onPaneDragOver,
