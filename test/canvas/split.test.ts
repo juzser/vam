@@ -24,6 +24,8 @@ import {
   findLeaf,
   leaves,
   nearestEdge,
+  pruneClosedTabs,
+  removeTab,
   type SplitTree,
   setPaneSession,
   singlePane,
@@ -34,19 +36,19 @@ import {
 describe('singlePane', () => {
   it('is one leaf holding the given session', () => {
     const tree = singlePane('s1', 'pane-1');
-    expect(tree).toEqual({ kind: 'leaf', id: 'pane-1', sessionId: 's1' });
+    expect(tree).toEqual({ kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1'] });
   });
 
   it('tolerates no session at all — the pre-load state', () => {
     const tree = singlePane(null, 'pane-1');
-    expect(tree).toEqual({ kind: 'leaf', id: 'pane-1', sessionId: null });
+    expect(tree).toEqual({ kind: 'leaf', id: 'pane-1', sessionId: null, sessionIds: [] });
   });
 });
 
 describe('leaves — walks the tree left to right, top to bottom', () => {
   it('is just itself for a single leaf', () => {
     expect(leaves(singlePane('s1', 'pane-1'))).toEqual([
-      { kind: 'leaf', id: 'pane-1', sessionId: 's1' },
+      { kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1'] },
     ]);
   });
 
@@ -67,7 +69,12 @@ describe('findLeaf', () => {
   it('finds a leaf by id anywhere in the tree', () => {
     let tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
     tree = splitPane(tree, 'p2', 'bottom', 's3', 'p3');
-    expect(findLeaf(tree, 'p3')).toEqual({ kind: 'leaf', id: 'p3', sessionId: 's3' });
+    expect(findLeaf(tree, 'p3')).toEqual({
+      kind: 'leaf',
+      id: 'p3',
+      sessionId: 's3',
+      sessionIds: ['s3'],
+    });
   });
 
   it('is null for an id nothing holds', () => {
@@ -190,7 +197,7 @@ describe('closePane', () => {
   it('collapses a two-pane split back to a single leaf', () => {
     const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
     const closed = closePane(tree, 'p2');
-    expect(closed).toEqual({ kind: 'leaf', id: 'p1', sessionId: 's1' });
+    expect(closed).toEqual({ kind: 'leaf', id: 'p1', sessionId: 's1', sessionIds: ['s1'] });
   });
 
   it('collapses a three-pane row down to two, not down to one', () => {
@@ -258,5 +265,107 @@ describe('nearestEdge — pure hit-testing for a drop, no DOM required', () => {
 
   it('is total over a degenerate zero-size rect', () => {
     expect(['left', 'right', 'top', 'bottom']).toContain(nearestEdge(0, 0, 0, 0));
+  });
+});
+
+describe('a pane holds a LIST of tabs, not one session', () => {
+  it('opens a second session in the pane as a new tab, in front', () => {
+    const tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1', 's2']);
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s2');
+  });
+
+  it('re-selecting a tab it already holds does not duplicate it', () => {
+    let tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    tree = setPaneSession(tree, 'p1', 's1');
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1', 's2']);
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s1');
+  });
+
+  it('opens tabs only in the named pane — a split neighbour is untouched', () => {
+    let tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's1', 'p2');
+    tree = setPaneSession(tree, 'p2', 's2');
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1']);
+    expect(findLeaf(tree, 'p2')?.sessionIds).toEqual(['s1', 's2']);
+  });
+
+  it('a split gives the new pane exactly the one session it was made with', () => {
+    let tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    tree = splitPane(tree, 'p1', 'right', 's2', 'p2');
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1', 's2']);
+    expect(findLeaf(tree, 'p2')?.sessionIds).toEqual(['s2']);
+    expect(findLeaf(tree, 'p2')?.sessionId).toBe('s2');
+  });
+});
+
+describe('removeTab — one tab out of one pane', () => {
+  it('drops the tab and activates its right-hand neighbour', () => {
+    let tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    tree = setPaneSession(tree, 'p1', 's3');
+    tree = setPaneSession(tree, 'p1', 's2');
+    const next = removeTab(tree, 'p1', 's2') as SplitTree;
+    expect(findLeaf(next, 'p1')?.sessionIds).toEqual(['s1', 's3']);
+    expect(findLeaf(next, 'p1')?.sessionId).toBe('s3');
+  });
+
+  it('falls back to the LEFT neighbour when the last tab is removed', () => {
+    let tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    tree = removeTab(tree, 'p1', 's2') as SplitTree;
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1']);
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s1');
+  });
+
+  it('leaves the active tab alone when some OTHER tab goes', () => {
+    let tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    tree = setPaneSession(tree, 'p1', 's1');
+    const next = removeTab(tree, 'p1', 's2') as SplitTree;
+    expect(findLeaf(next, 'p1')?.sessionId).toBe('s1');
+  });
+
+  it('closes the PANE when its last tab is removed', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    const next = removeTab(tree, 'p2', 's2') as SplitTree;
+    expect(leaves(next).map((l) => l.id)).toEqual(['p1']);
+  });
+
+  it('returns null when the last tab of the last pane goes — "cannot"', () => {
+    expect(removeTab(singlePane('s1', 'p1'), 'p1', 's1')).toBeNull();
+  });
+
+  it('is a no-op for a pane id nothing holds', () => {
+    const tree = singlePane('s1', 'p1');
+    expect(removeTab(tree, 'ghost', 's1')).toEqual(tree);
+  });
+
+  it('is a no-op for a session that pane does not hold', () => {
+    const tree = singlePane('s1', 'p1');
+    expect(removeTab(tree, 'p1', 's9')).toEqual(tree);
+  });
+});
+
+describe('pruneClosedTabs — a closed session leaves no ghost tab behind', () => {
+  it('drops tabs for sessions that are gone', () => {
+    let tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    tree = pruneClosedTabs(tree, (id) => id === 's1');
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1']);
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s1');
+  });
+
+  it('closes a pane whose every tab is gone', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    const next = pruneClosedTabs(tree, (id) => id === 's1');
+    expect(leaves(next).map((l) => l.id)).toEqual(['p1']);
+  });
+
+  it('never closes the LAST pane — it is left empty instead', () => {
+    const next = pruneClosedTabs(singlePane('s1', 'p1'), () => false);
+    expect(leaves(next)).toHaveLength(1);
+    expect(leaves(next)[0]?.sessionIds).toEqual([]);
+    expect(leaves(next)[0]?.sessionId).toBeNull();
+  });
+
+  it('returns the SAME tree when every tab is still open — no render churn', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    expect(pruneClosedTabs(tree, () => true)).toBe(tree);
   });
 });
