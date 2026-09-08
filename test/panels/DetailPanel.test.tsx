@@ -168,24 +168,29 @@ describe('the composer says when a prompt is in flight', () => {
  * and both captions kept describing the present.
  */
 describe('the in and out rules do not date a turn the model cannot date', () => {
-  const ruleMeta = (block: string) =>
-    q<HTMLElement>(`[data-detail-block="${block}"] [data-rule-meta]`)?.textContent ?? '';
+  // The three rules are gone (`DetailPanel.transcript-flow.test.tsx`), so
+  // both meta slots are read where their contents moved: `in`'s onto the
+  // identity line, `out`'s onto the condensed progress line. The property is
+  // untouched -- a session-level fact must not be captioned as a turn-level
+  // one -- only the element carrying it changed.
+  const identity = () => q<HTMLElement>('[data-detail-identity]')?.textContent ?? '';
+  const activity = () => q<HTMLElement>('[data-progress-activity]')?.textContent ?? '';
 
-  it('the in rule names who, and claims no per-turn time', () => {
+  it('the in line names who, and claims no per-turn time', () => {
     draw({ entry: ENTRY, decision: DECISIONS[2] as Decision });
-    expect(ruleMeta('in')).toContain('you');
+    expect(identity()).toContain('you');
     // 12m is SESSION.age. It must not appear against a turn three back.
-    expect(ruleMeta('in')).not.toContain('12m');
+    expect(identity()).not.toContain('12m');
   });
 
-  it('the out rule shows current activity only on the turn being worked', () => {
+  it('the progress line shows current activity only on the turn being worked', () => {
     // Newest turn of a running session: the activity genuinely belongs to it.
     cleanup();
     draw({
       entry: { project: PROJECT, session: { ...SESSION, status: 'running' } },
       decision: DECISIONS[0] as Decision,
     });
-    expect(ruleMeta('out')).toContain('just now');
+    expect(activity()).toContain('just now');
 
     // An older turn: the same activity line would be describing the present
     // while the operator reads the past.
@@ -194,7 +199,7 @@ describe('the in and out rules do not date a turn the model cannot date', () => 
       entry: { project: PROJECT, session: { ...SESSION, status: 'running' } },
       decision: DECISIONS[2] as Decision,
     });
-    expect(ruleMeta('out')).not.toContain('just now');
+    expect(activity()).not.toContain('just now');
   });
 
   it('says no session is selected rather than that the session has no steps', () => {
@@ -445,11 +450,11 @@ describe('the panel remembers which turn you are reading, independent of the can
   const pick = pickTurn;
 
   const inText = () => q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '';
-  // A12.2: the removed header's `[data-detail-step]` chip moved into the
-  // `in` rule's own meta, beside "you" (`you · step d7`) — see the
-  // header-removal comment in `DetailPanel.tsx`. `stepLabel` reads that.
-  const stepLabel = () =>
-    q<HTMLElement>('[data-detail-block="in"] [data-rule-meta]')?.textContent ?? '';
+  // A12.2 moved the removed header's `[data-detail-step]` chip into the `in`
+  // rule's meta, beside "you" (`you · step d7`); with the rule itself gone it
+  // rides the identity line instead, as `[data-detail-turn]`. Same fact, same
+  // words, one row up.
+  const stepLabel = () => q<HTMLElement>('[data-detail-turn]')?.textContent ?? '';
 
   it('shows the canvas’s own pick by default', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
@@ -1164,21 +1169,19 @@ describe('there is a way out of the prompt box without a mouse', () => {
   });
 });
 
-describe('`in` still caps its own text, inside one merged scrolling column (A12.2)', () => {
-  it('caps `in` at two rendered lines of its own body text', () => {
-    draw();
-    const box = q<HTMLElement>('[data-detail-scroll="in"]');
-    expect(box).not.toBeNull();
-    // Two lines of 12px/1.55 plus the box's own 10px padding and 1px border.
-    // A number, not a percentage: "two lines" is a promise about the text,
-    // and a percentage of the pane is a promise about the window. This is
-    // the one region-shaped thing A12.2 keeps: `in` still clamps to its own
-    // two lines, which is what makes pinning it with `position: sticky`
-    // (below) a small, useful anchor rather than an unbounded block.
-    expect(box?.style.maxHeight).toBe('59px');
-    // Still a scroller — capped, not clipped: the rest is one drag away.
-    expect(box?.className).toContain('overflow-y-auto');
-  });
+describe('the merged column scrolls the whole turn, `in` pinned to its top', () => {
+  /**
+   * RETIRED: `'caps `in` at two rendered lines of its own body text'` — it
+   * asserted `[data-detail-scroll="in"]` carried `style.maxHeight: 59px` and
+   * its own `overflow-y-auto`. Both are gone on the operator's follow-up:
+   * a boxed, separately scrolling prompt is what still read as a separate
+   * panel once the band labels came off, so the prompt runs out in full
+   * inside the one column now. Not a coverage loss — the replacement guards
+   * live in `DetailPanel.transcript-flow.test.tsx` (`'gives `in` no box, no
+   * height cap and no scrollbar of its own'` and `'keeps exactly one
+   * scroller for the turn'`), and the sticky paint itself is measured in a
+   * real browser by `e2e/transcript-flow-shots.mjs`.
+   */
 
   /**
    * RETIRED: `'gives `out` the height the other two gave up'` — it asserted
@@ -1360,84 +1363,27 @@ describe('the out region renders the agent’s markdown', () => {
   });
 });
 
-describe('the in and out rules wear the mockup’s own glyphs', () => {
-  it('is a user for in and a bot for out, announced rather than drawn only', () => {
-    draw();
-    // Measured off the Response artboards: `in` is a head-and-shoulders glyph,
-    // `out` is a bot (antenna, two eyes, a mouth) — not the arrows vam had.
-    // `role="img"` is what makes the label announced at all; on a bare <span>
-    // aria-label is dropped in silence.
-    const inIcon = q<HTMLElement>('[data-detail-block="in"] [role="img"]');
-    const outIcon = q<HTMLElement>('[data-detail-block="out"] [role="img"]');
-    expect(inIcon?.getAttribute('aria-label')).toContain('you');
-    expect(outIcon?.getAttribute('aria-label')).toContain('agent');
-  });
-});
-
 /**
- * Three section rules, three colours.
+ * RETIRED: two whole describes, five tests, all about the three section
+ * rules' glyphs — `'the in and out rules wear the mockup’s own glyphs'`
+ * (`'is a user for in and a bot for out, announced rather than drawn only'`)
+ * and `'the three section rules are told apart by colour as well as by
+ * glyph'` (`'paints each icon with its own token, pairwise distinct'`,
+ * `'keeps every icon announced, so colour is never the only channel'`,
+ * `'draws three different glyphs, which is the distinction without
+ * colour'`).
  *
- * The operator could not tell `in`, `progress` and `out` apart at a glance:
- * all three drew their icon inside the rule's one `text-ink-faint` span, so
- * the pane had three headings in the same faint grey. Colour is ADDED to the
- * existing scheme, never substituted for it — a colour-only distinction is
- * invisible to a colour-blind operator, so the distinct glyph and the
- * announced `aria-label` are asserted here beside the colour and are what
- * carries the meaning when the colour does not arrive.
+ * Every one of them asserted a property of the `Rule` component: its icon,
+ * that icon's `role="img"` label, and the three distinct `text-rule-*`
+ * colour tokens it wore. The operator asked for the three bands to go, so
+ * `Rule` is deleted and there is no icon left to colour, announce or tell
+ * apart. These are not rewritten against the new shape because the shape has
+ * no counterpart: nothing labels a region visually any more. What DOES
+ * replace the announcement — the `sr-only` region names, which are the only
+ * channel a screen reader has left — is asserted in
+ * `DetailPanel.transcript-flow.test.tsx` (`'keeps each region named for a
+ * screen reader, and only for one'`).
  */
-describe('the three section rules are told apart by colour as well as by glyph', () => {
-  const BLOCKS = ['in', 'progress', 'out'] as const;
-
-  const icon = (block: string) =>
-    q<HTMLElement>(`[data-detail-block="${block}"] [role="img"]`) ?? null;
-
-  /** The colour utility on an icon, e.g. `text-rule-in`. */
-  const tone = (block: string) =>
-    (icon(block)?.getAttribute('class') ?? '').split(/\s+/).find((c) => c.startsWith('text-')) ??
-    '';
-
-  it('paints each icon with its own token, pairwise distinct', () => {
-    draw();
-    const tones = BLOCKS.map(tone);
-    for (const [i, block] of BLOCKS.entries()) {
-      // Not merely non-empty: the faint grey they all shared is a `text-`
-      // class too, and three of it would pass an "each has a colour" check.
-      expect(tones[i], `${block} carries a colour token`).not.toBe('');
-      expect(tones[i], `${block} is no longer the shared faint grey`).not.toBe('text-ink-faint');
-    }
-    // Pairwise, so two sections sharing one hue fails rather than passing on
-    // the third being different.
-    expect(new Set(tones).size, `three distinct tokens, got ${tones.join(', ')}`).toBe(3);
-  });
-
-  it('keeps every icon announced, so colour is never the only channel', () => {
-    draw();
-    const labels = BLOCKS.map((block) => {
-      const el = icon(block);
-      // `role="img"` is what makes the label announced at all; on a bare
-      // <span> aria-label is dropped in silence, which this codebase has
-      // shipped once already.
-      expect(el, `${block} has a role="img" icon`).not.toBeNull();
-      return el?.getAttribute('aria-label') ?? '';
-    });
-    // Each word is what the GLYPH means, complementing the visible label
-    // rather than repeating it: `in` is you, `out` is the agent, and the
-    // commit line is the session's turns.
-    expect(labels).toEqual(['you', 'turns', 'agent']);
-  });
-
-  it('draws three different glyphs, which is the distinction without colour', () => {
-    draw();
-    // The glyphs are a head-and-shoulders, a commit line and a bot, measured
-    // off the Response artboards in #53 — not the opposing arrows vam started
-    // with. Compare the drawn geometry, so a shared icon fails here even when
-    // the three colours pass above.
-    const shapes = BLOCKS.map((block) => icon(block)?.querySelector('svg')?.innerHTML ?? '');
-    for (const [i, block] of BLOCKS.entries())
-      expect(shapes[i], `${block} draws a glyph`).not.toBe('');
-    expect(new Set(shapes).size).toBe(3);
-  });
-});
 
 describe('the attachment button inlines a file into the text that gets recorded', () => {
   const file = (over: Partial<AttachedFile> = {}): AttachedFile => ({
