@@ -559,3 +559,36 @@ and inside the expression the assertion reads — because a filter over an empty
 list is empty, and a guard written the obvious way passes loudest at the moment
 the hook is renamed away. Falsified both ways: re-inflating the skin to 44
 names all three controls; renaming the hook fails on the count.
+
+## The web guards now run in CI — `pnpm run test:e2e:web`
+
+Four scripts here assert against a real browser and throw when what they
+expect is not on screen: `split-panes-shots.mjs` (22 assertions),
+`prompt-suggest-shots.mjs` (20), `transcript-flow-shots.mjs` (11) and
+`prompt-mode-icon-shots.mjs` (6). Until now nothing ran them, which for 59
+assertions covering exactly what jsdom cannot see — split ordering,
+per-project layout restore, the per-pane `+`, drag-to-move, which pane is
+focused at the instant of an event, `position: sticky` against real layout —
+means they mostly did not run.
+
+`e2e/run-web-guards.mjs` builds `dist-web`, serves it with `vite preview
+--strictPort` on port 5520, drives the four scripts against it in sequence and
+exits non-zero the moment one throws, with the script's own message intact.
+The `web-guards` job in `.github/workflows/ci.yml` runs the same command;
+because `playwright-core` is in no manifest here and the root install is
+`--frozen-lockfile`, that job installs `playwright-core@1.62.1` into the
+runner's temp directory and links it into `e2e/node_modules`, which is
+gitignored. Screenshots go to `VAM_E2E_OUT` (default
+`e2e/test-results/web-guards`, also gitignored) and are uploaded as a workflow
+artifact — never into `docs/ui`, so CI produces no repo diff.
+
+The other five `*.mjs` scripts here (`focus-edge-visibility`,
+`issue-188-shots`, `pane-refinements-shots`, `phone-list-shots`,
+`phone-prompt-shots`) are **shot-takers, not guards**: they assert nothing, so
+they are deliberately not in that list and adding them would widen what a
+green tick claims without adding a single check.
+
+Falsified 2026-09-08: making `zv` a no-op in the served bundle (with
+`VAM_E2E_SKIP_BUILD=1`) reddens the job in 12s, naming both
+`split-panes-shots.mjs` — *"zv (split vertical) left 1 pane(s), expected 2"* —
+and `prompt-suggest-shots.mjs`, and exits 1.
