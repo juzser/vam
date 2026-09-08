@@ -144,6 +144,7 @@ import {
   nearestEdge,
   pruneClosedTabs,
   removeTab,
+  restoreLayout,
   type SplitOrientation,
   type SplitTree,
   setPaneSession,
@@ -974,6 +975,24 @@ function CanvasInner({
    */
   const entriesByIdRef = useRef<ReadonlyMap<string, SessionEntry>>(new Map());
   const activeProjectIdRef = useRef<string | null>(null);
+  /** Which project each session that EXISTS belongs to — built from
+   *  `allEntries`, never the filtered `entries`, so a restore cannot drop a
+   *  pane's tab merely because a filter is hiding it right now. */
+  const projectOfSessionRef = useRef<ReadonlyMap<string, string>>(new Map());
+  /** The tree as last rendered, for `setFocusedSessionId` to store when the
+   *  project changes — the same render-phase mirror the two above are, for
+   *  the same reason: it must stay a stably-identified callback. */
+  const panesRef = useRef<SplitTree>(panes);
+  /**
+   * A15.6 — ONE REMEMBERED LAYOUT PER PROJECT, and which pane in it had the
+   * keyboard. Written when the operator leaves a project, read when they come
+   * back (`restoreLayout` reconciles it against what is still open). A ref
+   * rather than state: nothing renders from it, it must survive the render
+   * that swaps the panes, and it is deliberately not persisted to `prefs` —
+   * pane ids are minted per mounted shell (see `paneSeq`), so a layout is
+   * only meaningful for as long as this shell lives.
+   */
+  const paneLayouts = useRef(new Map<string, { tree: SplitTree; paneId: string }>());
   const [focusedPaneId, setFocusedPaneIdState] = useState('pane-1');
   /**
    * Mirrors `focusedPaneId`, updated in the SAME tick as the state (never
@@ -1047,10 +1066,35 @@ function CanvasInner({
         currentProjectId !== null &&
         nextProjectId !== currentProjectId
       ) {
+        // The outgoing project keeps its layout, exactly as it stands.
+        paneLayouts.current.set(currentProjectId, {
+          tree: panesRef.current,
+          paneId: focusedPaneIdRef.current,
+        });
         paneSeq.current += 1;
-        const collapsedId = `pane-${paneSeq.current}`;
-        setPanes(singlePane(sessionId, collapsedId));
-        setFocusedPaneId(collapsedId);
+        const freshId = `pane-${paneSeq.current}`;
+        const stored = paneLayouts.current.get(nextProjectId);
+        if (stored === undefined) {
+          // A project never opened in this shell starts as one pane holding
+          // what was picked — VSCode's own answer for a workspace it has
+          // never seen.
+          setPanes(singlePane(sessionId, freshId));
+          setFocusedPaneId(freshId);
+          return;
+        }
+        const restored = restoreLayout(
+          stored.tree,
+          // A15.5's invariant, enforced on the way back IN: a tab survives
+          // only if its session still exists AND still belongs to the
+          // project being opened, so a restored layout can never redraw
+          // another project's session.
+          (id) => projectOfSessionRef.current.get(id) === nextProjectId,
+          sessionId,
+          stored.paneId,
+          freshId,
+        );
+        setPanes(restored.tree);
+        setFocusedPaneId(restored.paneId);
         return;
       }
       setPanes((tree) => setPaneSession(tree, focusedPaneIdRef.current, sessionId));
@@ -1633,6 +1677,10 @@ function CanvasInner({
   // The render-phase half of the two mirrors declared beside `panes` above.
   entriesByIdRef.current = entriesById;
   activeProjectIdRef.current = activeProjectId;
+  panesRef.current = panes;
+  projectOfSessionRef.current = new Map(
+    allEntries.map((entry) => [entry.session.id, entry.project.id]),
+  );
 
   /**
    * A15.5 — a session that is no longer there leaves no tab behind. Sessions
