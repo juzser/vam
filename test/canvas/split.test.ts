@@ -385,7 +385,7 @@ describe('restoreLayout — a remembered layout, reconciled against what is stil
   /**
    * A LEGAL layout to be remembered: p1 holds s1 and s3, p2 holds s2, and no
    * session is in two panes. The fixture this replaces put s2 in BOTH panes,
-   * which #268 made unrepresentable — `zv`/`zs`, the drag and the sidebar all
+   * which PR 268 made unrepresentable — `zv`/`zs`, the drag and the sidebar all
    * MOVE a session now — so it could only be reached through the very bug the
    * duplication case below pins.
    */
@@ -407,7 +407,7 @@ describe('restoreLayout — a remembered layout, reconciled against what is stil
   });
 
   /**
-   * A SESSION LIVES IN EXACTLY ONE PANE — #268's rule, which every other
+   * A SESSION LIVES IN EXACTLY ONE PANE — PR 268's rule, which every other
    * route already keeps (`splitFocused` and the drag MOVE the tab,
    * `paneHolding` sends a sidebar pick to the pane that already holds it).
    * This one did not: coming back to a project by clicking a session ANOTHER

@@ -420,7 +420,7 @@ export function nearestEdge(x: number, y: number, width: number, height: number)
  * 3. otherwise the picked session is opened in the pane that had focus in
  *    this project, or in the leftmost surviving pane when that one went with
  *    its sessions — UNLESS a surviving pane already holds it, in which case
- *    the keyboard goes there and nothing is opened. #268's rule is that a
+ *    the keyboard goes there and nothing is opened. PR 268's rule is that a
  *    session lives in exactly one pane, and this was the last route that
  *    broke it: coming back by clicking a session another remembered pane
  *    held added a second copy of it here, and two `TerminalTab`s over one

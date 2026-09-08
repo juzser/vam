@@ -1668,8 +1668,29 @@ function CanvasInner({
    * and whichever project is active, recomputed on every render exactly the
    * way `entries` itself already is.
    *
-   * "The active project" is DEFINED here as the focused session's project —
-   * the derivation the epic itself calls obvious. The second case the epic
+   * "The active project" is DEFINED here as the focused session's project,
+   * looked up UNFILTERED, and — when there is no focused session — as the
+   * project of whatever the panes are actually holding.
+   *
+   * Both halves are corrections to "the focused session's project", the
+   * derivation the epic calls obvious, and both are the same mistake: this
+   * value is what A15.5's invariant is ABOUT (every pane on screen holds
+   * sessions of the project on screen), so deriving it from one session that
+   * may not be there let the invariant switch itself off. A `null` here does
+   * not mean "no project on screen", it meant "do not collapse", and
+   * `setFocusedSessionId` reads it to decide whether a pick is a project
+   * SWITCH. Two ways to reach that: a search or status pill hiding the
+   * focused session (the filtered lookup answered `null` for a session that
+   * is plainly still open), and the keyboard sitting in a pane that holds
+   * nothing — which since PR 268 is where `zv` then `zw` leaves it, on purpose.
+   * Either way, picking a session in another project skipped the collapse and
+   * skipped remembering the layout: a pane went on drawing the previous
+   * project's session under a strip, scoped to the new project, reading "no
+   * sessions open".
+   *
+   * The panes' own sessions are the right fallback because they are the
+   * screen: the strip beside them is scoped to this value, so answering with
+   * the project they hold is answering with what the operator can see. The second case the epic
    * flags — a project selected in the sidebar with NO session focused — has
    * no live UI action to select a project independently of a session
    * (verified: `SessionList.tsx`'s `data-project-heading` binds a click only
@@ -1682,7 +1703,21 @@ function CanvasInner({
    * for an empty tab list. If a future surface lets the operator select a
    * project without a session, THIS is the one place that needs to learn it.
    */
-  const activeProjectId = focusedEntry?.project.id ?? null;
+  const activeProjectId = useMemo(() => {
+    const focused = focusedSessionId === null ? null : entriesById.get(focusedSessionId);
+    if (focused !== undefined && focused !== null) {
+      return focused.project.id;
+    }
+    for (const leaf of leaves(panes)) {
+      for (const held of leaf.sessionIds) {
+        const entry = entriesById.get(held);
+        if (entry !== undefined) {
+          return entry.project.id;
+        }
+      }
+    }
+    return null;
+  }, [focusedSessionId, entriesById, panes]);
   const projectTabs = useMemo(
     () => (activeProjectId === null ? [] : entries.filter((e) => e.project.id === activeProjectId)),
     [entries, activeProjectId],
