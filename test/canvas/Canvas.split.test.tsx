@@ -90,6 +90,11 @@ const tabSelect = (title: string) =>
   [...document.querySelectorAll<HTMLButtonElement>('[data-tab-select]')].find(
     (el) => el.textContent === title,
   );
+/** The sidebar rows, in source order: a1, a2, b1. Opening a session that no
+ *  pane holds yet goes through the sidebar — A15.5 made a strip list the
+ *  tabs of ITS OWN pane, not every session in the project. */
+const sidebarRow = (at: number) =>
+  [...document.querySelectorAll('[data-session-row]')][at] as HTMLElement;
 const promptInputIn = (paneEl: Element | null) =>
   paneEl?.querySelector<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]') ?? null;
 /** A12.2 removed `DetailPanel`'s own header, so the session's NAME is not
@@ -210,7 +215,10 @@ describe('keyboard: zs / zv split the focused pane, zc closes it, zw/zW move bet
 describe('dragging a tab splits — same project only, refused aloud otherwise', () => {
   it('dropping near the right edge makes a row split holding the DRAGGED session', () => {
     render(<Canvas model={MODEL} />);
-    // pane-1 shows a1 (focus lands there on mount, first entry).
+    // pane-1 shows a1 (focus lands there on mount, first entry); open a2 in
+    // it too, so its own strip has a second tab to drag.
+    act(() => sidebarRow(1).click());
+    act(() => sidebarRow(0).click());
     const targetPane = paneFor('pane-1') as HTMLElement;
     stubRect(targetPane, { left: 0, top: 0, width: 200, height: 100 });
     const tab = tabSelect('a2') as HTMLButtonElement;
@@ -226,6 +234,7 @@ describe('dragging a tab splits — same project only, refused aloud otherwise',
 
   it('dropping near the top edge makes a column split', () => {
     render(<Canvas model={MODEL} />);
+    act(() => sidebarRow(1).click());
     const targetPane = paneFor('pane-1') as HTMLElement;
     stubRect(targetPane, { left: 0, top: 0, width: 200, height: 100 });
     const tab = tabSelect('a2') as HTMLButtonElement;
@@ -235,35 +244,20 @@ describe('dragging a tab splits — same project only, refused aloud otherwise',
     expect(splitContainer()?.getAttribute('data-split-orientation')).toBe('column');
   });
 
-  it('a cross-project drop is refused ALOUD, and nothing splits', () => {
-    render(<Canvas model={MODEL} />);
-    // A cross-project attempt needs TWO panes that disagree on project —
-    // with only one pane, that pane IS whatever the strip shows, so
-    // dragging one of the strip's own (necessarily same-project, A13.1)
-    // tabs onto it can never disagree with itself. Split first, so pane-1
-    // keeps showing project alpha while pane-2's own focus moves elsewhere.
-    pressChord('z', 'v'); // pane-1: a1 (alpha) | pane-2: a1 (alpha, focused)
-    const targetPane = paneFor('pane-1') as HTMLElement; // stays on alpha throughout
-    stubRect(targetPane, { left: 0, top: 0, width: 200, height: 100 });
-    // Move the FOCUSED pane (pane-2) onto b1 — project beta — by clicking
-    // its sidebar row directly, the same real gesture `focusSession` names
-    // as its own caller. `rows()` lists a1, a2, b1 in source order.
-    const betaRow = [...document.querySelectorAll('[data-session-row]')][2] as HTMLElement;
-    act(() => betaRow.click());
-    // The strip now shows project beta (pane-2's own project), so b1 is
-    // what a real drag would pick up.
-    const betaTab = tabSelect('b1') as HTMLButtonElement;
-    expect(betaTab).toBeDefined();
-    fireEvent.dragStart(betaTab);
-    dragAt(targetPane, 'dragover', 190, 50);
-    dragAt(targetPane, 'drop', 190, 50);
-    // Refused: still the same two panes as before the drop, pane-1 untouched.
-    expect(splitPanes()).toHaveLength(2);
-    expect(inBlockIn(targetPane)).toContain('in-d-a1');
-    expect(statusBar()).toContain("can't split across projects");
-    expect(statusBar()).toContain('alpha');
-    expect(statusBar()).toContain('beta');
-  });
+  /**
+   * RETIRED with A15.5: "a cross-project drop is refused ALOUD, and nothing
+   * splits". The gesture it drove is no longer reachable. It needed two
+   * panes disagreeing about their project, which it produced by moving the
+   * focused pane onto another project's session while the first pane stayed
+   * behind — exactly the stale state the operator then reported as a bug,
+   * and which switching project now reconciles by collapsing to a single
+   * pane (`Canvas.tsx`'s `setFocusedSessionId`, guarded in
+   * `Canvas.pane-tabs.test.tsx`). Every pane on screen therefore holds the
+   * active project's sessions, and every strip lists only those, so a drag
+   * cannot pick up a tab that disagrees with its target. The refusal itself
+   * is KEPT in `onPaneDrop` as a defensive check on two pieces of state
+   * (the drag payload, the pane tree) that are written a gesture apart.
+   */
 });
 
 describe('per-pane isolation — the composer draft is per SESSION, and two panes never share one', () => {
@@ -280,9 +274,10 @@ describe('per-pane isolation — the composer draft is per SESSION, and two pane
   it('two panes showing DIFFERENT sessions never leak a draft between them', () => {
     render(<Canvas model={MODEL} />);
     pressChord('z', 'v'); // pane-1: a1 (unfocused) | pane-2: a1 (focused, mirror)
-    // Point the now-focused second pane at a DIFFERENT session, the same
-    // way an operator would — clicking its own tab in the strip.
-    act(() => tabSelect('a2')?.click());
+    // Point the now-focused second pane at a DIFFERENT session, the same way
+    // an operator would — clicking its sidebar row, which A15.5 makes open
+    // that session in the FOCUSED pane and nowhere else.
+    act(() => sidebarRow(1).click());
     const [first, second] = splitPanes();
     const firstInput = promptInputIn(first as Element) as HTMLTextAreaElement; // a1
     const secondInput = promptInputIn(second as Element) as HTMLTextAreaElement; // a2

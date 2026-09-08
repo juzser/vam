@@ -142,6 +142,8 @@ import {
   type Leaf,
   leaves,
   nearestEdge,
+  pruneClosedTabs,
+  removeTab,
   type SplitOrientation,
   type SplitTree,
   setPaneSession,
@@ -453,26 +455,30 @@ function SidebarSlot({ show, ...props }: ComponentProps<typeof SessionList> & { 
 function DetailColumn({
   show,
   width,
-  toolbar,
   children,
 }: {
   readonly show: boolean;
   readonly width: number;
-  readonly toolbar: ReactNode;
   readonly children: ReactNode;
 }) {
   return show ? (
     <div data-detail-pane className="relative flex min-w-0 flex-col" style={{ width }}>
-      {/* A15.2: the strip is chrome, not content — shrunk from `h-12` (48px)
-          to `h-9` (36px), the shortest height that still keeps an 11px tab
-          label and its icon clear of the row's own top/bottom edge (see
-          `TabStrip`'s own `py-1`, trimmed to match in the same commit). */}
-      <div className="flex h-9 flex-none items-stretch gap-[9px] border-line border-b px-1.5">
-        {toolbar}
-      </div>
       {children}
     </div>
   ) : null;
+}
+
+/** A15.2: the strip is chrome, not content — `h-9` (36px) is the shortest
+ *  height that still keeps an 11px tab label and its icon clear of the row's
+ *  own top/bottom edge (see `TabStrip`'s own `py-1`). A15.5 moved this row
+ *  out of `DetailColumn` and INTO each pane: one strip per pane is the whole
+ *  point, and a row above the split layout could only ever draw one. */
+function TabStripRow({ children }: { readonly children: ReactNode }) {
+  return (
+    <div className="flex h-9 flex-none items-stretch gap-[9px] border-line border-b px-1.5">
+      {children}
+    </div>
+  );
 }
 
 /**
@@ -900,6 +906,15 @@ function CanvasInner({
    */
   const paneSeq = useRef(1);
   const [panes, setPanes] = useState<SplitTree>(() => singlePane(null, 'pane-1'));
+  /**
+   * Two derived values, mirrored into refs during render, so
+   * `setFocusedSessionId` below can read them and still be the
+   * stably-identified callback its ~40 existing callers rely on (see its own
+   * comment). Assigned further down, immediately after each is computed —
+   * an effect would be one commit behind, and a click is what reads them.
+   */
+  const entriesByIdRef = useRef<ReadonlyMap<string, SessionEntry>>(new Map());
+  const activeProjectIdRef = useRef<string | null>(null);
   const [focusedPaneId, setFocusedPaneIdState] = useState('pane-1');
   /**
    * Mirrors `focusedPaneId`, updated in the SAME tick as the state (never
@@ -942,9 +957,47 @@ function CanvasInner({
     () => findLeaf(panes, focusedPaneId)?.sessionId ?? null,
     [panes, focusedPaneId],
   );
-  const setFocusedSessionId = useCallback((sessionId: string | null) => {
-    setPanes((tree) => setPaneSession(tree, focusedPaneIdRef.current, sessionId));
-  }, []);
+  /**
+   * A15.5 — WHAT A PROJECT SWITCH DOES TO THE PANES, reported by the
+   * operator as "after splitting a tab, when I switch project, the old tab
+   * still shows and is still split". Panes held session ids and nothing
+   * reconciled them, so a split kept drawing the PREVIOUS project's
+   * sessions after the strip (project-scoped since A13.1) had stopped
+   * listing them: the shell showing something it could no longer justify
+   * showing, and saying nothing about it.
+   *
+   * Picking a session in another project COLLAPSES the layout to a single
+   * pane holding it. The alternative — remembering one layout per project
+   * and restoring it — is the richer answer and is deliberately not what
+   * this does: it needs a second store keyed by project, kept in step with
+   * sessions that end while their project is off screen, which is a larger
+   * change than this one is scoped for. Collapsing is the smaller rule that
+   * makes the invariant true and visible in one place: every pane on screen
+   * holds sessions of the project on screen. It is also loud by
+   * construction — the split visibly folds — rather than a reconciliation
+   * the operator has to notice the absence of.
+   */
+  const setFocusedSessionId = useCallback(
+    (sessionId: string | null) => {
+      const nextProjectId =
+        sessionId === null ? null : (entriesByIdRef.current.get(sessionId)?.project.id ?? null);
+      const currentProjectId = activeProjectIdRef.current;
+      if (
+        sessionId !== null &&
+        nextProjectId !== null &&
+        currentProjectId !== null &&
+        nextProjectId !== currentProjectId
+      ) {
+        paneSeq.current += 1;
+        const collapsedId = `pane-${paneSeq.current}`;
+        setPanes(singlePane(sessionId, collapsedId));
+        setFocusedPaneId(collapsedId);
+        return;
+      }
+      setPanes((tree) => setPaneSession(tree, focusedPaneIdRef.current, sessionId));
+    },
+    [setFocusedPaneId],
+  );
   const [jumping, setJumping] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -1518,6 +1571,27 @@ function CanvasInner({
   );
   const projectTabIds = useMemo(() => projectTabs.map((e) => e.session.id), [projectTabs]);
 
+  // The render-phase half of the two mirrors declared beside `panes` above.
+  entriesByIdRef.current = entriesById;
+  activeProjectIdRef.current = activeProjectId;
+
+  /**
+   * A15.5 — a session that is no longer there leaves no tab behind. Sessions
+   * end, are closed from the sidebar, or vanish with their project; a pane
+   * holding the id would otherwise keep drawing a tab for something gone.
+   * `pruneClosedTabs` returns the SAME tree when nothing is stale, so this
+   * cannot churn the render, and it never closes the last pane. Skipped
+   * entirely while the model is empty — that is the pre-load state, not
+   * every session closing at once.
+   */
+  useEffect(() => {
+    if (allEntries.length === 0) {
+      return;
+    }
+    const open = new Set(allEntries.map((entry) => entry.session.id));
+    setPanes((tree) => pruneClosedTabs(tree, (id) => open.has(id)));
+  }, [allEntries]);
+
   /**
    * What the detail panel expands: the focused session's newest decision.
    *
@@ -1628,8 +1702,6 @@ function CanvasInner({
         setStatus('pick a session first');
         return;
       }
-      paneSeq.current += 1;
-      const newId = `pane-${paneSeq.current}`;
       const edge: Edge = orientation === 'row' ? 'right' : 'bottom';
       // Read the ref into a plain local BEFORE `setFocusedPaneId` below moves
       // it. `setFocusedPaneId` writes `focusedPaneIdRef.current` synchronously
@@ -1649,10 +1721,20 @@ function CanvasInner({
       // pane. That script is this fix's ONLY regression guard — keep its
       // pane-count assertions.
       const targetPaneId = focusedPaneIdRef.current;
+      // `splitPane` is total: an id it cannot find returns the tree
+      // UNCHANGED, which on screen is indistinguishable from a split that
+      // had nothing to do. Said out loud instead — a pane operation that
+      // fails silently is the one shape this shell refuses everywhere else.
+      if (findLeaf(panes, targetPaneId) === null) {
+        setStatus('that pane is gone — nothing to split');
+        return;
+      }
+      paneSeq.current += 1;
+      const newId = `pane-${paneSeq.current}`;
       setPanes((tree) => splitPane(tree, targetPaneId, edge, focusedSessionId, newId));
       setFocusedPaneId(newId);
     },
-    [focusedSessionId, setFocusedPaneId],
+    [focusedSessionId, panes, setFocusedPaneId],
   );
 
   /**
@@ -1678,6 +1760,37 @@ function CanvasInner({
     setFocusedPaneId(fallback);
   }, [panes, focusedPaneId, setFocusedPaneId]);
 
+  /**
+   * A15.5 — a tab's own `×` closes THE TAB, in the pane that drew it, and
+   * the pane itself once its last tab goes (VSCode: an emptied editor group
+   * is dropped, not left as a titled void).
+   *
+   * This REVERSES A11.3's "one action, two keys", and deliberately: that
+   * decision was made when every session in the project was always a tab of
+   * the one strip, so there was no tab to close that was not the session
+   * itself. A pane's tab list is now a genuine choice — which sessions THIS
+   * pane has open — so closing one is meaningful on its own, and the session
+   * keeps running and keeps its sidebar row. Closing the session itself is
+   * still one keystroke, `x`, and still the sidebar row's own `×`.
+   *
+   * Refuses aloud rather than emptying the shell when the tab is the last
+   * tab of the last pane — `removeTab` returns `null` for exactly that case.
+   */
+  const closePaneTab = useCallback(
+    (paneId: string, sessionId: string) => {
+      const next = removeTab(panes, paneId, sessionId);
+      if (next === null) {
+        setStatus('that is the last tab — close the session with x');
+        return;
+      }
+      setPanes(next);
+      if (findLeaf(next, focusedPaneIdRef.current) === null) {
+        setFocusedPaneId(stepPane(panes, paneId, 1));
+      }
+    },
+    [panes, setFocusedPaneId],
+  );
+
   /** Cycle the keyboard between splits, wrapping — vim's `Ctrl-w w`/`W`. */
   const stepFocusedSplit = useCallback(
     (delta: 1 | -1) => {
@@ -1702,15 +1815,21 @@ function CanvasInner({
    * for a real browser's own drag affordance (the ghost image, the cursor),
    * but nothing here reads it back.
    */
-  const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
+  /** A15.5 — the dragged tab now carries the pane it came FROM as well:
+   *  dropping it on another pane MOVES it (VSCode's own drag-a-tab-to-a-
+   *  group), so the source pane has to be named to take it back out of. */
+  const [dragging, setDragging] = useState<{
+    readonly sessionId: string;
+    readonly paneId: string;
+  } | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     readonly paneId: string;
     readonly edge: Edge;
   } | null>(null);
 
   const onTabDragStart = useCallback(
-    (sessionId: string) => (event: ReactDragEvent<HTMLButtonElement>) => {
-      setDraggingSessionId(sessionId);
+    (paneId: string, sessionId: string) => (event: ReactDragEvent<HTMLButtonElement>) => {
+      setDragging({ sessionId, paneId });
       try {
         event.dataTransfer.effectAllowed = 'copy';
         event.dataTransfer.setData('text/plain', sessionId);
@@ -1723,13 +1842,13 @@ function CanvasInner({
   );
 
   const onTabDragEnd = useCallback(() => {
-    setDraggingSessionId(null);
+    setDragging(null);
     setDropTarget(null);
   }, []);
 
   const onPaneDragOver = useCallback(
     (paneId: string) => (event: ReactDragEvent<HTMLDivElement>) => {
-      if (draggingSessionId === null) {
+      if (dragging === null) {
         return;
       }
       // Allowing the drop (`preventDefault`) is the browser's own contract
@@ -1748,7 +1867,7 @@ function CanvasInner({
           : { paneId, edge },
       );
     },
-    [draggingSessionId],
+    [dragging],
   );
 
   const onPaneDragLeave = useCallback(
@@ -1768,18 +1887,24 @@ function CanvasInner({
   const onPaneDrop = useCallback(
     (paneId: string) => (event: ReactDragEvent<HTMLDivElement>) => {
       event.preventDefault();
-      const draggedId = draggingSessionId;
-      setDraggingSessionId(null);
+      const drag = dragging;
+      setDragging(null);
       setDropTarget(null);
-      if (draggedId === null) {
+      if (drag === null) {
         return;
       }
+      const draggedId = drag.sessionId;
       const targetLeaf = findLeaf(panes, paneId);
+      if (targetLeaf === null) {
+        // The same silent-no-op trap `splitFocused` guards above: a drop
+        // that raced a close would hand `splitPane` an id it cannot find,
+        // and get the tree back untouched with nothing said.
+        setStatus('that pane is gone — nothing to split');
+        return;
+      }
       const draggedEntry = entriesById.get(draggedId) ?? null;
       const targetEntry =
-        targetLeaf === null || targetLeaf.sessionId === null
-          ? null
-          : (entriesById.get(targetLeaf.sessionId) ?? null);
+        targetLeaf.sessionId === null ? null : (entriesById.get(targetLeaf.sessionId) ?? null);
       if (
         draggedEntry !== null &&
         targetEntry !== null &&
@@ -1799,10 +1924,18 @@ function CanvasInner({
       );
       paneSeq.current += 1;
       const newId = `pane-${paneSeq.current}`;
-      setPanes((tree) => splitPane(tree, paneId, edge, draggedId, newId));
+      setPanes((tree) => {
+        // A15.5 — a drag MOVES the tab: it lands in the new pane and leaves
+        // the one it came from, which is VSCode's own gesture and the only
+        // reading under which "the tab sits on the split side" is true of
+        // the tab that was dragged. `removeTab` closes a source pane it
+        // empties, and is total over a source that has already gone.
+        const split = splitPane(tree, paneId, edge, draggedId, newId);
+        return removeTab(split, drag.paneId, draggedId) ?? split;
+      });
       setFocusedPaneId(newId);
     },
-    [draggingSessionId, panes, entriesById, setFocusedPaneId],
+    [dragging, panes, entriesById, setFocusedPaneId],
   );
 
   /**
@@ -3341,6 +3474,23 @@ function CanvasInner({
           ? null
           : (entriesById.get(leaf.sessionId) ?? null);
       const splitCount = leaves(panes).length;
+      /**
+       * THIS PANE's own tabs, in the order it opened them — the leaf's list
+       * resolved against the model, never `entries`' whole project. A id
+       * whose session has gone draws nothing until the prune effect above
+       * catches up, and A13.1's project scoping is kept here as well: a
+       * strip only ever lists the ACTIVE project's sessions, so a pane left
+       * over from another project cannot draw one.
+       */
+      const paneTabs = leaf.sessionIds.flatMap((sessionId) => {
+        const tabEntry = entriesById.get(sessionId);
+        if (tabEntry === undefined) {
+          return [];
+        }
+        return activeProjectId !== null && tabEntry.project.id !== activeProjectId
+          ? []
+          : [tabEntry];
+      });
       return (
         // Not a control and not a keyboard stop of its own -- the real
         // interactive content is the `DetailPanel` instance inside it,
@@ -3368,6 +3518,24 @@ function CanvasInner({
           onDragLeave={onPaneDragLeave(leaf.id)}
           onDrop={onPaneDrop(leaf.id)}
         >
+          <TabStripRow>
+            <TabStrip
+              orientation="horizontal"
+              tabs={paneTabs}
+              activeId={leaf.sessionId}
+              onSelect={(sessionId) => {
+                // The pane whose strip was clicked is the pane the keyboard
+                // moves to FIRST: `setFocusedPaneId` writes its ref
+                // synchronously, so the `setFocusedSessionId` below lands in
+                // this pane rather than in whichever one held focus before.
+                setFocusedPaneId(leaf.id);
+                setFocusedSessionId(sessionId);
+              }}
+              onClose={(sessionId) => closePaneTab(leaf.id, sessionId)}
+              onTabDragStart={(sessionId) => onTabDragStart(leaf.id, sessionId)}
+              onTabDragEnd={onTabDragEnd}
+            />
+          </TabStripRow>
           <DetailPanel {...buildDetailProps(entry, leaf.sessionId, leaf.id, isFocused)} />
           {dropTarget !== null && dropTarget.paneId === leaf.id && (
             <DropZoneOverlay edge={dropTarget.edge} />
@@ -3379,9 +3547,14 @@ function CanvasInner({
       focusedPaneId,
       focusedEntry,
       entriesById,
+      activeProjectId,
       panes,
       buildDetailProps,
+      closePaneTab,
       setFocusedPaneId,
+      setFocusedSessionId,
+      onTabDragStart,
+      onTabDragEnd,
       onPaneDragOver,
       onPaneDragLeave,
       onPaneDrop,
@@ -3412,21 +3585,7 @@ function CanvasInner({
               moved to the status bar, the one place already on screen
               whether or not a session is focused, so "is vam connected" is
               never something the tab row alone had to say. */}
-          <DetailColumn
-            show={visible.detail}
-            width={detailWidth}
-            toolbar={
-              <TabStrip
-                orientation="horizontal"
-                tabs={projectTabs}
-                activeId={focusedSessionId}
-                onSelect={focusSession}
-                onClose={onSidebarClose}
-                onTabDragStart={onTabDragStart}
-                onTabDragEnd={onTabDragEnd}
-              />
-            }
-          >
+          <DetailColumn show={visible.detail} width={detailWidth}>
             <SplitLayout tree={panes} renderLeaf={renderLeaf} />
           </DetailColumn>
         </div>

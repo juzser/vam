@@ -27,12 +27,25 @@
  * drift.
  */
 
-/** One pane: the session it shows, or `null` before the first model has
- *  loaded — the same pre-load state `focusedSessionId` already tolerates. */
+/**
+ * One pane — VSCode's EDITOR GROUP, not one editor: it owns an ordered list
+ * of open tabs and which one of them is in front. That is the whole of the
+ * operator's report that split panes still shared one strip of tabs; the
+ * strip is drawn per leaf from `sessionIds` (see `Canvas.tsx`'s `renderLeaf`)
+ * rather than once for the whole column.
+ *
+ * `sessionId` is the tab in front — always a member of `sessionIds`, or
+ * `null` when the pane holds nothing yet (the pre-load state
+ * `focusedSessionId` already tolerates, now also the state a pane reaches
+ * when every session it held has been closed). Kept as its own field rather
+ * than an index into the list so every existing reader of
+ * `findLeaf(...)?.sessionId` keeps meaning what it always meant.
+ */
 export type Leaf = {
   readonly kind: 'leaf';
   readonly id: string;
   readonly sessionId: string | null;
+  readonly sessionIds: readonly string[];
 };
 
 /** A divider, and what it holds — two or more panes or nested splits, in
@@ -56,7 +69,7 @@ export type Edge = 'left' | 'right' | 'top' | 'bottom';
 /** The layout before any split exists: one pane, holding one session (or
  *  none yet). */
 export function singlePane(sessionId: string | null, id: string): SplitTree {
-  return { kind: 'leaf', id, sessionId };
+  return { kind: 'leaf', id, sessionId, sessionIds: sessionId === null ? [] : [sessionId] };
 }
 
 /** Every leaf, left to right and top to bottom as the tree draws them —
@@ -72,16 +85,39 @@ export function findLeaf(tree: SplitTree, id: string): Leaf | null {
   return leaves(tree).find((leaf) => leaf.id === id) ?? null;
 }
 
-/** Point one pane at a different session, leaving every other leaf alone.
- *  `sessionId` may be `null` — a deliberate "point at nothing", the same
- *  value the pre-load leaf starts with, not only a pre-load-only state. A
- *  no-op, not a crash, when `id` matches nothing — the same defensive
- *  contract `clampPaneWidth` holds for a garbage stored width. */
-export function setPaneSession(tree: SplitTree, id: string, sessionId: string | null): SplitTree {
+/** Rebuild one leaf in place, leaving every other leaf (and the shape of the
+ *  tree) alone. Identity-preserving: a leaf `f` returns unchanged, and every
+ *  split above it, come back as the same object. */
+function mapLeaf(tree: SplitTree, id: string, f: (leaf: Leaf) => Leaf): SplitTree {
   if (tree.kind === 'leaf') {
-    return tree.id === id ? { ...tree, sessionId } : tree;
+    return tree.id === id ? f(tree) : tree;
   }
-  return { ...tree, children: tree.children.map((child) => setPaneSession(child, id, sessionId)) };
+  const children = tree.children.map((child) => mapLeaf(child, id, f));
+  return children.every((child, at) => child === tree.children[at]) ? tree : { ...tree, children };
+}
+
+/**
+ * OPEN a session in one pane and bring it to the front — VSCode's "open in
+ * the active group": a session the pane does not hold yet is APPENDED as a
+ * new tab (at the end, the order the strip draws, never re-sorted), and one
+ * it already holds is simply activated rather than duplicated.
+ *
+ * `sessionId` may be `null` — a deliberate "point at nothing", the same
+ * value the pre-load leaf starts with. It clears which tab is in front and
+ * leaves the pane's own list alone: nothing was closed, the keyboard just
+ * has nowhere to be. A no-op, not a crash, when `id` matches nothing — the
+ * same defensive contract `clampPaneWidth` holds for a garbage stored width.
+ */
+export function setPaneSession(tree: SplitTree, id: string, sessionId: string | null): SplitTree {
+  return mapLeaf(tree, id, (leaf) => {
+    if (sessionId === null) {
+      return leaf.sessionId === null ? leaf : { ...leaf, sessionId: null };
+    }
+    const sessionIds = leaf.sessionIds.includes(sessionId)
+      ? leaf.sessionIds
+      : [...leaf.sessionIds, sessionId];
+    return { ...leaf, sessionId, sessionIds };
+  });
 }
 
 function orientationFor(edge: Edge): SplitOrientation {
@@ -119,7 +155,7 @@ export function splitPane(
 ): SplitTree {
   const orientation = orientationFor(edge);
   const before = isBefore(edge);
-  const newLeaf: Leaf = { kind: 'leaf', id: newId, sessionId };
+  const newLeaf: Leaf = { kind: 'leaf', id: newId, sessionId, sessionIds: [sessionId] };
 
   function wrap(target: SplitTree): Split {
     return {
@@ -180,6 +216,94 @@ export function closePane(tree: SplitTree, id: string): SplitTree | null {
   }
   const only = children[0];
   return children.length === 1 && only !== undefined ? only : { ...tree, children };
+}
+
+/** Which tab takes the front when `removed` leaves: the one to its right,
+ *  and the one to its left when it was last — VSCode's own rule, and the
+ *  only one that keeps closing a run of tabs from jumping across the strip. */
+function neighbourOf(sessionIds: readonly string[], removed: string): string | null {
+  const at = sessionIds.indexOf(removed);
+  return sessionIds[at + 1] ?? sessionIds[at - 1] ?? null;
+}
+
+/**
+ * Take one tab out of one pane — what a drag MOVING a tab into another pane
+ * does to the pane it came from, and what closing a tab does.
+ *
+ * A pane left with no tabs at all is CLOSED, exactly the way VSCode drops an
+ * empty editor group rather than leaving a titled void on screen; `null`
+ * means "cannot", the same word `closePane` already uses, for the one case
+ * where that would empty the shell entirely (the last tab of the last pane).
+ * A pane id nothing holds, or a session that pane does not hold, returns the
+ * tree unchanged — a drop that raced a close is not a reason to corrupt the
+ * layout.
+ */
+export function removeTab(tree: SplitTree, paneId: string, sessionId: string): SplitTree | null {
+  const leaf = findLeaf(tree, paneId);
+  if (leaf === null || !leaf.sessionIds.includes(sessionId)) {
+    return tree;
+  }
+  const remaining = leaf.sessionIds.filter((id) => id !== sessionId);
+  if (remaining.length === 0) {
+    return closePane(tree, paneId);
+  }
+  return mapLeaf(tree, paneId, (target) => ({
+    ...target,
+    sessionIds: remaining,
+    sessionId:
+      target.sessionId === sessionId ? neighbourOf(target.sessionIds, sessionId) : target.sessionId,
+  }));
+}
+
+/**
+ * Drop every tab whose session is no longer open, wherever it sits.
+ *
+ * A session can be closed from four places (the sidebar row's `×`, a tab's
+ * own `×`, the `x` chord, the session ending on its own), and a pane holding
+ * its id would otherwise keep drawing a tab for something that is gone. One
+ * reconciliation over the whole tree covers all four rather than four call
+ * sites that each have to remember.
+ *
+ * Panes emptied this way close, as in `removeTab` — except the LAST pane,
+ * which is left holding nothing rather than closed, because an empty shell
+ * is not a state this can be allowed to reach. Returns the SAME tree when
+ * nothing was stale, so the effect that calls it on every model refresh
+ * cannot churn the render.
+ */
+export function pruneClosedTabs(
+  tree: SplitTree,
+  isOpen: (sessionId: string) => boolean,
+): SplitTree {
+  const emptied: string[] = [];
+  const mapped = mapEveryLeaf(tree, (leaf) => {
+    const kept = leaf.sessionIds.filter((id) => isOpen(id));
+    if (kept.length === leaf.sessionIds.length) {
+      return leaf;
+    }
+    if (kept.length === 0) {
+      emptied.push(leaf.id);
+    }
+    const sessionId =
+      leaf.sessionId !== null && kept.includes(leaf.sessionId) ? leaf.sessionId : (kept[0] ?? null);
+    return { ...leaf, sessionIds: kept, sessionId };
+  });
+  let result = mapped;
+  for (const id of emptied) {
+    const next = closePane(result, id);
+    if (next !== null) {
+      result = next;
+    }
+  }
+  return result;
+}
+
+/** `mapLeaf` over EVERY leaf at once, identity-preserving the same way. */
+function mapEveryLeaf(tree: SplitTree, f: (leaf: Leaf) => Leaf): SplitTree {
+  if (tree.kind === 'leaf') {
+    return f(tree);
+  }
+  const children = tree.children.map((child) => mapEveryLeaf(child, f));
+  return children.every((child, at) => child === tree.children[at]) ? tree : { ...tree, children };
 }
 
 /** Cycle the focused pane among every leaf, wrapping at both ends — the same
