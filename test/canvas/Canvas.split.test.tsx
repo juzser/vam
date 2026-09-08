@@ -167,12 +167,27 @@ describe('keyboard: zs / zv split the focused pane, zc closes it, zw/zW move bet
     expect(splitContainer()?.getAttribute('data-split-orientation')).toBe('column');
   });
 
-  it('the new pane starts as a mirror of the one it split from', () => {
+  it('the new pane TAKES the tab, and the one it came from is left empty', () => {
+    // This case read "the new pane starts as a mirror of the one it split
+    // from" and asserted a composer in both halves. The mirror is what the
+    // operator reported against ("when I split a tab, I still see that tab
+    // showing in both panes"), so the same setup now pins the opposite: the
+    // session is in the new pane, and the pane it came from is empty and says
+    // so rather than disappearing.
     render(<Canvas model={MODEL} />);
     pressChord('z', 'v');
     const [first, second] = splitPanes();
-    expect(promptInputIn(first as Element)).not.toBeNull();
-    expect(promptInputIn(second as Element)).not.toBeNull();
+    // Empty means it holds no session, not that it is a blank rectangle: the
+    // strip says so and the composer is present but read-only, which is the
+    // pane's own pre-existing "holding nothing" presentation.
+    expect(first?.querySelector('[data-tab-strip]')?.textContent).toContain('no sessions open');
+    expect(promptInputIn(first as Element)?.placeholder).toContain('Pick a session first');
+    // The pane that took the tab is pointed at a session, so its composer is
+    // not the "pick one" placeholder. (Whether it is READ-ONLY is a question
+    // about the source's capabilities, not about panes — this MODEL has no
+    // source at all, so both are read-only and that would prove nothing.)
+    expect(promptInputIn(second as Element)?.placeholder).not.toContain('Pick a session first');
+    expect(inBlockIn(second as Element)).toContain('in-d-a1');
   });
 
   it('zc closes the focused split — the other pane survives, unsplit', () => {
@@ -260,24 +275,21 @@ describe('dragging a tab splits — same project only, refused aloud otherwise',
    */
 });
 
+/**
+ * The mirrored-pane case that used to open this block is gone with the
+ * mirror: `zv` MOVES the active tab now, so no gesture can put one session in
+ * two panes and "two panes showing the SAME session share one draft" is a
+ * state the shell cannot reach. What is left to pin — and the half that was
+ * always load-bearing — is that two panes showing DIFFERENT sessions never
+ * leak a draft between them.
+ */
 describe('per-pane isolation — the composer draft is per SESSION, and two panes never share one', () => {
-  it('two panes showing the SAME session share its one draft — a mirror, not two copies', () => {
-    render(<Canvas model={MODEL} />);
-    pressChord('z', 'v');
-    const [first, second] = splitPanes();
-    const firstInput = promptInputIn(first as Element) as HTMLTextAreaElement;
-    const secondInput = promptInputIn(second as Element) as HTMLTextAreaElement;
-    typeInto(firstInput, 'shared, because it is one session');
-    expect(secondInput.value).toBe('shared, because it is one session');
-  });
-
   it('two panes showing DIFFERENT sessions never leak a draft between them', () => {
     render(<Canvas model={MODEL} />);
-    pressChord('z', 'v'); // pane-1: a1 (unfocused) | pane-2: a1 (focused, mirror)
-    // Point the now-focused second pane at a DIFFERENT session, the same way
-    // an operator would — clicking its sidebar row, which A15.5 makes open
-    // that session in the FOCUSED pane and nowhere else.
+    // pane-1 holds a1 and a2, a2 in front; `zv` takes a2 to pane-2 and leaves
+    // a1 behind, which is the two-panes-two-sessions shape in one chord.
     act(() => sidebarRow(1).click());
+    pressChord('z', 'v');
     const [first, second] = splitPanes();
     const firstInput = promptInputIn(first as Element) as HTMLTextAreaElement; // a1
     const secondInput = promptInputIn(second as Element) as HTMLTextAreaElement; // a2
@@ -291,7 +303,8 @@ describe('per-pane isolation — the composer draft is per SESSION, and two pane
 describe('the default-provider picker (#261) is wired to every pane, not only the focused one', () => {
   it('renders its toggle inside a background (non-focused) split pane too', () => {
     render(<Canvas model={MODEL} />);
-    pressChord('z', 'v'); // pane-1 (unfocused) | pane-2 (focused, mirror)
+    act(() => sidebarRow(1).click()); // pane-1: a1, a2 — a2 in front
+    pressChord('z', 'v'); // pane-1: a1 (unfocused) | pane-2: a2 (focused)
     const [first] = splitPanes();
     // `defaultProvider`/`onSetDefaultProvider` are global-preference props,
     // identical for every pane (A15.4's own contract) — proving the

@@ -154,29 +154,34 @@ describe('each pane draws its own tab strip', () => {
 });
 
 describe('a pane owns its tabs — a split does not hand over the source pane’s', () => {
-  it('the new pane holds ONLY the session it was split from', () => {
+  it('the new pane holds ONLY the session it was split from, and the source loses it', () => {
     render(<Canvas model={MODEL} />);
     act(() => sidebarRow(1).click()); // open a2 in pane-1 as well
     expect(tabsIn(paneFor('pane-1'))).toEqual(['a1', 'a2']);
     pressChord('z', 'v');
-    expect(tabsIn(paneFor('pane-1'))).toEqual(['a1', 'a2']);
+    // The source pane used to keep its copy of a2 -- the split mirrored. It
+    // moves the tab now (see 'splitting MOVES the tab' below for the whole
+    // rule); what this case still pins is that the new pane holds the ONE
+    // session it was split from and none of the source pane's others.
+    expect(tabsIn(paneFor('pane-1'))).toEqual(['a1']);
     expect(tabsIn(paneFor('pane-2'))).toEqual(['a2']);
     expect(activeTabIn(paneFor('pane-2'))).toBe('a2');
   });
 
   it('opens a sidebar pick in the FOCUSED pane only', () => {
     render(<Canvas model={MODEL} />);
-    pressChord('z', 'v'); // pane-2 is focused
-    act(() => sidebarRow(2).click()); // a3
+    act(() => sidebarRow(1).click()); // pane-1: a1, a2 -- a2 active
+    pressChord('z', 'v'); // pane-1: a1 | pane-2: a2, focused
+    act(() => sidebarRow(2).click()); // a3, which no pane holds
     expect(tabsIn(paneFor('pane-1'))).toEqual(['a1']);
-    expect(tabsIn(paneFor('pane-2'))).toEqual(['a1', 'a3']);
+    expect(tabsIn(paneFor('pane-2'))).toEqual(['a2', 'a3']);
     expect(inBlockIn(paneFor('pane-2'))).toContain('in-d-a3');
   });
 
   it('activates a tab in the pane whose strip was clicked, leaving the other alone', () => {
     render(<Canvas model={MODEL} />);
     act(() => sidebarRow(1).click()); // pane-1 holds a1, a2 — a2 active
-    pressChord('z', 'v'); // pane-2 holds a2
+    pressChord('z', 'v'); // pane-1: a1 | pane-2: a2
     act(() => tabIn(paneFor('pane-1'), 'a1')?.click());
     expect(activeTabIn(paneFor('pane-1'))).toBe('a1');
     expect(activeTabIn(paneFor('pane-2'))).toBe('a2');
@@ -216,15 +221,19 @@ describe('dragging a tab MOVES it into the pane it is dropped on', () => {
 });
 
 describe('closing the last tab in a pane closes the pane', () => {
-  it('drops the pane, and only that pane’s copy of the tab', () => {
+  it('drops the pane, and closes the tab rather than the session', () => {
     render(<Canvas model={MODEL} />);
     act(() => sidebarRow(1).click()); // pane-1: a1, a2 — a2 active
-    pressChord('z', 'v'); // pane-2: a2 alone
+    act(() => sidebarRow(2).click()); // pane-1: a1, a2, a3 — a3 active
+    pressChord('z', 'v'); // pane-1: a1, a2 | pane-2: a3 alone
     const close = paneFor('pane-2')?.querySelector<HTMLButtonElement>('[data-tab-close]');
     act(() => close?.click());
     expect(splitPanes()).toHaveLength(1);
     // A tab's `×` closes THE TAB in the pane that drew it, not the session:
-    // pane-1 still has its own a2 tab, and a2 still has its sidebar row.
+    // a3 still has its sidebar row, and pane-1's own tabs are untouched.
+    // (This case used to close a MIRRORED tab and check the source pane kept
+    // its copy; a session lives in one pane now, so what is left to pin is
+    // that the pane goes and the session does not.)
     expect(tabsIn(splitPanes()[0])).toEqual(['a1', 'a2']);
     expect(document.querySelectorAll('[data-session-row]')).toHaveLength(4);
   });
@@ -314,5 +323,92 @@ describe('switching project reconciles the panes — no stale split, no stale ta
     pressChord('z', 'v');
     act(() => sidebarRow(2).click()); // a3, still alpha
     expect(splitPanes()).toHaveLength(2);
+  });
+});
+
+/**
+ * A SESSION LIVES IN EXACTLY ONE PANE.
+ *
+ * The operator: "when I split a tab, I still see that tab showing in both
+ * panes." `zv`/`zs` used to open the new pane as a MIRROR of the one it came
+ * from — vim's `:split` and VSCode's "Split Editor" both do that, and the
+ * comment on `splitFocused` argued for it. Used, it turned out to contradict
+ * the model the rest of this shell teaches: a tab belongs to a pane. Two panes
+ * showing one session is not a split of anything, it is the same thing twice
+ * over the half of the screen the split was made to gain.
+ *
+ * So the chord MOVES the active tab, which is what the drag gesture has always
+ * done — one rule for where a tab lives, not two that disagree depending on
+ * how you asked for it. The consequences pinned below are the whole of the
+ * rule: the source keeps its other tabs and activates a neighbour by the
+ * right-then-left rule closing already used; a source left with nothing stays
+ * on screen saying so rather than vanishing; and picking a session in the
+ * sidebar while another pane holds it moves the KEYBOARD there instead of
+ * making a second copy — the same complaint through a different door.
+ */
+describe('splitting MOVES the tab — a session is never in two panes', () => {
+  it('leaves the source pane without the tab the split took', () => {
+    render(<Canvas model={MODEL} />);
+    act(() => sidebarRow(1).click()); // pane-1: a1, a2 — a2 active
+    pressChord('z', 'v');
+    expect(splitPanes()).toHaveLength(2);
+    expect(tabsIn(paneFor('pane-1'))).toEqual(['a1']);
+    expect(tabsIn(paneFor('pane-2'))).toEqual(['a2']);
+    // The assertion that names the report: once on screen, not twice.
+    const everywhere = splitPanes().flatMap((pane) => tabsIn(pane));
+    expect(everywhere.filter((title) => title === 'a2')).toHaveLength(1);
+  });
+
+  it('activates the neighbour to the right in the pane it took the tab from', () => {
+    render(<Canvas model={MODEL} />);
+    act(() => sidebarRow(1).click()); // a2
+    act(() => sidebarRow(2).click()); // a3 — pane-1: a1, a2, a3
+    act(() => tabIn(paneFor('pane-1'), 'a2')?.click()); // a2 back in front
+    pressChord('z', 'v');
+    expect(tabsIn(paneFor('pane-1'))).toEqual(['a1', 'a3']);
+    // Right-then-left, the rule `removeTab` already used for a close.
+    expect(activeTabIn(paneFor('pane-1'))).toBe('a3');
+  });
+
+  it('keeps a pane it emptied on screen, saying what to do about it', () => {
+    render(<Canvas model={MODEL} />);
+    pressChord('z', 'v'); // pane-1 held a1 alone, and gives it up
+    expect(splitPanes()).toHaveLength(2);
+    const emptied = paneFor('pane-1');
+    expect(tabsIn(emptied)).toEqual([]);
+    // The strip's own empty state, drawn INSIDE the pane — the operator asked
+    // for two panes and gets two, one of them honest about being empty.
+    expect(emptied?.querySelector('[data-tab-strip]')?.textContent).toContain('no sessions open');
+    expect(tabsIn(paneFor('pane-2'))).toEqual(['a1']);
+  });
+
+  it('a horizontal split moves the tab the same way', () => {
+    render(<Canvas model={MODEL} />);
+    act(() => sidebarRow(1).click()); // pane-1: a1, a2 — a2 active
+    pressChord('z', 's');
+    expect(tabsIn(paneFor('pane-1'))).toEqual(['a1']);
+    expect(tabsIn(paneFor('pane-2'))).toEqual(['a2']);
+  });
+});
+
+describe('picking a session the OTHER pane holds moves the keyboard, not the tab', () => {
+  it('focuses the pane already holding it instead of opening a second copy', () => {
+    render(<Canvas model={MODEL} />);
+    act(() => sidebarRow(1).click()); // pane-1: a1, a2 — a2 active
+    pressChord('z', 'v'); // pane-1: a1 | pane-2: a2, focused
+    act(() => sidebarRow(0).click()); // a1 — which pane-1 already holds
+    expect(paneFor('pane-1')?.getAttribute('data-split-focused')).toBe('true');
+    expect(activeTabIn(paneFor('pane-1'))).toBe('a1');
+    expect(tabsIn(paneFor('pane-1'))).toEqual(['a1']);
+    expect(tabsIn(paneFor('pane-2'))).toEqual(['a2']);
+  });
+
+  it('opens a session NO pane holds in the focused pane, as before', () => {
+    render(<Canvas model={MODEL} />);
+    act(() => sidebarRow(1).click()); // pane-1: a1, a2
+    pressChord('z', 'v'); // pane-1: a1 | pane-2: a2, focused
+    act(() => sidebarRow(2).click()); // a3 — nobody holds it
+    expect(tabsIn(paneFor('pane-2'))).toEqual(['a2', 'a3']);
+    expect(paneFor('pane-2')?.getAttribute('data-split-focused')).toBe('true');
   });
 });

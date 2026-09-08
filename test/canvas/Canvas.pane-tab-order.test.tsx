@@ -112,16 +112,28 @@ describe('a pane lists its tabs the way the sidebar lists them', () => {
     ).toBe('old');
   });
 
-  it('keeps each pane in canonical order after a split', () => {
+  it('keeps each pane in canonical order after a split moves a tab', () => {
     render(<Canvas model={MODEL} />);
-    // pane-1 by arrival: new (the pre-focused one), old, mid.
+    // pane-1 by arrival: new (the pre-focused one), old, mid — `mid` in front.
     pickInSidebar('old');
     pickInSidebar('mid');
     press('z');
-    press('v'); // pane-2 holds `mid` alone and takes the keyboard
-    pickInSidebar('new'); // pane-2 by arrival: mid, new
-    expect(tabsIn(paneFor('pane-1'))).toEqual(['new', 'mid', 'old']);
-    expect(tabsIn(paneFor('pane-2'))).toEqual(['new', 'mid']);
+    press('v'); // `zv` MOVES `mid` into pane-2 and leaves the other two
+    expect(tabsIn(paneFor('pane-2'))).toEqual(['mid']);
+    // pane-1 arrived at new, old and keeps them in the sidebar's order, which
+    // for these two is the same sequence — so `old` is picked back into it
+    // below to make arrival and canonical order disagree again.
+    expect(tabsIn(paneFor('pane-1'))).toEqual(['new', 'old']);
+  });
+
+  it('a pick that lands in another pane orders THAT pane, not the focused one', () => {
+    render(<Canvas model={MODEL} />);
+    pickInSidebar('old'); // pane-1: new, old
+    press('z');
+    press('v'); // pane-2: old | pane-1: new
+    pickInSidebar('mid'); // no pane holds `mid` — it opens in the focused one
+    expect(tabsIn(paneFor('pane-2'))).toEqual(['mid', 'old']);
+    expect(tabsIn(paneFor('pane-1'))).toEqual(['new']);
   });
 });
 
