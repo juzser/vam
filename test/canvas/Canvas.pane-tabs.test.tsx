@@ -249,17 +249,64 @@ describe('closing the last tab in a pane closes the pane', () => {
   });
 });
 
+/**
+ * A15.7 — EVERY PROJECT REMEMBERS ITS OWN LAYOUT, and the operator's report
+ * that reversed A15.5's answer: "when I split, switch to another project and
+ * then come back, the split state is lost."
+ *
+ * A15.5 fixed a real bug (panes kept drawing the previous project's
+ * sessions) with the smaller of two rules — collapse to one pane on every
+ * project switch — and said so in its own comment. The operator has used it
+ * and asked for the other one, VSCode's: a layout per workspace, reopened on
+ * return. The invariant A15.5 established is what makes that safe, so it is
+ * asserted here in the same breath as the restore: no pane ever draws a tab
+ * for another project, and a stored tree is RECONCILED against what is still
+ * open rather than trusted (`restoreLayout`, pinned directly in
+ * `split.test.ts`).
+ */
 describe('switching project reconciles the panes — no stale split, no stale tab', () => {
-  it('collapses a split and shows only the project just picked', () => {
+  it('restores the split, with its tabs, when the project comes back', () => {
     render(<Canvas model={MODEL} />);
     act(() => sidebarRow(1).click()); // pane-1: a1, a2 (alpha)
     pressChord('z', 'v');
     expect(splitPanes()).toHaveLength(2);
+    const before = splitPanes().map(tabsIn);
     act(() => sidebarRow(3).click()); // b1 — project beta
+    // The A15.5 guard, kept: a project never visited opens as ONE pane, and
+    // not one tab of alpha's survives the switch.
     expect(splitPanes()).toHaveLength(1);
-    const only = splitPanes()[0];
-    expect(tabsIn(only)).toEqual(['b1']);
-    expect(inBlockIn(only)).toContain('in-d-b1');
+    expect(tabsIn(splitPanes()[0])).toEqual(['b1']);
+    expect(inBlockIn(splitPanes()[0])).toContain('in-d-b1');
+    act(() => sidebarRow(1).click()); // back to a2, in alpha
+    expect(splitPanes()).toHaveLength(2);
+    expect(splitPanes().map(tabsIn)).toEqual(before);
+  });
+
+  it('does not resurrect a session that ended while its project was off screen', () => {
+    const { rerender } = render(<Canvas model={MODEL} />);
+    act(() => sidebarRow(1).click());
+    pressChord('z', 'v'); // pane-2 holds a2 alone
+    act(() => sidebarRow(3).click()); // beta
+    const survived: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'claude-code',
+          sessions: [session('a1'), session('a3')],
+        },
+        { id: 'p2', name: 'beta', source: 'claude-code', sessions: [session('b1')] },
+      ],
+    };
+    act(() => {
+      rerender(<Canvas model={survived} />);
+    });
+    act(() => sidebarRow(0).click()); // a1, back in alpha
+    // a2 ended off screen: its tab is gone, and the pane that held nothing
+    // else closed with it rather than standing empty.
+    expect(splitPanes().flatMap((pane) => tabsIn(pane))).not.toContain('a2');
+    expect(splitPanes()).toHaveLength(1);
+    expect(tabsIn(splitPanes()[0])).toEqual(['a1']);
   });
 
   it('keeps the split when the pick stays inside the same project', () => {

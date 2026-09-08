@@ -347,3 +347,46 @@ export function nearestEdge(x: number, y: number, width: number, height: number)
   }
   return bestEdge;
 }
+
+/**
+ * A project's remembered layout, brought back — reconciled, never replayed.
+ *
+ * A15.7, the operator's report: "when I split, switch to another project and
+ * then come back, the split state is lost." A15.5 collapsed to one pane on
+ * every project switch, the smaller of the two answers it named; this is the
+ * other one, VSCode's — a layout per workspace, reopened on return.
+ *
+ * The reason the larger answer was deferred is the whole of what this
+ * function does: sessions END while their project is off screen, so a stored
+ * tree can name things that are no longer there. Trusting it would bring
+ * back exactly the stale-tab bug A15.5 was written to kill. So:
+ *
+ * 1. every tab whose session is gone is dropped, and a pane emptied that way
+ *    closes (`pruneClosedTabs`);
+ * 2. if nothing at all survived, the answer is ONE pane holding the session
+ *    just picked, under `fallbackId` — a restore must never show a blank
+ *    shell;
+ * 3. otherwise the picked session is opened in the pane that had focus in
+ *    this project, or in the leftmost surviving pane when that one went with
+ *    its sessions.
+ *
+ * Returns the pane the keyboard should land in alongside the tree, because
+ * only this function knows which of the three cases happened. Pure and total
+ * like everything else here: `isOpen` decides what still exists, and no
+ * lookup that misses can throw.
+ */
+export function restoreLayout(
+  stored: SplitTree,
+  isOpen: (sessionId: string) => boolean,
+  sessionId: string,
+  focusedPaneId: string,
+  fallbackId: string,
+): { readonly tree: SplitTree; readonly paneId: string } {
+  const pruned = pruneClosedTabs(stored, isOpen);
+  const surviving = leaves(pruned).filter((leaf) => leaf.sessionIds.length > 0);
+  const target = surviving.find((leaf) => leaf.id === focusedPaneId) ?? surviving[0];
+  if (target === undefined) {
+    return { tree: singlePane(sessionId, fallbackId), paneId: fallbackId };
+  }
+  return { tree: setPaneSession(pruned, target.id, sessionId), paneId: target.id };
+}

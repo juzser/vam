@@ -26,6 +26,7 @@ import {
   nearestEdge,
   pruneClosedTabs,
   removeTab,
+  restoreLayout,
   type SplitTree,
   setPaneSession,
   singlePane,
@@ -367,5 +368,52 @@ describe('pruneClosedTabs — a closed session leaves no ghost tab behind', () =
   it('returns the SAME tree when every tab is still open — no render churn', () => {
     const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
     expect(pruneClosedTabs(tree, () => true)).toBe(tree);
+  });
+});
+
+/**
+ * A15.7 — what a project's remembered layout is worth when it comes back.
+ *
+ * The reason A15.5 deferred per-project layouts: a stored tree can name
+ * sessions that ended while their project was off screen. So a restore is a
+ * reconciliation, never a replay — and it lives here, pure, rather than only
+ * inside the component where it could be asserted only through the DOM.
+ */
+describe('restoreLayout — a remembered layout, reconciled against what is still open', () => {
+  const stored = () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    return setPaneSession(tree, 'p1', 's2');
+  };
+
+  it('brings the split back, and opens the picked session in the pane that had focus', () => {
+    const { tree, paneId } = restoreLayout(stored(), () => true, 's1', 'p2', 'fresh');
+    expect(leaves(tree).map((l) => l.id)).toEqual(['p1', 'p2']);
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1', 's2']);
+    expect(findLeaf(tree, 'p2')?.sessionIds).toEqual(['s2', 's1']);
+    expect(findLeaf(tree, 'p2')?.sessionId).toBe('s1');
+    expect(paneId).toBe('p2');
+  });
+
+  it('drops a session that ended off screen, closing the pane it emptied', () => {
+    const { tree, paneId } = restoreLayout(stored(), (id) => id === 's1', 's1', 'p2', 'fresh');
+    expect(leaves(tree).map((l) => l.id)).toEqual(['p1']);
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1']);
+    expect(paneId).toBe('p1');
+  });
+
+  it('falls back to ONE pane holding the picked session when nothing survived', () => {
+    const { tree, paneId } = restoreLayout(stored(), () => false, 's9', 'p2', 'fresh');
+    expect(leaves(tree)).toHaveLength(1);
+    expect(leaves(tree)[0]?.id).toBe('fresh');
+    expect(leaves(tree)[0]?.sessionIds).toEqual(['s9']);
+    expect(paneId).toBe('fresh');
+  });
+
+  it('falls back too when the pane that had focus is the one that went', () => {
+    const { tree, paneId } = restoreLayout(stored(), (id) => id === 's1', 's1', 'ghost', 'fresh');
+    // `ghost` holds nothing, so the leftmost surviving pane takes the session
+    // rather than the restore doing nothing visible.
+    expect(paneId).toBe('p1');
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s1');
   });
 });
