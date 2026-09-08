@@ -1705,14 +1705,46 @@ function CanvasInner({
    * cannot churn the render, and it never closes the last pane. Skipped
    * entirely while the model is empty — that is the pre-load state, not
    * every session closing at once.
+   *
+   * AND THE KEYBOARD GOES WITH THE PANE THAT CLOSED. A pane emptied this way
+   * is closed, so this is the one site that can leave `focusedPaneId` naming
+   * a leaf that no longer exists — `splitFocused`, `onPaneDrop` and
+   * `closePaneTab` each already refuse or repair such an id, and the state
+   * they guard against was created here. Stale, the shell wedges rather than
+   * breaking loudly: no pane wears the focus, `findLeaf` answers `null` so
+   * `focusedSessionId` is `null` and every chord replies "pick a session
+   * first", and a sidebar click aims `setPaneSession` at nothing and does
+   * nothing at all. "Land focus on something real" below only rescues that
+   * by accident — when the candidate it re-picks happens to be held by a
+   * surviving pane — so the repair belongs here, beside the close, and is
+   * `closePaneTab`'s rule read twice: the next pane round, else the first
+   * one left.
+   *
+   * Read through `panesRef` rather than a `setPanes` updater because the
+   * repair has to know WHICH tree came back; a `setFocusedPaneId` inside an
+   * updater would be a side effect in a function React may call twice.
    */
   useEffect(() => {
     if (allEntries.length === 0) {
       return;
     }
     const open = new Set(allEntries.map((entry) => entry.session.id));
-    setPanes((tree) => pruneClosedTabs(tree, (id) => open.has(id)));
-  }, [allEntries]);
+    const before = panesRef.current;
+    const pruned = pruneClosedTabs(before, (id) => open.has(id));
+    if (pruned === before) {
+      return;
+    }
+    setPanes(pruned);
+    const focused = focusedPaneIdRef.current;
+    if (findLeaf(pruned, focused) !== null) {
+      return;
+    }
+    const next = stepPane(before, focused, 1);
+    const survivor = leaves(pruned).find((leaf) => leaf.id === next) ?? leaves(pruned)[0];
+    if (survivor !== undefined) {
+      setFocusedPaneId(survivor.id);
+    }
+  }, [allEntries, setFocusedPaneId]);
 
   /**
    * The other half of the per-pane `+`: the session it started, once it
