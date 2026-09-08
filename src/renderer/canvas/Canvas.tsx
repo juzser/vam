@@ -31,7 +31,7 @@
  * that same id again.
  */
 
-import { Box, Factory, FlaskConical, type LucideIcon } from 'lucide-react';
+import { Box, Factory, FlaskConical, type LucideIcon, Plus } from 'lucide-react';
 import {
   type ComponentProps,
   type DragEvent as ReactDragEvent,
@@ -475,7 +475,10 @@ function DetailColumn({
  *  point, and a row above the split layout could only ever draw one. */
 function TabStripRow({ children }: { readonly children: ReactNode }) {
   return (
-    <div className="flex h-9 flex-none items-stretch gap-[9px] border-line border-b px-1.5">
+    <div
+      data-tab-strip-row
+      className="flex h-9 flex-none items-stretch gap-[9px] border-line border-b px-1.5"
+    >
       {children}
     </div>
   );
@@ -506,6 +509,46 @@ function TabStripRow({ children }: { readonly children: ReactNode }) {
  * `onTabDragEnd` are optional so every caller that predates splitting (and
  * every existing test) is unaffected.
  */
+/**
+ * The `+` at the end of one pane's strip — the operator's request, and
+ * VSCode's own "new editor in THIS group": the session it starts is born in
+ * the pane whose button was pressed, not in whichever pane holds the
+ * keyboard (`renderLeaf` passes the leaf id through).
+ *
+ * A SIBLING of the strip rather than a child of it, so it stays pinned at
+ * the row's right edge while a pane full of tabs scrolls under it, and so a
+ * pane holding nothing yet — where `TabStrip` draws its "no sessions open"
+ * placeholder instead of any tabs — still has one.
+ *
+ * `decline` is `newSessionDecline`: the reason there is no route, computed
+ * from the same `newSessionRoute` the click reads, so the caption cannot
+ * disagree with what pressing it does. It is worn as the TOOLTIP and said
+ * out loud in the status bar on click; the button is never drawn inert.
+ * (`ViewIcons`' rule for icon-only controls applies here too: a real
+ * `<button>`, reachable by Tab, with an `aria-label`. A `title` alone is not
+ * a name.)
+ */
+function NewTabButton({
+  decline,
+  onClick,
+}: {
+  readonly decline: string | null;
+  readonly onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-tab-new
+      aria-label="new session in this pane"
+      title={decline ?? 'New session in this pane'}
+      onClick={onClick}
+      className="vam-tap flex flex-none cursor-pointer items-center self-center rounded-[4px] px-1.5 py-1 text-ink-faint hover:text-ink"
+    >
+      <Plus size={13} strokeWidth={1.7} />
+    </button>
+  );
+}
+
 /** The literal class strings, not a template literal, so Tailwind's static
  *  scanner can see them rather than a computed `` `text-${status}` ``. */
 const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
@@ -906,6 +949,22 @@ function CanvasInner({
    */
   const paneSeq = useRef(1);
   const [panes, setPanes] = useState<SplitTree>(() => singlePane(null, 'pane-1'));
+  /**
+   * Which pane a `+` just started a session FOR, and which sessions already
+   * existed when it did.
+   *
+   * `write.createSession` resolves `void` (`preload-api.ts`) — `tmux
+   * new-session -d` returns before the agent inside has registered anywhere
+   * vam can read, so the id of what was started is not knowable at the call
+   * and cannot be opened on the spot. The pane is remembered instead, and the
+   * session that turns up in a later model is opened into it (the effect
+   * beside the prune below). A ref, not state: nothing renders from it, and
+   * an intervening render must not reset it.
+   *
+   * Armed only after the write RESOLVES, so a refused or failed creation
+   * leaves nothing behind to capture an unrelated session that appears later.
+   */
+  const pendingNewTab = useRef<{ paneId: string; known: ReadonlySet<string> } | null>(null);
   /**
    * Two derived values, mirrored into refs during render, so
    * `setFocusedSessionId` below can read them and still be the
@@ -1591,6 +1650,34 @@ function CanvasInner({
     const open = new Set(allEntries.map((entry) => entry.session.id));
     setPanes((tree) => pruneClosedTabs(tree, (id) => open.has(id)));
   }, [allEntries]);
+
+  /**
+   * The other half of the per-pane `+`: the session it started, once it
+   * shows up, opens in the pane that asked for it.
+   *
+   * The FIRST id that was not there when the button was pressed — vam has
+   * nothing better to match on (the write reported no id), and anything else
+   * appearing in the same poll is indistinguishable from it. Fires once and
+   * disarms, so a session started elsewhere a minute later never lands in a
+   * pane nobody pointed at. A pane closed in the meantime disarms too rather
+   * than moving focus onto a leaf that is gone.
+   */
+  useEffect(() => {
+    const pendingTab = pendingNewTab.current;
+    if (pendingTab === null) {
+      return;
+    }
+    const arrived = allEntries.find((entry) => !pendingTab.known.has(entry.session.id));
+    if (arrived === undefined) {
+      return;
+    }
+    pendingNewTab.current = null;
+    if (findLeaf(panes, pendingTab.paneId) === null) {
+      return;
+    }
+    setPanes((tree) => setPaneSession(tree, pendingTab.paneId, arrived.session.id));
+    setFocusedPaneId(pendingTab.paneId);
+  }, [allEntries, panes, setFocusedPaneId]);
 
   /**
    * What the detail panel expands: the focused session's newest decision.
@@ -2304,7 +2391,7 @@ function CanvasInner({
    * keeps "it started" and "you can see it" two different sentences too.
    */
   const createSession = useCallback(
-    async (projectId: string, projectName: string) => {
+    async (projectId: string, projectName: string, paneId?: string) => {
       if (pendingAction !== null) {
         setStatus(
           `something else is still running — no new session in ${projectName}; try again in a moment`,
@@ -2317,12 +2404,18 @@ function CanvasInner({
         return;
       }
       setPendingAction(projectId);
+      // Captured BEFORE the write, so "which session is new" is measured
+      // against what existed when the operator pressed the button.
+      const known = new Set(entriesByIdRef.current.keys());
       // The first half of one sentence: this and the success below are a
       // sequence -- "starting…" then "started … it may take a moment to
       // appear" -- rather than two unrelated remarks about the same click.
       setStatus(`starting a new session in ${projectName}…`);
       try {
         await route.write.createSession?.(projectId, projectName);
+        if (paneId !== undefined) {
+          pendingNewTab.current = { paneId, known };
+        }
         // The write resolves when the SESSION exists, not when the agent
         // inside it has registered where vam can see it -- `tmux new-session
         // -d` returns immediately. So the reload below very often comes back
@@ -3535,6 +3628,26 @@ function CanvasInner({
               onTabDragStart={(sessionId) => onTabDragStart(leaf.id, sessionId)}
               onTabDragEnd={onTabDragEnd}
             />
+            <NewTabButton
+              decline={newSessionDecline}
+              onClick={() => {
+                // This pane takes the keyboard first, exactly as clicking one
+                // of its tabs does — pressing `+` in an unfocused pane must
+                // not leave the caret in the pane the session did not land in.
+                setFocusedPaneId(leaf.id);
+                // WHICH PROJECT: this pane's own front tab, else the first tab
+                // it holds — the same "a new session is born in the focused
+                // one's project" rule `o` follows, read per pane rather than
+                // globally. A pane holding nothing names no directory, and vam
+                // will not pick one for it.
+                const target = entry ?? paneTabs[0] ?? null;
+                if (target === null) {
+                  setStatus('pick a session first — a new one is started in its project');
+                  return;
+                }
+                void createSession(target.project.id, target.project.name, leaf.id);
+              }}
+            />
           </TabStripRow>
           <DetailPanel {...buildDetailProps(entry, leaf.sessionId, leaf.id, isFocused)} />
           {dropTarget !== null && dropTarget.paneId === leaf.id && (
@@ -3558,6 +3671,8 @@ function CanvasInner({
       onPaneDragOver,
       onPaneDragLeave,
       onPaneDrop,
+      createSession,
+      newSessionDecline,
       dropTarget,
     ],
   );
