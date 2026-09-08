@@ -382,18 +382,48 @@ describe('pruneClosedTabs — a closed session leaves no ghost tab behind', () =
  * inside the component where it could be asserted only through the DOM.
  */
 describe('restoreLayout — a remembered layout, reconciled against what is still open', () => {
+  /**
+   * A LEGAL layout to be remembered: p1 holds s1 and s3, p2 holds s2, and no
+   * session is in two panes. The fixture this replaces put s2 in BOTH panes,
+   * which #268 made unrepresentable — `zv`/`zs`, the drag and the sidebar all
+   * MOVE a session now — so it could only be reached through the very bug the
+   * duplication case below pins.
+   */
   const stored = () => {
     const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
-    return setPaneSession(tree, 'p1', 's2');
+    return setPaneSession(tree, 'p1', 's3');
   };
 
   it('brings the split back, and opens the picked session in the pane that had focus', () => {
-    const { tree, paneId } = restoreLayout(stored(), () => true, 's1', 'p2', 'fresh');
+    // s9 is a session of this project that no remembered pane holds — its tab
+    // was closed while the project was off screen — so the pane that had
+    // focus is where it opens.
+    const { tree, paneId } = restoreLayout(stored(), () => true, 's9', 'p2', 'fresh');
     expect(leaves(tree).map((l) => l.id)).toEqual(['p1', 'p2']);
-    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1', 's2']);
-    expect(findLeaf(tree, 'p2')?.sessionIds).toEqual(['s2', 's1']);
-    expect(findLeaf(tree, 'p2')?.sessionId).toBe('s1');
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1', 's3']);
+    expect(findLeaf(tree, 'p2')?.sessionIds).toEqual(['s2', 's9']);
+    expect(findLeaf(tree, 'p2')?.sessionId).toBe('s9');
     expect(paneId).toBe('p2');
+  });
+
+  /**
+   * A SESSION LIVES IN EXACTLY ONE PANE — #268's rule, which every other
+   * route already keeps (`splitFocused` and the drag MOVE the tab,
+   * `paneHolding` sends a sidebar pick to the pane that already holds it).
+   * This one did not: coming back to a project by clicking a session ANOTHER
+   * remembered pane holds opened a second copy of it in the pane that had
+   * focus. Two `TerminalTab`s then poll one tmux session, each sending its
+   * own `resize`, so each renders a screen composed for the other's width.
+   * The keyboard goes to the holder instead — the sidebar's own answer.
+   */
+  it('never opens a second copy: the keyboard goes to the pane already holding it', () => {
+    const { tree, paneId } = restoreLayout(stored(), () => true, 's1', 'p2', 'fresh');
+    expect(paneId).toBe('p1');
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1', 's3']);
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s1');
+    expect(findLeaf(tree, 'p2')?.sessionIds).toEqual(['s2']);
+    const everywhere = leaves(tree).flatMap((leaf) => leaf.sessionIds);
+    expect(everywhere).toHaveLength(new Set(everywhere).size);
   });
 
   it('drops a session that ended off screen, closing the pane it emptied', () => {
