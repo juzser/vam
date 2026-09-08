@@ -522,6 +522,24 @@ export type DetailPanelProps = {
    * Both optional, and the pane works with neither: without them the tab is
    * component state that starts at the default, exactly as it was.
    */
+  /**
+   * Whether THIS pane is the one holding the keyboard -- the canvas's own
+   * `focusedPaneId`, passed down rather than re-derived, because a second
+   * notion of focus in this file could disagree with the ring the canvas
+   * paints (`data-split-focused`).
+   *
+   * It gates ONE thing: whether the view-icon overlay is drawn. Operator
+   * instruction -- the four icons repeated in every pane of a split, over
+   * content whose Alt+digit the background pane cannot consume anyway
+   * (`tabRequest` is already focused-only). Hidden means NOT DRAWN, never
+   * drawn-and-inert: `ViewIcons`' promise that each icon is a real button Tab
+   * reaches is kept whole in the pane that has focus, and an invisible row
+   * still catching clicks would be the worse trade.
+   *
+   * Defaults to `true`: an unsplit shell is the focused pane, and so is the
+   * desktop detail column, which has no pane identity at all.
+   */
+  readonly paneFocused?: boolean;
   readonly initialTab?: string | null;
   readonly onTabChange?: (tab: string) => void;
   /**
@@ -1516,6 +1534,7 @@ function QuestionCard({
   firstOptionRef,
   onChat,
   onAnswer,
+  onSuggest,
 }: {
   /**
    * THE WHOLE SET asked by one `AskUserQuestion` call, in asking order.
@@ -1536,6 +1555,19 @@ function QuestionCard({
    * cannot write to is a control that lies about what it will do.
    */
   readonly onAnswer: ((request: AnswerRequest) => Promise<AnswerResult>) | null;
+  /**
+   * What the composer should OFFER as a ghost, whenever there is a composer to
+   * offer it in -- the label of the showing step's mark, or its first option
+   * where nothing is marked yet, and `null` when this step has nothing to
+   * suggest. The card owns `marks` and `showing`, so the alternative was
+   * re-deriving a suggestion in the pane that could disagree with the card the
+   * operator is looking at.
+   *
+   * It is a SUGGESTION and nothing more: what the composer does with it is the
+   * existing record-or-submit path, unchanged. See the prompt box's own Tab
+   * branch.
+   */
+  readonly onSuggest?: (label: string | null) => void;
 }) {
   /** Which step is showing, and what has been marked on EACH of them. */
   const [showing, setShowing] = useState(0);
@@ -1589,6 +1621,24 @@ function QuestionCard({
   /** The pending steps still waiting for a mark -- what Submit is short of. */
   const unmarked = pending.filter((one) => (marks[one.id] ?? []).length === 0);
   const takenIds = new Set(openSteps.slice(0, taken.length).map((one) => one.id));
+  /**
+   * An ANSWERED step suggests nothing: there is nothing left to reply with.
+   * A multi-select's marks are joined the way the operator would have typed
+   * them, because that is all the composer can carry -- text.
+   */
+  const suggested =
+    question === undefined || question.answer !== null
+      ? null
+      : picked.length > 0
+        ? picked.join(', ')
+        : (question.options[0]?.label ?? null);
+  useEffect(() => {
+    onSuggest?.(suggested);
+    // Withdrawn on the way out, so a card that unmounts -- the question was
+    // answered, the session changed -- cannot leave a stale offer standing in
+    // a composer that outlives it.
+    return () => onSuggest?.(null);
+  }, [suggested, onSuggest]);
 
   /**
    * Steps CLAMP where options wrap, and the difference is deliberate. A list of
@@ -2025,6 +2075,7 @@ export function DetailPanel(props: DetailPanelProps) {
     phone = false,
     defaultProvider,
     onSetDefaultProvider,
+    paneFocused = true,
   } = props;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -2719,6 +2770,31 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const openQuestion = newestQuestions.some((one) => one.answer === null);
   const [chattingAbout, setChattingAbout] = useState<string | null>(null);
+  /** What `QuestionCard` says the open step would answer with -- see `onSuggest`. */
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  /**
+   * THE OFFER STANDING IN THE PROMPT BOX, and the whole condition under which
+   * the box takes `Tab` at all.
+   *
+   * Operator request: the prompt input should follow the suggestion, and Tab
+   * should accept it -- the shell's inline completion, one key for a routine
+   * reply. Two things decide the shape of it:
+   *
+   *  - AN EMPTY DRAFT ONLY. A ghost over text the operator typed would either
+   *    hide it or fight it, and a Tab that overwrote a half-written reply is a
+   *    worse trade than the key it saves.
+   *  - `Tab` IS HOW A KEYBOARD LEAVES A TEXTAREA (see the box's own key
+   *    handler). Taking it unconditionally makes this box a trap for anyone
+   *    navigating without a mouse, so it is taken ONLY while this is non-null
+   *    -- which also makes the binding self-explaining: Tab does something
+   *    extra exactly when the placeholder says there is something to accept.
+   *
+   * Accepting writes the DRAFT and delivers nothing. Whether that draft is
+   * recorded or sent is the existing button's business, and the card goes on
+   * saying that a pick is only a mark.
+   */
+  const promptSuggestion =
+    suggestion !== null && suggestion !== '' && draft === '' ? suggestion : null;
   // `records === false` is a source that has no route to record a prompt at
   // all -- a read-only server, where `/api/record-prompt` is not registered
   // and 404s. The box is then not DRAWN, rather than drawn and refused on tap:
@@ -2886,7 +2962,8 @@ export function DetailPanel(props: DetailPanelProps) {
         moment the reader scrolls, defeating the one thing an "always
         reachable" shortcut promises.
       */}
-      {!phone && (
+      {/* FOCUSED PANE ONLY -- see `paneFocused`. */}
+      {!phone && paneFocused && (
         <div
           data-view-overlay
           className="pointer-events-none absolute top-2 right-2.5 z-20 flex max-w-[calc(100%-1.25rem)] items-center justify-end gap-1.5"
@@ -3346,6 +3423,7 @@ export function DetailPanel(props: DetailPanelProps) {
               firstOptionRef={firstOptionRef}
               onChat={startChat}
               onAnswer={questionOnAnswer}
+              onSuggest={setSuggestion}
             />
           )}
         </div>
@@ -3578,6 +3656,14 @@ export function DetailPanel(props: DetailPanelProps) {
                   // `normalizeKey` gives Shift no token, so a table entry for
                   // `Tab` would answer a PLAIN Tab as well. Plain Tab is left
                   // alone: it is how a keyboard gets out of a textarea.
+                  // THE OFFER, ACCEPTED -- and only while there is one, which
+                  // is what keeps plain Tab the exit the rest of the time.
+                  // See `promptSuggestion` for the whole rule.
+                  if (event.key === 'Tab' && !event.shiftKey && promptSuggestion !== null) {
+                    event.preventDefault();
+                    onDraftChange(promptSuggestion);
+                    return;
+                  }
                   if (event.key === 'Tab' && event.shiftKey && canCycleMode) {
                     event.preventDefault();
                     void cycleMode();
@@ -3597,10 +3683,15 @@ export function DetailPanel(props: DetailPanelProps) {
                     onStopComposing();
                   }
                 }}
+                // The ghost, in the placeholder's own faint ink: unmistakably
+                // not a draft yet, and naming the key that would make it one.
+                data-prompt-suggestion={promptSuggestion ?? undefined}
                 placeholder={
                   entry === null
                     ? 'Pick a session first'
-                    : 'Reply to agent, answer with a number, or paste a plan…'
+                    : promptSuggestion !== null
+                      ? `${promptSuggestion} — Tab to use`
+                      : 'Reply to agent, answer with a number, or paste a plan…'
                 }
                 className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-[13.5px] text-ink leading-[1.55] outline-none placeholder:text-ink-faint"
                 aria-label="prompt to session"
