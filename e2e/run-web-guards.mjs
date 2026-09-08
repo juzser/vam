@@ -34,6 +34,7 @@ const GUARDS = [
   'prompt-mode-icon-shots',
   'long-prompt-shots',
   'narrow-pane-overlay-shots',
+  'tab-strip-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

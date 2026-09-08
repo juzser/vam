@@ -2369,7 +2369,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
 
                               {/* Mouse route to the same thing `x` does. Hidden until the
                             row is hovered, so a list at rest is a list of names
-                            rather than a row of buttons. */}
+                            rather than a row of buttons.
+
+                            HIDDEN MEANS UNHITTABLE, AND FOCUS REVEALS. The
+                            phone rule in `styles.css` takes this button away
+                            entirely on a coarse pointer, which was the fix
+                            for "invisible and still tappable"; on a desktop
+                            it stayed `opacity: 0` with its pointer events
+                            and its focus ring intact, so Tab could land on a
+                            control drawn nowhere (WCAG 2.4.7) and a pen or a
+                            touchscreen on a desktop build could hit it
+                            blind. The tab strip's `×` carries the same two
+                            lines for the same reason. */}
                               <ShortcutTip label="Close this session" action={CLOSE_ACTION}>
                                 <button
                                   type="button"
@@ -2379,6 +2390,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                   className={[
                                     'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
                                     'opacity-0 hover:bg-panel hover:text-failed group-hover/row:opacity-100',
+                                    'pointer-events-none group-hover/row:pointer-events-auto',
+                                    'focus-visible:pointer-events-auto focus-visible:opacity-100',
+                                    'focus-visible:ring-1 focus-visible:ring-cursor-ring',
                                   ].join(' ')}
                                 >
                                   ×
