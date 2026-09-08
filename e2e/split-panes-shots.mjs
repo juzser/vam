@@ -11,6 +11,12 @@
  *   node_modules/.bin/vite preview --config vite.web.config.ts --port 5511 --strictPort
  *   node e2e/split-panes-shots.mjs http://localhost:5511 docs/ui
  *
+ * A15.8 note: `zv`/`zs` MOVE the active tab into the new pane rather than
+ * mirroring it (the operator: "when I split a tab, I still see that tab
+ * showing in both panes"), so every sequence below is written against a pane
+ * that LOSES the tab it was split on. Where a step needs two tabs in one pane
+ * it opens them from the sidebar first.
+ *
  * Every check here THROWS, naming what it expected: this script is the only
  * guard in the repo for the ordering React's eager-state path hides from
  * jsdom (see `splitFocused`'s own comment in `Canvas.tsx`), and a guard that
@@ -73,10 +79,58 @@ async function chord(a, b, label, expected) {
   }
 }
 
-// Focus factory-sse-1, then open crosscheck-2 in the same pane — A15.5 makes
-// a strip list the tabs of ITS OWN pane, so a second tab has to be opened
-// from the sidebar before there is one to drag or to leave behind.
+/** One pane's tab titles with the leading session glyph stripped. */
+async function tabTitlesInPane(at) {
+  const texts = await tabsInPane(at);
+  return texts.map((text) => text.replace(/^[^\p{ASCII}]+\s*/u, '').trim());
+}
+/** The ids the sidebar lists, top to bottom — its canonical order. */
+async function sidebarOrder() {
+  return page.locator('[data-session-row]').evaluateAll((rows) =>
+    rows.map((row) => row.getAttribute('data-session-row')),
+  );
+}
+
+// --- The tab ORDER in a pane. The operator: "the way tabs are arranged in
+// the pane still isn't right — when I focus a session in the sidebar, the
+// tabs shown in the pane get jumbled." The strip drew the leaf's own
+// `sessionIds`, which is the order the tabs were OPENED in, so the strip and
+// the sidebar listed the same sessions two different ways.
+//
+// Opened here deliberately BACKWARDS — the done one first, the waiting one
+// last — so insertion order and the sidebar's order are opposites and only
+// one of them can be on screen. Asserted against the sidebar as it is
+// actually drawn, never a hardcoded list: the point is that the two surfaces
+// agree, not that either matches a sequence typed into this file.
+await page.locator('[data-session-row="dogfood-4"]').click();
+await page.waitForTimeout(150);
+await page.locator('[data-session-row="crosscheck-2"]').click();
+await page.waitForTimeout(150);
 await page.locator('[data-session-row="factory-sse-1"]').click();
+await page.waitForTimeout(150);
+const stripOrder = await tabTitlesInPane(0);
+const listOrder = (await sidebarOrder()).filter((id) => stripOrder.includes(id));
+console.log('opened dogfood-4, crosscheck-2, factory-sse-1 — strip reads:', stripOrder);
+console.log('the sidebar, narrowed to those three:', listOrder);
+if (stripOrder.length !== 3) {
+  throw new Error(
+    `the pane should hold all three factory sessions as tabs, it holds ${stripOrder.length}: ` +
+      `${stripOrder.join(', ')}.`,
+  );
+}
+if (JSON.stringify(stripOrder) !== JSON.stringify(listOrder)) {
+  throw new Error(
+    `the pane's strip reads ${stripOrder.join(', ')} but the sidebar lists the same three as ` +
+      `${listOrder.join(', ')}. A pane draws its tabs in the sidebar's order — two surfaces ` +
+      'showing one set of sessions in two orders is the "jumbled" the operator reported.',
+  );
+}
+await page.screenshot({ path: `${outDir}/pane-tab-order.png` });
+console.log(`${outDir}/pane-tab-order.png`);
+
+// Back to the two-tab shape the rest of this script is written against:
+// drop dogfood-4's tab and leave crosscheck-2 in front.
+await page.getByLabel('close dogfood-4 tab').click();
 await page.waitForTimeout(150);
 await page.locator('[data-session-row="crosscheck-2"]').click();
 await page.waitForTimeout(150);
@@ -91,21 +145,49 @@ await assertStripPerPane('after zv');
 // operator asked for made visible in one shot.
 const [leftTabs, rightTabs] = [await tabsInPane(0), await tabsInPane(1)];
 console.log('tabs per pane after zv:', leftTabs, rightTabs);
-if (leftTabs.length !== 2 || rightTabs.length !== 1) {
+// The split MOVES the active tab: the source pane had two and keeps one, the
+// new pane holds the one it took. This is the operator's report made
+// checkable — the old rule put `crosscheck-2` in BOTH lists here.
+if (leftTabs.length !== 1 || rightTabs.length !== 1) {
   throw new Error(
-    `after zv the source pane should keep its 2 tabs and the new pane hold 1, got ` +
-      `${leftTabs.length} and ${rightTabs.length}.`,
+    `after zv the source pane should be left with 1 tab and the new pane hold the 1 it ` +
+      `took, got ${leftTabs.length} and ${rightTabs.length}.`,
   );
+}
+const shared = leftTabs.filter((title) => rightTabs.includes(title));
+if (shared.length > 0) {
+  throw new Error(
+    `after zv both panes draw ${shared.join(', ')}. A session lives in exactly ONE pane — ` +
+      'the split moves the tab, it does not mirror it.',
+  );
+}
+const everyTab = [...leftTabs, ...rightTabs];
+const twice = everyTab.filter((title, at) => everyTab.indexOf(title) !== at);
+if (twice.length > 0) {
+  throw new Error(`${twice.join(', ')} appears in more than one pane after zv.`);
 }
 await page.screenshot({ path: `${outDir}/a15-5-split-vertical-tabs.png` });
 console.log(`${outDir}/a15-5-split-vertical-tabs.png`);
 
 // Back to one pane before the next shot, so each is the SAME starting shape.
+// `zc` closes the focused pane AND the tab it took, so crosscheck-2 is
+// re-opened from the sidebar to get back to the two-tab shape `zs` needs.
 await chord('z', 'c', 'close', 1);
+await page.locator('[data-session-row="crosscheck-2"]').click();
+await page.waitForTimeout(150);
 
-// --- Shot 2: horizontal split (zs) — a column, panes stacked.
+// --- Shot 2: horizontal split (zs) — a column, panes stacked. It moves the
+// active tab exactly as zv does, leaving one tab in each half.
 await chord('z', 's', 'split horizontal', 2);
 await assertStripPerPane('after zs');
+const stacked = [await tabsInPane(0), await tabsInPane(1)];
+console.log('tabs per pane after zs:', stacked);
+if (stacked[0].length !== 1 || stacked[1].length !== 1) {
+  throw new Error(
+    `zs should move the active tab too, leaving 1 tab in each pane, got ` +
+      `${JSON.stringify(stacked)}.`,
+  );
+}
 await page.screenshot({ path: `${outDir}/a15-5-split-horizontal-tabs.png` });
 console.log(`${outDir}/a15-5-split-horizontal-tabs.png`);
 
@@ -203,15 +285,24 @@ if (!said.includes('no new-session command')) {
 await page.screenshot({ path: `${outDir}/a15-7-pane-new-tab.png` });
 console.log(`${outDir}/a15-7-pane-new-tab.png`);
 
-// Back to one pane, holding both tabs, for the drag below.
+// Back to one pane for the drag below. `zc` takes the focused pane's tab with
+// it, so the pane is refilled from the sidebar: the drag needs a pane holding
+// MORE than the one tab `zv` will move out of it.
 await chord('z', 'c', 'close', 1);
 await page.waitForTimeout(150);
+for (const id of ['factory-sse-1', 'crosscheck-2', 'dogfood-4']) {
+  await page.locator(`[data-session-row="${id}"]`).click();
+  await page.waitForTimeout(150);
+}
 
 // --- Shot 3: the drag in progress, and the drop-zone highlight it draws.
 // A real HTML5 drag needs a real browser -- happy-dom (the unit tests) has
 // no `DragEvent` at all, which is exactly why this shot is worth taking:
 // it is the one thing no test in this PR can stand in for.
+// Moves the front tab (dogfood-4) out, leaving factory-sse-1 and crosscheck-2
+// in the first pane — which is the tab the drag below picks up.
 await chord('z', 'v', 'split for drag demo', 2);
+console.log('tabs before the drag:', await tabsInPane(0), await tabsInPane(1));
 // Scoped to the FIRST pane's own strip: A15.5 means the same session can be
 // a tab of more than one pane, so an unscoped locator now matches twice.
 const draggedTab = page
@@ -268,5 +359,40 @@ if (!landedOn.some((title) => title.includes('crosscheck'))) {
     `the pane the tab was dropped on does not draw it (${landedOn.join(', ')}).`,
   );
 }
+
+// --- The pane a split EMPTIES. Splitting a pane that holds one tab moves
+// that tab out and leaves the source pane standing with nothing — the
+// operator asked for two panes, and an empty one saying what to do about it
+// is the honest answer to that. (`removeTab`, what a drag and a close use,
+// would have closed it; `detachTab` is the difference.)
+await chord('z', 'c', 'close', 2);
+await chord('z', 'c', 'close', 1);
+await page.waitForTimeout(150);
+const beforeEmptying = await tabsInPane(0);
+console.log('one pane, before emptying it:', beforeEmptying);
+if (beforeEmptying.length !== 1) {
+  throw new Error(
+    `this step needs a single pane holding exactly 1 tab, it holds ${beforeEmptying.length}: ` +
+      `${beforeEmptying.join(', ')}.`,
+  );
+}
+await chord('z', 'v', 'split a single-tab pane', 2);
+const [emptied, took] = [await tabsInPane(0), await tabsInPane(1)];
+const emptiedText = await page.locator('[data-split-pane]').nth(0).locator('[data-tab-strip]').innerText();
+console.log('after splitting a single-tab pane:', emptied, took, '|', emptiedText);
+if (emptied.length !== 0 || took.length !== 1) {
+  throw new Error(
+    `splitting a pane holding one tab should MOVE it, leaving the source empty — got ` +
+      `${JSON.stringify(emptied)} and ${JSON.stringify(took)}.`,
+  );
+}
+if (!emptiedText.includes('no sessions open')) {
+  throw new Error(
+    `the emptied pane draws "${emptiedText}" — it must stay on screen and say what to do, ` +
+      'not sit blank and not be closed.',
+  );
+}
+await page.screenshot({ path: `${outDir}/split-empties-source-pane.png` });
+console.log(`${outDir}/split-empties-source-pane.png`);
 
 await browser.close();

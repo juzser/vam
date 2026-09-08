@@ -21,9 +21,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   closePane,
+  detachTab,
   findLeaf,
   leaves,
   nearestEdge,
+  paneHolding,
   pruneClosedTabs,
   removeTab,
   restoreLayout,
@@ -415,5 +417,81 @@ describe('restoreLayout — a remembered layout, reconciled against what is stil
     // rather than the restore doing nothing visible.
     expect(paneId).toBe('p1');
     expect(findLeaf(tree, 'p1')?.sessionId).toBe('s1');
+  });
+});
+
+/**
+ * `detachTab` is `removeTab`'s other half: take the tab out and LEAVE THE
+ * PANE, even with nothing in it.
+ *
+ * The two differ on exactly one question and it is a policy question, which
+ * is why they are two functions rather than one with a flag. Closing a tab
+ * means the operator is done with that pane's last piece of work, so the pane
+ * goes. Splitting means the operator asked for a second pane and the tab went
+ * into it: closing the one they were looking at would answer a request for
+ * two panes with one.
+ */
+describe('detachTab', () => {
+  const pane = (id: string, ids: string[], front: string | null): SplitTree => ({
+    kind: 'leaf',
+    id,
+    sessionId: front,
+    sessionIds: ids,
+  });
+
+  it('takes the tab out and activates the neighbour to its right', () => {
+    const tree = pane('pane-1', ['s1', 's2', 's3'], 's2');
+    expect(detachTab(tree, 'pane-1', 's2')).toEqual(pane('pane-1', ['s1', 's3'], 's3'));
+  });
+
+  it('falls back to the neighbour on the left when the last tab goes', () => {
+    const tree = pane('pane-1', ['s1', 's2'], 's2');
+    expect(detachTab(tree, 'pane-1', 's2')).toEqual(pane('pane-1', ['s1'], 's1'));
+  });
+
+  it('leaves the pane standing, holding nothing, when it was the only tab', () => {
+    const tree = pane('pane-1', ['s1'], 's1');
+    // `removeTab` would have closed it -- that is the whole difference.
+    expect(detachTab(tree, 'pane-1', 's1')).toEqual(pane('pane-1', [], null));
+    expect(removeTab(tree, 'pane-1', 's1')).toBeNull();
+  });
+
+  it('leaves a tab that was not in front in front', () => {
+    const tree = pane('pane-1', ['s1', 's2'], 's1');
+    expect(detachTab(tree, 'pane-1', 's2')).toEqual(pane('pane-1', ['s1'], 's1'));
+  });
+
+  it('is a no-op for a pane, or a session, it cannot find', () => {
+    const tree = pane('pane-1', ['s1'], 's1');
+    expect(detachTab(tree, 'pane-9', 's1')).toBe(tree);
+    expect(detachTab(tree, 'pane-1', 's9')).toBe(tree);
+  });
+});
+
+/**
+ * `paneHolding` is what makes "a session lives in exactly one pane" checkable
+ * from the outside: the sidebar asks it before opening anything, so a pick
+ * lands on the pane that already has the session rather than making a second
+ * copy of it.
+ */
+describe('paneHolding', () => {
+  const tree: SplitTree = {
+    kind: 'split',
+    id: 'split-1',
+    orientation: 'row',
+    children: [
+      { kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1', 's2'] },
+      { kind: 'leaf', id: 'pane-2', sessionId: 's3', sessionIds: ['s3'] },
+    ],
+  };
+
+  it('names the pane holding a session, whether or not it is in front', () => {
+    expect(paneHolding(tree, 's1')).toBe('pane-1');
+    expect(paneHolding(tree, 's2')).toBe('pane-1');
+    expect(paneHolding(tree, 's3')).toBe('pane-2');
+  });
+
+  it('is null for a session no pane holds', () => {
+    expect(paneHolding(tree, 's9')).toBeNull();
   });
 });

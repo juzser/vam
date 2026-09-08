@@ -28,11 +28,20 @@
  */
 
 /**
- * One pane — VSCode's EDITOR GROUP, not one editor: it owns an ordered list
- * of open tabs and which one of them is in front. That is the whole of the
+ * One pane — VSCode's EDITOR GROUP, not one editor: it owns a list of open
+ * tabs and which one of them is in front. That is the whole of the
  * operator's report that split panes still shared one strip of tabs; the
  * strip is drawn per leaf from `sessionIds` (see `Canvas.tsx`'s `renderLeaf`)
  * rather than once for the whole column.
+ *
+ * `sessionIds` is MEMBERSHIP, not display order. It was both once, and the
+ * operator's word for the result was that the tabs in a pane came out
+ * jumbled: a session picked in the sidebar was appended here, so the strip
+ * and the sidebar listed the same sessions in two orders. The strip's order
+ * now comes from `orderedPaneTabs` (`domain/selectors.ts`), the sidebar's
+ * own — one vocabulary, the way `row`/`column` below is one. Nothing in this
+ * file may sort the list, because the order depends on session status and
+ * this file is deliberately blind to the model.
  *
  * `sessionId` is the tab in front — always a member of `sessionIds`, or
  * `null` when the pane holds nothing yet (the pre-load state
@@ -98,9 +107,10 @@ function mapLeaf(tree: SplitTree, id: string, f: (leaf: Leaf) => Leaf): SplitTre
 
 /**
  * OPEN a session in one pane and bring it to the front — VSCode's "open in
- * the active group": a session the pane does not hold yet is APPENDED as a
- * new tab (at the end, the order the strip draws, never re-sorted), and one
- * it already holds is simply activated rather than duplicated.
+ * the active group": a session the pane does not hold yet joins the pane's
+ * membership as a new tab, and one it already holds is simply activated
+ * rather than duplicated. Appending is arbitrary and means nothing on
+ * screen — see `Leaf` on why the strip's order is not read from here.
  *
  * `sessionId` may be `null` — a deliberate "point at nothing", the same
  * value the pre-load leaf starts with. It clears which tab is in front and
@@ -243,16 +253,57 @@ export function removeTab(tree: SplitTree, paneId: string, sessionId: string): S
   if (leaf === null || !leaf.sessionIds.includes(sessionId)) {
     return tree;
   }
-  const remaining = leaf.sessionIds.filter((id) => id !== sessionId);
-  if (remaining.length === 0) {
-    return closePane(tree, paneId);
+  return leaf.sessionIds.length === 1
+    ? closePane(tree, paneId)
+    : detachTab(tree, paneId, sessionId);
+}
+
+/**
+ * Take one tab out of one pane and LEAVE THE PANE, even holding nothing —
+ * what `zv`/`zs` do to the pane they split, where `removeTab` above is what a
+ * CLOSE does.
+ *
+ * The operator's report: "when I split a tab, I still see that tab showing in
+ * both panes." The chord used to hand the new pane a copy (vim's `:split`,
+ * VSCode's "Split Editor"); it moves the tab now, so a session is in exactly
+ * one pane whichever way it got there — the drag gesture already moved.
+ *
+ * The one thing this does NOT share with `removeTab` is what happens to a
+ * pane left with nothing, and that is a policy difference rather than a
+ * parameter: a close means the operator is done with that pane's last piece
+ * of work, so the pane goes, while a split is a request for two panes and
+ * answering it with one would be answering a different question. The emptied
+ * pane stays, drawing the strip's own "no sessions open" line.
+ *
+ * The tab that takes the front is `neighbourOf`'s, the same right-then-left
+ * rule a close uses -- one rule, read twice -- and `null` when nothing is
+ * left, which is the state `Leaf.sessionId` already documents.
+ */
+export function detachTab(tree: SplitTree, paneId: string, sessionId: string): SplitTree {
+  const leaf = findLeaf(tree, paneId);
+  if (leaf === null || !leaf.sessionIds.includes(sessionId)) {
+    return tree;
   }
   return mapLeaf(tree, paneId, (target) => ({
     ...target,
-    sessionIds: remaining,
+    sessionIds: target.sessionIds.filter((id) => id !== sessionId),
     sessionId:
       target.sessionId === sessionId ? neighbourOf(target.sessionIds, sessionId) : target.sessionId,
   }));
+}
+
+/**
+ * Which pane holds this session, or `null` if none does.
+ *
+ * The lookup behind "a session lives in exactly one pane": picking a session
+ * in the sidebar while ANOTHER pane already holds it moves the keyboard to
+ * that pane instead of opening a second copy — the operator's
+ * one-session-two-panes report arriving through the sidebar rather than
+ * through the split chord. First match wins, and the rule everywhere else in
+ * this file is what keeps there from being a second.
+ */
+export function paneHolding(tree: SplitTree, sessionId: string): string | null {
+  return leaves(tree).find((leaf) => leaf.sessionIds.includes(sessionId))?.id ?? null;
 }
 
 /**

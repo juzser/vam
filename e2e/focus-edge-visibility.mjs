@@ -9,10 +9,11 @@
  * backdrop three rows below it, and reports the difference.
  *
  * It was written to settle whether the CANVAS column's line was painted. The
- * answer no longer matters in that direction: the canvas carries no edge at
- * all now (see `FocusEdge.tsx`), so a healthy run reports `no edge mounted`
- * for it and a painted line for whichever of sidebar/action holds the
- * keyboard.
+ * answer no longer matters in that direction: the canvas never carried an
+ * edge, and the SIDEBAR's was removed at the operator's request ("remove the
+ * running line on focus at the top of the sidebar"). So a healthy run now
+ * reports `no edge mounted` for both of those columns, and a painted line for
+ * the response pane when it holds the keyboard -- the one mount left.
  *
  * Like everything else in e2e/, this is not part of vam's gates and nothing
  * runs it automatically. Run it by hand when the focus edge or a column's

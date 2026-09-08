@@ -166,7 +166,10 @@ describe('the per-pane `+`', () => {
     await act(async () => {
       rerender(<Canvas model={modelWith('a1', 'a2')} source={source} />);
     });
-    expect(tabsIn(paneFor('pane-1'))).toEqual(['a1', 'a2']);
+    // `zv` MOVES the tab, so pane-1 is the pane the split emptied: its `+`
+    // names the project on screen and the new session lands HERE, in the pane
+    // whose button was pressed, not in the one that took a1.
+    expect(tabsIn(paneFor('pane-1'))).toEqual(['a2']);
     expect(activeTabIn(paneFor('pane-1'))).toBe('a2');
     expect(tabsIn(paneFor('pane-2'))).toEqual(['a1']);
   });

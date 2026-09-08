@@ -66,7 +66,7 @@ import {
 } from '../domain/optimistic.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
-import { orderedSessions } from '../domain/selectors.js';
+import { orderedPaneTabs, orderedSessions } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain/session-filter.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
@@ -137,11 +137,13 @@ import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
 import {
   closePane,
+  detachTab,
   type Edge,
   findLeaf,
   type Leaf,
   leaves,
   nearestEdge,
+  paneHolding,
   pruneClosedTabs,
   removeTab,
   restoreLayout,
@@ -1097,7 +1099,20 @@ function CanvasInner({
         setFocusedPaneId(restored.paneId);
         return;
       }
-      setPanes((tree) => setPaneSession(tree, focusedPaneIdRef.current, sessionId));
+      // A session lives in exactly ONE pane. Picking one another pane already
+      // holds moves the KEYBOARD there and brings it to the front, rather
+      // than opening a second copy of it here -- the operator's
+      // one-session-two-panes report arriving through the sidebar instead of
+      // through the split chord, and the same answer.
+      const holder = sessionId === null ? null : paneHolding(panesRef.current, sessionId);
+      // Read into a local before `setFocusedPaneId` moves the ref, for the
+      // reason `splitFocused` spells out at length: an updater is not
+      // guaranteed to run before the ref does.
+      const target = holder ?? focusedPaneIdRef.current;
+      if (holder !== null && holder !== focusedPaneIdRef.current) {
+        setFocusedPaneId(holder);
+      }
+      setPanes((tree) => setPaneSession(tree, target, sessionId));
     },
     [setFocusedPaneId],
   );
@@ -1768,15 +1783,39 @@ function CanvasInner({
    * The first model arrives after mount, so the initial focus is null; and a
    * filter can strip the session under the cursor. Both end with nothing
    * pointed at, which makes the first keypress do nothing.
+   *
+   * EXCEPT A PANE THAT IS EMPTY ON PURPOSE. Since `zv`/`zs` MOVE the active
+   * tab, a pane can be left holding nothing while the shell as a whole is
+   * showing plenty — and that pane is exactly where the operator asked the
+   * keyboard to be. Filling it here would undo the split they just made, and
+   * with `paneHolding` routing a pick to whichever pane already holds the
+   * session, it would do worse: the keyboard would bounce straight back out
+   * of the empty pane into the one that took the tab. So "nothing pointed at"
+   * only counts when NO pane holds anything, which is the pre-load and
+   * everything-filtered-away state this was written for.
    */
   useEffect(() => {
     if (focusCandidates.length === 0) {
       return;
     }
+    const deliberatelyEmpty =
+      findLeaf(panes, focusedPaneId)?.sessionIds.length === 0 &&
+      leaves(panes).some((leaf) => leaf.sessionIds.length > 0);
+    if (deliberatelyEmpty) {
+      return;
+    }
     if (focusedSessionId === null || !sessionIds.includes(focusedSessionId)) {
       setFocusedSessionId(resolveFocusNodeId(prefs.lastFocus, focusCandidates));
     }
-  }, [sessionIds, focusCandidates, focusedSessionId, prefs.lastFocus, setFocusedSessionId]);
+  }, [
+    sessionIds,
+    focusCandidates,
+    focusedSessionId,
+    panes,
+    focusedPaneId,
+    prefs.lastFocus,
+    setFocusedSessionId,
+  ]);
 
   /**
    * The other half: record where focus is, so the next launch can ask.
@@ -1819,11 +1858,21 @@ function CanvasInner({
   );
 
   /**
-   * A15.1 — split the FOCUSED pane, showing the same session in both halves.
-   * Vim's own `:split`/`:vsplit` do the same thing: the new window starts as
-   * a mirror of the one it came from, not empty. Focus moves to the new
-   * pane, again matching vim (and VSCode's "Split Editor") — the reason to
-   * split is almost always to look at something new in the new spot.
+   * A15.1 — split the FOCUSED pane, MOVING its active tab into the new half.
+   *
+   * It used to mirror, the way vim's `:split`/`:vsplit` and VSCode's "Split
+   * Editor" do, and the operator's report on using it was "when I split a
+   * tab, I still see that tab showing in both panes". A tab belongs to a
+   * pane in this shell, so two panes showing one session is the same thing
+   * twice over the half of the screen the split was asked for — and the drag
+   * gesture had already been moving rather than copying, so the two ways of
+   * asking disagreed. One rule now, in `detachTab`.
+   *
+   * The pane the tab came from keeps its other tabs and brings the neighbour
+   * to the right forward; left with nothing it STAYS, drawing the strip's
+   * "no sessions open" line, because the operator asked for two panes.
+   * Focus moves to the new pane, as it always did — the reason to split is
+   * almost always to look at something new in the new spot.
    *
    * `orientation` is the CSS axis (`row` = side by side, `column` =
    * stacked); the EDGE handed to `splitPane` is the arbitrary-but-documented
@@ -1866,7 +1915,17 @@ function CanvasInner({
       }
       paneSeq.current += 1;
       const newId = `pane-${paneSeq.current}`;
-      setPanes((tree) => splitPane(tree, targetPaneId, edge, focusedSessionId, newId));
+      setPanes((tree) =>
+        // Split first, while the source pane is still there to be found, then
+        // take the tab out of it: `detachTab` keeps that pane even when it
+        // empties, which is the one thing `removeTab` (what the drag route
+        // uses) would not do.
+        detachTab(
+          splitPane(tree, targetPaneId, edge, focusedSessionId, newId),
+          targetPaneId,
+          focusedSessionId,
+        ),
+      );
       setFocusedPaneId(newId);
     },
     [focusedSessionId, panes, setFocusedPaneId],
@@ -3395,7 +3454,6 @@ function CanvasInner({
     // no other column takes this. A hidden column is not rendered at all,
     // so it needs no second test against `visible` here either -- the slot
     // already is that test.
-    keyboardHere: mode === 'select',
     entries: entries,
     loading: sidebarLoading,
     // The UNFILTERED set, for the two things about removing a project
@@ -3619,24 +3677,22 @@ function CanvasInner({
         : leaf.sessionId === null
           ? null
           : (entriesById.get(leaf.sessionId) ?? null);
-      const splitCount = leaves(panes).length;
       /**
-       * THIS PANE's own tabs, in the order it opened them — the leaf's list
-       * resolved against the model, never `entries`' whole project. A id
-       * whose session has gone draws nothing until the prune effect above
-       * catches up, and A13.1's project scoping is kept here as well: a
-       * strip only ever lists the ACTIVE project's sessions, so a pane left
-       * over from another project cannot draw one.
+       * THIS PANE's own tabs, in the SIDEBAR's order — the leaf's list
+       * resolved against the model through `orderedPaneTabs`, never
+       * `entries`' whole project. The leaf's own list is the order the tabs
+       * were opened in, which is what the operator saw as jumbled: a pick in
+       * the sidebar landed at the far end of a strip listing the same
+       * sessions a different way. The order rule stays in `selectors.ts`
+       * alone, and it is re-read every render because it depends on session
+       * status. An id whose session has gone draws nothing until the prune
+       * effect above catches up, and A13.1's project scoping is kept here as
+       * well: a strip only ever lists the ACTIVE project's sessions, so a
+       * pane left over from another project cannot draw one.
        */
-      const paneTabs = leaf.sessionIds.flatMap((sessionId) => {
-        const tabEntry = entriesById.get(sessionId);
-        if (tabEntry === undefined) {
-          return [];
-        }
-        return activeProjectId !== null && tabEntry.project.id !== activeProjectId
-          ? []
-          : [tabEntry];
-      });
+      const paneTabs = orderedPaneTabs(allEntries, leaf.sessionIds).filter(
+        (tabEntry) => activeProjectId === null || tabEntry.project.id === activeProjectId,
+      );
       return (
         // Not a control and not a keyboard stop of its own -- the real
         // interactive content is the `DetailPanel` instance inside it,
@@ -3649,14 +3705,15 @@ function CanvasInner({
         <div
           key={leaf.id}
           data-split-pane={leaf.id}
+          // The attribute stays and is the ONLY thing focus paints on this
+          // element: the ring it used to wear (`ring-1 ring-inset
+          // ring-cursor-ring`, drawn once a second pane existed) is gone at
+          // the operator's request. What says where the keyboard is instead
+          // is the view-icon overlay that draws in the focused pane alone,
+          // and `data-split-focused` is what the tests and the browser guard
+          // read — neither is a class, so neither goes with the ring.
           data-split-focused={isFocused ? 'true' : 'false'}
-          // The ring only draws once a second pane exists — an unsplit shell
-          // must render pixel-identical to before this feature, and a ring
-          // around the one pane that always has the keyboard would be noise
-          // nobody asked for.
-          className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-canvas ${
-            isFocused && splitCount > 1 ? 'ring-1 ring-inset ring-cursor-ring' : ''
-          }`}
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-canvas"
           onMouseDownCapture={() => {
             if (!isFocused) setFocusedPaneId(leaf.id);
           }}
@@ -3691,9 +3748,23 @@ function CanvasInner({
                 // WHICH PROJECT: this pane's own front tab, else the first tab
                 // it holds — the same "a new session is born in the focused
                 // one's project" rule `o` follows, read per pane rather than
-                // globally. A pane holding nothing names no directory, and vam
-                // will not pick one for it.
-                const target = entry ?? paneTabs[0] ?? null;
+                // globally.
+                //
+                // An EMPTY pane falls back to the project on screen. It used
+                // to name no directory and refuse, which was fine while the
+                // only empty pane was the pre-load one; since `zv`/`zs` MOVE
+                // the active tab, a split leaves an empty pane every time and
+                // its `+` would refuse in the state the operator had just
+                // asked for. `activeProjectId` is not a guess — every strip in
+                // the shell is scoped to it, so it is the project the operator
+                // is looking at. With no active project there is still nothing
+                // to name, and the refusal below stands.
+                const target =
+                  entry ??
+                  paneTabs[0] ??
+                  (activeProjectId === null
+                    ? null
+                    : (allEntries.find((e) => e.project.id === activeProjectId) ?? null));
                 if (target === null) {
                   setStatus('pick a session first — a new one is started in its project');
                   return;
@@ -3712,9 +3783,9 @@ function CanvasInner({
     [
       focusedPaneId,
       focusedEntry,
+      allEntries,
       entriesById,
       activeProjectId,
-      panes,
       buildDetailProps,
       closePaneTab,
       setFocusedPaneId,

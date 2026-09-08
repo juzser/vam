@@ -22,6 +22,15 @@
  * to that. It travels continuously now, borrowing the running node's own
  * animation -- see the last describe block for why, and for what a test in
  * this environment can honestly claim about it.
+ *
+ * The SIDEBAR no longer wears one. The operator asked for it off ("remove the
+ * running line on focus at the top of the sidebar"), so where the keyboard is
+ * in Select is said by the status word and the focused row's own ring, and the
+ * line is the response pane's alone. The cases below that used to read
+ * `['sidebar']` read `[]` for that reason -- same assertions, answer
+ * corrected, exactly as they were once corrected in the other direction for
+ * the canvas column. `DetailPanel`'s mount stays and is asserted here and in
+ * `test/panels/PaneResizer.test.tsx`.
  */
 
 import { readFileSync } from 'node:fs';
@@ -87,9 +96,9 @@ beforeAll(() => stubMatchMedia(false));
 afterEach(cleanup);
 
 describe('the focused pane wears the line and the unfocused one does not', () => {
-  it('draws it on the sidebar alone in Select -- never on the canvas', () => {
+  it('draws it in NO column in Select -- not the sidebar, not the canvas', () => {
     render(<Canvas model={MODEL} />);
-    expect(edges()).toEqual(['sidebar']);
+    expect(edges()).toEqual([]);
   });
 
   it('moves it to the response pane when the keyboard goes there', () => {
@@ -98,15 +107,28 @@ describe('the focused pane wears the line and the unfocused one does not', () =>
     expect(edges()).toEqual(['action']);
   });
 
-  it('moves it back when the keyboard is handed back', () => {
+  it('takes it away when the keyboard is handed back to the sidebar', () => {
     render(<Canvas model={MODEL} />);
     press('I');
+    expect(edges()).toEqual(['action']);
     press('H');
-    expect(edges()).toEqual(['sidebar']);
+    expect(edges()).toEqual([]);
+  });
+
+  it('never mounts one inside the sidebar, in either mode', () => {
+    render(<Canvas model={MODEL} />);
+    const inSidebar = () => document.querySelector('[data-sidebar-pane] [data-focus-edge]');
+    expect(inSidebar()).toBeNull();
+    press('I');
+    expect(inSidebar()).toBeNull();
+    // And the one that stays is still there: removing the sidebar's line is
+    // not removing the component, which has this second caller.
+    expect(document.querySelector('[data-action-pane] [data-focus-edge]')).not.toBeNull();
   });
 
   it('is decoration to a screen reader — the word carries the state', () => {
     render(<Canvas model={MODEL} />);
+    press('I'); // the response pane is the only column that mounts one now
     const edge = document.querySelector('[data-focus-edge]');
     expect(edge?.getAttribute('aria-hidden')).toBe('true');
   });
@@ -128,7 +150,9 @@ describe('the line and the status word cannot disagree', () => {
       // neither list, in any mode -- it is a view, not a place the keyboard
       // goes.
       expect(panes.includes('action')).toBe(word === 'Insert');
-      expect(panes.includes('sidebar')).toBe(word === 'Select');
+      // The sidebar is now in neither list, in any mode -- the same thing
+      // that has always been true of the canvas, asked for by the operator.
+      expect(panes.includes('sidebar')).toBe(false);
       expect(panes.includes('canvas')).toBe(false);
     }
   });
@@ -138,7 +162,8 @@ describe('reduced motion loses the sweep, not the indicator', () => {
   it('still draws the line when the operator asked for no motion', () => {
     stubMatchMedia(true);
     render(<Canvas model={MODEL} />);
-    expect(edges()).toEqual(['sidebar']);
+    press('I');
+    expect(edges()).toEqual(['action']);
     stubMatchMedia(false);
   });
 
