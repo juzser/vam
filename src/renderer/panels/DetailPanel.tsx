@@ -3138,10 +3138,29 @@ export function DetailPanel(props: DetailPanelProps) {
                 through the two lines of `in`. The identity line the removed
                 header used to carry (project, epic) rides along here too —
                 see the header-removal comment above for the full account of
-                where each fact went. */}
+                where each fact went.
+
+                BOUNDED, because an unbounded sticky block is not a pin, it is
+                a lid (audit F2, measured: a 3,822-character prompt left the
+                answer 19px and a 10,920-character one covered `progress` and
+                `out` AT MAXIMUM SCROLL — the answer became unreachable at
+                every scroll offset, with no fold and no control to recover
+                it). A16 accepted "a very long prompt can cover the pane" as a
+                cost; it did not accept an answer nothing can reach. `max-h`
+                is what makes STICKY bounded rather than what makes the prompt
+                short: the paragraph keeps its full length and gets its own
+                scroll inside the bubble, so nothing typed is truncated and
+                the remaining 55%+ of the column always belongs to the answer.
+                That is VSCode's sticky-scroll bargain — what is pinned is
+                capped, what is in flow is whole.
+
+                The ground is the PANE's (`bg-canvas`), not `bg-sidebar`: it
+                exists to stop text bleeding through, and matching the column
+                is how it does that without drawing a band. What distinguishes
+                the prompt now is the bubble inside it, below. */}
             <section
               data-detail-block="in"
-              className="sticky top-0 z-10 flex flex-none flex-col gap-1 bg-sidebar pb-1.5"
+              className="sticky top-0 z-10 flex max-h-[45%] min-h-0 flex-none flex-col gap-1 bg-canvas pb-1.5"
             >
               {/* The region's name, announced and not drawn -- see the
                   band-removal note above `IN_BODY_PX`. */}
@@ -3168,7 +3187,27 @@ export function DetailPanel(props: DetailPanelProps) {
                   {decision.label === '' ? 'you' : `you · ${decision.label}`}
                 </span>
               </div>
-              <div data-detail-scroll="in" className="min-w-0">
+              {/* THE BUBBLE (operator: "the IN prompt should have a
+                  different colour so it stands out, and sit in a bubble").
+                  A chat bubble, deliberately, and not the bordered band PR 266
+                  deleted: a tinted, rounded ground INSIDE the one continuous
+                  column, which is a speech affordance, where the old `in` was
+                  a labelled panel with its own rule and its own scrollbar
+                  competing with two others. The seam-free reading survives —
+                  no border, no header, one scroll region for the turn.
+
+                  It is also the element the `max-h` above bounds against:
+                  `overflow-y-auto` here is what keeps a 10,000-character
+                  prompt whole while the block it sticks in stays capped. */}
+              <div
+                data-detail-scroll="in"
+                /* The scrollbar is NOT hidden here, unlike the column's
+                   (`vam-no-scrollbar`). It is the only thing on screen
+                   saying the prompt continues past the bubble's bottom
+                   edge, and a bound nobody can see is how "the answer is
+                   unreachable" became "the prompt is". */
+                className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-2.5 py-2"
+              >
                 <p className="whitespace-pre-wrap break-words text-[13px] text-ink-dim leading-[1.55]">
                   {decision.input}
                 </p>

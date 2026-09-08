@@ -235,36 +235,46 @@ describe('progress condenses into one line you can expand', () => {
  * where `in` actually is.
  */
 describe('the turn reads straight through, as one scrolling column', () => {
-  it('gives `in` no box, no height cap and no scrollbar of its own', () => {
+  it('gives the prompt a bubble — a ground and a radius, and still no box', () => {
     draw();
     const box = q<HTMLElement>('[data-detail-scroll="in"]') as HTMLElement;
     expect(box).not.toBeNull();
-    // The cap was two lines of body text plus the box's padding. Gone: the
-    // prompt runs out in full and the column scrolls it with everything else.
-    expect(box.style.maxHeight).toBe('');
-    expect(box.className).not.toContain('overflow-y-auto');
-    expect(box.className).not.toContain('max-h');
-    // The bordered panel was the seam the operator could still see.
+    // WAS: "no box, no height cap and no scrollbar of its own", which pinned
+    // all three halves of what PR 266 removed. Two of them have been asked
+    // for back, in a different shape, and the third has not:
+    //  - the operator now wants the prompt "in a bubble", visually distinct
+    //    from the answer. A ground and a radius are that. A BORDER is not
+    //    asked for and is still refused below, because the bordered panel
+    //    with its own rule is what read as a separate block;
+    //  - the cap and the scroller are back on the BUBBLE, and they are the
+    //    fix for audit F2: an unbounded sticky block covered the answer at
+    //    every scroll offset. What is capped is what STICKS; the paragraph
+    //    inside keeps its full length.
+    // The geometry of all that is measured in a real browser, where layout
+    // exists, by `e2e/long-prompt-shots.mjs`. This file pins the skin.
+    expect(box.className).toContain('rounded-');
+    expect(box.className).toContain('bg-raised');
     expect(box.className).not.toContain('border');
     expect(box.className).not.toContain('bg-panel');
   });
 
-  it('keeps exactly one scroller for the turn, and it is the column', () => {
+  it('keeps the answer’s region unscrollable, and caps only what sticks', () => {
     draw();
     const column = q<HTMLElement>('[data-detail-column]') as HTMLElement;
     expect(column.className).toContain('overflow-y-auto');
-    // Neither transcript region may own a scroller: that is what made them
-    // read as separate panels. The opened turn list is a control, not a
-    // region of the transcript, and is allowed its own cap -- it is closed
-    // here, so nothing inside the three regions scrolls at all.
-    for (const name of ['in', 'out']) {
-      const region = q<HTMLElement>(`[data-detail-scroll="${name}"]`);
-      expect(region?.className ?? '', name).not.toContain('overflow-y-auto');
-    }
+    // `out` owns no scroller: a second scrollbar beside the column's is what
+    // made the regions read as separate panels, and the answer is the region
+    // that argument was really about.
+    const out = q<HTMLElement>('[data-detail-scroll="out"]');
+    expect(out?.className ?? '').not.toContain('overflow-y-auto');
+    // Exactly one scroller inside the column, and it is the prompt bubble.
     const scrollers = [...column.querySelectorAll('*')].filter((el) =>
       (el.getAttribute('class') ?? '').includes('overflow-y-auto'),
     );
-    expect(scrollers).toHaveLength(0);
+    expect(scrollers.map((el) => el.getAttribute('data-detail-scroll'))).toEqual(['in']);
+    // And the cap is on the STICKY BLOCK, not on the paragraph: capping the
+    // text is truncation, capping the pin is a pin.
+    expect((block('in') as HTMLElement).className).toContain('max-h-');
   });
 
   it('sticks `in` to the top of that column, with nothing scrollable between', () => {
@@ -272,8 +282,12 @@ describe('the turn reads straight through, as one scrolling column', () => {
     const inBlock = block('in') as HTMLElement;
     expect(inBlock.className).toContain('sticky');
     expect(inBlock.className).toContain('top-0');
-    // Opaque, or the answer scrolling underneath shows through the prompt.
-    expect(inBlock.className).toContain('bg-sidebar');
+    // Opaque, or the answer scrolling underneath shows through the prompt --
+    // and the PANE's own ground, not the sidebar's: this backing exists to
+    // stop bleed-through, and matching the column is how it does that without
+    // drawing a band across the turn. What distinguishes the prompt is the
+    // bubble inside it, which has its own ground.
+    expect(inBlock.className).toContain('bg-canvas');
     // Sticky is resolved against the nearest scrolling ancestor. If anything
     // between `in` and the column scrolled, `in` would stick to THAT and go
     // off screen with it -- the exact failure a class-name-only assertion

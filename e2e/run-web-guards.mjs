@@ -6,8 +6,8 @@
  * Until now these scripts ran only when a human remembered them: 59 throwing
  * assertions covering exactly what jsdom cannot see (project-switch
  * reconciliation, per-project layout restore, the per-pane `+`, drag-to-move,
- * which pane is focused AT THE MOMENT OF AN EVENT, and `position: sticky`
- * against real layout). This driver builds the web bundle, serves it with
+ * which pane is focused AT THE MOMENT OF AN EVENT, `position: sticky` against
+ * real layout, and which element is on top at a pixel). This driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
  * soon as any assertion throws — so CI can hold them.
  *
@@ -32,6 +32,7 @@ const GUARDS = [
   'prompt-suggest-shots',
   'transcript-flow-shots',
   'prompt-mode-icon-shots',
+  'long-prompt-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);
