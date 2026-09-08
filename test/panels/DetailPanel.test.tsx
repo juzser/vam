@@ -3404,11 +3404,15 @@ describe('the +1px type bump reaches everything in this pane except out', () => 
     // note); the note kept its size and its home in the prompt block, the
     // label did not survive the move to an icon.
     '10.5': 8,
-    '11': 14,
+    // +2: the folded question row's "marked, not sent" caption and the
+    // `change` control that reopens the list (audit-adjacent operator
+    // request: the option list folds away once a pick is made).
+    '11': 16,
     // -1: `WaitingNote`'s remedy line, removed with the notice.
     '11.5': 10,
     // +1: the mode popover's option rows, at the provider popover's own size.
-    '12': 16,
+    // +1: the folded question row's own mark, at the option label's size.
+    '12': 17,
     // -2: the three mode pills (one class) and `WaitingNote`'s cause line.
     '12.5': 4,
     '13': 1,

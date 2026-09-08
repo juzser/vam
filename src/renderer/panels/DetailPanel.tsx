@@ -1660,6 +1660,28 @@ function QuestionCard({
    * clamp turned into a no-op asks for nothing, because the cursor is already
    * where the operator put it.
    */
+  /**
+   * WHICH STEP HAS FOLDED ITS OPTIONS AWAY, by question id.
+   *
+   * Operator: "after choosing an option, shouldn't the option panel hide?" —
+   * asked, not specified, and the trap in it is this card's own rule: A PICK
+   * IS ONLY A MARK. A list that simply vanishes on a click reads as "sent",
+   * which is the defect this file has spent its whole life refusing. So the
+   * fold keeps the mark on screen, keeps `data-question-note` (the sentence
+   * that says a mark is not a delivery) under it, and keeps a way back in.
+   *
+   * KEYED BY QUESTION so walking to another step of the same call arrives
+   * expanded — the fold is about the step you just answered, not the card.
+   *
+   * SET ON A POINTER PICK ONLY. The listbox owns the picker's keyboard (the
+   * digits, `j`/`k`, `h`/`l`, `c`) through a listener on the element itself,
+   * so folding after a keyboard pick would unmount the grammar mid-sequence
+   * and drop the cursor to `document.body`. `UIEvent.detail` carries which
+   * one happened, the same fact the tab strip reads for the same reason.
+   *
+   * AND SINGLE-SELECT ONLY: on a multi-select, one pick is not a choice made.
+   */
+  const [foldedStep, setFoldedStep] = useState<string | null>(null);
   const [landing, setLanding] = useState<number | null>(null);
   const stepTabRef = useRef<HTMLButtonElement>(null);
   const walk = (by: number) => {
@@ -1683,6 +1705,9 @@ function QuestionCard({
    * operator clicked.
    */
   const showingTaken = question !== undefined && takenIds.has(question.id);
+  /** This step's options are folded away behind its own mark — see
+   *  `foldedStep`. Never with nothing marked: there would be nothing to fold. */
+  const folded = question !== undefined && foldedStep === question.id && picked.length > 0;
   useEffect(() => {
     if (landing === null) return;
     setLanding(null);
@@ -1720,7 +1745,13 @@ function QuestionCard({
     setSending(false);
   };
 
-  const toggle = (label: string) =>
+  const toggle = (label: string, viaPointer = false) => {
+    if (viaPointer && question !== undefined && !question.multiSelect) {
+      // Fold only when the click MARKS. Clicking the marked option again
+      // clears it, and folding on that would hide an empty list behind a
+      // summary with nothing to summarise.
+      setFoldedStep((marks[question.id] ?? []).includes(label) ? null : question.id);
+    }
     setMarks((current) => {
       if (question === undefined) return current;
       const held = current[question.id] ?? [];
@@ -1735,6 +1766,7 @@ function QuestionCard({
             : [label],
       };
     });
+  };
 
   // The list walks with the arrows, and jumps with the numbers; every option is
   // a real button, so Enter and Space already mark one and Tab already leaves.
@@ -1920,62 +1952,92 @@ function QuestionCard({
         </span>
       ) : (
         <>
-          {/* A listbox, not a form control: nothing here is submitted, and
-              `aria-multiselectable` is the one honest way to say that several
-              may be marked. */}
-          <div
-            role="listbox"
-            aria-multiselectable={question.multiSelect}
-            aria-label="the options this question offers"
-            onKeyDown={onKeys}
-            className="flex flex-col gap-1"
-          >
-            {question.options.map((option, index) => (
+          {folded ? (
+            /* THE FOLD, and everything it is careful to keep. The mark
+               itself, so nothing is hidden about what was chosen; the way
+               back into the list; and — drawn below by the card, not here —
+               `data-question-note`, the sentence saying a mark is not a
+               delivery. "Marked, not sent" is repeated here rather than left
+               to that note alone, because this row is what replaces the list
+               and it must not be readable as a receipt. */
+            <div
+              data-question-collapsed
+              className="flex items-baseline gap-2 rounded-[6px] border border-running bg-raised px-1.5 py-1"
+            >
+              <span data-question-marked className="min-w-0 flex-1 text-[12px] text-ink">
+                {picked.join(', ')}
+                <span className="text-[11px] text-ink-faint"> — marked, not sent</span>
+              </span>
               <button
-                key={option.label}
-                ref={index === 0 ? firstOptionRef : undefined}
                 type="button"
-                role="option"
-                aria-selected={picked.includes(option.label)}
-                data-question-option
-                data-question-number={NUMBERED_OPTIONS[index]}
-                data-picked={picked.includes(option.label) ? 'true' : undefined}
-                onClick={() => toggle(option.label)}
-                className={[
-                  'vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
-                  picked.includes(option.label)
-                    ? 'border-running bg-raised'
-                    : 'border-line hover:bg-raised',
-                ].join(' ')}
+                data-question-expand
+                onClick={() => setFoldedStep(null)}
+                className="vam-tap flex-none cursor-pointer rounded-[6px] px-1.5 py-0.5 text-[11px] text-ink-dim underline decoration-dotted hover:text-ink"
               >
-                <span className="flex max-w-full items-baseline gap-1.5 text-[12px] text-ink">
-                  {NUMBERED_OPTIONS[index] !== undefined && (
-                    <span className="text-[11px] text-ink-faint tabular-nums">
-                      {NUMBERED_OPTIONS[index]}
+                change
+              </button>
+            </div>
+          ) : (
+            /* A listbox, not a form control: nothing here is submitted, and
+              `aria-multiselectable` is the one honest way to say that several
+              may be marked. */
+            <div
+              role="listbox"
+              aria-multiselectable={question.multiSelect}
+              aria-label="the options this question offers"
+              onKeyDown={onKeys}
+              className="flex flex-col gap-1"
+            >
+              {question.options.map((option, index) => (
+                <button
+                  key={option.label}
+                  ref={index === 0 ? firstOptionRef : undefined}
+                  type="button"
+                  role="option"
+                  aria-selected={picked.includes(option.label)}
+                  data-question-option
+                  data-question-number={NUMBERED_OPTIONS[index]}
+                  data-picked={picked.includes(option.label) ? 'true' : undefined}
+                  onClick={(event) => toggle(option.label, event.detail > 0)}
+                  className={[
+                    'vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                    picked.includes(option.label)
+                      ? 'border-running bg-raised'
+                      : 'border-line hover:bg-raised',
+                  ].join(' ')}
+                >
+                  <span className="flex max-w-full items-baseline gap-1.5 text-[12px] text-ink">
+                    {NUMBERED_OPTIONS[index] !== undefined && (
+                      <span className="text-[11px] text-ink-faint tabular-nums">
+                        {NUMBERED_OPTIONS[index]}
+                      </span>
+                    )}
+                    <span className="min-w-0">{option.label}</span>
+                  </span>
+                  {option.description !== null && (
+                    <span
+                      data-question-description
+                      className="max-w-full text-[11.5px] text-ink-dim"
+                    >
+                      {option.description}
                     </span>
                   )}
-                  <span className="min-w-0">{option.label}</span>
-                </span>
-                {option.description !== null && (
-                  <span data-question-description className="max-w-full text-[11.5px] text-ink-dim">
-                    {option.description}
-                  </span>
-                )}
-                {/* WHAT PICKING IT WOULD PRODUCE, under the reason for picking
+                  {/* WHAT PICKING IT WOULD PRODUCE, under the reason for picking
                   it and set in mono because that is usually what it is -- a
                   colour, a path, a line of the thing that would be written. It
                   was in the record all along and drawn nowhere. */}
-                {(option.preview ?? null) !== null && (
-                  <span
-                    data-question-preview
-                    className="max-w-full truncate font-mono text-[11px] text-ink-faint"
-                  >
-                    {option.preview}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+                  {(option.preview ?? null) !== null && (
+                    <span
+                      data-question-preview
+                      className="max-w-full truncate font-mono text-[11px] text-ink-faint"
+                    >
+                      {option.preview}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
           {/* Not in the transcript: `AskUserQuestion`'s tool_use records the
               model's own options and nothing else, and the free-text row is
               the CLI's own UI. So vam appends it and SAYS it appended it —
