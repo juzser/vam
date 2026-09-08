@@ -1660,6 +1660,28 @@ function QuestionCard({
    * clamp turned into a no-op asks for nothing, because the cursor is already
    * where the operator put it.
    */
+  /**
+   * WHICH STEP HAS FOLDED ITS OPTIONS AWAY, by question id.
+   *
+   * Operator: "after choosing an option, shouldn't the option panel hide?" —
+   * asked, not specified, and the trap in it is this card's own rule: A PICK
+   * IS ONLY A MARK. A list that simply vanishes on a click reads as "sent",
+   * which is the defect this file has spent its whole life refusing. So the
+   * fold keeps the mark on screen, keeps `data-question-note` (the sentence
+   * that says a mark is not a delivery) under it, and keeps a way back in.
+   *
+   * KEYED BY QUESTION so walking to another step of the same call arrives
+   * expanded — the fold is about the step you just answered, not the card.
+   *
+   * SET ON A POINTER PICK ONLY. The listbox owns the picker's keyboard (the
+   * digits, `j`/`k`, `h`/`l`, `c`) through a listener on the element itself,
+   * so folding after a keyboard pick would unmount the grammar mid-sequence
+   * and drop the cursor to `document.body`. `UIEvent.detail` carries which
+   * one happened, the same fact the tab strip reads for the same reason.
+   *
+   * AND SINGLE-SELECT ONLY: on a multi-select, one pick is not a choice made.
+   */
+  const [foldedStep, setFoldedStep] = useState<string | null>(null);
   const [landing, setLanding] = useState<number | null>(null);
   const stepTabRef = useRef<HTMLButtonElement>(null);
   const walk = (by: number) => {
@@ -1683,6 +1705,9 @@ function QuestionCard({
    * operator clicked.
    */
   const showingTaken = question !== undefined && takenIds.has(question.id);
+  /** This step's options are folded away behind its own mark — see
+   *  `foldedStep`. Never with nothing marked: there would be nothing to fold. */
+  const folded = question !== undefined && foldedStep === question.id && picked.length > 0;
   useEffect(() => {
     if (landing === null) return;
     setLanding(null);
@@ -1720,7 +1745,13 @@ function QuestionCard({
     setSending(false);
   };
 
-  const toggle = (label: string) =>
+  const toggle = (label: string, viaPointer = false) => {
+    if (viaPointer && question !== undefined && !question.multiSelect) {
+      // Fold only when the click MARKS. Clicking the marked option again
+      // clears it, and folding on that would hide an empty list behind a
+      // summary with nothing to summarise.
+      setFoldedStep((marks[question.id] ?? []).includes(label) ? null : question.id);
+    }
     setMarks((current) => {
       if (question === undefined) return current;
       const held = current[question.id] ?? [];
@@ -1735,6 +1766,7 @@ function QuestionCard({
             : [label],
       };
     });
+  };
 
   // The list walks with the arrows, and jumps with the numbers; every option is
   // a real button, so Enter and Space already mark one and Tab already leaves.
@@ -1920,62 +1952,92 @@ function QuestionCard({
         </span>
       ) : (
         <>
-          {/* A listbox, not a form control: nothing here is submitted, and
-              `aria-multiselectable` is the one honest way to say that several
-              may be marked. */}
-          <div
-            role="listbox"
-            aria-multiselectable={question.multiSelect}
-            aria-label="the options this question offers"
-            onKeyDown={onKeys}
-            className="flex flex-col gap-1"
-          >
-            {question.options.map((option, index) => (
+          {folded ? (
+            /* THE FOLD, and everything it is careful to keep. The mark
+               itself, so nothing is hidden about what was chosen; the way
+               back into the list; and — drawn below by the card, not here —
+               `data-question-note`, the sentence saying a mark is not a
+               delivery. "Marked, not sent" is repeated here rather than left
+               to that note alone, because this row is what replaces the list
+               and it must not be readable as a receipt. */
+            <div
+              data-question-collapsed
+              className="flex items-baseline gap-2 rounded-[6px] border border-running bg-raised px-1.5 py-1"
+            >
+              <span data-question-marked className="min-w-0 flex-1 text-[12px] text-ink">
+                {picked.join(', ')}
+                <span className="text-[11px] text-ink-faint"> — marked, not sent</span>
+              </span>
               <button
-                key={option.label}
-                ref={index === 0 ? firstOptionRef : undefined}
                 type="button"
-                role="option"
-                aria-selected={picked.includes(option.label)}
-                data-question-option
-                data-question-number={NUMBERED_OPTIONS[index]}
-                data-picked={picked.includes(option.label) ? 'true' : undefined}
-                onClick={() => toggle(option.label)}
-                className={[
-                  'vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
-                  picked.includes(option.label)
-                    ? 'border-running bg-raised'
-                    : 'border-line hover:bg-raised',
-                ].join(' ')}
+                data-question-expand
+                onClick={() => setFoldedStep(null)}
+                className="vam-tap flex-none cursor-pointer rounded-[6px] px-1.5 py-0.5 text-[11px] text-ink-dim underline decoration-dotted hover:text-ink"
               >
-                <span className="flex max-w-full items-baseline gap-1.5 text-[12px] text-ink">
-                  {NUMBERED_OPTIONS[index] !== undefined && (
-                    <span className="text-[11px] text-ink-faint tabular-nums">
-                      {NUMBERED_OPTIONS[index]}
+                change
+              </button>
+            </div>
+          ) : (
+            /* A listbox, not a form control: nothing here is submitted, and
+              `aria-multiselectable` is the one honest way to say that several
+              may be marked. */
+            <div
+              role="listbox"
+              aria-multiselectable={question.multiSelect}
+              aria-label="the options this question offers"
+              onKeyDown={onKeys}
+              className="flex flex-col gap-1"
+            >
+              {question.options.map((option, index) => (
+                <button
+                  key={option.label}
+                  ref={index === 0 ? firstOptionRef : undefined}
+                  type="button"
+                  role="option"
+                  aria-selected={picked.includes(option.label)}
+                  data-question-option
+                  data-question-number={NUMBERED_OPTIONS[index]}
+                  data-picked={picked.includes(option.label) ? 'true' : undefined}
+                  onClick={(event) => toggle(option.label, event.detail > 0)}
+                  className={[
+                    'vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                    picked.includes(option.label)
+                      ? 'border-running bg-raised'
+                      : 'border-line hover:bg-raised',
+                  ].join(' ')}
+                >
+                  <span className="flex max-w-full items-baseline gap-1.5 text-[12px] text-ink">
+                    {NUMBERED_OPTIONS[index] !== undefined && (
+                      <span className="text-[11px] text-ink-faint tabular-nums">
+                        {NUMBERED_OPTIONS[index]}
+                      </span>
+                    )}
+                    <span className="min-w-0">{option.label}</span>
+                  </span>
+                  {option.description !== null && (
+                    <span
+                      data-question-description
+                      className="max-w-full text-[11.5px] text-ink-dim"
+                    >
+                      {option.description}
                     </span>
                   )}
-                  <span className="min-w-0">{option.label}</span>
-                </span>
-                {option.description !== null && (
-                  <span data-question-description className="max-w-full text-[11.5px] text-ink-dim">
-                    {option.description}
-                  </span>
-                )}
-                {/* WHAT PICKING IT WOULD PRODUCE, under the reason for picking
+                  {/* WHAT PICKING IT WOULD PRODUCE, under the reason for picking
                   it and set in mono because that is usually what it is -- a
                   colour, a path, a line of the thing that would be written. It
                   was in the record all along and drawn nowhere. */}
-                {(option.preview ?? null) !== null && (
-                  <span
-                    data-question-preview
-                    className="max-w-full truncate font-mono text-[11px] text-ink-faint"
-                  >
-                    {option.preview}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+                  {(option.preview ?? null) !== null && (
+                    <span
+                      data-question-preview
+                      className="max-w-full truncate font-mono text-[11px] text-ink-faint"
+                    >
+                      {option.preview}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
           {/* Not in the transcript: `AskUserQuestion`'s tool_use records the
               model's own options and nothing else, and the free-text row is
               the CLI's own UI. So vam appends it and SAYS it appended it —
@@ -2824,7 +2886,27 @@ export function DetailPanel(props: DetailPanelProps) {
   // and 404s. The box is then not DRAWN, rather than drawn and refused on tap:
   // a control that takes text it cannot deliver is worse than no control, and
   // the source's own sentence for the refusal is carried in `declines`.
-  const composerHidden = records === false || (openQuestion && chattingAbout !== setId);
+  /**
+   * NO SESSION, NO COMPOSER (audit F8). Since PR 268 `zv` MOVES the active
+   * tab, so an empty pane is an ordinary state rather than a cold-start one —
+   * and it was drawing a full composer over nothing: a `readOnly` textarea,
+   * attach, the provider picker, the model field, and an ENABLED record
+   * button whose click did nothing and did not even change the status bar.
+   * Six controls that cannot act, against this file's own first rule:
+   * absent, not dimmed. The withdrawal path already existed for `records ===
+   * false`; the no-session case is the same fact — there is no route from
+   * this box to a session — and now takes the same road.
+   */
+  const composerHidden =
+    entry === null || records === false || (openQuestion && chattingAbout !== setId);
+  /**
+   * Is the corner overlay on screen? Two things need the answer: the overlay
+   * itself, and the top of the column, which has to RESERVE the corner the
+   * overlay is about to paint on (audit F1). Derived once so the two cannot
+   * drift apart — a reserved corner in a pane that draws no icons is wasted
+   * width, and icons over an unreserved corner is the defect.
+   */
+  const cornerOverlay = !phone && paneFocused;
   /**
    * The phone keystroke strip's own gate -- structurally the SAME boolean
    * `canCycleMode` already is, shared rather than re-derived, AND the card
@@ -2968,10 +3050,25 @@ export function DetailPanel(props: DetailPanelProps) {
           so it never shadows a click meant for the content underneath.
         - IT MUST NOT BALLOON AT A NARROW WIDTH. Sized to its own content
           (no `inset-x-0`/`w-full`) and capped by `max-w-` against the pane's
-          own width, so in a narrow split it can only ever cover the few
-          pixels its glyphs occupy — never the whole line of text beneath
-          it. The refusal note is capped and truncated the same way, so a
-          long one grows the ellipsis, never the overlay.
+          own width. The refusal note is capped and truncated the same way,
+          so a long one grows the ellipsis, never the overlay.
+
+          THIS USED TO SAY the overlay "can only ever cover the few pixels
+          its glyphs occupy — never the whole line of text beneath it". That
+          was true of the WRAPPER, which is `pointer-events-none` and
+          transparent, and false of the filled pill inside it, which is
+          opaque: measured at a 253px pane, the nav ran x 924–1014 over an
+          identity line running to x 1010, so its last 86px — project and
+          epic, the two facts the removed header relocated there — were laid
+          out, measured as visible by `truncate`, and then painted over
+          (audit F1). An overlay owes a FOURTH property, and it cannot be
+          discharged from here: WHAT IT FLOATS OVER MUST RESERVE ITS CORNER.
+          `cornerOverlay` below is that reservation, and
+          `e2e/narrow-pane-overlay-shots.mjs` measures it by asking which
+          element is on top rather than by reading a class back.
+
+          A comment asserting a property the code does not have is worse than
+          no comment: it is how this defect passed review.
         - IT MUST NOT TRAP FOCUS. `position` is a paint property; a browser's
           default Tab order follows DOM order, not screen position, so
           moving the icons out of the flow cannot create the kind of focus
@@ -2987,7 +3084,7 @@ export function DetailPanel(props: DetailPanelProps) {
         reachable" shortcut promises.
       */}
       {/* FOCUSED PANE ONLY -- see `paneFocused`. */}
-      {!phone && paneFocused && (
+      {cornerOverlay && (
         <div
           data-view-overlay
           className="pointer-events-none absolute top-2 right-2.5 z-20 flex max-w-[calc(100%-1.25rem)] items-center justify-end gap-1.5"
@@ -3101,19 +3198,27 @@ export function DetailPanel(props: DetailPanelProps) {
             </button>
           </p>
         ) : decision === null ? (
-          <p className="text-[12px] text-ink-faint">
-            {/* Two different absences. "This session has no steps yet" named a
+          entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip
+          // above it, and an empty strip already says "no sessions open —
+          // pick one from the sidebar". This line said the same thing in
+          // different words 40px below it, in otherwise empty space. The
+          // PHONE has no strip, so there it is the only sentence there is and
+          // it stays.
+          null : (
+            <p className="text-[12px] text-ink-faint">
+              {/* Two different absences. "This session has no steps yet" named a
                 session that did not exist whenever nothing was focused. */}
-            {entry === null
-              ? 'No session selected — pick one in the sidebar.'
-              : entry.session.status === 'failed'
-                ? // Final, not pending. A failed background session has no
-                  // transcript at all -- the CLI lists it while
-                  // `~/.claude/projects/` holds no `.jsonl` for its id -- and
-                  // "no steps yet" promises steps that are never coming.
-                  'This session failed with nothing recorded.'
-                : 'This session has no steps yet.'}
-          </p>
+              {entry === null
+                ? 'No session selected — pick one in the sidebar.'
+                : entry.session.status === 'failed'
+                  ? // Final, not pending. A failed background session has no
+                    // transcript at all -- the CLI lists it while
+                    // `~/.claude/projects/` holds no `.jsonl` for its id -- and
+                    // "no steps yet" promises steps that are never coming.
+                    'This session failed with nothing recorded.'
+                  : 'This session has no steps yet.'}
+            </p>
+          )
         ) : (
           // THE MERGED COLUMN (A12.2). One scrollable region for `in`,
           // `progress` and `out` together — the ref and the scroll handler
@@ -3138,17 +3243,44 @@ export function DetailPanel(props: DetailPanelProps) {
                 through the two lines of `in`. The identity line the removed
                 header used to carry (project, epic) rides along here too —
                 see the header-removal comment above for the full account of
-                where each fact went. */}
+                where each fact went.
+
+                BOUNDED, because an unbounded sticky block is not a pin, it is
+                a lid (audit F2, measured: a 3,822-character prompt left the
+                answer 19px and a 10,920-character one covered `progress` and
+                `out` AT MAXIMUM SCROLL — the answer became unreachable at
+                every scroll offset, with no fold and no control to recover
+                it). A16 accepted "a very long prompt can cover the pane" as a
+                cost; it did not accept an answer nothing can reach. `max-h`
+                is what makes STICKY bounded rather than what makes the prompt
+                short: the paragraph keeps its full length and gets its own
+                scroll inside the bubble, so nothing typed is truncated and
+                the remaining 55%+ of the column always belongs to the answer.
+                That is VSCode's sticky-scroll bargain — what is pinned is
+                capped, what is in flow is whole.
+
+                The ground is the PANE's (`bg-canvas`), not `bg-sidebar`: it
+                exists to stop text bleeding through, and matching the column
+                is how it does that without drawing a band. What distinguishes
+                the prompt now is the bubble inside it, below. */}
             <section
               data-detail-block="in"
-              className="sticky top-0 z-10 flex flex-none flex-col gap-1 bg-sidebar pb-1.5"
+              className="sticky top-0 z-10 flex max-h-[45%] min-h-0 flex-none flex-col gap-1 bg-canvas pb-1.5"
             >
               {/* The region's name, announced and not drawn -- see the
                   band-removal note above `IN_BODY_PX`. */}
               <span className="sr-only">in</span>
               <div
                 data-detail-identity
-                className="flex items-center gap-[5px] font-mono text-[10.5px] text-ink-faint"
+                /* The reserved corner (audit F1). `truncate` computes its
+                   ellipsis against this box, so reserving here is what makes
+                   the ellipsis land where the pill starts instead of under
+                   it. Only when the overlay is actually drawn: an unfocused
+                   pane would otherwise give up 7rem of a narrow line for
+                   nothing. */
+                className={`flex items-center gap-[5px] font-mono text-[10.5px] text-ink-faint ${
+                  cornerOverlay ? 'pr-[7rem]' : ''
+                }`}
               >
                 <span className="truncate text-ink-dim">{entry?.project.name ?? '—'}</span>
                 <span>·</span>
@@ -3168,7 +3300,27 @@ export function DetailPanel(props: DetailPanelProps) {
                   {decision.label === '' ? 'you' : `you · ${decision.label}`}
                 </span>
               </div>
-              <div data-detail-scroll="in" className="min-w-0">
+              {/* THE BUBBLE (operator: "the IN prompt should have a
+                  different colour so it stands out, and sit in a bubble").
+                  A chat bubble, deliberately, and not the bordered band PR 266
+                  deleted: a tinted, rounded ground INSIDE the one continuous
+                  column, which is a speech affordance, where the old `in` was
+                  a labelled panel with its own rule and its own scrollbar
+                  competing with two others. The seam-free reading survives —
+                  no border, no header, one scroll region for the turn.
+
+                  It is also the element the `max-h` above bounds against:
+                  `overflow-y-auto` here is what keeps a 10,000-character
+                  prompt whole while the block it sticks in stays capped. */}
+              <div
+                data-detail-scroll="in"
+                /* The scrollbar is NOT hidden here, unlike the column's
+                   (`vam-no-scrollbar`). It is the only thing on screen
+                   saying the prompt continues past the bubble's bottom
+                   edge, and a bound nobody can see is how "the answer is
+                   unreachable" became "the prompt is". */
+                className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-2.5 py-2"
+              >
                 <p className="whitespace-pre-wrap break-words text-[13px] text-ink-dim leading-[1.55]">
                   {decision.input}
                 </p>

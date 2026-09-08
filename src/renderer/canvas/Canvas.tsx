@@ -565,6 +565,7 @@ function TabStrip({
   orientation,
   tabs,
   activeId,
+  paneFocused,
   onSelect,
   onClose,
   onTabDragStart,
@@ -573,7 +574,26 @@ function TabStrip({
   readonly orientation: 'horizontal' | 'vertical';
   readonly tabs: readonly SessionEntry[];
   readonly activeId: string | null;
-  readonly onSelect: (sessionId: string) => void;
+  /**
+   * Does the pane this strip belongs to hold the keyboard? Since PR 268 took
+   * the focus ring off the pane, "the active tab of a pane that does NOT have
+   * the keyboard" is a state with nothing to say it — two panes each have an
+   * active tab and only one of them is where the next keystroke lands. The
+   * strip is where that difference can usefully show, so the accent under the
+   * active tab is drawn at full strength only here.
+   */
+  readonly paneFocused: boolean;
+  /**
+   * `viaPointer` is the ACTIVATION SOURCE, carried rather than inferred later
+   * (the operator's "focusing a tab should focus the prompt" is true of a
+   * click and false of a chord — see `Canvas.tab-pointer-focus.test.tsx`).
+   * Its value is `UIEvent.detail`, the click count: the HTML activation
+   * behaviour dispatches a click with `detail` 0 when a focused button is
+   * activated from the keyboard, and a pointer press always reports at least
+   * 1. This is the only place in the shell that can still see the difference,
+   * so it is read here and passed on as a fact.
+   */
+  readonly onSelect: (sessionId: string, viaPointer: boolean) => void;
   readonly onClose: (sessionId: string) => void;
   /**
    * A15.1 — dragging a tab is how a split is made. Optional so every
@@ -591,7 +611,7 @@ function TabStrip({
       <div
         data-tab-strip
         data-orientation={orientation}
-        className="flex min-w-0 flex-1 items-center px-1 text-[11px] text-ink-faint"
+        className="flex min-w-0 shrink items-center whitespace-nowrap px-1 text-[11px] text-ink-faint"
       >
         no sessions open — pick one from the sidebar
       </div>
@@ -601,9 +621,24 @@ function TabStrip({
     <div
       data-tab-strip
       data-orientation={orientation}
+      /*
+        NOT `flex-1` on the horizontal strip any more (operator: "put the new
+        tab button next to the last tab, instead of on the right"). `shrink`
+        with no grow makes the strip exactly as wide as its tabs until they
+        run out of room, so the `+` that follows it in `TabStripRow` lands
+        immediately after the last tab.
+
+        WHAT HAPPENS WHEN THE TABS OVERFLOW is the question that placement
+        raises, and the answer chosen is PINNED, not scrolled: the `+` stays
+        a sibling of this scroller rather than moving inside it, so once the
+        strip fills the row the strip scrolls under a `+` that does not move.
+        Following the last tab into the overflow would put "add one more"
+        behind a horizontal scroll exactly when a pane has the most tabs,
+        which is when it is most likely to be wanted.
+      */
       className={
         orientation === 'horizontal'
-          ? 'flex min-w-0 flex-1 items-stretch overflow-x-auto'
+          ? 'flex min-w-0 shrink items-stretch overflow-x-auto'
           : 'flex min-h-0 flex-1 flex-col overflow-y-auto'
       }
     >
@@ -623,7 +658,30 @@ function TabStrip({
             key={entry.session.id}
             data-session-tab
             data-active={active ? 'true' : 'false'}
-            className={`group flex flex-none items-center gap-1.5 border-line border-r px-2.5 text-[11px] ${active ? 'bg-canvas text-ink' : 'text-ink-dim hover:text-ink'}`}
+            /*
+              THREE CHANNELS ON THE ACTIVE TAB, not one (operator: "the
+              focused tab should have a different opacity from the others,
+              and a border-bottom"):
+                - the ACCENT UNDER IT. `border-b-2` is on every tab and
+                  transparent on the others, so lighting it moves nothing;
+                - the GROUND AND INK it already had;
+                - OPACITY, which recedes the neighbours.
+              Opacity is deliberately not carrying this alone — dimming is
+              not an accessible signal by itself, and `opacity-85` is as far
+              as the inactive title can go while its 11px text stays above
+              4.5:1 (measured in `e2e/tab-strip-shots.mjs`, not estimated).
+
+              AND THE PANE'S OWN FOCUS rides the accent's colour: an
+              unfocused pane's active tab keeps its ground and its underline
+              but wears the quiet line rather than the cursor accent, so
+              "which tab this pane is on" and "which pane the keyboard is in"
+              are two readable facts instead of one ambiguous one.
+            */
+            className={`group flex flex-none items-center gap-1.5 border-line border-r border-b-2 px-2.5 text-[11px] ${
+              active
+                ? `bg-canvas text-ink ${paneFocused ? 'border-b-cursor-ring' : 'border-b-line-loud'}`
+                : 'border-b-transparent text-ink-dim opacity-85 hover:text-ink hover:opacity-100'
+            }`}
           >
             <button
               type="button"
@@ -631,7 +689,7 @@ function TabStrip({
               draggable={onTabDragStart !== undefined}
               onDragStart={onTabDragStart?.(entry.session.id)}
               onDragEnd={onTabDragEnd}
-              onClick={() => onSelect(entry.session.id)}
+              onClick={(event) => onSelect(entry.session.id, event.detail > 0)}
               className={`max-w-[160px] truncate py-1 ${active ? TAB_STATUS_INK[entry.session.status] : ''}`}
             >
               {glyph !== null && (
@@ -651,7 +709,21 @@ function TabStrip({
                 event.stopPropagation();
                 onClose(entry.session.id);
               }}
-              className="shrink-0 rounded-[4px] px-1 text-ink-faint opacity-0 hover:text-ink group-hover:opacity-100 data-[active=true]:opacity-100"
+              /*
+                `opacity: 0` REMOVES NO POINTER EVENTS AND HIDES NO FOCUS
+                RING. This project diagnosed that on the sidebar row --
+                `test/phone/touch-targets.test.tsx`, "removes the hover-
+                revealed close control rather than leaving it invisible" --
+                and the new strip reintroduced it on what is now the primary
+                navigation surface (audit F4): Tab reached this button and it
+                was then a focused control with `opacity: 0`, `outline: none`
+                and no box shadow, visible nowhere on screen (WCAG 2.4.7),
+                while any pointer that cannot hover -- touch, pen -- met a
+                15x17 invisible close target sitting on an inactive tab.
+                Both halves come from the same wrong idea, so both are fixed
+                at once: invisible means UNHITTABLE, and focus REVEALS.
+              */
+              className="shrink-0 rounded-[4px] px-1 text-ink-faint opacity-0 hover:text-ink focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-cursor-ring group-hover:opacity-100 data-[active=true]:opacity-100 pointer-events-none focus-visible:pointer-events-auto group-hover:pointer-events-auto data-[active=true]:pointer-events-auto"
               data-active={active ? 'true' : 'false'}
             >
               ×
@@ -2777,6 +2849,28 @@ function CanvasInner({
       }
 
       /**
+       * AND THE SAME CONCESSION TO A FOCUSED BUTTON, for Enter and Space.
+       *
+       * A button has an activation behaviour of its own, and this listener
+       * cancelled it: `Enter` resolves as the `open` chord, `preventDefault`
+       * follows, and the browser's click never fires. So `ViewIcons`' comment
+       * promised "Enter and Space activate it" while only Space worked (audit
+       * F5), and a tab's `×` closed on Space and did nothing on Enter (audit
+       * F4). Both are the same swallow, and this is the same shape of rule the
+       * `typing` guard above already is: a control that has the focus has
+       * first claim on the keys that operate it.
+       *
+       * Scoped to those two keys and to a real button, so nothing else is
+       * given away — `Enter` anywhere but on a control is still `open`, and
+       * `j` on a focused button is still `move`.
+       */
+      const onButton =
+        target instanceof HTMLElement && target.closest('button, [role="button"]') !== null;
+      if (onButton && (event.key === 'Enter' || event.key === ' ')) {
+        return;
+      }
+
+      /**
        * A KEY SOMETHING ELSE HAS ALREADY ANSWERED IS NOT THIS GRAMMAR'S.
        *
        * The options list of an open question is a real widget with its own
@@ -3795,13 +3889,26 @@ function CanvasInner({
               orientation="horizontal"
               tabs={paneTabs}
               activeId={leaf.sessionId}
-              onSelect={(sessionId) => {
+              paneFocused={isFocused}
+              onSelect={(sessionId, viaPointer) => {
                 // The pane whose strip was clicked is the pane the keyboard
                 // moves to FIRST: `setFocusedPaneId` writes its ref
                 // synchronously, so the `setFocusedSessionId` below lands in
                 // this pane rather than in whichever one held focus before.
                 setFocusedPaneId(leaf.id);
                 setFocusedSessionId(sessionId);
+                // A POINTER said "I am here to type", so the caret goes where
+                // typing goes — the operator's own request, and the reason `i`
+                // stops being the price of a click. A keyboard activation of
+                // the same button does NOT: the operator is mid-grammar and
+                // the next key is likelier to be `zv` than a letter of prose.
+                // `setComposingFor` is named with the session rather than
+                // going through `beginComposing`, which reads the focused id
+                // this call is in the middle of changing.
+                if (viaPointer) {
+                  setMode('insert');
+                  setComposingFor(sessionId, true);
+                }
               }}
               onClose={(sessionId) => closePaneTab(leaf.id, sessionId)}
               onTabDragStart={(sessionId) => onTabDragStart(leaf.id, sessionId)}
@@ -3859,6 +3966,7 @@ function CanvasInner({
       closePaneTab,
       setFocusedPaneId,
       setFocusedSessionId,
+      setComposingFor,
       onTabDragStart,
       onTabDragEnd,
       onPaneDragOver,

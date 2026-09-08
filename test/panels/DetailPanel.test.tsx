@@ -202,13 +202,24 @@ describe('the in and out rules do not date a turn the model cannot date', () => 
     expect(activity()).not.toContain('just now');
   });
 
-  it('says no session is selected rather than that the session has no steps', () => {
+  it('never claims a session that does not exist has no steps', () => {
     // With nothing focused the pane read "This session has no steps yet",
-    // which names a session that does not exist.
+    // which names a session that does not exist. That is still refused.
     draw({ entry: null, decision: null });
-    const body = document.body.textContent ?? '';
-    expect(body).not.toContain('This session has no steps yet');
-    expect(body).toMatch(/no session/i);
+    expect(document.body.textContent ?? '').not.toContain('This session has no steps yet');
+  });
+
+  it('leaves the sentence to the tab strip on a desktop pane, and says it on a phone', () => {
+    // Audit F9: the empty pane stacked "no sessions open — pick one from the
+    // sidebar" (the strip, always drawn above a desktop pane) and "No session
+    // selected — pick one in the sidebar." (here) 40px apart in otherwise
+    // empty space. One sentence, said once, by the surface that is always
+    // there. A PHONE has no tab strip, so there this is that surface.
+    draw({ entry: null, decision: null });
+    expect(document.body.textContent ?? '').not.toMatch(/no session selected/i);
+    cleanup();
+    draw({ entry: null, decision: null, phone: true });
+    expect(document.body.textContent ?? '').toMatch(/no session selected/i);
   });
 });
 
@@ -1219,8 +1230,9 @@ describe('the merged column scrolls the whole turn, `in` pinned to its top', () 
     expect(inBlock?.className).toContain('sticky');
     expect(inBlock?.className).toContain('top-0');
     // Opaque, or `out` text scrolling underneath would show through the two
-    // pinned lines of `in`.
-    expect(inBlock?.className).toContain('bg-sidebar');
+    // pinned lines of `in` -- the PANE's ground since the prompt got a bubble
+    // of its own, so the backing stops bleed-through without painting a band.
+    expect(inBlock?.className).toContain('bg-canvas');
   });
 });
 
@@ -3392,11 +3404,15 @@ describe('the +1px type bump reaches everything in this pane except out', () => 
     // note); the note kept its size and its home in the prompt block, the
     // label did not survive the move to an icon.
     '10.5': 8,
-    '11': 14,
+    // +2: the folded question row's "marked, not sent" caption and the
+    // `change` control that reopens the list (audit-adjacent operator
+    // request: the option list folds away once a pick is made).
+    '11': 16,
     // -1: `WaitingNote`'s remedy line, removed with the notice.
     '11.5': 10,
     // +1: the mode popover's option rows, at the provider popover's own size.
-    '12': 16,
+    // +1: the folded question row's own mark, at the option label's size.
+    '12': 17,
     // -2: the three mode pills (one class) and `WaitingNote`'s cause line.
     '12.5': 4,
     '13': 1,

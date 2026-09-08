@@ -130,6 +130,17 @@ console.log(`${outDir}/pane-tab-order.png`);
 
 // Back to the two-tab shape the rest of this script is written against:
 // drop dogfood-4's tab and leave crosscheck-2 in front.
+//
+// HOVER THE TAB FIRST. The `×` on an inactive tab is `pointer-events: none`
+// until its tab is hovered (audit F4: `opacity: 0` removed no pointer events,
+// so every inactive tab carried an invisible close target for a pointer that
+// cannot hover). A real mouse gets there by crossing the tab, which is what
+// this now does; Playwright's own hit-target check runs before it moves, so
+// clicking the button cold is the one route a person does not have.
+await page
+  .locator('[data-session-tab]')
+  .filter({ has: page.getByLabel('close dogfood-4 tab') })
+  .hover();
 await page.getByLabel('close dogfood-4 tab').click();
 await page.waitForTimeout(150);
 await page.locator('[data-session-row="crosscheck-2"]').click();

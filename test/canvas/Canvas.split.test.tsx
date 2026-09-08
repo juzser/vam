@@ -178,10 +178,19 @@ describe('keyboard: zs / zv split the focused pane, zc closes it, zw/zW move bet
     pressChord('z', 'v');
     const [first, second] = splitPanes();
     // Empty means it holds no session, not that it is a blank rectangle: the
-    // strip says so and the composer is present but read-only, which is the
-    // pane's own pre-existing "holding nothing" presentation.
+    // strip says so, once, and the composer is WITHDRAWN.
+    //
+    // WAS: "the composer is present but read-only, which is the pane's own
+    // pre-existing 'holding nothing' presentation". That presentation was
+    // audit F8 — a `readOnly` box under an enabled record button that did
+    // nothing and did not even change the status bar, plus attach, the
+    // provider picker and the model field, six controls that cannot act. A
+    // control that cannot act is withdrawn or refuses aloud; this one is
+    // withdrawn, and `Canvas.empty-pane-composer.test.tsx` holds the whole
+    // set. What "Pick a session first" was pinning here — that the two panes
+    // present differently — the assertion below still pins from the live half.
     expect(first?.querySelector('[data-tab-strip]')?.textContent).toContain('no sessions open');
-    expect(promptInputIn(first as Element)?.placeholder).toContain('Pick a session first');
+    expect(promptInputIn(first as Element) ?? null).toBeNull();
     // The pane that took the tab is pointed at a session, so its composer is
     // not the "pick one" placeholder. (Whether it is READ-ONLY is a question
     // about the source's capabilities, not about panes — this MODEL has no
