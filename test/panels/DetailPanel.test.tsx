@@ -1763,6 +1763,68 @@ describe('the empty tabs carry no tooltip, and the other notes stay', () => {
 });
 
 /**
+ * `paneFocused` is one claim made twice — DRAWN and ANSWERING — because
+ * A15.1 mounts one `DetailPanel` PER PANE and this component was written
+ * when exactly one existed.
+ *
+ * Two window-wide behaviours were left ungated by that move, and both are
+ * pinned here rather than in the canvas because a `DetailPanel` is where
+ * they live:
+ *
+ * 1. `Alt+<digit>`. Every mounted panel answered it, so one keypress swapped
+ *    the background pane's view too — with no icon row and no note drawn
+ *    there to explain it — and `Alt+3` mounted a `TerminalTab` per pane,
+ *    each polling `capture-pane` against a session nobody is looking at.
+ * 2. Reporting the tab back for `prefs`. `prefs` remembers ONE tab and
+ *    `onTabChange` is a fresh closure every render, so two panes showing two
+ *    different tabs wrote over each other on every render, forever: measured
+ *    on the head this fixes, clicking one pane's PRs icon in a split hangs
+ *    the shell. This case fails FAST rather than hanging, which is the point
+ *    of pinning it at this level.
+ */
+describe('an unfocused pane is silent — it neither answers Alt+<digit> nor persists its tab', () => {
+  const altDigit = (digit: number) => {
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: String(digit),
+          code: `Digit${digit}`,
+          altKey: true,
+          bubbles: true,
+        }),
+      );
+    });
+  };
+
+  it('does not consume the key: the view it shows is unchanged', () => {
+    draw({ paneFocused: false, terminal: true });
+    // No icon row to read `aria-pressed` off (that is the other half of
+    // `paneFocused`), so the VIEW ITSELF is the witness: Response's turn
+    // body, not the PRs list.
+    altDigit(2);
+    expect(q('[data-prs]')).toBeNull();
+  });
+
+  it('the focused pane still does, which is what makes the case above a gate', () => {
+    draw({ paneFocused: true, terminal: true });
+    altDigit(2);
+    expect(q('[data-prs]')).not.toBeNull();
+  });
+
+  it('does not write the remembered tab — one pane holds the pen', () => {
+    const reported: string[] = [];
+    draw({ paneFocused: false, onTabChange: (next) => reported.push(next) });
+    expect(reported).toEqual([]);
+  });
+
+  it('the focused pane reports its tab, as it always did', () => {
+    const reported: string[] = [];
+    draw({ paneFocused: true, onTabChange: (next) => reported.push(next) });
+    expect(reported).toEqual(['Response']);
+  });
+});
+
+/**
  * A12.2, A2.5, A5.4: the four views are icons now, and each carries its own
  * `Alt+<digit>`. Two things are pinned here that nothing else in this file
  * does: an icon-only control still needs a REAL accessible name (a tooltip
