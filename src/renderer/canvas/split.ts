@@ -28,11 +28,20 @@
  */
 
 /**
- * One pane — VSCode's EDITOR GROUP, not one editor: it owns an ordered list
- * of open tabs and which one of them is in front. That is the whole of the
+ * One pane — VSCode's EDITOR GROUP, not one editor: it owns a list of open
+ * tabs and which one of them is in front. That is the whole of the
  * operator's report that split panes still shared one strip of tabs; the
  * strip is drawn per leaf from `sessionIds` (see `Canvas.tsx`'s `renderLeaf`)
  * rather than once for the whole column.
+ *
+ * `sessionIds` is MEMBERSHIP, not display order. It was both once, and the
+ * operator's word for the result was that the tabs in a pane came out
+ * jumbled: a session picked in the sidebar was appended here, so the strip
+ * and the sidebar listed the same sessions in two orders. The strip's order
+ * now comes from `orderedPaneTabs` (`domain/selectors.ts`), the sidebar's
+ * own — one vocabulary, the way `row`/`column` below is one. Nothing in this
+ * file may sort the list, because the order depends on session status and
+ * this file is deliberately blind to the model.
  *
  * `sessionId` is the tab in front — always a member of `sessionIds`, or
  * `null` when the pane holds nothing yet (the pre-load state
@@ -98,9 +107,10 @@ function mapLeaf(tree: SplitTree, id: string, f: (leaf: Leaf) => Leaf): SplitTre
 
 /**
  * OPEN a session in one pane and bring it to the front — VSCode's "open in
- * the active group": a session the pane does not hold yet is APPENDED as a
- * new tab (at the end, the order the strip draws, never re-sorted), and one
- * it already holds is simply activated rather than duplicated.
+ * the active group": a session the pane does not hold yet joins the pane's
+ * membership as a new tab, and one it already holds is simply activated
+ * rather than duplicated. Appending is arbitrary and means nothing on
+ * screen — see `Leaf` on why the strip's order is not read from here.
  *
  * `sessionId` may be `null` — a deliberate "point at nothing", the same
  * value the pre-load leaf starts with. It clears which tab is in front and

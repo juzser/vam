@@ -73,10 +73,58 @@ async function chord(a, b, label, expected) {
   }
 }
 
-// Focus factory-sse-1, then open crosscheck-2 in the same pane — A15.5 makes
-// a strip list the tabs of ITS OWN pane, so a second tab has to be opened
-// from the sidebar before there is one to drag or to leave behind.
+/** One pane's tab titles with the leading session glyph stripped. */
+async function tabTitlesInPane(at) {
+  const texts = await tabsInPane(at);
+  return texts.map((text) => text.replace(/^[^\p{ASCII}]+\s*/u, '').trim());
+}
+/** The ids the sidebar lists, top to bottom — its canonical order. */
+async function sidebarOrder() {
+  return page.locator('[data-session-row]').evaluateAll((rows) =>
+    rows.map((row) => row.getAttribute('data-session-row')),
+  );
+}
+
+// --- The tab ORDER in a pane. The operator: "the way tabs are arranged in
+// the pane still isn't right — when I focus a session in the sidebar, the
+// tabs shown in the pane get jumbled." The strip drew the leaf's own
+// `sessionIds`, which is the order the tabs were OPENED in, so the strip and
+// the sidebar listed the same sessions two different ways.
+//
+// Opened here deliberately BACKWARDS — the done one first, the waiting one
+// last — so insertion order and the sidebar's order are opposites and only
+// one of them can be on screen. Asserted against the sidebar as it is
+// actually drawn, never a hardcoded list: the point is that the two surfaces
+// agree, not that either matches a sequence typed into this file.
+await page.locator('[data-session-row="dogfood-4"]').click();
+await page.waitForTimeout(150);
+await page.locator('[data-session-row="crosscheck-2"]').click();
+await page.waitForTimeout(150);
 await page.locator('[data-session-row="factory-sse-1"]').click();
+await page.waitForTimeout(150);
+const stripOrder = await tabTitlesInPane(0);
+const listOrder = (await sidebarOrder()).filter((id) => stripOrder.includes(id));
+console.log('opened dogfood-4, crosscheck-2, factory-sse-1 — strip reads:', stripOrder);
+console.log('the sidebar, narrowed to those three:', listOrder);
+if (stripOrder.length !== 3) {
+  throw new Error(
+    `the pane should hold all three factory sessions as tabs, it holds ${stripOrder.length}: ` +
+      `${stripOrder.join(', ')}.`,
+  );
+}
+if (JSON.stringify(stripOrder) !== JSON.stringify(listOrder)) {
+  throw new Error(
+    `the pane's strip reads ${stripOrder.join(', ')} but the sidebar lists the same three as ` +
+      `${listOrder.join(', ')}. A pane draws its tabs in the sidebar's order — two surfaces ` +
+      'showing one set of sessions in two orders is the "jumbled" the operator reported.',
+  );
+}
+await page.screenshot({ path: `${outDir}/pane-tab-order.png` });
+console.log(`${outDir}/pane-tab-order.png`);
+
+// Back to the two-tab shape the rest of this script is written against:
+// drop dogfood-4's tab and leave crosscheck-2 in front.
+await page.getByLabel('close dogfood-4 tab').click();
 await page.waitForTimeout(150);
 await page.locator('[data-session-row="crosscheck-2"]').click();
 await page.waitForTimeout(150);

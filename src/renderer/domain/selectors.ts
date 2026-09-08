@@ -259,3 +259,33 @@ export function orderedSessions(model: CanvasModel): SessionEntry[] {
   }
   return ordered;
 }
+
+/**
+ * One pane's tabs in the order its strip draws them: `orderedSessions`,
+ * narrowed to the sessions that pane holds.
+ *
+ * A pane's `Leaf.sessionIds` (`canvas/split.ts`) is MEMBERSHIP, not order —
+ * which tabs are open here, appended as they were opened. The operator's
+ * report was what happens when a strip prints that list directly: picking a
+ * session in the sidebar dropped its tab at the far end of the strip, so the
+ * two surfaces listing the same sessions listed them two different ways and
+ * neither told you where to look next.
+ *
+ * DERIVED, never stored, and that is the reason this is a selector rather
+ * than a sort inside `setPaneSession`: the canonical order is a function of
+ * session STATUS, so an order written into the leaf would be correct exactly
+ * until something finished. The sidebar re-reads its order from the model on
+ * every render; a strip that agrees with it has to do the same.
+ *
+ * An id with no session left — closed, but not yet pruned — draws nothing
+ * rather than a hole, the same tolerance the strip has always had, and a
+ * duplicate id draws one tab, because this filters the sessions rather than
+ * mapping the ids.
+ */
+export function orderedPaneTabs(
+  ordered: readonly SessionEntry[],
+  held: readonly string[],
+): SessionEntry[] {
+  const members = new Set(held);
+  return ordered.filter((entry) => members.has(entry.session.id));
+}

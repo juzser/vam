@@ -66,7 +66,7 @@ import {
 } from '../domain/optimistic.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
-import { orderedSessions } from '../domain/selectors.js';
+import { orderedPaneTabs, orderedSessions } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain/session-filter.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
@@ -3621,22 +3621,21 @@ function CanvasInner({
           : (entriesById.get(leaf.sessionId) ?? null);
       const splitCount = leaves(panes).length;
       /**
-       * THIS PANE's own tabs, in the order it opened them — the leaf's list
-       * resolved against the model, never `entries`' whole project. A id
-       * whose session has gone draws nothing until the prune effect above
-       * catches up, and A13.1's project scoping is kept here as well: a
-       * strip only ever lists the ACTIVE project's sessions, so a pane left
-       * over from another project cannot draw one.
+       * THIS PANE's own tabs, in the SIDEBAR's order — the leaf's list
+       * resolved against the model through `orderedPaneTabs`, never
+       * `entries`' whole project. The leaf's own list is the order the tabs
+       * were opened in, which is what the operator saw as jumbled: a pick in
+       * the sidebar landed at the far end of a strip listing the same
+       * sessions a different way. The order rule stays in `selectors.ts`
+       * alone, and it is re-read every render because it depends on session
+       * status. An id whose session has gone draws nothing until the prune
+       * effect above catches up, and A13.1's project scoping is kept here as
+       * well: a strip only ever lists the ACTIVE project's sessions, so a
+       * pane left over from another project cannot draw one.
        */
-      const paneTabs = leaf.sessionIds.flatMap((sessionId) => {
-        const tabEntry = entriesById.get(sessionId);
-        if (tabEntry === undefined) {
-          return [];
-        }
-        return activeProjectId !== null && tabEntry.project.id !== activeProjectId
-          ? []
-          : [tabEntry];
-      });
+      const paneTabs = orderedPaneTabs(allEntries, leaf.sessionIds).filter(
+        (tabEntry) => activeProjectId === null || tabEntry.project.id === activeProjectId,
+      );
       return (
         // Not a control and not a keyboard stop of its own -- the real
         // interactive content is the `DetailPanel` instance inside it,
@@ -3712,6 +3711,7 @@ function CanvasInner({
     [
       focusedPaneId,
       focusedEntry,
+      allEntries,
       entriesById,
       activeProjectId,
       panes,
