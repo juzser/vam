@@ -3215,18 +3215,6 @@ function CanvasInner({
             ),
           );
           return;
-        case 'zoom':
-          // The zoom controls left with the graph they scaled. Unlike `h`/`l`
-          // just above, nothing in the tab strip needs a zoom-shaped meaning,
-          // so this chord stays a binding with no home yet rather than being
-          // re-homed here: it still fires, and reports the honest fact that
-          // there is nothing left to zoom. Step 3 decides what, if anything,
-          // it becomes.
-          setStatus('nothing to zoom — the canvas view is gone');
-          return;
-        case 'fitView':
-          setStatus('nothing to fit — the canvas view is gone');
-          return;
         case 'splitPane':
           splitFocused(action.orientation);
           return;
