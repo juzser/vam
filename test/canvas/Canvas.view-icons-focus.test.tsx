@@ -11,8 +11,18 @@
  * "Focused" is the PANE the canvas says is focused (`focusedPaneId`, the same
  * fact `data-split-focused` already paints), never hover: a mouse crossing a
  * background pane is not the keyboard moving there, and an icon row that
- * appeared under the pointer would draw in a pane whose Alt+digit does
- * nothing.
+ * appeared under the pointer would draw in a pane the keyboard is not in.
+ *
+ * DRAWING THE ICONS AND ANSWERING THE KEY ARE TWO CLAIMS, and this file used
+ * to make only the first while its header asserted the second ("a pane whose
+ * Alt+digit does nothing"). It did nothing of the sort: `DetailPanel`'s
+ * `Alt+<digit>` was a bare `window` listener written when exactly one panel
+ * was ever mounted, so once `renderLeaf` mounted one per pane EVERY pane
+ * answered the key — the background one swapping its content with no icon
+ * row and no note to explain it, and `Alt+3` mounting a `TerminalTab` per
+ * pane, each polling `capture-pane` against a session nobody is looking at.
+ * The last case below is the guard for that, and it is why this file presses
+ * the key rather than only counting icon rows.
  *
  * HIDDEN MUST NOT MEAN UNREACHABLE. `ViewIcons` promises every icon is a real
  * button that Tab reaches and `aria-pressed` describes; this file pins that
@@ -21,7 +31,7 @@
  * focused pane and keeps them.
  */
 
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
@@ -52,6 +62,21 @@ afterEach(cleanup);
 function press(key: string) {
   act(() => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+  });
+}
+
+/** A bare `Alt+<digit>`, the combination `DetailPanel` claims — `code` is
+ *  what it matches on, not `key`. */
+function altDigit(digit: number) {
+  act(() => {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: String(digit),
+        code: `Digit${digit}`,
+        altKey: true,
+        bubbles: true,
+      }),
+    );
   });
 }
 
@@ -96,6 +121,24 @@ describe('the view icons are drawn in the focused pane only', () => {
     expect(bars()).toHaveLength(1);
     expect(iconsIn(focusedPane()).length).toBeGreaterThan(0);
     expect(iconsIn(document.querySelector(`[data-split-pane="${first}"]`))).toHaveLength(0);
+  });
+
+  it('only the focused pane ANSWERS Alt+<digit> — drawing the icons is not the whole claim', () => {
+    render(<Canvas model={MODEL} />);
+    // Two panes each holding a session: `zv` moves a1 into the new pane,
+    // `zw` returns to the emptied one, and the sidebar fills it with a2.
+    pressChord('z', 'v');
+    pressChord('z', 'w');
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('[data-session-row]')][1] as HTMLElement);
+    });
+    expect(panes()).toHaveLength(2);
+    altDigit(2);
+    // `[data-prs]` is what the PRs view draws — readable in a pane that draws
+    // no icon row, which `aria-pressed` is not.
+    const prs = [...document.querySelectorAll('[data-prs]')];
+    expect(prs).toHaveLength(1);
+    expect(focusedPane()?.contains(prs[0] as Node)).toBe(true);
   });
 
   it('the focused pane keeps real, reachable buttons — not an inert row', () => {

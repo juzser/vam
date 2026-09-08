@@ -419,7 +419,13 @@ export function nearestEdge(x: number, y: number, width: number, height: number)
  *    shell;
  * 3. otherwise the picked session is opened in the pane that had focus in
  *    this project, or in the leftmost surviving pane when that one went with
- *    its sessions.
+ *    its sessions — UNLESS a surviving pane already holds it, in which case
+ *    the keyboard goes there and nothing is opened. PR 268's rule is that a
+ *    session lives in exactly one pane, and this was the last route that
+ *    broke it: coming back by clicking a session another remembered pane
+ *    held added a second copy of it here, and two `TerminalTab`s over one
+ *    tmux session each `resize` it to their own width. `paneHolding` is the
+ *    same answer the sidebar already gives.
  *
  * Returns the pane the keyboard should land in alongside the tree, because
  * only this function knows which of the three cases happened. Pure and total
@@ -435,7 +441,10 @@ export function restoreLayout(
 ): { readonly tree: SplitTree; readonly paneId: string } {
   const pruned = pruneClosedTabs(stored, isOpen);
   const surviving = leaves(pruned).filter((leaf) => leaf.sessionIds.length > 0);
-  const target = surviving.find((leaf) => leaf.id === focusedPaneId) ?? surviving[0];
+  const target =
+    surviving.find((leaf) => leaf.sessionIds.includes(sessionId)) ??
+    surviving.find((leaf) => leaf.id === focusedPaneId) ??
+    surviving[0];
   if (target === undefined) {
     return { tree: singlePane(sessionId, fallbackId), paneId: fallbackId };
   }

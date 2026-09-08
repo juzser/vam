@@ -528,10 +528,13 @@ export type DetailPanelProps = {
    * notion of focus in this file could disagree with the ring the canvas
    * paints (`data-split-focused`).
    *
-   * It gates ONE thing: whether the view-icon overlay is drawn. Operator
-   * instruction -- the four icons repeated in every pane of a split, over
-   * content whose Alt+digit the background pane cannot consume anyway
-   * (`tabRequest` is already focused-only). Hidden means NOT DRAWN, never
+   * It gates TWO things, and they are the same claim twice: whether the
+   * view-icon overlay is DRAWN, and whether this instance's `Alt+<digit>`
+   * listener ANSWERS. Operator instruction -- the four icons repeated in
+   * every pane of a split, over content the background pane must not be
+   * swapping either. The second half was missing while this comment asserted
+   * it, so every pane consumed the key at once; `tabRequest` was already
+   * focused-only, and now the two routes agree. Hidden means NOT DRAWN, never
    * drawn-and-inert: `ViewIcons`' promise that each icon is a real button Tab
    * reaches is kept whole in the pane that has focus, and an invisible row
    * still catching clicks would be the worse trade.
@@ -2295,10 +2298,21 @@ export function DetailPanel(props: DetailPanelProps) {
    * Response while a source withdraws the Terminal tab, and persisting that
    * would let walking past a session without a terminal erase a choice the
    * operator never changed.
+   *
+   * FROM THE FOCUSED PANE ONLY, and this one is not a preference: `prefs`
+   * holds ONE remembered tab and `onTabChange` is a fresh closure every
+   * render, so this effect fires on every render — with two panes showing
+   * two different tabs, each write re-rendered the other pane, which wrote
+   * back, forever. Measured on this head before the fix: clicking the PRs
+   * icon in one pane of a split hangs the shell in a synchronous loop of
+   * `savePrefs`. One writer, the pane holding the keyboard, is what makes
+   * "the tab a previous run left showing" a single fact again; a background
+   * pane's tab is not the operator's current choice anyway.
    */
   useEffect(() => {
+    if (!paneFocused) return;
     onTabChange?.(tab);
-  }, [tab, onTabChange]);
+  }, [tab, onTabChange, paneFocused]);
   const tabRequest = props.tabRequest ?? null;
   // A withdrawn tab is not refused here: `current` below already falls back to
   // Response when the showing tab is not on offer, so asking for Terminal
@@ -2337,10 +2351,19 @@ export function DetailPanel(props: DetailPanelProps) {
    *
    * A WINDOW LISTENER OF ITS OWN, not a new case in the shared chord switch
    * (`keyboard/chords.ts`/`Canvas.tsx`) — the pattern A5.1 already
-   * established for `ProjectPicker`/`GroupPicker`/`IconPicker`, and safe for
-   * the same reason it is there: exactly one `DetailPanel` is ever mounted
-   * at a time (`Canvas.tsx`'s own `DetailSlot` doc), so this can never
-   * double-fire the way one per open tab would.
+   * established for `ProjectPicker`/`GroupPicker`/`IconPicker`.
+   *
+   * GATED ON `paneFocused`, which is what makes a window listener safe HERE.
+   * It was written when exactly one `DetailPanel` was ever mounted, and said
+   * so; A15.1's `renderLeaf` mounts one per pane and deleted that invariant
+   * without deleting the sentence. Ungated, one `Alt+2` fired in every open
+   * pane at once: the background pane swapped its content with no icon row
+   * and no note on screen to explain it, both instances wrote
+   * `prefs.detailTab`, and `Alt+3` mounted a `TerminalTab` PER PANE, each
+   * polling `capture-pane`/`resize-window` against a session the operator is
+   * not looking at — the laziness the Terminal branch below promises, undone
+   * by a keystroke. Focused-only matches `tabRequest`, which the canvas has
+   * always sent to one pane.
    *
    * THE CONTRACT (A5.3): decline what this widget does not own. A key typed
    * into an INPUT/TEXTAREA (the composer, the terminal's own hidden field)
@@ -2351,6 +2374,7 @@ export function DetailPanel(props: DetailPanelProps) {
    * promise nothing else has.
    */
   useEffect(() => {
+    if (!paneFocused) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
       const target = event.target;
@@ -2379,7 +2403,7 @@ export function DetailPanel(props: DetailPanelProps) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [tabs]);
+  }, [tabs, paneFocused]);
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
   /**

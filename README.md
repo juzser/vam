@@ -208,8 +208,6 @@ whichever your platform uses.
 | `Mod-k` | Open the command palette |
 | `Mod-1` `Mod-2` `Mod-3` `Mod-4` `Mod-5` `Mod-6` `Mod-7` `Mod-8` `Mod-9` | Jump to a position — a session in the sidebar, or a tab in the response pane, whichever pane has the keyboard (`Mod-9` is always the last one) |
 | `<` / `>` | Narrow / widen the focused side pane |
-| `+` / `-` | Zoom the canvas in / out |
-| `Z` | Fit the whole canvas in view |
 | `Escape` | Cancel whatever is half-typed |
 
 Chord prefixes — press the first key, then the second:

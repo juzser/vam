@@ -132,16 +132,19 @@ describe('Mod-<digit> is a position in whatever pane has the keyboard', () => {
   });
 
   /**
-   * THE DIGIT COUNTS WHAT THE BAR DRAWS. This model's source declares no
-   * terminal, so the bar reads `Response · PRs · Agents` and Agents is
-   * visibly third. It used to be `Mod-4`, because the handler indexed the
-   * unfiltered constant: `Mod-3` resolved to the withdrawn Terminal tab and
-   * silently landed back on Response.
+   * THE DIGIT NAMES A VIEW, and the same view every time — `tabForDigit`'s
+   * rule (A15.6), which `Alt+<digit>` has followed since it was written and
+   * which this chord did not. It counted the DRAWN list positionally, the
+   * very defect `tabForDigit` was added to abolish: with this model's source
+   * declaring no terminal, `Mod-3` opened Agents because Agents had slid
+   * into third place, while the icon beside it captioned itself `Alt+4` and
+   * `Alt+3` refused. One digit, two answers, depending on which route the
+   * operator took.
    */
   it('switches TAB once the keyboard is in the response pane', () => {
     mountFocused();
     intoResponsePane();
-    digitChord(3);
+    digitChord(4);
     expect(selectedTab()).toBe('agents');
     digitChord(2);
     expect(selectedTab()).toBe('prs');
@@ -149,10 +152,31 @@ describe('Mod-<digit> is a position in whatever pane has the keyboard', () => {
     expect(focusedTitle()).toBe('a1');
   });
 
+  /**
+   * The two routes to a view must agree, because the operator reads one of
+   * them off the icons and presses the other. `Alt+4` is what the Agents
+   * icon captions itself with here; `Mod-4` is the same view, and `Mod-3` is
+   * Terminal's digit whether or not this source has one.
+   */
+  it('agrees with the icon captions: the digit is a NAME, not a position', () => {
+    mountFocused();
+    intoResponsePane();
+    const caption =
+      document.querySelector('[data-view="agents"]')?.getAttribute('aria-label') ?? '';
+    expect(caption).toContain('4');
+    digitChord(3);
+    // Terminal is TABS[2] and this source has none: refused, aloud, and NOT
+    // silently landed on whatever is drawn third.
+    expect(selectedTab()).toBe('response');
+    expect(statusBar()).toContain('Terminal');
+    digitChord(4);
+    expect(selectedTab()).toBe('agents');
+  });
+
   it('goes back to sessions when the keyboard goes back to the list', () => {
     mountFocused();
     intoResponsePane();
-    digitChord(3);
+    digitChord(4);
     expect(selectedTab()).toBe('agents');
     backToList();
     digitChord(2);
@@ -185,14 +209,14 @@ describe('Mod-<digit> is a position in whatever pane has the keyboard', () => {
   it('refuses the digit of a tab that was WITHDRAWN, rather than landing nowhere', () => {
     mountFocused();
     intoResponsePane();
-    // Position 4 exists in the constant (Agents was fourth of four) and does
-    // not exist on this bar. Asking for it must be refused, not accepted and
-    // silently reverted to Response.
+    // 3 is Terminal's digit in `TABS`, and this source has none. Asking for
+    // it must be refused BY NAME — not accepted and silently reverted to
+    // Response, and not quietly handed to whatever slid into third place.
     digitChord(2);
     expect(selectedTab()).toBe('prs');
-    digitChord(4);
+    digitChord(3);
     expect(selectedTab()).toBe('prs');
-    expect(statusBar()).toContain('only 3 tabs');
+    expect(statusBar()).toContain('Terminal');
   });
 
   it('the ninth is the LAST session while the sidebar has the keyboard', () => {
@@ -206,7 +230,7 @@ describe('Mod-<digit> is a position in whatever pane has the keyboard', () => {
     intoResponsePane();
     const box = container.querySelector('[aria-label="prompt to session"]') as HTMLTextAreaElement;
     box.focus();
-    digitChord(3, box);
+    digitChord(4, box);
     expect(selectedTab()).toBe('agents');
   });
 

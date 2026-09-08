@@ -89,7 +89,7 @@ import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { NEW_PROJECT_PENDING, SessionList } from '../panels/SessionList.js';
 import { resolveSessionGlyph } from '../panels/session-icon.js';
-import { visibleTabs } from '../panels/tabs.js';
+import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
@@ -1668,8 +1668,29 @@ function CanvasInner({
    * and whichever project is active, recomputed on every render exactly the
    * way `entries` itself already is.
    *
-   * "The active project" is DEFINED here as the focused session's project —
-   * the derivation the epic itself calls obvious. The second case the epic
+   * "The active project" is DEFINED here as the focused session's project,
+   * looked up UNFILTERED, and — when there is no focused session — as the
+   * project of whatever the panes are actually holding.
+   *
+   * Both halves are corrections to "the focused session's project", the
+   * derivation the epic calls obvious, and both are the same mistake: this
+   * value is what A15.5's invariant is ABOUT (every pane on screen holds
+   * sessions of the project on screen), so deriving it from one session that
+   * may not be there let the invariant switch itself off. A `null` here does
+   * not mean "no project on screen", it meant "do not collapse", and
+   * `setFocusedSessionId` reads it to decide whether a pick is a project
+   * SWITCH. Two ways to reach that: a search or status pill hiding the
+   * focused session (the filtered lookup answered `null` for a session that
+   * is plainly still open), and the keyboard sitting in a pane that holds
+   * nothing — which since PR 268 is where `zv` then `zw` leaves it, on purpose.
+   * Either way, picking a session in another project skipped the collapse and
+   * skipped remembering the layout: a pane went on drawing the previous
+   * project's session under a strip, scoped to the new project, reading "no
+   * sessions open".
+   *
+   * The panes' own sessions are the right fallback because they are the
+   * screen: the strip beside them is scoped to this value, so answering with
+   * the project they hold is answering with what the operator can see. The second case the epic
    * flags — a project selected in the sidebar with NO session focused — has
    * no live UI action to select a project independently of a session
    * (verified: `SessionList.tsx`'s `data-project-heading` binds a click only
@@ -1682,7 +1703,21 @@ function CanvasInner({
    * for an empty tab list. If a future surface lets the operator select a
    * project without a session, THIS is the one place that needs to learn it.
    */
-  const activeProjectId = focusedEntry?.project.id ?? null;
+  const activeProjectId = useMemo(() => {
+    const focused = focusedSessionId === null ? null : entriesById.get(focusedSessionId);
+    if (focused !== undefined && focused !== null) {
+      return focused.project.id;
+    }
+    for (const leaf of leaves(panes)) {
+      for (const held of leaf.sessionIds) {
+        const entry = entriesById.get(held);
+        if (entry !== undefined) {
+          return entry.project.id;
+        }
+      }
+    }
+    return null;
+  }, [focusedSessionId, entriesById, panes]);
   const projectTabs = useMemo(
     () => (activeProjectId === null ? [] : entries.filter((e) => e.project.id === activeProjectId)),
     [entries, activeProjectId],
@@ -1705,14 +1740,46 @@ function CanvasInner({
    * cannot churn the render, and it never closes the last pane. Skipped
    * entirely while the model is empty — that is the pre-load state, not
    * every session closing at once.
+   *
+   * AND THE KEYBOARD GOES WITH THE PANE THAT CLOSED. A pane emptied this way
+   * is closed, so this is the one site that can leave `focusedPaneId` naming
+   * a leaf that no longer exists — `splitFocused`, `onPaneDrop` and
+   * `closePaneTab` each already refuse or repair such an id, and the state
+   * they guard against was created here. Stale, the shell wedges rather than
+   * breaking loudly: no pane wears the focus, `findLeaf` answers `null` so
+   * `focusedSessionId` is `null` and every chord replies "pick a session
+   * first", and a sidebar click aims `setPaneSession` at nothing and does
+   * nothing at all. "Land focus on something real" below only rescues that
+   * by accident — when the candidate it re-picks happens to be held by a
+   * surviving pane — so the repair belongs here, beside the close, and is
+   * `closePaneTab`'s rule read twice: the next pane round, else the first
+   * one left.
+   *
+   * Read through `panesRef` rather than a `setPanes` updater because the
+   * repair has to know WHICH tree came back; a `setFocusedPaneId` inside an
+   * updater would be a side effect in a function React may call twice.
    */
   useEffect(() => {
     if (allEntries.length === 0) {
       return;
     }
     const open = new Set(allEntries.map((entry) => entry.session.id));
-    setPanes((tree) => pruneClosedTabs(tree, (id) => open.has(id)));
-  }, [allEntries]);
+    const before = panesRef.current;
+    const pruned = pruneClosedTabs(before, (id) => open.has(id));
+    if (pruned === before) {
+      return;
+    }
+    setPanes(pruned);
+    const focused = focusedPaneIdRef.current;
+    if (findLeaf(pruned, focused) !== null) {
+      return;
+    }
+    const next = stepPane(before, focused, 1);
+    const survivor = leaves(pruned).find((leaf) => leaf.id === next) ?? leaves(pruned)[0];
+    if (survivor !== undefined) {
+      setFocusedPaneId(survivor.id);
+    }
+  }, [allEntries, setFocusedPaneId]);
 
   /**
    * The other half of the per-pane `+`: the session it started, once it
@@ -2919,15 +2986,29 @@ function CanvasInner({
               setStatus('the detail pane is hidden — z0 brings it back');
               return;
             }
-            // THE DRAWN LIST, not the constant. A source with no terminal
-            // has that tab withdrawn and everything after it moves up a
-            // position, so indexing the constant opened a tab that was not
-            // there -- accepted, then silently reverted to Response -- and
-            // refused with a count the operator could see was wrong.
+            // THROUGH `tabForDigit`, the one place a digit becomes a name,
+            // and the same derivation `Alt+<digit>` already uses. Two
+            // mistakes have lived on this line: counting the CONSTANT while
+            // the bar drew a filtered list, and then counting the DRAWN list
+            // positionally -- which is the defect `tabForDigit` was added to
+            // abolish, shipped again here. With Terminal withdrawn it opened
+            // Agents for `Mod-3` while the icon beside it captioned `Alt+4`,
+            // so one digit meant two views depending on the route taken, and
+            // the meaning slid as Terminal came and went.
+            //
+            // Two refusals, because they are two facts -- `DetailPanel`'s
+            // own wording, for the same reason it has two: a digit inside
+            // `TABS` names a real view THIS SOURCE has withdrawn, and a
+            // digit past `TABS` names nothing at all.
             const drawn = visibleTabs(terminalTab);
-            const tab = drawn[action.digit - 1];
+            const tab = tabForDigit(drawn, action.digit);
             if (tab === undefined) {
-              setStatus(`only ${drawn.length} tab${drawn.length === 1 ? '' : 's'}`);
+              const named = TABS[action.digit - 1];
+              setStatus(
+                named === undefined
+                  ? `only ${drawn.length} tab${drawn.length === 1 ? '' : 's'}`
+                  : `${named} — this source has none`,
+              );
               return;
             }
             setTabRequest({ tab });
@@ -3133,18 +3214,6 @@ function CanvasInner({
               ALL_VISIBLE,
             ),
           );
-          return;
-        case 'zoom':
-          // The zoom controls left with the graph they scaled. Unlike `h`/`l`
-          // just above, nothing in the tab strip needs a zoom-shaped meaning,
-          // so this chord stays a binding with no home yet rather than being
-          // re-homed here: it still fires, and reports the honest fact that
-          // there is nothing left to zoom. Step 3 decides what, if anything,
-          // it becomes.
-          setStatus('nothing to zoom — the canvas view is gone');
-          return;
-        case 'fitView':
-          setStatus('nothing to fit — the canvas view is gone');
           return;
         case 'splitPane':
           splitFocused(action.orientation);

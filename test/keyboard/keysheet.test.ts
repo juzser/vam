@@ -65,6 +65,37 @@ describe('the sheet is generated from the binding tables', () => {
   });
 });
 
+/**
+ * THE SHEET MAY NOT CAPTION A KEY THAT ONLY EVER REFUSES.
+ *
+ * The generated sheet's property is "no row without a binding". `+`, `-` and
+ * `Z` had bindings, so they had rows — captioned 'zoom in', 'zoom out' and
+ * 'fit the whole canvas in view' while their handlers answered "nothing to
+ * zoom — the canvas view is gone". The canvas was deleted in 0.2, and a
+ * caption for a control that cannot act is the defect this module exists to
+ * make impossible, wearing the one shape the derivation does not catch: the
+ * binding was real and did nothing.
+ *
+ * "Absent, not dimmed" is the codebase's rule, so the bindings are gone
+ * rather than relabelled, and the keys are free for a real meaning.
+ */
+describe('nothing survives that names the deleted canvas view', () => {
+  it('captions no row for a view vam no longer has', () => {
+    for (const row of sheetRows()) {
+      expect(row.label.toLowerCase(), `sheet row "${row.keys}"`).not.toMatch(
+        /zoom|fit the whole canvas/,
+      );
+    }
+  });
+
+  it('leaves the keys it used to hold unbound', () => {
+    const bound = new Set(boundKeys().map(({ keys }) => keys));
+    for (const key of ['+', '-', 'Z']) {
+      expect(bound.has(key), `"${key}" is still bound to something`).toBe(false);
+    }
+  });
+});
+
 describe('labels', () => {
   it('gives every bound action a non-empty label in a known group', () => {
     for (const { keys, action } of boundKeys()) {
