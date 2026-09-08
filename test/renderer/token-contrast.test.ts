@@ -141,16 +141,14 @@ describe('token contrast, per theme', () => {
         expect(measure(pairs, 4.5)).toEqual({ pairs: 2, failing: [] });
       });
 
-      it('marks the cursor at 3:1 against the canvas and against a grid dot', () => {
+      it('marks the cursor at 3:1 against the canvas', () => {
         // A non-text indicator owes 3:1 (WCAG 1.4.11), and the ring is the only
         // thing that says which node the cursor is on — the card border does not
-        // vary with focus and the sidebar highlights the SESSION. The grid dot
-        // is in here because the ring is 1px and is drawn across the dots.
-        const pairs = [
-          ['--vam-cursor-ring', '--vam-canvas'],
-          ['--vam-cursor-ring', '--vam-dots'],
-        ] as const;
-        expect(measure(pairs, 3)).toEqual({ pairs: 2, failing: [] });
+        // vary with focus and the sidebar highlights the SESSION. `--vam-dots`
+        // (the grid-dot token this pair used to also check) is gone with the
+        // canvas it was drawn on — 0.2 migration, A12.1 (epic.md decision 5).
+        const pairs = [['--vam-cursor-ring', '--vam-canvas']] as const;
+        expect(measure(pairs, 3)).toEqual({ pairs: 1, failing: [] });
       });
 
       it('draws the segmented control border at 3:1 against the fill it encloses', () => {

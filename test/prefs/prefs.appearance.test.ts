@@ -12,7 +12,6 @@ import {
   applyPalette,
   clearPalette,
   clearPaletteColor,
-  DEFAULT_FOCUS_SHARE,
   EMPTY_PREFS,
   PALETTE_TOKENS,
   paletteValue,
@@ -141,7 +140,6 @@ describe('a payload written before either field existed', () => {
   it('loads, uses the defaults for both, and resets nothing else', () => {
     const old = {
       theme: 'light',
-      focusViewportShare: 0.45,
       panes: { sidebar: 300, detail: 400 },
       filters: { hideAgentStarted: false, onlyPrompted: true },
     };
@@ -149,11 +147,9 @@ describe('a payload written before either field existed', () => {
     expect(prefs.palette).toEqual({ dark: {}, light: {} });
     expect(prefs.keyBindings).toEqual({});
     expect(prefs.theme).toBe('light');
-    expect(prefs.focusViewportShare).toBe(0.45);
     expect(prefs.panes.sidebar).toBe(300);
     expect(prefs.filters.hideAgentStarted).toBe(false);
     expect(prefs.filters.onlyPrompted).toBe(true);
-    expect(EMPTY_PREFS.focusViewportShare).toBe(DEFAULT_FOCUS_SHARE);
   });
 
   it('survives a garbage value in either field, per field', () => {

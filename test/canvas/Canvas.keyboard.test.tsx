@@ -20,12 +20,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { SmithApiError, type SmithClient } from '../../src/renderer/adapter/client.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
-import {
-  DEFAULT_PANES,
-  DETAIL_MIN,
-  SIDEBAR_MAX,
-  SIDEBAR_MIN,
-} from '../../src/renderer/prefs/panes.js';
+import { DEFAULT_PANES, SIDEBAR_MAX, SIDEBAR_MIN } from '../../src/renderer/prefs/panes.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
 import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
@@ -161,10 +156,13 @@ const statusFull = () =>
 
 const actionPane = () =>
   document.querySelector('[data-action-pane]')?.getAttribute('data-action-pane') ?? '';
-// The sidebar renders first among the two resizable `<aside>`s; the detail
-// pane is the one that also carries `data-action-pane`.
+// The sidebar renders first among the two resizable `<aside>`s.
 const sidebarAside = () => document.querySelectorAll('aside')[0] as HTMLElement | undefined;
-const detailAside = () => document.querySelector<HTMLElement>('[data-action-pane]') ?? undefined;
+// A12.1: the width now lives on `[data-detail-pane]`, the wrapper that also
+// holds the tab strip — `DetailPanel`'s own root (`[data-action-pane]`) is
+// handed `width={undefined}` and fills it via `w-full`, so it carries no
+// inline width of its own any more.
+const detailAside = () => document.querySelector<HTMLElement>('[data-detail-pane]') ?? undefined;
 const width = (el: HTMLElement | undefined) => Number.parseFloat(el?.style.width ?? 'NaN');
 
 /**
@@ -1466,25 +1464,38 @@ describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
     expect(width(sidebarAside())).toBe(SIDEBAR_MAX);
   });
 
-  it('routes to the detail pane once I has focused it, leaving the sidebar untouched', () => {
+  /**
+   * A12.1: the detail pane has no stored width of its own any more — it
+   * fills everything to the sidebar's right (`panes.ts`) — so once `I` has
+   * moved the keyboard there, `<`/`>` still move the ONE real seam, the
+   * sidebar's, approached from the other side: "narrow the pane I am in"
+   * (`<`, meaning the detail pane) is "grow the sidebar", and the sign
+   * flips relative to Select. This replaces the old
+   * "leaving the sidebar untouched" claim, which described a detail pane
+   * that no longer exists.
+   */
+  it('resizes the sidebar from Insert too, with the sign flipped', () => {
     render(<Canvas model={MODEL} />);
     press('I'); // focuses the action pane — pane === 'action'
     expect(actionPane()).toBe('active');
 
     press('<');
-    expect(width(detailAside())).toBe(DEFAULT_PANES.detail - 24);
-    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar); // untouched
+    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar + 24);
+    // The detail pane is exactly what the sidebar leaves — it shrinks in
+    // lock-step, never independently.
+    expect(width(detailAside())).toBe(1600 - (DEFAULT_PANES.sidebar + 24));
 
     press('>');
     press('>');
-    expect(width(detailAside())).toBe(DEFAULT_PANES.detail + 24);
-    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar); // still untouched
+    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar - 24);
+    expect(width(detailAside())).toBe(1600 - (DEFAULT_PANES.sidebar - 24));
 
-    // Also prove the detail pane clamps at its own MIN.
+    // Also prove the sidebar still clamps at its own MAX, reached from
+    // Insert's `<` (which grows it).
     for (let i = 0; i < 20; i++) {
       press('<');
     }
-    expect(width(detailAside())).toBe(DETAIL_MIN);
+    expect(width(sidebarAside())).toBe(SIDEBAR_MAX);
   });
 
   /**
@@ -1520,9 +1531,11 @@ describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
 
     keyOn(box as Element, 'Escape');
 
+    // The proof is the DIRECTION: Select's `<` shrinks the sidebar; Insert's
+    // grows it (the test just above this one). Had Escape failed to route
+    // the keyboard back, this same `<` would have GROWN the sidebar instead.
     press('<');
     expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar - 24);
-    expect(width(detailAside())).toBe(DEFAULT_PANES.detail);
   });
 
   it('z0 resets both panes to their defaults in one keystroke sequence', () => {
@@ -1530,14 +1543,17 @@ describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
     press('<');
     press('<');
     press('I');
-    press('>');
+    press('>'); // Insert's `>` shrinks the sidebar further (sign flipped)
     expect(width(sidebarAside())).not.toBe(DEFAULT_PANES.sidebar);
-    expect(width(detailAside())).not.toBe(DEFAULT_PANES.detail);
+    // The detail pane is always `viewport - sidebar` now (A12.1) — this
+    // still differs from its OLD stored default whenever the sidebar does,
+    // which the line above already pins.
+    expect(width(detailAside())).not.toBe(1600 - DEFAULT_PANES.sidebar);
 
     press('z');
     press('0');
     expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar);
-    expect(width(detailAside())).toBe(DEFAULT_PANES.detail);
+    expect(width(detailAside())).toBe(1600 - DEFAULT_PANES.sidebar);
   });
 
   it('writes prefs at most once per press, even one that lands exactly on a bound', () => {

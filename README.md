@@ -220,10 +220,7 @@ Chord prefixes — press the first key, then the second:
 | `gt` / `gT` | Next / previous project |
 | `gm` | Move the focused session's project into a folder, or out of one |
 | `yy` | Copy the focused step's commands |
-| `z0` | Reset both side panes to their default layout |
-| `zc` | Hide the canvas |
-| `zC` | Response pane only |
-| `zf` | Response pane in the middle, canvas as a strip |
+| `z0` | Reset both panes to their default widths and bring back any hidden pane |
 
 ## Development
 

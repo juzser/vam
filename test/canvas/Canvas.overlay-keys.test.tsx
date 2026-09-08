@@ -18,6 +18,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import { DEFAULT_PANES } from '../../src/renderer/prefs/panes.js';
 
 function session(id: string): Session {
   return {
@@ -44,12 +45,15 @@ const MODEL: CanvasModel = {
 const sheet = () => document.querySelector('[data-key-sheet]');
 const settings = () => document.querySelector('[data-settings-overlay]');
 const palette = () => document.querySelector('[cmdk-root]');
-const canvasPane = () => document.querySelector('[data-canvas-pane]');
 const focusedTitle = () =>
   document
     .querySelector('[data-row-cursor]')
     ?.closest('[data-session-row]')
     ?.querySelector('[data-row-title]')?.textContent ?? '';
+const sidebarWidth = () =>
+  Number.parseFloat(
+    (document.querySelectorAll('aside')[0] as HTMLElement | undefined)?.style.width ?? 'NaN',
+  );
 
 function press(key: string, modifiers: KeyboardEventInit = {}) {
   act(() => {
@@ -133,13 +137,26 @@ describe('an open overlay stops the canvas listening', () => {
     expect(focusedTitle()).toBe(before);
   });
 
-  it('does not let `zc` close the canvas under either overlay', () => {
+  /**
+   * 0.2 migration, A12.1: `zc` (the canvas preset chord this test used to
+   * pin) is gone with the canvas it hid — the property it was proving,
+   * "an overlay swallows every chord but Escape", is unchanged and still
+   * needs a `z`-prefixed, still-live chord to observe it through. `z0`
+   * (`resetPanes`) is that chord: it is observable (the sidebar's stored
+   * width), and it is exactly as reachable as `zc` was, keystroke for
+   * keystroke, behind the same `z` prefix.
+   */
+  it('does not let `z0` reset the panes under either overlay', () => {
     for (const { name, open, node } of [OVERLAYS[0], OVERLAYS[1]]) {
       render(<Canvas model={MODEL} />);
+      press('<'); // move the sidebar away from its default, so a reset is observable
+      expect(sidebarWidth()).toBe(DEFAULT_PANES.sidebar - 24);
       open();
       expect(node(), `${name} did not open`).not.toBeNull();
-      chord('z', 'c');
-      expect(canvasPane(), `\`zc\` reached the canvas under ${name}`).not.toBeNull();
+      chord('z', '0');
+      expect(sidebarWidth(), `\`z0\` reached the shell under ${name}`).toBe(
+        DEFAULT_PANES.sidebar - 24,
+      );
       cleanup();
       localStorage.clear();
     }
@@ -200,13 +217,18 @@ describe('the canvas hears again once the overlay closes', () => {
     expect(focusedTitle()).toBe('a2');
   });
 
-  it('lets `zc` through again after the settings overlay closes', () => {
+  it('lets `z0` through again after the settings overlay closes', () => {
     render(<Canvas model={MODEL} />);
+    press('<');
+    expect(sidebarWidth()).toBe(DEFAULT_PANES.sidebar - 24);
     openSettings();
-    chord('z', 'c');
+    chord('z', '0');
+    expect(sidebarWidth(), '`z0` reached the shell while settings was open').toBe(
+      DEFAULT_PANES.sidebar - 24,
+    );
     press('Escape');
     expect(settings()).toBeNull();
-    chord('z', 'c');
-    expect(canvasPane()).toBeNull();
+    chord('z', '0');
+    expect(sidebarWidth()).toBe(DEFAULT_PANES.sidebar);
   });
 });
