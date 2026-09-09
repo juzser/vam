@@ -213,7 +213,7 @@ describe('a key press on a divider moves a real pane', () => {
       (slot as HTMLElement).getBoundingClientRect = () =>
         ({
           width: 40,
-          height: 300,
+          height: 500,
           top: 0,
           left: 0,
           right: 0,
@@ -228,8 +228,8 @@ describe('a key press on a divider moves a real pane', () => {
     // THE OUTER ROW DOES NOT MOVE: dragging an inner divider must not reflow
     // the layout around the split it belongs to.
     expect(after.slice(0, 2)).toEqual(before.slice(0, 2));
-    expect(after[2]).toBeCloseTo((300 + PANE_RESIZE_STEP) / 600, 10);
-    expect(after[3]).toBeCloseTo((300 - PANE_RESIZE_STEP) / 600, 10);
+    expect(after[2]).toBeCloseTo((500 + PANE_RESIZE_STEP) / 1000, 10);
+    expect(after[3]).toBeCloseTo((500 - PANE_RESIZE_STEP) / 1000, 10);
   });
 });
 

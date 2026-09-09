@@ -27,6 +27,8 @@
  * drift.
  */
 
+import { DETAIL_MIN } from '../prefs/panes.js';
+
 /**
  * One pane — VSCode's EDITOR GROUP, not one editor: it owns a list of open
  * tabs and which one of them is in front. That is the whole of the
@@ -125,23 +127,37 @@ export function singlePane(sessionId: string | null, id: string): SplitTree {
 export const MIN_PANE_SHARE = 0.3;
 
 /**
- * THE USABILITY FLOOR: how narrow, in pixels, a drag may make a pane.
+ * THE USABILITY FLOOR: how small, in pixels, a drag may make a pane.
  *
- * Pixels, because usability is measured in them: at 176px a pane still draws
- * its tab strip (which scrolls), the prompt composer and its send row. Below
- * roughly that the composer's own controls start to overlap rather than
- * shrink. The structural floor above cannot express this — 0.15 of a 2400px
- * screen is 360px and of a 700px one is 105px, and neither number is about
- * the pane's contents.
+ * `DETAIL_MIN` ITSELF, not a number of its own. A split pane IS a detail
+ * pane — the same `DetailPanel`, the same transcript column, the same
+ * composer — so "how narrow can this be and stay usable" is a question this
+ * codebase has already answered, with its reasons written down: the prompt
+ * input stays usable, the two-line `.vam-clamp-2` blocks still read as two
+ * lines of prose, and the review-queue rows keep their note inputs. A second
+ * constant for one question is how two answers drift apart.
  *
- * Applied by `dividerShare`, which is the one place a pointer position or an
- * arrow key becomes a share. It is not applied on the read path: a layout
+ * MEASURED, not assumed. A first attempt used 176px, on the theory that a
+ * pane narrower than a whole sidebar could still draw a strip and a composer.
+ * It can, and the result is not usable: at 176px the floating view-icon pill
+ * covers the first prompt bubble's text, and a question card's "Chat about
+ * this" option prints on top of its own explanation. At `DETAIL_MIN` both are
+ * clean. The screenshots are in the PR.
+ *
+ * The same number on BOTH axes. A stacked pane's contents are the same
+ * contents; 320px of height is a tab strip, several lines of transcript and
+ * the composer, which is the same "still usable" this is asking about.
+ *
+ * Applied by `dividerShare`, the one place a pointer position or an arrow key
+ * becomes a share. It is deliberately NOT applied on the read path: a layout
  * remembered on a wide screen and restored on a narrow one has panes below
- * this, and re-clamping it on read would silently rewrite what the operator
- * arranged the first time the window got small (`prefs/panes.ts` learnt the
- * same lesson: clamping belongs on the render path, never on the store).
+ * this, and re-clamping on read would silently rewrite what the operator
+ * arranged the first time their window got small (`prefs/panes.ts` learnt
+ * exactly that lesson — clamping belongs on the render path, never on the
+ * store). A pair with no room for two of these is halved instead, which is
+ * `dividerShare`'s own documented degenerate case.
  */
-export const MIN_PANE_PX = 176;
+export const MIN_PANE_PX = DETAIL_MIN;
 
 /** The structural floor for a split of `count` children. */
 function sizeFloor(count: number): number {

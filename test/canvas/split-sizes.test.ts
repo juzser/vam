@@ -327,7 +327,10 @@ describe('resizeSplit — moving ONE divider, between one adjacent pair', () => 
 
 describe('dividerShare — the pixel arithmetic a drag does, in one pure place', () => {
   it('is the first pane’s share of the pair', () => {
-    expect(dividerShare(300, 1000, MIN_PANE_PX)).toBeCloseTo(0.3, 10);
+    // A pair wide enough that the minimum is not what decides the answer —
+    // the clamp has its own cases below, and a fixture where every input
+    // saturates it would prove nothing about the division itself.
+    expect(dividerShare(600, 2000, MIN_PANE_PX)).toBeCloseTo(0.3, 10);
   });
 
   it('never lets either pane of the pair fall below the pixel minimum', () => {

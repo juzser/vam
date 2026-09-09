@@ -26,8 +26,8 @@ afterEach(() => {
   cleanup();
 });
 
-const FIRST = 600;
-const SECOND = 400;
+const FIRST = 1200;
+const SECOND = 800;
 const PAIR = FIRST + SECOND;
 
 function stubRect(element: Element, width: number, height: number) {
@@ -154,7 +154,9 @@ describe('SplitResizer — the drag', () => {
     fireEvent.pointerDown(handle, { pointerId: 1, clientX: 600, clientY: 40 });
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 750, clientY: 40 });
     expect(onResize).toHaveBeenCalledWith('sp', 0, dividerShare(FIRST + 150, PAIR, MIN_PANE_PX));
-    expect(onResize.mock.calls.at(-1)?.[2]).toBeCloseTo(0.75, 10);
+    // Written out, not derived: comparing against `dividerShare` of the same
+    // inputs is a tautology, and 1350 of 2000 is what the pointer asked for.
+    expect(onResize.mock.calls.at(-1)?.[2]).toBeCloseTo(0.675, 10);
   });
 
   it('reports again on pointerup, so a drag that ends off the last move still lands', () => {
@@ -173,7 +175,8 @@ describe('SplitResizer — the drag', () => {
     const { onResize, handle } = mount({ orientation: 'column' });
     fireEvent.pointerDown(handle, { pointerId: 1, clientX: 40, clientY: 600 });
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 999, clientY: 450 });
-    expect(onResize.mock.calls.at(-1)?.[2]).toBeCloseTo(dividerShare(450, PAIR, MIN_PANE_PX), 10);
+    // 150px UP from where it started, off the leading pane's own 1200px.
+    expect(onResize.mock.calls.at(-1)?.[2]).toBeCloseTo((FIRST - 150) / PAIR, 10);
   });
 
   it('never drags the trailing pane below the pixel minimum', () => {
