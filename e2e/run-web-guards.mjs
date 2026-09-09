@@ -11,8 +11,10 @@
  * sticky prompts is PINNED at a given scroll offset and what a percentage
  * max-height actually resolves to, and -- since the tooltip
  * audit -- what a tooltip FLATTENS TO for a screen reader, whether Tab
- * reaches the element a `Note` hangs on, and the computed contrast of the tip's
- * boundary against the surface it floats over in both themes). This driver builds the web bundle, serves it with
+ * reaches the element a `Note` hangs on, the computed contrast of the tip's
+ * boundary against the surface it floats over in both themes, and -- since the
+ * pane took its own colour token -- what a surface ACTUALLY PAINTS and whether
+ * a swatch in the settings form reaches it). This driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
  * soon as any assertion throws — so CI can hold them.
  *
@@ -43,6 +45,7 @@ const GUARDS = [
   'tab-strip-shots',
   'turn-signal-shots',
   'tooltip-shots',
+  'pane-colour-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

@@ -1630,20 +1630,30 @@ export type PaletteOverrides = Readonly<Record<string, string>>;
 export type ThemePalettes = Readonly<Record<EffectiveTheme, PaletteOverrides>>;
 
 /**
- * The colours the operator may adjust — TEN of about thirty, chosen rather
+ * The colours the operator may adjust — ELEVEN of about thirty, chosen rather
  * than enumerated.
  *
  * Two families, because they are the two that change the app's character: the
- * surfaces you look at all day (ground, panel, sidebar, raised) with the ink
+ * surfaces you look at all day (pane, panel, sidebar, raised) with the ink
  * that has to stay readable on them, and the status family (running, waiting,
  * done, failed) plus the cursor ring, which is what a glance at the session
  * list is actually reading.
  *
- * `ground` is the deepest surface -- the fill a pane paints on. It shipped as
- * `canvas`, named after the column 0.2 deleted, so the swatch described a
- * thing the operator could no longer point at while quietly setting the
- * detail pane's background. `LEGACY_GROUND_TOKEN` below carries the stored
- * colour across.
+ * `pane` IS THE DETAIL PANE'S OWN FILL, and it is here because the operator
+ * asked for it to be: the pane was painted `bg-sidebar` -- the mockup gives
+ * the two the same value -- so the sidebar swatch moved the whole right-hand
+ * pane with it and there was no way to pull them apart. They are separate
+ * tokens now, starting on the same value (styles.css), and `seedPane` below
+ * carries a stored sidebar override onto the new one so the split is
+ * invisible until the operator moves one of them.
+ *
+ * `ground` USED TO BE HERE AND IS NOT ANY MORE -- operator: "the ground
+ * setting is unnecessary". It was the deepest surface, and what it actually
+ * painted inside the pane (the sticky prompt's band) now takes the pane's own
+ * fill, so the swatch was setting a colour the operator could barely see. The
+ * TOKEN stays: it still paints the page behind the panes, the code fence
+ * (whose syntax colours were measured against it -- styles.css) and the modal
+ * scrims. See `RETIRED_TOKENS`.
  *
  * The rest are deliberately NOT here, and the reason is the same for all of
  * them: they are measured against these. The tints and washes
@@ -1663,7 +1673,7 @@ export type ThemePalettes = Readonly<Record<EffectiveTheme, PaletteOverrides>>;
  * the other theme on the first pick.)
  */
 export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: string }[] = [
-  { token: '--vam-ground', label: 'ground' },
+  { token: '--vam-pane', label: 'pane' },
   { token: '--vam-panel', label: 'panel' },
   { token: '--vam-sidebar', label: 'sidebar' },
   { token: '--vam-raised', label: 'raised' },
@@ -1676,7 +1686,30 @@ export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: 
   { token: '--vam-failed', label: 'failed' },
 ];
 
-const PALETTE_KEYS = new Set(PALETTE_TOKENS.map((entry) => entry.token));
+/**
+ * A COLOUR THE OPERATOR MAY STILL HAVE, AND MAY NO LONGER SET.
+ *
+ * `--vam-ground` left the swatch grid when the operator asked for it to; it
+ * did not leave the stylesheet. So a stored override for it is still read,
+ * still written back, and still put on the document -- anything else changes
+ * what somebody sees because of a refactor, which is the one thing a
+ * migration may not do (`LEGACY_GROUND_TOKEN` below argues the same case for
+ * the rename before this one, and that rename now lands here).
+ *
+ * The cost, stated rather than discovered: with no swatch there is no
+ * per-token reset either, so "reset <theme> colours" is the only way back.
+ * That button clears the whole bucket, retired entries included, so the
+ * colour is undoable -- just not individually.
+ */
+const RETIRED_TOKENS: readonly string[] = ['--vam-ground'];
+
+/** Every token that may appear in a stored bucket: offered plus retired. */
+const PALETTE_KEYS = new Set([...PALETTE_TOKENS.map((entry) => entry.token), ...RETIRED_TOKENS]);
+
+/** The two tokens the pane/sidebar split is between. Named, not spelled
+ *  twice: a typo in either half is a seed that silently never happens. */
+const PANE_TOKEN = '--vam-pane';
+const SIDEBAR_TOKEN = '--vam-sidebar';
 
 /**
  * What `--vam-ground` was called before the canvas it was named after was
@@ -1722,7 +1755,31 @@ function readBucket(raw: unknown): PaletteOverrides {
       out[key] = value;
     }
   }
-  return out;
+  return seedPane(out);
+}
+
+/**
+ * THE PANE'S FILL, SPLIT OFF THE SIDEBAR'S WITHOUT MOVING A PIXEL.
+ *
+ * The two paint the same value in the stylesheet, and the detail pane wore
+ * `bg-sidebar` until the operator asked for the two settings to come apart.
+ * An operator who had already customised the sidebar was therefore looking at
+ * a custom PANE, and the split alone would have handed it back to the
+ * stylesheet's grey in front of them. So the sidebar's stored colour is
+ * copied onto the new token once, on load, and written back under it.
+ *
+ * ONLY WHEN THE SIDEBAR IS ACTUALLY OVERRIDDEN. Seeding an unset pane from the
+ * stylesheet's current value would freeze it: a theme change moves the
+ * sidebar, and a pane pinned to the other theme's grey would follow nothing.
+ * And never over a pane the operator has picked -- a payload holding both was
+ * written by a build that already had this token.
+ */
+function seedPane(bucket: Record<string, string>): PaletteOverrides {
+  const sidebar = bucket[SIDEBAR_TOKEN];
+  if (bucket[PANE_TOKEN] === undefined && sidebar !== undefined) {
+    bucket[PANE_TOKEN] = sidebar;
+  }
+  return bucket;
 }
 
 /**
@@ -1831,6 +1888,12 @@ export function setKeyBindings(prefs: Prefs, keyBindings: KeyBindings): Prefs {
  * cascade falls back to the `:root` / `html.light` pair in styles.css. Setting
  * a token to its current value instead would be indistinguishable on screen
  * and would quietly survive a theme change.
+ *
+ * RETIRED TOKENS ARE VISITED TOO. A colour the operator can no longer pick is
+ * still a colour they picked: leaving it out of this loop would keep it in
+ * the file and take it off the screen, which is the drop this whole layer is
+ * written to avoid -- and would leave a reset unable to remove a property it
+ * had set in an earlier build.
  */
 export function applyPalette(
   overrides: PaletteOverrides,
@@ -1839,7 +1902,7 @@ export function applyPalette(
   if (root === null) {
     return;
   }
-  for (const { token } of PALETTE_TOKENS) {
+  for (const token of [...PALETTE_TOKENS.map((entry) => entry.token), ...RETIRED_TOKENS]) {
     const value = overrides[token];
     if (value === undefined) {
       root.style.removeProperty(token);

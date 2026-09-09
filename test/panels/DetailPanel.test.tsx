@@ -910,13 +910,54 @@ describe('the pane drops the status line under the tab bar', () => {
 });
 
 describe('the pane wears the mockup’s own background', () => {
-  it('uses the sidebar token, the pane colour measured off both artboards', () => {
+  /**
+   * RE-POINTED, and the colour did not move.
+   *
+   * This asserted `bg-sidebar`: the mockup paints the pane and the sidebar the
+   * same value, so the pane borrowed the sidebar's token -- and with it the
+   * sidebar's SWATCH, which is what the operator asked to have split ("split
+   * the pane's colour setting from the sidebar"). `--vam-pane` starts on that
+   * same measured value in both themes, so what this case was protecting (the
+   * pane wears the artboard's fill, not some other rung of the ladder) is
+   * unchanged; what it can no longer do is pass while one swatch drives two
+   * surfaces.
+   */
+  it('uses the pane token, whose value is the pane colour off both artboards', () => {
     draw();
-    // #171717 dark / #f0eeea light in the mockup — exactly `--vam-sidebar`,
-    // so this is an existing token rather than a new one.
     const aside = q<HTMLElement>('[data-action-pane]');
-    expect(aside?.className).toContain('bg-sidebar');
+    expect(aside?.className).toContain('bg-pane');
+    expect(aside?.className).not.toContain('bg-sidebar');
     expect(aside?.className).not.toContain('bg-sunken');
+  });
+
+  /**
+   * THE BLACK BANDS THE OPERATOR REPORTED. "There are some black background
+   * areas below the prompt input and the In block" -- three blocks inside the
+   * pane painted a DARKER rung than the pane itself: the sticky prompt band on
+   * `ground`, the deepest value there is, and the question and composer blocks
+   * on `header`. All three take the pane's own fill now; the seams that
+   * matter are borders, which the two bars still carry.
+   *
+   * Class-level here and MEASURED in the browser by
+   * `e2e/pane-colour-shots.mjs`: a Tailwind utility whose token does not
+   * resolve emits nothing and reads back perfectly from `className`.
+   */
+  it('paints no band inside itself darker than the pane', () => {
+    draw();
+    for (const selector of [
+      '[data-detail-block="in"]',
+      '[data-composer-bar]',
+      '[data-question-bar]',
+    ]) {
+      const band = q<HTMLElement>(selector);
+      if (band === null) continue;
+      expect(band.className, selector).not.toContain('bg-ground');
+      expect(band.className, selector).not.toContain('bg-header');
+      expect(band.className, selector).toContain('bg-pane');
+    }
+    // The sticky band is the one that must be there to be opaque, so its
+    // absence would make this pass for the wrong reason.
+    expect(q('[data-detail-block="in"]')).not.toBeNull();
   });
 });
 
@@ -1398,9 +1439,11 @@ describe('the merged column scrolls the whole turn, `in` pinned to its top', () 
     expect(inBlock?.className).toContain('sticky');
     expect(inBlock?.className).toContain('top-0');
     // Opaque, or `out` text scrolling underneath would show through the two
-    // pinned lines of `in` -- the PANE's ground since the prompt got a bubble
-    // of its own, so the backing stops bleed-through without painting a band.
-    expect(inBlock?.className).toContain('bg-ground');
+    // pinned lines of `in` -- and the PANE's own fill since the prompt got a
+    // bubble of its own, so the backing stops bleed-through without painting a
+    // band. It named `ground` for that job while the pane wore `sidebar`,
+    // which is how the band the operator reported got there.
+    expect(inBlock?.className).toContain('bg-pane');
   });
 });
 

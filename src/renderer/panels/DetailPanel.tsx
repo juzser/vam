@@ -733,11 +733,11 @@ function ViewIcons({
       data-view-tabs
       /* `pointer-events-auto` opts back into clicks the corner overlay's own
          wrapper declines (A15.5) — without it these buttons would be inert,
-         not merely see-through. The pill fill (`bg-sidebar`, matching the
+         not merely see-through. The pill fill (`bg-pane`, matching the
          pane) plus a hairline border is what keeps the glyphs legible over
          whatever scrolls beneath rather than letting icon and letterform
          overlap into noise. */
-      className="pointer-events-auto flex flex-none items-center gap-1 rounded-[9px] border border-line-strong bg-sidebar px-1 py-1 shadow-sm"
+      className="pointer-events-auto flex flex-none items-center gap-1 rounded-[9px] border border-line-strong bg-pane px-1 py-1 shadow-sm"
     >
       {tabs.map((tab) => {
         const selected = tab === current;
@@ -2229,8 +2229,9 @@ const TurnBlock = memo(function TurnBlock({
     >
       {/* STICKY, not merely first: `position: sticky` against the column's own
           scroll (the operator's ask -- "the sticky In should follow wherever
-          you scroll"), with an opaque background so the answer scrolling
-          underneath does not bleed through the prompt.
+          you scroll"), with an opaque background -- the pane's own, see the
+          fill note below -- so the answer scrolling underneath does not bleed
+          through the prompt.
 
           BOUNDED, because an unbounded sticky block is not a pin, it is a lid
           (audit F2, measured: a 3,822-character prompt left the answer 19px
@@ -2257,13 +2258,21 @@ const TurnBlock = memo(function TurnBlock({
       {/* FULL-BLEED TO BOTH PANE EDGES, which is two different numbers since
           the column reserved its right-hand strip for the floating jumps:
           `-ml-3.5` gives back the column's left padding, `-mr-11` gives back
-          that strip, and each side's padding puts the content back. The GROUND
+          that strip, and each side's padding puts the content back. The FILL
           has to reach both edges or the transcript shows through beside the
           pinned prompt; the CONTENT must not reach the right one, or the
-          bubble would run under a jump. */}
+          bubble would run under a jump.
+
+          `bg-pane`, NOT `bg-ground`. This band is what the operator reported
+          as "black background areas ... the In block": `ground` is the darkest
+          value in the palette and the pane it bands is two steps up it, so a
+          strip that exists purely to stop the transcript bleeding through was
+          painting itself darker than the surface it sits in. The
+          band's job is to be invisible and the BUBBLE is the thing meant to be
+          seen; opacity is what it needs, not depth. */}
       <section
         data-detail-block="in"
-        className="-ml-3.5 -mr-11 sticky top-0 z-10 flex max-h-[45cqh] min-h-0 flex-none flex-col gap-1 bg-ground pt-1.5 pr-11 pb-1.5 pl-3.5"
+        className="-ml-3.5 -mr-11 sticky top-0 z-10 flex max-h-[45cqh] min-h-0 flex-none flex-col gap-1 bg-pane pt-1.5 pr-11 pb-1.5 pl-3.5"
       >
         {/* The region's name, announced and not drawn. */}
         <span className="sr-only">in</span>
@@ -3484,10 +3493,14 @@ export function DetailPanel(props: DetailPanelProps) {
       data-action-pane={active ? 'active' : 'idle'}
       style={width === undefined ? undefined : { width }}
       className={[
-        // `bg-sidebar` is the mockup's own pane fill. Measured off the
-        // `width:408px` column of artboards 1a/1b, both values are exactly what
-        // this token already holds, so no new colour was invented for it.
-        'relative flex h-full min-w-0 flex-col border-line border-l bg-sidebar',
+        // THE PANE'S OWN TOKEN, at the operator's ask ("split the pane's
+        // colour setting from the sidebar"). It was `bg-sidebar` -- the
+        // mockup's `width:408px` column of artboards 1a/1b paints the pane and
+        // the sidebar the same value, so the token was right and the SETTING
+        // was one swatch for two surfaces. `--vam-pane` starts on that same
+        // measured value in both themes (styles.css), so nothing moved; what
+        // changed is that either can move alone now.
+        'relative flex h-full min-w-0 flex-col border-line border-l bg-pane',
         // No width given means nobody is sizing this pane -- the phone shell's
         // case -- so it fills its host instead of refusing to shrink.
         width === undefined ? 'w-full' : 'shrink-0',
@@ -3600,7 +3613,7 @@ export function DetailPanel(props: DetailPanelProps) {
             <span
               data-view-note
               role="status"
-              className="min-w-0 max-w-[160px] truncate rounded-[7px] border border-line-strong bg-sidebar px-1.5 py-0.5 text-right font-mono text-[10.5px] text-waiting"
+              className="min-w-0 max-w-[160px] truncate rounded-[7px] border border-line-strong bg-pane px-1.5 py-0.5 text-right font-mono text-[10.5px] text-waiting"
             >
               {viewNote}
             </span>
@@ -4041,7 +4054,7 @@ export function DetailPanel(props: DetailPanelProps) {
       {current !== 'Terminal' && newestQuestion !== null && (
         <div
           data-question-bar
-          className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3"
+          className="flex flex-none flex-col gap-2.5 border-line border-t bg-pane px-3.5 py-3"
         >
           {/* The factory's governance queue — findings awaiting a waiver, and
             lesson candidates — used to stand here. The operator asked for it
@@ -4074,12 +4087,22 @@ export function DetailPanel(props: DetailPanelProps) {
       {/* The composer, in its own block so that it can stand down while a
         question is open without the card standing down with it. Its top border
         is the seam between the two, and belongs to whichever of them is
-        drawn first. */}
+        drawn first.
+
+        `bg-pane`, NOT `bg-header`. Both this block and the question block
+        above it painted `header`, a darker rung than the pane around them,
+        which is the other half of the operator's report -- "black background
+        areas below the prompt input". The SEAM is the border and always was;
+        the fill step
+        was a second separator saying the same thing in a darker colour, and it
+        is the darker colour they were looking at. Nothing else in the app
+        wears `header` now; the token stays defined, unworn, rather than being
+        deleted out from under a theme that still names it. */}
       {current !== 'Terminal' && !composerHidden && (
         <div
           data-composer-bar
           className={[
-            'flex flex-none flex-col gap-2.5 bg-header px-3.5 py-3',
+            'flex flex-none flex-col gap-2.5 bg-pane px-3.5 py-3',
             newestQuestion === null ? 'border-line border-t' : '',
           ].join(' ')}
         >

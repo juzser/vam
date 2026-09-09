@@ -357,11 +357,14 @@ describe('the turn reads straight through, as one scrolling column', () => {
     expect(inBlock.className).toContain('sticky');
     expect(inBlock.className).toContain('top-0');
     // Opaque, or the answer scrolling underneath shows through the prompt --
-    // and the PANE's own ground, not the sidebar's: this backing exists to
-    // stop bleed-through, and matching the column is how it does that without
-    // drawing a band across the turn. What distinguishes the prompt is the
-    // bubble inside it, which has its own ground.
-    expect(inBlock.className).toContain('bg-ground');
+    // and THE PANE'S OWN FILL, which is what this comment already claimed and
+    // the class did not deliver: it said `bg-ground` "matches the column",
+    // while the pane painted `sidebar` two rungs lighter, so the backing drew
+    // exactly the band it says it must not (the operator's "black background
+    // areas ... the In block"). What distinguishes the prompt is the bubble
+    // inside it, which has a ground of its own.
+    expect(inBlock.className).toContain('bg-pane');
+    expect(inBlock.className).not.toContain('bg-ground');
     // Sticky is resolved against the nearest scrolling ancestor. If anything
     // between `in` and the column scrolled, `in` would stick to THAT and go
     // off screen with it -- the exact failure a class-name-only assertion

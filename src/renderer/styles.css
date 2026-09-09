@@ -33,13 +33,16 @@
  * `html.light` replaces them. One class on <html> moves the entire app.
  */
 @theme inline {
-  /* Surfaces, by elevation. `ground` is the deepest of them: the fill a pane
-     paints on, and the page's own background. It was called `canvas` until
-     the canvas column was deleted in 0.2 — the colour never moved, only the
-     name it was borrowing. Note `panel` and `ground` collapse to the same
-     white in light — the mockup separates cards from the ground with a border
-     there, not with a fill, and forcing a tint would be inventing a step the
-     design does not have. */
+  /* Surfaces, by elevation. `ground` is the deepest of them: the page's own
+     background, the code fence's fill and what the modal scrims tint. It was
+     called `canvas` until the canvas column was deleted in 0.2 — the colour
+     never moved, only the name it was borrowing — and it used to be described
+     here as "the fill a pane paints on", which it no longer is: the detail
+     pane paints `pane` (below), and the black bands ground left inside it
+     were what the operator asked to have taken out. Note `panel` and `ground`
+     collapse to the same white in light — the mockup separates cards from the
+     ground with a border there, not with a fill, and forcing a tint would be
+     inventing a step the design does not have. */
   --color-ground: var(--vam-ground);
   --color-sunken: var(--vam-sunken);
   --color-panel: var(--vam-panel);
@@ -51,6 +54,18 @@
   /* The sidebar column itself, between `panel` and `raised` in dark and
      matching neither — the mockup gives it its own value. */
   --color-sidebar: var(--vam-sidebar);
+  /* THE DETAIL PANE'S OWN FILL, and a separate token from `sidebar` at the
+     operator's ask ("split the pane's colour setting from the sidebar"). The
+     pane wore `bg-sidebar` because the mockup paints the two the same, which
+     also meant one swatch moved both. They START on the same value in each
+     theme -- that is what makes the split invisible on upgrade, together with
+     `seedPane` in `prefs.ts`, which carries a stored sidebar override onto
+     this token -- and they are free to diverge from here.
+
+     A LITERAL, NOT `var(--vam-sidebar)`. Pointing this at the other token
+     would mean the sidebar swatch still moved the pane whenever the pane was
+     unset, which is the thing being fixed. */
+  --color-pane: var(--vam-pane);
 
   /* The selected pill inside a segmented control's well. Read off the mode
      row of the mockup's right pane: dark is `line-strong`'s own value, but
@@ -199,6 +214,8 @@
   --vam-header: #111111;
   --vam-well: #101010;
   --vam-sidebar: #171717;
+  /* The same value as `sidebar`, deliberately: see `--color-pane` above. */
+  --vam-pane: #171717;
 
   --vam-segment-on: #262626;
 
@@ -336,6 +353,7 @@ html.light {
   --vam-header: #f4f4f2;
   --vam-well: #eeece7;
   --vam-sidebar: #f0eeea;
+  --vam-pane: #f0eeea;
 
   --vam-segment-on: #e2e0da;
 
