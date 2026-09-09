@@ -3437,7 +3437,7 @@ export function DetailPanel(props: DetailPanelProps) {
 
                    The height it gives back goes to the answer, not to the
                    pin: `max-h-[45%]` bounds the block either way. */
-                className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-3 py-2.5"
+                className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-2.5 py-2"
               >
                 <p className="whitespace-pre-wrap break-words text-[13px] text-ink-dim leading-[1.55]">
                   {/* THE RESERVED CORNER, audit F1's obligation, inherited

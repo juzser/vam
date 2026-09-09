@@ -167,7 +167,12 @@ if (skin.background === skin.sectionGround) {
 //    both have been wrong: at 8px the ground read as a highlight behind the
 //    words rather than a shape around them, and at 14x12 the operator called
 //    it too big. 9 to 12 is the room that leaves.
-const PAD_FLOOR = 9;
+// Lowered from 9 to 7 when the operator asked a second time for a tighter
+// bubble (12x10 -> 10x8). The floor still exists for the reason it always
+// did: at 0 the tint reads as a highlight behind the words rather than a
+// bubble, which an earlier 8px pass was judged to do. 7 leaves 8 a margin
+// rather than sitting exactly on the bound.
+const PAD_FLOOR = 7;
 const PAD_CEILING = 12;
 const pad = await bubble.evaluate((el) => {
   const p = el.querySelector('p');

@@ -793,7 +793,7 @@ function TabStrip({
               onDragStart={onTabDragStart?.(entry.session.id)}
               onDragEnd={onTabDragEnd}
               onClick={(event) => onSelect(entry.session.id, event.detail > 0)}
-              className={`max-w-[160px] truncate py-1 ${active ? TAB_STATUS_INK[entry.session.status] : ''}`}
+              className={`max-w-[160px] cursor-pointer truncate py-1 ${active ? TAB_STATUS_INK[entry.session.status] : ''}`}
             >
               {glyph !== null && (
                 <>
@@ -826,7 +826,7 @@ function TabStrip({
                 Both halves come from the same wrong idea, so both are fixed
                 at once: invisible means UNHITTABLE, and focus REVEALS.
               */
-              className="shrink-0 rounded-[4px] px-1 text-ink-faint opacity-0 hover:text-ink focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-cursor-ring group-hover:opacity-100 data-[active=true]:opacity-100 pointer-events-none focus-visible:pointer-events-auto group-hover:pointer-events-auto data-[active=true]:pointer-events-auto"
+              className="shrink-0 cursor-pointer rounded-[4px] px-1 text-ink-faint opacity-0 hover:text-ink focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-cursor-ring group-hover:opacity-100 data-[active=true]:opacity-100 pointer-events-none focus-visible:pointer-events-auto group-hover:pointer-events-auto data-[active=true]:pointer-events-auto"
               data-active={active ? 'true' : 'false'}
             >
               ×
