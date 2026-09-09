@@ -57,13 +57,33 @@ export type Leaf = {
   readonly sessionIds: readonly string[];
 };
 
-/** A divider, and what it holds — two or more panes or nested splits, in
- *  the order they are drawn. */
+/**
+ * A divider, and what it holds — two or more panes or nested splits, in the
+ * order they are drawn.
+ *
+ * `sizes` is how much of THIS split's extent each child takes, as a fraction:
+ * one entry per child, summing to 1. Fractions and not pixels because this
+ * file is pure and knows nothing about a viewport, and because a fraction is
+ * the only unit that survives a window resize, a nested split and a restore
+ * into a differently-shaped shell without arithmetic at every reader.
+ *
+ * OPTIONAL, and absent means EQUAL SHARES — which is exactly what every child
+ * was before this field existed. That is the whole migration: a tree
+ * remembered by a build that predates resizing carries no `sizes` and reads
+ * back as the equal-share layout it was drawn as. Nothing has to detect a
+ * version, and there is no discard path to get wrong.
+ *
+ * Nothing may read this field directly. `splitSizes` is the reader, and it is
+ * total over anything a store can hold — the wrong number of entries, `NaN`,
+ * a negative, a set that sums to 300 — because a remembered layout can be any
+ * of those and none of them may put a pane on screen at no width.
+ */
 export type Split = {
   readonly kind: 'split';
   readonly id: string;
   readonly orientation: SplitOrientation;
   readonly children: readonly SplitTree[];
+  readonly sizes?: readonly number[];
 };
 
 export type SplitOrientation = 'row' | 'column';
@@ -79,6 +99,233 @@ export type Edge = 'left' | 'right' | 'top' | 'bottom';
  *  none yet). */
 export function singlePane(sessionId: string | null, id: string): SplitTree {
   return { kind: 'leaf', id, sessionId, sessionIds: sessionId === null ? [] : [sessionId] };
+}
+
+// ---------------------------------------------------------------------------
+// SIZES. Two floors, with two different jobs, and neither can do the other's.
+// ---------------------------------------------------------------------------
+
+/**
+ * THE STRUCTURAL FLOOR: no child of a split may ever take less than
+ * `MIN_PANE_SHARE / children.length` of it.
+ *
+ * A share and not a pixel count, because this is the guard that has to hold
+ * where there are no pixels to consult — a remembered layout being read back,
+ * a size arriving as `NaN`, a split whose store says `[0, 0, 0]`. It answers
+ * exactly one question: is any pane about to be drawn at no width at all.
+ * Scaled by the child count rather than flat, so it stays SATISFIABLE: a flat
+ * 0.1 over eleven children asks for 1.1 of a whole, which is not a floor, it
+ * is a crash waiting for the eleventh split.
+ *
+ * At the default two-pane split this is 0.15 — a sixth of the pair. It is
+ * deliberately looser than what a drag will let you reach (`MIN_PANE_PX`
+ * below), because a floor that bites during ordinary dragging would silently
+ * overrule the pixel one on a wide screen.
+ */
+export const MIN_PANE_SHARE = 0.3;
+
+/**
+ * THE USABILITY FLOOR: how narrow, in pixels, a drag may make a pane.
+ *
+ * Pixels, because usability is measured in them: at 176px a pane still draws
+ * its tab strip (which scrolls), the prompt composer and its send row. Below
+ * roughly that the composer's own controls start to overlap rather than
+ * shrink. The structural floor above cannot express this — 0.15 of a 2400px
+ * screen is 360px and of a 700px one is 105px, and neither number is about
+ * the pane's contents.
+ *
+ * Applied by `dividerShare`, which is the one place a pointer position or an
+ * arrow key becomes a share. It is not applied on the read path: a layout
+ * remembered on a wide screen and restored on a narrow one has panes below
+ * this, and re-clamping it on read would silently rewrite what the operator
+ * arranged the first time the window got small (`prefs/panes.ts` learnt the
+ * same lesson: clamping belongs on the render path, never on the store).
+ */
+export const MIN_PANE_PX = 176;
+
+/** The structural floor for a split of `count` children. */
+function sizeFloor(count: number): number {
+  return count <= 0 ? 0 : Math.min(MIN_PANE_SHARE / count, 1 / count);
+}
+
+/**
+ * Raise every entry below `floor` up to it, taking the difference from the
+ * entries above it in proportion to how far above they are.
+ *
+ * Sum-preserving whenever the input sums to 1 and `floor <= 1 / length`,
+ * which `sizeFloor` guarantees: the deficit `Σ(floor − v)` over the short
+ * entries can never exceed the surplus `Σ(v − floor)` over the tall ones,
+ * because their difference is `length * floor − 1 <= 0`.
+ */
+function liftToFloor(sizes: readonly number[], floor: number): readonly number[] {
+  if (sizes.every((size) => size >= floor)) {
+    return sizes;
+  }
+  const deficit = sizes.reduce((total, size) => total + Math.max(0, floor - size), 0);
+  const surplus = sizes.reduce((total, size) => total + Math.max(0, size - floor), 0);
+  if (surplus <= 0) {
+    return sizes.map(() => 1 / sizes.length);
+  }
+  const take = Math.min(1, deficit / surplus);
+  return sizes.map((size) => (size < floor ? floor : size - (size - floor) * take));
+}
+
+/**
+ * Anything a store can hold, turned into exactly `count` usable fractions.
+ *
+ * Every entry that is not a finite positive number — absent, `NaN`,
+ * `Infinity`, zero, negative, a string that got in through a JSON round trip
+ * — is replaced by an EQUAL SHARE of the original whole rather than dropped,
+ * so a split remembered with two sizes and restored holding three keeps the
+ * ratio of the two it remembers and gives the newcomer an average slot. The
+ * result is then renormalised to sum to 1 and lifted to the floor.
+ */
+function normaliseSizes(sizes: readonly number[] | undefined, count: number): readonly number[] {
+  if (count <= 0) {
+    return [];
+  }
+  const equal = 1 / count;
+  const raw = Array.from({ length: count }, (_, at) => {
+    const size = sizes?.[at];
+    return typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : equal;
+  });
+  const total = raw.reduce((sum, size) => sum + size, 0);
+  // `total` cannot be zero: every entry is either a positive stored size or
+  // `equal`, which is positive for any `count > 0`.
+  return liftToFloor(
+    raw.map((size) => size / total),
+    sizeFloor(count),
+  );
+}
+
+/**
+ * A split's child sizes, as fractions summing to 1 — THE ONLY reader of
+ * `Split.sizes`.
+ *
+ * Total: always exactly `children.length` finite entries, every one at least
+ * `sizeFloor(children.length)`, whatever the split carries.
+ */
+export function splitSizes(split: Split): readonly number[] {
+  return normaliseSizes(split.sizes, split.children.length);
+}
+
+/** A split carrying `sizes`, normalised on the way IN so the store and the
+ *  reader never disagree — every writer below goes through here. */
+function withSizes(split: Split, sizes: readonly number[]): Split {
+  return { ...split, sizes: normaliseSizes(sizes, split.children.length) };
+}
+
+/**
+ * The repair pass: every split in the tree, rewritten with sizes that fit its
+ * own children.
+ *
+ * `splitSizes` already repairs on every read, so this changes nothing about
+ * what is DRAWN. What it changes is what is written back: a layout restored
+ * from a store that predates sizes, or one whose sizes no longer line up with
+ * its children, is normalised ONCE here rather than re-derived by every
+ * reader forever. `restoreLayout` is the only caller, because a restore is
+ * the only moment a tree arrives from outside this file's own arithmetic.
+ *
+ * Identity-preserving where there is nothing to repair, the same contract
+ * `mapLeaf` and `pruneClosedTabs` hold, so a restore of an already-normal
+ * layout cannot churn the render.
+ */
+export function normaliseTree(tree: SplitTree): SplitTree {
+  if (tree.kind === 'leaf') {
+    return tree;
+  }
+  const children = tree.children.map(normaliseTree);
+  const sizes = splitSizes(tree);
+  const unchanged =
+    children.every((child, at) => child === tree.children[at]) &&
+    tree.sizes !== undefined &&
+    tree.sizes.length === sizes.length &&
+    tree.sizes.every((size, at) => size === sizes[at]);
+  return unchanged ? tree : { ...tree, children, sizes };
+}
+
+/**
+ * Where a divider should sit, given where the pointer is — the one place a
+ * pixel becomes a share, and the one place `MIN_PANE_PX` is applied.
+ *
+ * `firstPx` is how wide (or tall) the divider's LEADING pane would be if the
+ * pointer were obeyed exactly; `pairPx` is the two panes' combined extent. A
+ * drag moves one divider, so only that adjacent pair exchanges room and every
+ * other sibling of the split stays exactly where it is — the same rule vim,
+ * tmux and VSCode all use, and the only one under which dragging one edge
+ * cannot reflow the whole layout.
+ *
+ * Total, and every degenerate case answers 0.5: a pair with no measurable
+ * extent (a hidden or not-yet-laid-out split), a non-finite pointer, and a
+ * pair too narrow to hold two minimums at once. Halving is not a shrug in
+ * that last case — it is the only division that treats the two alike, and it
+ * is a state the layout already reaches, because it is what a fresh split is.
+ */
+export function dividerShare(firstPx: number, pairPx: number, minPx: number): number {
+  if (!Number.isFinite(firstPx) || !Number.isFinite(pairPx) || pairPx <= 0) {
+    return 0.5;
+  }
+  const min = Number.isFinite(minPx) ? Math.max(0, minPx) : 0;
+  if (pairPx < min * 2) {
+    return 0.5;
+  }
+  const floor = min / pairPx;
+  return Math.min(1 - floor, Math.max(floor, firstPx / pairPx));
+}
+
+/** Rebuild one split in place, leaving every other node alone.
+ *  Identity-preserving, exactly as `mapLeaf` is for leaves. */
+function mapSplit(tree: SplitTree, id: string, f: (split: Split) => Split): SplitTree {
+  if (tree.kind === 'leaf') {
+    return tree;
+  }
+  if (tree.id === id) {
+    return f(tree);
+  }
+  const children = tree.children.map((child) => mapSplit(child, id, f));
+  return children.every((child, at) => child === tree.children[at]) ? tree : { ...tree, children };
+}
+
+/**
+ * MOVE ONE DIVIDER: the one between children `at` and `at + 1` of the split
+ * `splitId`, so that the leading child takes `share` of THEIR COMBINED
+ * extent.
+ *
+ * A share of the pair rather than of the whole split, because that is what
+ * makes the gesture absolute: the handle can recompute it from the pointer's
+ * live position on every move without accumulating drift, and a three-pane
+ * row keeps its third pane exactly where it was.
+ *
+ * Total, and a no-op — the SAME tree object back — for every miss this file's
+ * contract already covers: a split id nothing holds, an index that is not a
+ * divider, a non-finite share. The share is clamped so neither of the pair
+ * falls through the structural floor; the pixel floor is `dividerShare`'s and
+ * has been applied before the number gets here.
+ */
+export function resizeSplit(
+  tree: SplitTree,
+  splitId: string,
+  at: number,
+  share: number,
+): SplitTree {
+  if (!Number.isFinite(share) || !Number.isInteger(at) || at < 0) {
+    return tree;
+  }
+  return mapSplit(tree, splitId, (split) => {
+    const sizes = splitSizes(split);
+    const first = sizes[at];
+    const second = sizes[at + 1];
+    if (first === undefined || second === undefined) {
+      return split;
+    }
+    const pair = first + second;
+    const floor = sizeFloor(sizes.length) / pair;
+    const clamped = Math.min(1 - floor, Math.max(floor, share));
+    const next = [...sizes];
+    next[at] = pair * clamped;
+    next[at + 1] = pair * (1 - clamped);
+    return withSizes(split, next);
+  });
 }
 
 /** Every leaf, left to right and top to bottom as the tree draws them —
@@ -167,12 +414,17 @@ export function splitPane(
   const before = isBefore(edge);
   const newLeaf: Leaf = { kind: 'leaf', id: newId, sessionId, sessionIds: [sessionId] };
 
+  // A NEW PANE TAKES HALF THE PANE IT SPLIT, and nothing else moves — tmux's
+  // rule, and the only one that is the same sentence in both shapes below: a
+  // wrapper divides its slot evenly, and a sibling insert halves the target's
+  // own share and leaves every other sibling untouched.
   function wrap(target: SplitTree): Split {
     return {
       kind: 'split',
       id: `split-${newId}`,
       orientation,
       children: before ? [newLeaf, target] : [target, newLeaf],
+      sizes: [0.5, 0.5],
     };
   }
 
@@ -193,10 +445,18 @@ export function splitPane(
     if (node.orientation === orientation) {
       const children = [...node.children];
       children.splice(before ? index : index + 1, 0, newLeaf);
-      return { ...node, children };
+      // The target's own share, halved, in the two slots that replace it —
+      // both halves are equal, so `before` does not change the arithmetic,
+      // only which of them holds the new leaf.
+      const sizes = [...splitSizes(node)];
+      const half = (sizes[index] ?? 0) / 2;
+      sizes.splice(index, 1, half, half);
+      return withSizes({ ...node, children }, sizes);
     }
     const children = [...node.children];
     children[index] = wrap(children[index] as SplitTree);
+    // The nested split stands in the slot the target held, at the size the
+    // target held it, so the surrounding row or column does not move.
     return { ...node, children };
   }
 
@@ -218,14 +478,33 @@ export function closePane(tree: SplitTree, id: string): SplitTree | null {
   if (tree.kind === 'leaf') {
     return tree.id === id ? null : tree;
   }
-  const children = tree.children
-    .map((child) => closePane(child, id))
-    .filter((child): child is SplitTree => child !== null);
+  const mapped = tree.children.map((child) => closePane(child, id));
+  if (mapped.every((child, at) => child === tree.children[at])) {
+    // Nothing here held it. The SAME object back, so a miss cannot churn the
+    // render and cannot rewrite sizes that were already right.
+    return tree;
+  }
+  const sizes = splitSizes(tree);
+  const children: SplitTree[] = [];
+  const kept: number[] = [];
+  for (const [at, child] of mapped.entries()) {
+    if (child !== null) {
+      children.push(child);
+      kept.push(sizes[at] ?? 0);
+    }
+  }
   if (children.length === 0) {
     return null;
   }
   const only = children[0];
-  return children.length === 1 && only !== undefined ? only : { ...tree, children };
+  // THE FREED ROOM GOES TO THE SURVIVORS IN PROPORTION — `withSizes`
+  // renormalises what is left, so two panes that stood at 2:1 still stand at
+  // 2:1 once the third goes. There is no "which neighbour gets it" case to
+  // get wrong, and a split that collapses to its only child hands that child
+  // the whole slot the split occupied, because the child now IS that slot.
+  return children.length === 1 && only !== undefined
+    ? only
+    : withSizes({ ...tree, children }, kept);
 }
 
 /** Which tab takes the front when `removed` leaves: the one to its right,
@@ -439,7 +718,15 @@ export function restoreLayout(
   focusedPaneId: string,
   fallbackId: string,
 ): { readonly tree: SplitTree; readonly paneId: string } {
-  const pruned = pruneClosedTabs(stored, isOpen);
+  // 0. THE SIZES ARE REPAIRED BEFORE ANYTHING ELSE READS THEM. A restore is
+  //    the one moment a tree arrives from outside this file's own arithmetic,
+  //    so it is the one moment sizes can fail to describe the children they
+  //    are stored beside: a layout remembered before resizing existed carries
+  //    none at all, and one remembered with two panes can come back holding
+  //    three. Neither may crash, drop a pane or draw one at no width — see
+  //    `normaliseSizes`, which answers all three by treating every unusable
+  //    entry as an equal share rather than as a reason to discard the layout.
+  const pruned = pruneClosedTabs(normaliseTree(stored), isOpen);
   const surviving = leaves(pruned).filter((leaf) => leaf.sessionIds.length > 0);
   const target =
     surviving.find((leaf) => leaf.sessionIds.includes(sessionId)) ??
