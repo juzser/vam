@@ -17,10 +17,7 @@ import {
   loadClaudeCodeProjects,
   readClaudeCodeHistory,
 } from '../../src/main/sources/claude-code/source.js';
-import {
-  summarizeTranscript,
-  turnStartOf,
-} from '../../src/main/sources/claude-code/transcript.js';
+import { summarizeTranscript, turnStartOf } from '../../src/main/sources/claude-code/transcript.js';
 import { readTranscriptWindow, readWindowOf } from '../../src/main/sources/claude-code/window.js';
 
 const jsonl = (...lines: unknown[]) => `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`;
@@ -123,7 +120,9 @@ describe('turn identity is independent of where the window was cut', () => {
     const oldest = facts.decisions.at(-1);
     expect(turnStartOf(oldest?.id ?? '')).toBe(offsetOfPrompt('continue'));
     // The fingerprint form carries no position, and saying so is the point.
-    expect(turnStartOf(summarizeTranscript(TRANSCRIPT, 'sess-1').decisions[0]?.id ?? '')).toBeNull();
+    expect(
+      turnStartOf(summarizeTranscript(TRANSCRIPT, 'sess-1').decisions[0]?.id ?? ''),
+    ).toBeNull();
     expect(turnStartOf('@nonsense')).toBeNull();
     expect(turnStartOf('@-1')).toBeNull();
   });
@@ -135,7 +134,11 @@ function readerOf(text: string) {
   return {
     reads: [] as { from: number; to: number }[],
     size: async () => bytes.length,
-    read: async function (this: { reads: { from: number; to: number }[] }, from: number, to: number) {
+    read: async function (
+      this: { reads: { from: number; to: number }[] },
+      from: number,
+      to: number,
+    ) {
       this.reads.push({ from, to });
       return readWindowOf(bytes, from, to);
     },
@@ -330,11 +333,7 @@ describe('readTranscriptHistory', () => {
       reply('c2'),
     );
     const whole = summarizeTranscript(reemitting, 'sess-1', 0).decisions;
-    expect(whole.map((d) => d.input)).toEqual([
-      'the third ask',
-      'the second ask',
-      'the first ask',
-    ]);
+    expect(whole.map((d) => d.input)).toEqual(['the third ask', 'the second ask', 'the first ask']);
 
     // Windows small enough to open between a turn's own re-emissions.
     for (const bytes of [90, 130, 200, 320]) {
@@ -390,7 +389,6 @@ describe('readTranscriptHistory', () => {
     expect(answer.error).toMatchObject({ kind: 'unreachable', code: 'cursor-past-end' });
   });
 });
-
 
 describe('readClaudeCodeHistory, over a transcript on disk', () => {
   let root: string;
@@ -461,7 +459,6 @@ describe('readTranscriptWindow, against a real file', () => {
   });
 });
 
-
 /**
  * THE COST CONTRACT `load()` MUST NOT LOSE. Paging exists so that scrolling
  * back is an on-demand read; the ten-second poll stays bounded by
@@ -480,12 +477,8 @@ describe('the polling read is still a tail, and history is the only thing that s
     const filler = Array.from({ length: 60 }, () =>
       JSON.stringify({ type: 'user', message: { role: 'user', content: 'x'.repeat(1000) } }),
     ).join('\n');
-    const block = (ask: string) =>
-      `${jsonl(userPrompt(ask), reply(`answered ${ask}`))}${filler}\n`;
-    writeFileSync(
-      join(root, '-w-demo', 'sess-1.jsonl'),
-      ASKS.map(block).join(''),
-    );
+    const block = (ask: string) => `${jsonl(userPrompt(ask), reply(`answered ${ask}`))}${filler}\n`;
+    writeFileSync(join(root, '-w-demo', 'sess-1.jsonl'), ASKS.map(block).join(''));
   });
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });

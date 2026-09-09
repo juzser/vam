@@ -9,7 +9,6 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { CHANNELS } from '../../src/main/ipc/channels.js';
 import { registerSourceIpc } from '../../src/main/ipc/handlers.js';
 import { FIXTURE_SOURCE } from '../../src/main/sources/fixture-source.js';
 import type { MainSource } from '../../src/main/sources/source.js';
@@ -74,7 +73,10 @@ function browser(routes: Record<string, (body: unknown) => unknown>) {
         return {
           status: 404,
           statusText: 'no such route',
-          json: async () => ({ ok: false, error: { kind: 'refused', code: 'no-such-route', message: 'no' } }),
+          json: async () => ({
+            ok: false,
+            error: { kind: 'refused', code: 'no-such-route', message: 'no' },
+          }),
         };
       }
       return { status: 200, statusText: 'OK', json: async () => route(body) };

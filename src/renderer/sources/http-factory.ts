@@ -17,7 +17,7 @@
  * politeness, on top of a refusal that does not depend on it.
  */
 
-import type { HistoryCursor, TranscriptPage } from '../../shared/history.js';
+import type { TranscriptPage } from '../../shared/history.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../../shared/preload-api.js';
 import type { Project } from '../domain/model.js';
 import type { SessionSource, SourceError } from './port.js';

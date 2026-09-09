@@ -39,13 +39,13 @@
  */
 
 import type { Project, SourceId } from '../renderer/domain/model.js';
-import type { HistoryCursor, TranscriptPage } from './history.js';
 import type {
   SessionSource,
   SourceCapabilities,
   SourceDeclines,
   ViewerScope,
 } from '../renderer/sources/port.js';
+import type { HistoryCursor, TranscriptPage } from './history.js';
 
 /**
  * Everything about a source that is data rather than behaviour: exactly the

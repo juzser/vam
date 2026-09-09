@@ -66,11 +66,10 @@ export const HISTORY_WINDOW_BYTES = 128 * 1024;
  */
 export const MAX_HISTORY_READ_BYTES = 8 * 1024 * 1024;
 
-const unavailable = (
-  kind: SourceError['kind'],
-  code: string,
-  message: string,
-): TranscriptPage => ({ kind: 'unavailable', error: { kind, code, message } });
+const unavailable = (kind: SourceError['kind'], code: string, message: string): TranscriptPage => ({
+  kind: 'unavailable',
+  error: { kind, code, message },
+});
 
 /**
  * The turns before `cursor`, newest first.

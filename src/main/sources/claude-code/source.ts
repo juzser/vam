@@ -33,8 +33,8 @@
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
-import type { HistoryCursor, TranscriptPage } from '../../../shared/history.js';
 import type { Project, Session, SlashCommand } from '../../../renderer/domain/model.js';
+import type { HistoryCursor, TranscriptPage } from '../../../shared/history.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
 import type { MainSource } from '../source.js';
@@ -67,7 +67,7 @@ import {
   summarizeTranscript,
   type TranscriptFacts,
 } from './transcript.js';
-import { fileTranscriptSource, type TranscriptSource, readTranscriptWindow } from './window.js';
+import { fileTranscriptSource, readTranscriptWindow, type TranscriptSource } from './window.js';
 
 /**
  * The read budget. Only sessions the CLI reported are opened -- single digits

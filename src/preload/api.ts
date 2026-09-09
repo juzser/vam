@@ -20,11 +20,11 @@
 
 import type { MainFailureEvent } from '../main/errors/log.js';
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
-import type { SourceError } from '../renderer/sources/port.js';
-import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { RemoteState } from '../main/remote/state.js';
 import type { Project } from '../renderer/domain/model.js';
+import type { SourceError } from '../renderer/sources/port.js';
 import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.js';
+import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
 import type { PaneKey, PaneSendResult, PaneView } from '../shared/terminal.js';
 import type { UpdateStatus } from '../shared/update.js';

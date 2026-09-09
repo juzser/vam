@@ -386,7 +386,9 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
       send(
         response,
         200,
-        await envelope(async () => await read(body.sessionId as string, (body.cursor ?? null) as string | null)),
+        await envelope(
+          async () => await read(body.sessionId as string, (body.cursor ?? null) as string | null),
+        ),
       );
     },
   });
