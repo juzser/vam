@@ -3428,24 +3428,26 @@ describe('the +1px type bump reaches everything in this pane except out', () => 
     // -1 again: the identity line above the bubble (`you · <turn label>`),
     // removed at the operator's ask -- its label lives in the progress
     // picker, which has its own 10.5px class already counted here.
-    // +2: the column's two ends. The single condensed progress line became one
-    // line PER TURN plus a boundary block at the top of the column (what vam
-    // has read this far) and a navigation bar at its bottom (the picker and
-    // the two jumps) -- three call sites where there was one, all at the same
-    // 10.5px the line already used.
-    '10.5': 9,
+    // +1: the single condensed progress line became one line PER TURN plus a
+    // navigation bar at the bottom of the column (the picker and the two
+    // jumps) -- two call sites where there was one, both at the 10.5px the
+    // line already used, because both ARE that line, moved.
+    '10.5': 8,
     // +2: the folded question row's "marked, not sent" caption and the
     // `change` control that reopens the list (audit-adjacent operator
     // request: the option list folds away once a pick is made).
-    // +1: the "that turn has scrolled out of what vam can see" note, which
-    // dropped from 12px to 11px when it moved out of the pane's body and into
-    // the boundary block, beside text of that size.
-    '11': 17,
+    '11': 16,
     // -1: `WaitingNote`'s remedy line, removed with the notice.
-    '11.5': 10,
+    // +1: the column's boundary block. NEW type, so it takes the size it
+    // would have after the +1px bump the operator has now asked for twice,
+    // rather than adding a ninth literal at 10.5px -- and the
+    // scrolled-out-turn note inside it dropped its own 12px class to inherit
+    // this one, which is why 12 loses one below.
+    '11.5': 11,
     // +1: the mode popover's option rows, at the provider popover's own size.
     // +1: the folded question row's own mark, at the option label's size.
-    // -1: the scrolled-out-turn note, now 11px -- see above.
+    // -1: the scrolled-out-turn note, which now inherits the boundary
+    // block's size instead of carrying one.
     '12': 16,
     // -2: the three mode pills (one class) and `WaitingNote`'s cause line.
     '12.5': 4,

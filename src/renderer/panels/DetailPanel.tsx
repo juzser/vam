@@ -3739,9 +3739,24 @@ export function DetailPanel(props: DetailPanelProps) {
               "'No PRs' and 'vam could not ask' must never look the same." A
               column that simply stops at its oldest loaded turn claims the
               session started there. It did not: the transcript reader only
-              ever opens the newest `TAIL_BYTES` of the file (`source.ts`), and
-              10% of the sessions measured on this machine fit inside that
-              window while the median has about a third of itself in it.
+              ever opens the newest `TAIL_BYTES` of the file (`source.ts`).
+
+              MEASURED, over the 73 transcripts on this machine that vam
+              actually opens -- interactive sessions only; the other 863
+              `.jsonl` files on disk are subagent SIDECHAINS, which vam never
+              reads, and counting them would have made every figure here wrong
+              by an order of magnitude. The distribution is bimodal, and both
+              ends argue for this block:
+                - 41% of sessions fit ENTIRELY inside the window. For four in
+                  ten, the oldest turn drawn really is the session's first --
+                  and vam still cannot say so, which is why `session-start` is
+                  defined below and not drawn;
+                - the other end is where the operator's long-running work
+                  lives, and there the window is a sliver: 157.3 MB over 63
+                  turns shows ONE, 138.4 MB over 261 turns shows two, 122.1 MB
+                  over 89 shows one. p50 254 KB, p75 5 MB, p90 45 MB.
+              A column that ended silently would be at its most misleading
+              exactly there.
 
               TWO STATES, AND ONLY ONE OF THEM IS ASSERTABLE TODAY:
                 - `read-limit` — "this is as far back as vam has read". True
@@ -3772,7 +3787,15 @@ export function DetailPanel(props: DetailPanelProps) {
                 one would notch every pane the operator is not in. */}
             <div
               data-column-start="read-limit"
-              className={`-mx-3.5 flex flex-none flex-col gap-0.5 px-3.5 pt-3 pb-1 font-mono text-[10.5px] text-ink-faint ${
+              /* 11.5px, NOT the 10.5px of the turn lines this block's facts
+                 came off. The operator has twice asked for small type to come
+                 up a pixel, and a repo-wide bump is its own task (198 literals,
+                 18 files, no type scale to change in one place) -- so a NEW
+                 call site takes the size it would have AFTER that bump rather
+                 than adding one more literal below the floor. The turn lines
+                 and the bar below keep 10.5 because they are the existing
+                 progress line, moved, not new type. */
+              className={`-mx-3.5 flex flex-none flex-col gap-0.5 px-3.5 pt-3 pb-1 font-mono text-[11.5px] text-ink-faint ${
                 cornerOverlay ? 'pr-[6rem]' : ''
               }`}
             >
@@ -3810,7 +3833,9 @@ export function DetailPanel(props: DetailPanelProps) {
                   is still there to read, and hiding it to print one sentence
                   was the old single-turn pane's constraint, not a rule. */}
               {selectedTurnMissing && (
-                <p data-progress-turn-missing className="text-[11px] text-ink-faint leading-[1.5]">
+                /* No size of its own: it inherits the block's, which is the
+                   right size for it and one literal fewer to keep in step. */
+                <p data-progress-turn-missing className="text-ink-faint leading-[1.5]">
                   The turn you were reading has scrolled out of what vam can see.{' '}
                   <button
                     type="button"
