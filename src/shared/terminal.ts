@@ -29,8 +29,52 @@
 
 import type { SourceError } from '../renderer/sources/port.js';
 
+/**
+ * WHERE TYPING WOULD LAND, and the two ways there is no answer to that.
+ *
+ * `at` is a cell of the captured screen, in tmux's own coordinates: `column`
+ * counts CELLS from the left edge and `row` counts lines from the top of the
+ * pane, so `row` indexes the captured screen directly -- measured on a real
+ * 61-row pane, `capture-pane` returns exactly 61 lines and `cursor_y` never
+ * leaves them.
+ *
+ * THE OTHER TWO ARE KEPT APART FOR THE REASON `PaneView` KEEPS ITS SIX APART,
+ * and here the conflation would not merely mislead, it would fabricate a fact.
+ * `hidden` is the application having turned the cursor off -- a pager, a
+ * spinner, a full-screen editor -- which tmux reports (`cursor_flag`) and vam
+ * must honour. `unreadable` is vam not having got an answer, and it exists
+ * because of exactly what tmux does when it cannot answer: MEASURED on 3.7b,
+ * `display-message -p` against a target that does not exist EXITS ZERO, says
+ * nothing on stderr, and prints the format with every field EMPTY. `Number('')`
+ * is 0, so the parse anyone writes first turns that silence into a confident
+ * cursor in the top-left corner of somebody's screen -- "no PRs" and "vam could
+ * not ask" drawn identically (`sources/claude-code/pull-requests.ts`), on a
+ * surface where the wrong answer is a claim about where a keystroke goes.
+ *
+ * Both draw nothing today. They are two values rather than one `null` so that
+ * a surface which ever wants to SAY which of them happened can, and so that
+ * "vam could not tell" is something a producer must name rather than something
+ * a missing field decays into.
+ */
+export type PaneCursor =
+  | { readonly kind: 'at'; readonly column: number; readonly row: number }
+  /** The program in the pane turned the cursor off. There is nothing to draw. */
+  | { readonly kind: 'hidden' }
+  /** vam did not find out. NEVER to be drawn as a position, least of all 0,0. */
+  | { readonly kind: 'unreadable' };
+
 export type PaneView =
-  | { readonly kind: 'ok'; readonly name: string; readonly text: string }
+  | {
+      readonly kind: 'ok';
+      readonly name: string;
+      readonly text: string;
+      /**
+       * Where the cursor is on the screen above -- as much a part of `ok` as
+       * the text is, and required for that reason: a producer that has not
+       * looked has to say `unreadable` out loud rather than leave a field out.
+       */
+      readonly cursor: PaneCursor;
+    }
   | { readonly kind: 'not-vam' }
   | { readonly kind: 'gone' }
   | { readonly kind: 'ambiguous'; readonly names: readonly string[] }

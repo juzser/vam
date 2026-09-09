@@ -164,7 +164,44 @@ export function hasSessionArgv(name: string): readonly string[] {
 }
 
 /**
- * The RENDERED screen as plain text -- what the pane looks like right now.
+ * The word that marks tmux's answer about the cursor, so that the answer is
+ * RECOGNISED rather than assumed.
+ *
+ * `readPane` strips this line off the front of stdout, and a strip made on
+ * POSITION alone would eat the first line of somebody's screen the moment the
+ * cursor query did not run -- an old tmux with no `cursor_flag`, a runner
+ * stubbed by a test that predates this, a sequence that ran only half. With
+ * the marker, "there is no cursor line" is a state this file can spell and the
+ * screen survives whole (`spawn.ts`, `readCursorLine`).
+ *
+ * `@vam-` for the reason `VAM_PROJECT_OPTION` uses it: it is vam's namespace
+ * on this server, and it is legible to a person running the command by hand.
+ */
+export const VAM_CURSOR_MARK = '@vam-cursor';
+
+/**
+ * WHAT VAM ASKS ABOUT THE CURSOR, and the three fields are the whole of it.
+ *
+ * `cursor_flag` first because it can veto the other two: it is 0 when a
+ * program in the pane turned the cursor off (DECTCEM), and a caret drawn over
+ * a pager or a spinner is vam inventing one the application deliberately
+ * removed. `cursor_x` and `cursor_y` are CELLS from the left and lines from
+ * the top of the pane.
+ *
+ * `cursor_character` is deliberately NOT asked for. The captured screen
+ * already carries that cell, so it would be a second copy of one character of
+ * a stranger's session for no gain -- and the fewer bytes of somebody's
+ * terminal that cross this boundary for decoration, the better.
+ *
+ * MEASURED on tmux 3.7b: all three keys exist and expand, and a key tmux does
+ * not know expands to the EMPTY STRING rather than failing -- which is what
+ * makes an older tmux read as `unreadable` instead of as a crash.
+ */
+const CURSOR_FORMAT = `${VAM_CURSOR_MARK} #{cursor_flag} #{cursor_x} #{cursor_y}`;
+
+/**
+ * The RENDERED screen as plain text -- what the pane looks like right now --
+ * AND where the cursor is on it, in ONE tmux invocation.
  *
  * `-p` prints to stdout. `-e` asks tmux to keep the SGR sequences, which it
  * did not used to: the operator's report was "tmux chua co color", and a
@@ -176,11 +213,50 @@ export function hasSessionArgv(name: string): readonly string[] {
  * arrives together with `panels/terminal-ansi.ts`, which turns them into
  * styled spans and drops everything it does not model, including a sequence
  * the capture boundary cut in half. What is still NOT built is the live
- * streaming path (`pipe-pane -o`): that needs a real emulator, and half of
- * one is worse than none.
+ * streaming path (`pipe-pane -o`): that needs a real emulator, and half of one
+ * is worse than none. Asking where the cursor is does not change that: the tab
+ * draws a SNAPSHOT with the cursor marked on it, not a terminal.
+ *
+ * TWO COMMANDS, ONE PROCESS, and that is why the cursor costs the Terminal tab
+ * nothing. A bare `;` element is tmux's command separator in an argv array
+ * exactly as it is in a shell string -- MEASURED through `execFile` with an
+ * array and no shell, on tmux 3.7b: both answers arrive in order on one
+ * stdout. The tab already spawns one short-lived tmux per second; a second
+ * spawn for a caret would have doubled that for the life of every open tab.
+ *
+ * THE ORDER IS LOAD-BEARING. The cursor query is FIRST because its answer is
+ * exactly one line while the screen's length is not known in advance, so the
+ * front is the only place a reader can find the short answer. `-t` on BOTH:
+ * measured, a `display-message` with no target answers about whatever pane
+ * tmux calls current, which is somebody else's session as easily as this one.
+ *
+ * The separator cannot be confused with an argument. Every name reaching here
+ * came off `list-sessions` filtered by `isVamSession` and was minted by
+ * `vamSessionName`, which admits only `[A-Za-z0-9_-]`, so no argument in this
+ * argv can end in a `;` for tmux to read as a second separator.
+ *
+ * WHAT A HALF-FAILURE DOES, measured rather than assumed: with a bad target on
+ * the `display-message` and a good one on the `capture-pane`, tmux exits ZERO
+ * with an empty cursor line and the whole screen behind it -- so a cursor vam
+ * cannot read never costs the operator the screen. The other way round, tmux
+ * exits 1 and the existing classifier reports it exactly as it did before this
+ * line existed.
  */
 export function capturePaneArgv(name: string): readonly string[] {
-  return ['capture-pane', '-p', '-e', '-t', paneTarget(name)];
+  return [
+    'display-message',
+    '-p',
+    '-t',
+    paneTarget(name),
+    '-F',
+    CURSOR_FORMAT,
+    ';',
+    'capture-pane',
+    '-p',
+    '-e',
+    '-t',
+    paneTarget(name),
+  ];
 }
 
 /**
