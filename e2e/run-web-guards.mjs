@@ -19,7 +19,7 @@
  * soon as any assertion throws — so CI can hold them.
  *
  * The other `e2e/*.mjs` scripts (issue-188-shots, pane-refinements-shots,
- * phone-list-shots, phone-prompt-shots) are NOT run
+ * pane-patches-shots, phone-list-shots, phone-prompt-shots) are NOT run
  * here and must not be added: they take screenshots and assert nothing, so
  * running them would only turn a green tick into a broader claim than it is.
  *
