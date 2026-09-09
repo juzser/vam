@@ -59,13 +59,61 @@
      pane wore `bg-sidebar` because the mockup paints the two the same, which
      also meant one swatch moved both. They START on the same value in each
      theme -- that is what makes the split invisible on upgrade, together with
-     `seedPane` in `prefs.ts`, which carries a stored sidebar override onto
+     `seedSplits` in `prefs.ts`, which carries a stored sidebar override onto
      this token -- and they are free to diverge from here.
 
      A LITERAL, NOT `var(--vam-sidebar)`. Pointing this at the other token
      would mean the sidebar swatch still moved the pane whenever the pane was
      unset, which is the thing being fixed. */
   --color-pane: var(--vam-pane);
+
+  /* A CARD THAT SITS ON THE PANE OR THE SIDEBAR, and the rung the ladder did
+     not have.
+
+     `panel` is one step BELOW `sidebar`/`pane` in dark and that is deliberate
+     -- see `--color-sidebar`, "between `panel` and `raised`". What was not
+     deliberate is that the question card, the composer's prompt box, the
+     sidebar's project row, its icon buttons and its popovers all painted
+     `bg-panel` while sitting on the pane or the sidebar: measured on the
+     painted DOM, #141414 on #171717, 1.028:1 in the WRONG DIRECTION. An
+     element darker than its own ground does not read as a card, it reads as a
+     hole punched in the surface -- the operator's "black patches", reported
+     twice.
+
+     The LIGHT theme was already right (#ffffff on #f0eeea, 1.159:1 lighter),
+     which is the whole reason this is a new token rather than a new value for
+     `panel`: a dark-only fix applied to the shared token would have inverted
+     the light theme, and no existing rung is above the pane in BOTH themes
+     (`raised` is, in dark, at 1.030:1 -- and is 1.015:1 in light, which would
+     have deleted light's crisp white cards to fix dark's holes).
+
+     So light's value is `panel`'s own white, unchanged to the pixel, and dark
+     takes a rung above the pane. `test/renderer/surface-elevation.test.ts`
+     holds the DIRECTION in both themes; `e2e/pane-colour-shots.mjs` measures
+     it as paint. A LITERAL in both, not `var(--vam-panel)`, for the reason
+     `--color-pane` gives: a token pointed at another token is a swatch that
+     still moves two surfaces. */
+  --color-card: var(--vam-card);
+
+  /* THE IN BUBBLE'S OWN FILL. Operator, twice: "the IN prompt should have a
+     different colour so it stands out, and sit in a bubble", then -- after
+     getting the bubble -- "the In bubble needs more contrast within the pane".
+
+     The second report is the measurement of the first fix. The bubble wore
+     `raised` on a `pane` band: 1.030:1 in dark, 1.015:1 in light, ΔE 1.5 and
+     1.4. Three units per channel is below the step at which a person reliably
+     sees an edge, so the bubble that had been asked for was, in practice, not
+     drawn.
+
+     It takes the In region's OWN hue -- `--vam-rule-in`'s teal, already the
+     colour of that region's rule and its announced label -- at fill strength,
+     which is the move `--vam-waiting-tint` and `--vam-done-tint` already make
+     for their statuses. A hue rather than a lighter grey because "a different
+     colour" is what was asked for, and because in the light theme hue is the
+     only channel with room left: that theme's pane sits at 86% relative
+     luminance, so the WCAG ratio of ANYTHING lighter than it is capped at
+     1.159:1 -- pure white. The values carry the numbers reached. */
+  --color-in-bubble: var(--vam-in-bubble);
 
   /* The selected pill inside a segmented control's well. Read off the mode
      row of the mockup's right pane: dark is `line-strong`'s own value, but
@@ -217,6 +265,29 @@
   /* The same value as `sidebar`, deliberately: see `--color-pane` above. */
   --vam-pane: #171717;
 
+  /* 1.063:1 above the pane and the sidebar, where `panel` was 1.028:1 below
+     them. #1e1e1e IS THE CEILING and the reason this is not lighter still:
+     `--vam-ink-quiet` / `--vam-ink-faint` measure 4.518:1 there and 4.415:1
+     one step further, so a brighter card fill would put every caption drawn on
+     one under WCAG 1.4.3. At this value they read 4.568:1, checked by
+     `test/renderer/token-contrast.test.ts`, which now counts `card` among its
+     text grounds. */
+  --vam-card: #1d1d1d;
+
+  /* The In bubble, dark: `--vam-rule-in`'s teal (#2dd4bf) carried down to fill
+     strength. 1.449:1 against the pane and ΔE 21.8, against the 1.030:1 / ΔE
+     1.5 it replaces -- and deliberately inside the band this palette's own
+     tinted grounds already occupy (`waiting-tint` 1.389:1, `done-tint`
+     1.444:1), so the bubble is as loud as a status tint and no louder.
+
+     IT STOPS HERE BECAUSE OF THE TEXT ON IT. The prompt inside the bubble is
+     `--vam-ink-dim`, which measures 4.789:1 on this fill; one rung deeper
+     (#12403a) it is 4.466 and fails 1.4.3. `--vam-ink-faint` measures 3.353:1
+     here and MUST NOT be painted in the bubble -- the e2e guard reads the
+     ink the bubble is really drawn with, so an edit that reaches for a
+     quieter grey fails there rather than shipping. */
+  --vam-in-bubble: #0f3b35;
+
   --vam-segment-on: #262626;
 
   --vam-line: #1f1f1f;
@@ -354,6 +425,29 @@ html.light {
   --vam-well: #eeece7;
   --vam-sidebar: #f0eeea;
   --vam-pane: #f0eeea;
+
+  /* `panel`'s own white, and the point is that it is UNCHANGED: this theme's
+     cards were already 1.159:1 lighter than the pane they sit on, so the new
+     token exists here only so the dark theme can differ. Not one light pixel
+     moves in the repoint -- which is the safety property that let 29 call
+     sites change at once. */
+  --vam-card: #ffffff;
+
+  /* The In bubble, light, and RE-DERIVED rather than mirrored -- the dark
+     value inverted would be a dark patch on a pale pane, which is the defect
+     this change exists to remove.
+
+     THE CEILING IS REAL AND IT IS LOW. The pane sits at 86% relative
+     luminance, so pure white -- the lightest colour there is -- measures
+     1.159:1 against it, and no fill lighter than the pane can do better. This
+     one measures 1.113:1, 96% of that ceiling, and buys the rest of the step
+     in the channel that has room: ΔE 9.09 against the pane, where the theme's
+     own white card measures 6.24. So it is further from the pane than a card
+     is, while still being lighter than it -- raised, not sunken.
+
+     Ink is not the constraint it is in dark: `--vam-ink-dim` reads 7.42:1
+     here. */
+  --vam-in-bubble: #eafff9;
 
   --vam-segment-on: #e2e0da;
 

@@ -346,3 +346,92 @@ describe('the pane takes its own colour, and ground stops being a swatch', () =>
     expect(prefs.palette.light[groundToken]).toBe('#222233');
   });
 });
+
+/**
+ * THE CARD AND THE IN BUBBLE JOIN THE GRID — and only one of them is seeded.
+ *
+ * Both are new surfaces (`styles.css`), and both were carved out of a token
+ * the operator could already set. That is what puts them here rather than in
+ * the stylesheet alone: a colour that used to answer to a swatch and quietly
+ * stops is a setting taken away by a refactor, which is the thing the pane
+ * split above went to some trouble not to do.
+ *
+ * `--vam-card` IS SEEDED FROM `--vam-panel`, for exactly the pane split's reason.
+ * Every card on the detail pane and in the sidebar painted `bg-panel` until
+ * this change; an operator who had picked a panel colour was looking at cards
+ * in it, and the repoint alone would have handed them back to the
+ * stylesheet's grey in front of them.
+ *
+ * `--vam-in-bubble` IS NOT SEEDED, and the asymmetry is the point rather than
+ * an omission. The bubble wore `raised` — which also paints session rows and
+ * hovers all over the app, so a stored `raised` is a choice about those, not
+ * about this bubble. Worse, carrying it here would restore the exact defect
+ * being fixed: `raised` against the pane band is the 1.03:1 the operator came
+ * back about. A migration must not silently change what somebody sees; it
+ * also must not silently re-break what they asked to have fixed.
+ */
+describe('the card and the In bubble are colours the operator can set', () => {
+  const cardToken = '--vam-card';
+  const bubbleToken = '--vam-in-bubble';
+  const panelToken = '--vam-panel';
+
+  it('offers both as swatches, with their own labels', () => {
+    const tokens = PALETTE_TOKENS.map((t) => t.token);
+    expect(tokens).toContain(cardToken);
+    expect(tokens).toContain(bubbleToken);
+    expect(PALETTE_TOKENS.find((t) => t.token === cardToken)?.label).toBe('card');
+    expect(PALETTE_TOKENS.find((t) => t.token === bubbleToken)?.label).toBe('in bubble');
+  });
+
+  it('seeds the card from a stored panel override, per theme', () => {
+    const prefs = readPrefs(
+      storage({
+        palette: {
+          dark: { '--vam-panel': '#181818' },
+          light: { '--vam-panel': '#fbfbf9' },
+        },
+      }),
+    );
+    expect(prefs.palette.dark[cardToken]).toBe('#181818');
+    expect(prefs.palette.light[cardToken]).toBe('#fbfbf9');
+    // A split, not a move: `panel` still paints the dialogs and the phone's
+    // own headers, and keeps whatever it was set to.
+    expect(prefs.palette.dark[panelToken]).toBe('#181818');
+  });
+
+  it('leaves the card unset when the panel was never customised', () => {
+    // Same argument as the pane: seeding from the stylesheet's current value
+    // would freeze the card on one theme's grey and stop it following a theme
+    // change at all.
+    const prefs = readPrefs(storage({ palette: { dark: { '--vam-sidebar': '#202024' } } }));
+    expect(prefs.palette.dark[cardToken]).toBeUndefined();
+  });
+
+  it('never overwrites a card colour the operator has already picked', () => {
+    const prefs = readPrefs(
+      storage({ palette: { dark: { '--vam-panel': '#181818', '--vam-card': '#242430' } } }),
+    );
+    expect(prefs.palette.dark[cardToken]).toBe('#242430');
+  });
+
+  it('does not seed the In bubble from anything', () => {
+    const prefs = readPrefs(
+      storage({
+        palette: {
+          dark: { '--vam-raised': '#1a1a1a', '--vam-panel': '#181818', '--vam-pane': '#171717' },
+        },
+      }),
+    );
+    expect(prefs.palette.dark[bubbleToken]).toBeUndefined();
+  });
+
+  it('stores, applies and resets a picked In bubble colour like any other', () => {
+    const picked = setPaletteColor(EMPTY_PREFS, 'dark', bubbleToken, '#0f3b35');
+    expect(picked.palette.dark[bubbleToken]).toBe('#0f3b35');
+    const root = fakeRoot();
+    applyPalette(picked.palette.dark, root.element);
+    expect(root.read(bubbleToken)).toBe('#0f3b35');
+    const cleared = clearPaletteColor(picked, 'dark', bubbleToken);
+    expect(cleared.palette.dark[bubbleToken]).toBeUndefined();
+  });
+});

@@ -2,6 +2,15 @@
  * WCAG 2.x relative-luminance contrast, for tests that measure `styles.css`
  * rather than quoting it. Shared by the token guard and by the node-glow test,
  * which asserts one specific ratio in the middle of a larger story.
+ *
+ * `deltaE` is here for the one question the ratio cannot answer, and it was
+ * added because that question arrived as an operator complaint. The WCAG ratio
+ * is LUMINANCE ONLY: two surfaces of the same lightness in different hues
+ * measure 1.00:1 and are obviously different to look at, and -- the case that
+ * forced this -- the light theme's pane already sits at 86% luminance, so
+ * NOTHING lighter than it can measure past 1.16:1 however saturated it is.
+ * Judging a surface pair on the ratio alone would have made the light theme
+ * look unfixable while the dark theme looked solved. Both numbers get floors.
  */
 
 function channel(value: number): number {
@@ -9,15 +18,43 @@ function channel(value: number): number {
   return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
 }
 
-function luminance(hex: string): number {
+function rgb(hex: string): readonly [number, number, number] {
   const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
   if (!m) throw new Error(`not a six-digit hex colour: ${hex}`);
   const n = Number.parseInt(m[1] as string, 16);
-  return (
-    0.2126 * channel((n >> 16) & 0xff) +
-    0.7152 * channel((n >> 8) & 0xff) +
-    0.0722 * channel(n & 0xff)
-  );
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
+function luminance(hex: string): number {
+  const [r, g, b] = rgb(hex);
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
+/** CIE L*a*b* under D65, from linearised sRGB. */
+function lab(hex: string): readonly [number, number, number] {
+  const [r, g, b] = rgb(hex).map(channel) as [number, number, number];
+  const x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+  const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+  const f = (t: number): number => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+}
+
+/**
+ * CIE76 ΔE*ab between two six-digit hex colours: how far apart they LOOK, hue
+ * included. ~2.3 is the just-noticeable difference; the light theme's own card
+ * step (white on the pane) is 6.2, which is the number this repo reaches for
+ * when it wants to say "at least as distinct as a card".
+ */
+export function deltaE(a: string, b: string): number {
+  const [l1, a1, b1] = lab(a);
+  const [l2, a2, b2] = lab(b);
+  return Math.hypot(l1 - l2, a1 - a2, b1 - b2);
+}
+
+/** The relative luminance of a six-digit hex colour, 0 to 1. */
+export function relativeLuminance(hex: string): number {
+  return luminance(hex);
 }
 
 /** The ratio between two six-digit hex colours, 1 to 21, order-independent. */

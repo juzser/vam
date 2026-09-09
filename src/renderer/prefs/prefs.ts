@@ -1643,7 +1643,7 @@ export type ThemePalettes = Readonly<Record<EffectiveTheme, PaletteOverrides>>;
  * asked for it to be: the pane was painted `bg-sidebar` -- the mockup gives
  * the two the same value -- so the sidebar swatch moved the whole right-hand
  * pane with it and there was no way to pull them apart. They are separate
- * tokens now, starting on the same value (styles.css), and `seedPane` below
+ * tokens now, starting on the same value (styles.css), and `seedSplits` below
  * carries a stored sidebar override onto the new one so the split is
  * invisible until the operator moves one of them.
  *
@@ -1675,8 +1675,24 @@ export type ThemePalettes = Readonly<Record<EffectiveTheme, PaletteOverrides>>;
 export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: string }[] = [
   { token: '--vam-pane', label: 'pane' },
   { token: '--vam-panel', label: 'panel' },
+  /* `card` IS THE FILL OF ANYTHING SITTING ON THE PANE OR THE SIDEBAR, and
+     it is here for the same reason `pane` is: it was carved out of a token the
+     operator could already set. Every card in the detail pane and the sidebar
+     painted `bg-panel` until the operator's second report of "black patches",
+     which was `panel` measuring 1.028:1 DARKER than the two surfaces it was
+     drawn on (styles.css). `seedCard` below carries a stored panel override
+     onto it so the repoint takes nothing away. */
+  { token: '--vam-card', label: 'card' },
   { token: '--vam-sidebar', label: 'sidebar' },
   { token: '--vam-raised', label: 'raised' },
+  /* THE ONE COLOUR THE OPERATOR HAS ASKED ABOUT TWICE. First for the prompt
+     to "have a different colour so it stands out, and sit in a bubble", then
+     -- having got a bubble filled with `raised`, 1.030:1 against the band
+     behind it -- for it to have "more contrast within the pane". A swatch is
+     the honest end of that: the fill now has a real step, and the person who
+     keeps looking at it can move it without waiting for a build. It is NOT
+     seeded from `raised`; see `seedCard`. */
+  { token: '--vam-in-bubble', label: 'in bubble' },
   { token: '--vam-ink', label: 'text' },
   { token: '--vam-running', label: 'running' },
   { token: '--vam-waiting', label: 'waiting' },
@@ -1706,10 +1722,32 @@ const RETIRED_TOKENS: readonly string[] = ['--vam-ground'];
 /** Every token that may appear in a stored bucket: offered plus retired. */
 const PALETTE_KEYS = new Set([...PALETTE_TOKENS.map((entry) => entry.token), ...RETIRED_TOKENS]);
 
-/** The two tokens the pane/sidebar split is between. Named, not spelled
- *  twice: a typo in either half is a seed that silently never happens. */
-const PANE_TOKEN = '--vam-pane';
-const SIDEBAR_TOKEN = '--vam-sidebar';
+/**
+ * EVERY SPLIT A STORED COLOUR HAS TO SURVIVE, as `[the older token, the one
+ * carved out of it]`.
+ *
+ * A table rather than two hand-written functions, and the reason is the
+ * comment the first one carried: "a typo in either half is a seed that
+ * silently never happens". Two copies of that hazard is two chances to have
+ * it, and the second split arrived within one release of the first.
+ *
+ *  - `sidebar -> pane`: the detail pane wore `bg-sidebar` until the operator
+ *    asked for "the pane's colour setting split from the sidebar".
+ *  - `panel -> card`: every card on the pane and in the sidebar wore
+ *    `bg-panel` until the operator's second report of black patches, which
+ *    was that fill measuring 1.028:1 DARKER than the surfaces under it.
+ *
+ * `--vam-in-bubble` IS DELIBERATELY ABSENT from this table even though the
+ * bubble it fills used to wear `raised`. Seeding it would carry a colour the
+ * operator chose for session rows and hovers onto a surface they never picked
+ * it for -- and, specifically, would restore the 1.03:1 they came back to
+ * complain about. Preserving what somebody sees is the rule; preserving a
+ * defect they asked to have fixed is not the same thing.
+ */
+const SPLITS: readonly (readonly [string, string])[] = [
+  ['--vam-sidebar', '--vam-pane'],
+  ['--vam-panel', '--vam-card'],
+];
 
 /**
  * What `--vam-ground` was called before the canvas it was named after was
@@ -1755,29 +1793,31 @@ function readBucket(raw: unknown): PaletteOverrides {
       out[key] = value;
     }
   }
-  return seedPane(out);
+  return seedSplits(out);
 }
 
 /**
- * THE PANE'S FILL, SPLIT OFF THE SIDEBAR'S WITHOUT MOVING A PIXEL.
+ * A SURFACE SPLIT OFF ANOTHER ONE WITHOUT MOVING A PIXEL.
  *
- * The two paint the same value in the stylesheet, and the detail pane wore
- * `bg-sidebar` until the operator asked for the two settings to come apart.
- * An operator who had already customised the sidebar was therefore looking at
- * a custom PANE, and the split alone would have handed it back to the
- * stylesheet's grey in front of them. So the sidebar's stored colour is
- * copied onto the new token once, on load, and written back under it.
+ * Each pair in `SPLITS` names a token that used to paint a surface and the
+ * token that paints it now. An operator who had customised the OLD one was
+ * therefore looking at a custom version of the NEW surface, and the repoint
+ * alone would have handed it back to the stylesheet's grey in front of them.
+ * So the old colour is copied onto the new token once, on load, and written
+ * back under it.
  *
- * ONLY WHEN THE SIDEBAR IS ACTUALLY OVERRIDDEN. Seeding an unset pane from the
- * stylesheet's current value would freeze it: a theme change moves the
- * sidebar, and a pane pinned to the other theme's grey would follow nothing.
- * And never over a pane the operator has picked -- a payload holding both was
- * written by a build that already had this token.
+ * ONLY WHEN THE OLD TOKEN IS ACTUALLY OVERRIDDEN. Seeding an unset token from
+ * the stylesheet's current value would freeze it: a theme change moves the
+ * original, and a copy pinned to the other theme's grey would follow nothing.
+ * And never over a value the operator has picked -- a payload holding both was
+ * written by a build that already had the new token.
  */
-function seedPane(bucket: Record<string, string>): PaletteOverrides {
-  const sidebar = bucket[SIDEBAR_TOKEN];
-  if (bucket[PANE_TOKEN] === undefined && sidebar !== undefined) {
-    bucket[PANE_TOKEN] = sidebar;
+function seedSplits(bucket: Record<string, string>): PaletteOverrides {
+  for (const [from, to] of SPLITS) {
+    const source = bucket[from];
+    if (bucket[to] === undefined && source !== undefined) {
+      bucket[to] = source;
+    }
   }
   return bucket;
 }
