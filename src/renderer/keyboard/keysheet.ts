@@ -45,9 +45,11 @@ import {
  * to call NORMAL, Insert is the resting state of the right pane.
  *
  * They exist HERE, in the sheet, and not only in the canvas, because the
- * operator's point about them is a point about the sheet: `hjkl` and
- * `Mod+<digit>` mean one thing in each mode and the two sets do not interfere,
- * and a sheet that lists those bindings undifferentiated hides exactly that.
+ * operator's point about them is a point about the sheet: `hjkl` means one
+ * thing in each mode and the two sets do not interfere, and a sheet that lists
+ * that binding undifferentiated hides exactly that. `Mod+<digit>` was the
+ * second family in this sentence until the fourth arrangement of the digit row
+ * gave it one fixed meaning; `hjkl` is the last one left.
  * `Canvas.tsx` imports `CursorMode` from here so there is one spelling of the
  * fact rather than two.
  */
@@ -77,12 +79,13 @@ type Meta<K extends KeyAction['kind']> = {
   /** A function of the action, so `h` and `j` cannot share one vague caption. */
   readonly label: (action: Extract<KeyAction, { kind: K }>) => string;
   /**
-   * For the two families whose meaning DEPENDS on the cursor mode: one caption
-   * per mode, and the sheet prints a row for each.
+   * For a family whose meaning DEPENDS on the cursor mode: one caption per
+   * mode, and the sheet prints a row for each. `hjkl` is the only one left —
+   * `Mod+<digit>` was the other until it was given one fixed meaning.
    *
    * Absent means mode-independent, which is most of the table — `yy` copies in
    * either mode and a row per mode would be the same row twice. So this is
-   * opt-in, and the day a third mode-dependent binding is added, adding it here
+   * opt-in, and the day another mode-dependent binding is added, adding it here
    * is the whole change.
    */
   readonly byMode?: (
@@ -112,46 +115,35 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
     label: (a) => (a.delta === 1 ? 'next project' : 'previous project'),
   },
   jump: { group: 'navigation', label: () => 'jump to a labelled node' },
-  // The one row family whose meaning depends on where the keyboard is, and the
-  // caption says so rather than picking a side. A sheet reading "Cmd+1 —
-  // session 1" would be wrong every time the operator is in the response pane,
-  // which is exactly the defect the previous two arrangements shipped.
+  // ONE CAPTION, AND NO `byMode` ANY MORE — which is most of what the fourth
+  // arrangement of the digit row did to this file. The row carried two
+  // captions because the key carried two meanings; it now means one thing with
+  // the keyboard in either place, and a row printed twice saying the same
+  // sentence is noise this sheet already refuses for `yy`.
+  //
+  // It names no COUNT, because there is no fixed one to name: a pane's strip
+  // draws as many tabs as the project has sessions. That is also why nothing
+  // here is capped by `TABS.length` the way the Insert half used to be —
+  // `TABS` counts the four VIEWS, which live on `Alt-<digit>` and are
+  // captioned by `pickView` just below.
   //
   // Still generated: the label is a function of the action's own digit, so the
   // sheet lists precisely the digits the table binds and no others.
-  // The Insert half is capped by the number of tabs the pane can hold.
-  // `Mod-1`..`Mod-9` are all bound, so the sheet used to print "tab 5 in the
-  // response pane" through "tab 9" over a bar of at most four: the binding is
-  // real and the caption was not, which is the one thing a generated sheet
-  // exists to make impossible. Digits past the last tab say what they do
-  // instead, the way the digit-9 Select caption already did.
-  position: {
+  selectTab: {
     group: 'navigation',
     label: (a) =>
       a.digit === 9
-        ? 'position 9 — the LAST session in the sidebar, whatever the count'
-        : a.digit <= TABS.length
-          ? `position ${a.digit} — session ${a.digit} in the sidebar, tab ${a.digit} in the response pane`
-          : `position ${a.digit} — session ${a.digit} in the sidebar`,
-    byMode: (a) => ({
-      select:
-        a.digit === 9
-          ? 'the LAST session in the sidebar, whatever the count'
-          : `session ${a.digit} in the sidebar`,
-      insert:
-        a.digit <= TABS.length
-          ? `tab ${a.digit} in the response pane`
-          : `nothing — the response pane holds ${TABS.length} tabs at most`,
-    }),
+        ? 'the LAST tab of this pane, whatever the count'
+        : `tab ${a.digit} of this pane`,
   },
   // The response pane's four views, and the one row family whose caption is
   // GENERATED FROM `TABS` rather than written out: the bar's contents have
   // changed twice in this epic, and a hand-written caption is how the sheet
   // came to promise a view that had been renamed.
   //
-  // No `byMode`: unlike `position` on the other modifier, this digit names
-  // the same view in either cursor mode, and a row printed twice saying the
-  // same thing is noise the sheet already refuses for `yy`.
+  // No `byMode`, and its neighbour on the other modifier has none either now:
+  // both digit families name the same thing in either cursor mode, which is
+  // what the fourth arrangement bought.
   //
   // Digits past the last view get the honest caption instead of a promise.
   // `Alt-5`..`Alt-9` are bound so the pane can refuse them ALOUD rather than
@@ -176,6 +168,11 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   icon: { group: 'session', label: () => 'pick this session’s icon' },
   close: { group: 'session', label: () => 'close this session' },
   newSession: { group: 'session', label: () => 'start a new session' },
+  // Named for the pane, because that is the whole difference from
+  // `newSession` above — one sheet row must not read as a second spelling of
+  // the other, or an operator picks whichever they remember and gets a
+  // different refusal.
+  newTab: { group: 'session', label: () => 'new session as a tab in this pane' },
   open: { group: 'session', label: () => 'open the focused step' },
   focusAction: { group: 'panes', label: () => 'keyboard to the action pane' },
   focusList: { group: 'panes', label: () => 'keyboard back to the session list' },

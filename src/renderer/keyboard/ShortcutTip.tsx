@@ -8,9 +8,9 @@
  * `effectiveBindings` — after `resolveChord` and the settings page — and holds
  * no key of its own.
  *
- * Mode is not flattened either: `describeAction` returns `byMode` for the two
- * families whose meaning depends on the cursor mode, so a caller that knows its
- * mode gets that meaning and one that does not gets BOTH, named. Picking one
+ * Mode is not flattened either: `describeAction` returns `byMode` for a family
+ * whose meaning depends on the cursor mode, so a caller that knows its mode
+ * gets that meaning and one that does not gets BOTH, named. Picking one
  * silently is the same lie in a smaller font.
  *
  * `Note` is its sibling: same Radix machinery, same reason (a `title` never
