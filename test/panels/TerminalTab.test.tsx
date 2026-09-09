@@ -23,7 +23,14 @@ const q = <T extends Element>(selector: string) => document.querySelector<T>(sel
 const ATLAS = 'claude-code:atlas-11111111';
 const BEACON = 'claude-code:beacon-22222222';
 
-const ok = (text: string, name = 'vam-atlas-a1b2c3'): PaneView => ({ kind: 'ok', name, text });
+/** A screen with no cursor answer -- what a stub that never asked tmux knows. */
+const NO_CURSOR = { kind: 'unreadable' } as const;
+const ok = (text: string, name = 'vam-atlas-a1b2c3'): PaneView => ({
+  kind: 'ok',
+  name,
+  text,
+  cursor: NO_CURSOR,
+});
 
 /** Lets the mounted effect's first read resolve before anything is asserted. */
 const settle = async () => {

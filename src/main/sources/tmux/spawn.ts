@@ -36,7 +36,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import type { PaneSize } from '../../../shared/terminal.js';
+import type { PaneCursor, PaneSize } from '../../../shared/terminal.js';
 import type { SourceError } from '../../ipc/channels.js';
 import {
   capturePaneArgv,
@@ -45,6 +45,7 @@ import {
   newSessionArgv,
   resizeWindowArgv,
   tagSessionArgv,
+  VAM_CURSOR_MARK,
 } from './argv.js';
 
 /** tmux answers in milliseconds; a slow one is a broken one. */
@@ -218,8 +219,71 @@ export type TmuxSessions =
   | { readonly kind: 'unavailable'; readonly error: SourceError };
 
 export type TmuxText =
-  | { readonly kind: 'ok'; readonly text: string }
+  | { readonly kind: 'ok'; readonly text: string; readonly cursor: PaneCursor }
   | { readonly kind: 'unavailable'; readonly error: SourceError };
+
+/**
+ * The largest coordinate this will believe. Not a size policy -- the renderer
+ * decides what fits, and only draws a cursor on a row the screen actually has.
+ * This is the bound against a value that is not a position at all, so nothing
+ * downstream is asked to pad a line to a hundred thousand cells.
+ */
+const MAX_CURSOR_CELL = 99_999;
+
+/**
+ * tmux's one-line answer about the cursor, or the honest absence of one.
+ *
+ * EXPORTED FOR ITS TEST, and it is worth testing on its own because every
+ * failure mode here is SILENT. Measured on tmux 3.7b: a `display-message`
+ * aimed at a target that does not exist exits 0, writes nothing to stderr,
+ * and prints the format with all three fields empty -- so there is no failure
+ * for `classifyTmuxFailure` to catch and nothing but this parse standing
+ * between that silence and a cursor drawn in the corner of a screen.
+ *
+ * Every field is therefore checked rather than coerced. `Number('')` is 0 and
+ * `Number(' ')` is 0; `parseInt` on a malformed value is `NaN`, which compares
+ * false and would slip through a `>=` guard the wrong way round. The shape is
+ * matched whole, by pattern, and anything else is `unreadable`.
+ */
+export function readCursorLine(line: string): PaneCursor {
+  const marked = `${VAM_CURSOR_MARK} `;
+  if (!line.startsWith(marked)) return { kind: 'unreadable' };
+  const fields = line.slice(marked.length).split(' ');
+  const [flag, x, y] = fields;
+  if (fields.length !== 3) return { kind: 'unreadable' };
+  // The flag can VETO, so it is read before the coordinates and only two
+  // values mean anything: a `cursor_flag` that is neither 0 nor 1 is a tmux
+  // this parse does not understand, not a cursor to guess about.
+  if (flag === '0') return { kind: 'hidden' };
+  if (flag !== '1') return { kind: 'unreadable' };
+  if (x === undefined || y === undefined || !/^\d+$/.test(x) || !/^\d+$/.test(y)) {
+    return { kind: 'unreadable' };
+  }
+  const column = Number(x);
+  const row = Number(y);
+  return column > MAX_CURSOR_CELL || row > MAX_CURSOR_CELL
+    ? { kind: 'unreadable' }
+    : { kind: 'at', column, row };
+}
+
+/**
+ * Split tmux's one stdout into the cursor's line and the screen's lines.
+ *
+ * THE SPLIT IS BY MARKER, NEVER BY POSITION (`argv.ts`, `VAM_CURSOR_MARK`). A
+ * first line taken on trust would be a line of the operator's screen deleted
+ * on every read the cursor query did not answer -- and the query not answering
+ * is not hypothetical: it is what an older tmux, a half-run sequence and every
+ * pre-existing stubbed runner all look like.
+ */
+function splitCursor(stdout: string): { text: string; cursor: PaneCursor } {
+  const end = stdout.indexOf('\n');
+  if (end === -1) return { text: stdout, cursor: readCursorLine(stdout) };
+  const cursor = readCursorLine(stdout.slice(0, end));
+  return cursor.kind === 'unreadable' && !stdout.startsWith(`${VAM_CURSOR_MARK} `)
+    ? // No cursor line at all: every byte is screen.
+      { text: stdout, cursor }
+    : { text: stdout.slice(end + 1), cursor };
+}
 
 /**
  * vam's own sessions, and only those.
@@ -294,7 +358,7 @@ export async function createVamSession(
 export async function readPane(run: TmuxRun, name: string): Promise<TmuxText> {
   const { failure, stdout, stderr } = await run(capturePaneArgv(name));
   return failure === null
-    ? { kind: 'ok', text: stdout }
+    ? { kind: 'ok', ...splitCursor(stdout) }
     : {
         kind: 'unavailable',
         error: classifyTmuxFailure({ failure, stderr, action: `reading session ${name}` }),

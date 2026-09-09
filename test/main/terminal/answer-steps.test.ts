@@ -38,7 +38,7 @@ function runner(captures: readonly string[]) {
   const run: TmuxRun = async (argv) => {
     argvs.push(argv);
     if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t${NAME}\n`);
-    if (argv[0] === 'capture-pane') return ok(queue.shift() ?? '');
+    if (argv.includes('capture-pane')) return ok(queue.shift() ?? '');
     return ok('');
   };
   return {
@@ -93,7 +93,7 @@ describe('the real two-question call, walked end to end', () => {
     ]);
     // Read before every key and after every one of them: nine captures for
     // seven keys, and never two keys in a row on one reading.
-    expect(argvs.filter((argv) => argv[0] === 'capture-pane')).toHaveLength(8);
+    expect(argvs.filter((argv) => argv.includes('capture-pane'))).toHaveLength(8);
   });
 
   it('reads the answer back off the CLI own review rather than off its own intent', async () => {
@@ -274,7 +274,7 @@ describe('a refusal after part of the set has been committed', () => {
     const run: TmuxRun = async (argv) => {
       argvs.push(argv);
       if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t${NAME}\n`);
-      if (argv[0] === 'capture-pane') return ok(queue.shift() ?? '');
+      if (argv.includes('capture-pane')) return ok(queue.shift() ?? '');
       sends += 1;
       return sends >= nth
         ? { failure: { message: 'tmux failed' }, stdout: '', stderr: "can't find pane" }

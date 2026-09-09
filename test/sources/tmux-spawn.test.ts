@@ -206,9 +206,29 @@ describe('readPane', () => {
     const run = fakeTmux(() => ({ stdout: '> hello\nworking...\n' }));
     await expect(readPane(run, 'vam-demo-a1b2c3')).resolves.toEqual({
       kind: 'ok',
+      // NOT SHORTENED BY A LINE. This stub answers with a screen and no
+      // cursor line, which is what an older tmux and every runner stubbed
+      // before the cursor query look like -- and the screen has to survive
+      // whole (`tmux/argv.ts`, `VAM_CURSOR_MARK`).
       text: '> hello\nworking...\n',
+      cursor: { kind: 'unreadable' },
     });
-    expect(run.calls).toEqual([['capture-pane', '-p', '-e', '-t', '=vam-demo-a1b2c3:']]);
+    expect(run.calls).toEqual([
+      [
+        'display-message',
+        '-p',
+        '-t',
+        '=vam-demo-a1b2c3:',
+        '-F',
+        '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y}',
+        ';',
+        'capture-pane',
+        '-p',
+        '-e',
+        '-t',
+        '=vam-demo-a1b2c3:',
+      ],
+    ]);
   });
 
   it('distinguishes a session that is gone from a tmux that is gone', async () => {

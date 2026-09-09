@@ -26,7 +26,14 @@ import { applyPalette } from '../../src/renderer/prefs/prefs.js';
 import type { PaneView } from '../../src/shared/terminal.js';
 
 const ATLAS = 'claude-code:atlas-11111111';
-const ok = (text = 'the pane'): PaneView => ({ kind: 'ok', name: 'vam-atlas-a1b2c3', text });
+/** A screen with no cursor answer -- what a stub that never asked tmux knows. */
+const NO_CURSOR = { kind: 'unreadable' } as const;
+const ok = (text = 'the pane'): PaneView => ({
+  kind: 'ok',
+  name: 'vam-atlas-a1b2c3',
+  text,
+  cursor: NO_CURSOR,
+});
 
 const q = <T extends Element>(selector: string) => document.querySelector<T>(selector);
 

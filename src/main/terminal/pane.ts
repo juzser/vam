@@ -198,7 +198,11 @@ export async function readSessionPane(
   }
   const pane = await readPane(run, match.name);
   if (pane.kind === 'ok') {
-    return { kind: 'ok', name: match.name, text: pane.text };
+    // The cursor travels WITH the screen it belongs to and is never
+    // reconstructed downstream: it is a position in THIS capture, at this
+    // moment, and a value kept across two reads would be one screen's caret
+    // drawn on another's (`shared/terminal.ts`, `PaneCursor`).
+    return { kind: 'ok', name: match.name, text: pane.text, cursor: pane.cursor };
   }
   return pane.error.code === 'no-such-session'
     ? { kind: 'gone' }

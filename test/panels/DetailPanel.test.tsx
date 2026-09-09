@@ -3195,6 +3195,8 @@ describe('the Terminal tab costs nothing until it is opened', () => {
         kind: 'ok',
         name: 'vam-sprint-board-reorder-a1b2c3',
         text: 'the pane',
+        // This stub never asked tmux, and `unreadable` is what that is.
+        cursor: { kind: 'unreadable' },
       }),
     );
     withBridge(read);
@@ -3234,6 +3236,8 @@ describe('the Terminal tab costs nothing until it is opened', () => {
         kind: 'ok',
         name: 'vam-sprint-board-reorder-a1b2c3',
         text: 'the pane',
+        // This stub never asked tmux, and `unreadable` is what that is.
+        cursor: { kind: 'unreadable' },
       }),
     );
     const send = vi.fn(async () => 'sent' as const);

@@ -32,9 +32,18 @@ function runner(answers: Record<string, TmuxRunResult>) {
   const argvs: (readonly string[])[] = [];
   const run: TmuxRun = async (argv) => {
     argvs.push(argv);
-    return answers[argv[0] ?? ''] ?? failed(`no stub for ${argv[0] ?? ''}`);
+    // THE PANE READ IS ONE TMUX INVOCATION OF TWO COMMANDS since it began
+    // asking where the cursor is (`tmux/argv.ts`), so its first word is
+    // `display-message` and not `capture-pane`. Every stub here names the
+    // read by WHAT IT READS rather than by the verb that happens to lead.
+    const verb = argv.includes('capture-pane') ? 'capture-pane' : (argv[0] ?? '');
+    return answers[verb] ?? failed(`no stub for ${verb}`);
   };
-  return { run, argvs, verbs: () => argvs.map((argv) => argv[0]) };
+  return {
+    run,
+    argvs,
+    verbs: () => argvs.map((argv) => (argv.includes('capture-pane') ? 'capture-pane' : argv[0])),
+  };
 }
 
 const listing = (rows: string) => ({ 'list-sessions': ok(rows), 'send-keys': ok('') });
