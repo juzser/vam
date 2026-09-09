@@ -16,9 +16,13 @@ import type { HistoryCursor, TranscriptPage } from '../../src/shared/history.js'
 import type { Decision } from '../../src/renderer/domain/model.js';
 import {
   appendOlder,
+  applyWalk,
   cursorToAsk,
   MAX_BLANK_STEPS,
   mergeColumn,
+  moreState,
+  type PagerState,
+  RESTING_PAGER,
   walkOlder,
 } from '../../src/renderer/panels/transcript-history.js';
 
@@ -201,6 +205,19 @@ describe('walkOlder', () => {
     expect(walk).toEqual({ kind: 'unavailable', error, steps: 1 });
   });
 
+  it('never asks with a cursor of its own devising', async () => {
+    // `HistoryCursor` is opaque: exactly two shapes are legal, and both come
+    // from somewhere else. Every ask after the first must be a cursor the
+    // previous page handed back, verbatim.
+    const handed = ['@600', '@300'];
+    const read = vi.fn(async () => {
+      const cursor = handed.shift() ?? null;
+      return page({ turns: [], cursor, reachedStart: cursor === null });
+    });
+    await walkOlder(read, 's1', 't1');
+    expect(read.mock.calls.map((c) => c[1])).toEqual(['t1', '@600', '@300']);
+  });
+
   it('turns a REJECTION into the same refusal rather than losing the gesture', async () => {
     // The port says `history` never rejects, and every source vam ships keeps
     // that promise. A source built by hand is exactly what the member is
@@ -212,5 +229,76 @@ describe('walkOlder', () => {
     const walk = await walkOlder(read, 's1', 't1');
     expect(walk.kind).toBe('unavailable');
     expect(walk.kind === 'unavailable' && walk.error.message).toContain('the bridge went away');
+  });
+});
+
+describe('applyWalk', () => {
+  const walkTurns = {
+    kind: 'page' as const,
+    turns: [turn('t0')],
+    cursor: '@8',
+    reachedStart: false,
+    steps: 1,
+  };
+
+  it('carries the next cursor forward when a page landed', () => {
+    expect(applyWalk(RESTING_PAGER, walkTurns)).toEqual({
+      cursor: '@8',
+      phase: 'rest',
+      error: null,
+    });
+  });
+
+  it('records the start as the start', () => {
+    expect(applyWalk(RESTING_PAGER, { ...walkTurns, cursor: null, reachedStart: true })).toEqual({
+      cursor: null,
+      phase: 'start',
+      error: null,
+    });
+  });
+
+  it('a blank page past the cap is still MORE, never a start', () => {
+    const after = applyWalk(RESTING_PAGER, { ...walkTurns, turns: [], cursor: '@4' });
+    expect(after).toEqual({ cursor: '@4', phase: 'rest', error: null });
+    expect(moreState(after, async () => page({}))).toBe('available');
+  });
+
+  it('a refusal leaves the cursor exactly where it was, so a retry asks the same thing', () => {
+    const error = { kind: 'refused' as const, code: 'nope', message: 'not today' };
+    const asked: PagerState = { cursor: '@600', phase: 'rest', error: null };
+    expect(applyWalk(asked, { kind: 'unavailable', error, steps: 1 })).toEqual({
+      cursor: '@600',
+      phase: 'failed',
+      error,
+    });
+  });
+});
+
+describe('moreState', () => {
+  const read = async () => page({});
+
+  it('is UNSUPPORTED when the source has no pager at all', () => {
+    // Absent is a stated refusal, never "there is nothing older".
+    expect(moreState(RESTING_PAGER, null)).toBe('unsupported');
+  });
+
+  it('is nothing at all once the start is proven -- there is nothing left to ask', () => {
+    expect(moreState({ cursor: null, phase: 'start', error: null }, read)).toBeNull();
+  });
+
+  it('a source with no pager can still have proven the start', () => {
+    // It cannot today, and the ordering is asserted so it stays that way if one
+    // ever can: a source that HAS reached the start has nothing to refuse.
+    expect(moreState({ cursor: null, phase: 'start', error: null }, null)).toBeNull();
+  });
+
+  it('says READING while a walk is in flight, and UNAVAILABLE after one failed', () => {
+    expect(moreState({ cursor: null, phase: 'reading', error: null }, read)).toBe('reading');
+    expect(
+      moreState(
+        { cursor: null, phase: 'failed', error: { kind: 'refused', code: 'x', message: 'y' } },
+        read,
+      ),
+    ).toBe('unavailable');
   });
 });

@@ -38,13 +38,8 @@
 
 import type { HistoryCursor, TranscriptPage } from '../../shared/history.js';
 import type { Decision } from '../domain/model.js';
+import type { TranscriptReader } from '../sources/history-reader.js';
 import type { SourceError } from '../sources/port.js';
-
-/** The port's own `history` member, narrowed to what this module needs. */
-export type TranscriptReader = (
-  sessionId: string,
-  cursor: HistoryCursor | null,
-) => Promise<TranscriptPage>;
 
 /**
  * How many BLANK windows one gesture may walk before it stops and hands the
@@ -208,4 +203,71 @@ export async function walkOlder(
     }
     at = next;
   }
+}
+
+/**
+ * WHERE THE COLUMN HAS GOT TO, walking back. Not what it DRAWS -- `moreState`
+ * below is that, and the split is what keeps a source's absence and a source's
+ * refusal from collapsing into one another.
+ *
+ * `cursor` is `null` in two completely different situations and the `phase`
+ * beside it is what tells them apart: `rest` with a null cursor means nothing
+ * has been asked yet (so the next ask derives from the oldest turn on screen),
+ * and `start` with a null cursor means the beginning has been PROVEN and there
+ * is nothing left to ask for. Deriving that difference from the cursor alone is
+ * the exact mistake `shared/history.ts` carries both `cursor` and
+ * `reachedStart` to prevent.
+ */
+export type PagerState = {
+  readonly cursor: HistoryCursor | null;
+  readonly phase: 'rest' | 'reading' | 'start' | 'failed';
+  readonly error: SourceError | null;
+};
+
+/** Nothing asked yet, for a session just opened. */
+export const RESTING_PAGER: PagerState = { cursor: null, phase: 'rest', error: null };
+
+/**
+ * Fold one walk's answer into the pager.
+ *
+ * THE CURSOR DOES NOT MOVE ON A FAILURE, and that is what makes the retry
+ * control honest rather than decorative: a second press asks for exactly the
+ * thing that failed, so a transient refusal is recoverable and a permanent one
+ * says the same sentence again.
+ */
+export function applyWalk(pager: PagerState, walk: HistoryWalk): PagerState {
+  if (walk.kind === 'unavailable') {
+    return { cursor: pager.cursor, phase: 'failed', error: walk.error };
+  }
+  if (walk.reachedStart) return { cursor: null, phase: 'start', error: null };
+  return { cursor: walk.cursor, phase: 'rest', error: null };
+}
+
+/**
+ * What the boundary block offers, or `null` when it offers nothing.
+ *
+ * FOUR ANSWERS AND A SILENCE, kept apart on screen because they are four
+ * different things to do about:
+ *  - `available`   -- there is more, and vam can go and get it. A control.
+ *  - `reading`     -- a walk is in flight. A status line, and NO control:
+ *                     "absent, not dimmed" is the rule the block shipped under.
+ *  - `unavailable` -- the last read failed, in the source's own words, plus a
+ *                     control, because a retry asks the same thing again.
+ *  - `unsupported` -- this source has no pager. A sentence and no control.
+ *  - `null`        -- the start is proven; there is nothing left to ask for, so
+ *                     there is nothing to ask with.
+ *
+ * THE START OUTRANKS THE ABSENCE. A source with no pager cannot reach `start`
+ * today, and the order here is what keeps that from becoming a lie in the other
+ * direction if one ever does: having proven the beginning, there is nothing
+ * left to refuse.
+ */
+export function moreState(
+  pager: PagerState,
+  read: TranscriptReader | null,
+): 'available' | 'reading' | 'unavailable' | 'unsupported' | null {
+  if (pager.phase === 'start') return null;
+  if (read === null) return 'unsupported';
+  if (pager.phase === 'reading') return 'reading';
+  return pager.phase === 'failed' ? 'unavailable' : 'available';
 }
