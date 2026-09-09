@@ -15,9 +15,25 @@
  * screen, that it is one cell, that it is on the right character of a coloured
  * line, and that `hidden` and `unreadable` put nothing on screen at all.
  *
- * jsdom cannot say where the mark LANDS in pixels. That is
- * `e2e/terminal-cursor-shots.mjs`, in a real browser, against a real
- * stylesheet.
+ * WHAT NOTHING IN THIS REPO GUARDS, said here rather than left to be
+ * discovered. jsdom cannot say where the mark LANDS in pixels, and there is no
+ * e2e script for it either: the Terminal tab is unreachable in the web build
+ * `e2e/run-web-guards.mjs` drives, because `terminalTab` in `Canvas.tsx` is
+ * `source.kind === 'session' && capabilities.terminal` and the demo source is
+ * neither of those. Offering the tab there would be a production change made
+ * to enable a test, so it was not made.
+ *
+ * It WAS measured once, by hand, in headless Chromium against the real built
+ * stylesheet, on markup dumped from this component rather than hand-written.
+ * With the ruler's advance at 6.321875px, the caret's left edge sat 0.006px
+ * from `pre.left + 6 * advance` on a line whose first run is red -- so it is
+ * on the monospace grid cell tmux named and not on a byte of the capture. The
+ * glyphs after it were undisturbed: the tail run began exactly one advance
+ * later than the same line rendered unsplit, which is the single cell that
+ * moved into the caret's own span and nothing else. `bg-ink`/`text-panel`
+ * resolved to #ededed on #141414 in dark and #18181b on #ffffff in light, and
+ * `animationName` was `none` in both. A number in a comment is not a guard,
+ * and this one is labelled as what it is.
  */
 
 import { act, cleanup, render } from '@testing-library/react';
