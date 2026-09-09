@@ -175,7 +175,15 @@ describe('the in and out rules do not date a turn the model cannot date', () => 
   // whole `in` block is the subject now, and `out`'s meta is still read off
   // the condensed progress line.
   const inBlock = () => q<HTMLElement>('[data-detail-block="in"]')?.textContent ?? '';
-  const activity = () => q<HTMLElement>('[data-progress-activity]')?.textContent ?? '';
+  /**
+   * THE ACTIVITY ON THE TURN THE PANE IS MARKING. The column draws every turn
+   * and the NEWEST one carries the activity whatever the pane is marking, so
+   * an unqualified lookup would find that line and report the present tense on
+   * a case about reading the past.
+   */
+  const activity = () =>
+    q<HTMLElement>('[data-column-turn][data-turn-current="true"] [data-progress-activity]')
+      ?.textContent ?? '';
 
   it('the in block claims no per-turn time, and no longer says who', () => {
     draw({ entry: ENTRY, decision: DECISIONS[2] as Decision });
@@ -286,6 +294,36 @@ describe('a failed session says so, and does not invent a reason', () => {
   });
 });
 
+/**
+ * THE PANE DRAWS THE SESSION, NOT THE `decision` PROP -- so a fixture whose two
+ * halves disagree describes nothing.
+ *
+ * The pane used to render whichever single turn `decision` pointed at, which
+ * let a case hand it a turn that was not in `entry.session.decisions` at all
+ * and still see it on screen. It is a column of every turn the SESSION carries
+ * now (`Canvas.tsx` builds `decision` out of that same list, so the two never
+ * disagree in the app), and such a fixture would draw seven turns that have
+ * nothing to do with the assertion below it.
+ *
+ * So the two are reconciled here, once, rather than in thirty cases: a
+ * `decision` the entry already carries is left alone -- that is a case about
+ * WHICH of several turns is picked, and the seven-turn fixture is the whole
+ * point of it -- and an ad-hoc one becomes the session's only turn, which is
+ * what a case about how one turn RENDERS meant all along. A caller that passes
+ * its own `entry` has said what it wants and is never touched.
+ */
+function reconcile(over: Partial<DetailPanelProps>): Partial<DetailPanelProps> {
+  const picked = over.decision;
+  if (picked === undefined || picked === null) return over;
+  if ('entry' in over) return over;
+  // BY IDENTITY, not by id. The shared fixture's newest turn IS `d5`, so an
+  // id test would leave `{ id: 'd5', output: '## heading' }` sitting beside a
+  // seven-turn session that carries a DIFFERENT d5 -- the fixture disagreeing
+  // with itself in the one way that is invisible from the assertion.
+  if (ENTRY.session.decisions.includes(picked)) return over;
+  return { ...over, entry: { ...ENTRY, session: { ...ENTRY.session, decisions: [picked] } } };
+}
+
 function draw(over: Partial<DetailPanelProps> = {}) {
   const props: DetailPanelProps = {
     entry: ENTRY,
@@ -301,7 +339,7 @@ function draw(over: Partial<DetailPanelProps> = {}) {
     actionIndex: 0,
     width: 408,
     resizeHandle: null,
-    ...over,
+    ...reconcile(over),
   };
   render(<DetailPanel {...props} />);
 }
@@ -321,8 +359,7 @@ function drawFor(over: Partial<DetailPanelProps> = {}) {
     actionIndex: 0,
     width: 408,
     resizeHandle: null,
-    ...over,
-    ...extra,
+    ...reconcile({ ...over, ...extra }),
   });
   const view = render(<DetailPanel {...build({})} />);
   return {
@@ -461,7 +498,20 @@ describe('the panel remembers which turn you are reading, independent of the can
   // file) rather than a click on a list row opened by a toggle first.
   const pick = pickTurn;
 
-  const inText = () => q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '';
+  /**
+   * THE MARKED TURN'S PROMPT, not "the first prompt on screen".
+   *
+   * The pane draws every turn now, oldest first, so an unqualified
+   * `[data-detail-scroll="in"]` is the OLDEST turn's prompt whatever the panel
+   * remembers -- which would have made every case in this block assert `d1`
+   * and pass for the wrong reason on the two that expect it. What the block is
+   * about is unchanged: which turn the panel considers itself to be reading.
+   * That is `data-turn-current` now, because picking one no longer hides the
+   * other six.
+   */
+  const markedTurn = () => q<HTMLElement>('[data-column-turn][data-turn-current="true"]');
+  const inText = () =>
+    markedTurn()?.querySelector('[data-detail-scroll="in"]')?.textContent ?? '';
   // A12.2 moved the removed header's `[data-detail-step]` chip into the `in`
   // rule's meta beside "you", then onto the identity line -- and the operator
   // has now had that line removed as well. The label was never only there:
@@ -576,7 +626,14 @@ describe('the panel remembers which turn you are reading, independent of the can
     // output the way `data-out-empty` is -- asserting on it (rather than
     // `data-out-empty`) is what keeps this test from passing vacuously
     // against a fixture whose every turn already has an answer.
-    expect(all('[data-out-live]')).toHaveLength(0);
+    // ON THE PICKED TURN. The column draws the newest turn too, and that one
+    // IS the live one and rightly carries the marker; the claim was never that
+    // a running session stops saying so, only that the turn being read out of
+    // history does not pretend to be it.
+    const picked = q<HTMLElement>('[data-column-turn][data-turn-current="true"]') as HTMLElement;
+    expect(picked?.getAttribute('data-column-turn')).toBe('d1');
+    expect([...picked.querySelectorAll('[data-out-live]')]).toHaveLength(0);
+    expect(all('[data-out-live]')).toHaveLength(1);
   });
 });
 
@@ -616,7 +673,10 @@ describe('a selected historical turn survives a poll that delivers a new one', (
     project: PROJECT,
     session: { ...SESSION, id: 'sess-1', decisions },
   });
-  const inText = () => q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '';
+  /** The MARKED turn's prompt -- the column draws every turn, so an
+   *  unqualified lookup reads the oldest one whatever was picked. */
+  const marked = () => q<HTMLElement>('[data-column-turn][data-turn-current="true"]');
+  const inText = () => marked()?.querySelector('[data-detail-scroll="in"]')?.textContent ?? '';
   /** The `<option>` at oldest-first position `index` in the jump control. */
   const optionAt = (index: number) =>
     [...(jump()?.querySelectorAll('option') ?? [])][index] as HTMLOptionElement | undefined;
@@ -647,7 +707,7 @@ describe('a selected historical turn survives a poll that delivers a new one', (
     // through: "continue" sent twice, non-adjacently. `in` shows the PROMPT,
     // identical for both occurrences by construction, so `out` -- each
     // turn's own distinct reply -- is what has to be read here.
-    const outText = () => q<HTMLElement>('[data-detail-scroll="out"]')?.textContent ?? '';
+    const outText = () => marked()?.querySelector('[data-detail-scroll="out"]')?.textContent ?? '';
     const before = turnsFor(['continue', 'something else', 'continue']);
     const view = drawFor({ entry: entryWith(before), decision: before[0] as Decision });
 
@@ -689,7 +749,9 @@ describe('a turn that has genuinely scrolled out of the window', () => {
       focusNodeId: 'info:s1',
     });
     pickTurn('d1');
-    expect(q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '').toContain('ask d1');
+    expect(
+      q<HTMLElement>('[data-column-turn][data-turn-current="true"]')?.textContent ?? '',
+    ).toContain('ask d1');
 
     // The window no longer carries `d1` at all -- every id in the new
     // decisions list is one the panel has never seen, simulating it having
@@ -702,8 +764,14 @@ describe('a turn that has genuinely scrolled out of the window', () => {
     });
 
     expect(document.body.textContent ?? '').toContain('scrolled out');
-    // Not the newest turn silently standing in for the one that vanished.
-    expect(document.body.textContent ?? '').not.toContain('ask d5');
+    // NOT MARKED AS THE ONE BEING READ. `d5` is on screen -- it is a turn of
+    // this session and the column draws every turn it has, which is not a
+    // substitution. The substitution this refuses is the pane pointing at
+    // `d5` and calling it the turn the operator picked, so what is asserted
+    // is that NOTHING is marked while the pick is missing, and that the
+    // picker says so rather than quietly selecting somebody else's turn.
+    expect(all('[data-column-turn][data-turn-current="true"]')).toHaveLength(0);
+    expect(jump()?.value ?? '').toBe('');
     expect(all('[data-progress-turn-missing]')).toHaveLength(1);
   });
 
@@ -725,7 +793,9 @@ describe('a turn that has genuinely scrolled out of the window', () => {
     const back = q<HTMLButtonElement>('[data-progress-turn-return]');
     expect(back).not.toBeNull();
     act(() => back?.click());
-    expect(q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '').toContain('ask d5');
+    expect(
+      q<HTMLElement>('[data-column-turn][data-turn-current="true"]')?.textContent ?? '',
+    ).toContain('ask d5');
     expect(all('[data-progress-turn-missing]')).toHaveLength(0);
   });
 });
@@ -2621,10 +2691,27 @@ describe('a turn with no answer says which kind of nothing it is', () => {
     output,
     commands: [],
   });
-  const status = (s: Session['status']) => ({
-    project: PROJECT,
-    session: { ...SESSION, status: s },
-  });
+  /**
+   * ONE TURN, AND IT IS THIS ONE. The pane draws every turn the SESSION
+   * carries, so an ad-hoc `decision` beside the five-turn shared fixture put
+   * five other turns on screen and none of them was the one under test.
+   *
+   * ACTIVITY WITHHELD, because this block is about `noAnswerNote`. Now that the
+   * turn under test IS the session's newest, a running session draws its live
+   * caption on it -- and that caption prefers the session's own `activity`,
+   * which the shared fixture has. Leaving it in would have measured the caption
+   * instead of the sentence underneath it.
+   */
+  const show = (output: string | null, s: Session['status'] = SESSION.status) => {
+    const only = withOutput(output);
+    draw({
+      decision: only,
+      entry: {
+        project: PROJECT,
+        session: { ...SESSION, status: s, activity: null, decisions: [only] },
+      },
+    });
+  };
 
   it('renders an explicit line for an empty answer rather than blank space', () => {
     // `''` is a distinct state: a turn that resolved to nothing. But `'' !==
@@ -2632,14 +2719,14 @@ describe('a turn with no answer says which kind of nothing it is', () => {
     // empty, and the operator got an `OUT` rule over blank space --
     // indistinguishable from a failed render.
     expect(splitAnswers('')).toEqual([]);
-    draw({ decision: withOutput('') });
+    show('');
     expect(all('[data-out-line]')).toHaveLength(0);
     const note = q<HTMLElement>('[data-out-empty]');
     expect(note?.textContent ?? '').toContain('nothing');
   });
 
   it('says "still running" only for a session that is running', () => {
-    draw({ decision: withOutput(null), entry: status('running') });
+    show(null, 'running');
     expect(q<HTMLElement>('[data-out-empty]')?.textContent ?? '').toContain('still running');
   });
 
@@ -2649,7 +2736,7 @@ describe('a turn with no answer says which kind of nothing it is', () => {
     // for something that will never arrive.
     for (const s of ['done', 'failed'] as const) {
       cleanup();
-      draw({ decision: withOutput(null), entry: status(s) });
+      show(null, s);
       const text = q<HTMLElement>('[data-out-empty]')?.textContent ?? '';
       expect(text, `status ${s}`).toContain('ended without an answer');
       expect(text, `status ${s}`).not.toContain('still running');
@@ -2733,9 +2820,14 @@ describe('the out region shows live work while the session is running', () => {
     // `decisions` is newest first, so d3 is three turns back: the activity
     // would be describing the present while the operator reads the past.
     draw({ entry: running('editing transcript.ts'), decision: DECISIONS[2] as Decision });
-    expect(all('[data-out-empty]')).toHaveLength(0);
-    expect(cursor()).toBeNull();
-    expect(document.body.textContent ?? '').not.toContain('editing transcript.ts');
+    // WITHIN THAT TURN. The column draws the newest turn as well, and it is
+    // the one the caption belongs to -- scoping to the document would now be
+    // asserting that a running session never animates at all.
+    const older = q<HTMLElement>('[data-column-turn][data-turn-current="true"]') as HTMLElement;
+    expect(older).not.toBeNull();
+    expect([...older.querySelectorAll('[data-out-empty]')]).toHaveLength(0);
+    expect(older.querySelector('[data-out-empty] [data-out-running]')).toBeNull();
+    expect(older.textContent ?? '').not.toContain('editing transcript.ts');
   });
 
   it('still says the session is working under reduced motion', () => {
@@ -2819,11 +2911,19 @@ describe('the live line stands beside the answer, not instead of it', () => {
     output: string | null,
     activity: string | null = 'editing transcript.ts',
     status: Session['status'] = 'running',
-  ) =>
+  ) => {
+    // ONE TURN, AND IT IS THE ONE ON TRIAL. The pane draws every turn the
+    // SESSION carries now, so handing it an ad-hoc `decision` beside the
+    // five-turn shared fixture drew five turns none of which had this output.
+    const only = turn(output);
     draw({
-      entry: { project: PROJECT, session: { ...SESSION, status, activity } },
-      decision: turn(output),
+      entry: {
+        project: PROJECT,
+        session: { ...SESSION, status, activity, decisions: [only] },
+      },
+      decision: only,
     });
+  };
   const liveLine = () => q<HTMLElement>('[data-out-live]');
   const cursor = () => q<HTMLElement>('[data-out-live] [data-out-running]');
 
@@ -2892,9 +2992,20 @@ describe('the live line stands beside the answer, not instead of it', () => {
       },
       decision: DECISIONS[2] as Decision,
     });
-    expect(all('[data-out-live]')).toHaveLength(0);
-    expect(all('[data-out-running]')).toHaveLength(0);
-    expect(document.body.textContent ?? '').not.toContain('editing transcript.ts');
+    // ON THIS TURN, which is the whole claim. The column draws the newest turn
+    // too, and that one IS live and correctly carries the line -- asserting
+    // over the whole document would now be asserting that a running session
+    // never says it is running.
+    const older = q<HTMLElement>('[data-column-turn][data-turn-current="true"]') as HTMLElement;
+    expect(older).not.toBeNull();
+    expect([...older.querySelectorAll('[data-out-live]')]).toHaveLength(0);
+    expect([...older.querySelectorAll('[data-out-running]')]).toHaveLength(0);
+    expect(older.textContent ?? '').not.toContain('editing transcript.ts');
+    // And the live line is where it belongs: on the newest turn, once.
+    expect(all('[data-out-live]')).toHaveLength(1);
+    expect(
+      q<HTMLElement>('[data-column-turn][data-turn-newest] [data-out-live]'),
+    ).not.toBeNull();
   });
 });
 
@@ -3265,16 +3376,23 @@ describe('the composer is hidden while the Terminal tab is open', () => {
 
 /** The `out` text size is a pref, put on the document root and consumed as
  *  the ROOT of `out`'s `em` scale (`out-font-size.test.tsx` pins the scale).
- *  What matters here is that exactly one element reads it: a second would make
- *  part of `out` scale twice, and none would make the setting inert. */
+ *  What matters here is that exactly one element PER TURN reads it: a second
+ *  inside one turn would make part of that answer scale twice, and none would
+ *  make the setting inert. One per turn rather than one per pane since the
+ *  column draws them all -- what would be wrong is a count that does not match
+ *  the turns, which is what this compares. */
 describe('the out text size roots on the out container and nowhere else', () => {
-  it('is worn by the out scroll container alone', () => {
+  it('is worn by the out scroll containers alone, one per turn', () => {
     draw();
+    const turns = all('[data-column-turn]');
+    expect(turns.length).toBeGreaterThan(1);
     const wearing = all('*').filter((el) => el.className.toString().includes(OUT_FONT_SIZE_VAR));
-    expect(wearing).toHaveLength(1);
-    expect(wearing[0]?.getAttribute('data-detail-scroll')).toBe('out');
-    // The pane above `out` keeps the sizes it was drawn with.
-    expect(q('[data-detail-block="in"]')?.className ?? '').not.toContain(OUT_FONT_SIZE_VAR);
+    expect(wearing).toHaveLength(turns.length);
+    for (const el of wearing) expect(el.getAttribute('data-detail-scroll')).toBe('out');
+    // The prompt above each answer keeps the sizes it was drawn with.
+    for (const block of all('[data-detail-block="in"]')) {
+      expect(block.className.toString()).not.toContain(OUT_FONT_SIZE_VAR);
+    }
   });
 });
 
@@ -3313,16 +3431,25 @@ describe('the +1px type bump reaches everything in this pane except out', () => 
     // -1 again: the identity line above the bubble (`you · <turn label>`),
     // removed at the operator's ask -- its label lives in the progress
     // picker, which has its own 10.5px class already counted here.
-    '10.5': 7,
+    // +2: the column's two ends. The single condensed progress line became one
+    // line PER TURN plus a boundary block at the top of the column (what vam
+    // has read this far) and a navigation bar at its bottom (the picker and
+    // the two jumps) -- three call sites where there was one, all at the same
+    // 10.5px the line already used.
+    '10.5': 9,
     // +2: the folded question row's "marked, not sent" caption and the
     // `change` control that reopens the list (audit-adjacent operator
     // request: the option list folds away once a pick is made).
-    '11': 16,
+    // +1: the "that turn has scrolled out of what vam can see" note, which
+    // dropped from 12px to 11px when it moved out of the pane's body and into
+    // the boundary block, beside text of that size.
+    '11': 17,
     // -1: `WaitingNote`'s remedy line, removed with the notice.
     '11.5': 10,
     // +1: the mode popover's option rows, at the provider popover's own size.
     // +1: the folded question row's own mark, at the option label's size.
-    '12': 17,
+    // -1: the scrolled-out-turn note, now 11px -- see above.
+    '12': 16,
     // -2: the three mode pills (one class) and `WaitingNote`'s cause line.
     '12.5': 4,
     '13': 1,
