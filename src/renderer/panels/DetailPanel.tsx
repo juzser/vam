@@ -119,7 +119,7 @@ import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 
 import { TerminalTab } from './TerminalTab.js';
-import { TABS, type Tab, tabForDigit, visibleTabs } from './tabs.js';
+import { TABS, type Tab, visibleTabs } from './tabs.js';
 
 /**
  * How often the pane is re-read while a row says it is waiting.
@@ -506,6 +506,18 @@ export type DetailPanelProps = {
    * asking twice for the same tab an ask, which `Tab | null` could not say.
    */
   readonly tabRequest?: { readonly tab: Tab } | null;
+  /**
+   * What the last view shortcut REFUSED, drawn as a `role="status"` line
+   * beside the icons — or null at rest.
+   *
+   * A PROP, not state, since `Alt+<digit>` became a real binding: the chord
+   * machine in `Canvas.tsx` owns the keystroke now (`pickView`), so it is
+   * the only thing that can know a digit was refused. This panel used to
+   * hold both the listener and the note; keeping the note here while the
+   * listener moved would mean a second listener, which is the whole hole
+   * promotion closed.
+   */
+  readonly viewNote?: string | null;
   /**
    * The tab a previous run left showing, as an OPAQUE STRING, and the way to
    * report a change back.
@@ -2375,6 +2387,7 @@ export function DetailPanel(props: DetailPanelProps) {
     onTabChange?.(tab);
   }, [tab, onTabChange, paneFocused]);
   const tabRequest = props.tabRequest ?? null;
+  const viewNote = props.viewNote ?? null;
   // A withdrawn tab is not refused here: `current` below already falls back to
   // Response when the showing tab is not on offer, so asking for Terminal
   // where there is none lands exactly where clicking would have.
@@ -2390,104 +2403,6 @@ export function DetailPanel(props: DetailPanelProps) {
   const tabs = visibleTabs(terminal !== false);
   const current = tabs.includes(tab) ? tab : 'Response';
 
-  /**
-   * What the last `Alt+<digit>` refused, or `null` at rest — the "refuses
-   * aloud" half of A2.5/A5.4's promise, carried the same way `cycleNote`
-   * above carries the pane-key press's own outcome: local state, read by a
-   * small `role="status"` line beside the icons, cleared the moment a press
-   * actually lands somewhere.
-   */
-  const [viewNote, setViewNote] = useState<string | null>(null);
-  // `sessionKey` is the trigger, not something the body reads: a refusal
-  // raised for the session just left must not still be showing over the one
-  // the operator switched to.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: clear on session change, body reads nothing
-  useEffect(() => {
-    setViewNote(null);
-  }, [sessionKey]);
-  /**
-   * `Alt+<digit>` picks a view (A12.2, A2.5, A5.4) — resolved through
-   * `tabForDigit(tabs, …)`, the SAME derivation `visibleTabs` already forces
-   * on the click handler two lines up, never a second count of `TABS`.
-   *
-   * A WINDOW LISTENER OF ITS OWN, not a new case in the shared chord switch
-   * (`keyboard/chords.ts`/`Canvas.tsx`) — the pattern A5.1 already
-   * established for `ProjectPicker`/`GroupPicker`/`IconPicker`.
-   *
-   * GATED ON `paneFocused`, which is what makes a window listener safe HERE.
-   * It was written when exactly one `DetailPanel` was ever mounted, and said
-   * so; A15.1's `renderLeaf` mounts one per pane and deleted that invariant
-   * without deleting the sentence. Ungated, one `Alt+2` fired in every open
-   * pane at once: the background pane swapped its content with no icon row
-   * and no note on screen to explain it, both instances wrote
-   * `prefs.detailTab`, and `Alt+3` mounted a `TerminalTab` PER PANE, each
-   * polling `capture-pane`/`resize-window` against a session the operator is
-   * not looking at — the laziness the Terminal branch below promises, undone
-   * by a keystroke. Focused-only matches `tabRequest`, which the canvas has
-   * always sent to one pane.
-   *
-   * THE CONTRACT (A5.3): decline what this widget does not own. A key typed
-   * into an INPUT/TEXTAREA (the composer, the terminal's own hidden field)
-   * is left alone entirely — not even inspected — and any key that is not a
-   * bare `Alt+<digit>` (no other modifier) falls through with no
-   * `preventDefault`. Only that one combination is ever claimed.
-   *
-   * WHAT MAKES THAT COMBINATION SAFE TO CLAIM, honestly. This comment used
-   * to cite two registries in `chords.ts` as promising nothing else takes
-   * it. NEITHER HAS EVER EXISTED: each name appeared exactly once in this
-   * tree, in that sentence, so the citation sent an auditor to read nothing.
-   * (`test/keyboard/alt-digit-is-free.test.ts` names both and holds them
-   * out of this file, so the sentence cannot come back.) The real basis,
-   * which is WEAKER, is three facts:
-   *
-   *   - the shipped grammar binds no `Alt-` key at all. `BINDING_TABLES`
-   *     (`chords.ts`) is its one enumeration -- the shortcut sheet is built
-   *     by walking it -- so that is the whole surface, not a sample.
-   *   - `normalizeKey` spells this combination `Alt-<digit>` off
-   *     `event.code`, so a collision would be two identical names rather
-   *     than two spellings sliding past each other.
-   *   - and NOTHING FORBIDS ONE. `RESERVED_KEYS` is `['Escape',
-   *     ...PREFIXES]`: it protects the chord doors, not this. An operator
-   *     override may bind `Alt-1`, and then that binding and this listener
-   *     both answer one keystroke, this one having called
-   *     `preventDefault`. That hole is real and open; promoting
-   *     `Alt+<digit>` into the tables is what would close it, and it is
-   *     queued separately.
-   *
-   * `test/keyboard/alt-digit-is-free.test.ts` holds all three, so the day
-   * one of them stops being true this paragraph goes red rather than stale.
-   */
-  useEffect(() => {
-    if (!paneFocused) return;
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
-      const target = event.target;
-      if (target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName)) return;
-      const match = /^Digit([1-9])$/.exec(event.code);
-      if (match === null) return;
-      event.preventDefault();
-      const digit = Number(match[1]);
-      const requested = tabForDigit(tabs, digit);
-      if (requested === undefined) {
-        // Two different refusals, because they are two different facts. A
-        // digit inside TABS' own range names a real view that THIS SOURCE
-        // has withdrawn (A5.4: "refuses aloud when the source has none") —
-        // say which one by name. A digit past TABS' length names nothing at
-        // all, so the only honest thing to report is how many views exist.
-        const named = TABS[digit - 1];
-        setViewNote(
-          named === undefined
-            ? `no view ${digit} — only ${tabs.length} shown (${tabs.join(', ')})`
-            : `${named} — this source has none`,
-        );
-        return;
-      }
-      setViewNote(null);
-      setTab(requested);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [tabs, paneFocused]);
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
   /**

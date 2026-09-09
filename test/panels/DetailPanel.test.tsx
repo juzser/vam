@@ -1778,54 +1778,28 @@ describe('the empty tabs carry no tooltip, and the other notes stay', () => {
 });
 
 /**
- * `paneFocused` is one claim made twice — DRAWN and ANSWERING — because
+ * `paneFocused` is what an unfocused pane must stay quiet about, because
  * A15.1 mounts one `DetailPanel` PER PANE and this component was written
  * when exactly one existed.
  *
- * Two window-wide behaviours were left ungated by that move, and both are
- * pinned here rather than in the canvas because a `DetailPanel` is where
- * they live:
+ * ONE of the two behaviours it used to gate is no longer this file's:
+ * `Alt+<digit>` was a `window` listener here, and answering it in every
+ * mounted panel at once was the defect `paneFocused` was added for. It is a
+ * real binding now (`pickView`), so the canvas's own chord listener owns the
+ * keystroke and delivers it to one pane through `tabRequest` — there is no
+ * second listener left to gate. Those two cases moved to
+ * `test/canvas/Canvas.view-shortcut.test.tsx`, where the key now lives, and
+ * `test/canvas/Canvas.view-icons-focus.test.tsx` still presses it across a
+ * real split.
  *
- * 1. `Alt+<digit>`. Every mounted panel answered it, so one keypress swapped
- *    the background pane's view too — with no icon row and no note drawn
- *    there to explain it — and `Alt+3` mounted a `TerminalTab` per pane,
- *    each polling `capture-pane` against a session nobody is looking at.
- * 2. Reporting the tab back for `prefs`. `prefs` remembers ONE tab and
- *    `onTabChange` is a fresh closure every render, so two panes showing two
- *    different tabs wrote over each other on every render, forever: measured
- *    on the head this fixes, clicking one pane's PRs icon in a split hangs
- *    the shell. This case fails FAST rather than hanging, which is the point
- *    of pinning it at this level.
+ * What is still THIS file's is reporting the tab back for `prefs`. `prefs`
+ * remembers ONE tab and `onTabChange` is a fresh closure every render, so
+ * two panes showing two different tabs wrote over each other on every
+ * render, forever: measured on the head this fixes, clicking one pane's PRs
+ * icon in a split hangs the shell. This case fails FAST rather than hanging,
+ * which is the point of pinning it at this level.
  */
-describe('an unfocused pane is silent — it neither answers Alt+<digit> nor persists its tab', () => {
-  const altDigit = (digit: number) => {
-    act(() => {
-      window.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: String(digit),
-          code: `Digit${digit}`,
-          altKey: true,
-          bubbles: true,
-        }),
-      );
-    });
-  };
-
-  it('does not consume the key: the view it shows is unchanged', () => {
-    draw({ paneFocused: false, terminal: true });
-    // No icon row to read `aria-pressed` off (that is the other half of
-    // `paneFocused`), so the VIEW ITSELF is the witness: Response's turn
-    // body, not the PRs list.
-    altDigit(2);
-    expect(q('[data-prs]')).toBeNull();
-  });
-
-  it('the focused pane still does, which is what makes the case above a gate', () => {
-    draw({ paneFocused: true, terminal: true });
-    altDigit(2);
-    expect(q('[data-prs]')).not.toBeNull();
-  });
-
+describe('an unfocused pane does not persist its tab — one pane holds the pen', () => {
   it('does not write the remembered tab — one pane holds the pen', () => {
     const reported: string[] = [];
     draw({ paneFocused: false, onTabChange: (next) => reported.push(next) });
@@ -1840,29 +1814,25 @@ describe('an unfocused pane is silent — it neither answers Alt+<digit> nor per
 });
 
 /**
- * A12.2, A2.5, A5.4: the four views are icons now, and each carries its own
- * `Alt+<digit>`. Two things are pinned here that nothing else in this file
- * does: an icon-only control still needs a REAL accessible name (a tooltip
- * is not one), and the digit resolves by NAME through `visibleTabs`, never
- * by indexing `TABS` — the exact bug `panels/tabs.ts`'s own header
- * describes, falsified directly with Terminal withdrawn.
+ * A12.2, A2.5, A5.4: the four views are icons, and each has a digit.
+ *
+ * WHAT THE KEY DOES IS NO LONGER MEASURED HERE. `Alt+<digit>` was a `window`
+ * listener inside this component; it is a real binding now (`pickView`), so
+ * the canvas's chord machine answers it and this panel only draws the
+ * outcome. The six press-a-key cases that used to live in this describe —
+ * by-name resolution with all four views drawn, the aloud refusal for a
+ * withdrawn Terminal, Agents keeping digit 4, the refusal past the last
+ * named view, and the two decline cases (a differently-modified digit, a
+ * digit typed into the composer) — moved verbatim in intent to
+ * `test/canvas/Canvas.view-shortcut.test.tsx`, which drives the listener
+ * where it now is. Left here, they would have pressed a key nothing in this
+ * file listens for and passed only while some other route happened to work.
+ *
+ * What stays is what this file can still see: an icon-only control needs a
+ * REAL accessible name, and each icon must be named for its own fixed slot
+ * in `TABS`, never its position in the drawn bar.
  */
-describe('Alt+<digit> picks a view by name, through visibleTabs, never by position', () => {
-  const press = (digit: number, modifiers: Partial<globalThis.KeyboardEventInit> = {}) => {
-    act(() => {
-      window.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: String(digit),
-          code: `Digit${digit}`,
-          altKey: true,
-          bubbles: true,
-          ...modifiers,
-        }),
-      );
-    });
-  };
-  const note = () => q<HTMLElement>('[data-view-note]');
-
+describe('the view icons are named controls, each for its own fixed slot in TABS', () => {
   it('every icon is a real <button>, in the tab order, named beyond a tooltip', () => {
     draw();
     for (const icon of all('[data-view]') as HTMLButtonElement[]) {
@@ -1880,94 +1850,11 @@ describe('Alt+<digit> picks a view by name, through visibleTabs, never by positi
     }
   });
 
-  it('Alt-3 opens Terminal by name when all four views are drawn', () => {
-    draw({ terminal: true });
-    press(3);
-    expect(q<HTMLElement>('[data-view="terminal"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect(note()).toBeNull();
-  });
-
-  /**
-   * THE BUG ITSELF, falsified against the real component (A15.6): with
-   * Terminal withdrawn the bar reads Response · PRs · Agents, and `Alt-3`
-   * MUST REFUSE — Terminal is what digit 3 names, always, and the source
-   * just said it has none. The guard this replaces asserted the opposite
-   * (that `Alt-3` should silently open Agents, the third DRAWN view) and
-   * shipped green having tested the exact defect A5.4 exists to forbid.
-   */
-  it('Alt-3 refuses, aloud, once Terminal is withdrawn — it never falls through to Agents', () => {
-    draw({ terminal: false });
-    press(3);
-    // Still on Response -- the refused digit changed nothing, and it did
-    // not silently land on whatever now sits third in the drawn bar.
-    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect(q<HTMLElement>('[data-view="agents"]')?.getAttribute('aria-pressed')).toBe('false');
-    expect(q('[data-view="terminal"]')).toBeNull();
-    expect(note()?.getAttribute('role')).toBe('status');
-    expect(note()?.textContent ?? '').toContain('Terminal');
-  });
-
-  /**
-   * The other half of name-stability: Agents does not inherit Terminal's
-   * digit and does not lose its own. Agents is `TABS[3]` — digit 4 — with or
-   * without Terminal on the bar.
-   */
-  it('Alt-4 still opens Agents once Terminal is withdrawn — every surviving view keeps its own digit', () => {
-    draw({ terminal: false });
-    press(4);
-    expect(q<HTMLElement>('[data-view="agents"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect(note()).toBeNull();
-  });
-
-  /**
-   * The label must say the digit that actually reaches it. Naming Agents'
-   * icon "Alt+3" because that is where it happens to sit in the shorter,
-   * drawn bar would be the exact defect A15.6 fixes in `tabForDigit`, just
-   * spoken instead of wired — an operator reading the label and pressing
-   * what it says would land on Response's own refusal note, not Agents.
-   */
   it('labels each icon with its own fixed Alt-digit, even once Terminal is withdrawn', () => {
     draw({ terminal: false });
     expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-label')).toContain('Alt+1');
     expect(q<HTMLElement>('[data-view="prs"]')?.getAttribute('aria-label')).toContain('Alt+2');
     expect(q<HTMLElement>('[data-view="agents"]')?.getAttribute('aria-label')).toContain('Alt+4');
-  });
-
-  it('refuses aloud, and changes nothing, for a digit past the last named view', () => {
-    draw({ terminal: false }); // three views drawn: Response, PRs, Agents
-    press(5); // past TABS' own length, not merely past what is drawn
-    // Still on Response -- the request did not fall through to it either.
-    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect(note()?.getAttribute('role')).toBe('status');
-    expect(note()?.textContent ?? '').toContain('no view 5');
-  });
-
-  it('leaves a modifier-free digit and a differently-modified one alone', () => {
-    draw({ terminal: false });
-    press(3, { altKey: false });
-    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
-    press(3, { metaKey: true });
-    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
-    press(3, { shiftKey: true });
-    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
-  });
-
-  it('leaves typing in the composer alone entirely', () => {
-    draw({ terminal: false, composing: true });
-    const box = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
-    expect(box).not.toBeNull();
-    act(() => {
-      box?.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: '3',
-          code: 'Digit3',
-          altKey: true,
-          bubbles: true,
-        }),
-      );
-    });
-    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect(note()).toBeNull();
   });
 });
 
@@ -2014,17 +1901,10 @@ describe('A15.5: the view icons are a corner overlay, not a reserved row', () =>
   });
 
   it('still truncates a long refusal instead of growing the overlay past its cap', () => {
-    draw({ terminal: false });
-    act(() => {
-      window.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: '5',
-          code: 'Digit5',
-          altKey: true,
-          bubbles: true,
-        }),
-      );
-    });
+    // The refusal ARRIVES AS A PROP now — the canvas owns the keystroke that
+    // raises it, since `Alt+<digit>` became a real binding. The wording is
+    // the canvas's own, longest form, which is the case this cap is for.
+    draw({ terminal: false, viewNote: 'no view 5 — only 3 shown (Response, PRs, Agents)' });
     const note = q<HTMLElement>('[data-view-note]');
     expect(note).not.toBeNull();
     expect(note?.className ?? '').toMatch(/max-w-/);
