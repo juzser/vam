@@ -249,6 +249,46 @@ describe('a source that can page', () => {
     await waitFor(() => expect(turnIds()).toEqual(['t7', 't8', 't9']));
     expect(read).toHaveBeenCalledTimes(1);
   });
+
+  it('runs ONE walk for two scrolls in the SAME task, before any render', async () => {
+    /**
+     * THE WINDOW A RENDERED-STATE CHECK CANNOT COVER, and it is why the guard
+     * is a ref rather than `pager.phase`.
+     *
+     * Found by mutation: with the ref's check deleted, every other test in this
+     * repo -- including the browser guard's "one page, however hard it is
+     * scrolled at" -- stayed green, because they all give React a chance to
+     * commit `phase: 'reading'` between one gesture and the next, and the
+     * SECOND check then catches it. That makes the ref an untested guard, which
+     * is exactly the shape of thing that gets deleted as redundant and takes a
+     * real defect with it.
+     *
+     * SCROLL IS A CONTINUOUS EVENT. React flushes discrete events (click, key)
+     * synchronously and continuous ones at its own convenience, so two scroll
+     * events dispatched in one task both run against the state of the last
+     * COMMITTED render -- in which nothing is in flight yet. Dispatched raw,
+     * outside `act`, because `act` is what flushes and therefore what hides
+     * this. Two requests for the same cursor is a doubled read of up to 8 MiB
+     * and a page that could be prepended twice.
+     */
+    const read = vi.fn(async (_id: string, _cursor: string | null) => {
+      await Promise.resolve();
+      return page({ turns: [turn('t7')], cursor: '@700', reachedStart: false });
+    });
+    draw(read);
+    const column = q('[data-detail-column]');
+    expect(column).not.toBeNull();
+    if (column === null) return;
+    column.scrollTop = 0;
+    column.dispatchEvent(new Event('scroll', { bubbles: false }));
+    column.dispatchEvent(new Event('scroll', { bubbles: false }));
+    expect(read).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(turnIds()).toEqual(['t7', 't8', 't9']));
+    expect(read).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('the poll keeps arriving while the operator reads back', () => {

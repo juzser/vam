@@ -879,6 +879,24 @@ const toTopAndMark = () =>
     };
   });
 
+/**
+ * Wait for something and REPORT rather than throw when it never happens.
+ *
+ * `waitForFunction` aborts the whole run on a timeout, which costs this file
+ * its own stated rule -- "collect rather than throw on the first: one run should
+ * report every fault". Found by falsification: with a refusal wrongly folded
+ * into the start state, the run died on a bare `TimeoutError` at a line number
+ * instead of naming the three checks that were about to catch it.
+ */
+async function settles(what, ms = 8_000) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (await back.evaluate(what)) return true;
+    await back.waitForTimeout(50);
+  }
+  return false;
+}
+
 /** Where a turn sits now, in the column's own coordinates. */
 const markNow = (id) =>
   back.evaluate((want) => {
@@ -918,11 +936,10 @@ check(
 //   - the column GREW, so turns really did land above the viewport;
 //   - the turn that was at the top edge is still at the same pixel.
 const beforeFirst = await toTopAndMark();
-await back.waitForFunction(
-  (had) => document.querySelectorAll('[data-column-turn]').length > had,
-  beforeFirst.turns,
-  { timeout: 10_000 },
+const firstLanded = await settles(
+  `document.querySelectorAll('[data-column-turn]').length > ${beforeFirst.turns}`,
 );
+check('the gesture finished rather than hanging', firstLanded);
 await back.waitForTimeout(150);
 const afterFirst = await markNow(beforeFirst.id);
 const grewFirst = afterFirst.scrollHeight - beforeFirst.scrollHeight;
@@ -980,11 +997,10 @@ const beforeRefusal = await toTopAndMark();
 // "not reading" is TRUE for the first frame after the scroll, before React has
 // even rendered the in-flight state, so the check ran against the state the
 // gesture started from and passed or failed on the wrong screen entirely.
-await back.waitForFunction(
-  () => document.querySelector('[data-column-more]')?.getAttribute('data-column-more') === 'unavailable',
-  undefined,
-  { timeout: 10_000 },
+const sawRefusal = await settles(
+  `document.querySelector('[data-column-more]')?.getAttribute('data-column-more') === 'unavailable'`,
 );
+check('a read that could not be made settles into a state of its own', sawRefusal);
 const refused = await columnState();
 console.log(`  refusal: ${refused.start}/${refused.more} — ${JSON.stringify(refused.moreText)}`);
 check(
@@ -1060,11 +1076,10 @@ for (let i = 0; i < 6; i += 1) {
     col.scrollTop = 0;
   });
 }
-await back.waitForFunction(
-  (had) => document.querySelectorAll('[data-column-turn]').length > had,
-  beforeRetry.turns,
-  { timeout: 10_000 },
+const retryLanded = await settles(
+  `document.querySelectorAll('[data-column-turn]').length > ${beforeRetry.turns}`,
 );
+check('the retry actually recovered, rather than refusing again forever', retryLanded);
 await back.waitForTimeout(400);
 const afterRetry = await markNow(beforeRetry.id);
 const retriedState = await columnState();
@@ -1097,16 +1112,14 @@ const beforeBlank = await columnState();
 await back.locator('[data-column-more-ask]').click();
 // IN, THEN OUT. Waiting only for "not reading" would pass on the frame before
 // the walk had even started -- see 11b's own note.
-await back.waitForFunction(
-  () => document.querySelector('[data-column-more]')?.getAttribute('data-column-more') === 'reading',
-  undefined,
-  { timeout: 10_000 },
+const wentReading = await settles(
+  `document.querySelector('[data-column-more]')?.getAttribute('data-column-more') === 'reading'`,
 );
-await back.waitForFunction(
-  () => document.querySelector('[data-column-more]')?.getAttribute('data-column-more') !== 'reading',
-  undefined,
-  { timeout: 10_000 },
+check('pressing the control starts a read', wentReading);
+const stoppedReading = await settles(
+  `document.querySelector('[data-column-more]')?.getAttribute('data-column-more') !== 'reading'`,
 );
+check('and the read ENDS -- no spinner that never stops', stoppedReading);
 await back.waitForTimeout(200);
 const blanked = await columnState();
 console.log(
@@ -1140,11 +1153,10 @@ check(
 // vam read could prove it. `TranscriptPage.reachedStart` is that proof, read
 // off a window that really began at byte 0 — never inferred from a short page.
 await back.locator('[data-column-more-ask]').click();
-await back.waitForFunction(
-  () => document.querySelector('[data-column-start]')?.getAttribute('data-column-start') === 'session-start',
-  undefined,
-  { timeout: 10_000 },
+const reachedStart = await settles(
+  `document.querySelector('[data-column-start]')?.getAttribute('data-column-start') === 'session-start'`,
 );
+check('the walk reaches the beginning of the session at all', reachedStart);
 await back.waitForTimeout(200);
 const atStart = await columnState();
 console.log(`  at the start: ${atStart.ids.length} turns, boundary ${JSON.stringify(atStart.moreText)}`);
