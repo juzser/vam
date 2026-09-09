@@ -7,8 +7,20 @@
  * top pixels. The spans are `truncate`d, but the ellipsis is computed against
  * the PANE edge, not against the pill, so the text is laid out, measured as
  * visible, and then covered. The two facts the deleted header relocated into
- * that line — project and epic — are exactly what disappears, in every
+ * that line — project and epic — were exactly what disappeared, in every
  * focused pane under roughly 600px, in both themes.
+ *
+ * THOSE TWO FACTS ARE GONE FROM THE LINE NOW (the operator: "remove the
+ * branch and repo information above the In section" — the sidebar carries
+ * both), and the mechanism is not. Measured at 620px after the removal, with
+ * the reservation off: the turn's own label is a task id (`epicOf` in
+ * `to-canvas.ts` reads labels as `<epic>/<task>`), and one of ordinary length
+ * lays out 360px wide from x 279 — running to x 639, while the pill starts at
+ * x 520. So the line can still be laid out under the pill, by itself, and
+ * this guard still measures the state it was written for. What it can NO
+ * LONGER do is reach that state off the fixture's own text: `you · R-5` is
+ * 57px and stops 184px short. The injection below is what closes that gap,
+ * and it moved from the epic span to the turn span with the removal.
  *
  * The overlay's own comment claimed it "can only ever cover the few pixels
  * its glyphs occupy — never the whole line of text beneath it". True of the
@@ -41,19 +53,20 @@ await page.waitForSelector('[data-detail-column]');
 
 /**
  * The FIXTURE CANNOT DO THIS ALONE, and finding that out is half the guard.
- * The demo's identity line reads `factory · ui-server-sse · you · R-5`,
- * which is short enough that at 620px its glyphs stop 25px short of the pill
- * — so the first version of this file passed with the fix reverted, and the
- * falsification is what caught it. What the audit measured needs the line to
- * OVERFLOW, because that is the mechanism: `truncate` computes its ellipsis
- * against the pane edge, so an overflowing line is laid out all the way to
- * the corner the pill occupies. A longer epic name (they are branch names;
- * this length is ordinary) is injected to get there.
+ * The demo's identity line now reads `you · R-5` — 57px of glyphs stopping
+ * 184px short of the pill at this viewport, where the older, longer line
+ * stopped 25px short. Either way the fixture alone lets this file pass with
+ * the fix reverted, and the falsification is what caught it the first time.
+ * What the audit measured needs the line to OVERFLOW, because that is the
+ * mechanism: `truncate` computes its ellipsis against the pane edge, so an
+ * overflowing line is laid out all the way to the corner the pill occupies.
+ * A turn label of ordinary length — they are task ids — is injected to get
+ * there: measured 360px, past the pill's left edge by 119px.
  */
-await page.evaluate(() => {
-  const spans = document.querySelectorAll('[data-detail-identity] span');
-  spans[2].textContent = 'ui-server-sse-reconnect-and-backpressure';
-});
+const LONG_LABEL = 'wave-3/task-11-reconnect-and-backpressure';
+await page.evaluate((label) => {
+  document.querySelector('[data-detail-turn]').textContent = `you · ${label}`;
+}, LONG_LABEL);
 await page.waitForTimeout(250);
 
 const identity = page.locator('[data-detail-identity]');
@@ -124,8 +137,9 @@ async function coveredText(selector) {
 }
 
 // 1. NOT ONE PIXEL OF THE IDENTITY LINE IS UNDER THE PILL. This is the whole
-//    finding: project and epic are the facts the removed header relocated
-//    here, and a truncated line that is then covered has lost them silently.
+//    finding: what the line carries is the turn's own label and `you`, this
+//    is their only home in the pane, and a truncated line that is then
+//    covered has lost them silently.
 const id = await coveredText('[data-detail-identity]');
 console.log(
   `identity line: ${id.covered} of ${id.samples} sampled glyph pixels under the overlay ` +
@@ -134,7 +148,7 @@ console.log(
 if (id.covered > 0) {
   throw new Error(
     `the view-icon overlay covers the identity line at ${id.covered} of ${id.samples} ` +
-      `sampled points — project and epic are drawn, measured as visible, and then painted over.`,
+      `sampled points — the turn label is drawn, measured as visible, and then painted over.`,
   );
 }
 
@@ -163,12 +177,40 @@ if (tap.width < 22 || tap.height < 22) {
 }
 
 // 4. THE IDENTITY LINE STILL SAYS SOMETHING. Reserving 7rem of a 253px pane
-//    could truncate project and epic to their ellipses, which would lose the
-//    same two facts by another route.
+//    could squeeze the turn down to its own ellipsis, which loses the fact by
+//    another route — and `innerText` cannot see that, because clipping does
+//    not change it. So the PAINTED width of the turn span is what is
+//    measured, against the width of the two words that must survive.
+const turn = await page.locator('[data-detail-turn]').evaluate((el) => {
+  const probe = document.createElement('span');
+  probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap';
+  probe.className = el.className.replace('truncate', '');
+  probe.textContent = 'you · wave-3';
+  el.parentElement.appendChild(probe);
+  const floor = probe.getBoundingClientRect().width;
+  probe.remove();
+  return { painted: el.getBoundingClientRect().width, floor, text: el.innerText };
+});
+console.log(
+  `turn label: ${Math.round(turn.painted)}px painted, ${Math.round(turn.floor)}px needed ` +
+    `for "you · wave-3" — reads "${turn.text}"`,
+);
+if (turn.painted < turn.floor) {
+  throw new Error(
+    `the reserved corner squeezed the turn label to ${Math.round(turn.painted)}px, under the ` +
+      `${Math.round(turn.floor)}px its first words need — the fact is lost to truncation instead`,
+  );
+}
+
+// 5. AND THE LINE HAS NOT GROWN THE SESSION'S FACTS BACK. The project and the
+//    epic were removed from it because the sidebar already says both; a
+//    revert would restore exactly the overflow this file exists to measure.
 const text = (await identity.innerText()).replace(/\s+/g, ' ').trim();
 console.log(`identity line reads: ${text}`);
-if (!text.includes('factory') || !text.includes('ui-server-sse')) {
-  throw new Error(`the identity line no longer names the project and epic: "${text}"`);
+if (text.includes('factory') || text.includes('ui-server-sse')) {
+  throw new Error(
+    `the identity line repeats the sidebar's own project/epic again: "${text}"`,
+  );
 }
 
 await page.screenshot({ path: `${outDir}/narrow-pane-overlay.png` });

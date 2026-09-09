@@ -152,7 +152,53 @@ if (skin.background === skin.sectionGround) {
   );
 }
 
-// 5. AND #266 IS NOT UNDONE. That PR removed `in`'s bordered panel so the turn
+// 5. THE BUBBLE HAS REAL PADDING, MEASURED AS PAINT (the operator: "the In
+//    section's background needs padding"). Not the computed `padding`
+//    property: that is the rule as typed, and this project has shipped a
+//    stylesheet rule matching nothing before. What is measured is the gap
+//    between the bubble's own box and the box of the text inside it, on all
+//    four sides — the top and the sides at rest, the bottom at maximum
+//    scroll, because the bottom inset of a scrolling box only exists at its
+//    end and that is exactly where a tight bubble looks worst.
+//
+//    THE FLOOR IS THE TINT'S JOB. At 8px the ground read as a highlight
+//    behind the words rather than as a bubble around them, which is what the
+//    operator was looking at. 12px is what makes the tint a shape.
+const PAD_FLOOR = 12;
+const pad = await bubble.evaluate((el) => {
+  const p = el.querySelector('p');
+  const inset = () => {
+    const box = el.getBoundingClientRect();
+    const text = p.getBoundingClientRect();
+    return {
+      // `clientLeft`/`clientWidth` rather than the border box's right edge:
+      // this element scrolls, and the scrollbar lives inside the border box.
+      // Measuring to it would credit the gutter as padding.
+      left: text.left - (box.left + el.clientLeft),
+      right: box.left + el.clientLeft + el.clientWidth - text.right,
+      top: text.top - box.top,
+      bottom: box.bottom - text.bottom,
+    };
+  };
+  el.scrollTop = 0;
+  const rest = inset();
+  el.scrollTop = el.scrollHeight;
+  const end = inset();
+  return { top: rest.top, left: rest.left, right: rest.right, bottom: end.bottom };
+});
+console.log(`bubble padding painted: ${JSON.stringify(pad)}`);
+for (const [side, value] of Object.entries(pad)) {
+  // Half a pixel of slack for subpixel layout, and no more: the point is the
+  // floor, not the rounding.
+  if (value + 0.5 < PAD_FLOOR) {
+    throw new Error(
+      `the bubble's ${side} padding paints ${value.toFixed(1)}px, under the ${PAD_FLOOR}px floor ` +
+        `— the tint reads as a highlight behind the text, not as a bubble around it`,
+    );
+  }
+}
+
+// 6. AND #266 IS NOT UNDONE. That PR removed `in`'s bordered panel so the turn
 //    reads straight through; a bubble is a speech affordance inside the one
 //    column, not the labelled band coming back.
 const seam = await inBlock.evaluate((el) => {
