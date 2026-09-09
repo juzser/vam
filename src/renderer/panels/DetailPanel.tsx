@@ -3285,9 +3285,10 @@ export function DetailPanel(props: DetailPanelProps) {
                 sticky at the top while scrolling"), with an opaque
                 background so `out` text scrolling underneath does not bleed
                 through the two lines of `in`. The identity line the removed
-                header used to carry (project, epic) rides along here too —
-                see the header-removal comment above for the full account of
-                where each fact went.
+                header used to carry rides along here too — see the
+                header-removal comment above for the full account of where
+                each fact went, and the line's own comment below for why only
+                the turn's half of it is still drawn.
 
                 BOUNDED, because an unbounded sticky block is not a pin, it is
                 a lid (audit F2, measured: a 3,822-character prompt left the
@@ -3326,10 +3327,6 @@ export function DetailPanel(props: DetailPanelProps) {
                   cornerOverlay ? 'pr-[7rem]' : ''
                 }`}
               >
-                <span className="truncate text-ink-dim">{entry?.project.name ?? '—'}</span>
-                <span>·</span>
-                <span className="truncate">{entry?.session.epic ?? '—'}</span>
-                <span>·</span>
                 {/* `you`, and no time. `Decision` carries no timestamp, so
                     nothing here can say when this turn happened -- and
                     `session.age` is the session's LAST ACTIVITY, usually the
@@ -3339,7 +3336,20 @@ export function DetailPanel(props: DetailPanelProps) {
                     row, where it is true. The turn's own label (the removed
                     header's `data-detail-step` chip, informally "which round")
                     rides beside it, since both are facts about THIS turn. This
-                    is the `in` rule's whole meta slot, one line up. */}
+                    is the `in` rule's whole meta slot, one line up.
+
+                    AND NOTHING ELSE. The line used to open with the project
+                    and the epic, inherited from the deleted header; the
+                    operator asked for both to go ("remove the branch and repo
+                    information above the In section"). They are SESSION facts
+                    and the sidebar already carries them on the session's own
+                    row -- the project as the group heading the row is filed
+                    under, the branch as `data-session-branch` -- so the pane
+                    was repeating, one column over, what the list beside it
+                    already said, and paying for the repetition in the one
+                    line the turn has. What stays is what the sidebar cannot
+                    say, because it is not about the session: which turn this
+                    is, and that you asked it. */}
                 <span data-detail-turn className="truncate">
                   {decision.label === '' ? 'you' : `you · ${decision.label}`}
                 </span>

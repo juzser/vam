@@ -128,13 +128,27 @@ describe('the three band separators are gone', () => {
 });
 
 describe('what the in rule carried survives its removal', () => {
-  it('says who and which turn on the identity line, with no per-turn time', () => {
+  /**
+   * REWRITTEN, not retired: this used to assert `atlas` and `epic-4` on the
+   * line as well. The operator asked for the project and the epic to go
+   * ("remove the branch and repo information above the In section") because
+   * both are already on the session's own sidebar row -- the project as the
+   * group heading it is filed under, the branch on the row itself -- so the
+   * line was repeating, one pane over, what the list already said. What it
+   * does NOT repeat is `you` and the turn's label: those are facts about
+   * THIS turn, the `in` rule's meta slot, and this line is their only home.
+   * So the case keeps its name and swaps halves -- the two session facts are
+   * now asserted ABSENT, which is a stronger claim than the silence deleting
+   * the assertions would have left.
+   */
+  it('says who and which turn on the identity line, and repeats no session fact', () => {
     draw({ decision: TURNS[2] as Decision });
     const identity = q<HTMLElement>('[data-detail-identity]')?.textContent ?? '';
-    expect(identity).toContain('atlas');
-    expect(identity).toContain('epic-4');
     expect(identity).toContain('you');
     expect(identity).toContain('step d5');
+    // The sidebar's, not the pane's.
+    expect(identity).not.toContain('atlas');
+    expect(identity).not.toContain('epic-4');
     // `12m` is SESSION.age -- the session's last activity, never this turn's
     // time. The removed rule was careful about that and so is its replacement.
     expect(identity).not.toContain('12m');

@@ -103,13 +103,17 @@ describe('the detail pane on a desktop, which shares this component', () => {
    * desktop header too (`[data-prompt-target]`, `[data-prompt-project]` and
    * `[data-pane-status]` are all gone from `DetailPanel.tsx`), so the two
    * sides converge and this file's own premise — "one shares the component,
-   * one does not" — is no longer true for the header. The replacement below
-   * pins what actually survived: project and epic move into the scrolling
-   * column's identity line (`[data-detail-identity]`), gated on there being
-   * a turn to show, exactly as the header-removal comment in
-   * `DetailPanel.tsx` describes.
+   * one does not" — is no longer true for the header.
+   *
+   * REWRITTEN AGAIN: its replacement pinned project and epic onto the
+   * column's identity line, and the operator has now asked for both to go
+   * ("remove the branch and repo information above the In section") — the
+   * sidebar already files the session under its project heading and prints
+   * its branch on the row. So neither the header card NOR the identity line
+   * carries them, and that is what this asserts: the header stays gone, and
+   * the line that briefly inherited it does not quietly grow it back.
    */
-  it('carries project and epic in the column now, not in a header card', () => {
+  it('carries neither project nor epic once the header card is gone', () => {
     const project: Project = { id: 'p1', name: 'factory', sessions: [SESSION] };
     const entry: SessionEntry = { project, session: SESSION };
     render(
@@ -132,10 +136,12 @@ describe('the detail pane on a desktop, which shares this component', () => {
     );
     expect(document.querySelector('[data-prompt-target]')).toBeNull();
     expect(document.querySelector('[data-pane-status]')).toBeNull();
-    expect(document.querySelector('[data-detail-identity]')?.textContent).toContain('factory');
-    expect(document.querySelector('[data-detail-identity]')?.textContent).toContain(
-      'ui-server-sse',
-    );
+    const identity = document.querySelector('[data-detail-identity]')?.textContent ?? '';
+    expect(identity).not.toContain('factory');
+    expect(identity).not.toContain('ui-server-sse');
+    // The line itself stays: it is the turn's own meta slot, and `you` is
+    // the part of it that has nowhere else to live.
+    expect(identity).toContain('you');
   });
 
   it('keeps the view icon row, which only the phone lost', () => {
