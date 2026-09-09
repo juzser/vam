@@ -79,9 +79,11 @@ import {
 import {
   isValidElement,
   type KeyboardEvent,
+  memo,
   type ReactNode,
   type RefObject,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
@@ -2146,6 +2148,313 @@ function QuestionCard({
   );
 }
 
+/**
+ * The mark for one turn, and the only place these glyphs are chosen -- the
+ * `<select>`, the expanded list and the turn's own line in the column would
+ * otherwise draw the same conditional three times, which is how they come to
+ * disagree about what a turn is.
+ *
+ * FAILURE OUTRANKS PROGRESS. `◌` says "not finished" and `✓` says "finished",
+ * and both are true of a turn whose tools blew up -- which is exactly how the
+ * fold came to cost the operator the alarm while keeping the detail. `!` means
+ * SOMETHING INSIDE THIS TURN FAILED, which is a narrower claim than "this turn
+ * failed": the count beside the line says how many, and the turn may well have
+ * recovered. It is still the thing worth seeing from a collapsed row.
+ */
+function turnMark(d: Decision): string {
+  return (d.errorCount ?? 0) > 0 ? '!' : d.output === null ? '◌' : '✓';
+}
+
+/**
+ * ONE TURN OF THE TRANSCRIPT, as a block of the column.
+ *
+ * The pane used to draw exactly one of these -- whichever turn `selectedId`
+ * pointed at -- while `entry.session.decisions` already carried up to
+ * `MAX_DECISIONS` (3,276) of them, newest first. The operator asked for the
+ * whole session, scrolled, with the prompt pinned: "show the WHOLE session,
+ * load more when scrolling up, and the sticky In should follow wherever you
+ * scroll." So the column maps every turn through this, oldest at the top.
+ *
+ * ITS OWN BOX, AND THAT IS THE MECHANISM, NOT A TIDINESS. `position: sticky`
+ * is bounded by the sticky element's CONTAINING BLOCK: with every `in` a flat
+ * sibling of the column, each one would pin at `top: 0` for the rest of the
+ * scroll and pile up behind the next -- and a shorter prompt arriving on top
+ * of a taller one leaves the taller one's tail sticking out below it. Wrapped,
+ * each `in` is released exactly when its own turn scrolls past, which is what
+ * "the In of the turn you are inside" means and what the operator's "follows
+ * wherever you scroll" asked for. The cost of the wrapper is paid at
+ * `--vam-turn-cap` -- see the `max-h` below.
+ *
+ * MEMOISED, because at 3,276 turns this is the difference between a keystroke
+ * in the composer costing one render and costing 3,276 of them. Every prop is
+ * a primitive or the turn object itself, which `transcript.ts` rebuilds only
+ * when its content actually changes (ids are content-derived), so the default
+ * shallow compare is the right one.
+ */
+const TurnBlock = memo(function TurnBlock({
+  decision,
+  marked,
+  newest,
+  live,
+  activity,
+  waitingCause,
+  age,
+  status,
+  reserveCorner,
+}: {
+  readonly decision: Decision;
+  /** Is this the turn the picker (or the canvas) has landed on? */
+  readonly marked: boolean;
+  /** Is this the newest turn vam read -- the only one "right now" is about? */
+  readonly newest: boolean;
+  /** Is the session still working on THIS turn? `newest` and `running`. */
+  readonly live: boolean;
+  readonly activity: string | null;
+  readonly waitingCause: string | null;
+  readonly age: string | null;
+  readonly status: SessionStatus | null;
+  readonly reserveCorner: boolean;
+}) {
+  const failed = decision.errorCount ?? 0;
+  return (
+    <article
+      data-column-turn={decision.id}
+      /* MARKED, NOT SHOWN ALONE. `selectedId` used to decide which turn was
+         drawn at all; in a column that is the wrong verb -- the others do not
+         go away, the column scrolls to this one and says which one it is. */
+      data-turn-current={marked ? 'true' : undefined}
+      data-turn-newest={newest ? 'true' : undefined}
+      /* `relative` is what makes this the sticky block's containing block --
+         see the note above. `gap` matches the column's own so a turn's three
+         parts sit at the same rhythm as the turns do. */
+      className="relative flex flex-none flex-col gap-1.5"
+    >
+      {/* STICKY, not merely first: `position: sticky` against the column's own
+          scroll (the operator's ask -- "the sticky In should follow wherever
+          you scroll"), with an opaque background so the answer scrolling
+          underneath does not bleed through the prompt.
+
+          BOUNDED, because an unbounded sticky block is not a pin, it is a lid
+          (audit F2, measured: a 3,822-character prompt left the answer 19px
+          and a 10,920-character one covered `progress` and `out` AT MAXIMUM
+          SCROLL). What is capped is what STICKS: the paragraph keeps its full
+          length and gets its own scroll inside the bubble, so nothing typed is
+          truncated. That is VSCode's sticky-scroll bargain.
+
+          `45cqh` RATHER THAN `45%`, AND THAT IS THE WRAPPER'S BILL. A
+          percentage max-height resolves against the CONTAINING BLOCK: the
+          column has a definite height (`flex-1` down a `min-h-0` chain), the
+          `<article>` above does not, so the very same `45%` that bounded the
+          pin while one turn was drawn resolves to `none` inside a wrapper --
+          audit F2 back, with not one class changed to notice it by. A
+          container query unit resolves against the nearest SIZE CONTAINER
+          instead, which the column declares (`container-type: size` in its own
+          class list), so the cap is 45% of the column however deep in the tree
+          the block sits. Measured on this head: column 400px, resolved
+          `max-height: 180px`, both turns, wrapper and all. And measured in CI
+          as RESOLVED PIXELS by `e2e/transcript-column-shots.mjs` -- a cap that
+          quietly became `none` (or stayed the unresolvable `45%`, which
+          `getComputedStyle` cheerfully reports back verbatim) is exactly the
+          shape of bug a class-name assertion cannot see. */}
+      <section
+        data-detail-block="in"
+        className="-mx-3.5 sticky top-0 z-10 flex max-h-[45cqh] min-h-0 flex-none flex-col gap-1 bg-ground px-3.5 pt-1.5 pb-1.5"
+      >
+        {/* The region's name, announced and not drawn. */}
+        <span className="sr-only">in</span>
+        {/* THE BUBBLE (operator: "the IN prompt should have a different colour
+            so it stands out, and sit in a bubble"). A tinted, rounded ground
+            INSIDE the one continuous column, not the bordered band PR 266
+            deleted. It is also the element the `max-h` above bounds against:
+            `overflow-y-auto` here is what keeps a 10,000-character prompt
+            whole while the block it sticks in stays capped. */}
+        <div
+          data-detail-scroll="in"
+          /* The scrollbar is NOT hidden here, unlike the column's. It is the
+             only thing on screen saying the prompt continues past the
+             bubble's bottom edge, and a bound nobody can see is how "the
+             answer is unreachable" became "the prompt is". */
+          /* PADDING IS WHAT MAKES THE TINT A SHAPE, and it is bounded on BOTH
+             sides -- 10x8, held to a 7-12px band measured AS PAINT by
+             `e2e/long-prompt-shots.mjs`, because a padding rule that matches
+             nothing has passed review in this project before. */
+          className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-2.5 py-2"
+        >
+          <p className="whitespace-pre-wrap break-words text-[13px] text-ink-dim leading-[1.55]">
+            {/* THE RESERVED CORNER, audit F1's obligation. A float rather than
+                padding because only the FIRST LINE meets the pill: padding
+                would indent all 300 lines of a long prompt to clear something
+                34px tall. Sized off the measured pill (72px at any width, plus
+                what the icon count adds); 6rem covers it with 24px to spare,
+                and the bound is measured by
+                `e2e/narrow-pane-overlay-shots.mjs`, which fails both if the
+                reservation misses the pill and if it runs far past it.
+
+                ON EVERY TURN, not only on the pinned one. The pill floats over
+                the top-right corner of the COLUMN, so whichever turn's prompt
+                is pinned there is the one it covers -- and which turn that is
+                changes with every scroll event. Reserving only for the pinned
+                one would mean rewriting the DOM as you scroll and reflowing a
+                paragraph under the reader's eye each time a new turn takes the
+                pin; reserving on all of them costs a shorter first line in the
+                turns that are not pinned and cannot be wrong at any scroll
+                offset. Only when the overlay is actually drawn -- an unfocused
+                pane paints no pill. */}
+            {reserveCorner && (
+              <span
+                data-detail-corner-reserve
+                aria-hidden="true"
+                className="float-right h-[22px] w-[6rem]"
+              />
+            )}
+            {decision.input}
+          </p>
+        </div>
+      </section>
+
+      {/* THE TURN'S OWN CONDENSED LINE. It used to be the session's -- one
+          line for the whole pane, carrying the turn count and the picker,
+          because only one turn was ever on screen. In a column those are facts
+          about the COLUMN and have moved to its two ends (the boundary block
+          at the top, the navigation bar at the bottom); what is left here is
+          what is true of THIS turn: which turn it is, and whether anything
+          inside it failed. */}
+      <section data-detail-block="progress" className="flex flex-none flex-col gap-1">
+        {/* Announced, not drawn. */}
+        <span className="sr-only">progress</span>
+        <div
+          data-progress-line
+          className="flex items-center gap-1.5 font-mono text-[10.5px] text-ink-faint"
+        >
+          <span data-progress-turn-label className="flex min-w-0 items-center gap-1 truncate">
+            {/* Answered, still open, or carrying a failure -- the same marks
+                the picker draws, from the same function. Decorative, so
+                hidden: the label is what a screen reader should read. */}
+            <span aria-hidden="true" className={failed > 0 ? 'text-failed' : undefined}>
+              {turnMark(decision)}
+            </span>
+            <span className="min-w-0 truncate">{decision.label}</span>
+          </span>
+          {/* THE FOLD MAY COST DETAIL, NEVER ALARM. A turn's mark cannot say
+              how many tool calls blew up inside it, and the count is what the
+              operator would otherwise have to open the turn to find. Drawn
+              only above zero: ABSENT is "this source cannot report tool
+              failures" and ZERO is "vam looked and found none", and neither is
+              news. */}
+          {failed > 0 && (
+            <span data-progress-failed className="text-failed">
+              · {failed} failed
+            </span>
+          )}
+          {/* `session.activity` is what the session is doing RIGHT NOW, so it
+              belongs to the turn currently being worked and to no other -- on
+              an older turn it described the present while the operator read
+              the past. In a column that turn is the last one, at the bottom,
+              which is where the eye already is. */}
+          {newest && activity !== null && (
+            <>
+              {/* The line's own middot, so the label and the activity do not
+                  run together into one phrase. Decorative: a screen reader
+                  reads two values. */}
+              <span aria-hidden="true">·</span>
+              <span data-progress-activity className="min-w-0 truncate">
+                {activity}
+              </span>
+            </>
+          )}
+          {/* WHAT IT IS BLOCKED ON, in the session's own words. The pane used
+              to compute `waitingFor` and spend it as a boolean, so every
+              waiting session read the same on screen: "it needs something" and
+              "it needs permission to run rm" were one picture. VERBATIM,
+              because the observed causes are a sample of an open set
+              (`session-status.ts`). */}
+          {newest && waitingCause !== null && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span data-progress-waiting className="min-w-0 truncate text-waiting">
+                {waitingCause}
+              </span>
+            </>
+          )}
+        </div>
+      </section>
+
+      <section data-detail-block="out" className="flex flex-none flex-col gap-1.5">
+        <span className="sr-only">out</span>
+        <div
+          data-detail-scroll="out"
+          className="flex flex-col gap-2 text-[length:var(--vam-out-font-size,12px)]"
+        >
+          {decision.output !== null && decision.output !== '' && (
+            <OutText output={decision.output} />
+          )}
+          {(decision.output === null || decision.output === '' || live) && (
+            /* The live line and the answer are not alternatives, and treating
+               them as one is what made this line unreachable in practice: it
+               used to render only when `output` was empty, but `transcript.ts`
+               writes `turns[last].output` on every assistant text, so a
+               running session has an answer within seconds and the operator
+               never saw the line again. It is rendered whenever the turn is
+               live, and BELOW the answer: here is what the session has said,
+               here is what it is doing now. When there is no answer it is the
+               only thing in the region, so the empty-turn sentence prints
+               once, in this same element, rather than in a second one.
+
+               While the session is working, this line is the only thing in the
+               pane that changes -- so it carries the work rather than a
+               sentence that reads the same on a session that has quietly died.
+               The idiom is the agent's own running caption: a star, the word
+               for what it is doing, and an ellipsis that animates. The WORD is
+               `activity` -- the newest tool call the source reported -- so it
+               cycles as the work does, off data vam has, rather than off a
+               rotating list of invented gerunds. Under
+               `prefers-reduced-motion` the dots park on at full opacity
+               (styles.css), which still reads as "still going". It is withheld
+               from every stopped status -- `live` is `running` AND
+               newest-turn only. A null `activity` is a source that cannot say
+               (model.ts): the sentence stays as the word and no words are
+               invented, because it asserts only that the session is running,
+               which it is. */
+            <p
+              data-out-empty={decision.output === null || decision.output === '' ? true : undefined}
+              data-out-live={live ? 'true' : undefined}
+              className="text-[12.5px] text-ink-faint"
+            >
+              {live ? (
+                /* Star and word share one accent, the app's own `running`
+                   token; the detail is dim. Decorative marks are hidden from
+                   assistive tech, which should read the activity and not a
+                   star and three dots. */
+                <span data-out-running className="text-running">
+                  <span aria-hidden="true" data-out-running-star className="vam-running-star">
+                    {'✳'}
+                  </span>{' '}
+                  <span data-out-running-word className="vam-running-word">
+                    {activity ?? noAnswerNote(decision.output, status)}
+                  </span>
+                  <span aria-hidden="true" data-out-ellipsis className="vam-ellipsis">
+                    <span>.</span>
+                    <span>.</span>
+                    <span>.</span>
+                  </span>
+                  {age !== null && (
+                    <span data-out-running-detail className="text-ink-faint">
+                      {' '}
+                      (last active {age} ago)
+                    </span>
+                  )}
+                </span>
+              ) : (
+                noAnswerNote(decision.output, status)
+              )}
+            </p>
+          )}
+        </div>
+      </section>
+    </article>
+  );
+});
+
 export function DetailPanel(props: DetailPanelProps) {
   const {
     entry,
@@ -2222,10 +2531,24 @@ export function DetailPanel(props: DetailPanelProps) {
   const sessionKey = entry?.session.id ?? null;
   const sessionKeyRef = useRef(sessionKey);
   const focusNodeRef = useRef(focusNodeId);
+  /**
+   * WHICH TURN THE COLUMN SHOULD BE SCROLLED TO, once, on the next paint.
+   *
+   * A ref rather than state because nothing renders from it: it is a
+   * one-shot instruction to the layout effect below, consumed and cleared
+   * there. Set by an explicit pick and by a canvas navigation -- the two
+   * things that mean "take me to that turn" now that picking one no longer
+   * hides the rest. Session identity is deliberately NOT here: a new document
+   * opens at its newest turn, which is the stick-to-bottom effect's job, and
+   * an instruction to scroll into the middle of it would fight that.
+   */
+  const scrollToTurnRef = useRef<string | null>(null);
   let followCanvas = false;
+  let sessionChanged = false;
   if (sessionKeyRef.current !== sessionKey) {
     sessionKeyRef.current = sessionKey;
     followCanvas = true;
+    sessionChanged = true;
   }
   // `undefined` (no caller offering the signal, e.g. `PhoneShell`) is never a
   // "change" -- only a caller that actually reports a node id can ask this
@@ -2233,6 +2556,11 @@ export function DetailPanel(props: DetailPanelProps) {
   if (focusNodeId !== undefined && focusNodeRef.current !== focusNodeId) {
     focusNodeRef.current = focusNodeId;
     followCanvas = true;
+    // WITHIN ONE SESSION ONLY. Focusing a different session changes this id
+    // too, and there the bottom is where the column must open -- landing
+    // mid-history is the half-read flash `focusKey` has always existed to
+    // avoid.
+    if (!sessionChanged && canvasDecisionId !== null) scrollToTurnRef.current = canvasDecisionId;
   }
   if (followCanvas && selectedId !== canvasDecisionId) setSelectedId(canvasDecisionId);
   /**
@@ -2615,17 +2943,43 @@ export function DetailPanel(props: DetailPanelProps) {
     }
   }, [draft]);
 
-  // The session has stopped and the next move is yours. Keyed off the session,
-  // not off an empty `output`: a session still writing its answer is busy, not
-  // blocked, and banner-ing it would train you to ignore the banner.
-  // A different session or a different step is a different document, and the
-  // previous one's scroll position would open it half-read.
-  const focusKey = `${entry?.session.id ?? ''}/${decision?.id ?? ''}`;
+  /**
+   * THE DOCUMENT IS THE SESSION NOW, not the turn.
+   *
+   * This key used to carry the focused turn's id as well, because the pane
+   * drew one turn at a time and moving between them genuinely was moving
+   * between documents. The column draws them all, so a different turn is a
+   * different PLACE in one document -- and keeping the id here would have
+   * yanked the column back to its bottom every time a poll produced a new
+   * newest turn, which is the very thing `focusNodeId` exists to prevent.
+   * Where to scroll for a turn is `scrollToTurnRef`'s job, below.
+   */
+  const focusKey = entry?.session.id ?? '';
   const focusRef = useRef(focusKey);
-  const output = decision?.output ?? null;
-  // `output` is a change SIGNAL, not something this effect reads: new text
-  // arriving is exactly the moment the region has to stick again, and dropping it
-  // from the list would leave the pane showing the old bottom.
+  /**
+   * The change SIGNAL for "the column grew", not something the effect reads.
+   * Two halves: the newest turn's answer (a streaming session rewrites it
+   * every second or so) and how many turns there are (a new turn appended).
+   * Dropping either would leave a column that was resting at its bottom
+   * showing the old bottom.
+   */
+  const newestTurn = entry?.session.decisions[0] ?? null;
+  const output = newestTurn?.output ?? null;
+  const turnCount = entry?.session.decisions.length ?? 0;
+  /**
+   * WHICH TURN IS THE LIVE ONE. `decisions` is newest first (model.ts), so the
+   * newest is the turn a session is working on -- the only one a "what it is
+   * doing now" caption can honestly describe. An id rather than a boolean now
+   * that every turn is drawn: each block is told whether it is this one.
+   * Declared here, above the two effects that read it, rather than beside the
+   * rest of the turn derivations below.
+   */
+  const newestId = newestTurn?.id ?? null;
+  /**
+   * Whether the session is still working. The other half of "live" -- being
+   * the newest turn -- is decided per block, against `newestId`.
+   */
+  const sessionRunning = entry?.session.status === 'running';
   // biome-ignore lint/correctness/useExhaustiveDependencies: stick again on new output
   useEffect(() => {
     const box = outRef.current;
@@ -2639,7 +2993,107 @@ export function DetailPanel(props: DetailPanelProps) {
     box.scrollTop = box.scrollHeight;
     stuckRef.current = true;
     syncJumps(box);
-  }, [focusKey, output]);
+  }, [focusKey, output, turnCount]);
+
+  /**
+   * KEEP THE BOTTOM WHEN THE PANE'S OWN FURNITURE MOVES.
+   *
+   * MEASURED ON THIS HEAD, and the reason this exists: opening `factory-sse-1`
+   * in the demo left the column resting at scrollTop 431 of 520 -- 89px short
+   * of its own end -- every single time. The effect above does stick it, and
+   * correctly; what happens next is that the pane's PROMPT POLL resolves, a
+   * question card appears below the column and the composer withdraws, and the
+   * column's own height drops by 89px. Its content did not change, so nothing
+   * in the dependency list above changed, and the scroller was simply left 89px
+   * up a transcript it had just been told to show the end of. The single-turn
+   * pane had the same hole and it did not show: one turn rarely overflowed.
+   *
+   * A ResizeObserver ON THE SCROLLER, because the fact that changed is the
+   * scroller's own size -- not its content, which the effect above already
+   * watches. Together they cover both halves of "stuck": the content grew, and
+   * the window onto it shrank. Guarded on `stuck`, so it can only ever act for
+   * a reader who was at the bottom already; a reader who scrolled up is left
+   * exactly where they were, which is the whole rule this pane keeps.
+   *
+   * Re-attached when the column comes and goes -- another tab, an empty
+   * session -- because that is when the element behind `outRef` changes.
+   * `typeof` guarded for happy-dom, where the unit suite runs.
+   */
+  const columnMounted = current === 'Response' && turnCount > 0;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `syncJumps` is a fresh closure every render, so listing it would tear down and re-attach the observer on every keystroke in the composer -- it only ever calls `setJumps`, which is stable
+  useEffect(() => {
+    const box = outRef.current;
+    if (box === null || !columnMounted) return;
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (!stuckRef.current) {
+        syncJumps(box);
+        return;
+      }
+      box.scrollTop = box.scrollHeight;
+      syncJumps(box);
+    });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [columnMounted]);
+
+  /**
+   * TAKE THE COLUMN TO A PICKED TURN — the one-shot instruction
+   * `scrollToTurnRef` carries, consumed here.
+   *
+   * A LAYOUT effect, not a passive one: the turn is scrolled to in the same
+   * frame it was picked in, so nothing paints at the old offset first.
+   *
+   * NO DEPENDENCY ARRAY on purpose. The instruction is set during render (a
+   * canvas navigation) and from an event handler (a pick), and both are
+   * followed by a render; a dependency list would have to name every path
+   * that can set a ref, which is the list that goes stale. The body reads one
+   * ref and returns, so running it after every render costs nothing.
+   *
+   * MEASURED AGAINST THE COLUMN, not `scrollIntoView`: that would scroll every
+   * scrollable ancestor, including the page, to bring a turn into view inside
+   * a pane that was already showing. The delta between the two boxes moves
+   * exactly one scroller, which is the one this is about.
+   */
+  useLayoutEffect(() => {
+    const want = scrollToTurnRef.current;
+    if (want === null) return;
+    scrollToTurnRef.current = null;
+    const box = outRef.current;
+    if (box === null) return;
+    /**
+     * THE NEWEST TURN IS THE BOTTOM, and asking for it means asking for the
+     * end of the transcript.
+     *
+     * MEASURED, not anticipated: the canvas's default pick is `decisions[0]`,
+     * so opening a session emits a navigation to the NEWEST turn one render
+     * after the session key changed. Aligning that turn's top edge undid the
+     * stick-to-bottom that had just run -- the column opened at scrollTop 431
+     * of 520, showing the newest prompt with its own answer cut off below the
+     * fold, on every single open. Its top edge is not where anyone wants to
+     * be for the turn that is still being written; its end is.
+     */
+    if (want === newestId) {
+      box.scrollTop = box.scrollHeight;
+      stuckRef.current = true;
+      syncJumps(box);
+      return;
+    }
+    const target = [...box.querySelectorAll('[data-column-turn]')].find(
+      (el) => el.getAttribute('data-column-turn') === want,
+    );
+    // A turn that is not mounted is not an error here: `selectedTurnMissing`
+    // is what says so on screen, and silently scrolling somewhere else would
+    // be the substitution that whole mechanism refuses.
+    if (target === undefined) return;
+    box.scrollTop += target.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    // Landing anywhere but the bottom is letting go of it -- done here rather
+    // than left to the scroll event, because new output arriving before that
+    // event lands would otherwise find `stuck` still true and yank the column
+    // straight back down over the turn just asked for.
+    stuckRef.current = isAtBottom(box);
+    syncJumps(box);
+  });
 
   const commands = decision?.commands ?? [];
   const slashCommands = entry?.session.slashCommands ?? [];
@@ -2674,22 +3128,6 @@ export function DetailPanel(props: DetailPanelProps) {
     setCaret(next.caret);
     setDismissed(true);
   };
-  /**
-   * Whether the decision on screen is the one the session is working on.
-   * `decisions` is newest first (model.ts), so the newest is the live turn --
-   * the only one a "what it is doing now" caption can honestly describe.
-   */
-  const isNewestTurn =
-    decision !== null && entry !== null && entry.session.decisions[0]?.id === decision.id;
-  /**
-   * Whether the empty `out` describes work still happening. Both halves are
-   * required: only a `running` session is still working, and only the newest
-   * turn is the one it is working on.
-   */
-  const outIsLive = isNewestTurn && entry?.session.status === 'running';
-  /** The words themselves — `null` when there is no live turn, or when the
-   * source cannot say what it is doing. */
-  const liveActivity = outIsLive ? entry.session.activity : null;
   /**
    * The question the card draws: the newest OPEN one, and only if there is
    * none, the newest answered one -- what is still being asked outranks what
@@ -2919,7 +3357,7 @@ export function DetailPanel(props: DetailPanelProps) {
    * total, which would be a lie about one session -- so those clauses are not
    * printed rather than printed as zeros.
    */
-  const liveAge = outIsLive ? entry.session.age : null;
+  const liveAge = sessionRunning ? (entry?.session.age ?? null) : null;
   /**
    * HOW MANY TURNS VAM READ -- not how many the session has had. The source's
    * transcript reader only ever opens the newest `TAIL_BYTES` of the file
@@ -2964,9 +3402,32 @@ export function DetailPanel(props: DetailPanelProps) {
    * claim than "this turn failed": the count beside the line says how many,
    * and the turn may well have recovered. It is still the thing worth seeing
    * from a collapsed row.
+   *
+   * MOVED TO MODULE SCOPE with the column: `TurnBlock` draws the same mark on
+   * each turn's own line, and a third copy of the conditional is exactly what
+   * this comment was already written against.
    */
-  const turnMark = (d: Decision): string =>
-    (d.errorCount ?? 0) > 0 ? '!' : d.output === null ? '\u25cc' : '\u2713';
+  /**
+   * WHICH TURN THE COLUMN IS MARKING, or `null` when the pick has fallen out
+   * of the window entirely -- `selectedTurnMissing`'s case, where the column
+   * still draws every turn it HAS and says separately that the one asked for
+   * is not among them. Marking a substitute would be exactly the swap that
+   * mechanism exists to refuse.
+   */
+  const markedId = selectedTurnMissing ? null : (decision?.id ?? null);
+  /**
+   * PICK A TURN: mark it, and take the column to it.
+   *
+   * `selectedId` used to decide which turn was DRAWN. In a column that is the
+   * wrong verb -- picking must not hide six turns to show one -- so the state
+   * survives with a smaller job (which turn is marked, and which turn the `!`
+   * typeahead reads its proposed commands from) and the MOVEMENT is the
+   * scroll, applied by the layout effect above.
+   */
+  const pickTurn = (id: string) => {
+    setSelectedId(id);
+    scrollToTurnRef.current = id;
+  };
 
   /**
    * What the composer's button claims, in the words the SOURCE earns.
@@ -3203,24 +3664,7 @@ export function DetailPanel(props: DetailPanelProps) {
           <AgentsTab agents={entry?.session.agents} />
         ) : current === 'PRs' ? (
           <PullRequestsTab pullRequests={entry?.session.pullRequests} />
-        ) : selectedTurnMissing ? (
-          // THIS TURN, NOT ANOTHER ONE. Falling through to the newest turn
-          // here would look identical to the operator to actually having
-          // read it -- exactly the swap this whole mechanism exists to
-          // refuse. Said plainly, with a way back to what the canvas is
-          // actually showing rather than a dead end.
-          <p data-progress-turn-missing className="text-[12px] text-ink-faint">
-            The turn you were reading has scrolled out of what vam can see.{' '}
-            <button
-              type="button"
-              data-progress-turn-return
-              onClick={() => setSelectedId(canvasDecisionId)}
-              className="cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
-            >
-              Back to the current turn
-            </button>
-          </p>
-        ) : decision === null ? (
+        ) : orderedTurns.length === 0 ? (
           entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip
           // above it, and an empty strip already says "no sessions open —
           // pick one from the sidebar". This line said the same thing in
@@ -3243,13 +3687,16 @@ export function DetailPanel(props: DetailPanelProps) {
             </p>
           )
         ) : (
-          // THE MERGED COLUMN (A12.2). One scrollable region for `in`,
-          // `progress` and `out` together — the ref and the scroll handler
-          // that used to live on `out` alone (it was the only region that
-          // grew) now live HERE, because this is the region that scrolls.
-          // `stuckRef`/`isAtBottom` re-derive unchanged: they never cared
-          // which element they were reading metrics off, only whether it was
-          // resting at its own bottom.
+          // THE WHOLE SESSION, AS ONE COLUMN. One scrollable region holding
+          // every turn `entry.session.decisions` carries, oldest at the top,
+          // newest at the bottom, each turn's `in` pinned to the top of the
+          // column while you are inside it — the operator's ask, and the shape
+          // the Claude Code plugin for VSCode has.
+          //
+          // The ref and the scroll handler live HERE because this is the
+          // region that scrolls; `stuckRef`/`isAtBottom` never cared which
+          // element they were reading metrics off, only whether it was resting
+          // at its own bottom.
           <div
             ref={outRef}
             data-detail-column
@@ -3257,182 +3704,244 @@ export function DetailPanel(props: DetailPanelProps) {
               stuckRef.current = isAtBottom(event.currentTarget);
               syncJumps(event.currentTarget);
             }}
-            /* FULL-BLEED, so the sticky ground below can be. The pane body
+            /* FULL-BLEED, so the sticky ground inside can be. The pane body
                puts `px-3.5 py-3` around everything; a scroll column inside
                that padding can only paint as wide as the padding box, which
                left a 14px gutter down each side of the pinned prompt with
                the transcript scrolling past in it, in full view. So the
                column takes the padding OFF the body (`-mx-3.5`) and puts it
                back on itself (`px-3.5`): every child lays out exactly where
-               it did, and the two that ask for it -- the sticky ground --
-               can reach the pane's own edges with `-mx-3.5`.
+               it did, and the ones that ask for it -- every turn's sticky
+               ground, and the navigation bar -- reach the pane's own edges
+               with `-mx-3.5` of their own.
 
                The TOP is the same move without the give-back: `-mt-3` hands
-               the body's top padding to the sticky block, which re-spends it
-               as its own `pt-3`, so the ground covers the strip above the
-               bubble instead of leaving pane fill there. Not when the failed
-               banner is drawn -- there IS something above the column then,
-               and pulling up would slide the column under it. */
-            className={`vam-no-scrollbar -mx-3.5 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-3.5 ${
+               the body's top padding to the column, which re-spends it on the
+               boundary block below. Not when the failed banner is drawn --
+               there IS something above the column then, and pulling up would
+               slide the column under it.
+
+               `container-type:size` IS LOad-BEARING, not decoration: it makes
+               this element the size container the `45cqh` cap on every turn's
+               sticky prompt resolves against. Without it that cap resolves to
+               nothing inside the per-turn wrapper and the pinned prompt can
+               cover the answer again (audit F2). `TurnBlock`'s own comment
+               carries the measurement. */
+            className={`vam-no-scrollbar -mx-3.5 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-3.5 [container-type:size] ${
               failedBanner ? '' : '-mt-3'
             }`}
           >
-            {/* STICKY, not merely first: `position: sticky` against the
-                column's own scroll (the operator's ask, A12.2 — "IN stays
-                sticky at the top while scrolling"), with an opaque
-                background so `out` text scrolling underneath does not bleed
-                through the two lines of `in`. The identity line the removed
-                header used to carry rides along here too — see the
-                header-removal comment above for the full account of where
-                each fact went, and the line's own comment below for why only
-                the turn's half of it is still drawn.
+            {/*
+              WHAT THE TOP OF THE COLUMN IS — said, not left to be inferred.
 
-                BOUNDED, because an unbounded sticky block is not a pin, it is
-                a lid (audit F2, measured: a 3,822-character prompt left the
-                answer 19px and a 10,920-character one covered `progress` and
-                `out` AT MAXIMUM SCROLL — the answer became unreachable at
-                every scroll offset, with no fold and no control to recover
-                it). A16 accepted "a very long prompt can cover the pane" as a
-                cost; it did not accept an answer nothing can reach. `max-h`
-                is what makes STICKY bounded rather than what makes the prompt
-                short: the paragraph keeps its full length and gets its own
-                scroll inside the bubble, so nothing typed is truncated and
-                the remaining 55%+ of the column always belongs to the answer.
-                That is VSCode's sticky-scroll bargain — what is pinned is
-                capped, what is in flow is whole.
+              THE REPO'S DOMINANT DEFECT FAMILY, at the one place it bites
+              hardest. `sources/claude-code/pull-requests.ts` states the rule:
+              "'No PRs' and 'vam could not ask' must never look the same." A
+              column that simply stops at its oldest loaded turn claims the
+              session started there. It did not: the transcript reader only
+              ever opens the newest `TAIL_BYTES` of the file (`source.ts`).
 
-                The ground is the PANE's (`bg-ground`), not `bg-sidebar`: it
-                exists to stop text bleeding through, and matching the column
-                is how it does that without drawing a band. What distinguishes
-                the prompt now is the bubble inside it, below. */}
-            <section
-              data-detail-block="in"
-              className="-mx-3.5 sticky top-0 z-10 flex max-h-[45%] min-h-0 flex-none flex-col gap-1 bg-ground px-3.5 pt-3 pb-1.5"
+              MEASURED, over the 73 transcripts on this machine that vam
+              actually opens -- interactive sessions only; the other 863
+              `.jsonl` files on disk are subagent SIDECHAINS, which vam never
+              reads, and counting them would have made every figure here wrong
+              by an order of magnitude. The distribution is bimodal, and both
+              ends argue for this block:
+                - 41% of sessions fit ENTIRELY inside the window. For four in
+                  ten, the oldest turn drawn really is the session's first --
+                  and vam still cannot say so, which is why `session-start` is
+                  defined below and not drawn;
+                - the other end is where the operator's long-running work
+                  lives, and there the window is a sliver: 157.3 MB over 63
+                  turns shows ONE, 138.4 MB over 261 turns shows two, 122.1 MB
+                  over 89 shows one. p50 254 KB, p75 5 MB, p90 45 MB.
+              A column that ended silently would be at its most misleading
+              exactly there.
+
+              TWO STATES, AND ONLY ONE OF THEM IS ASSERTABLE TODAY:
+                - `read-limit` — "this is as far back as vam has read". True
+                  whenever the window is what ended the list, which is always,
+                  because no source can yet report reaching the file's start.
+                - `session-start` — "the session begins here". NOT DRAWN, and
+                  deliberately not stubbed: nothing vam reads can currently
+                  prove it, and a boundary that guessed would be the same lie
+                  in the other direction.
+
+              AND NO CONTROL, because there is nothing behind one. Backward
+              paging is being added to the source in parallel; until it lands,
+              a "load more" button would be a control that cannot act and a
+              spinner would be a fetch that does not exist — both worse than
+              the sentence. THE SEAM: when the source can page, this block
+              gains the `session-start` state and a real button beside it, and
+              nothing else in the column has to change — the column already
+              renders whatever `orderedTurns` holds, oldest first.
+            */}
+            {/* THE RESERVED CORNER, audit F1's obligation, inherited by
+                whatever sits at the top of the column: at scrollTop 0 that is
+                this block, and the view-icon pill is opaque. The prompt
+                bubbles discharge it with a float (only their first line meets
+                the pill); this is two short lines that all meet it, so it is
+                padding. 6rem is the measured pill plus 24px, the same figure
+                and the same reason as the float. Only while the overlay is
+                drawn -- an unfocused pane paints no pill, and reserving for
+                one would notch every pane the operator is not in. */}
+            <div
+              data-column-start="read-limit"
+              /* 11.5px, NOT the 10.5px of the turn lines this block's facts
+                 came off. The operator has twice asked for small type to come
+                 up a pixel, and a repo-wide bump is its own task (198 literals,
+                 18 files, no type scale to change in one place) -- so a NEW
+                 call site takes the size it would have AFTER that bump rather
+                 than adding one more literal below the floor. The turn lines
+                 and the bar below keep 10.5 because they are the existing
+                 progress line, moved, not new type. */
+              className={`-mx-3.5 flex flex-none flex-col gap-0.5 px-3.5 pt-3 pb-1 font-mono text-[11.5px] text-ink-faint ${
+                cornerOverlay ? 'pr-[6rem]' : ''
+              }`}
             >
-              {/* The region's name, announced and not drawn -- see the
-                  band-removal note above `IN_BODY_PX`. */}
-              <span className="sr-only">in</span>
-              {/* NO IDENTITY LINE. It carried the project and the epic
-                  (inherited from the deleted header) until the operator had
-                  those removed as facts the sidebar's own row already says,
-                  and then `you · <turn label>` until the operator had that
-                  removed too ("also remove the `you · ...` part above In").
-
-                  What was written here last time -- that the turn's label had
-                  no other home -- was WRONG, and this note replaces it rather
-                  than quietly dropping it. The label has two homes, both in
-                  the progress line just below: the condensed form is a
-                  `<select>` whose every option is a turn's label, with the
-                  current one selected and therefore painted; the expanded
-                  form lists them as rows with the current one marked
-                  `aria-current`. The one case where neither draws is a
-                  session with EXACTLY ONE turn and progress collapsed, since
-                  the picker only appears past one turn -- and there "which
-                  turn" has a single answer, so a label naming it says nothing
-                  the operator could act on.
-
-                  The reserved corner (audit F1, `pr-[7rem]`) went with the
-                  row -- it existed so this line's `truncate` computed its
-                  ellipsis against the pill rather than the pane edge -- but
-                  the OBLIGATION did not: with the line gone the bubble rises
-                  into the corner the pill paints on, and measured at a 356px
-                  pane, 24 of 100 sampled glyph pixels of the prompt's first
-                  line went under it. So the reservation moved down into the
-                  bubble as a floated spacer rather than being deleted with
-                  its old holder. Measured as OCCLUSION, in a real browser, by
-                  `e2e/narrow-pane-overlay-shots.mjs`. */}
-              {/* THE BUBBLE (operator: "the IN prompt should have a
-                  different colour so it stands out, and sit in a bubble").
-                  A chat bubble, deliberately, and not the bordered band PR 266
-                  deleted: a tinted, rounded ground INSIDE the one continuous
-                  column, which is a speech affordance, where the old `in` was
-                  a labelled panel with its own rule and its own scrollbar
-                  competing with two others. The seam-free reading survives —
-                  no border, no header, one scroll region for the turn.
-
-                  It is also the element the `max-h` above bounds against:
-                  `overflow-y-auto` here is what keeps a 10,000-character
-                  prompt whole while the block it sticks in stays capped. */}
-              <div
-                data-detail-scroll="in"
-                /* The scrollbar is NOT hidden here, unlike the column's
-                   (`vam-no-scrollbar`). It is the only thing on screen
-                   saying the prompt continues past the bubble's bottom
-                   edge, and a bound nobody can see is how "the answer is
-                   unreachable" became "the prompt is". */
-                /* PADDING IS WHAT MAKES THE TINT A SHAPE (the operator:
-                   "the In section's background needs padding"), and it is
-                   bounded on BOTH sides. At 10x8 the ground sat tight against
-                   the words and read as a highlight behind them; at 14x12 the
-                   operator called the bubble too big ("the In bubble needs to
-                   be smaller"). 12x10 is what is left, and the guard holds it
-                   to a 9-12px band measured AS PAINT rather than as a class
-                   (`e2e/long-prompt-shots.mjs`), because a padding rule that
-                   matches nothing has passed review in this project before.
-
-                   The height it gives back goes to the answer, not to the
-                   pin: `max-h-[45%]` bounds the block either way. */
-                className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-2.5 py-2"
-              >
-                <p className="whitespace-pre-wrap break-words text-[13px] text-ink-dim leading-[1.55]">
-                  {/* THE RESERVED CORNER, audit F1's obligation, inherited
-                      from the identity line that used to discharge it above.
-                      A float rather than padding because only the FIRST LINE
-                      meets the pill: padding would indent all 300 lines of a
-                      long prompt to clear something 34px tall. `float` is the
-                      one layout primitive that reserves a corner and lets the
-                      text close back under it.
-
-                      Sized off the measured pill, not guessed. Every offset
-                      between the pill and the paragraph is fixed (`right-2.5`
-                      on the overlay, `px-3.5` on the column and on the
-                      bubble), so the overlap does not vary with the pane's
-                      width: 72px at any width, plus whatever the icon count
-                      adds. 6rem covers it with 24px to spare, where the
-                      identity line's 7rem over-reserved by 40 -- and the
-                      bound is measured, not asserted here: the guard fails
-                      both if the reservation misses the pill and if it runs
-                      far past it.
-
-                      Only when the overlay is actually drawn -- an unfocused
-                      pane paints no pill, and reserving for it would notch
-                      the prompt of every pane the operator is not in. */}
-                  {cornerOverlay && (
-                    <span
-                      data-detail-corner-reserve
-                      aria-hidden="true"
-                      className="float-right h-[22px] w-[6rem]"
-                    />
-                  )}
-                  {decision.input}
-                </p>
+              <div className="flex items-center gap-1.5">
+                {/* "read", not a bare count: only the newest `TAIL_BYTES` is
+                    ever opened, so on a session bigger than that window this
+                    is what vam FOUND, not a provable total for the session's
+                    whole life. Trailing, not leading: "read 7 turns" is an
+                    imperative -- a command this line does not carry out --
+                    while "7 turns read" is what it actually is, a count with
+                    its qualifier attached. */}
+                <span data-progress-count>{turnsRead} turns read</span>
+                {/* THE FOLD MAY COST DETAIL, NEVER ALARM. Every turn carries
+                    its own `· N failed` on its own line below; this is the
+                    total across the window, beside the count of that same
+                    window, which is what lets the two share a line honestly.
+                    `null` is "no turn read can report failures at all" and
+                    draws nothing -- a confident "0 failed" over data nobody
+                    looked at is the same lie as a false badge. */}
+                {failedRead !== null && failedRead > 0 && (
+                  <span data-column-failed className="text-failed">
+                    · {failedRead} failed
+                  </span>
+                )}
               </div>
-            </section>
+              <p data-column-start-note className="text-ink-faint leading-[1.5]">
+                This is as far back as vam has read — not necessarily where the session began.
+              </p>
+              {/* THE PICK IS GONE, BUT NOT THE ANSWER TO IT. A turn can fall
+                  out of the window between one poll and the next; falling
+                  through to some other turn would look identical to the
+                  operator to having actually read the one they asked for.
+                  Said here, at the boundary that explains WHY it is gone,
+                  rather than in place of the column: the rest of the session
+                  is still there to read, and hiding it to print one sentence
+                  was the old single-turn pane's constraint, not a rule. */}
+              {selectedTurnMissing && (
+                /* No size of its own: it inherits the block's, which is the
+                   right size for it and one literal fewer to keep in step. */
+                <p data-progress-turn-missing className="text-ink-faint leading-[1.5]">
+                  The turn you were reading has scrolled out of what vam can see.{' '}
+                  <button
+                    type="button"
+                    data-progress-turn-return
+                    onClick={() => {
+                      setSelectedId(canvasDecisionId);
+                      if (canvasDecisionId !== null) scrollToTurnRef.current = canvasDecisionId;
+                    }}
+                    className="cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
+                  >
+                    Back to the current turn
+                  </button>
+                </p>
+              )}
+            </div>
 
-            {/* The mockup lists the actions inside one step. The factory's unit
-                is the turn, so this lists the session's turns — the same shape
-                answering the same question, off data that exists.
-                COLLAPSED INTO A SINGLE STEP (A12.2), not a list of rows: a
-                `<select>` is one control regardless of how many turns exist,
-                so browsing history costs one lightweight `<option>` per turn
-                rather than a styled, icon-bearing row per turn — the answer
-                to "what happens at volume" now that turn history is uncapped
-                (3,276, not 3): only the SELECTED turn's `in`/`out` is ever
-                rendered in full; every other turn costs one line of text in
-                a control the browser itself manages. */}
-            <section data-detail-block="progress" className="flex flex-none flex-col gap-1">
-              {/* Announced, not drawn -- the band-removal note above
-                  `IN_BODY_PX` carries the reasoning. */}
-              <span className="sr-only">progress</span>
-              {/* ONE LINE, the whole time. Collapsed it is a count, a picker
-                  and whatever the session is doing; open it is the same line
-                  with the picker swapped for the full list of turns. That is
-                  the VSCode plugin's own idiom for intermediate work, and it
-                  is the only chrome left between the prompt and the answer. */}
-              <div
-                data-progress-line
-                className="flex items-center gap-1.5 font-mono text-[10.5px] text-ink-faint"
-              >
+            {/* EVERY TURN, OLDEST FIRST. `decisions` arrives newest first
+                (model.ts); reversed here so the newest lands at the bottom,
+                where a conversation's newest line belongs and where the column
+                opens. Keyed by the turn's own content-derived id
+                (`transcript.ts`), so a poll that appends a turn does not
+                remount the ones already on screen -- which at 3,276 turns is
+                the difference between a scroll and a freeze. */}
+            {orderedTurns.map((d) => (
+              <TurnBlock
+                key={d.id}
+                decision={d}
+                marked={d.id === markedId}
+                newest={d.id === newestId}
+                live={d.id === newestId && sessionRunning}
+                /* `session.activity` and `waitingFor` describe the present, so
+                   they are handed to the newest turn and to no other -- on an
+                   older turn they described the present while the operator
+                   read the past. Passed as `null` elsewhere rather than gated
+                   at the call site so the block has one rule to follow. */
+                activity={d.id === newestId ? (entry?.session.activity ?? null) : null}
+                waitingCause={d.id === newestId ? waitingCause : null}
+                age={d.id === newestId ? liveAge : null}
+                status={entry?.session.status ?? null}
+                reserveCorner={cornerOverlay}
+              />
+            ))}
+
+            {/* THE COLUMN'S OWN BAR, pinned to its bottom.
+                It is what is left of the single condensed progress line once
+                the per-turn facts moved onto the turns and the window's facts
+                moved to the boundary above: navigation, and nothing else.
+
+                STICKY AT THE BOTTOM, not at the top, and not in the flow. The
+                jumps and the picker are what an operator reaches for while
+                scrolled far up -- having to scroll back down to find the
+                control that scrolls you back down is a circle -- and the top
+                is already spoken for by the pinned prompt, which is the whole
+                feature. In flow at the end of the column, so at maximum scroll
+                it sits BELOW the newest answer rather than over it. */}
+            <div
+              data-column-bar
+              className="-mx-3.5 sticky bottom-0 z-20 flex flex-none flex-col gap-1 bg-ground px-3.5 pt-1 pb-3"
+            >
+              {/* At volume this costs one node per turn, the same as the
+                  `<select>`'s options. The difference is that these are only
+                  here while the operator asked for them.
+
+                  CAPPED AGAINST THE COLUMN, not at a fixed 132px, which is what
+                  it was while it sat inline in the flow and could only ever
+                  push the turn down. It floats over the column now, so at a
+                  short pane 132px WAS the column: measured at a 460px viewport,
+                  the open list covered the pinned prompt entirely and the top
+                  of the transcript painted a list row. `cqh` resolves against
+                  the column (its `container-type: size`), so the list takes a
+                  share of the height rather than a number of pixels the pane
+                  may not have. */}
+              {progressOpen && (
+                <ul
+                  data-progress-turns
+                  className="vam-no-scrollbar max-h-[40cqh] min-h-0 overflow-y-auto"
+                >
+                  {orderedTurns.map((d) => (
+                    <li key={d.id}>
+                      <button
+                        type="button"
+                        data-progress-turn
+                        aria-current={d.id === markedId ? 'true' : undefined}
+                        onClick={() => pickTurn(d.id)}
+                        className={[
+                          'flex w-full cursor-pointer items-center gap-1.5 rounded-[var(--radius-sm)] px-1 py-0.5 text-left font-mono text-[10.5px] hover:bg-raised hover:text-ink',
+                          d.id === markedId ? 'bg-raised text-ink' : 'text-ink-faint',
+                        ].join(' ')}
+                      >
+                        {/* Answered, still open, or carrying a failure -- the
+                            same marks the turn's own line draws, from the same
+                            function. Decorative, so hidden: the label is what
+                            a screen reader should read. */}
+                        <span
+                          aria-hidden="true"
+                          className={(d.errorCount ?? 0) > 0 ? 'text-failed' : undefined}
+                        >
+                          {turnMark(d)}
+                        </span>
+                        <span className="min-w-0 truncate">{d.label}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="flex items-center gap-1.5 font-mono text-[10.5px] text-ink-faint">
                 {orderedTurns.length > 1 && (
                   <button
                     type="button"
@@ -3449,42 +3958,33 @@ export function DetailPanel(props: DetailPanelProps) {
                     )}
                   </button>
                 )}
-                {/* "read", not a bare count: `source.ts` only ever opens the
-                    newest `TAIL_BYTES` of the transcript, so on a session
-                    bigger than that window this is what vam FOUND, not a
-                    provable total for the session's whole life. Trailing, not
-                    leading: "read 7 turns" is an imperative -- a command this
-                    line does not carry out -- while "7 turns read" is what it
-                    actually is, a count with its qualifier attached. */}
-                <span data-progress-count>{turnsRead} turns read</span>
-                {/* THE FOLD MAY COST DETAIL, NEVER ALARM. Without this the
-                    line read "12 turns read" over a run where three tools blew
-                    up, because a turn's mark could not say so and the count
-                    did not try.
-                    BESIDE THE QUALIFIER, NOT INSTEAD OF IT. "read" is
-                    load-bearing above -- only the newest `TAIL_BYTES` is ever
-                    opened -- and this is a second fact about that same window,
-                    not a claim about the whole run. Which is also why it is
-                    not folded into the count's own span: that span says what
-                    it says, and this says what it says. */}
-                {failedRead !== null && failedRead > 0 && (
-                  <span data-progress-failed className="text-failed">
-                    · {failedRead} failed
-                  </span>
-                )}
                 {/* ONE PICKER AT A TIME. The `<select>` is the condensed form
-                    and the list below is the open one; they drive the same
-                    `setSelectedId` off the same turns, and drawing both would
-                    be two controls for one job -- which is how they come to
-                    disagree. */}
+                    and the list above is the open one; they drive the same
+                    `pickTurn` off the same turns, and drawing both would be
+                    two controls for one job -- which is how they come to
+                    disagree.
+                    `value` is the MARKED turn, and `''` when the pick has
+                    fallen out of the window: a `<select>` handed a value no
+                    option carries paints its first option instead, which would
+                    put a turn's label on screen as the one being read while
+                    the boundary above says that turn cannot be found. */}
                 {!progressOpen && orderedTurns.length > 1 && (
                   <select
                     data-progress-jump
                     aria-label="jump to a turn"
-                    value={decision.id}
-                    onChange={(event) => setSelectedId(event.target.value)}
+                    value={markedId ?? ''}
+                    onChange={(event) => pickTurn(event.target.value)}
                     className="max-w-[130px] cursor-pointer truncate rounded-[var(--radius-sm)] border border-line-strong bg-panel px-1 py-0.5 font-mono text-[10.5px] text-ink-faint outline-none hover:text-ink"
                   >
+                    {/* Drawn only while the pick is missing, and never
+                        selectable back into: it exists so the control can
+                        represent the state the boundary above describes
+                        instead of silently pointing at somebody else's turn. */}
+                    {markedId === null && (
+                      <option value="" disabled>
+                        — turn not in view —
+                      </option>
+                    )}
                     {orderedTurns.map((d) => (
                       <option key={d.id} value={d.id}>
                         {turnMark(d)} {d.label}
@@ -3492,63 +3992,17 @@ export function DetailPanel(props: DetailPanelProps) {
                     ))}
                   </select>
                 )}
-                {/* `session.activity` is what the session is doing RIGHT NOW,
-                    so it belongs to the turn currently being worked and to no
-                    other -- on an older turn it described the present while
-                    the operator read the past. It used to sit in the `out`
-                    rule's meta with an em dash standing in whenever there was
-                    none; the dash was the price of a heading that had to hold
-                    its row, and with the heading gone an absent activity is
-                    simply absent. Nothing is hidden by that: the region below
-                    still says what it knows about an empty or unfinished turn
-                    (`noAnswerNote`), which is where that silence would matter. */}
-                {isNewestTurn && (entry?.session.activity ?? null) !== null && (
-                  <>
-                    {/* The line's own middot, so the count and the activity do
-                        not run together into one phrase when the picker is not
-                        between them (the one-turn case, and while the list is
-                        open). Decorative: a screen reader reads two values. */}
-                    <span aria-hidden="true">·</span>
-                    <span data-progress-activity className="min-w-0 truncate">
-                      {entry?.session.activity}
-                    </span>
-                  </>
-                )}
-                {/* WHAT IT IS BLOCKED ON, in the session's own words. The pane
-                    computed `waitingFor` and then spent it as a boolean, so
-                    every waiting session read the same on screen: "it needs
-                    something" and "it needs permission to run rm" were one
-                    picture, and telling them apart cost one open per tab.
-                    HERE, not above the composer: the bordered "waiting on you"
-                    notice was removed at the operator's request and is not
-                    coming back. This is the same fact in the space this line
-                    already spends on `activity`, and it can sit beside one:
-                    `activity` is drawn for the newest turn whatever the status
-                    is, so a session whose last known action is still on record
-                    shows both, each behind its own middot -- what it was doing,
-                    then what stopped it. Reading order, and the cause last,
-                    because that is the half the operator came for.
-                    VERBATIM, because the observed causes are a sample of an
-                    open set (`session-status.ts`): a value vam has never seen
-                    is still the truest thing anyone can say about that row. */}
-                {waitingCause !== null && (
-                  <>
-                    <span aria-hidden="true">·</span>
-                    <span data-progress-waiting className="min-w-0 truncate text-waiting">
-                      {waitingCause}
-                    </span>
-                  </>
-                )}
                 <span className="flex-1" />
-                {/* The scroll-to-edge buttons the `out` rule used to carry.
-                    Each is drawn only while it would actually move the column
-                    -- a control that scrolls nowhere is worse than no control,
-                    and that rule outlives the rule it sat on. */}
+                {/* The scroll-to-edge buttons. Each is drawn only while it
+                    would actually move the column -- a control that scrolls
+                    nowhere is worse than no control. "Top" now means the
+                    oldest turn vam read, which is what the boundary block up
+                    there says it is. */}
                 {jumps.above && (
                   <button
                     type="button"
                     data-out-to-top
-                    aria-label="scroll out to the top"
+                    aria-label="scroll to the oldest turn read"
                     onClick={() => jumpTo('top')}
                     className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
                   >
@@ -3559,7 +4013,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   <button
                     type="button"
                     data-out-to-bottom
-                    aria-label="scroll out to the bottom"
+                    aria-label="scroll to the newest turn"
                     onClick={() => jumpTo('bottom')}
                     className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
                   >
@@ -3567,126 +4021,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   </button>
                 )}
               </div>
-              {/* At volume this costs what the `<select>` already costs: one
-                  node per turn, which the collapsed form renders as an
-                  `<option>` on every render anyway. The difference is that
-                  these are only here while the operator asked for them. */}
-              {progressOpen && (
-                <ul
-                  data-progress-turns
-                  className="vam-no-scrollbar max-h-[132px] min-h-0 overflow-y-auto"
-                >
-                  {orderedTurns.map((d) => (
-                    <li key={d.id}>
-                      <button
-                        type="button"
-                        data-progress-turn
-                        aria-current={d.id === decision.id ? 'true' : undefined}
-                        onClick={() => setSelectedId(d.id)}
-                        className={[
-                          'flex w-full cursor-pointer items-center gap-1.5 rounded-[var(--radius-sm)] px-1 py-0.5 text-left font-mono text-[10.5px] hover:bg-raised hover:text-ink',
-                          d.id === decision.id ? 'bg-raised text-ink' : 'text-ink-faint',
-                        ].join(' ')}
-                      >
-                        {/* Answered, still open, or carrying a failure -- the
-                            same marks the options carry, from the same
-                            function. Decorative, so hidden: the label is what
-                            a screen reader should read. */}
-                        <span
-                          aria-hidden="true"
-                          className={(d.errorCount ?? 0) > 0 ? 'text-failed' : undefined}
-                        >
-                          {turnMark(d)}
-                        </span>
-                        <span className="min-w-0 truncate">{d.label}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-
-            <section data-detail-block="out" className="flex flex-none flex-col gap-1.5">
-              <span className="sr-only">out</span>
-              <div
-                data-detail-scroll="out"
-                className="flex flex-col gap-2 text-[length:var(--vam-out-font-size,12px)]"
-              >
-                {decision.output !== null && decision.output !== '' && (
-                  <OutText output={decision.output} />
-                )}
-                {(decision.output === null || decision.output === '' || outIsLive) && (
-                  /* The live line and the answer are not alternatives, and
-                     treating them as one is what made this line unreachable in
-                     practice: it used to render only when `output` was empty,
-                     but `transcript.ts` writes `turns[last].output` on every
-                     assistant text, so a running session has an answer within
-                     seconds and the operator never saw the line again. It is
-                     rendered whenever the turn is live, and BELOW the answer:
-                     here is what the session has said, here is what it is
-                     doing now. When there is no answer it is the only thing in
-                     the region, so the empty-turn sentence prints once, in
-                     this same element, rather than in a second one.
-
-                     While the session is working, this line is the only thing
-                     in the pane that changes -- so it carries the work rather
-                     than a sentence that reads the same on a session that has
-                     quietly died. The idiom is the agent's own running caption:
-                     a star, the word for what it is doing, and an ellipsis that
-                     animates. The WORD is `activity` -- the newest tool call the
-                     source reported (transcript.ts) -- so it cycles as the work
-                     does, off data vam has, rather than off a rotating list of
-                     invented gerunds. It REPLACES the blinking block caret this
-                     line shipped with (and the `vam-breathe` pulse before that)
-                     -- one motion story, not three -- and under
-                     `prefers-reduced-motion` the dots park on at full opacity
-                     (styles.css), which still reads as "still going". It is
-                     withheld from every stopped status -- `outIsLive` above is
-                     `running` AND newest-turn only, the same "still in
-                     motion" test the removed header's status dot used to
-                     make. A null `activity` is a source that
-                     cannot say (model.ts): the sentence stays as the word and no
-                     words are invented, because it asserts only that the session
-                     is running, which it is. */
-                  <p
-                    data-out-empty={
-                      decision.output === null || decision.output === '' ? true : undefined
-                    }
-                    data-out-live={outIsLive ? 'true' : undefined}
-                    className="text-[12.5px] text-ink-faint"
-                  >
-                    {outIsLive ? (
-                      /* Star and word share one accent, the app's own `running`
-                         token; the detail is dim. Decorative marks are hidden
-                         from assistive tech, which should read the activity and
-                         not a star and three dots. */
-                      <span data-out-running className="text-running">
-                        <span aria-hidden="true" data-out-running-star className="vam-running-star">
-                          {'\u2733'}
-                        </span>{' '}
-                        <span data-out-running-word className="vam-running-word">
-                          {liveActivity ??
-                            noAnswerNote(decision.output, entry?.session.status ?? null)}
-                        </span>
-                        <span aria-hidden="true" data-out-ellipsis className="vam-ellipsis">
-                          <span>.</span>
-                          <span>.</span>
-                          <span>.</span>
-                        </span>
-                        {liveAge !== null && (
-                          <span data-out-running-detail className="text-ink-faint">
-                            {' '}
-                            (last active {liveAge} ago)
-                          </span>
-                        )}
-                      </span>
-                    ) : (
-                      noAnswerNote(decision.output, entry?.session.status ?? null)
-                    )}
-                  </p>
-                )}
-              </div>
-            </section>
+            </div>
           </div>
         )}
       </div>

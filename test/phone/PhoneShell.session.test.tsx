@@ -52,13 +52,27 @@ describe('the phone session screen', () => {
     expect(document.body.textContent).not.toContain('STEP ');
   });
 
-  it('opens on the newest step, with no control that moves off it', () => {
+  it('opens on the newest step, and the older ones are a scroll away', () => {
     openSession();
     const pane = () => document.querySelector('[data-action-pane]')?.textContent ?? '';
     expect(pane()).toContain('the gate said yes');
-    // The oldest step's output, which a chip used to reach. Nothing on this
-    // screen reaches it now -- that is the cost, stated.
-    expect(pane()).not.toContain('the researcher read');
+    /**
+     * THE COST THIS CASE USED TO STATE HAS BEEN PAID.
+     *
+     * It read: "the oldest step's output, which a chip used to reach. Nothing
+     * on this screen reaches it now -- that is the cost, stated." The pane
+     * draws the whole session as one scrolling column, so every step is on the
+     * screen and the oldest is reached by scrolling to it rather than by a
+     * chip. The rail staying gone is the OTHER half and is pinned above; what
+     * this case keeps is where the screen OPENS, which is unchanged.
+     */
+    expect(pane()).toContain('the researcher read');
+    const turns = [...document.querySelectorAll('[data-column-turn]')];
+    expect(turns).toHaveLength(FIVE_STEPS.length);
+    // Oldest first, newest last: the order a conversation is read in, and the
+    // reason the newest is what the screen opens on.
+    expect(turns[0]?.textContent ?? '').toContain('the researcher read');
+    expect(turns.at(-1)?.textContent ?? '').toContain('the gate said yes');
   });
 
   it('opens on the newest step again after a chevron and a second tap', () => {

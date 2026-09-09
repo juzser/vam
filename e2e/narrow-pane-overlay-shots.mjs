@@ -59,8 +59,16 @@ if ((await page.locator('[data-detail-identity]').count()) > 0) {
   throw new Error('the identity line above the prompt is back -- this guard now measures the wrong element.');
 }
 
+/**
+ * WHICH PROMPT IS IN THE CORNER. The pane draws the whole session now, one
+ * prompt bubble per turn, and the one the pill floats over is whichever is
+ * PINNED at the top of the column. The column opens at its end, so that is the
+ * newest turn's — named here rather than left to `querySelector`'s first match,
+ * which would be the OLDEST turn's bubble, seven screens away from the pill.
+ */
+const PINNED = '[data-column-turn][data-turn-newest]';
 const overlay = page.locator('[data-view-tabs]');
-const bubbleBox = await page.locator('[data-detail-scroll="in"]').boundingBox();
+const bubbleBox = await page.locator(`${PINNED} [data-detail-scroll="in"]`).boundingBox();
 const navBox = await overlay.boundingBox();
 console.log(
   `prompt bubble x ${Math.round(bubbleBox.x)}-${Math.round(bubbleBox.x + bubbleBox.width)} ` +
@@ -83,8 +91,8 @@ if (navBox.y + navBox.height <= bubbleBox.y) {
  * nodes gives the rectangles the glyph runs actually occupy, and
  * `elementFromPoint` says what is on top of each.
  */
-async function coveredText(selector) {
-  return page.evaluate((sel) => {
+async function coveredText(selector, depth = 24) {
+  return page.evaluate(([sel, depth]) => {
     const root = document.querySelector(sel);
     const nav = document.querySelector('[data-view-tabs]');
     const note = document.querySelector('[data-view-note]');
@@ -109,9 +117,15 @@ async function coveredText(selector) {
     let covered = 0;
     let samples = 0;
     for (const r of rects) {
-      // Only the first 24px of the block can meet the overlay at all; below
-      // that the pill has ended, and sampling a 10,000px paragraph is slow.
-      if (r.y > root.getBoundingClientRect().y + 24) continue;
+      // Only the top of the block can meet the overlay at all; below that the
+      // pill has ended, and sampling a 10,000px paragraph is slow. `depth` is
+      // how far down that reaches, and it is not one number for every element:
+      // for the prompt bubble the pill's bottom is a line and a bit down, for
+      // the column's boundary block it is three lines down, and a 24px default
+      // there sampled only the short count line -- which never reaches the
+      // corner, so the check could not fail. Measured and passed in by the
+      // caller.
+      if (r.y > root.getBoundingClientRect().y + depth) continue;
       for (let dx = 1; dx < r.width; dx += 3) {
         samples += 1;
         // THREE HEIGHTS, not the midline. The audit's second half was "the
@@ -129,7 +143,7 @@ async function coveredText(selector) {
       }
     }
     return { covered, samples, rects: rects.length };
-  }, selector);
+  }, [selector, depth]);
 }
 
 // 1. NOT ONE PIXEL OF THE PROMPT'S FIRST LINE IS UNDER THE PILL. This is
@@ -137,7 +151,7 @@ async function coveredText(selector) {
 //    whole of it, because the bubble is what sits in that corner. The bubble's
 //    padding alone does NOT discharge it (measured: 24 of 100 points covered);
 //    the floated spacer inside the paragraph does.
-const bubble = await coveredText('[data-detail-scroll="in"]');
+const bubble = await coveredText(`${PINNED} [data-detail-scroll="in"]`);
 console.log(
   `prompt first line: ${bubble.covered} of ${bubble.samples} sampled glyph pixels covered ` +
     `(${bubble.rects} text runs)`,
@@ -159,7 +173,7 @@ if (bubble.covered > 0) {
 //    the opening words by a second route -- which is what the identity line's
 //    7rem did (40px past the pill). Measured against the pill's own left edge
 //    rather than against a remembered number.
-const reserve = await page.locator('[data-detail-corner-reserve]').boundingBox();
+const reserve = await page.locator(`${PINNED} [data-detail-corner-reserve]`).boundingBox();
 const slack = Math.round(navBox.x - reserve.x);
 console.log(
   `corner reservation x ${Math.round(reserve.x)}-${Math.round(reserve.x + reserve.width)}, ` +
@@ -187,6 +201,70 @@ if (tap.width < 22 || tap.height < 22) {
   throw new Error(`the view icons were shrunk to ${tap.width}x${tap.height} to make room`);
 }
 
+// 4. THE OTHER THING THAT REACHES THAT CORNER. Since the pane became a column
+//    of the whole session, the element at the very top of it is not a prompt at
+//    all: it is the boundary that says how far back vam has read, and at
+//    scrollTop 0 THAT is what the pill floats over. F1's obligation follows
+//    whatever sits in the corner, so it is measured there too — with the same
+//    method, because the reservation is padding here and a box test cannot tell
+//    padding from a collision.
+await page.locator('[data-detail-column]').evaluate((el) => {
+  el.scrollTop = 0;
+});
+await page.waitForTimeout(200);
+/**
+ * A SENTENCE LONG ENOUGH TO REACH THE CORNER, injected the way
+ * `long-prompt-shots` injects its prompt.
+ *
+ * FALSIFIED, AND THIS IS WHAT THE FALSIFICATION BOUGHT: with the shipped
+ * wording the check passed whether or not the block reserved the pill's corner
+ * — measured at 620px wide, the text's own line break happened to land 7px
+ * short of the pill either way. An assertion that cannot fail is worse than
+ * none, so the line is made long enough that it MUST fill the content box, and
+ * the reservation is then the only thing keeping it out of the corner. The text
+ * still wraps inside the block's own padding, so what is measured is the
+ * padding, not the injection.
+ */
+await page.locator('[data-column-start-note]').evaluate((el) => {
+  el.textContent =
+    'This is as far back as vam has read, and it is not necessarily where the session began, ' +
+    'because only the newest part of the transcript is ever opened.';
+});
+await page.waitForTimeout(200);
+// DOWN TO THE PILL'S OWN BOTTOM EDGE, measured rather than assumed: the
+// boundary block is three short lines and the pill covers most of them, where
+// the default depth of 24px reached only the first.
+const boundaryDepth = await page.evaluate(() => {
+  const start = document.querySelector('[data-column-start]').getBoundingClientRect();
+  const nav = document.querySelector('[data-view-tabs]').getBoundingClientRect();
+  return Math.max(24, Math.ceil(nav.bottom - start.top) + 4);
+});
+console.log(`sampling the boundary down to ${boundaryDepth}px, the pill's own bottom edge`);
+const boundary = await coveredText('[data-column-start]', boundaryDepth);
+console.log(
+  `column boundary: ${boundary.covered} of ${boundary.samples} sampled glyph pixels covered ` +
+    `(${boundary.rects} text runs)`,
+);
+if (boundary.samples < 10) {
+  throw new Error(
+    `only ${boundary.samples} glyph pixels of the boundary were sampled -- a check over almost ` +
+      `no points passes for the wrong reason.`,
+  );
+}
+if (boundary.covered > 0) {
+  throw new Error(
+    `the overlay covers the column's boundary line at ${boundary.covered} of ` +
+      `${boundary.samples} points -- the one sentence that says the session may go back further`,
+  );
+}
+await page.screenshot({ path: `${outDir}/narrow-pane-overlay-boundary.png` });
+console.log(`${outDir}/narrow-pane-overlay-boundary.png`);
+
+// Back to where the shot belongs: the pinned prompt in the corner.
+await page.locator('[data-detail-column]').evaluate((el) => {
+  el.scrollTop = el.scrollHeight;
+});
+await page.waitForTimeout(200);
 await page.screenshot({ path: `${outDir}/narrow-pane-overlay.png` });
 console.log(`${outDir}/narrow-pane-overlay.png`);
 

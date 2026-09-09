@@ -41,23 +41,60 @@ await page.waitForSelector('[data-tab-strip]');
 await page.locator('[data-session-row="factory-sse-1"]').click();
 await page.waitForSelector('[data-detail-column]');
 
+/**
+ * ONE TURN, NAMED, AND ONE THAT CAN ACTUALLY BE PINNED.
+ *
+ * The pane draws the whole session now — one `in`, one `progress` and one `out`
+ * PER TURN — so an unqualified `[data-detail-block="in"]` names seven elements
+ * and Playwright refuses it outright. Which turn is not arbitrary: F2 is about
+ * a prompt that is PINNED covering the answer underneath it, and only a turn
+ * whose own start can be scrolled to the top of the column is ever in that
+ * state. The NEWEST turn never is — the column cannot scroll past its end, so
+ * at maximum scroll the newest turn sits 67px down with the turn before it
+ * above, unpinned, and every check here would have been measuring a prompt that
+ * cannot cover anything. The fourth of seven is the subject: middling, and with
+ * three turns of column below it to be scrolled under.
+ *
+ * The cap itself is per-turn and resolves through the per-turn wrapper — that
+ * is measured separately, for several turns, by
+ * `e2e/transcript-column-shots.mjs`.
+ */
+const TURN = '[data-column-turn]:nth-of-type(4)';
 const column = page.locator('[data-detail-column]');
-const inBlock = page.locator('[data-detail-block="in"]');
-const outBlock = page.locator('[data-detail-block="out"]');
-const bubble = page.locator('[data-detail-scroll="in"]');
+const inBlock = page.locator(`${TURN} [data-detail-block="in"]`);
+const outBlock = page.locator(`${TURN} [data-detail-block="out"]`);
+const bubble = page.locator(`${TURN} [data-detail-scroll="in"]`);
 
 // Inject the long prompt into the paragraph already on screen.
-await page.locator('[data-detail-scroll="in"] p').evaluate((el, text) => {
+await page.locator(`${TURN} [data-detail-scroll="in"] p`).evaluate((el, text) => {
   el.textContent = text;
 }, LONG);
 await page.waitForTimeout(250);
 console.log(`injected prompt: ${LONG.length} characters`);
 
 const col = await column.boundingBox();
-await column.evaluate((el) => {
-  el.scrollTop = el.scrollHeight;
+// PINNED, which is the whole premise: the turn's own start at the top of the
+// column, so its capped prompt is stuck there with its answer directly beneath.
+const pinnedAt = await column.evaluate((el) => {
+  const article = el.querySelectorAll('[data-column-turn]')[3];
+  const top = article.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+  el.scrollTop = top;
+  return { asked: Math.round(top), got: Math.round(el.scrollTop) };
 });
 await page.waitForTimeout(250);
+const pinCheck = await inBlock.evaluate(
+  (el) => el.getBoundingClientRect().top - el.closest('[data-detail-column]').getBoundingClientRect().top,
+);
+console.log(
+  `scrolled ${JSON.stringify(pinnedAt)}; the prompt sits ${pinCheck.toFixed(1)}px from the ` +
+    `top of the column`,
+);
+if (Math.abs(pinCheck) > 4) {
+  throw new Error(
+    `the prompt is ${pinCheck.toFixed(1)}px from the column's top edge at its own turn's start ` +
+      `— it is not pinned, so nothing below is measuring what it says it is.`,
+  );
+}
 
 const inBox = await inBlock.boundingBox();
 const outBox = await outBlock.boundingBox();
@@ -72,8 +109,8 @@ const outBox = await outBlock.boundingBox();
  */
 async function paintedRowsOfOut() {
   return page.evaluate(
-    ({ box }) => {
-      const out = document.querySelector('[data-detail-block="out"]');
+    ({ box, turn }) => {
+      const out = document.querySelector(`${turn} [data-detail-block="out"]`);
       let painted = 0;
       for (let dy = 2; dy < box.height; dy += 4) {
         const el = document.elementFromPoint(box.x + box.width / 2, box.y + dy);
@@ -81,13 +118,13 @@ async function paintedRowsOfOut() {
       }
       return painted;
     },
-    { box: outBox },
+    { box: outBox, turn: TURN },
   );
 }
 
 const painted = await paintedRowsOfOut();
 console.log(
-  `at max scroll: column ${Math.round(col.height)}px, in ${Math.round(inBox.height)}px, ` +
+  `with the prompt pinned: column ${Math.round(col.height)}px, in ${Math.round(inBox.height)}px, ` +
     `out ${Math.round(outBox.height)}px of which ${painted}px is actually on top`,
 );
 
@@ -95,7 +132,7 @@ console.log(
 //    pixels it occupies, at the scroll offset furthest from the prompt.
 if (painted < outBox.height - 8) {
   throw new Error(
-    `the answer is unreachable: at maximum scroll only ${painted}px of a ` +
+    `the answer is unreachable: with the prompt pinned only ${painted}px of a ` +
       `${Math.round(outBox.height)}px answer is painted — the rest is under the pinned prompt.`,
   );
 }
@@ -241,7 +278,7 @@ const bleed = await inBlock.evaluate((el) => {
     bodyWidth: body.width,
   };
 });
-console.log(`sticky ground insets at max scroll: ${JSON.stringify(bleed)}`);
+console.log(`sticky ground insets while pinned: ${JSON.stringify(bleed)}`);
 for (const side of ['left', 'right', 'top']) {
   if (bleed[side] > 0.5) {
     throw new Error(
@@ -264,16 +301,21 @@ for (const side of ['left', 'right', 'top']) {
 //    to be wrong.
 //
 //    Sampled down both gutters and across the strip above the bubble, at
-//    maximum scroll, where the transcript is at its most eager to appear.
+//    the offset where this prompt is pinned, which is where the transcript is
+//    at its most eager to appear beside it.
+// ANY turn's answer or progress line, not only this turn's: the column scrolls
+// six other turns past this pinned prompt, and one of those showing through the
+// gutter is the same defect as this turn's own doing it.
 const throughGutters = await inBlock.evaluate((el) => {
   const box = el.getBoundingClientRect();
-  const out = document.querySelector('[data-detail-block="out"]');
-  const progress = document.querySelector('[data-detail-block="progress"]');
   const hits = [];
   const probe = (x, y) => {
     const top = document.elementFromPoint(x, y);
     if (top === null) return;
-    if (out.contains(top) || progress.contains(top)) {
+    if (
+      top.closest('[data-detail-block="out"]') !== null ||
+      top.closest('[data-detail-block="progress"]') !== null
+    ) {
       hits.push(`${Math.round(x)},${Math.round(y)}`);
     }
   };

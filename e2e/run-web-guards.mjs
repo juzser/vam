@@ -7,7 +7,9 @@
  * assertions covering exactly what jsdom cannot see (project-switch
  * reconciliation, per-project layout restore, the per-pane `+`, drag-to-move,
  * which pane is focused AT THE MOMENT OF AN EVENT, `position: sticky` against
- * real layout, which element is on top at a pixel, and -- since the tooltip
+ * real layout, which element is on top at a pixel, which of a column's many
+ * sticky prompts is PINNED at a given scroll offset and what a percentage
+ * max-height actually resolves to, and -- since the tooltip
  * audit -- what a tooltip FLATTENS TO for a screen reader, whether Tab
  * reaches the element a `Note` hangs on, and the computed contrast of the tip's
  * boundary against the surface it floats over in both themes). This driver builds the web bundle, serves it with
@@ -34,6 +36,7 @@ const GUARDS = [
   'split-panes-shots',
   'prompt-suggest-shots',
   'transcript-flow-shots',
+  'transcript-column-shots',
   'prompt-mode-icon-shots',
   'long-prompt-shots',
   'narrow-pane-overlay-shots',

@@ -68,7 +68,10 @@ if (row.text !== 'permission prompt') {
   throw new Error(`the row's cause should be the session's own words, got "${row.text}"`);
 }
 
-// --- 3. THE FAILURE COUNT, appended to the turns-read line.
+// --- 3. THE FAILURE COUNT, ON THE FAILING TURN'S OWN LINE. Since the pane
+// became a column of every turn, this count belongs to ONE turn -- `d-task4`,
+// the demo's turn that answered and still blew up three tools -- and
+// `querySelector` finds the first turn that draws one, which is that turn.
 const failed = await inkOf('[data-progress-failed]');
 console.log('failure count:', JSON.stringify(failed));
 if (failed === null) throw new Error('a run with three failed tools reported no failures');
@@ -79,11 +82,20 @@ if (!/^·\s*3 failed$/.test(failed.text)) {
 // --- 4. "TURNS READ" SURVIVES BESIDE IT. The qualifier is load-bearing: only
 // the newest TAIL_BYTES of a transcript is ever opened, so the count is what
 // vam FOUND. A failure count that replaced it would trade one honesty for
-// another.
-const line = await page.locator('[data-progress-line]').first().innerText();
-console.log('progress line reads:', JSON.stringify(line.replace(/\s+/g, ' ').trim()));
+// another. Both moved with the column: they are facts about the WINDOW, not
+// about any one turn, so they are drawn at the boundary that describes that
+// window -- the top of the column.
+const line = await page.locator('[data-column-start]').innerText();
+console.log('column boundary reads:', JSON.stringify(line.replace(/\s+/g, ' ').trim()));
 if (!line.includes('turns read')) {
   throw new Error('the failure count replaced the "turns read" qualifier instead of joining it');
+}
+const total = await inkOf('[data-column-failed]');
+console.log('failures across the window:', JSON.stringify(total));
+if (total === null || !/^·\s*3 failed$/.test(total.text)) {
+  throw new Error(
+    `the boundary should total the failures across the window it names, got ${JSON.stringify(total)}`,
+  );
 }
 
 // --- 5. THE COLOURS ARE REAL, not class names that resolved to nothing.
@@ -95,6 +107,7 @@ for (const [name, seen] of [
   ['waiting cause', cause.colour],
   ['sidebar cause', row.colour],
   ['failure count', failed.colour],
+  ['window failure total', total.colour],
 ]) {
   if (seen === baseInk) {
     throw new Error(

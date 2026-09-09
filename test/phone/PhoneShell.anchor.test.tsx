@@ -50,9 +50,14 @@ describe('the output and the composer on one screen', () => {
       fireEvent.focusIn(input as HTMLTextAreaElement);
     });
     // Same step, same output: nothing about the keyboard opening is a focus
-    // change, so the stick rule is never asked to move anything.
+    // change, so the stick rule is never asked to move anything. What the
+    // column added is that the older steps are on screen too -- which is not
+    // what this case is about, so it is the NEWEST step's own block that is
+    // read rather than the whole pane's text.
+    const newest = document.querySelector('[data-column-turn][data-turn-newest]');
+    expect(newest?.textContent ?? '').toContain('the gate said yes');
+    expect(newest?.textContent ?? '').not.toContain('the researcher read');
     expect(pane()).toContain('the gate said yes');
-    expect(pane()).not.toContain('the researcher read');
   });
 
   it('draws no step rail in either keyboard state, and still reports the state', () => {
