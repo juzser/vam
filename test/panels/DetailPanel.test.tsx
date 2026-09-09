@@ -168,19 +168,20 @@ describe('the composer says when a prompt is in flight', () => {
  * and both captions kept describing the present.
  */
 describe('the in and out rules do not date a turn the model cannot date', () => {
-  // The three rules are gone (`DetailPanel.transcript-flow.test.tsx`), so
-  // both meta slots are read where their contents moved: `in`'s onto the
-  // identity line, `out`'s onto the condensed progress line. The property is
-  // untouched -- a session-level fact must not be captioned as a turn-level
-  // one -- only the element carrying it changed.
-  const identity = () => q<HTMLElement>('[data-detail-identity]')?.textContent ?? '';
+  // The three rules are gone (`DetailPanel.transcript-flow.test.tsx`), and so
+  // now is the identity line their `in` half moved onto -- the operator asked
+  // for that too. The PROPERTY is untouched and is what this reads: a
+  // session-level fact must not be captioned as a turn-level one. So the
+  // whole `in` block is the subject now, and `out`'s meta is still read off
+  // the condensed progress line.
+  const inBlock = () => q<HTMLElement>('[data-detail-block="in"]')?.textContent ?? '';
   const activity = () => q<HTMLElement>('[data-progress-activity]')?.textContent ?? '';
 
-  it('the in line names who, and claims no per-turn time', () => {
+  it('the in block claims no per-turn time, and no longer says who', () => {
     draw({ entry: ENTRY, decision: DECISIONS[2] as Decision });
-    expect(identity()).toContain('you');
     // 12m is SESSION.age. It must not appear against a turn three back.
-    expect(identity()).not.toContain('12m');
+    expect(inBlock()).not.toContain('12m');
+    expect(q('[data-detail-identity]')).toBeNull();
   });
 
   it('the progress line shows current activity only on the turn being worked', () => {
@@ -462,10 +463,12 @@ describe('the panel remembers which turn you are reading, independent of the can
 
   const inText = () => q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '';
   // A12.2 moved the removed header's `[data-detail-step]` chip into the `in`
-  // rule's meta, beside "you" (`you · step d7`); with the rule itself gone it
-  // rides the identity line instead, as `[data-detail-turn]`. Same fact, same
-  // words, one row up.
-  const stepLabel = () => q<HTMLElement>('[data-detail-turn]')?.textContent ?? '';
+  // rule's meta beside "you", then onto the identity line -- and the operator
+  // has now had that line removed as well. The label was never only there:
+  // the jump control prints one per turn and marks the current one by BEING
+  // a `<select>`, so the selected option is the same fact in the same words,
+  // read where it is actually painted.
+  const stepLabel = () => jump()?.selectedOptions[0]?.textContent ?? '';
 
   it('shows the canvas’s own pick by default', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
@@ -3403,7 +3406,10 @@ describe('the +1px type bump reaches everything in this pane except out', () => 
     // -1: the mode row carried two 10.5px captions (`MODE` and the cycle
     // note); the note kept its size and its home in the prompt block, the
     // label did not survive the move to an icon.
-    '10.5': 8,
+    // -1 again: the identity line above the bubble (`you · <turn label>`),
+    // removed at the operator's ask -- its label lives in the progress
+    // picker, which has its own 10.5px class already counted here.
+    '10.5': 7,
     // +2: the folded question row's "marked, not sent" caption and the
     // `change` control that reopens the list (audit-adjacent operator
     // request: the option list folds away once a pick is made).

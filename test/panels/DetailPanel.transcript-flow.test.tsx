@@ -129,29 +129,34 @@ describe('the three band separators are gone', () => {
 
 describe('what the in rule carried survives its removal', () => {
   /**
-   * REWRITTEN, not retired: this used to assert `atlas` and `epic-4` on the
-   * line as well. The operator asked for the project and the epic to go
-   * ("remove the branch and repo information above the In section") because
-   * both are already on the session's own sidebar row -- the project as the
-   * group heading it is filed under, the branch on the row itself -- so the
-   * line was repeating, one pane over, what the list already said. What it
-   * does NOT repeat is `you` and the turn's label: those are facts about
-   * THIS turn, the `in` rule's meta slot, and this line is their only home.
-   * So the case keeps its name and swaps halves -- the two session facts are
-   * now asserted ABSENT, which is a stronger claim than the silence deleting
-   * the assertions would have left.
+   * REWRITTEN A SECOND TIME, and this time the line it asserted is gone.
+   *
+   * It first asserted `atlas` and `epic-4` on the identity line; the operator
+   * had those removed as facts the sidebar already carries, and the case
+   * swapped halves to assert them absent. Now the operator has asked for the
+   * remainder too ("also remove the `you · ...` part above In"), so there is
+   * no line at all -- and the argument that kept the slot last time ("the
+   * turn's label has no other home") turned out to be false: the condensed
+   * progress line's picker prints EVERY turn's label with the current one
+   * selected, and the expanded list prints them as rows. So the case keeps
+   * its subject -- where the turn's own label lives -- and follows it to the
+   * control that actually carries it.
    */
-  it('says who and which turn on the identity line, and repeats no session fact', () => {
+  it('drops the identity line, and the turn label survives in the picker', () => {
     draw({ decision: TURNS[2] as Decision });
-    const identity = q<HTMLElement>('[data-detail-identity]')?.textContent ?? '';
-    expect(identity).toContain('you');
-    expect(identity).toContain('step d5');
-    // The sidebar's, not the pane's.
-    expect(identity).not.toContain('atlas');
-    expect(identity).not.toContain('epic-4');
-    // `12m` is SESSION.age -- the session's last activity, never this turn's
-    // time. The removed rule was careful about that and so is its replacement.
-    expect(identity).not.toContain('12m');
+    expect(q('[data-detail-identity]')).toBeNull();
+    expect(q('[data-detail-turn]')).toBeNull();
+    // Not "somewhere in the pane": the SELECTED option, which is what is
+    // painted on the collapsed line the operator actually sees.
+    const jump = q<HTMLSelectElement>('[data-progress-jump]');
+    expect(jump).not.toBeNull();
+    expect(jump?.selectedOptions[0]?.textContent).toContain('step d5');
+    // The sidebar's facts stayed out, and the session's age never became a
+    // caption on a turn that cannot be dated.
+    const block = q<HTMLElement>('[data-detail-block="in"]')?.textContent ?? '';
+    expect(block).not.toContain('atlas');
+    expect(block).not.toContain('epic-4');
+    expect(block).not.toContain('12m');
   });
 });
 

@@ -2911,11 +2911,16 @@ export function DetailPanel(props: DetailPanelProps) {
   const composerHidden =
     entry === null || records === false || (openQuestion && chattingAbout !== setId);
   /**
-   * Is the corner overlay on screen? Two things need the answer: the overlay
-   * itself, and the top of the column, which has to RESERVE the corner the
-   * overlay is about to paint on (audit F1). Derived once so the two cannot
-   * drift apart — a reserved corner in a pane that draws no icons is wasted
-   * width, and icons over an unreserved corner is the defect.
+   * Is the corner overlay on screen?
+   *
+   * It had a second reader: the identity line at the top of the column, which
+   * reserved the corner this is about to paint on (audit F1). That line is
+   * gone at the operator's ask, and the reservation with it, so the only
+   * thing left that must not run under the pill is the prompt bubble -- kept
+   * clear by its own padding, and measured as OCCLUSION rather than as a
+   * class by `e2e/narrow-pane-overlay-shots.mjs`. Kept named rather than
+   * inlined because it is also, still, the answer to "is this pane the
+   * focused one" as far as anything painted is concerned.
    */
   const cornerOverlay = !phone && paneFocused;
   /**
@@ -3112,10 +3117,13 @@ export function DetailPanel(props: DetailPanelProps) {
           epic, the two facts the removed header relocated there — were laid
           out, measured as visible by `truncate`, and then painted over
           (audit F1). An overlay owes a FOURTH property, and it cannot be
-          discharged from here: WHAT IT FLOATS OVER MUST RESERVE ITS CORNER.
-          `cornerOverlay` below is that reservation, and
-          `e2e/narrow-pane-overlay-shots.mjs` measures it by asking which
-          element is on top rather than by reading a class back.
+          discharged from here: WHAT IT FLOATS OVER MUST STAY CLEAR OF ITS
+          CORNER. The identity line discharged it by reserving 7rem, and the
+          operator has since had that line removed altogether; what the pill
+          floats over now is the prompt bubble, kept clear by the bubble's own
+          padding -- a paint choice, so it is measured rather than trusted.
+          `e2e/narrow-pane-overlay-shots.mjs` asks which element is on top of
+          each painted glyph, which is the only way to see occlusion.
 
           A comment asserting a property the code does not have is worse than
           no comment: it is how this defect passed review.
@@ -3321,45 +3329,35 @@ export function DetailPanel(props: DetailPanelProps) {
               {/* The region's name, announced and not drawn -- see the
                   band-removal note above `IN_BODY_PX`. */}
               <span className="sr-only">in</span>
-              <div
-                data-detail-identity
-                /* The reserved corner (audit F1). `truncate` computes its
-                   ellipsis against this box, so reserving here is what makes
-                   the ellipsis land where the pill starts instead of under
-                   it. Only when the overlay is actually drawn: an unfocused
-                   pane would otherwise give up 7rem of a narrow line for
-                   nothing. */
-                className={`flex items-center gap-[5px] font-mono text-[10.5px] text-ink-faint ${
-                  cornerOverlay ? 'pr-[7rem]' : ''
-                }`}
-              >
-                {/* `you`, and no time. `Decision` carries no timestamp, so
-                    nothing here can say when this turn happened -- and
-                    `session.age` is the session's LAST ACTIVITY, usually the
-                    agent's most recent write rather than when you typed this.
-                    Walk back a turn with `h` and the old caption went on
-                    describing the present. The session's age is on its sidebar
-                    row, where it is true. The turn's own label (the removed
-                    header's `data-detail-step` chip, informally "which round")
-                    rides beside it, since both are facts about THIS turn. This
-                    is the `in` rule's whole meta slot, one line up.
+              {/* NO IDENTITY LINE. It carried the project and the epic
+                  (inherited from the deleted header) until the operator had
+                  those removed as facts the sidebar's own row already says,
+                  and then `you · <turn label>` until the operator had that
+                  removed too ("also remove the `you · ...` part above In").
 
-                    AND NOTHING ELSE. The line used to open with the project
-                    and the epic, inherited from the deleted header; the
-                    operator asked for both to go ("remove the branch and repo
-                    information above the In section"). They are SESSION facts
-                    and the sidebar already carries them on the session's own
-                    row -- the project as the group heading the row is filed
-                    under, the branch as `data-session-branch` -- so the pane
-                    was repeating, one column over, what the list beside it
-                    already said, and paying for the repetition in the one
-                    line the turn has. What stays is what the sidebar cannot
-                    say, because it is not about the session: which turn this
-                    is, and that you asked it. */}
-                <span data-detail-turn className="truncate">
-                  {decision.label === '' ? 'you' : `you · ${decision.label}`}
-                </span>
-              </div>
+                  What was written here last time -- that the turn's label had
+                  no other home -- was WRONG, and this note replaces it rather
+                  than quietly dropping it. The label has two homes, both in
+                  the progress line just below: the condensed form is a
+                  `<select>` whose every option is a turn's label, with the
+                  current one selected and therefore painted; the expanded
+                  form lists them as rows with the current one marked
+                  `aria-current`. The one case where neither draws is a
+                  session with EXACTLY ONE turn and progress collapsed, since
+                  the picker only appears past one turn -- and there "which
+                  turn" has a single answer, so a label naming it says nothing
+                  the operator could act on.
+
+                  The reserved corner (audit F1, `pr-[7rem]`) went with the
+                  row -- it existed so this line's `truncate` computed its
+                  ellipsis against the pill rather than the pane edge -- but
+                  the OBLIGATION did not: with the line gone the bubble rises
+                  into the corner the pill paints on, and measured at a 356px
+                  pane, 24 of 100 sampled glyph pixels of the prompt's first
+                  line went under it. So the reservation moved down into the
+                  bubble as a floated spacer rather than being deleted with
+                  its old holder. Measured as OCCLUSION, in a real browser, by
+                  `e2e/narrow-pane-overlay-shots.mjs`. */}
               {/* THE BUBBLE (operator: "the IN prompt should have a
                   different colour so it stands out, and sit in a bubble").
                   A chat bubble, deliberately, and not the bordered band PR 266
@@ -3392,6 +3390,35 @@ export function DetailPanel(props: DetailPanelProps) {
                 className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-3.5 py-3"
               >
                 <p className="whitespace-pre-wrap break-words text-[13px] text-ink-dim leading-[1.55]">
+                  {/* THE RESERVED CORNER, audit F1's obligation, inherited
+                      from the identity line that used to discharge it above.
+                      A float rather than padding because only the FIRST LINE
+                      meets the pill: padding would indent all 300 lines of a
+                      long prompt to clear something 34px tall. `float` is the
+                      one layout primitive that reserves a corner and lets the
+                      text close back under it.
+
+                      Sized off the measured pill, not guessed. Every offset
+                      between the pill and the paragraph is fixed (`right-2.5`
+                      on the overlay, `px-3.5` on the column and on the
+                      bubble), so the overlap does not vary with the pane's
+                      width: 72px at any width, plus whatever the icon count
+                      adds. 6rem covers it with 24px to spare, where the
+                      identity line's 7rem over-reserved by 40 -- and the
+                      bound is measured, not asserted here: the guard fails
+                      both if the reservation misses the pill and if it runs
+                      far past it.
+
+                      Only when the overlay is actually drawn -- an unfocused
+                      pane paints no pill, and reserving for it would notch
+                      the prompt of every pane the operator is not in. */}
+                  {cornerOverlay && (
+                    <span
+                      data-detail-corner-reserve
+                      aria-hidden="true"
+                      className="float-right h-[22px] w-[6rem]"
+                    />
+                  )}
                   {decision.input}
                 </p>
               </div>
