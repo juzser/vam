@@ -73,13 +73,24 @@ import { fileTranscriptSource, readTranscriptWindow, type TranscriptSource } fro
  * The read budget. Only sessions the CLI reported are opened -- single digits
  * in practice -- and each is read for its last `TAIL_BYTES` and no more (plus
  * the one byte `window.ts` probes to find the line boundary), so `load()`
- * costs kilobytes against the 814 MB of transcripts on this disk, independent
- * of how large any one of them is. A transcript shared by two resumed
- * processes is read once.
+ * costs kilobytes against the 0.94 GB of session transcripts on this disk,
+ * independent of how large any one of them is. A transcript shared by two
+ * resumed processes is read once.
  *
  * THIS IS THE LIVE VIEW'S BUDGET AND NOTHING ELSE'S. Scrolling back through a
  * session is a separate, on-demand read (`history.ts`), asked for by a person
  * and never by the poll; it does not widen this and this does not bound it.
+ *
+ * WHAT THE OPERATOR SEES FOR IT, said here because it is this constant that
+ * decides it: 34 of the 77 sessions here fit inside the window entirely and
+ * show every turn they have. The rest open MID-TURN, and the oldest turn on
+ * the canvas is then one whose beginning vam never read -- its prompt is whole
+ * (`last-prompt` re-emits the text in full) and its answer is the real one,
+ * but the tool failures counted against it are only those inside the window.
+ * That turn is not dropped: on five of the six largest transcripts here the
+ * tail holds exactly one turn, so dropping it would leave the canvas empty.
+ * `history.ts` is what reaches everything before it, and its cursor rules are
+ * written so that turn is never handed over a second time.
  *
  * The per-process status files are the one read that is per ROW rather than
  * per session -- there is no sharing them, since telling two rows apart is

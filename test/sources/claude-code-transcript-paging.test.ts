@@ -301,8 +301,11 @@ describe('readTranscriptHistory', () => {
     reader.reads.length = 0;
     await readTranscriptHistory(reader, 'sess-1', first.cursor, 64);
     expect(reader.reads.length).toBeGreaterThan(0);
+    const at = turnStartOf(first.cursor) ?? -1;
     for (const read of reader.reads) {
-      expect(read.to).toBeLessThanOrEqual(turnStartOf(first.cursor) ?? -1);
+      // Every window ends at the cursor. The one read that goes past it starts
+      // exactly there -- it is the cursor's own line, and nothing else.
+      expect(read.to <= at || read.from === at).toBe(true);
     }
   });
 
@@ -359,6 +362,98 @@ describe('readTranscriptHistory', () => {
         new Set(whole.map((d) => d.id)),
       );
     }
+  });
+
+  /**
+   * THE TAIL->PAGE SEAM, which page->page correctness does not cover.
+   *
+   * `load()`'s window opens mid-file too, and it does NOT drop its oldest turn
+   * -- it cannot, because on the six largest transcripts here the tail holds
+   * exactly ONE turn and that turn is always the mid-turn one, so dropping it
+   * would empty the canvas. So the tail hands out the offset of a RE-EMISSION
+   * for that turn, and a page that returned the same turn at its real opening
+   * would put the same prompt on screen twice under two different ids, which
+   * no dedupe can catch.
+   */
+  it('does not hand the tail and the first page the same turn', async () => {
+    const text = jsonl(
+      userPrompt('the older ask'),
+      reply('a1'),
+      // The SAME turn, re-emitted: 21,604 of 22,668 real lines are this.
+      userPrompt('the older ask'),
+      reply('a2'),
+      userPrompt('the newer ask'),
+      reply('b1'),
+    );
+    const bytes = Buffer.from(text, 'utf8');
+    const opening = JSON.stringify(userPrompt('the older ask'));
+    // A tail window that opens between the turn's real opening and its
+    // re-emission -- the case `load()` lands in on any large transcript.
+    const cut = text.indexOf(opening, opening.length) - 5;
+    const window = readWindowOf(bytes, cut, bytes.length);
+    const tail = summarizeTranscript(window.text, 'sess-1', window.start).decisions;
+    expect(tail.map((t) => t.input)).toEqual(['the newer ask', 'the older ask']);
+    // The tail really did open that turn at the re-emission, not at byte 0.
+    expect(turnStartOf(tail.at(-1)?.id ?? '')).toBeGreaterThan(0);
+
+    const page = await readTranscriptHistory(readerOf(text), 'sess-1', tail.at(-1)?.id ?? null);
+    expect(page.kind).toBe('page');
+    if (page.kind !== 'page') return;
+    const column = [...tail, ...page.turns].map((t) => t.input);
+    expect(column).toEqual([...new Set(column)]);
+    expect(page.reachedStart).toBe(true);
+  });
+
+  /**
+   * The same walk under a budget too small to widen its way out of trouble.
+   * Every step then ends on the exhausted-budget path, which is the one place a
+   * turn vam could not vouch for is RETURNED rather than dropped -- withholding
+   * it there loses it, because the next step ends before it and never sees it
+   * again.
+   */
+  it('covers every turn exactly once even when every step runs out of budget', async () => {
+    const reemitting = jsonl(
+      userPrompt('the first ask'),
+      reply('a1'),
+      userPrompt('the first ask'),
+      reply('a2'),
+      userPrompt('the second ask'),
+      reply('b1'),
+      userPrompt('the second ask'),
+      reply('b2'),
+      userPrompt('the third ask'),
+      reply('c1'),
+      userPrompt('the third ask'),
+      reply('c2'),
+    );
+    const whole = summarizeTranscript(reemitting, 'sess-1', 0).decisions;
+    const starts = whole.map((d) => turnStartOf(d.id) ?? -1);
+    const reader = readerOf(reemitting);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let step = 0; step < 60; step++) {
+      // Sized so every step ends on the exhausted-budget path AND so a
+      // `last-prompt` line straddles the byte each step is asked to begin at --
+      // the line neither the window that trims past it nor the window that
+      // stops short of it can parse.
+      const answer = await readTranscriptHistory(reader, 'sess-1', cursor, 200, 600);
+      expect(answer.kind).toBe('page');
+      if (answer.kind !== 'page') return;
+      seen.push(...answer.turns.map((t) => t.id));
+      if (answer.reachedStart) {
+        cursor = null;
+        break;
+      }
+      expect(answer.cursor).not.toBeNull();
+      cursor = answer.cursor;
+    }
+    expect(cursor).toBeNull();
+    // Every id maps onto the true turn it belongs to -- the newest turn opening
+    // at or before it -- and every true turn is covered exactly once. Comparing
+    // ids directly would be too strict: a step that ran out of budget may name
+    // a turn by a line inside it rather than by the line that opened it.
+    const covered = seen.map((id) => starts.findIndex((at) => at <= (turnStartOf(id) ?? -1)));
+    expect(covered.slice().sort()).toEqual(whole.map((_d, i) => i));
   });
 
   it('tells a failed read apart from a page with nothing older', async () => {

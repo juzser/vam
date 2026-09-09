@@ -271,6 +271,20 @@ export function turnStartOf(id: string): number | null {
   return Number.isSafeInteger(offset) ? offset : null;
 }
 
+/**
+ * Whether a cursor NAMES A TURN the caller already holds, as opposed to being a
+ * bare position this endpoint handed back for a page that had no turn to name.
+ *
+ * The difference decides whether a backward read may return the turn that is
+ * open at the cursor: a caller holding that turn must not be handed it twice,
+ * and a caller holding nothing there must not have it withheld. The two shapes
+ * are the two `turnStartOf` accepts -- `<prefix>:@<offset>` and `@<offset>` --
+ * so the distinction is carried by the id itself and cannot be lost in transit.
+ */
+export function cursorNamesATurn(cursor: string): boolean {
+  return turnStartOf(cursor) !== null && cursor.lastIndexOf(OFFSET_MARK) > 0;
+}
+
 export function summarizeTranscript(
   tail: string,
   decisionIdPrefix: string,
@@ -350,7 +364,9 @@ export function summarizeTranscript(
   // survive scrolling back.
   //
   // WHY NOT A FIELD THE CLI ALREADY WRITES, which is the obvious question and
-  // was measured before this was written, against 77 real transcripts:
+  // was measured before this was written, against the 77 real SESSION
+  // transcripts on this machine -- not the 863 subagent sidechains beside them,
+  // which vam never opens:
   //
   //  - `type:'last-prompt'` -- the only line that opens a turn here -- carries
   //    NO `uuid` (0 of 224 in the tails sampled). It carries `leafUuid`, on
