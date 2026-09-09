@@ -161,10 +161,14 @@ if (skin.background === skin.sectionGround) {
 //    scroll, because the bottom inset of a scrolling box only exists at its
 //    end and that is exactly where a tight bubble looks worst.
 //
-//    THE FLOOR IS THE TINT'S JOB. At 8px the ground read as a highlight
-//    behind the words rather than as a bubble around them, which is what the
-//    operator was looking at. 12px is what makes the tint a shape.
-const PAD_FLOOR = 12;
+//    A BAND, NOT A FLOOR, since the operator asked the bubble to get tighter
+//    ("the In bubble needs to be smaller, but the background behind the bubble
+//    must be full") while it stays a bubble. Both edges are measured because
+//    both have been wrong: at 8px the ground read as a highlight behind the
+//    words rather than a shape around them, and at 14x12 the operator called
+//    it too big. 9 to 12 is the room that leaves.
+const PAD_FLOOR = 9;
+const PAD_CEILING = 12;
 const pad = await bubble.evaluate((el) => {
   const p = el.querySelector('p');
   const inset = () => {
@@ -196,6 +200,12 @@ for (const [side, value] of Object.entries(pad)) {
         `— the tint reads as a highlight behind the text, not as a bubble around it`,
     );
   }
+  if (value - 0.5 > PAD_CEILING) {
+    throw new Error(
+      `the bubble's ${side} padding paints ${value.toFixed(1)}px, over the ${PAD_CEILING}px ` +
+        `ceiling — the operator asked for a tighter bubble than that`,
+    );
+  }
 }
 
 // 6. AND #266 IS NOT UNDONE. That PR removed `in`'s bordered panel so the turn
@@ -207,6 +217,86 @@ const seam = await inBlock.evaluate((el) => {
 });
 if (Number.parseFloat(seam.bottom) > 0 || Number.parseFloat(seam.top) > 0) {
   throw new Error(`the \`in\` block wears a border again (${JSON.stringify(seam)}) — #266 removed it`);
+}
+
+// 7. THE GROUND BEHIND THE BUBBLE IS FULL-BLEED (operator: "the background
+//    behind the bubble must be full and bleed out to both sides, and the
+//    top"). The bubble shrank; the opaque backing it sits on did the
+//    opposite. This is the sticky block's own box against the PANE's, not
+//    against the scroll column's: the column sits inside `px-3.5 py-3`, so a
+//    ground that stops at the column's edge leaves a gutter on each side
+//    through which the answer scrolls past in full view.
+const bleed = await inBlock.evaluate((el) => {
+  const body = el.closest('[data-detail-column]').parentElement.getBoundingClientRect();
+  const box = el.getBoundingClientRect();
+  return {
+    left: box.left - body.left,
+    right: body.right - box.right,
+    top: box.top - body.top,
+    bodyWidth: body.width,
+  };
+});
+console.log(`sticky ground insets at max scroll: ${JSON.stringify(bleed)}`);
+for (const side of ['left', 'right', 'top']) {
+  if (bleed[side] > 0.5) {
+    throw new Error(
+      `the sticky ground stops ${bleed[side].toFixed(1)}px short of the pane's ${side} edge — ` +
+        `the transcript scrolls past in that gutter`,
+    );
+  }
+}
+
+// 8. AND NOTHING SHOWS THROUGH BESIDE IT. Two halves, because neither is
+//    sufficient and finding that out was the work.
+//
+//    `elementFromPoint` answers PAINT ORDER, not visibility: hit-testing
+//    ignores alpha, so a fully transparent sticky block still comes back as
+//    the topmost element at every gutter pixel while the transcript is
+//    plainly readable through it. Verified by trying it -- dropping
+//    `bg-ground` off the block leaves this half reporting 0 hits. So it is
+//    paired with the ground's own alpha, read off the computed style: order
+//    from the compositor, opacity from the element, and the defect needs both
+//    to be wrong.
+//
+//    Sampled down both gutters and across the strip above the bubble, at
+//    maximum scroll, where the transcript is at its most eager to appear.
+const throughGutters = await inBlock.evaluate((el) => {
+  const box = el.getBoundingClientRect();
+  const out = document.querySelector('[data-detail-block="out"]');
+  const progress = document.querySelector('[data-detail-block="progress"]');
+  const hits = [];
+  const probe = (x, y) => {
+    const top = document.elementFromPoint(x, y);
+    if (top === null) return;
+    if (out.contains(top) || progress.contains(top)) {
+      hits.push(`${Math.round(x)},${Math.round(y)}`);
+    }
+  };
+  for (let dy = 2; dy < box.height; dy += 6) {
+    probe(box.left + 2, box.top + dy);
+    probe(box.right - 2, box.top + dy);
+  }
+  for (let dx = 2; dx < box.width; dx += 6) probe(box.left + dx, box.top + 2);
+  return hits;
+});
+console.log(`transcript pixels showing beside or above the pinned prompt: ${throughGutters.length}`);
+if (throughGutters.length > 0) {
+  throw new Error(
+    `the transcript is painted beside or above the pinned prompt at ${throughGutters.length} ` +
+      `points (${throughGutters.slice(0, 4).join(' ')}) — the ground does not cover them`,
+  );
+}
+const groundAlpha = await inBlock.evaluate((el) => {
+  const value = getComputedStyle(el).backgroundColor;
+  const parts = value.match(/[\d.]+/g) ?? [];
+  return { value, alpha: parts.length > 3 ? Number(parts[3]) : 1 };
+});
+console.log(`sticky ground: ${groundAlpha.value} (alpha ${groundAlpha.alpha})`);
+if (groundAlpha.alpha < 1) {
+  throw new Error(
+    `the sticky ground is ${groundAlpha.value} — the transcript reads straight through it, and ` +
+      `the check above cannot see that because hit-testing ignores alpha`,
+  );
 }
 
 await page.screenshot({ path: `${outDir}/long-prompt-bubble.png` });

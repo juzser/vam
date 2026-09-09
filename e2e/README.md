@@ -582,9 +582,8 @@ gitignored. Screenshots go to `VAM_E2E_OUT` (default
 `e2e/test-results/web-guards`, also gitignored) and are uploaded as a workflow
 artifact — never into `docs/ui`, so CI produces no repo diff.
 
-The other five `*.mjs` scripts here (`focus-edge-visibility`,
-`issue-188-shots`, `pane-refinements-shots`, `phone-list-shots`,
-`phone-prompt-shots`) are **shot-takers, not guards**: they assert nothing, so
+The other four `*.mjs` scripts here (`issue-188-shots`,
+`pane-refinements-shots`, `phone-list-shots`, `phone-prompt-shots`) are **shot-takers, not guards**: they assert nothing, so
 they are deliberately not in that list and adding them would widen what a
 green tick claims without adding a single check.
 

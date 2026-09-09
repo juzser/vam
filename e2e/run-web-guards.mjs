@@ -14,8 +14,8 @@
  * `vite preview`, points each script at it and fails with a non-zero exit as
  * soon as any assertion throws — so CI can hold them.
  *
- * The other `e2e/*.mjs` scripts (focus-edge-visibility, issue-188-shots,
- * pane-refinements-shots, phone-list-shots, phone-prompt-shots) are NOT run
+ * The other `e2e/*.mjs` scripts (issue-188-shots, pane-refinements-shots,
+ * phone-list-shots, phone-prompt-shots) are NOT run
  * here and must not be added: they take screenshots and assert nothing, so
  * running them would only turn a green tick into a broader claim than it is.
  *

@@ -136,12 +136,14 @@ describe('the detail pane on a desktop, which shares this component', () => {
     );
     expect(document.querySelector('[data-prompt-target]')).toBeNull();
     expect(document.querySelector('[data-pane-status]')).toBeNull();
-    const identity = document.querySelector('[data-detail-identity]')?.textContent ?? '';
-    expect(identity).not.toContain('factory');
-    expect(identity).not.toContain('ui-server-sse');
-    // The line itself stays: it is the turn's own meta slot, and `you` is
-    // the part of it that has nowhere else to live.
-    expect(identity).toContain('you');
+    // The line does not repeat the sidebar's facts because there is no line:
+    // the operator had the project and the epic removed from it, and then the
+    // `you · ...` remainder too. Asserted on the `in` block as a whole, which
+    // is the only place a session fact could reappear as a turn caption.
+    expect(document.querySelector('[data-detail-identity]')).toBeNull();
+    const block = document.querySelector('[data-detail-block="in"]')?.textContent ?? '';
+    expect(block).not.toContain('factory');
+    expect(block).not.toContain('ui-server-sse');
   });
 
   it('keeps the view icon row, which only the phone lost', () => {

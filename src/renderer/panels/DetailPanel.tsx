@@ -106,7 +106,6 @@ import { describeFailure } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
-import { FocusEdge } from './FocusEdge.js';
 import {
   type DiffKind,
   diffLineKind,
@@ -2431,9 +2430,32 @@ export function DetailPanel(props: DetailPanelProps) {
    * into an INPUT/TEXTAREA (the composer, the terminal's own hidden field)
    * is left alone entirely — not even inspected — and any key that is not a
    * bare `Alt+<digit>` (no other modifier) falls through with no
-   * `preventDefault`. Only that one combination is ever claimed, which is
-   * the whole of what `DELIBERATELY_FREE`/`UNREACHABLE_KEYS` (`chords.ts`)
-   * promise nothing else has.
+   * `preventDefault`. Only that one combination is ever claimed.
+   *
+   * WHAT MAKES THAT COMBINATION SAFE TO CLAIM, honestly. This comment used
+   * to cite two registries in `chords.ts` as promising nothing else takes
+   * it. NEITHER HAS EVER EXISTED: each name appeared exactly once in this
+   * tree, in that sentence, so the citation sent an auditor to read nothing.
+   * (`test/keyboard/alt-digit-is-free.test.ts` names both and holds them
+   * out of this file, so the sentence cannot come back.) The real basis,
+   * which is WEAKER, is three facts:
+   *
+   *   - the shipped grammar binds no `Alt-` key at all. `BINDING_TABLES`
+   *     (`chords.ts`) is its one enumeration -- the shortcut sheet is built
+   *     by walking it -- so that is the whole surface, not a sample.
+   *   - `normalizeKey` spells this combination `Alt-<digit>` off
+   *     `event.code`, so a collision would be two identical names rather
+   *     than two spellings sliding past each other.
+   *   - and NOTHING FORBIDS ONE. `RESERVED_KEYS` is `['Escape',
+   *     ...PREFIXES]`: it protects the chord doors, not this. An operator
+   *     override may bind `Alt-1`, and then that binding and this listener
+   *     both answer one keystroke, this one having called
+   *     `preventDefault`. That hole is real and open; promoting
+   *     `Alt+<digit>` into the tables is what would close it, and it is
+   *     queued separately.
+   *
+   * `test/keyboard/alt-digit-is-free.test.ts` holds all three, so the day
+   * one of them stops being true this paragraph goes red rather than stale.
    */
   useEffect(() => {
     if (!paneFocused) return;
@@ -2912,13 +2934,25 @@ export function DetailPanel(props: DetailPanelProps) {
   const composerHidden =
     entry === null || records === false || (openQuestion && chattingAbout !== setId);
   /**
-   * Is the corner overlay on screen? Two things need the answer: the overlay
-   * itself, and the top of the column, which has to RESERVE the corner the
-   * overlay is about to paint on (audit F1). Derived once so the two cannot
-   * drift apart — a reserved corner in a pane that draws no icons is wasted
-   * width, and icons over an unreserved corner is the defect.
+   * Is the corner overlay on screen?
+   *
+   * It had a second reader: the identity line at the top of the column, which
+   * reserved the corner this is about to paint on (audit F1). That line is
+   * gone at the operator's ask, and the reservation with it, so the only
+   * thing left that must not run under the pill is the prompt bubble -- kept
+   * clear by its own padding, and measured as OCCLUSION rather than as a
+   * class by `e2e/narrow-pane-overlay-shots.mjs`. Kept named rather than
+   * inlined because it is also, still, the answer to "is this pane the
+   * focused one" as far as anything painted is concerned.
    */
   const cornerOverlay = !phone && paneFocused;
+  /**
+   * Is the failed-session banner drawn above the column? Two readers, which
+   * is why it is named: the banner itself, and the column, which hands its
+   * top padding to the sticky ground and must NOT when something is sitting
+   * in that padding already.
+   */
+  const failedBanner = current === 'Response' && entry?.session.status === 'failed';
   /**
    * The phone keystroke strip's own gate -- structurally the SAME boolean
    * `canCycleMode` already is, shared rather than re-derived, AND the card
@@ -3047,18 +3081,25 @@ export function DetailPanel(props: DetailPanelProps) {
       ].join(' ')}
     >
       {/*
-        The pane says out loud when it holds the keyboard, and says it ONCE.
+        THE PANE DRAWS NOTHING FOR HOLDING THE KEYBOARD.
 
-        It used to say it twice: this border grew to `border-l-2` in a colour
-        as well, first `waiting` -- the amber that means "a session is waiting
-        on your answer" everywhere else -- and then `focus-edge`. The operator
-        called the border wrong, and two indicators for one fact is how they
-        come to disagree. So the border is gone in both states and the pane
-        keeps the ordinary 1px `line` every other column draws; the line along
-        the top edge is the whole signal, the same one the sidebar wears, which
-        is what was asked for.
+        It used to say so twice, then once, then not at all. First the left
+        border grew to `border-l-2` in a colour -- `waiting`, the amber that
+        means "a session is waiting on your answer" everywhere else, then
+        `focus-edge` -- and the operator called the border wrong. Then the
+        line along the top edge was the whole signal, until the operator asked
+        for that off too ("remove the running-line animation at the top of the
+        pane when focused"), the same way the sidebar's copy had already gone.
+        Being the last mount, it took the whole feature with it: component,
+        class, keyframe hook and the token pair only it read.
+
+        What still answers "where do my keys go": the status bar prints the
+        mode as a word, the focused row or card inside the mode draws its own
+        ring, and the view-icon overlay is drawn in the FOCUSED pane alone --
+        so with two panes open, only one wears it. `data-action-pane` still
+        carries `active`/`idle` for tests and for whatever draws next; it is
+        simply not painted here.
       */}
-      {active && <FocusEdge />}
       {resizeHandle}
       {/*
         A12.2: THE HEADER IS GONE. It used to carry five facts — the status
@@ -3106,10 +3147,13 @@ export function DetailPanel(props: DetailPanelProps) {
           epic, the two facts the removed header relocated there — were laid
           out, measured as visible by `truncate`, and then painted over
           (audit F1). An overlay owes a FOURTH property, and it cannot be
-          discharged from here: WHAT IT FLOATS OVER MUST RESERVE ITS CORNER.
-          `cornerOverlay` below is that reservation, and
-          `e2e/narrow-pane-overlay-shots.mjs` measures it by asking which
-          element is on top rather than by reading a class back.
+          discharged from here: WHAT IT FLOATS OVER MUST STAY CLEAR OF ITS
+          CORNER. The identity line discharged it by reserving 7rem, and the
+          operator has since had that line removed altogether; what the pill
+          floats over now is the prompt bubble, kept clear by the bubble's own
+          padding -- a paint choice, so it is measured rather than trusted.
+          `e2e/narrow-pane-overlay-shots.mjs` asks which element is on top of
+          each painted glyph, which is the only way to see occlusion.
 
           A comment asserting a property the code does not have is worse than
           no comment: it is how this defect passed review.
@@ -3182,7 +3226,7 @@ export function DetailPanel(props: DetailPanelProps) {
             reports `working` for a session the CLI calls failed, so it is not
             a second opinion worth showing. Naming the gap is the whole of
             what can honestly be said. */}
-        {current === 'Response' && entry?.session.status === 'failed' && (
+        {failedBanner && (
           <p
             data-session-failed
             className="flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-panel px-3 py-2 text-[12px] text-failed leading-[1.45]"
@@ -3278,7 +3322,25 @@ export function DetailPanel(props: DetailPanelProps) {
               stuckRef.current = isAtBottom(event.currentTarget);
               syncJumps(event.currentTarget);
             }}
-            className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto"
+            /* FULL-BLEED, so the sticky ground below can be. The pane body
+               puts `px-3.5 py-3` around everything; a scroll column inside
+               that padding can only paint as wide as the padding box, which
+               left a 14px gutter down each side of the pinned prompt with
+               the transcript scrolling past in it, in full view. So the
+               column takes the padding OFF the body (`-mx-3.5`) and puts it
+               back on itself (`px-3.5`): every child lays out exactly where
+               it did, and the two that ask for it -- the sticky ground --
+               can reach the pane's own edges with `-mx-3.5`.
+
+               The TOP is the same move without the give-back: `-mt-3` hands
+               the body's top padding to the sticky block, which re-spends it
+               as its own `pt-3`, so the ground covers the strip above the
+               bubble instead of leaving pane fill there. Not when the failed
+               banner is drawn -- there IS something above the column then,
+               and pulling up would slide the column under it. */
+            className={`vam-no-scrollbar -mx-3.5 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-3.5 ${
+              failedBanner ? '' : '-mt-3'
+            }`}
           >
             {/* STICKY, not merely first: `position: sticky` against the
                 column's own scroll (the operator's ask, A12.2 — "IN stays
@@ -3310,50 +3372,40 @@ export function DetailPanel(props: DetailPanelProps) {
                 the prompt now is the bubble inside it, below. */}
             <section
               data-detail-block="in"
-              className="sticky top-0 z-10 flex max-h-[45%] min-h-0 flex-none flex-col gap-1 bg-ground pb-1.5"
+              className="-mx-3.5 sticky top-0 z-10 flex max-h-[45%] min-h-0 flex-none flex-col gap-1 bg-ground px-3.5 pt-3 pb-1.5"
             >
               {/* The region's name, announced and not drawn -- see the
                   band-removal note above `IN_BODY_PX`. */}
               <span className="sr-only">in</span>
-              <div
-                data-detail-identity
-                /* The reserved corner (audit F1). `truncate` computes its
-                   ellipsis against this box, so reserving here is what makes
-                   the ellipsis land where the pill starts instead of under
-                   it. Only when the overlay is actually drawn: an unfocused
-                   pane would otherwise give up 7rem of a narrow line for
-                   nothing. */
-                className={`flex items-center gap-[5px] font-mono text-[10.5px] text-ink-faint ${
-                  cornerOverlay ? 'pr-[7rem]' : ''
-                }`}
-              >
-                {/* `you`, and no time. `Decision` carries no timestamp, so
-                    nothing here can say when this turn happened -- and
-                    `session.age` is the session's LAST ACTIVITY, usually the
-                    agent's most recent write rather than when you typed this.
-                    Walk back a turn with `h` and the old caption went on
-                    describing the present. The session's age is on its sidebar
-                    row, where it is true. The turn's own label (the removed
-                    header's `data-detail-step` chip, informally "which round")
-                    rides beside it, since both are facts about THIS turn. This
-                    is the `in` rule's whole meta slot, one line up.
+              {/* NO IDENTITY LINE. It carried the project and the epic
+                  (inherited from the deleted header) until the operator had
+                  those removed as facts the sidebar's own row already says,
+                  and then `you · <turn label>` until the operator had that
+                  removed too ("also remove the `you · ...` part above In").
 
-                    AND NOTHING ELSE. The line used to open with the project
-                    and the epic, inherited from the deleted header; the
-                    operator asked for both to go ("remove the branch and repo
-                    information above the In section"). They are SESSION facts
-                    and the sidebar already carries them on the session's own
-                    row -- the project as the group heading the row is filed
-                    under, the branch as `data-session-branch` -- so the pane
-                    was repeating, one column over, what the list beside it
-                    already said, and paying for the repetition in the one
-                    line the turn has. What stays is what the sidebar cannot
-                    say, because it is not about the session: which turn this
-                    is, and that you asked it. */}
-                <span data-detail-turn className="truncate">
-                  {decision.label === '' ? 'you' : `you · ${decision.label}`}
-                </span>
-              </div>
+                  What was written here last time -- that the turn's label had
+                  no other home -- was WRONG, and this note replaces it rather
+                  than quietly dropping it. The label has two homes, both in
+                  the progress line just below: the condensed form is a
+                  `<select>` whose every option is a turn's label, with the
+                  current one selected and therefore painted; the expanded
+                  form lists them as rows with the current one marked
+                  `aria-current`. The one case where neither draws is a
+                  session with EXACTLY ONE turn and progress collapsed, since
+                  the picker only appears past one turn -- and there "which
+                  turn" has a single answer, so a label naming it says nothing
+                  the operator could act on.
+
+                  The reserved corner (audit F1, `pr-[7rem]`) went with the
+                  row -- it existed so this line's `truncate` computed its
+                  ellipsis against the pill rather than the pane edge -- but
+                  the OBLIGATION did not: with the line gone the bubble rises
+                  into the corner the pill paints on, and measured at a 356px
+                  pane, 24 of 100 sampled glyph pixels of the prompt's first
+                  line went under it. So the reservation moved down into the
+                  bubble as a floated spacer rather than being deleted with
+                  its old holder. Measured as OCCLUSION, in a real browser, by
+                  `e2e/narrow-pane-overlay-shots.mjs`. */}
               {/* THE BUBBLE (operator: "the IN prompt should have a
                   different colour so it stands out, and sit in a bubble").
                   A chat bubble, deliberately, and not the bordered band PR 266
@@ -3374,18 +3426,49 @@ export function DetailPanel(props: DetailPanelProps) {
                    edge, and a bound nobody can see is how "the answer is
                    unreachable" became "the prompt is". */
                 /* PADDING IS WHAT MAKES THE TINT A SHAPE (the operator:
-                   "the In section's background needs padding"). At 10x8 the
-                   ground sat tight against the words and read as a highlight
-                   behind them; a bubble is a ground the text sits INSIDE.
-                   14x12, and the `in` block's own `max-h-[45%]` absorbs the
-                   extra height rather than passing it on to the answer:
-                   measured with a 10,800-character prompt, `in` is 156px of a
-                   348px column before and after, with 40 of the answer's 42px
-                   painted on top at maximum scroll either way. Measured as
-                   paint, not as a class, by `e2e/long-prompt-shots.mjs`. */
-                className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-3.5 py-3"
+                   "the In section's background needs padding"), and it is
+                   bounded on BOTH sides. At 10x8 the ground sat tight against
+                   the words and read as a highlight behind them; at 14x12 the
+                   operator called the bubble too big ("the In bubble needs to
+                   be smaller"). 12x10 is what is left, and the guard holds it
+                   to a 9-12px band measured AS PAINT rather than as a class
+                   (`e2e/long-prompt-shots.mjs`), because a padding rule that
+                   matches nothing has passed review in this project before.
+
+                   The height it gives back goes to the answer, not to the
+                   pin: `max-h-[45%]` bounds the block either way. */
+                className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-3 py-2.5"
               >
                 <p className="whitespace-pre-wrap break-words text-[13px] text-ink-dim leading-[1.55]">
+                  {/* THE RESERVED CORNER, audit F1's obligation, inherited
+                      from the identity line that used to discharge it above.
+                      A float rather than padding because only the FIRST LINE
+                      meets the pill: padding would indent all 300 lines of a
+                      long prompt to clear something 34px tall. `float` is the
+                      one layout primitive that reserves a corner and lets the
+                      text close back under it.
+
+                      Sized off the measured pill, not guessed. Every offset
+                      between the pill and the paragraph is fixed (`right-2.5`
+                      on the overlay, `px-3.5` on the column and on the
+                      bubble), so the overlap does not vary with the pane's
+                      width: 72px at any width, plus whatever the icon count
+                      adds. 6rem covers it with 24px to spare, where the
+                      identity line's 7rem over-reserved by 40 -- and the
+                      bound is measured, not asserted here: the guard fails
+                      both if the reservation misses the pill and if it runs
+                      far past it.
+
+                      Only when the overlay is actually drawn -- an unfocused
+                      pane paints no pill, and reserving for it would notch
+                      the prompt of every pane the operator is not in. */}
+                  {cornerOverlay && (
+                    <span
+                      data-detail-corner-reserve
+                      aria-hidden="true"
+                      className="float-right h-[22px] w-[6rem]"
+                    />
+                  )}
                   {decision.input}
                 </p>
               </div>

@@ -1,36 +1,36 @@
 /**
- * The view-icon overlay must not paint over the identity line.
+ * The view-icon overlay must not paint over the top of the prompt block.
  *
- * Audit F1 (S2), measured at a 253px pane: the nav occupied x 924–1014 while
- * the identity line ran to x 1010 — the last 86px of project · epic · turn
+ * Audit F1 (S2), measured at a 253px pane: the nav occupied x 924-1014 while
+ * the identity line ran to x 1010 -- the last 86px of project . epic . turn
  * sat under an opaque `bg-sidebar` pill, and the prompt's first line lost its
- * top pixels. The spans are `truncate`d, but the ellipsis is computed against
- * the PANE edge, not against the pill, so the text is laid out, measured as
- * visible, and then covered. The two facts the deleted header relocated into
- * that line — project and epic — were exactly what disappeared, in every
- * focused pane under roughly 600px, in both themes.
+ * top pixels. The spans were `truncate`d, but the ellipsis is computed against
+ * the PANE edge, not against the pill, so the text was laid out, measured as
+ * visible, and then covered.
  *
- * THOSE TWO FACTS ARE GONE FROM THE LINE NOW (the operator: "remove the
- * branch and repo information above the In section" — the sidebar carries
- * both), and the mechanism is not. Measured at 620px after the removal, with
- * the reservation off: the turn's own label is a task id (`epicOf` in
- * `to-canvas.ts` reads labels as `<epic>/<task>`), and one of ordinary length
- * lays out 360px wide from x 279 — running to x 639, while the pill starts at
- * x 520. So the line can still be laid out under the pill, by itself, and
- * this guard still measures the state it was written for. What it can NO
- * LONGER do is reach that state off the fixture's own text: `you · R-5` is
- * 57px and stops 184px short. The injection below is what closes that gap,
- * and it moved from the epic span to the turn span with the removal.
+ * THE IDENTITY LINE IS GONE. The operator had the project and the epic taken
+ * off it first ("remove the branch and repo information above the In
+ * section"), and then the `you . <turn label>` remainder as well ("also remove
+ * the `you . ...` part above In"). Its `pr-[7rem]` reservation went with it --
+ * and the OBLIGATION did not, which is the whole reason this file still
+ * exists: with nothing above it, the bubble rose into the corner the pill
+ * paints on, and this guard measured 24 of 100 sampled glyph pixels of the
+ * prompt's first line under the pill the moment the line was deleted. The
+ * reservation moved into the bubble as a floated spacer, and the number below
+ * is what says so.
  *
- * The overlay's own comment claimed it "can only ever cover the few pixels
- * its glyphs occupy — never the whole line of text beneath it". True of the
- * wrapper, false of the filled pill inside it. Fixed in the code, and fixed
- * in the comment.
+ * RETIRED WITH THE LINE: the checks that read `[data-detail-identity]` and
+ * `[data-detail-turn]` -- "not one pixel of the identity line is covered",
+ * "the reserved corner has not squeezed the label to an ellipsis", and "the
+ * line has not grown the session's facts back" -- along with the long-label
+ * injection written to make the line overflow. All four were about an element
+ * that no longer renders; kept, they would have thrown on `null` and reported
+ * a missing selector as if it were an occlusion.
  *
  * WHY A REAL BROWSER: this is occlusion. Nothing about the class list of
  * either element says whether one covers the other; only layout plus paint
  * order does, and only `elementFromPoint` reports it. A jsdom test here could
- * assert the padding class and stay green while the pill went on covering a
+ * assert the float class and stay green while the pill went on covering a
  * line that had grown.
  *
  * Run by hand, or by `e2e/run-web-guards.mjs`:
@@ -51,32 +51,28 @@ await page.waitForSelector('[data-tab-strip]');
 await page.locator('[data-session-row="factory-sse-1"]').click();
 await page.waitForSelector('[data-detail-column]');
 
-/**
- * The FIXTURE CANNOT DO THIS ALONE, and finding that out is half the guard.
- * The demo's identity line now reads `you · R-5` — 57px of glyphs stopping
- * 184px short of the pill at this viewport, where the older, longer line
- * stopped 25px short. Either way the fixture alone lets this file pass with
- * the fix reverted, and the falsification is what caught it the first time.
- * What the audit measured needs the line to OVERFLOW, because that is the
- * mechanism: `truncate` computes its ellipsis against the pane edge, so an
- * overflowing line is laid out all the way to the corner the pill occupies.
- * A turn label of ordinary length — they are task ids — is injected to get
- * there: measured 360px, past the pill's left edge by 119px.
- */
-const LONG_LABEL = 'wave-3/task-11-reconnect-and-backpressure';
-await page.evaluate((label) => {
-  document.querySelector('[data-detail-turn]').textContent = `you · ${label}`;
-}, LONG_LABEL);
-await page.waitForTimeout(250);
+// THE LINE IS REALLY GONE. Not decoration: every check below measures the
+// bubble, and the bubble is only in the pill's corner BECAUSE nothing sits
+// above it. If the line came back, this file would be measuring the wrong
+// element and passing.
+if ((await page.locator('[data-detail-identity]').count()) > 0) {
+  throw new Error('the identity line above the prompt is back -- this guard now measures the wrong element.');
+}
 
-const identity = page.locator('[data-detail-identity]');
 const overlay = page.locator('[data-view-tabs]');
-const idBox = await identity.boundingBox();
+const bubbleBox = await page.locator('[data-detail-scroll="in"]').boundingBox();
 const navBox = await overlay.boundingBox();
 console.log(
-  `pane identity x ${Math.round(idBox.x)}–${Math.round(idBox.x + idBox.width)}, ` +
-    `nav x ${Math.round(navBox.x)}–${Math.round(navBox.x + navBox.width)}`,
+  `prompt bubble x ${Math.round(bubbleBox.x)}-${Math.round(bubbleBox.x + bubbleBox.width)} ` +
+    `top ${Math.round(bubbleBox.y)}, nav x ${Math.round(navBox.x)}-${Math.round(navBox.x + navBox.width)} ` +
+    `bottom ${Math.round(navBox.y + navBox.height)}`,
 );
+if (navBox.y + navBox.height <= bubbleBox.y) {
+  throw new Error(
+    'the pill ends above the bubble, so nothing here can collide -- the state this guard ' +
+      'was written for is unreachable and the checks below are vacuous.',
+  );
+}
 
 /**
  * Which of the element's PAINTED GLYPHS are under the overlay.
@@ -136,34 +132,49 @@ async function coveredText(selector) {
   }, selector);
 }
 
-// 1. NOT ONE PIXEL OF THE IDENTITY LINE IS UNDER THE PILL. This is the whole
-//    finding: what the line carries is the turn's own label and `you`, this
-//    is their only home in the pane, and a truncated line that is then
-//    covered has lost them silently.
-const id = await coveredText('[data-detail-identity]');
+// 1. NOT ONE PIXEL OF THE PROMPT'S FIRST LINE IS UNDER THE PILL. This is
+//    what is left of F1 once the identity line is gone -- and it is now the
+//    whole of it, because the bubble is what sits in that corner. The bubble's
+//    padding alone does NOT discharge it (measured: 24 of 100 points covered);
+//    the floated spacer inside the paragraph does.
+const bubble = await coveredText('[data-detail-scroll="in"]');
 console.log(
-  `identity line: ${id.covered} of ${id.samples} sampled glyph pixels under the overlay ` +
-    `(${id.rects} text runs)`,
+  `prompt first line: ${bubble.covered} of ${bubble.samples} sampled glyph pixels covered ` +
+    `(${bubble.rects} text runs)`,
 );
-if (id.covered > 0) {
+if (bubble.samples < 10) {
   throw new Error(
-    `the view-icon overlay covers the identity line at ${id.covered} of ${id.samples} ` +
-      `sampled points — the turn label is drawn, measured as visible, and then painted over.`,
+    `only ${bubble.samples} glyph pixels of the prompt's first line were sampled -- a check ` +
+      `over almost no points passes for the wrong reason.`,
   );
 }
-
-// 2. NOR THE PROMPT'S FIRST LINE, the other half of F1 ("the prompt's first
-//    line loses its top 8px"). Nothing was added for this one: the bubble's
-//    own padding already drops the text below the pill's bottom edge, which
-//    is why a float spacer written for it was removed again — it could not be
-//    falsified, so it was decoration. The check stays because the property is
-//    real and the thing discharging it (padding on a bubble, a paint choice)
-//    could be changed by someone who never heard of this overlay.
-const bubble = await coveredText('[data-detail-scroll="in"]');
-console.log(`prompt first line: ${bubble.covered} of ${bubble.samples} sampled glyph pixels covered`);
 if (bubble.covered > 0) {
   throw new Error(
     `the overlay covers the prompt's first line at ${bubble.covered} of ${bubble.samples} points`,
+  );
+}
+
+// 2. AND THE RESERVATION IS NO WIDER THAN THE PILL IT IS FOR. Reserving the
+//    corner costs the prompt's first line real width, so over-reserving loses
+//    the opening words by a second route -- which is what the identity line's
+//    7rem did (40px past the pill). Measured against the pill's own left edge
+//    rather than against a remembered number.
+const reserve = await page.locator('[data-detail-corner-reserve]').boundingBox();
+const slack = Math.round(navBox.x - reserve.x);
+console.log(
+  `corner reservation x ${Math.round(reserve.x)}-${Math.round(reserve.x + reserve.width)}, ` +
+    `${slack}px wider on the left than the pill needs`,
+);
+if (slack < 0) {
+  throw new Error(
+    `the reservation starts ${-slack}px INSIDE the pill -- it cannot be what keeps the ` +
+      `first line clear, and check 1 above is passing for some other reason`,
+  );
+}
+if (slack > 48) {
+  throw new Error(
+    `the reservation runs ${slack}px past the pill's left edge -- that width is taken out of ` +
+      `the prompt's first line for nothing`,
   );
 }
 
@@ -174,43 +185,6 @@ const tap = await page.locator('[data-view-tabs] button').first().boundingBox();
 console.log(`view icon hit box: ${Math.round(tap.width)}x${Math.round(tap.height)}`);
 if (tap.width < 22 || tap.height < 22) {
   throw new Error(`the view icons were shrunk to ${tap.width}x${tap.height} to make room`);
-}
-
-// 4. THE IDENTITY LINE STILL SAYS SOMETHING. Reserving 7rem of a 253px pane
-//    could squeeze the turn down to its own ellipsis, which loses the fact by
-//    another route — and `innerText` cannot see that, because clipping does
-//    not change it. So the PAINTED width of the turn span is what is
-//    measured, against the width of the two words that must survive.
-const turn = await page.locator('[data-detail-turn]').evaluate((el) => {
-  const probe = document.createElement('span');
-  probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap';
-  probe.className = el.className.replace('truncate', '');
-  probe.textContent = 'you · wave-3';
-  el.parentElement.appendChild(probe);
-  const floor = probe.getBoundingClientRect().width;
-  probe.remove();
-  return { painted: el.getBoundingClientRect().width, floor, text: el.innerText };
-});
-console.log(
-  `turn label: ${Math.round(turn.painted)}px painted, ${Math.round(turn.floor)}px needed ` +
-    `for "you · wave-3" — reads "${turn.text}"`,
-);
-if (turn.painted < turn.floor) {
-  throw new Error(
-    `the reserved corner squeezed the turn label to ${Math.round(turn.painted)}px, under the ` +
-      `${Math.round(turn.floor)}px its first words need — the fact is lost to truncation instead`,
-  );
-}
-
-// 5. AND THE LINE HAS NOT GROWN THE SESSION'S FACTS BACK. The project and the
-//    epic were removed from it because the sidebar already says both; a
-//    revert would restore exactly the overflow this file exists to measure.
-const text = (await identity.innerText()).replace(/\s+/g, ' ').trim();
-console.log(`identity line reads: ${text}`);
-if (text.includes('factory') || text.includes('ui-server-sse')) {
-  throw new Error(
-    `the identity line repeats the sidebar's own project/epic again: "${text}"`,
-  );
 }
 
 await page.screenshot({ path: `${outDir}/narrow-pane-overlay.png` });

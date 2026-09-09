@@ -130,15 +130,6 @@
      the one hue that means "a session needs you" on a decoration. */
   --color-filter-badge: var(--vam-filter-badge);
 
-  /* WHERE THE KEYBOARD IS, which is not a session state either -- the same
-     argument `filter-badge` and `danger` already make, and the sharpest case
-     of it: the response pane used to say it held the keyboard in
-     `--color-waiting`, the one hue reserved for "a session is waiting on your
-     answer", so the amber meant two things at once. Indigo, under its own
-     name, appears nowhere else in the palette, and no other token ever draws a
-     horizontal line at a column's top edge. */
-  --color-focus-edge: var(--vam-focus-edge);
-
   /* A destructive ACTION, which is not a session state. `--vam-failed` means
      a session failed; a menu item painted with it would read as a status
      report on the project it sits above rather than as a control that ends
@@ -281,11 +272,6 @@
      the row beside it. */
   --vam-danger: #fb7185;
 
-  /* Indigo. 6.01 on `sidebar` and 6.64 on `ground` in this theme -- the only
-     candidate measured that stays balanced against its light counterpart
-     rather than being dramatic here and thin there. */
-  --vam-focus-edge: #818cf8;
-
   --vam-waiting-tint: #3f2f12;
   --vam-waiting-wash: #161208;
 
@@ -421,10 +407,6 @@ html.light {
   /* Darker than the dark theme's for contrast on a light panel, and still a
      step off `--vam-failed` here -- see the note there. */
   --vam-danger: #be123c;
-
-  /* The light theme's indigo: 6.82 on `sidebar`, 7.90 on `ground`, so the
-     indicator is the same amount of PRESENT in both themes. */
-  --vam-focus-edge: #4338ca;
 
   --vam-waiting-tint: #f6dcae;
   --vam-waiting-wash: #fdf6e8;
@@ -690,43 +672,6 @@ body {
 }
 
 /*
- * The line along the top of whichever column holds the keyboard.
- *
- * Two layers, and the split is the whole design. The RESTING line is the
- * element's own background at 55% -- always there, full bleed, corner to
- * corner of the column, because "the keyboard is here" is a state and a static
- * line states it perfectly well. The SWEEP is the `::after` child, at full
- * strength, and it TRAVELS FOR AS LONG AS THE LINE IS DRAWN.
- *
- * It ran once, on arrival, on the argument that "the keyboard just arrived
- * here" is an event and an event that keeps announcing itself is peripheral
- * motion all day. The operator read the result the other way round: 1.4s after
- * a hand-over the line stops, so at almost every moment there is no moving
- * line anywhere, and the ask was for this to carry the running node's effect
- * instead. So it takes `.vam-running-edge::after`'s animation EXACTLY -- same
- * keyframes, same 2.1s, same linear, same `infinite` -- and the two are held
- * equal by a test rather than by two rules that agree today. What stays the
- * edge's own is its HUE: `--vam-focus-edge`, never a status token.
- *
- * 2px rather than the running edge's 1px: that one is measured off a card a
- * few hundred pixels wide, this spans a whole column and is answering "where
- * is my cursor" from the corner of the eye. 3px starts reading as a container
- * border instead.
- */
-.vam-focus-edge {
-  background: color-mix(in srgb, var(--color-focus-edge) 55%, transparent);
-}
-
-.vam-focus-edge::after {
-  content: '';
-  display: block;
-  width: 34%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, var(--color-focus-edge), transparent);
-  animation: vam-sweep 2.1s linear infinite;
-}
-
-/*
  * "This session is waiting on YOU."
  *
  * Given its own treatment rather than another status colour because it is the
@@ -776,13 +721,6 @@ body {
   [data-pending='true'],
   .vam-ellipsis > span,
   .vam-running-edge::after,
-  /* Only the travelling half. The resting 55% line is the element's own
-     background and survives, so reduced motion loses the travel and keeps the
-     indicator. This rule carries more weight than it did: the sweep no longer
-     stops on its own after 1.4s, so without it a 2px line would shimmer for
-     every minute the window is open -- which is the thing the preference
-     exists to stop. */
-  .vam-focus-edge::after,
   .vam-focus-glow {
     animation: none;
   }
