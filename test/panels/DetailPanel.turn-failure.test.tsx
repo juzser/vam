@@ -63,7 +63,20 @@ function draw(decisions: readonly Decision[], props: Partial<DetailPanelProps> =
 }
 
 const count = () => document.querySelector<HTMLElement>('[data-progress-count]');
-const failed = () => document.querySelector<HTMLElement>('[data-progress-failed]');
+/**
+ * THE TOTAL ACROSS THE WINDOW, which is what this block is about.
+ *
+ * Since the pane became a column of every turn, `[data-progress-failed]` is one
+ * turn's OWN count, drawn on that turn's line -- there is one per failing turn.
+ * The sum over the window sits at the boundary block that names that window,
+ * beside the turns-read count it qualifies.
+ */
+const failed = () => document.querySelector<HTMLElement>('[data-column-failed]');
+/** Every turn's own count, oldest first. */
+const perTurn = () =>
+  [...document.querySelectorAll<HTMLElement>('[data-progress-failed]')].map(
+    (el) => el.textContent ?? '',
+  );
 const options = () => [
   ...document.querySelectorAll<HTMLOptionElement>('[data-progress-jump] option'),
 ];
@@ -104,7 +117,16 @@ describe('the collapsed line reports failures it would otherwise fold away', () 
     // replacement for the caveat on it.
     draw([turn('a', { errorCount: 2 }), turn('b')]);
     expect(count()?.textContent).toBe('2 turns read');
-    expect(document.querySelector('[data-progress-line]')?.textContent).toContain('turns read');
+    expect(document.querySelector('[data-column-start]')?.textContent).toContain('turns read');
+  });
+
+  it('also puts each turn\'s own count on that turn\'s own line', () => {
+    // The column can say which turn went wrong, which the single folded line
+    // never could: the total says three tools failed, the lines say where.
+    draw([turn('a', { errorCount: 1 }), turn('b', { errorCount: 2 })]);
+    // Oldest first, the order the column draws them in.
+    expect(perTurn()).toEqual(['· 2 failed', '· 1 failed']);
+    expect(failed()?.textContent).toBe('· 3 failed');
   });
 });
 

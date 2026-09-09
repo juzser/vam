@@ -121,9 +121,18 @@ const focused = () => {
 };
 const mode = () => document.querySelector('[data-mode]')?.textContent ?? '';
 const promptTarget = () => focusedRow()?.querySelector('[data-row-title]')?.textContent ?? '';
-/** The full `in` or `out` text as the detail panel renders it. */
+/**
+ * The full `in` or `out` text of the turn THE PANE IS MARKING.
+ *
+ * The pane draws the whole session as a column now, oldest first, so an
+ * unqualified `[data-detail-block="in"]` is the OLDEST turn's prompt whatever
+ * the panel is reading -- which is exactly the substitution the cases below
+ * exist to catch, arriving in the assertion instead of in the code.
+ */
 const detailBlock = (which: 'in' | 'out') =>
-  document.querySelector(`[data-detail-block="${which}"]`)?.textContent ?? '';
+  document.querySelector(
+    `[data-column-turn][data-turn-current="true"] [data-detail-block="${which}"]`,
+  )?.textContent ?? '';
 // Named hooks, not positional ones: a row carries a close button of its own and
 // an icon picker, so `li button` stopped meaning "a session" the moment the row
 // grew controls.

@@ -163,13 +163,22 @@ describe('what the in rule carried survives its removal', () => {
 describe('what the out rule carried survives its removal', () => {
   it('shows the current activity on the turn being worked, and on no other', () => {
     draw();
-    expect(q<HTMLElement>('[data-progress-activity]')?.textContent).toContain('reading files');
+    // ON THE NEWEST TURN, AND EXACTLY THERE. The column draws every turn, so
+    // "on no other" is now a claim about WHICH of the seven lines carries it,
+    // rather than about whether the pane draws one at all -- and that is the
+    // stronger form of the same fact: an activity line on an older turn would
+    // be describing the present while the operator reads the past.
+    expect(all('[data-progress-activity]')).toHaveLength(1);
+    expect(
+      q<HTMLElement>('[data-column-turn][data-turn-newest] [data-progress-activity]')?.textContent,
+    ).toContain('reading files');
     cleanup();
-    // An older turn: the same line would describe the present while the
-    // operator reads the past. Absent, not an em dash under a heading --
-    // there is no heading left to leave standing empty.
+    // And picking an older turn does not move it there.
     draw({ decision: TURNS[2] as Decision });
-    expect(q('[data-progress-activity]')).toBeNull();
+    expect(all('[data-progress-activity]')).toHaveLength(1);
+    expect(
+      q('[data-column-turn][data-turn-current="true"] [data-progress-activity]'),
+    ).toBeNull();
   });
 
   it('keeps both scroll-to-edge buttons, in the one row of chrome that is left', () => {
@@ -181,7 +190,11 @@ describe('what the out rule carried survives its removal', () => {
     Object.defineProperty(column, 'clientHeight', { value: 100, configurable: true });
     column.scrollTop = 0;
     fireEvent.scroll(column);
-    expect(q('[data-detail-block="progress"] [data-out-to-bottom]')).not.toBeNull();
+    // IN THE COLUMN'S OWN BAR. The jumps moved out of the per-turn line with
+    // the column: they are about the whole column, not about one turn, and
+    // they have to stay reachable from wherever the operator scrolled to --
+    // which a control inside a turn that scrolled off the top is not.
+    expect(q('[data-column-bar] [data-out-to-bottom]')).not.toBeNull();
     // Only the jump that would actually move: a control that scrolls nowhere
     // is worse than no control, and that rule outlives the rule it sat on.
     expect(q('[data-out-to-top]')).toBeNull();
@@ -284,16 +297,26 @@ describe('the turn reads straight through, as one scrolling column', () => {
     // `out` owns no scroller: a second scrollbar beside the column's is what
     // made the regions read as separate panels, and the answer is the region
     // that argument was really about.
-    const out = q<HTMLElement>('[data-detail-scroll="out"]');
-    expect(out?.className ?? '').not.toContain('overflow-y-auto');
-    // Exactly one scroller inside the column, and it is the prompt bubble.
+    for (const out of all('[data-detail-scroll="out"]')) {
+      expect(out.className).not.toContain('overflow-y-auto');
+    }
+    // One scroller PER TURN, and each is that turn's prompt bubble. One per
+    // turn rather than one per pane since the column draws them all; what
+    // would be wrong is a second scroller inside a turn, which is what made
+    // the regions read as separate panels.
     const scrollers = [...column.querySelectorAll('*')].filter((el) =>
       (el.getAttribute('class') ?? '').includes('overflow-y-auto'),
     );
-    expect(scrollers.map((el) => el.getAttribute('data-detail-scroll'))).toEqual(['in']);
-    // And the cap is on the STICKY BLOCK, not on the paragraph: capping the
-    // text is truncation, capping the pin is a pin.
-    expect((block('in') as HTMLElement).className).toContain('max-h-');
+    expect(scrollers.map((el) => el.getAttribute('data-detail-scroll'))).toEqual(
+      all('[data-column-turn]').map(() => 'in'),
+    );
+    // And the cap is on EVERY STICKY BLOCK, not on the paragraph: capping the
+    // text is truncation, capping the pin is a pin. What it resolves TO is
+    // measured in a real browser (`e2e/transcript-column-shots.mjs`) -- a
+    // percentage would satisfy this line and cap nothing.
+    for (const inBlock of all('[data-detail-block="in"]')) {
+      expect(inBlock.className).toContain('max-h-');
+    }
   });
 
   it('sticks `in` to the top of that column, with nothing scrollable between', () => {
