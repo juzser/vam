@@ -1265,7 +1265,7 @@ export const OUT_MARKDOWN: Components = {
     const fence = readFence(children);
     const lang = fence === null ? null : resolveLang(fence.lang);
     return (
-      <pre className="vam-no-scrollbar overflow-x-auto rounded-[7px] border border-line bg-canvas px-2.5 py-2 font-mono text-[0.917em] text-ink-dim leading-[1.55] [&_code]:bg-transparent [&_code]:px-0 [&_code]:text-ink-dim">
+      <pre className="vam-no-scrollbar overflow-x-auto rounded-[7px] border border-line bg-ground px-2.5 py-2 font-mono text-[0.917em] text-ink-dim leading-[1.55] [&_code]:bg-transparent [&_code]:px-0 [&_code]:text-ink-dim">
         {fence !== null && lang !== null ? <Fence code={fence.code} lang={lang} /> : children}
       </pre>
     );
@@ -3304,13 +3304,13 @@ export function DetailPanel(props: DetailPanelProps) {
                 That is VSCode's sticky-scroll bargain — what is pinned is
                 capped, what is in flow is whole.
 
-                The ground is the PANE's (`bg-canvas`), not `bg-sidebar`: it
+                The ground is the PANE's (`bg-ground`), not `bg-sidebar`: it
                 exists to stop text bleeding through, and matching the column
                 is how it does that without drawing a band. What distinguishes
                 the prompt now is the bubble inside it, below. */}
             <section
               data-detail-block="in"
-              className="sticky top-0 z-10 flex max-h-[45%] min-h-0 flex-none flex-col gap-1 bg-canvas pb-1.5"
+              className="sticky top-0 z-10 flex max-h-[45%] min-h-0 flex-none flex-col gap-1 bg-ground pb-1.5"
             >
               {/* The region's name, announced and not drawn -- see the
                   band-removal note above `IN_BODY_PX`. */}

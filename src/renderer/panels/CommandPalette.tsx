@@ -36,7 +36,7 @@ export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
       <button
         type="button"
         aria-label="close palette"
-        className="absolute inset-0 cursor-default bg-canvas/70"
+        className="absolute inset-0 cursor-default bg-ground/70"
         onMouseDown={onClose}
       />
       <Command

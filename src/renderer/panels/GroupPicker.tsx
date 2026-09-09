@@ -78,7 +78,7 @@ export function GroupPicker({
         type="button"
         aria-label="close the folder list"
         onClick={onClose}
-        className="absolute inset-0 cursor-default bg-canvas/70"
+        className="absolute inset-0 cursor-default bg-ground/70"
       />
       <div
         ref={shellRef}

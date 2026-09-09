@@ -169,3 +169,72 @@ describe('what the picker shows', () => {
     expect(paletteValue({}, TOKEN, () => '')).toBe('');
   });
 });
+
+/**
+ * The `canvas` → `ground` rename, from the operator's side.
+ *
+ * `writePrefs` `JSON.stringify`s the freshly-parsed object, so a top-level
+ * key this version does not read is destroyed on the first save — and a
+ * palette entry under a token name `readBucket` no longer recognises is
+ * dropped even before that. Either way a customised colour would vanish on
+ * upgrade, silently, which is the one outcome a rename may not have.
+ */
+describe('a colour customised under the old `canvas` name survives the rename', () => {
+  // Byte-for-byte the shape the shipped build writes: both theme buckets,
+  // the old token name, beside a token whose name did not change.
+  const SHIPPED = {
+    theme: 'dark',
+    panes: { sidebar: 300, detail: 400 },
+    palette: {
+      dark: { '--vam-canvas': '#101820', '--vam-panel': '#181818' },
+      light: { '--vam-canvas': '#fdfdfb' },
+    },
+  };
+
+  it('reads the old key into the new one, in both themes', () => {
+    const prefs = readPrefs(storage(SHIPPED));
+    expect(prefs.palette.dark['--vam-ground']).toBe('#101820');
+    expect(prefs.palette.light['--vam-ground']).toBe('#fdfdfb');
+    // The neighbour is untouched, and the retired name is not carried along.
+    expect(prefs.palette.dark['--vam-panel']).toBe('#181818');
+    expect(prefs.palette.dark['--vam-canvas']).toBeUndefined();
+  });
+
+  it('rewrites the payload under the new name on the next save', () => {
+    const store = storage(SHIPPED);
+    const prefs = readPrefs(store);
+    writePrefs(store, prefs);
+    const written = JSON.parse(store.getItem(KEY) ?? '{}');
+    expect(written.palette.dark['--vam-ground']).toBe('#101820');
+    expect(written.palette.dark['--vam-canvas']).toBeUndefined();
+  });
+
+  it('migrates the pre-buckets flat palette too, into both themes', () => {
+    // The oldest shape: one flat token → colour map, read into both buckets.
+    const prefs = readPrefs(storage({ palette: { '--vam-canvas': '#222233' } }));
+    expect(prefs.palette.dark['--vam-ground']).toBe('#222233');
+    expect(prefs.palette.light['--vam-ground']).toBe('#222233');
+  });
+
+  it('lets a real `--vam-ground` entry win over a stale `--vam-canvas` one', () => {
+    // Both present means the file was written by two versions. The current
+    // name is the one the operator last picked with.
+    const prefs = readPrefs(
+      storage({ palette: { dark: { '--vam-canvas': '#111111', '--vam-ground': '#999999' } } }),
+    );
+    expect(prefs.palette.dark['--vam-ground']).toBe('#999999');
+    // Both key orders: a JSON object preserves insertion order, and the
+    // migration must not depend on which version wrote its key first.
+    const reversed = readPrefs(
+      storage({ palette: { dark: { '--vam-ground': '#999999', '--vam-canvas': '#111111' } } }),
+    );
+    expect(reversed.palette.dark['--vam-ground']).toBe('#999999');
+  });
+
+  it('offers the swatch under an honest label', () => {
+    const ground = PALETTE_TOKENS.find((t) => t.token === '--vam-ground');
+    expect(ground?.label).toBe('ground');
+    expect(PALETTE_TOKENS.map((t) => t.token)).not.toContain('--vam-canvas');
+    expect(PALETTE_TOKENS.map((t) => t.label)).not.toContain('canvas');
+  });
+});

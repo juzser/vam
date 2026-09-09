@@ -76,7 +76,7 @@ export function ProjectPicker({ groupName, choices, onToggle, onClose }: Project
         type="button"
         aria-label="close the repo list"
         onClick={onClose}
-        className="absolute inset-0 cursor-default bg-canvas/70"
+        className="absolute inset-0 cursor-default bg-ground/70"
       />
       <div
         ref={shellRef}

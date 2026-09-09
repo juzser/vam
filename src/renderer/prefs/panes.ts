@@ -141,51 +141,28 @@ export function renderedWidth(
 }
 
 /**
- * Which panes are drawn at all.
+ * The two rendered widths.
  *
- * Visibility is NOT a width. Every function above floors at the pane's MIN,
- * on purpose (see `clampPaneWidth`), so "hide it by storing 0" renders a 200px
- * sidebar. A pane is hidden by not being mounted, and this is the flag that
- * says so. It is stored NEXT TO `panes`, never inside it, so the width
- * arithmetic and its stored payloads stay exactly as they were.
- */
-export type PaneVisibility = {
-  readonly sidebar: boolean;
-  readonly detail: boolean;
-};
-
-/** The shipped layout: both panes drawn. */
-export const ALL_VISIBLE: PaneVisibility = { sidebar: true, detail: true };
-
-/**
- * The two rendered widths, for a given visibility.
+ * The sidebar is priced first — clamped to its own bounds and to whatever the
+ * viewport leaves once the detail pane's own floor is protected — and the
+ * detail pane takes what is left over. The detail pane has no stored width of
+ * its own to defend: it is the column that fills everything to the sidebar's
+ * right (A12.1), so unlike the sidebar there is nothing here for a drag to
+ * propose against it.
  *
- * Four rules:
+ * Total over garbage input: `clampPaneWidth` already is, and nothing here
+ * divides by a width that could be zero or NaN.
  *
- * 1. A hidden pane renders at 0 — it is not drawn, so it has no width. This
- *    is the one place a 0 is legal, and it never reaches storage.
- * 2. A hidden pane costs its sibling nothing: the survivor takes the whole
- *    viewport.
- * 3. With both panes drawn, the sidebar is priced first — clamped to its own
- *    bounds and to whatever the viewport leaves once the detail pane's own
- *    floor is protected — and the detail pane takes what is left over. The
- *    detail pane has no stored width of its own to defend: it is the
- *    column that fills everything to the sidebar's right (A12.1), so unlike
- *    the sidebar there is nothing here for a drag to propose against it.
- * 4. Every branch is total over garbage input: `clampPaneWidth` already is,
- *    and nothing here divides by a width that could be zero or NaN.
+ * The `PaneVisibility` argument this used to take is gone with the settings
+ * section that was its only writer: both panes are always drawn, so the two
+ * "a hidden pane renders at 0" branches were unreachable code pretending to
+ * be a rule. Same discipline as the `canvasReserved` note above — a branch
+ * that can only ever answer "nothing is hidden" is deleted, not kept.
  */
 export function layoutWidths(
-  visible: PaneVisibility,
   stored: { readonly sidebar: number; readonly detail: number },
   viewportWidth: number,
 ): { readonly sidebar: number; readonly detail: number } {
-  if (!visible.sidebar) {
-    return { sidebar: 0, detail: visible.detail ? Math.max(DETAIL_MIN, viewportWidth) : 0 };
-  }
-  if (!visible.detail) {
-    return { sidebar: Math.max(SIDEBAR_MIN, viewportWidth), detail: 0 };
-  }
   const sidebar = Math.min(
     clampPaneWidth('sidebar', stored.sidebar),
     Math.max(SIDEBAR_MIN, viewportWidth - DETAIL_MIN),

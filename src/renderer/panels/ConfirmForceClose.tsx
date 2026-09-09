@@ -61,7 +61,7 @@ export function ConfirmForceClose({ title, onConfirm, onCancel }: ConfirmForceCl
         tabIndex={-1}
         aria-label="cancel force-closing the session"
         onClick={onCancel}
-        className="absolute inset-0 cursor-default bg-canvas/70"
+        className="absolute inset-0 cursor-default bg-ground/70"
       />
       <div className="relative z-10 w-[340px] rounded-[var(--radius-lg)] border border-line-strong bg-panel p-3.5 shadow-[var(--shadow-node)]">
         <div className="flex items-center gap-2">
@@ -89,7 +89,7 @@ export function ConfirmForceClose({ title, onConfirm, onCancel }: ConfirmForceCl
             type="button"
             data-confirm-force-close-go
             onClick={onConfirm}
-            className="cursor-pointer rounded-[var(--radius-sm)] border border-danger px-2 py-1 text-[11.5px] text-danger hover:bg-danger hover:text-canvas"
+            className="cursor-pointer rounded-[var(--radius-sm)] border border-danger px-2 py-1 text-[11.5px] text-danger hover:bg-danger hover:text-ground"
           >
             Kill anyway
           </button>

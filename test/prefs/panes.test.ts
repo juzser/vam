@@ -12,7 +12,6 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  ALL_VISIBLE,
   clampPaneWidth,
   DEFAULT_PANES,
   DETAIL_MAX,
@@ -164,7 +163,7 @@ describe('a width stored under the old cap survives the read', () => {
 
   it('renders the detail pane as everything the sidebar leaves, regardless of what was stored', () => {
     const prefs = readPrefs(storageHolding({ panes: { sidebar: 264, detail: 900 } }));
-    const { detail } = layoutWidths(ALL_VISIBLE, prefs.panes, 1400);
+    const { detail } = layoutWidths(prefs.panes, 1400);
     // The stored 900 (or the old 640 ceiling before it) never bound this —
     // the detail pane has no stored width of its own to be capped at; it is
     // the viewport minus the sidebar.
@@ -176,10 +175,10 @@ describe('a width stored under the old cap survives the read', () => {
  * The two columns must always add up to exactly the window, at every width
  * either pane is stored at.
  *
- * Visibility (a pane hidden entirely) is its own file —
- * `test/prefs/pane-visibility.test.ts` — matching the split the arithmetic
- * itself already had before this migration: this file is `ALL_VISIBLE`
- * throughout.
+ * Visibility (a pane hidden entirely) used to be its own file and its own
+ * argument to `layoutWidths`. Both are gone with the settings section that
+ * was the only way to hide a pane: both panes are always drawn, so the two
+ * width numbers below are the whole of the layout.
  */
 describe('the two columns always add up to the viewport', () => {
   const LAPTOPS = [520, 700, 900, 1280, 1366, 1400, 1440, 1512, 1728, 2560];
@@ -187,7 +186,6 @@ describe('the two columns always add up to the viewport', () => {
   it('sums to the viewport at every laptop width, with the sidebar stored wide', () => {
     for (const viewport of LAPTOPS) {
       const { sidebar, detail } = layoutWidths(
-        ALL_VISIBLE,
         { sidebar: DEFAULT_PANES.sidebar, detail: 4000 },
         viewport,
       );
@@ -199,15 +197,26 @@ describe('the two columns always add up to the viewport', () => {
 
   it('commits the width the drag proposed, rather than snapping back', () => {
     for (const proposed of [220, 264, 300, 360]) {
-      const drawn = layoutWidths(ALL_VISIBLE, { sidebar: proposed, detail: 408 }, 1400).sidebar;
+      const drawn = layoutWidths({ sidebar: proposed, detail: 408 }, 1400).sidebar;
       expect(drawn, `${proposed}`).toBe(proposed);
     }
+  });
+
+  it('is total: garbage stored widths land on the pane defaults, never NaN', () => {
+    // Carried over from the retired `pane-visibility.test.ts`: it was never
+    // about visibility, and a stored width can still be any of these.
+    const { sidebar, detail } = layoutWidths(
+      { sidebar: Number.NaN, detail: Number.POSITIVE_INFINITY },
+      1200,
+    );
+    expect(sidebar).toBe(DEFAULT_PANES.sidebar);
+    expect(Number.isFinite(detail)).toBe(true);
   });
 
   it('prices the sidebar against a width it could actually be drawn at', () => {
     // A hand-edited sidebar past its own MAX must not starve the detail pane
     // of more room than the sidebar could ever really occupy.
-    const { sidebar, detail } = layoutWidths(ALL_VISIBLE, { sidebar: 4000, detail: 4000 }, 1400);
+    const { sidebar, detail } = layoutWidths({ sidebar: 4000, detail: 4000 }, 1400);
     expect(sidebar).toBe(SIDEBAR_MAX);
     expect(detail).toBe(1400 - SIDEBAR_MAX);
   });

@@ -21,10 +21,8 @@ import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PaneResizer, type PaneResizerProps } from '../../src/renderer/panels/PaneResizer.js';
 import {
-  ALL_VISIBLE,
   PANE_RESIZE_STEP,
   type Pane,
-  type PaneVisibility,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
 } from '../../src/renderer/prefs/panes.js';
@@ -33,17 +31,12 @@ afterEach(cleanup);
 
 function noop() {}
 
-function renderHandle(
-  pane: Pane,
-  onCommit: PaneResizerProps['onCommit'],
-  layout: PaneVisibility = ALL_VISIBLE,
-) {
+function renderHandle(pane: Pane, onCommit: PaneResizerProps['onCommit']) {
   const label = pane === 'sidebar' ? 'resize sessions panel' : 'resize detail panel';
   render(
     <PaneResizer
       pane={pane}
       ariaLabel={label}
-      layout={layout}
       stored={{ sidebar: 264, detail: 408 }}
       viewportWidth={1400}
       onChange={noop}
@@ -62,7 +55,6 @@ function ControlledResizer() {
     <PaneResizer
       pane="sidebar"
       ariaLabel="resize sessions panel"
-      layout={ALL_VISIBLE}
       stored={{ sidebar, detail: 408 }}
       viewportWidth={1400}
       onChange={noop}

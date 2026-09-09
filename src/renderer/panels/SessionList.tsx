@@ -1394,7 +1394,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               {activeFilters > 0 && (
                 <span
                   data-filter-badge
-                  className="-top-1 -right-1 absolute flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-filter-badge px-[3px] font-mono text-[8.5px] text-canvas"
+                  className="-top-1 -right-1 absolute flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-filter-badge px-[3px] font-mono text-[8.5px] text-ground"
                 >
                   {activeFilters}
                 </span>
@@ -1432,7 +1432,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     aria-pressed={on}
                     onClick={() => onStatusFilter(key)}
                     className={[
-                      'cursor-pointer rounded-full border bg-canvas px-2.5 py-1 font-mono text-[10px]',
+                      'cursor-pointer rounded-full border bg-ground px-2.5 py-1 font-mono text-[10px]',
                       on
                         ? 'border-line-loud bg-raised text-ink'
                         : loud
