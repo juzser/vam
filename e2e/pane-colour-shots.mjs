@@ -41,9 +41,14 @@
  * version of this file found three vacuous guards, the worst of which was:
  * delete `--vam-pane` from the stylesheet and the pane AND every band inside
  * it go transparent together, so "the band matches the pane" passes on two
- * absences. A relative comparison cannot see a token that does not exist.
- * `opaquePair` below is the answer, and nothing here compares two colours
- * without going through it.
+ * absences. A relative comparison cannot see a token that does not exist, so
+ * `window.vamColour.opaque` gates every comparison here and each check carries
+ * `bothOpaque` in its own failure detail. Falsified rather than argued:
+ * deleting `--vam-pane` from both theme blocks reddens 24 assertions, the
+ * "band is the pane's own colour" pair among them.
+ *
+ * AND EVERY SWEEP REPORTS ITS CORPUS. Four guards in this repo have gone green
+ * having examined zero elements, so the count is asserted rather than printed.
  *
  * Run by hand, or by `e2e/run-web-guards.mjs`:
  *   node e2e/pane-colour-shots.mjs http://localhost:5526 docs/ui
