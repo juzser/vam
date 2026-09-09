@@ -122,11 +122,25 @@ check(
 // AT EACH TURN'S OWN OFFSET, not at fractions of the scroll height: a fraction
 // lands in the hand-off between two turns as often as not, where the outgoing
 // prompt is halfway out of the frame and BOTH answers are right.
+//
+// PAST ITS START, AND THAT IS THE WHOLE OF WHAT MAKES THIS A STICKY TEST.
+// Measured by falsification: probing at a turn's own start, `position: sticky`
+// could be deleted outright and every check below still passed -- at that
+// offset the prompt is the article's first element and sits at the column's top
+// edge because of ordinary flow, not because anything pinned it. `into` scrolls
+// far enough that an unpinned prompt has left the frame and its answer owns the
+// top edge, while the turn still owns it: a quarter of the turn, and never so
+// far that the article has less left than the prompt is tall.
 const turnOffsets = await column.evaluate((el) =>
-  [...el.querySelectorAll('[data-column-turn]')].map((a) => ({
-    id: a.getAttribute('data-column-turn'),
-    top: a.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop,
-  })),
+  [...el.querySelectorAll('[data-column-turn]')].map((a) => {
+    const box = a.getBoundingClientRect();
+    const top = box.top - el.getBoundingClientRect().top + el.scrollTop;
+    return {
+      id: a.getAttribute('data-column-turn'),
+      top,
+      into: Math.max(12, Math.min(24, Math.floor(box.height * 0.25))),
+    };
+  }),
 );
 async function pinnedAt(scrollTop) {
   await column.evaluate((el, top) => {
@@ -167,11 +181,14 @@ let walked = 0;
 for (const turn of turnOffsets) {
   // A turn whose start is past the column's own maximum scroll can never own
   // the top edge, so it is not evidence either way.
-  if (turn.top > maxScroll) continue;
+  if (turn.top + turn.into > maxScroll) continue;
   walked += 1;
-  const at = await pinnedAt(turn.top);
+  const at = await pinnedAt(turn.top + turn.into);
   seenPinned.add(at.pinned);
-  console.log(`  at turn ${turn.id} (scrollTop ${Math.round(turn.top)}): pinned ${at.pinned}`);
+  console.log(
+    `  ${turn.into}px into turn ${turn.id} (scrollTop ${Math.round(turn.top + turn.into)}): ` +
+      `pinned ${at.pinned}`,
+  );
   check(
     `inside turn ${turn.id}, the pinned prompt is that turn's`,
     at.owner === turn.id && at.pinned === turn.id && at.pinnedIsIn,

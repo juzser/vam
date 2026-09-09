@@ -131,9 +131,15 @@ async function assertSticksWhileScrolling(label) {
    */
   const at = await column.evaluate((el) => {
     const article = el.querySelectorAll('[data-column-turn]')[2];
-    const top = article.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
-    el.scrollTop = top;
-    return { asked: Math.round(top), got: Math.round(el.scrollTop) };
+    const box = article.getBoundingClientRect();
+    const top = box.top - el.getBoundingClientRect().top + el.scrollTop;
+    // PAST ITS START. At a turn's exact start the prompt is at the column's top
+    // edge by ordinary flow, so the check below passed with `position: sticky`
+    // deleted -- falsified, and this is the fix. A quarter of the way in, only
+    // a pinned prompt is still up there.
+    const into = Math.max(12, Math.min(24, Math.floor(box.height * 0.25)));
+    el.scrollTop = top + into;
+    return { asked: Math.round(top + into), got: Math.round(el.scrollTop), into };
   });
   await page.waitForTimeout(200);
   // WHAT IS PAINTED at the column's top edge, not what merely overlaps it:
@@ -164,7 +170,7 @@ async function assertSticksWhileScrolling(label) {
   if (at.got <= 0) throw new Error(`${label}: the column did not scroll at all`);
   if (pinned.region !== 'in') {
     throw new Error(
-      `${label}: at the third turn's own start the top of the column paints ` +
+      `${label}: a quarter of the way into the third turn the top of the column paints ` +
         `"${pinned.region}", not a prompt — nothing stuck, it all scrolled away.`,
     );
   }
