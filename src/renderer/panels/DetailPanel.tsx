@@ -60,8 +60,6 @@
 import {
   ArrowUp,
   Box,
-  ChevronDown,
-  ChevronRight,
   ChevronsDown,
   ChevronsUp,
   CircleSlash,
@@ -2256,9 +2254,16 @@ const TurnBlock = memo(function TurnBlock({
           quietly became `none` (or stayed the unresolvable `45%`, which
           `getComputedStyle` cheerfully reports back verbatim) is exactly the
           shape of bug a class-name assertion cannot see. */}
+      {/* FULL-BLEED TO BOTH PANE EDGES, which is two different numbers since
+          the column reserved its right-hand strip for the floating jumps:
+          `-ml-3.5` gives back the column's left padding, `-mr-11` gives back
+          that strip, and each side's padding puts the content back. The GROUND
+          has to reach both edges or the transcript shows through beside the
+          pinned prompt; the CONTENT must not reach the right one, or the
+          bubble would run under a jump. */}
       <section
         data-detail-block="in"
-        className="-mx-3.5 sticky top-0 z-10 flex max-h-[45cqh] min-h-0 flex-none flex-col gap-1 bg-ground px-3.5 pt-1.5 pb-1.5"
+        className="-ml-3.5 -mr-11 sticky top-0 z-10 flex max-h-[45cqh] min-h-0 flex-none flex-col gap-1 bg-ground pt-1.5 pr-11 pb-1.5 pl-3.5"
       >
         {/* The region's name, announced and not drawn. */}
         <span className="sr-only">in</span>
@@ -2284,11 +2289,20 @@ const TurnBlock = memo(function TurnBlock({
             {/* THE RESERVED CORNER, audit F1's obligation. A float rather than
                 padding because only the FIRST LINE meets the pill: padding
                 would indent all 300 lines of a long prompt to clear something
-                34px tall. Sized off the measured pill (72px at any width, plus
-                what the icon count adds); 6rem covers it with 24px to spare,
-                and the bound is measured by
+                34px tall. The bound is measured by
                 `e2e/narrow-pane-overlay-shots.mjs`, which fails both if the
-                reservation misses the pill and if it runs far past it.
+                reservation misses the pill and if it runs far past it --
+                over-reserving takes the prompt's opening words out for
+                nothing, which is what the deleted identity line's 7rem did.
+
+                66px, DOWN FROM 6rem, AND NOT A TASTE. Measured at five widths,
+                the pill's left edge is 46px past this bubble's content edge
+                now that the column reserves a 44px strip on the right for the
+                floating jumps (see `data-detail-column`) and the bubble ends
+                10px inside it. 66 covers those 46 with the same 20px of slack
+                the 96 carried before the strip existed; leaving it at 96 would
+                have reserved 50px of first line for something already clear,
+                and the guard above would have said so.
 
                 ON EVERY TURN, not only on the pinned one. The pill floats over
                 the top-right corner of the COLUMN, so whichever turn's prompt
@@ -2304,7 +2318,7 @@ const TurnBlock = memo(function TurnBlock({
               <span
                 data-detail-corner-reserve
                 aria-hidden="true"
-                className="float-right h-[22px] w-[6rem]"
+                className="float-right h-[22px] w-[66px]"
               />
             )}
             {decision.input}
@@ -2520,14 +2534,6 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const canvasDecisionId = canvasDecision?.id ?? null;
   const [selectedId, setSelectedId] = useState<string | null>(canvasDecisionId);
-  /**
-   * Whether the condensed progress line is open into its list of turns.
-   * Closed by default: the intermediate work is what an operator scrolls past
-   * to read the answer, so it costs one line until it is asked for. Local to
-   * the pane, and deliberately not reset when the turn changes -- an operator
-   * walking history with the list open wants it to stay open.
-   */
-  const [progressOpen, setProgressOpen] = useState(false);
   const sessionKey = entry?.session.id ?? null;
   const sessionKeyRef = useRef(sessionKey);
   const focusNodeRef = useRef(focusNodeId);
@@ -3423,6 +3429,17 @@ export function DetailPanel(props: DetailPanelProps) {
    * survives with a smaller job (which turn is marked, and which turn the `!`
    * typeahead reads its proposed commands from) and the MOVEMENT is the
    * scroll, applied by the layout effect above.
+   *
+   * ONE CALLER LEFT, and it is deliberate that there is one rather than none.
+   * The turn list and the `<select>` that drove this both went with the
+   * column's bar -- the column draws every turn, so a jump-to-turn control was
+   * a second way to do what the scrollbar does. What still picks a turn is
+   * "Back to the current turn" below, and the CANVAS, which sets the same
+   * state through `followCanvas` during render. The consequence, named rather
+   * than left to be discovered: nothing in this pane can now mark a turn the
+   * canvas cannot reach. Scrolling to one still works, and marking one was
+   * only ever about which turn the `!` typeahead reads -- but it IS a reach
+   * this pane used to have and no longer does.
    */
   const pickTurn = (id: string) => {
     setSelectedId(id);
@@ -3697,41 +3714,71 @@ export function DetailPanel(props: DetailPanelProps) {
           // region that scrolls; `stuckRef`/`isAtBottom` never cared which
           // element they were reading metrics off, only whether it was resting
           // at its own bottom.
+          //
+          // WRAPPED, and the wrapper is the whole of what the floating jumps
+          // need. `position: absolute` inside a scroller is resolved against
+          // its SCROLLED content, so a jump placed on the column itself would
+          // ride the transcript out of the frame; placed on a non-scrolling
+          // box of exactly the same size, it stays at the column's edge at
+          // every offset. The full-bleed pull (`-mx-3.5`, see below) moves up
+          // here with it so the wrapper's box IS the column's box -- an
+          // overlay measured against a box 14px narrower on each side would
+          // sit 14px inside the edge it is meant to hug.
           <div
-            ref={outRef}
-            data-detail-column
-            onScroll={(event) => {
-              stuckRef.current = isAtBottom(event.currentTarget);
-              syncJumps(event.currentTarget);
-            }}
-            /* FULL-BLEED, so the sticky ground inside can be. The pane body
-               puts `px-3.5 py-3` around everything; a scroll column inside
-               that padding can only paint as wide as the padding box, which
-               left a 14px gutter down each side of the pinned prompt with
-               the transcript scrolling past in it, in full view. So the
-               column takes the padding OFF the body (`-mx-3.5`) and puts it
-               back on itself (`px-3.5`): every child lays out exactly where
-               it did, and the ones that ask for it -- every turn's sticky
-               ground, and the navigation bar -- reach the pane's own edges
-               with `-mx-3.5` of their own.
-
-               The TOP is the same move without the give-back: `-mt-3` hands
-               the body's top padding to the column, which re-spends it on the
-               boundary block below. Not when the failed banner is drawn --
-               there IS something above the column then, and pulling up would
-               slide the column under it.
-
-               `container-type:size` IS LOad-BEARING, not decoration: it makes
-               this element the size container the `45cqh` cap on every turn's
-               sticky prompt resolves against. Without it that cap resolves to
-               nothing inside the per-turn wrapper and the pinned prompt can
-               cover the answer again (audit F2). `TurnBlock`'s own comment
-               carries the measurement. */
-            className={`vam-no-scrollbar -mx-3.5 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-3.5 [container-type:size] ${
+            className={`relative -mx-3.5 flex min-h-0 flex-1 flex-col ${
               failedBanner ? '' : '-mt-3'
             }`}
           >
-            {/*
+            <div
+              ref={outRef}
+              data-detail-column
+              onScroll={(event) => {
+                stuckRef.current = isAtBottom(event.currentTarget);
+                syncJumps(event.currentTarget);
+              }}
+              /* FULL-BLEED, so the sticky ground inside can be. The pane body
+                 puts `px-3.5 py-3` around everything; a scroll column inside
+                 that padding can only paint as wide as the padding box, which
+                 left a 14px gutter down each side of the pinned prompt with
+                 the transcript scrolling past in it, in full view. So the
+                 padding comes OFF the body (`-mx-3.5`, on the wrapper above)
+                 and back on here: every child lays out where it did, and the
+                 ones that ask for it -- every turn's sticky ground, and the
+                 boundary block -- reach the pane's own edges with a negative
+                 margin of their own.
+
+                 THE RIGHT SIDE IS 44, NOT 14, AND THAT IS THE JUMPS' RENT.
+                 They float over this column, and MEASURED over the demo
+                 session at five widths and fifteen offsets each, the answer
+                 text runs to the column's content edge at every one of them
+                 (rightmost run x=1107 of 1135, 790 of 835, 538 of 555, 421 of
+                 435, 375 of 389 -- always the padding box, exactly). So there
+                 is no corner a control can float in without covering
+                 somebody's sentence, and the only honest way to float one is
+                 to reserve the strip it lands in. Reserved UNCONDITIONALLY,
+                 not while a jump happens to be drawn: a reservation that came
+                 and went with the scroll offset would re-wrap every paragraph
+                 in the pane under the reader's eye, which is the same
+                 objection `TurnBlock`'s corner reserve already answers. 44 is
+                 the touch floor the buttons have to meet anyway (WCAG 2.2 SC
+                 2.5.5, `PhoneShell.tsx`), so the strip is exactly one hit box
+                 wide and not a pixel more.
+
+                 The TOP is the same move without the give-back: `-mt-3` (on
+                 the wrapper) hands the body's top padding to the column, which
+                 re-spends it on the boundary block below. Not when the failed
+                 banner is drawn -- there IS something above the column then,
+                 and pulling up would slide the column under it.
+
+                 `container-type:size` IS LOad-BEARING, not decoration: it
+                 makes this element the size container the `45cqh` cap on every
+                 turn's sticky prompt resolves against. Without it that cap
+                 resolves to nothing inside the per-turn wrapper and the pinned
+                 prompt can cover the answer again (audit F2). `TurnBlock`'s
+                 own comment carries the measurement. */
+              className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-3.5 pr-11 [container-type:size]"
+            >
+              {/*
               WHAT THE TOP OF THE COLUMN IS — said, not left to be inferred.
 
               THE REPO'S DOMINANT DEFECT FAMILY, at the one place it bites
@@ -3776,7 +3823,7 @@ export function DetailPanel(props: DetailPanelProps) {
               nothing else in the column has to change — the column already
               renders whatever `orderedTurns` holds, oldest first.
             */}
-            {/* THE RESERVED CORNER, audit F1's obligation, inherited by
+              {/* THE RESERVED CORNER, audit F1's obligation, inherited by
                 whatever sits at the top of the column: at scrollTop 0 that is
                 this block, and the view-icon pill is opaque. The prompt
                 bubbles discharge it with a float (only their first line meets
@@ -3785,9 +3832,9 @@ export function DetailPanel(props: DetailPanelProps) {
                 and the same reason as the float. Only while the overlay is
                 drawn -- an unfocused pane paints no pill, and reserving for
                 one would notch every pane the operator is not in. */}
-            <div
-              data-column-start="read-limit"
-              /* 11.5px, NOT the 10.5px of the turn lines this block's facts
+              <div
+                data-column-start="read-limit"
+                /* 11.5px, NOT the 10.5px of the turn lines this block's facts
                  came off. The operator has twice asked for small type to come
                  up a pixel, and a repo-wide bump is its own task (198 literals,
                  18 files, no type scale to change in one place) -- so a NEW
@@ -3795,36 +3842,43 @@ export function DetailPanel(props: DetailPanelProps) {
                  than adding one more literal below the floor. The turn lines
                  and the bar below keep 10.5 because they are the existing
                  progress line, moved, not new type. */
-              className={`-mx-3.5 flex flex-none flex-col gap-0.5 px-3.5 pt-3 pb-1 font-mono text-[11.5px] text-ink-faint ${
-                cornerOverlay ? 'pr-[6rem]' : ''
-              }`}
-            >
-              <div className="flex items-center gap-1.5">
-                {/* "read", not a bare count: only the newest `TAIL_BYTES` is
+                /* Full-bleed to BOTH pane edges, which now means two different
+                 numbers: `-ml-3.5` gives back the column's left padding and
+                 `-mr-11` gives back the jump gutter, so this block's own
+                 padding puts its text exactly where the column's content box
+                 is. One `-mx-3.5` would leave it 30px short of the right edge
+                 -- invisible here, since this block paints no ground, and a
+                 trap for whoever gives it one. */
+                className={`-ml-3.5 -mr-11 flex flex-none flex-col gap-0.5 pt-3 pb-1 pl-3.5 font-mono text-[11.5px] text-ink-faint ${
+                  cornerOverlay ? 'pr-[6rem]' : 'pr-11'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  {/* "read", not a bare count: only the newest `TAIL_BYTES` is
                     ever opened, so on a session bigger than that window this
                     is what vam FOUND, not a provable total for the session's
                     whole life. Trailing, not leading: "read 7 turns" is an
                     imperative -- a command this line does not carry out --
                     while "7 turns read" is what it actually is, a count with
                     its qualifier attached. */}
-                <span data-progress-count>{turnsRead} turns read</span>
-                {/* THE FOLD MAY COST DETAIL, NEVER ALARM. Every turn carries
+                  <span data-progress-count>{turnsRead} turns read</span>
+                  {/* THE FOLD MAY COST DETAIL, NEVER ALARM. Every turn carries
                     its own `· N failed` on its own line below; this is the
                     total across the window, beside the count of that same
                     window, which is what lets the two share a line honestly.
                     `null` is "no turn read can report failures at all" and
                     draws nothing -- a confident "0 failed" over data nobody
                     looked at is the same lie as a false badge. */}
-                {failedRead !== null && failedRead > 0 && (
-                  <span data-column-failed className="text-failed">
-                    · {failedRead} failed
-                  </span>
-                )}
-              </div>
-              <p data-column-start-note className="text-ink-faint leading-[1.5]">
-                This is as far back as vam has read — not necessarily where the session began.
-              </p>
-              {/* THE PICK IS GONE, BUT NOT THE ANSWER TO IT. A turn can fall
+                  {failedRead !== null && failedRead > 0 && (
+                    <span data-column-failed className="text-failed">
+                      · {failedRead} failed
+                    </span>
+                  )}
+                </div>
+                <p data-column-start-note className="text-ink-faint leading-[1.5]">
+                  This is as far back as vam has read — not necessarily where the session began.
+                </p>
+                {/* THE PICK IS GONE, BUT NOT THE ANSWER TO IT. A turn can fall
                   out of the window between one poll and the next; falling
                   through to some other turn would look identical to the
                   operator to having actually read the one they asked for.
@@ -3832,195 +3886,145 @@ export function DetailPanel(props: DetailPanelProps) {
                   rather than in place of the column: the rest of the session
                   is still there to read, and hiding it to print one sentence
                   was the old single-turn pane's constraint, not a rule. */}
-              {selectedTurnMissing && (
-                /* No size of its own: it inherits the block's, which is the
+                {selectedTurnMissing && (
+                  /* No size of its own: it inherits the block's, which is the
                    right size for it and one literal fewer to keep in step. */
-                <p data-progress-turn-missing className="text-ink-faint leading-[1.5]">
-                  The turn you were reading has scrolled out of what vam can see.{' '}
-                  <button
-                    type="button"
-                    data-progress-turn-return
-                    onClick={() => {
-                      setSelectedId(canvasDecisionId);
-                      if (canvasDecisionId !== null) scrollToTurnRef.current = canvasDecisionId;
-                    }}
-                    className="cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
-                  >
-                    Back to the current turn
-                  </button>
-                </p>
-              )}
-            </div>
+                  <p data-progress-turn-missing className="text-ink-faint leading-[1.5]">
+                    The turn you were reading has scrolled out of what vam can see.{' '}
+                    <button
+                      type="button"
+                      data-progress-turn-return
+                      onClick={() => {
+                        if (canvasDecisionId === null) setSelectedId(null);
+                        else pickTurn(canvasDecisionId);
+                      }}
+                      className="cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
+                    >
+                      Back to the current turn
+                    </button>
+                  </p>
+                )}
+              </div>
 
-            {/* EVERY TURN, OLDEST FIRST. `decisions` arrives newest first
+              {/* EVERY TURN, OLDEST FIRST. `decisions` arrives newest first
                 (model.ts); reversed here so the newest lands at the bottom,
                 where a conversation's newest line belongs and where the column
                 opens. Keyed by the turn's own content-derived id
                 (`transcript.ts`), so a poll that appends a turn does not
                 remount the ones already on screen -- which at 3,276 turns is
                 the difference between a scroll and a freeze. */}
-            {orderedTurns.map((d) => (
-              <TurnBlock
-                key={d.id}
-                decision={d}
-                marked={d.id === markedId}
-                newest={d.id === newestId}
-                live={d.id === newestId && sessionRunning}
-                /* `session.activity` and `waitingFor` describe the present, so
+              {orderedTurns.map((d) => (
+                <TurnBlock
+                  key={d.id}
+                  decision={d}
+                  marked={d.id === markedId}
+                  newest={d.id === newestId}
+                  live={d.id === newestId && sessionRunning}
+                  /* `session.activity` and `waitingFor` describe the present, so
                    they are handed to the newest turn and to no other -- on an
                    older turn they described the present while the operator
                    read the past. Passed as `null` elsewhere rather than gated
                    at the call site so the block has one rule to follow. */
-                activity={d.id === newestId ? (entry?.session.activity ?? null) : null}
-                waitingCause={d.id === newestId ? waitingCause : null}
-                age={d.id === newestId ? liveAge : null}
-                status={entry?.session.status ?? null}
-                reserveCorner={cornerOverlay}
-              />
-            ))}
+                  activity={d.id === newestId ? (entry?.session.activity ?? null) : null}
+                  waitingCause={d.id === newestId ? waitingCause : null}
+                  age={d.id === newestId ? liveAge : null}
+                  status={entry?.session.status ?? null}
+                  reserveCorner={cornerOverlay}
+                />
+              ))}
+            </div>
+            {/* THE JUMPS, FLOATING OVER THE COLUMN — what is left of the bar
+                that used to hold them, and of two more controls that went with
+                it (the turn-list chevron, and the `<select>` that jumped to a
+                turn; the column draws every turn, so both were a second way to
+                do what the scrollbar does).
 
-            {/* THE COLUMN'S OWN BAR, pinned to its bottom.
-                It is what is left of the single condensed progress line once
-                the per-turn facts moved onto the turns and the window's facts
-                moved to the boundary above: navigation, and nothing else.
+                THE OPERATOR'S REPORT WAS THE STRIP, not the buttons: a
+                `bg-ground` band across the pane's full width, drawn on every
+                session whether or not either glyph in it was, eating a row of
+                the transcript to say nothing. Gone. What is left is the two
+                controls, at the two edges they take you to.
 
-                STICKY AT THE BOTTOM, not at the top, and not in the flow. The
-                jumps and the picker are what an operator reaches for while
-                scrolled far up -- having to scroll back down to find the
-                control that scrolls you back down is a circle -- and the top
-                is already spoken for by the pinned prompt, which is the whole
-                feature. In flow at the end of the column, so at maximum scroll
-                it sits BELOW the newest answer rather than over it. */}
+                WHY THEY CAN LIVE HERE AT ALL. The bar was sticky at the BOTTOM
+                and argued for it: an operator scrolled far up must not have to
+                scroll back down to find the control that scrolls them back
+                down -- a circle. That argument survives its bar and is what
+                `absolute` discharges now: each jump is pinned to the column's
+                own edge at every offset, so neither can ever be scrolled away
+                from. What does NOT survive is the rest of it -- the top being
+                "spoken for by the pinned prompt" was true of a band that would
+                have covered it; a 28px chip in a reserved 44px gutter covers
+                no part of it (see the column's `pr-11`).
+
+                DRAWN ONLY WHILE IT WOULD MOVE THE COLUMN, the rule the bar
+                already got right and the reason this is not two permanent
+                chips: `hasContentAbove`/`hasContentBelow` (`stick-to-bottom.ts`)
+                share their slack with the stick rule, so the pane never offers
+                a jump to where it already is. That rule is also the whole of
+                "appear when scrolling": at rest at the bottom -- where a
+                session opens -- there is nothing above, so nothing is drawn,
+                and the first scroll is what brings them.
+
+                AND NO IDLE FADE. Fading a control out after a moment reads
+                well and cannot be built honestly here: mid-transition a button
+                is either half-painted and still clickable or fully painted and
+                already inert, and both are the state this pane must never
+                have. It is also the circle again -- a reader who stops to read
+                loses the control that takes them back. So a jump is either
+                there, at full opacity and hit-testable, or it is not in the
+                DOM.
+
+                `pointer-events-none` on the layer, restored on each button:
+                the layer spans the column's whole height, and a transparent
+                sheet over a transcript would swallow the selection the pane
+                exists to allow (`select-text` on the body). */}
             <div
-              data-column-bar
-              className="-mx-3.5 sticky bottom-0 z-20 flex flex-none flex-col gap-1 bg-ground px-3.5 pt-1 pb-3"
+              data-column-jumps
+              className="pointer-events-none absolute inset-y-0 right-0 z-30 w-11"
             >
-              {/* At volume this costs one node per turn, the same as the
-                  `<select>`'s options. The difference is that these are only
-                  here while the operator asked for them.
-
-                  CAPPED AGAINST THE COLUMN, not at a fixed 132px, which is what
-                  it was while it sat inline in the flow and could only ever
-                  push the turn down. It floats over the column now, so at a
-                  short pane 132px WAS the column: measured at a 460px viewport,
-                  the open list covered the pinned prompt entirely and the top
-                  of the transcript painted a list row. `cqh` resolves against
-                  the column (its `container-type: size`), so the list takes a
-                  share of the height rather than a number of pixels the pane
-                  may not have. */}
-              {progressOpen && (
-                <ul
-                  data-progress-turns
-                  className="vam-no-scrollbar max-h-[40cqh] min-h-0 overflow-y-auto"
+              {/* BELOW THE RESERVED CORNER (audit F1), not beside it. The
+                  view-icon pill is opaque and floats at the pane's top right;
+                  measured at five widths it occupies the column's own y 8-42,
+                  x width-100 to width-10 -- so a jump at the column's top right
+                  would sit under it. `top-12` starts this one 48px down, 6px
+                  clear of the pill's bottom edge, and it is a CONSTANT: the
+                  pill is drawn only on a focused pane, and a control that moved
+                  when the operator clicked a different pane would be a control
+                  they had to look for. */}
+              {jumps.above && (
+                <button
+                  type="button"
+                  data-out-to-top
+                  aria-label="scroll to the oldest turn read"
+                  onClick={() => jumpTo('top')}
+                  /* THE HIT IS 44, THE PAINT IS 28 -- `PhoneShell.tsx`'s own
+                     bargain, for the same reason and on the same screen: the
+                     44 box is WCAG 2.2 SC 2.5.5 and this pane is the phone's
+                     session screen, while a ground painted on all 44 of it
+                     would put a slab over the transcript. */
+                  className="pointer-events-auto absolute top-12 right-0 flex h-11 w-11 cursor-pointer items-center justify-center"
                 >
-                  {orderedTurns.map((d) => (
-                    <li key={d.id}>
-                      <button
-                        type="button"
-                        data-progress-turn
-                        aria-current={d.id === markedId ? 'true' : undefined}
-                        onClick={() => pickTurn(d.id)}
-                        className={[
-                          'flex w-full cursor-pointer items-center gap-1.5 rounded-[var(--radius-sm)] px-1 py-0.5 text-left font-mono text-[10.5px] hover:bg-raised hover:text-ink',
-                          d.id === markedId ? 'bg-raised text-ink' : 'text-ink-faint',
-                        ].join(' ')}
-                      >
-                        {/* Answered, still open, or carrying a failure -- the
-                            same marks the turn's own line draws, from the same
-                            function. Decorative, so hidden: the label is what
-                            a screen reader should read. */}
-                        <span
-                          aria-hidden="true"
-                          className={(d.errorCount ?? 0) > 0 ? 'text-failed' : undefined}
-                        >
-                          {turnMark(d)}
-                        </span>
-                        <span className="min-w-0 truncate">{d.label}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-panel text-ink-dim shadow-sm hover:bg-raised hover:text-ink">
+                    <ChevronsUp size={14} strokeWidth={1.8} />
+                  </span>
+                </button>
               )}
-              <div className="flex items-center gap-1.5 font-mono text-[10.5px] text-ink-faint">
-                {orderedTurns.length > 1 && (
-                  <button
-                    type="button"
-                    data-progress-expand
-                    aria-expanded={progressOpen}
-                    aria-label={progressOpen ? 'collapse the turn list' : 'expand the turn list'}
-                    onClick={() => setProgressOpen((open) => !open)}
-                    className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
-                  >
-                    {progressOpen ? (
-                      <ChevronDown size={12} strokeWidth={1.8} />
-                    ) : (
-                      <ChevronRight size={12} strokeWidth={1.8} />
-                    )}
-                  </button>
-                )}
-                {/* ONE PICKER AT A TIME. The `<select>` is the condensed form
-                    and the list above is the open one; they drive the same
-                    `pickTurn` off the same turns, and drawing both would be
-                    two controls for one job -- which is how they come to
-                    disagree.
-                    `value` is the MARKED turn, and `''` when the pick has
-                    fallen out of the window: a `<select>` handed a value no
-                    option carries paints its first option instead, which would
-                    put a turn's label on screen as the one being read while
-                    the boundary above says that turn cannot be found. */}
-                {!progressOpen && orderedTurns.length > 1 && (
-                  <select
-                    data-progress-jump
-                    aria-label="jump to a turn"
-                    value={markedId ?? ''}
-                    onChange={(event) => pickTurn(event.target.value)}
-                    className="max-w-[130px] cursor-pointer truncate rounded-[var(--radius-sm)] border border-line-strong bg-panel px-1 py-0.5 font-mono text-[10.5px] text-ink-faint outline-none hover:text-ink"
-                  >
-                    {/* Drawn only while the pick is missing, and never
-                        selectable back into: it exists so the control can
-                        represent the state the boundary above describes
-                        instead of silently pointing at somebody else's turn. */}
-                    {markedId === null && (
-                      <option value="" disabled>
-                        — turn not in view —
-                      </option>
-                    )}
-                    {orderedTurns.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {turnMark(d)} {d.label}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <span className="flex-1" />
-                {/* The scroll-to-edge buttons. Each is drawn only while it
-                    would actually move the column -- a control that scrolls
-                    nowhere is worse than no control. "Top" now means the
-                    oldest turn vam read, which is what the boundary block up
-                    there says it is. */}
-                {jumps.above && (
-                  <button
-                    type="button"
-                    data-out-to-top
-                    aria-label="scroll to the oldest turn read"
-                    onClick={() => jumpTo('top')}
-                    className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
-                  >
-                    <ChevronsUp size={12} strokeWidth={1.8} />
-                  </button>
-                )}
-                {jumps.below && (
-                  <button
-                    type="button"
-                    data-out-to-bottom
-                    aria-label="scroll to the newest turn"
-                    onClick={() => jumpTo('bottom')}
-                    className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
-                  >
-                    <ChevronsDown size={12} strokeWidth={1.8} />
-                  </button>
-                )}
-              </div>
+              {/* At the bottom edge, where the newest turn is. `bottom-1`
+                  rather than flush, so the chip is not cut by the pane's own
+                  seam with the composer below it. */}
+              {jumps.below && (
+                <button
+                  type="button"
+                  data-out-to-bottom
+                  aria-label="scroll to the newest turn"
+                  onClick={() => jumpTo('bottom')}
+                  className="pointer-events-auto absolute right-0 bottom-1 flex h-11 w-11 cursor-pointer items-center justify-center"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-panel text-ink-dim shadow-sm hover:bg-raised hover:text-ink">
+                    <ChevronsDown size={14} strokeWidth={1.8} />
+                  </span>
+                </button>
+              )}
             </div>
           </div>
         )}

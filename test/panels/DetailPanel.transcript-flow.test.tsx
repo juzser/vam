@@ -141,16 +141,21 @@ describe('what the in rule carried survives its removal', () => {
    * selected, and the expanded list prints them as rows. So the case keeps
    * its subject -- where the turn's own label lives -- and follows it to the
    * control that actually carries it.
+   *
+   * FOLLOWED AGAIN, for the same reason and to the same subject: the picker
+   * has now gone with the column's bar, and the label's home is the turn's OWN
+   * condensed line -- one per turn, drawn beside the turn it names, which is
+   * where the picker was only ever a proxy for.
    */
-  it('drops the identity line, and the turn label survives in the picker', () => {
+  it('drops the identity line, and the turn label survives on the turn itself', () => {
     draw({ decision: TURNS[2] as Decision });
     expect(q('[data-detail-identity]')).toBeNull();
     expect(q('[data-detail-turn]')).toBeNull();
-    // Not "somewhere in the pane": the SELECTED option, which is what is
-    // painted on the collapsed line the operator actually sees.
-    const jump = q<HTMLSelectElement>('[data-progress-jump]');
-    expect(jump).not.toBeNull();
-    expect(jump?.selectedOptions[0]?.textContent).toContain('step d5');
+    // Not "somewhere in the pane": on the MARKED turn's own line, which is
+    // what the operator is looking at.
+    const marked = q<HTMLElement>('[data-column-turn][data-turn-current="true"]');
+    expect(marked).not.toBeNull();
+    expect(marked?.querySelector('[data-progress-turn-label]')?.textContent).toContain('step d5');
     // The sidebar's facts stayed out, and the session's age never became a
     // caption on a turn that cannot be dated.
     const block = q<HTMLElement>('[data-detail-block="in"]')?.textContent ?? '';
@@ -179,7 +184,7 @@ describe('what the out rule carried survives its removal', () => {
     expect(q('[data-column-turn][data-turn-current="true"] [data-progress-activity]')).toBeNull();
   });
 
-  it('keeps both scroll-to-edge buttons, in the one row of chrome that is left', () => {
+  it('floats both scroll-to-edge buttons over the column, with no band left', () => {
     draw();
     const column = q<HTMLElement>('[data-detail-column]') as HTMLElement;
     // happy-dom lays nothing out, so the metrics `syncJumps` reads are faked
@@ -188,61 +193,90 @@ describe('what the out rule carried survives its removal', () => {
     Object.defineProperty(column, 'clientHeight', { value: 100, configurable: true });
     column.scrollTop = 0;
     fireEvent.scroll(column);
-    // IN THE COLUMN'S OWN BAR. The jumps moved out of the per-turn line with
-    // the column: they are about the whole column, not about one turn, and
-    // they have to stay reachable from wherever the operator scrolled to --
-    // which a control inside a turn that scrolled off the top is not.
-    expect(q('[data-column-bar] [data-out-to-bottom]')).not.toBeNull();
+    // THE BAND IS GONE, and its absence is the operator's actual report: a
+    // `bg-ground` strip across the pane's whole width, drawn on every session
+    // whether or not either glyph in it was.
+    expect(q('[data-column-bar]')).toBeNull();
+    const bottom = q<HTMLElement>('[data-out-to-bottom]');
+    expect(bottom).not.toBeNull();
+    // OVER THE COLUMN, NOT INSIDE IT. A control in the scroller's own flow
+    // either scrolls away or bands the pane to stay; this one is a sibling of
+    // the scroller placed absolutely against the same box, so a jump arriving
+    // or leaving moves no line of the transcript.
+    expect(bottom?.closest('[data-detail-column]')).toBeNull();
+    expect(q('[data-column-jumps]')?.className).toContain('absolute');
     // Only the jump that would actually move: a control that scrolls nowhere
-    // is worse than no control, and that rule outlives the rule it sat on.
+    // is worse than no control, and that rule outlives the bar it sat in.
     expect(q('[data-out-to-top]')).toBeNull();
+  });
+
+  it('gives each jump a 44px hit box with a smaller skin painted inside it', () => {
+    draw();
+    const column = q<HTMLElement>('[data-detail-column]') as HTMLElement;
+    Object.defineProperty(column, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(column, 'clientHeight', { value: 100, configurable: true });
+    column.scrollTop = 500;
+    fireEvent.scroll(column);
+    for (const sel of ['[data-out-to-top]', '[data-out-to-bottom]']) {
+      const hit = q<HTMLElement>(sel);
+      // THE HIT IS 44 (WCAG 2.2 SC 2.5.5, and `PhoneShell.tsx`'s own floor):
+      // this pane is drawn on the phone too, where these are thumbs.
+      expect(hit?.className, sel).toContain('h-11');
+      expect(hit?.className, sel).toContain('w-11');
+      // AND THE PAINT IS SMALLER, drawn on a child rather than on the 44 box.
+      // A ground painted on the hit box is what makes a phone control read as
+      // a slab (`PhoneShell.tsx`, 44 hit / 30 paint), and this one floats over
+      // somebody's transcript.
+      const skin = hit?.firstElementChild as HTMLElement | null | undefined;
+      expect(skin?.className, sel).toContain('rounded-full');
+      expect(skin?.className, sel).toContain('h-7');
+      expect(hit?.className, sel).not.toContain('rounded-full');
+    }
   });
 });
 
-describe('progress condenses into one line you can expand', () => {
-  it('starts collapsed: the count, the picker, and no list of turns', () => {
+/**
+ * THE TURN PICKER WENT WITH THE BAR — the chevron, the list it opened and the
+ * `<select>` beside it, all three.
+ *
+ * They existed to navigate a pane that drew ONE turn. The column draws every
+ * turn, so "jump to a turn" is a second control for what the scrollbar already
+ * does, and the operator asked for the strip they lived in to go.
+ *
+ * WHAT DID NOT GO IS THE SELECTION MODEL. `selectedId`/`markedId` still say
+ * which turn is being read -- the canvas's step focus drives them, the `!`
+ * typeahead reads its commands off the marked turn, and `data-turn-current`
+ * plus the "turn not in view" state are load-bearing elsewhere. So these cases
+ * follow the model rather than the deleted controls.
+ */
+describe('the turn picker goes with the bar, and the selection model does not', () => {
+  it('draws no expander, no turn list and no jump-to-turn select', () => {
     draw();
-    expect(q<HTMLElement>('[data-progress-count]')?.textContent).toBe('7 turns read');
-    expect(q('[data-progress-jump]')).not.toBeNull();
-    expect(q('[data-progress-turns]')).toBeNull();
-    expect(all('[data-progress-turn]')).toHaveLength(0);
-    expect(q('[data-progress-expand]')?.getAttribute('aria-expanded')).toBe('false');
-  });
-
-  it('opens into every turn, oldest first, marking the one being read', () => {
-    draw();
-    fireEvent.click(q('[data-progress-expand]') as HTMLElement);
-    expect(q('[data-progress-expand]')?.getAttribute('aria-expanded')).toBe('true');
-    const rows = all('[data-progress-turn]');
-    expect(rows).toHaveLength(7);
-    expect(rows[0]?.textContent).toContain('step d1');
-    expect(rows[6]?.textContent).toContain('step d7');
-    // The turn on screen is marked in the list, or the list cannot be read as
-    // a position in history.
-    expect(rows[6]?.getAttribute('aria-current')).toBe('true');
-    expect(rows[0]?.getAttribute('aria-current')).toBeNull();
-    // One picker at a time: the collapsed line's `<select>` and the open list
-    // do the same job, and two controls for one job is how they disagree.
-    expect(q('[data-progress-jump]')).toBeNull();
-  });
-
-  it('draws a turn the canvas never focused when a row is picked', () => {
-    draw();
-    fireEvent.click(q('[data-progress-expand]') as HTMLElement);
-    fireEvent.click(all('[data-progress-turn]')[0] as HTMLElement);
-    expect(q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '').toContain('ask d1');
-  });
-
-  it('offers nothing to expand when there is only one turn', () => {
-    const only = [TURNS[0] as Decision];
-    const session: Session = { ...SESSION, decisions: only };
-    draw({
-      entry: { project: { ...PROJECT, sessions: [session] }, session },
-      decision: only[0] as Decision,
-    });
     expect(q('[data-progress-expand]')).toBeNull();
+    expect(q('[data-progress-turns]')).toBeNull();
     expect(q('[data-progress-jump]')).toBeNull();
-    expect(q<HTMLElement>('[data-progress-count]')?.textContent).toBe('1 turns read');
+    expect(all('[data-progress-turn]')).toHaveLength(0);
+    // Every turn is still drawn: the controls went, not the history they
+    // navigated, which is the whole reason they could go.
+    expect(all('[data-column-turn]')).toHaveLength(7);
+  });
+
+  it('still marks the turn it is reading, and still counts what it read', () => {
+    draw({ decision: TURNS[2] as Decision });
+    const marked = q<HTMLElement>('[data-column-turn][data-turn-current="true"]');
+    expect(marked?.getAttribute('data-column-turn')).toBe('d5');
+    expect(marked?.querySelector('[data-detail-scroll="in"]')?.textContent).toContain('ask d5');
+    expect(q<HTMLElement>('[data-progress-count]')?.textContent).toBe('7 turns read');
+  });
+
+  it("keeps every turn's own label on its own line, where the picker used to print them", () => {
+    draw();
+    const labels = all('[data-progress-turn-label]').map((el) => el.textContent ?? '');
+    expect(labels).toHaveLength(7);
+    // Oldest first, the order the column draws them in and the order the
+    // picker's options were in.
+    expect(labels[0]).toContain('step d1');
+    expect(labels[6]).toContain('step d7');
   });
 });
 
