@@ -21,6 +21,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   adoptOrphans,
+  canDivide,
   closePane,
   detachTab,
   dividerShare,
@@ -353,6 +354,51 @@ describe('dividerShare — the pixel arithmetic a drag does, in one pure place',
     ['an Infinite pair', 300, Number.POSITIVE_INFINITY],
   ])('answers 0.5 rather than NaN for %s', (_label, first, pair) => {
     expect(dividerShare(first as number, pair as number, MIN_PANE_PX)).toBe(0.5);
+  });
+});
+
+/**
+ * A DIVIDER THAT CANNOT MOVE AT ALL is a different state from one that has
+ * merely run into the floor, and the shell has to be able to tell them apart.
+ *
+ * `dividerShare` answers 0.5 for a pair too narrow to hold two minimums,
+ * which is the right ARITHMETIC and the wrong thing to do silently: a handle
+ * that accepts a grab, moves nothing and says nothing teaches the operator
+ * that resizing is broken rather than that the pane is at its floor. This
+ * predicate is what lets the handle withdraw its affordance and refuse aloud
+ * instead ("absent, not dimmed" — the same rule `newTabInPane` follows).
+ */
+describe('canDivide — is there more than one legal position for this divider', () => {
+  it('a pair with room for two minimums and a pixel to spare can move', () => {
+    expect(canDivide(MIN_PANE_PX * 2 + 1, MIN_PANE_PX)).toBe(true);
+    expect(canDivide(1016, MIN_PANE_PX)).toBe(true);
+  });
+
+  it('a pair with room for EXACTLY two minimums cannot — 0.5 is its only position', () => {
+    expect(canDivide(MIN_PANE_PX * 2, MIN_PANE_PX)).toBe(false);
+  });
+
+  it('the four-panes-on-a-laptop case: 508px between two panes that need 320 each', () => {
+    expect(canDivide(508, MIN_PANE_PX)).toBe(false);
+  });
+
+  it.each([
+    ['a zero pair', 0],
+    ['a negative pair', -100],
+    ['NaN', Number.NaN],
+  ])('%s cannot divide, and does not throw', (_label, pair) => {
+    expect(canDivide(pair as number, MIN_PANE_PX)).toBe(false);
+  });
+
+  it('agrees with dividerShare: exactly the pairs it refuses are the ones pinned to 0.5', () => {
+    // Not a restatement — the two are separate functions, and a handle that
+    // withdrew on a different set of pairs than the arithmetic actually
+    // refuses would be lying in one direction or the other.
+    for (const pair of [0, 1, 100, 639, 640, 641, 800, 1016, 4000]) {
+      const pinned =
+        dividerShare(0, pair, MIN_PANE_PX) === 0.5 && dividerShare(pair, pair, MIN_PANE_PX) === 0.5;
+      expect(canDivide(pair, MIN_PANE_PX)).toBe(!pinned);
+    }
   });
 });
 

@@ -43,12 +43,21 @@ function stubRect(element: Element, width: number, height: number) {
  * `parentElement`/`nextElementSibling`, so a harness that nested it any
  * differently would be testing a component that does not exist.
  */
-function mount(props: Partial<React.ComponentProps<typeof SplitResizer>> = {}): {
+function mount(
+  props: Partial<React.ComponentProps<typeof SplitResizer>> = {},
+  /** A pair with no room for two minimums — the four-panes-on-a-laptop case. */
+  extents: { readonly first: number; readonly second: number } = {
+    first: FIRST,
+    second: SECOND,
+  },
+): {
   onResize: ReturnType<typeof vi.fn>;
+  onRefuse: ReturnType<typeof vi.fn>;
   handle: HTMLElement;
   remeasure: () => void;
 } {
   const onResize = vi.fn();
+  const onRefuse = vi.fn();
   const orientation = props.orientation ?? 'row';
   const tree = () => (
     <div data-split>
@@ -60,6 +69,7 @@ function mount(props: Partial<React.ComponentProps<typeof SplitResizer>> = {}): 
           ariaLabel="resize panes 1 and 2"
           share={FIRST / PAIR}
           onResize={onResize}
+          onRefuse={onRefuse}
           {...props}
         />
       </div>
@@ -73,11 +83,11 @@ function mount(props: Partial<React.ComponentProps<typeof SplitResizer>> = {}): 
   // stacks, so it is height. The other axis is given the WRONG number on
   // purpose, so a handle reading the wrong one cannot accidentally agree.
   if (orientation === 'row') {
-    stubRect(first, FIRST, 77);
-    stubRect(second, SECOND, 77);
+    stubRect(first, extents.first, 77);
+    stubRect(second, extents.second, 77);
   } else {
-    stubRect(first, 77, FIRST);
-    stubRect(second, 77, SECOND);
+    stubRect(first, 77, extents.first);
+    stubRect(second, 77, extents.second);
   }
   const handle = screen.getByRole('separator', { name: 'resize panes 1 and 2' });
   // happy-dom implements neither, and React's synthetic pointer events do not
@@ -92,7 +102,7 @@ function mount(props: Partial<React.ComponentProps<typeof SplitResizer>> = {}): 
   // A FRESH element each time: React bails out of reconciling a subtree whose
   // element is reference-identical to the last one, so re-rendering the very
   // same object would not re-run the effect at all.
-  return { onResize, handle, remeasure: () => rerender(tree()) };
+  return { onResize, onRefuse, handle, remeasure: () => rerender(tree()) };
 }
 
 describe('SplitResizer — what it is, before what it does', () => {
@@ -145,6 +155,120 @@ describe('SplitResizer — what it is, before what it does', () => {
   it('carries no draggable attribute', () => {
     const { handle } = mount();
     expect(handle.hasAttribute('draggable')).toBe(false);
+  });
+});
+
+/**
+ * A DIVIDER WITH NOWHERE TO GO. Four panes side by side on a 1280px screen
+ * leave 508px between any adjacent two, and two panes need `MIN_PANE_PX`
+ * each: the divider cannot move by a single pixel from where it stands.
+ *
+ * "Absent, not dimmed" — a control that cannot act is withdrawn or refuses
+ * audibly, never sits there looking draggable and doing nothing. The same
+ * family as `pull-requests.ts`'s rule that "No PRs" and "vam could not ask"
+ * must never look alike: a handle that accepts a grab and answers with
+ * silence teaches the operator that resizing is broken.
+ *
+ * The affordance goes (no resize cursor, no hover tint, `aria-disabled`, the
+ * reason in the accessible name) AND a real attempt says it out loud. Both,
+ * because either alone leaves one of the two routes uninformed.
+ */
+describe('SplitResizer — a divider that cannot move at all', () => {
+  const cramped = { first: 254, second: 254 };
+
+  it('withdraws the affordance rather than promising a drag it cannot do', () => {
+    const { handle, remeasure } = mount({}, cramped);
+    remeasure();
+    expect(handle.getAttribute('data-split-resize-inert')).toBe('true');
+    expect(handle.getAttribute('aria-disabled')).toBe('true');
+    expect(handle.className).toMatch(/cursor-not-allowed/);
+    expect(handle.className).not.toMatch(/cursor-col-resize/);
+    expect(handle.className).not.toMatch(/hover:bg-line-loudest/);
+  });
+
+  it('carries the reason in its accessible name, for a reader that never clicks', () => {
+    const { handle, remeasure } = mount({}, cramped);
+    remeasure();
+    const name = handle.getAttribute('aria-label') ?? '';
+    expect(name).toContain('resize panes 1 and 2');
+    expect(name).toContain(String(MIN_PANE_PX));
+    expect(name).toContain('508');
+  });
+
+  it('a pointer grab REFUSES ALOUD and starts no drag', () => {
+    const { handle, onResize, onRefuse } = mount({}, cramped);
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 254, clientY: 40 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 500, clientY: 40 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 500, clientY: 40 });
+    expect(onResize).not.toHaveBeenCalled();
+    expect(onRefuse).toHaveBeenCalledTimes(1);
+    expect(onRefuse.mock.calls[0]?.[0]).toContain(String(MIN_PANE_PX));
+    // No capture taken: there is no gesture to hold.
+    expect(handle.setPointerCapture).not.toHaveBeenCalled();
+  });
+
+  it('an arrow key says the SAME sentence, and is not swallowed in silence', () => {
+    const { handle, onResize, onRefuse } = mount({}, cramped);
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 254, clientY: 40 });
+    const fromPointer = onRefuse.mock.calls[0]?.[0];
+    onRefuse.mockClear();
+    const event = new KeyboardEvent('keydown', {
+      key: 'ArrowRight',
+      bubbles: true,
+      cancelable: true,
+    });
+    handle.dispatchEvent(event);
+    expect(onResize).not.toHaveBeenCalled();
+    expect(onRefuse).toHaveBeenCalledTimes(1);
+    // ONE sentence, not two that could drift: the keyboard route and the
+    // pointer route are the same refusal or they are two different bugs.
+    expect(onRefuse.mock.calls[0]?.[0]).toBe(fromPointer);
+    // Claimed, so the window grammar does not also act on it.
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it.each([['Home'], ['End'], ['ArrowLeft']])('%s refuses too — every key it owns', (key) => {
+    const { handle, onResize, onRefuse } = mount({}, cramped);
+    fireEvent.keyDown(handle, { key });
+    expect(onResize).not.toHaveBeenCalled();
+    expect(onRefuse).toHaveBeenCalledTimes(1);
+  });
+
+  it('a key it does NOT own stays silent — the refusal is not a catch-all', () => {
+    const { handle, onRefuse } = mount({}, cramped);
+    fireEvent.keyDown(handle, { key: 'a' });
+    fireEvent.keyDown(handle, { key: 'ArrowRight', metaKey: true });
+    expect(onRefuse).not.toHaveBeenCalled();
+  });
+
+  /**
+   * THE NORMAL CASE STAYS QUIET. A divider that runs into the floor part-way
+   * through a drag is ordinary and already correct; making that noisy would
+   * turn every full-width drag into a refusal.
+   */
+  it('says nothing when a drag merely RUNS INTO the floor', () => {
+    const { handle, onResize, onRefuse } = mount();
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 600, clientY: 40 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 9000, clientY: 40 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 9000, clientY: 40 });
+    expect(onRefuse).not.toHaveBeenCalled();
+    expect(PAIR * (onResize.mock.calls.at(-1)?.[2] as number)).toBeCloseTo(PAIR - MIN_PANE_PX, 6);
+  });
+
+  it('and an arrow key at the floor is silent for the same reason', () => {
+    const { handle, onResize, onRefuse } = mount();
+    fireEvent.keyDown(handle, { key: 'End' });
+    fireEvent.keyDown(handle, { key: 'End' });
+    expect(onRefuse).not.toHaveBeenCalled();
+    expect(onResize).toHaveBeenCalledTimes(2);
+  });
+
+  it('a roomy divider is not marked inert', () => {
+    const { handle, remeasure } = mount();
+    remeasure();
+    expect(handle.getAttribute('data-split-resize-inert')).toBe('false');
+    expect(handle.getAttribute('aria-disabled')).toBe('false');
+    expect(handle.className).toMatch(/cursor-col-resize/);
   });
 });
 

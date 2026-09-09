@@ -70,6 +70,7 @@ function split(orientation: 'v' | 's') {
 const handles = () => [...document.querySelectorAll<HTMLElement>('[data-split-resize-handle]')];
 const slots = () => [...document.querySelectorAll<HTMLElement>('[data-split-slot]')];
 const grows = () => slots().map((slot) => Number(slot.style.flexGrow));
+const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
 
 /**
  * A real 1000px pair on the two slots either side of the first divider. Every
@@ -230,6 +231,80 @@ describe('a key press on a divider moves a real pane', () => {
     expect(after.slice(0, 2)).toEqual(before.slice(0, 2));
     expect(after[2]).toBeCloseTo((500 + PANE_RESIZE_STEP) / 1000, 10);
     expect(after[3]).toBeCloseTo((500 - PANE_RESIZE_STEP) / 1000, 10);
+  });
+});
+
+/**
+ * A DIVIDER WITH NOWHERE TO GO SAYS SO — through the same status bar every
+ * other refusal in this shell uses.
+ *
+ * "Absent, not dimmed": a control that cannot act is withdrawn or refuses
+ * audibly. A handle that accepts a grab, moves nothing and stays quiet
+ * teaches the operator that resizing is broken rather than that the two panes
+ * are already at their floor.
+ */
+describe('a divider with no room refuses out loud', () => {
+  it('an arrow key on it puts the reason in the status bar, and moves nothing', () => {
+    render(<Canvas model={MODEL} />);
+    split('v');
+    // 508px between two panes that each need MIN_PANE_PX — four panes on a
+    // 1280px screen, which is the case the operator will actually meet.
+    stubPair(254, 254, 'width');
+    const before = grows();
+    fireEvent.keyDown(handles()[0] as HTMLElement, { key: 'ArrowRight' });
+    expect(grows()).toEqual(before);
+    // THE WHOLE SENTENCE, and specifically its measurement. The bar truncates
+    // at 72 characters and hangs the rest on a tooltip; the first draft of
+    // this refusal was 74 and lost the very number that explains it, which is
+    // a refusal that has said nothing.
+    const said = document.querySelector('[data-status]')?.textContent ?? '';
+    expect(said).toBe('this divider cannot move — a pane needs 320px, these two share 508px');
+    expect(said).not.toContain('\u2026');
+  });
+
+  it('and a pointer grab on it says the same thing', () => {
+    render(<Canvas model={MODEL} />);
+    split('v');
+    stubPair(254, 254, 'width');
+    const handle = handles()[0] as HTMLElement;
+    handle.setPointerCapture = () => undefined;
+    handle.releasePointerCapture = () => undefined;
+    const before = grows();
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 254, clientY: 40 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 500, clientY: 40 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 500, clientY: 40 });
+    expect(grows()).toEqual(before);
+    expect(statusBar()).toContain(String(MIN_PANE_PX));
+  });
+
+  it('the handle marks itself inert once it has measured a pair it cannot divide', () => {
+    render(<Canvas model={MODEL} />);
+    split('v');
+    stubPair(254, 254, 'width');
+    fireEvent.keyDown(handles()[0] as HTMLElement, { key: 'ArrowRight' });
+    const handle = handles()[0] as HTMLElement;
+    expect(handle.getAttribute('data-split-resize-inert')).toBe('true');
+    expect(handle.getAttribute('aria-disabled')).toBe('true');
+    expect(handle.className).toMatch(/cursor-not-allowed/);
+  });
+
+  it('a divider WITH room says nothing and moves the pane — the normal case is quiet', () => {
+    render(<Canvas model={MODEL} />);
+    split('v');
+    stubPair(500, 500, 'width');
+    fireEvent.keyDown(handles()[0] as HTMLElement, { key: 'ArrowRight' });
+    expect(grows()[0]).toBeCloseTo((500 + PANE_RESIZE_STEP) / 1000, 10);
+    expect(statusBar()).not.toContain('no room');
+  });
+
+  it('a drag that merely RUNS INTO the floor stays quiet too', () => {
+    render(<Canvas model={MODEL} />);
+    split('v');
+    stubPair(500, 500, 'width');
+    fireEvent.keyDown(handles()[0] as HTMLElement, { key: 'End' });
+    fireEvent.keyDown(handles()[0] as HTMLElement, { key: 'End' });
+    expect((grows()[1] ?? 0) * 1000).toBeCloseTo(MIN_PANE_PX, 6);
+    expect(statusBar()).not.toContain('no room');
   });
 });
 

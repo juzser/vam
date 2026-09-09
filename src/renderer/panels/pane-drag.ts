@@ -32,6 +32,15 @@
  * Nothing here is memoised, exactly as `PaneResizer`'s handlers never were:
  * these functions close over the caller's current props by construction, so
  * there is no dependency array to keep in step and no stale closure to find.
+ *
+ * THIS FILE HAS ITS OWN TESTS, AND THAT IS THE POINT. Deleting the
+ * "a move that followed no down reports nothing" guard above was invisible
+ * through `SplitResizer`, whose own arithmetic happens to refuse a null
+ * measurement anyway — the mutation survived. A SHARED CONTRACT THAT ONLY ONE
+ * CALLER'S ACCIDENT ENFORCES IS NOT ENFORCED: the next caller inherits the
+ * hole, and nothing goes red when it does. Every rule this module claims is
+ * asserted in `test/panels/pane-drag.test.tsx`, against a harness with no
+ * defences of its own, and not through either handle.
  */
 
 import { useRef, useState } from 'react';

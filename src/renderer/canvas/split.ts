@@ -277,6 +277,33 @@ export function normaliseTree(tree: SplitTree): SplitTree {
  * that last case — it is the only division that treats the two alike, and it
  * is a state the layout already reaches, because it is what a fresh split is.
  */
+/**
+ * Is there MORE THAN ONE legal position for this divider?
+ *
+ * `dividerShare` below answers 0.5 for a pair too narrow to hold two
+ * minimums, which is the right arithmetic and the wrong thing to do in
+ * silence: a handle that accepts a grab, moves nothing and says nothing
+ * teaches the operator that resizing is broken rather than that the two panes
+ * are already at their floor. This is the predicate that lets the handle
+ * withdraw its affordance and refuse ALOUD instead — "absent, not dimmed",
+ * the rule `newTabInPane` and the sidebar's New session already follow.
+ *
+ * Deliberately about the WHOLE GESTURE and not about one frame of it: a drag
+ * that runs into the floor part-way is ordinary, and stays silent. This only
+ * answers false where the divider could not move from where it stands even by
+ * a pixel. Four panes side by side on a 1280px screen is the case that
+ * reaches it — 508px between two panes that each need `MIN_PANE_PX`.
+ *
+ * STRICTLY greater: a pair of exactly `2 * minPx` has exactly one legal
+ * position, and one position is not a range.
+ */
+export function canDivide(pairPx: number, minPx: number): boolean {
+  if (!Number.isFinite(pairPx) || !Number.isFinite(minPx)) {
+    return false;
+  }
+  return pairPx > Math.max(0, minPx) * 2;
+}
+
 export function dividerShare(firstPx: number, pairPx: number, minPx: number): number {
   if (!Number.isFinite(firstPx) || !Number.isFinite(pairPx) || pairPx <= 0) {
     return 0.5;

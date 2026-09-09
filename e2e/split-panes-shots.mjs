@@ -942,4 +942,181 @@ if (Math.abs(restored[0] - arranged[0]) > 4) {
   );
 }
 
+// --- A DIVIDER WITH NOWHERE TO GO SAYS SO.
+//
+// "Absent, not dimmed": a control that cannot act is withdrawn or refuses
+// audibly, never sits there looking draggable and doing nothing. Four panes
+// side by side on this 1280px viewport leave 508px between any adjacent two,
+// and two panes need MIN_PANE_PX each — so every divider here is at the one
+// position it can hold. A handle that accepted a grab and answered with
+// silence would teach the operator that resizing is broken.
+//
+// Worth a real browser twice over: the state is decided by a MEASUREMENT of
+// the laid-out slots, and the withdrawal is a computed `cursor` — neither
+// exists in jsdom.
+// BACK TO SELECT FIRST, and asserted rather than assumed. Sections above
+// click tab strips, and a POINTER click on a tab puts the shell in Insert so
+// the operator can type — at which point `z` is a letter, not a chord, and
+// every `chord()` below would quietly type into a composer and then fail on a
+// pane count with no hint as to why. Measured: that is exactly what happened
+// the first time this section was written.
+await page.keyboard.press('Escape');
+await page.waitForTimeout(150);
+const modeHere = await modeCell();
+console.log('mode before the refusal checks:', modeHere);
+if (!modeHere.includes('Select')) {
+  throw new Error(
+    `the shell is in "${modeHere}" mode, so a chord would be typed rather than obeyed. Every ` +
+      'pane count below would be measuring the wrong thing.',
+  );
+}
+await chord('z', 'c', 'close', 1);
+await page.locator('[data-session-row="factory-sse-1"]').click();
+await page.waitForTimeout(200);
+await chord('z', 'v', 'first of four', 2);
+// A ROOMY divider first, measured in the same run: without this contrast the
+// checks below would pass just as happily against a handle hardcoded inert.
+const roomy = await dividerAt().evaluate((el) => ({
+  inert: el.getAttribute('data-split-resize-inert'),
+  disabled: el.getAttribute('aria-disabled'),
+  cursor: getComputedStyle(el).cursor,
+}));
+console.log('a divider with room:', roomy);
+if (roomy.inert !== 'false' || roomy.disabled !== 'false' || roomy.cursor !== 'col-resize') {
+  throw new Error(
+    `a two-pane split's divider reports ${JSON.stringify(roomy)} — it has 1016px to work with ` +
+      'and must be an ordinary, draggable handle. Every check below would be vacuous.',
+  );
+}
+
+await chord('z', 'v', 'second of four', 3);
+await chord('z', 'v', 'third of four', 4);
+const cramped = await slotWidths();
+const dividers = await page.locator('[data-split-resize-handle]').evaluateAll((els) =>
+  els.map((el) => ({
+    inert: el.getAttribute('data-split-resize-inert'),
+    disabled: el.getAttribute('aria-disabled'),
+    cursor: getComputedStyle(el).cursor,
+    named: (el.getAttribute('aria-label') ?? '').includes('cannot move'),
+  })),
+);
+console.log('four panes measure:', cramped);
+console.log('their dividers:', dividers);
+if (dividers.length !== 3) {
+  throw new Error(`four panes should draw 3 dividers, they draw ${dividers.length}.`);
+}
+// `zv` halves the FOCUSED pane, so these four are not even — which is better
+// than even here, because the same layout carries dividers of both kinds and
+// the rule can be checked rather than a hardcoded expectation. Each divider is
+// judged against its OWN measured pair.
+const inertAt = [];
+for (const [at, state] of dividers.entries()) {
+  const pair = cramped[at] + cramped[at + 1];
+  const shouldBeInert = pair <= MIN_PANE_PX * 2;
+  if (shouldBeInert) inertAt.push(at);
+  if (state.inert !== String(shouldBeInert) || state.disabled !== String(shouldBeInert)) {
+    throw new Error(
+      `divider ${at} spans a ${Math.round(pair)}px pair, so it ${shouldBeInert ? 'cannot' : 'can'} ` +
+        `move, but it reports ${JSON.stringify(state)}.`,
+    );
+  }
+  const wantCursor = shouldBeInert ? 'not-allowed' : 'col-resize';
+  if (state.cursor !== wantCursor) {
+    throw new Error(
+      `divider ${at} over a ${Math.round(pair)}px pair shows the "${state.cursor}" cursor, not ` +
+        `"${wantCursor}". The affordance IS the cursor: a handle that goes on promising a drag ` +
+        'it cannot perform is the silence this state exists to end.',
+    );
+  }
+  if (state.named !== shouldBeInert) {
+    throw new Error(
+      `divider ${at}'s accessible name ${state.named ? 'carries' : 'omits'} the reason and should ` +
+        `${shouldBeInert ? 'carry' : 'omit'} it. A reader who never grabs anything has no other route to it.`,
+    );
+  }
+}
+// BOTH KINDS, in one measurement. A loop that happened to see only roomy
+// dividers would pass having checked nothing about the refusal, and one that
+// saw only cramped ones could not tell the attribute from a hardcoded 'true'.
+// TWO inert ones, because the two refusal ROUTES are compared below and React
+// does not re-render for an identical status string — so the pointer and the
+// keyboard have to be aimed at dividers whose pairs differ, which also proves
+// each message carries its own divider's measurement rather than a constant.
+if (inertAt.length < 2 || inertAt.length === dividers.length) {
+  throw new Error(
+    `this layout produced ${inertAt.length} inert divider(s) out of ${dividers.length}; the ` +
+      'checks below need at least two, and at least one roomy, to measure a rule rather than a ' +
+      'constant.',
+  );
+}
+
+// AND IT REFUSES ALOUD, on both routes, in the one place every other refusal
+// in this shell lands.
+async function refusalSaid(label) {
+  const said = await page.evaluate(
+    () => document.querySelector('[data-status]')?.textContent ?? '',
+  );
+  console.log(`${label} says: ${said}`);
+  if (!said.includes('cannot move') || !said.includes(`${MIN_PANE_PX}px`)) {
+    throw new Error(
+      `${label} left the status bar saying "${said}". A divider that accepts the gesture, moves ` +
+        'nothing and stays quiet teaches the operator that resizing is broken.',
+    );
+  }
+  if (said.includes('\u2026')) {
+    throw new Error(
+      `${label} was truncated to "${said}" — the status bar cuts at 72 characters and the ` +
+        'measurement is the part that explains the refusal.',
+    );
+  }
+  return said;
+}
+
+const beforeRefusing = await slotWidths();
+const grabbed = page.locator('[data-split-resize-handle]').nth(inertAt[0]);
+const grabBox = await grabbed.boundingBox();
+await page.mouse.move(grabBox.x + grabBox.width / 2, grabBox.y + grabBox.height / 2);
+await page.mouse.down();
+await page.mouse.move(grabBox.x + 200, grabBox.y + grabBox.height / 2, { steps: 8 });
+await page.mouse.up();
+await page.waitForTimeout(200);
+const fromPointer = await refusalSaid('a pointer grab');
+const afterRefusing = await slotWidths();
+if (JSON.stringify(beforeRefusing) !== JSON.stringify(afterRefusing)) {
+  throw new Error(
+    `the refused drag moved the panes anyway: ${beforeRefusing.join('/')} became ` +
+      `${afterRefusing.join('/')}. A divider that cannot divide must not snap its pair to even.`,
+  );
+}
+
+// The keyboard route must say the SAME SENTENCE — one refusal, not two that
+// could drift, and certainly not silence on one of the two routes. Aimed at
+// the OTHER inert divider so the string genuinely changes; the two are then
+// compared with their own measurements masked out, which is what "the same
+// sentence" means when each one is measuring a different pair.
+await page.locator('[data-split-resize-handle]').nth(inertAt[1]).focus();
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(200);
+const fromKeyboard = await refusalSaid('an arrow key');
+const shape = (said) => said.replace(/\d+px/g, '<n>px');
+if (shape(fromKeyboard) !== shape(fromPointer)) {
+  throw new Error(
+    `the pointer said "${fromPointer}" and the keyboard said "${fromKeyboard}". vam is ` +
+      'keyboard-first: the two routes are one refusal or they are two different bugs.',
+  );
+}
+if (fromKeyboard === fromPointer) {
+  throw new Error(
+    'both routes reported the identical string, so the keyboard check may be reading the ' +
+      "pointer's stale message. They were aimed at dividers of different widths and must differ " +
+      'in their measurement.',
+  );
+}
+const afterKey = await slotWidths();
+if (JSON.stringify(afterKey) !== JSON.stringify(afterRefusing)) {
+  throw new Error(`the refused arrow key moved the panes: ${afterKey.join('/')}.`);
+}
+await page.screenshot({ path: `${outDir}/split-resize-refusal.png` });
+console.log(`${outDir}/split-resize-refusal.png`);
+
 await browser.close();

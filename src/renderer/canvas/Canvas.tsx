@@ -988,10 +988,12 @@ function SplitLayout({
   tree,
   renderLeaf,
   onResize,
+  onRefuse,
 }: {
   readonly tree: SplitTree;
   readonly renderLeaf: (leaf: Leaf) => ReactNode;
   readonly onResize: (splitId: string, at: number, share: number) => void;
+  readonly onRefuse: (message: string) => void;
 }) {
   if (tree.kind === 'leaf') {
     return <>{renderLeaf(tree)}</>;
@@ -1013,7 +1015,12 @@ function SplitLayout({
           className="relative flex min-h-0 min-w-0"
           style={{ flexGrow: sizes[at] ?? 1 / tree.children.length, flexShrink: 1, flexBasis: 0 }}
         >
-          <SplitLayout tree={child} renderLeaf={renderLeaf} onResize={onResize} />
+          <SplitLayout
+            tree={child}
+            renderLeaf={renderLeaf}
+            onResize={onResize}
+            onRefuse={onRefuse}
+          />
           {at < last && (
             <SplitResizer
               splitId={tree.id}
@@ -1022,6 +1029,7 @@ function SplitLayout({
               ariaLabel={`resize pane ${at + 1} and pane ${at + 2}`}
               share={(sizes[at] ?? 0.5) / ((sizes[at] ?? 0.5) + (sizes[at + 1] ?? 0.5))}
               onResize={onResize}
+              onRefuse={onRefuse}
             />
           )}
         </div>
@@ -2376,6 +2384,13 @@ function CanvasInner({
    * (`TerminalTab`'s `RESIZE_DEBOUNCE_MS`, written for this very gesture).
    * `resizeSplit` is total, so a handle whose split was closed by the same
    * frame is a no-op rather than a crash.
+   *
+   * Its REFUSAL goes to `setStatus` directly — the divider composes the
+   * sentence, because only it has measured the pixels the sentence is about,
+   * and the shell only has to say it in the one place every other refusal in
+   * this file already lands ("only one pane open — nothing to close", the
+   * cross-project drop, `newTabInPane`'s decline). One surface for "vam will
+   * not do that and here is why", never a second channel a divider invented.
    */
   const onSplitResize = useCallback((splitId: string, at: number, share: number) => {
     setPanes((tree) => resizeSplit(tree, splitId, at, share));
@@ -4336,7 +4351,12 @@ function CanvasInner({
               whether or not a session is focused, so "is vam connected" is
               never something the tab row alone had to say. */}
           <DetailColumn width={detailWidth}>
-            <SplitLayout tree={panes} renderLeaf={renderLeaf} onResize={onSplitResize} />
+            <SplitLayout
+              tree={panes}
+              renderLeaf={renderLeaf}
+              onResize={onSplitResize}
+              onRefuse={setStatus}
+            />
           </DetailColumn>
         </div>
       )}
