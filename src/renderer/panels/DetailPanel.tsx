@@ -3872,11 +3872,21 @@ export function DetailPanel(props: DetailPanelProps) {
             >
               {/* At volume this costs one node per turn, the same as the
                   `<select>`'s options. The difference is that these are only
-                  here while the operator asked for them. */}
+                  here while the operator asked for them.
+
+                  CAPPED AGAINST THE COLUMN, not at a fixed 132px, which is what
+                  it was while it sat inline in the flow and could only ever
+                  push the turn down. It floats over the column now, so at a
+                  short pane 132px WAS the column: measured at a 460px viewport,
+                  the open list covered the pinned prompt entirely and the top
+                  of the transcript painted a list row. `cqh` resolves against
+                  the column (its `container-type: size`), so the list takes a
+                  share of the height rather than a number of pixels the pane
+                  may not have. */}
               {progressOpen && (
                 <ul
                   data-progress-turns
-                  className="vam-no-scrollbar max-h-[132px] min-h-0 overflow-y-auto"
+                  className="vam-no-scrollbar max-h-[40cqh] min-h-0 overflow-y-auto"
                 >
                   {orderedTurns.map((d) => (
                     <li key={d.id}>

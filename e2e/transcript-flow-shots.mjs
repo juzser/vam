@@ -144,7 +144,13 @@ async function assertSticksWhileScrolling(label) {
     const top = document.elementFromPoint(colBox.left + colBox.width / 2, colBox.top + 4);
     const block = top?.closest('[data-detail-block="in"]') ?? null;
     if (block === null) {
-      return { region: top?.closest('[data-detail-block]')?.dataset.detailBlock ?? null };
+      // Name what WAS there: a failure that reports `null` says nothing about
+      // which of the several ways this can go wrong actually happened.
+      return {
+        region: top?.closest('[data-detail-block]')?.dataset.detailBlock ?? null,
+        tag: top?.tagName ?? null,
+        cls: (top?.getAttribute('class') ?? '').slice(0, 70),
+      };
     }
     const rect = block.getBoundingClientRect();
     return {
