@@ -1613,65 +1613,99 @@ const MANY: CanvasModel = {
 };
 
 /**
- * `Cmd+<n>` — the sidebar's positions, while the sidebar has the keyboard.
+ * `Cmd+<n>` — the FOCUSED PANE's own tab strip.
  *
- * The pane fork itself lives in `Canvas.tab-chord.test.tsx`; what these pin is
- * the sidebar half, which is the half that counts rows. Pressed with a
- * `code`, because that is what a real keydown carries and what
+ * The pane/view fork lives in `Canvas.tab-chord.test.tsx` and the split-pane
+ * rule in `Canvas.session-keys.test.tsx`; what these pin is the counting —
+ * which list a digit indexes, what nine means, and what an out-of-range one
+ * says. It used to count the sidebar's rows: the fourth arrangement of the
+ * digit row gave that up at the operator's request ("Cmd+number switches
+ * tab"), so the list being counted is the strip, and `j`/`k`, `gg`/`G`, `f`
+ * and `/` are what reach a sidebar row now.
+ *
+ * Pressed with a `code`, because that is what a real keydown carries and what
  * `normalizeKey` reads.
  */
-const sessionAt = (n: number, extra: KeyboardEventInit = {}) =>
+const tabAt = (n: number, extra: KeyboardEventInit = {}) =>
   press(String(n), { metaKey: true, code: `Digit${n}`, ...extra });
 
-describe('Cmd-number jumps to a session while the sidebar has the keyboard', () => {
-  it('lands on the first row from wherever the cursor was', () => {
+/** Which tab of the focused pane wears the active mark. */
+const activeTab = () =>
+  document.querySelector(
+    '[data-split-pane][data-split-focused="true"] [data-session-tab][data-active="true"] [data-tab-select]',
+  )?.textContent ?? null;
+
+describe('Cmd-number selects a tab in the pane the operator is looking at', () => {
+  it('lands on the first tab from wherever the cursor was', () => {
     render(<Canvas model={MODEL} />);
     press('j');
     expect(focused()).toBe('alpha/a2');
-    sessionAt(1);
+    tabAt(1);
+    expect(activeTab()).toBe('a1');
     expect(focused()).toBe('alpha/a1');
   });
 
-  it('counts across project headings, which are captions and not rows', () => {
+  /**
+   * The strip is scoped to the ACTIVE PROJECT (A13.1), so `beta/b1` is not on
+   * it while alpha has the keyboard. A digit that reached it would be counting
+   * the sidebar again — the thing this arrangement gave up — so a third digit
+   * over a two-tab strip must refuse rather than cross into another project.
+   */
+  it('does not count sessions of another project, which the strip never draws', () => {
     render(<Canvas model={MODEL} />);
-    // a1, a2 sit under alpha and b1 under beta; the third digit is the third
-    // SESSION, not the third row of a list that counted its own headings.
     press('3', { ctrlKey: true, code: 'Digit3' });
-    expect(focused()).toBe('beta/b1');
+    expect(focused()).toBe('alpha/a1');
+    expect(statusBar()).toContain('only 2 tabs');
   });
 
-  it('the ninth is the last session, past nine and short of it alike', () => {
+  it('the ninth is the last tab, past nine and short of it alike', () => {
     const { unmount } = render(<Canvas model={MANY} />);
-    sessionAt(9);
-    expect(focused()).toBe('gamma/s10'); // the LAST, not the ninth
+    tabAt(9);
+    expect(activeTab()).toBe('s10'); // the LAST, not the ninth
     unmount();
 
     render(<Canvas model={MODEL} />);
-    sessionAt(9);
-    expect(focused()).toBe('beta/b1'); // three sessions, and it still lands
+    tabAt(9);
+    expect(activeTab()).toBe('a2'); // two tabs, and it still lands
   });
 
-  it('an out-of-range digit says so instead of clamping to the last row', () => {
+  it('an out-of-range digit says so instead of clamping to the last tab', () => {
     render(<Canvas model={MODEL} />);
-    sessionAt(7);
-    expect(focused()).toBe('alpha/a1'); // unmoved
-    expect(statusBar()).toContain('only 3 sessions');
+    tabAt(7);
+    expect(activeTab()).toBe('a1'); // unmoved
+    expect(statusBar()).toContain('only 2 tabs');
   });
 
-  it('counts what the filter left visible, not what the model holds', () => {
+  /**
+   * A FILTER NARROWS THE SIDEBAR AND MUST NOT NARROW THE COUNT. The old
+   * sidebar digit counted `entries` — the filtered list — because that is
+   * what it indexed, and refused "only 1 session in view". A pane's strip is
+   * built from `allEntries` on purpose (the prune effect's own rule: a filter
+   * must not decide which sessions a pane holds, or turning one on would
+   * silently drop tabs), so with the sidebar down to one row the digit still
+   * counts the two tabs that are DRAWN and refuses neither of them.
+   *
+   * WHAT IT DOES NOT PROMISE, and this is a limit rather than a bug of this
+   * binding: while a sidebar filter is on, focus cannot rest on a session the
+   * filter hides — the "land focus on something real" effect pulls it back to
+   * the filtered set. Clicking that same tab with the mouse bounces
+   * identically (verified), so the key and the pointer agree; the tab strip
+   * drawing a tab the filter will not let you sit on is a shell-level
+   * question, not a digit-row one.
+   */
+  it('counts the tabs the pane draws, which a sidebar filter does not narrow', () => {
     render(<Canvas model={MODEL} />);
     press('/');
-    typeInto(filterInput() as HTMLInputElement, 'alpha');
+    typeInto(filterInput() as HTMLInputElement, 'a1');
     keyOn(filterInput() as HTMLInputElement, 'Enter');
-    expect(rows().map((el) => el.getAttribute('data-session-row'))).toEqual(['a1', 'a2']);
+    expect(rows().map((el) => el.getAttribute('data-session-row'))).toEqual(['a1']);
 
-    sessionAt(2);
-    expect(focused()).toBe('alpha/a2');
-    // b1 is still in the model and still the third session there. Counting it
-    // would land the cursor on a row the operator cannot see.
-    sessionAt(3);
-    expect(focused()).toBe('alpha/a2');
-    expect(statusBar()).toContain('only 2 sessions');
+    tabAt(2);
+    // Not "only 1 tab": the strip still draws two, and a refusal counting the
+    // filtered sidebar would be the handler inventing a list of its own.
+    expect(statusBar()).not.toContain('only 1 tab');
+    tabAt(3);
+    expect(statusBar()).toContain('only 2 tabs');
   });
 
   it('still fires a Mod-chord while a text box has the keyboard, and keeps the draft', () => {
@@ -1681,22 +1715,22 @@ describe('Cmd-number jumps to a session while the sidebar has the keyboard', () 
     // entry on any layout, so the box has no claim on it. What the box does
     // keep is everything unmodified, including the draft already typed.
     //
-    // WHAT THE DIGIT COUNTS HERE CHANGED WITH THE MODE NAMING, and the change
-    // is the operator's own mapping: they named Insert after the PROMPT state,
-    // so `i` enters Insert exactly as `I` does. The digit therefore switches a
-    // TAB, which is what Insert binds it to — the cell no longer says one mode
-    // while the digit obeys another. The property under test is unchanged: the
-    // chord fired from inside the box, and the draft survived it.
+    // THE DRAFT IS PER SESSION, so switching tab swaps which draft is on
+    // screen — a1's, which is empty. That is the composer's contract, not a
+    // loss: the assertion is that a2's half-written prompt is still there when
+    // the operator comes back, which is the property "keeps the draft" was
+    // always about. (It used to be readable without moving, because the digit
+    // then switched a VIEW rather than a session.)
     render(<Canvas model={MODEL} />);
     press('j');
     press('i'); // the composer, aimed at alpha/a2
     const box = promptInput() as HTMLTextAreaElement;
     typeInto(box, 'half a prompt');
     keyOn(box, '1', { metaKey: true, code: 'Digit1' });
-    expect(
-      document.querySelector('[data-view][aria-pressed="true"]')?.getAttribute('data-view'),
-    ).toBe('response');
-    expect(focused()).toBe('alpha/a2');
+    expect(activeTab()).toBe('a1');
+    expect(promptInput()?.value).toBe('');
+    tabAt(2);
+    expect(activeTab()).toBe('a2');
     expect(promptInput()?.value).toBe('half a prompt');
   });
 
@@ -1713,7 +1747,7 @@ describe('Cmd-number jumps to a session while the sidebar has the keyboard', () 
       window.dispatchEvent(event);
     });
     expect(event.defaultPrevented).toBe(true);
-    expect(focused()).toBe('alpha/a2');
+    expect(activeTab()).toBe('a2');
   });
 });
 

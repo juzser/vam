@@ -189,11 +189,12 @@ whichever your platform uses.
 | `h` `j` `k` `l` | Move focus left / down / up / right |
 | `i` | Put the caret in the prompt box, aimed at the focused session |
 | `I` | Move keyboard control into the right-hand action pane |
-| `H` | Move keyboard control back to the session list |
+| `H` / `Mod-0` | Move keyboard control back to the session list |
 | `r` | Rename the focused session |
 | `s` | Pick the focused session's icon |
 | `x` / `Mod-w` | Close the focused session |
-| `o` / `Mod-n` | Start a new session |
+| `o` / `Mod-n` | Start a new session, in the focused session's project |
+| `Mod-t` | Start a new session as a tab of the FOCUSED PANE — the pane's own `+`, and it names the project on screen when that pane is empty |
 | `,` | Open settings |
 | `.` | Open Remote — pair a phone, approve or deny it, unpair one, or revoke every device |
 | `E` | Open the error log and the report vam can compose from it |
@@ -206,7 +207,7 @@ whichever your platform uses.
 | `p` | Reveal the focused session's project in the sidebar |
 | `Enter` | Open the focused step |
 | `Mod-k` | Open the command palette |
-| `Mod-1` `Mod-2` `Mod-3` `Mod-4` `Mod-5` `Mod-6` `Mod-7` `Mod-8` `Mod-9` | Jump to a position — a session in the sidebar, or a tab in the response pane, whichever pane has the keyboard (`Mod-9` is always the last one) |
+| `Mod-1` `Mod-2` `Mod-3` `Mod-4` `Mod-5` `Mod-6` `Mod-7` `Mod-8` `Mod-9` | Select a session tab by position, in the focused pane's own strip — the same meaning wherever the keyboard is (`Mod-9` is always the last one) |
 | `Alt-1` `Alt-2` `Alt-3` `Alt-4` | Show a view in the focused pane — Response, PRs, Terminal, Agents, in that fixed order. A digit always names the SAME view: if this source has no terminal, `Alt-3` says so rather than opening whatever sits third |
 | `Alt-5` `Alt-6` `Alt-7` `Alt-8` `Alt-9` | Nothing — bound only so they say there is no fifth view instead of reaching the browser |
 | `<` / `>` | Narrow / widen the focused side pane |

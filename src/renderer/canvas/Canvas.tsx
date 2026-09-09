@@ -305,6 +305,35 @@ type ProjectIconTarget = {
 };
 
 /**
+ * ONE PANE's tabs, exactly as its strip draws them.
+ *
+ * The leaf's own list resolved against the model through `orderedPaneTabs`,
+ * never `entries`' whole project. The leaf's list is the order the tabs were
+ * OPENED in, which is what the operator saw as jumbled: a pick in the sidebar
+ * landed at the far end of a strip listing the same sessions a different way.
+ * The order rule stays in `selectors.ts` alone, and this is re-read every
+ * render because it depends on session status. An id whose session has gone
+ * draws nothing until the prune effect catches up, and A13.1's project scoping
+ * is applied here as well: a strip only ever lists the ACTIVE project's
+ * sessions, so a pane left over from another project cannot draw one.
+ *
+ * A FUNCTION, and not inlined into `renderLeaf` where it used to live, because
+ * `Mod-<digit>` counts this list and `Mod-t` reads its head. "The tab at
+ * position N" has to mean the tab the operator can SEE at position N, and the
+ * only way to promise that is for the strip and the keyboard to derive it from
+ * one expression rather than two that agree today.
+ */
+function drawnPaneTabs(
+  all: readonly SessionEntry[],
+  sessionIds: readonly string[],
+  activeProjectId: string | null,
+): readonly SessionEntry[] {
+  return orderedPaneTabs(all, sessionIds).filter(
+    (entry) => activeProjectId === null || entry.project.id === activeProjectId,
+  );
+}
+
+/**
  * Whether a new session can be started at all, and through what.
  *
  * One function because there are three askers and they must never disagree:
@@ -526,12 +555,19 @@ function NewTabButton({
     // on nothing else -- so a keyboard user pressed it, got silence, and had
     // no route to the reason. The sidebar's New session already carries the
     // same string this way.
-    // The chord is offered only when there IS a route: `o` takes the same
+    // The chord is offered only when there IS a route: `Mod-t` takes the same
     // declined path, so printing it beside the refusal would read as "press
     // this instead" for a key that refuses identically.
+    //
+    // `newTab`, NOT `newSession`, and that correction is half of why `newTab`
+    // exists as an action of its own. This tip used to print `o` beside "New
+    // session in this pane" while `o` starts one in the FOCUSED session's
+    // project and lands it wherever the adoption rule puts it -- so the button
+    // named a key that does something adjacent, and in the pane a split had
+    // just emptied it named a key that refuses where the button works.
     <ShortcutTip
       label={decline ?? 'New session in this pane'}
-      action={decline === null ? { kind: 'newSession' } : undefined}
+      action={decline === null ? { kind: 'newTab' } : undefined}
     >
       <button
         type="button"
@@ -1920,6 +1956,22 @@ function CanvasInner({
   );
   const projectTabIds = useMemo(() => projectTabs.map((e) => e.session.id), [projectTabs]);
   /**
+   * THE STRIP THE OPERATOR IS LOOKING AT — the focused pane's own tabs, drawn
+   * by the same expression that draws them (`drawnPaneTabs`).
+   *
+   * What `Mod-<digit>` counts, and where `Mod-t` reads its project from. Every
+   * pane draws a strip of its own (A15.5) and exactly one of them has the
+   * keyboard, so "the tab strip in front of you" is a fact the pane focus
+   * already carries. Deliberately NOT `projectTabs`: that is every tab the
+   * project has open across every pane, and counting it would let a digit
+   * reach into a pane the operator is not in.
+   */
+  const focusedPaneTabs = useMemo(
+    () =>
+      drawnPaneTabs(allEntries, findLeaf(panes, focusedPaneId)?.sessionIds ?? [], activeProjectId),
+    [allEntries, panes, focusedPaneId, activeProjectId],
+  );
+  /**
    * EVERY session of the active project, filters and all — the list A11.1's
    * invariant is stated over. Read from `allEntries` rather than the filtered
    * `entries` for the reason the prune effect gives: a filter narrows what
@@ -2971,6 +3023,56 @@ function CanvasInner({
   }, [source]);
 
   /**
+   * A NEW SESSION AS A TAB OF ONE NAMED PANE — the per-pane `+`, and `Mod-t`.
+   *
+   * One function for both, so the button and the key cannot drift into two
+   * behaviours or two refusals. It was the button's inline `onClick` until
+   * `Mod-t` needed the same act; nothing about it changed in the move.
+   *
+   * This pane takes the keyboard first, exactly as clicking one of its tabs
+   * does — pressing `+` in an unfocused pane must not leave the caret in the
+   * pane the session did not land in. (From `Mod-t` the pane is already the
+   * focused one, so that call is a no-op there.)
+   *
+   * WHICH PROJECT: this pane's own front tab, else the first tab it holds —
+   * the same "a new session is born in the focused one's project" rule `o`
+   * follows, read per pane rather than globally.
+   *
+   * An EMPTY pane falls back to the project on screen. It used to name no
+   * directory and refuse, which was fine while the only empty pane was the
+   * pre-load one; since `zv`/`zs` MOVE the active tab, a split leaves an empty
+   * pane every time and its `+` would refuse in the state the operator had
+   * just asked for. `activeProjectId` is not a guess — every strip in the
+   * shell is scoped to it, so it is the project the operator is looking at.
+   * With no active project there is still nothing to name, and the refusal
+   * below stands. THIS FALLBACK IS ALSO THE WHOLE DIFFERENCE FROM `newSession`
+   * (`o`/`Mod-n`), which reads the focused SESSION and refuses when there is
+   * none — see `newTab` in `chords.ts`.
+   *
+   * `entry` and `tabs` are passed rather than read here because the caller
+   * knows which pane it is drawing: `renderLeaf` hands the focused leaf the
+   * filtered `focusedEntry` every other assertion in this file is written
+   * against, and an unfocused leaf its own lookup.
+   */
+  const newTabInPane = useCallback(
+    (paneId: string, entry: SessionEntry | null, tabs: readonly SessionEntry[]) => {
+      setFocusedPaneId(paneId);
+      const target =
+        entry ??
+        tabs[0] ??
+        (activeProjectId === null
+          ? null
+          : (allEntries.find((e) => e.project.id === activeProjectId) ?? null));
+      if (target === undefined || target === null) {
+        setStatus('pick a session first — a new one is started in its project');
+        return;
+      }
+      void createSession(target.project.id, target.project.name, paneId);
+    },
+    [allEntries, activeProjectId, createSession, setFocusedPaneId],
+  );
+
+  /**
    * Keep the name the operator just typed. Local by design: `claude agents`
    * has no rename subcommand, so there is nothing upstream to call, and vam
    * does not write into the operator's own Claude Code state — see
@@ -3267,66 +3369,44 @@ function CanvasInner({
           }
           return;
         }
-        case 'position': {
+        case 'selectTab': {
           /**
-           * One digit, two meanings, and `pane` is what decides — the same
-           * state the status-bar mode cell reads, deliberately not a second
-           * notion of where focus is.
+           * ONE DIGIT, ONE MEANING, IN EITHER CURSOR MODE: the session tab at
+           * that position in the strip the operator is looking at.
            *
-           * In the response pane the digit is a TAB. Past the four that exist
-           * it says so and stops: falling through to the sidebar would move a
-           * cursor in a pane the operator is not looking at, which is the
-           * failure this whole change is about, and silence would leave them
-           * pressing it again. Refusing out loud is what the sidebar half
-           * below already does for an out-of-range row.
+           * `focusedPaneTabs` is that strip, derived by the very expression
+           * that draws it (`drawnPaneTabs`), so "the tab at position N" can
+           * only ever mean the tab drawn at position N. The two mistakes this
+           * family has already made were both a handler counting a list of its
+           * own: the constant while the bar drew a filtered one, then the
+           * drawn one positionally on a route that was supposed to be by name.
+           *
+           * THE FOCUSED PANE'S OWN LIST, not the project's. Every pane draws a
+           * strip (A15.5) and one of them has the keyboard; counting across
+           * all of them would move a tab in a pane nobody is looking at, which
+           * is the exact failure the previous arrangements of this row kept
+           * finding in another form.
+           *
+           * Refused out loud both ways, and never clamped: a jump that
+           * silently lands one short is worse than one that does not happen,
+           * because you only find out by reading where you ended up. An empty
+           * pane and an out-of-range digit are two different facts and get two
+           * sentences.
            */
-          if (mode === 'insert') {
-            // THROUGH `tabForDigit`, the one place a digit becomes a name,
-            // and the same derivation `Alt+<digit>` already uses. Two
-            // mistakes have lived on this line: counting the CONSTANT while
-            // the bar drew a filtered list, and then counting the DRAWN list
-            // positionally -- which is the defect `tabForDigit` was added to
-            // abolish, shipped again here. With Terminal withdrawn it opened
-            // Agents for `Mod-3` while the icon beside it captioned `Alt+4`,
-            // so one digit meant two views depending on the route taken, and
-            // the meaning slid as Terminal came and went.
-            //
-            // Two refusals, because they are two facts -- `DetailPanel`'s
-            // own wording, for the same reason it has two: a digit inside
-            // `TABS` names a real view THIS SOURCE has withdrawn, and a
-            // digit past `TABS` names nothing at all.
-            const drawn = visibleTabs(terminalTab);
-            const tab = tabForDigit(drawn, action.digit);
-            if (tab === undefined) {
-              const named = TABS[action.digit - 1];
-              setStatus(
-                named === undefined
-                  ? `only ${drawn.length} tab${drawn.length === 1 ? '' : 's'}`
-                  : `${named} — this source has none`,
-              );
-              return;
-            }
-            setTabRequest({ tab });
+          if (focusedPaneTabs.length === 0) {
+            setStatus('no tabs open in this pane');
             return;
           }
-          // `entries` is what the sidebar prints — filter, status pills and
-          // all — so the digits count the rows the operator can see. Counting
-          // the whole model would land the cursor somewhere nobody is looking.
-          //
-          // 9 is the LAST row whatever the count, the convention every browser
-          // tab bar taught, and far more use than a ninth position once the
-          // list outgrows nine.
+          // 9 is the LAST tab whatever the count, the convention every browser
+          // tab bar taught, and far more use than a ninth position once a
+          // project outgrows nine sessions.
           const target =
-            action.digit === 9 ? entries[entries.length - 1] : entries[action.digit - 1];
+            action.digit === 9
+              ? focusedPaneTabs[focusedPaneTabs.length - 1]
+              : focusedPaneTabs[action.digit - 1];
           if (target === undefined) {
-            // Refused out loud, and not clamped to the last row: a jump that
-            // silently lands one short is worse than one that does not happen,
-            // because you only find out by reading where you ended up.
-            setStatus(
-              entries.length === 0
-                ? 'no session matches'
-                : `only ${entries.length} session${entries.length === 1 ? '' : 's'} in view`,
-            );
+            const count = focusedPaneTabs.length;
+            setStatus(`only ${count} tab${count === 1 ? '' : 's'} in this pane`);
             return;
           }
           focusSession(target.session.id);
@@ -3335,8 +3415,9 @@ function CanvasInner({
         case 'pickView': {
           /**
            * One digit, one VIEW, in either cursor mode — the difference from
-           * `position` directly above, which counts whatever the focused
-           * pane counts and therefore means two things.
+           * `selectTab` directly above, which counts the SESSION TABS of the
+           * same pane. Two families, one digit row each, told apart by the
+           * modifier alone: Cmd picks a tab, Alt picks a view.
            *
            * THROUGH `tabForDigit`, the one place a digit becomes a name
            * (A5.4/A15.6). Never an index into the drawn list: `visibleTabs`
@@ -3458,6 +3539,14 @@ function CanvasInner({
             return;
           }
           void createSession(focusedEntry.project.id, focusedEntry.project.name);
+          return;
+        case 'newTab':
+          // `Mod-t` — the FOCUSED PANE's own `+`, down to the same function
+          // its button calls, so the key and the button cannot come to mean
+          // two things or refuse in two ways. The difference from `newSession`
+          // directly above is which project it resolves and when it refuses;
+          // `newTabInPane` states it, and `chords.ts` argues it.
+          newTabInPane(focusedPaneId, focusedEntry, focusedPaneTabs);
           return;
         case 'settings':
           setSettingsSection('appearance');
@@ -3605,6 +3694,9 @@ function CanvasInner({
     phone,
     focusedEntry,
     focusedSessionId,
+    focusedPaneId,
+    focusedPaneTabs,
+    newTabInPane,
     projectTabIds,
     sessionIds,
     entries,
@@ -4059,22 +4151,7 @@ function CanvasInner({
         : leaf.sessionId === null
           ? null
           : (entriesById.get(leaf.sessionId) ?? null);
-      /**
-       * THIS PANE's own tabs, in the SIDEBAR's order — the leaf's list
-       * resolved against the model through `orderedPaneTabs`, never
-       * `entries`' whole project. The leaf's own list is the order the tabs
-       * were opened in, which is what the operator saw as jumbled: a pick in
-       * the sidebar landed at the far end of a strip listing the same
-       * sessions a different way. The order rule stays in `selectors.ts`
-       * alone, and it is re-read every render because it depends on session
-       * status. An id whose session has gone draws nothing until the prune
-       * effect above catches up, and A13.1's project scoping is kept here as
-       * well: a strip only ever lists the ACTIVE project's sessions, so a
-       * pane left over from another project cannot draw one.
-       */
-      const paneTabs = orderedPaneTabs(allEntries, leaf.sessionIds).filter(
-        (tabEntry) => activeProjectId === null || tabEntry.project.id === activeProjectId,
-      );
+      const paneTabs = drawnPaneTabs(allEntries, leaf.sessionIds, activeProjectId);
       return (
         // Not a control and not a keyboard stop of its own -- the real
         // interactive content is the `DetailPanel` instance inside it,
@@ -4135,37 +4212,7 @@ function CanvasInner({
             />
             <NewTabButton
               decline={newSessionDecline}
-              onClick={() => {
-                // This pane takes the keyboard first, exactly as clicking one
-                // of its tabs does — pressing `+` in an unfocused pane must
-                // not leave the caret in the pane the session did not land in.
-                setFocusedPaneId(leaf.id);
-                // WHICH PROJECT: this pane's own front tab, else the first tab
-                // it holds — the same "a new session is born in the focused
-                // one's project" rule `o` follows, read per pane rather than
-                // globally.
-                //
-                // An EMPTY pane falls back to the project on screen. It used
-                // to name no directory and refuse, which was fine while the
-                // only empty pane was the pre-load one; since `zv`/`zs` MOVE
-                // the active tab, a split leaves an empty pane every time and
-                // its `+` would refuse in the state the operator had just
-                // asked for. `activeProjectId` is not a guess — every strip in
-                // the shell is scoped to it, so it is the project the operator
-                // is looking at. With no active project there is still nothing
-                // to name, and the refusal below stands.
-                const target =
-                  entry ??
-                  paneTabs[0] ??
-                  (activeProjectId === null
-                    ? null
-                    : (allEntries.find((e) => e.project.id === activeProjectId) ?? null));
-                if (target === null) {
-                  setStatus('pick a session first — a new one is started in its project');
-                  return;
-                }
-                void createSession(target.project.id, target.project.name, leaf.id);
-              }}
+              onClick={() => newTabInPane(leaf.id, entry, paneTabs)}
             />
           </TabStripRow>
           <DetailPanel {...buildDetailProps(entry, leaf.sessionId, leaf.id, isFocused)} />
@@ -4191,7 +4238,7 @@ function CanvasInner({
       onPaneDragOver,
       onPaneDragLeave,
       onPaneDrop,
-      createSession,
+      newTabInPane,
       newSessionDecline,
       dropTarget,
     ],

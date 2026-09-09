@@ -1,7 +1,8 @@
 /**
  * Screenshots for A15.1 (split panes), A15.2 (shorter tab strip), A15.5
- * (one tab strip PER PANE), A15.7 (a remembered layout per project) and the
- * per-pane `+` that starts a session in the pane it belongs to, taken
+ * (one tab strip PER PANE), A15.7 (a remembered layout per project), the
+ * per-pane `+` that starts a session in the pane it belongs to, and the digit
+ * row that selects a tab in the pane the operator is looking at, taken
  * off the WEB build with the demo fixture — the only thing safe to point a
  * public screenshot at (`?demo=1`, App.tsx's own rule). Modelled on
  * `pane-refinements-shots.mjs`.
@@ -84,6 +85,31 @@ async function tabTitlesInPane(at) {
   const texts = await tabsInPane(at);
   return texts.map((text) => text.replace(/^[^\p{ASCII}]+\s*/u, '').trim());
 }
+/** The title on the tab the FOCUSED pane has forward, or null. */
+async function activeTabTitle() {
+  const tab = page.locator(
+    '[data-split-pane][data-split-focused="true"] [data-session-tab][data-active="true"] [data-tab-select]',
+  );
+  return (await tab.count()) === 0 ? null : (await tab.first().innerText()).replace(/^[^\p{ASCII}]+\s*/u, '').trim();
+}
+/** What the status bar is saying right now. */
+async function statusSaid() {
+  return (await page.locator('[data-status-bar]').innerText()) ?? '';
+}
+/** The mode cell: `Select` or `Insert`. */
+async function modeCell() {
+  return (await page.locator('[data-mode]').innerText()) ?? '';
+}
+/**
+ * A Cmd/Ctrl chord. `Control` rather than `Meta` so this runs the same on a CI
+ * runner as on the machine it was written on — `normalizeKey` folds the two,
+ * and what matters here is `event.code`, which is `Digit<n>` either way.
+ */
+async function modChord(key) {
+  await page.keyboard.press(`Control+${key}`);
+  await page.waitForTimeout(150);
+}
+
 /** The ids the sidebar lists, top to bottom — its canonical order. */
 async function sidebarOrder() {
   return page.locator('[data-session-row]').evaluateAll((rows) =>
@@ -146,6 +172,110 @@ if (JSON.stringify(stripOrder) !== JSON.stringify(listOrder)) {
 }
 await page.screenshot({ path: `${outDir}/pane-tab-order.png` });
 console.log(`${outDir}/pane-tab-order.png`);
+
+// --- THE DIGIT ROW, in a real browser. The operator: "Cmd+0 goes back to the
+// sidebar, Cmd+number switches tab", plus "Cmd+T creates a new session/tab in
+// the currently focused pane".
+//
+// Worth a browser rather than only jsdom for two reasons. A synthesised
+// `KeyboardEvent` carries whatever `code` the test types into it; here Chromium
+// supplies it, which is the whole basis of the digit row's layout-proof
+// spelling (`normalizeKey`). And the chord has to survive the real event path —
+// the window listener, the `defaultPrevented` yield to the question card, the
+// typing guard — none of which jsdom exercises the same way.
+const drawnHere = await tabTitlesInPane(0);
+if (drawnHere.length !== 3) {
+  throw new Error(
+    `the digit checks need the 3-tab factory strip, the pane draws ${drawnHere.length}: ` +
+      `${drawnHere.join(', ')}.`,
+  );
+}
+// EVERY POSITION, not one. A middle position over three tabs is symmetric
+// under a reversed strip, so pressing only `2` cannot tell a strip the
+// keyboard agrees with from one it happens to match (measured by mutation).
+for (const [index, title] of drawnHere.entries()) {
+  await modChord(String(index + 1));
+  const landed = await activeTabTitle();
+  if (landed !== title) {
+    throw new Error(
+      `Cmd+${index + 1} brought "${landed}" forward; the tab DRAWN at position ${index + 1} is ` +
+        `"${title}" (strip: ${drawnHere.join(', ')}). The digit indexes the strip on screen, ` +
+        'never a list the handler keeps of its own.',
+    );
+  }
+}
+await modChord('2');
+const onSecond = await activeTabTitle();
+console.log('after Cmd+2:', onSecond, '| strip:', drawnHere);
+if (onSecond !== drawnHere[1]) {
+  throw new Error(
+    `Cmd+2 brought "${onSecond}" forward; the second tab DRAWN is "${drawnHere[1]}" ` +
+      `(strip: ${drawnHere.join(', ')}). The digit counts the strip on screen, never a list ` +
+      'the handler keeps of its own.',
+  );
+}
+await modChord('9');
+const onLastTab = await activeTabTitle();
+console.log('after Cmd+9:', onLastTab);
+if (onLastTab !== drawnHere[drawnHere.length - 1]) {
+  throw new Error(
+    `Cmd+9 brought "${onLastTab}" forward; 9 is the LAST tab, which is ` +
+      `"${drawnHere[drawnHere.length - 1]}".`,
+  );
+}
+// PAST THE LAST TAB: refused out loud, and nothing moves. "Absent, not
+// dimmed" — a keypress that does nothing and says nothing is the defect
+// family this repo tracks.
+await modChord('4');
+const afterTooFar = await activeTabTitle();
+const refusal = await statusSaid();
+console.log('after Cmd+4 over a 3-tab strip:', afterTooFar, '| status:', refusal);
+if (afterTooFar !== onLastTab) {
+  throw new Error(`Cmd+4 over a 3-tab strip moved to "${afterTooFar}" — it must move nothing.`);
+}
+if (!refusal.includes('only 3 tabs')) {
+  throw new Error(
+    `Cmd+4 over a 3-tab strip said "${refusal}". A digit past the last tab must refuse ALOUD ` +
+      'and name the count it counted, never fall through and never sit silent.',
+  );
+}
+// CMD+0 — out of the tabs and back to the sidebar. Read off the mode cell,
+// which is the same state `H` sets and the status bar already prints.
+await page.keyboard.press('I');
+await page.waitForTimeout(150);
+const inThePane = await modeCell();
+await modChord('0');
+const backInTheList = await modeCell();
+console.log('mode after I:', inThePane, '| after Cmd+0:', backInTheList);
+if (!inThePane.includes('Insert') || !backInTheList.includes('Select')) {
+  throw new Error(
+    `Cmd+0 left the mode cell reading "${backInTheList}" (it read "${inThePane}" before) — ` +
+      'zero is the way out of the tabs and back to the session list.',
+  );
+}
+// CMD+T — the per-pane `+` on the keyboard. Under `?demo=1` there is no
+// new-session route, so what this pins is the half a browser can pin: it
+// refuses in the SOURCE's own words, exactly as the `+` button does further
+// down this file, and no tab list moves.
+const tabsBeforeModT = await tabTitlesInPane(0);
+await modChord('t');
+const tabsAfterModT = await tabTitlesInPane(0);
+const modTSaid = await statusSaid();
+console.log('after Cmd+T:', tabsAfterModT, '| status:', modTSaid);
+if (JSON.stringify(tabsAfterModT) !== JSON.stringify(tabsBeforeModT)) {
+  throw new Error(
+    `the demo source cannot start a session, yet Cmd+T changed the tabs: ` +
+      `${JSON.stringify(tabsAfterModT)} instead of ${JSON.stringify(tabsBeforeModT)}.`,
+  );
+}
+if (!modTSaid.includes('no new-session command')) {
+  throw new Error(
+    `Cmd+T with no new-session route said "${modTSaid}" — it must refuse ALOUD, in the same ` +
+      'words the `+` button gives, never silently do nothing and never imply a session started.',
+  );
+}
+await page.screenshot({ path: `${outDir}/digit-row-selects-a-tab.png` });
+console.log(`${outDir}/digit-row-selects-a-tab.png`);
 
 // --- What A11.1 does to a tab's own `×`: it cannot leave a live session
 // without a tab, so it refuses ALOUD rather than closing one the adoption
@@ -217,6 +347,46 @@ if (twice.length > 0) {
 }
 await page.screenshot({ path: `${outDir}/a15-5-split-vertical-tabs.png` });
 console.log(`${outDir}/a15-5-split-vertical-tabs.png`);
+
+// --- WHICH STRIP A DIGIT COUNTS WHEN THE SHELL IS SPLIT, measured here
+// because this is the case jsdom is worst at: the answer depends on which pane
+// holds the keyboard AT THE MOMENT OF THE EVENT, and React's eager-state path
+// hides that ordering (the reason this whole script exists — see
+// `splitFocused`'s comment in `Canvas.tsx`).
+//
+// `zv` left the keyboard in the new pane, which took ONE tab while the project
+// has three open across the two. `Cmd+2` must therefore refuse: the operator's
+// model is the strip in front of them, and reaching into the other pane would
+// move a tab nobody is looking at.
+const focusedStrip = await page
+  .locator('[data-split-pane][data-split-focused="true"] [data-tab-select]')
+  .allInnerTexts();
+const everyStrip = await page.locator('[data-split-pane] [data-tab-select]').allInnerTexts();
+console.log('focused pane strip:', focusedStrip, '| every pane:', everyStrip);
+if (focusedStrip.length !== 1 || everyStrip.length !== 3) {
+  throw new Error(
+    `this check needs a focused pane holding 1 tab beside 3 in all; got ` +
+      `${focusedStrip.length} and ${everyStrip.length}.`,
+  );
+}
+const beforeReach = await activeTabTitle();
+await modChord('2');
+const afterReach = await activeTabTitle();
+const reachSaid = await statusSaid();
+console.log('after Cmd+2 in a 1-tab pane:', afterReach, '| status:', reachSaid);
+if (afterReach !== beforeReach) {
+  throw new Error(
+    `Cmd+2 in a pane holding one tab moved to "${afterReach}". The digits count the FOCUSED ` +
+      "pane's own strip — reaching across into the other pane is the failure every previous " +
+      'arrangement of this row shipped in one form or another.',
+  );
+}
+if (!reachSaid.includes('only 1 tab')) {
+  throw new Error(
+    `Cmd+2 in a pane holding one tab said "${reachSaid}" — it must refuse aloud, counting the ` +
+      'strip in front of the operator.',
+  );
+}
 
 // Back to one pane before the next shot, so each is the SAME starting shape.
 // `zc` closes the focused pane, and the tab it took is ADOPTED back by the

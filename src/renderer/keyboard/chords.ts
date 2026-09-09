@@ -82,7 +82,7 @@ function digitPosition(event: KeyEventLike): string | null {
  * position, and one that would silently answer the unshifted binding.
  *
  * Both halves are about the ROW, not about whichever family is sitting on it:
- * the table has been rearranged three times and this reasoning has outlived
+ * the table has been rearranged four times and this reasoning has outlived
  * every arrangement. Nothing is bound under Shift today — macOS captures
  * `Cmd+Shift+3/4/5` for screenshots, so nothing can be — and the Shift token
  * still earns its place by keeping a shifted digit from matching an unshifted
@@ -141,7 +141,9 @@ export type KeyAction =
   | { readonly kind: 'prompt' }
   /** `I` — move keyboard control into the action pane on the right. */
   | { readonly kind: 'focusAction' }
-  /** `H` — back to the session list on the left. */
+  /** `H` / `Mod-0` — back to the session list on the left. `Mod-0` sits at
+      the head of the digit row it belongs to: the digits pick a tab, and zero
+      is the way out of the tabs entirely. */
   | { readonly kind: 'focusList' }
   /** `r` — rename the focused session in place. */
   | { readonly kind: 'rename' }
@@ -149,9 +151,25 @@ export type KeyAction =
   | { readonly kind: 'icon' }
   /** `x` — close the focused session. */
   | { readonly kind: 'close' }
-  /** `o` / `Mod-n` — start a new session. `o` the way `o` opens a new line,
-      and `Mod-n` because that is what "new" is bound to everywhere else. */
+  /** `o` / `Mod-n` — start a new session IN THE FOCUSED SESSION'S PROJECT.
+      `o` the way `o` opens a new line, and `Mod-n` because that is what "new"
+      is bound to everywhere else. With nothing focused there is no project to
+      be born in, and it refuses aloud rather than picking one. */
   | { readonly kind: 'newSession' }
+  /** `Mod-t` — the per-pane `+`, on the keyboard. The same route `newSession`
+      takes (`newSessionRoute`, one way to create a session and one refusal
+      when there is none), aimed at the FOCUSED PANE: the project comes from
+      that pane's own front tab, else its first tab, else the project on
+      screen, and the session that appears is opened as a tab THERE.
+
+      NOT A SECOND SPELLING OF `newSession`, and the difference is a state one
+      keystroke away. `zv` moves the active tab out and leaves the source pane
+      empty; with the keyboard back in it (`zw`), `Mod-n` has no focused
+      session and refuses, while `Mod-t` names the project on screen and
+      starts one — which is precisely what the `+` in that empty pane's strip
+      already does, and why it exists. `Mod-t` because "new tab in this one"
+      is Cmd+T in every browser and in VSCode's own editor group. */
+  | { readonly kind: 'newTab' }
   /** `F` — open or close the sidebar's filter popover. Shift-f, because
       plain `f` is already the jump-label move and this is its stronger,
       "narrow the whole list" cousin. */
@@ -178,14 +196,25 @@ export type KeyAction =
   /** `z0` — the shipped layout back: both panes at their default width and
       both drawn again. */
   | { readonly kind: 'resetPanes' }
-  /** `Mod-1` … `Mod-9` — a POSITION, 1-based, in whatever the keyboard is
-      pointed at: a session in the sidebar, a tab in the response pane.
-      The action carries the digit and NOTHING ELSE. Which pane is looking is
-      not something a reducer over a one-key memory can know — `Canvas` owns
-      that as `pane`, and it is the same state the status bar's mode cell
-      reads — so resolving it here would mean either threading React state
-      into the grammar or keeping a second copy of it. See `SINGLE`. */
-  | { readonly kind: 'position'; readonly digit: number }
+  /** `Mod-1` … `Mod-9` — the SESSION TAB at that position, 1-based, in the
+      strip of the FOCUSED PANE. One fixed meaning in either cursor mode: the
+      operator asked for the gesture every browser and editor already has, and
+      `SINGLE` records the trade that was made to give it to them.
+
+      WHICH STRIP, when the shell is split: the focused pane's own. Every
+      pane draws a strip of its own (A15.5) and only one of them has the
+      keyboard, so "the tab strip you are looking at" is the one the pane
+      focus already names — the same pane `zc`, `zw`, the per-pane `+` and
+      `pickView` all act in. Counting the project's whole tab set instead
+      would let a digit reach into a pane the operator is not in, which is
+      the failure the previous two arrangements shipped in another form.
+
+      The action carries the digit and NOTHING ELSE. Which sessions that
+      strip is drawing is not something a reducer over a one-key memory can
+      know — `Canvas` owns the pane tree — so resolving it here would mean
+      either threading React state into the grammar or keeping a second copy
+      of it. */
+  | { readonly kind: 'selectTab'; readonly digit: number }
   /** `Alt-1` … `Alt-9` — pick a VIEW in the focused response pane: Response,
       PRs, Terminal, Agents. A SLOT IN `TABS`, never a position in the drawn
       bar — `Alt-3` is Terminal because Terminal is `TABS[2]`, whether or not
@@ -295,41 +324,72 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   N: { kind: 'searchPrev' },
   Enter: { kind: 'open' },
   'Mod-k': { kind: 'palette' },
-  // Cmd/Ctrl + a digit is a POSITION, and the pane it counts in is whichever
-  // one has the keyboard: the sidebar's sessions, or the response pane's tabs.
+  // Cmd/Ctrl + a digit is THE SESSION TAB AT THAT POSITION in the focused
+  // pane's strip. One meaning, in both cursor modes, whatever has the
+  // keyboard.
   //
-  // Written as a rule rather than as a table of meanings because the table is
-  // what kept going stale — this is the third arrangement in three changes.
-  // The first gave the bare row to sessions and pushed the tabs onto
+  // THIS IS THE FOURTH ARRANGEMENT, AND IT IS A DELIBERATE REVERSAL OF THE
+  // THIRD. The first gave the bare row to sessions and pushed the tabs onto
   // `Mod-Shift-<digit>`; the second swapped them, because Cmd+number is the
-  // TAB gesture everywhere else. Both were wrong in the same way: they made a
-  // digit mean one fixed thing, so whichever pane the operator was actually
-  // looking at, half their presses went to the other one.
+  // TAB gesture everywhere else. The third abandoned a fixed meaning
+  // altogether and made the digit CONTEXT-DEPENDENT — a session in the
+  // sidebar while the sidebar had the keyboard, a view in the response pane
+  // while it did — on the argument that any fixed meaning sends half the
+  // operator's presses to the pane they are not looking at.
   //
-  // AND THE SHIFT ROW WAS NEVER REACHABLE. macOS binds `Cmd+Shift+3`, `4` and
-  // `5` to its screenshot commands and matches them before any Electron window
-  // sees the keydown (`com.apple.symbolichotkeys` entries 28-31 and 184). So
-  // `Mod-Shift-3` and `Mod-Shift-4` were dead bindings in both previous
-  // arrangements — first two session positions, then Terminal and Agents —
-  // and no test could have caught it, because the OS never delivers the event
-  // a test synthesises. Nothing is bound under Shift now.
+  // The operator has now asked for the fixed meaning anyway, and it is their
+  // call: Cmd+number is "switch tab" in every browser and every editor, they
+  // live in this app, and a key whose meaning changes with the cursor is a key
+  // you have to think about before pressing. The third arrangement's argument
+  // is not refuted by that, it is OUTWEIGHED — so the answer to it is written
+  // into the design instead of thrown away. The pane fork it worried about is
+  // gone twice over: the four VIEWS moved off this modifier entirely (see
+  // `Alt-<digit>` below, promoted in the change before this one), so the two
+  // families can no longer collide; and the SIDEBAR's positions, the other
+  // half of the old fork, are not re-homed onto some third chord to keep them
+  // — they are simply gone, because `j`/`k`, `gg`/`G`, `f` and `/` already
+  // reach any row and a digit that counted sidebar rows now had nothing left
+  // to disambiguate it from. What is lost is jumping to sidebar row N by
+  // number; that is the price, and it was quoted.
+  //
+  // AND THE SHIFT ROW IS STILL NOT REACHABLE. macOS binds `Cmd+Shift+3`, `4`
+  // and `5` to its screenshot commands and matches them before any Electron
+  // window sees the keydown (`com.apple.symbolichotkeys` entries 28-31 and
+  // 184). So `Mod-Shift-3` and `Mod-Shift-4` were dead bindings in the first
+  // two arrangements — first two session positions, then Terminal and Agents
+  // — and no test could have caught it, because the OS never delivers the
+  // event a test synthesises. Nothing goes there, in this arrangement or the
+  // next one.
   //
   // The digit is 1-BASED here, because a position is what the KEY means; the
-  // handler converts to an index. `Mod-0` stays unbound — `z0` owns the zero.
-  'Mod-1': { kind: 'position', digit: 1 },
-  'Mod-2': { kind: 'position', digit: 2 },
-  'Mod-3': { kind: 'position', digit: 3 },
-  'Mod-4': { kind: 'position', digit: 4 },
-  'Mod-5': { kind: 'position', digit: 5 },
-  'Mod-6': { kind: 'position', digit: 6 },
-  'Mod-7': { kind: 'position', digit: 7 },
-  'Mod-8': { kind: 'position', digit: 8 },
-  'Mod-9': { kind: 'position', digit: 9 },
+  // handler converts to an index, and 9 is the LAST tab whatever the count,
+  // which is the convention the same browsers taught.
+  //
+  // `Mod-0` IS BOUND NOW, and both of the reasons it was not are spent. It was
+  // held back first because Electron's default View menu claims
+  // `CommandOrControl+0` for Actual Size — vam owns its application menu since
+  // then and that menu has no `viewMenu` at all (`src/main/menu.ts`), so
+  // nothing native answers the key. And second because "`z0` owns the zero":
+  // `z0` is a CHORD, `z` then a bare `0`, and `normalizeKey` spells a modified
+  // digit `Mod-0` — two different strings, neither reachable from the other,
+  // and `z0` is asserted still working beside this.
+  'Mod-0': { kind: 'focusList' },
+  'Mod-1': { kind: 'selectTab', digit: 1 },
+  'Mod-2': { kind: 'selectTab', digit: 2 },
+  'Mod-3': { kind: 'selectTab', digit: 3 },
+  'Mod-4': { kind: 'selectTab', digit: 4 },
+  'Mod-5': { kind: 'selectTab', digit: 5 },
+  'Mod-6': { kind: 'selectTab', digit: 6 },
+  'Mod-7': { kind: 'selectTab', digit: 7 },
+  'Mod-8': { kind: 'selectTab', digit: 8 },
+  'Mod-9': { kind: 'selectTab', digit: 9 },
   // The response pane's four views, by name. The same digit row under the
-  // OTHER modifier, and that is the whole distinction: Cmd counts whatever
-  // the focused pane counts, Alt names a view. `normalizeKey` spells them
-  // apart (`Mod-1` vs `Alt-1`) off `event.code`, so neither can answer the
-  // other's keystroke on any layout.
+  // OTHER modifier, and that is the whole distinction: Cmd picks a SESSION
+  // TAB in the focused pane, Alt picks one of that pane's four VIEWS.
+  // `normalizeKey` spells them apart (`Mod-1` vs `Alt-1`) off `event.code`, so
+  // neither can answer the other's keystroke on any layout. This split is what
+  // let the digit row above take a fixed meaning at all — while both families
+  // shared Cmd, one of them had to lose.
   //
   // ALL NINE, though only four name a view. Digits 5-9 are what make the
   // refusal reachable: `Alt-5` says "no view 5" instead of falling through
@@ -378,6 +438,14 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // the INPUT|TEXTAREA guard, and a Cmd chord produces no character on any layout,
   // so it cannot be a keystroke the operator meant for the text.
   'Mod-n': { kind: 'newSession' },
+  // And the PER-PANE one, which is a different act with a different refusal:
+  // `newTab`'s own doc comment above spells out where the two diverge and why
+  // it is not a third chord on `newSession`. `Mod-t` is free — plain `t` is
+  // `gt`'s second key, behind the `g` door, and `normalizeKey` gives a
+  // modified letter its own `Mod-` spelling. Nothing native holds it either:
+  // vam's menu (`src/main/menu.ts`) is appMenu/editMenu/Window, none of which
+  // carries a Cmd+T, and Electron's default accelerators do not include it.
+  'Mod-t': { kind: 'newTab' },
   // Vim's own "shift this leftwards / rightwards" — literally what moving a
   // side pane's boundary is. A real Shift+, / Shift+. keydown normalizes to
   // the browser-applied `<` / `>` here, distinct from the plain `,` above
@@ -522,8 +590,8 @@ export function actionId(action: KeyAction): string {
   switch (action.kind) {
     case 'move':
       return `move:${action.direction}`;
-    case 'position':
-      return `position:${action.digit}`;
+    case 'selectTab':
+      return `selectTab:${action.digit}`;
     case 'pickView':
       return `pickView:${action.digit}`;
     case 'project':
