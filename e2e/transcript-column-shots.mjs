@@ -390,7 +390,18 @@ const jumpBoxes = () =>
         // Hit-testable AND fully painted: a control that is present must be
         // neither a dimmed decoration nor an invisible click target.
         onTop: mid?.closest('[data-out-to-top], [data-out-to-bottom]') === el,
-        opacity: Number(getComputedStyle(el).opacity) * Number(getComputedStyle(skinEl).opacity),
+        // EFFECTIVE opacity, walked up the ancestors -- found by falsification:
+        // an `opacity-50` on the LAYER these two sit in left every one of them
+        // reporting 1 for itself, and the check passed over a pair of chips
+        // painted at half strength. Opacity composites down the tree; a guard
+        // that reads one node's own value is measuring the wrong thing.
+        opacity: (() => {
+          let composed = 1;
+          for (let node = el; node !== null && node !== document.body; node = node.parentElement) {
+            composed *= Number(getComputedStyle(node).opacity);
+          }
+          return composed * Number(getComputedStyle(skinEl).opacity);
+        })(),
         // In the scroller's flow it would ride the transcript out of frame.
         insideScroller: el.closest('[data-detail-column]') !== null,
       };
@@ -414,103 +425,145 @@ const jumpBoxes = () =>
 
 const overlaps = (a, b) => a.x < b.right && a.right > b.x && a.y < b.bottom && a.bottom > b.y;
 
+// AT TWO WIDTHS, AND THAT SECOND ONE IS NOT DECORATION -- IT IS WHAT MAKES
+// THE OCCLUSION CHECKS BELOW MEAN ANYTHING.
+//
+// FOUND BY FALSIFICATION, which is the only way it could have been: with the
+// reserved strip deleted outright, every "covers no text" check below still
+// passed at 1100x620. At that width the demo's longest line breaks 45px short
+// of the column's content edge, so the jumps were clear by luck and the guard
+// was reporting the fixture rather than the fix. At 700x520 the same prose
+// wraps to the edge exactly, so a missing reservation puts a glyph under a
+// control. `filledTheWidth` below refuses to let that go unnoticed again: a
+// sweep that proves nothing has to say so.
+//
 // AT THE TWO ENDS AND THROUGH THE MIDDLE. The rule each jump is drawn under is
 // "only while it would actually move the column", so the ends are where that
 // rule is provable and the middle is where both are drawn at once.
-const ends = await metrics();
-const endScroll = ends.scrollHeight - ends.clientHeight;
-const offsets = [0, Math.round(endScroll * 0.25), Math.round(endScroll * 0.5),
-  Math.round(endScroll * 0.75), endScroll];
 let sawBoth = 0;
 let sawGap = Number.POSITIVE_INFINITY;
-for (const offset of offsets) {
-  await column.evaluate((el, top) => {
-    el.scrollTop = top;
-  }, offset);
-  await page.waitForTimeout(150);
-  const boxes = await jumpBoxes();
-  const drawn = [
-    ['to-top', boxes.top],
-    ['to-bottom', boxes.bottom],
-  ].filter(([, box]) => box !== null);
-  // A CONTROL THAT SCROLLS NOWHERE IS WORSE THAN NO CONTROL -- the rule the
-  // deleted bar already got right, kept.
-  check(
-    `at scrollTop ${offset}, only the jumps that would move the column are drawn`,
-    (boxes.top !== null) === offset > 24 &&
-      (boxes.bottom !== null) === endScroll - offset > 24,
-    `top=${boxes.top !== null} bottom=${boxes.bottom !== null} of ${endScroll}`,
-  );
-  if (drawn.length === 2) sawBoth += 1;
+let filledTheWidth = 0;
+for (const size of [
+  { width: 1100, height: 620 },
+  { width: 700, height: 520 },
+]) {
+  await page.setViewportSize(size);
+  await page.waitForTimeout(200);
+  const ends = await metrics();
+  const endScroll = ends.scrollHeight - ends.clientHeight;
+  const offsets = [
+    0,
+    Math.round(endScroll * 0.25),
+    Math.round(endScroll * 0.5),
+    Math.round(endScroll * 0.75),
+    endScroll,
+  ];
+  for (const offset of offsets) {
+    await column.evaluate((el, top) => {
+      el.scrollTop = top;
+    }, offset);
+    await page.waitForTimeout(150);
+    const boxes = await jumpBoxes();
+    const drawn = [
+      ['to-top', boxes.top],
+      ['to-bottom', boxes.bottom],
+    ].filter(([, box]) => box !== null);
+    // A CONTROL THAT SCROLLS NOWHERE IS WORSE THAN NO CONTROL -- the rule the
+    // deleted bar already got right, kept.
+    check(
+      `at scrollTop ${offset}, only the jumps that would move the column are drawn`,
+      (boxes.top !== null) === offset > 24 &&
+        (boxes.bottom !== null) === endScroll - offset > 24,
+      `top=${boxes.top !== null} bottom=${boxes.bottom !== null} of ${endScroll}`,
+    );
+    if (drawn.length === 2) sawBoth += 1;
 
-  for (const [name, box] of drawn) {
-    // 44x44 is WCAG 2.2 SC 2.5.5 and this pane is the phone's session screen.
-    check(
-      `${name} at ${offset}: the hit box clears 44x44`,
-      box.w >= 44 && box.h >= 44,
-      `${Math.round(box.w)}x${Math.round(box.h)}`,
-    );
-    // AND THE PAINT IS ITS OWN, SMALLER BOX -- with the glyph inside it. Every
-    // touch assertion in this repo checks the hit box; none checked whether
-    // the visible skin fits what it draws, and that is how a chip ships with
-    // its arrow clipped.
-    check(
-      `${name} at ${offset}: the painted skin is smaller than the hit box, and holds its glyph`,
-      box.skin !== null &&
-        box.skin.w >= 20 &&
-        box.skin.w < box.w &&
-        box.skin.h < box.h &&
-        box.glyph?.fits === true,
-      JSON.stringify({ skin: box.skin, glyph: box.glyph }),
-    );
-    // PRESENT MEANS FULLY VISIBLE AND FULLY CLICKABLE. There is no fade here
-    // on purpose: mid-transition a control is either half-painted and live or
-    // painted and inert, and both are states this pane must not have.
-    check(
-      `${name} at ${offset}: fully opaque and on top at its own centre`,
-      box.onTop && box.opacity === 1,
-      JSON.stringify({ onTop: box.onTop, opacity: box.opacity }),
-    );
-    check(`${name} at ${offset}: floats over the scroller rather than in it`, !box.insideScroller);
-  }
+    for (const [name, box] of drawn) {
+      // 44x44 is WCAG 2.2 SC 2.5.5 and this pane is the phone's session screen.
+      check(
+        `${name} at ${offset}: the hit box clears 44x44`,
+        box.w >= 44 && box.h >= 44,
+        `${Math.round(box.w)}x${Math.round(box.h)}`,
+      );
+      // AND THE PAINT IS ITS OWN, SMALLER BOX -- with the glyph inside it. Every
+      // touch assertion in this repo checks the hit box; none checked whether
+      // the visible skin fits what it draws, and that is how a chip ships with
+      // its arrow clipped.
+      check(
+        `${name} at ${offset}: the painted skin is smaller than the hit box, and holds its glyph`,
+        box.skin !== null &&
+          box.skin.w >= 20 &&
+          box.skin.w < box.w &&
+          box.skin.h < box.h &&
+          box.glyph?.fits === true,
+        JSON.stringify({ skin: box.skin, glyph: box.glyph }),
+      );
+      // PRESENT MEANS FULLY VISIBLE AND FULLY CLICKABLE. There is no fade here
+      // on purpose: mid-transition a control is either half-painted and live or
+      // painted and inert, and both are states this pane must not have.
+      check(
+        `${name} at ${offset}: fully opaque and on top at its own centre`,
+        box.onTop && box.opacity === 1,
+        JSON.stringify({ onTop: box.onTop, opacity: box.opacity }),
+      );
+      check(`${name} at ${offset}: floats over the scroller rather than in it`, !box.insideScroller);
+    }
 
-  // THE RESERVED CORNER (audit F1), which the top jump inherits: the view-icon
-  // pill is opaque and floats at the pane's top right, so a jump placed at the
-  // column's own top right would sit under it.
-  if (boxes.top !== null && boxes.pill !== null) {
-    check(
-      `at ${offset}, the top jump clears the view-icon pill`,
-      !overlaps(boxes.top, boxes.pill),
-      `jump ${JSON.stringify(boxes.top)} vs pill ${JSON.stringify(boxes.pill)}`,
-    );
-  }
+    // THE RESERVED CORNER (audit F1), which the top jump inherits: the view-icon
+    // pill is opaque and floats at the pane's top right, so a jump placed at the
+    // column's own top right would sit under it.
+    if (boxes.top !== null && boxes.pill !== null) {
+      check(
+        `at ${offset}, the top jump clears the view-icon pill`,
+        !overlaps(boxes.top, boxes.pill),
+        `jump ${JSON.stringify(boxes.top)} vs pill ${JSON.stringify(boxes.pill)}`,
+      );
+    }
 
-  // AND NOW THE POINT: not one glyph under either of them.
-  const { runs } = await textRuns();
-  for (const [name, box] of drawn) {
-    const covered = runs.filter((run) => overlaps(box, run));
-    check(
-      `at ${offset}, ${name} covers no text in the column`,
-      covered.length === 0,
-      covered
-        .slice(0, 3)
-        .map((c) => `${c.block}${c.pinned ? ' (PINNED)' : ''} ${JSON.stringify(c.text)}`)
-        .join(' ; '),
+    // AND NOW THE POINT: not one glyph under either of them.
+    const { runs } = await textRuns();
+    for (const [name, box] of drawn) {
+      const covered = runs.filter((run) => overlaps(box, run));
+      check(
+        `at ${offset}, ${name} covers no text in the column`,
+        covered.length === 0,
+        covered
+          .slice(0, 3)
+          .map((c) => `${c.block}${c.pinned ? ' (PINNED)' : ''} ${JSON.stringify(c.text)}`)
+          .join(' ; '),
+      );
+      // Named separately, because these two are the ones the overlay owes its
+      // clearance to by name: the prompt pinned at the top of the column, and
+      // the newest answer, which is what the operator came to read.
+      const pinned = covered.filter((c) => c.pinned && c.block === 'in');
+      const newestOut = covered.filter((c) => c.newest && c.block === 'out');
+      check(
+        `at ${offset}, ${name} covers neither the pinned prompt nor the newest answer`,
+        pinned.length === 0 && newestOut.length === 0,
+        `${pinned.length} pinned-prompt runs, ${newestOut.length} newest-answer runs`,
+      );
+      const gap = Math.min(...runs.map((run) => box.x - run.right));
+      if (Number.isFinite(gap)) sawGap = Math.min(sawGap, gap);
+    }
+    // DID THE SWEEP FIND A CORPUS? A line that reaches the column's own
+    // content edge is the only kind that can be covered, so at least one has
+    // to have been measured or every check above is vacuous. Within 8px of the
+    // edge, not exactly on it: prose wraps at word boundaries, and "this line
+    // used all the width there was" is the fact, not a coincidence of where
+    // the last space fell.
+    const contentEdge = await column.evaluate(
+      (el) => el.clientWidth - Number.parseFloat(getComputedStyle(el).paddingRight),
     );
-    // Named separately, because these two are the ones the overlay owes its
-    // clearance to by name: the prompt pinned at the top of the column, and
-    // the newest answer, which is what the operator came to read.
-    const pinned = covered.filter((c) => c.pinned && c.block === 'in');
-    const newestOut = covered.filter((c) => c.newest && c.block === 'out');
-    check(
-      `at ${offset}, ${name} covers neither the pinned prompt nor the newest answer`,
-      pinned.length === 0 && newestOut.length === 0,
-      `${pinned.length} pinned-prompt runs, ${newestOut.length} newest-answer runs`,
-    );
-    const gap = Math.min(...runs.map((run) => box.x - run.right));
-    if (Number.isFinite(gap)) sawGap = Math.min(sawGap, gap);
+    if (runs.some((run) => run.right >= contentEdge - 8)) filledTheWidth += 1;
   }
 }
+await page.setViewportSize({ width: 1100, height: 620 });
+await page.waitForTimeout(200);
+check(
+  'at least one line was measured actually filling the column, or the sweep proves nothing',
+  filledTheWidth >= 1,
+  `${filledTheWidth} of the offsets swept had a line reaching the content edge`,
+);
 check('both jumps were on screen together at some offset', sawBoth >= 1, `${sawBoth} offsets`);
 console.log(`  narrowest gap between a text run and a jump's hit box: ${Math.round(sawGap)}px`);
 check('no glyph came nearer a jump than its own edge', sawGap >= 0, `${Math.round(sawGap)}px`);
