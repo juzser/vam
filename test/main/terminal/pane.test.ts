@@ -42,10 +42,19 @@ function runner(answers: Record<string, TmuxRunResult>) {
   const argvs: (readonly string[])[] = [];
   const run: TmuxRun = async (argv) => {
     argvs.push(argv);
-    const verb = argv[0] ?? '';
+    // THE PANE READ IS ONE TMUX INVOCATION OF TWO COMMANDS since it began
+    // asking where the cursor is (`tmux/argv.ts`), so its first word is
+    // `display-message` and not `capture-pane`. Every stub here names the
+    // read by WHAT IT READS rather than by the verb that happens to lead.
+    const verb = argv.includes('capture-pane') ? 'capture-pane' : (argv[0] ?? '');
     return answers[verb] ?? failed(`no stub for ${verb}`);
   };
-  return { run, argvs, verbs: () => argvs.map((argv) => argv[0]) };
+  return {
+    run,
+    argvs,
+    verbs: () =>
+      argvs.map((argv) => (argv.includes('capture-pane') ? 'capture-pane' : argv[0])),
+  };
 }
 
 describe('matching a project to the tmux session vam started for it', () => {
@@ -140,6 +149,9 @@ describe('reading the pane', () => {
       kind: 'ok',
       name: 'vam-atlas-a1b2c3',
       text: '$ claude\n',
+      // These stubs answer the capture and say nothing about the cursor,
+      // which is exactly what `unreadable` means (`shared/terminal.ts`).
+      cursor: { kind: 'unreadable' },
     });
     // The listing has to ASK for the recorded id, or there is nothing to match
     // on and the code falls back to guessing from a name.
@@ -147,7 +159,24 @@ describe('reading the pane', () => {
     // Exact targeting: `-t vam-atlas-a1` would reach `vam-atlas-a1b2c3` by
     // tmux's own prefix resolution, and on send-keys that is someone else's
     // session.
-    expect(argvs[1]).toEqual(['capture-pane', '-p', '-e', '-t', '=vam-atlas-a1b2c3:']);
+    // The cursor query and the capture, one invocation, BOTH aimed at the
+    // same pane -- a `display-message` with no `-t` answers about whatever
+    // pane tmux calls current, which is somebody else's session as easily
+    // as this one.
+    expect(argvs[1]).toEqual([
+      'display-message',
+      '-p',
+      '-t',
+      '=vam-atlas-a1b2c3:',
+      '-F',
+      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y}',
+      ';',
+      'capture-pane',
+      '-p',
+      '-e',
+      '-t',
+      '=vam-atlas-a1b2c3:',
+    ]);
   });
 
   it('reports no session of vam-s, and captures nothing, when nothing matches', async () => {
@@ -226,6 +255,9 @@ describe('the terminal channel', () => {
       kind: 'ok',
       name: 'vam-atlas-a1b2c3',
       text: 'screen',
+      // These stubs answer the capture and say nothing about the cursor,
+      // which is exactly what `unreadable` means (`shared/terminal.ts`).
+      cursor: { kind: 'unreadable' },
     });
   });
 
@@ -257,6 +289,9 @@ describe('the terminal channel', () => {
       kind: 'ok',
       name: 'vam-atlas-cc22dd',
       text: 'beta screen',
+      // These stubs answer the capture and say nothing about the cursor,
+      // which is exactly what `unreadable` means (`shared/terminal.ts`).
+      cursor: { kind: 'unreadable' },
     });
   });
 });
@@ -283,8 +318,24 @@ describe('reading the pane a session published', () => {
       kind: 'ok',
       name: 'vam-atlas-cc22dd',
       text: 'beta screen',
+      // These stubs answer the capture and say nothing about the cursor,
+      // which is exactly what `unreadable` means (`shared/terminal.ts`).
+      cursor: { kind: 'unreadable' },
     });
-    expect(argvs).toContainEqual(['capture-pane', '-p', '-e', '-t', '=vam-atlas-cc22dd:']);
+    expect(argvs.at(-1)).toEqual([
+      'display-message',
+      '-p',
+      '-t',
+      '=vam-atlas-cc22dd:',
+      '-F',
+      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y}',
+      ';',
+      'capture-pane',
+      '-p',
+      '-e',
+      '-t',
+      '=vam-atlas-cc22dd:',
+    ]);
   });
 
   it('still says ambiguous for a row that published nothing', async () => {

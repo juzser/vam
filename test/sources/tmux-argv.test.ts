@@ -107,7 +107,18 @@ describe('tmux argv', () => {
     // the fix: tmux would then resolve the name by prefix and then by fnmatch,
     // and `send-keys` reaching a session other than the one vam meant is the
     // thing the exactness is there to prevent.
+    // The read is TWO commands in one invocation now (the cursor query and
+    // the capture), and the target-pane rule applies to both of them: a
+    // `display-message` with no `-t` answers about whatever pane tmux calls
+    // current, which is somebody else's session as easily as this one.
     expect(capturePaneArgv('vam-a1b2c3')).toEqual([
+      'display-message',
+      '-p',
+      '-t',
+      '=vam-a1b2c3:',
+      '-F',
+      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y}',
+      ';',
       'capture-pane',
       '-p',
       '-e',

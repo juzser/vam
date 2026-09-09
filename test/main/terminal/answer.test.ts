@@ -75,6 +75,16 @@ const REVIEW = [
 const RESOLVED = 'Your questions have been answered.\n> ';
 
 /**
+ * WHAT ONE TMUX INVOCATION DOES, which is no longer the same as its first
+ * word: the pane read is `display-message ; capture-pane` in one process since
+ * it began asking where the cursor is (`tmux/argv.ts`), so a sequence asserted
+ * on `argv[0]` would read `display-message` where it means "vam read the
+ * screen".
+ */
+const verbOf = (argv: readonly string[]): string | undefined =>
+  argv.includes('capture-pane') ? 'capture-pane' : argv[0];
+
+/**
  * A fake tmux. `captures` is a QUEUE: each `capture-pane` takes the next
  * screen, which is what lets a test say "and after that arrow the pane looked
  * like this" instead of assuming the module re-read at all.
@@ -85,7 +95,7 @@ function runner(captures: readonly string[], listed = `${ATLAS}\t${NAME}\n`) {
   const run: TmuxRun = async (argv) => {
     argvs.push(argv);
     if (argv[0] === 'list-sessions') return ok(listed);
-    if (argv[0] === 'capture-pane') return ok(queue.shift() ?? '');
+    if (argv.includes('capture-pane')) return ok(queue.shift() ?? '');
     if (argv[0] === 'send-keys') return ok('');
     return failed(`no stub for ${argv[0] ?? ''}`);
   };
@@ -214,7 +224,7 @@ describe('refusing rather than guessing', () => {
     const run: TmuxRun = async (argv) => {
       argvs.push(argv);
       if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t${NAME}\n`);
-      if (argv[0] === 'capture-pane') return ok(colours(0));
+      if (argv.includes('capture-pane')) return ok(colours(0));
       return failed('cant find pane');
     };
     expect(await answerQuestion(run, ATLAS, single(['Cobalt']))).toEqual({ kind: 'refused' });
@@ -241,7 +251,7 @@ describe('the verified route, step by step', () => {
       ['send-keys', '-t', TARGET, 'Enter'],
     ]);
     // Read, step, read, step, read, Return, read -- never a blind burst.
-    expect(argvs.map((argv) => argv[0])).toEqual([
+    expect(argvs.map(verbOf)).toEqual([
       'list-sessions',
       'capture-pane',
       'send-keys',
@@ -404,7 +414,7 @@ describe('when the pane stops cooperating part way through', () => {
     const keys: (string | undefined)[] = [];
     const run: TmuxRun = async (argv) => {
       if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t${NAME}\n`);
-      if (argv[0] === 'capture-pane') {
+      if (argv.includes('capture-pane')) {
         const next = queue.shift();
         return next === undefined ? failed('cant find pane') : ok(next);
       }

@@ -5,9 +5,32 @@
  * screen -- what the pane looks like right now, with every escape sequence
  * already applied by tmux -- and `-e` asks for the surviving SGR sequences
  * back with it, which `terminal-ansi.ts` turns into spans. So the agent's own
- * colours are drawn, and nothing else is: this is still not a terminal
- * emulator and not a stream, no cursor is placed, and a snapshot drawn
- * honestly beats a stream drawn as garbage (`sources/tmux/argv.ts`).
+ * colours are drawn, and this is STILL NOT A TERMINAL EMULATOR AND NOT A
+ * STREAM: a snapshot drawn honestly beats a stream drawn as garbage
+ * (`sources/tmux/argv.ts`).
+ *
+ * THE CURSOR IS THE ONE THING THAT SENTENCE USED TO EXCLUDE, and the exclusion
+ * was answered rather than argued with. It said "no cursor is placed", which
+ * was true and cost the operator the thing a terminal exists to tell you --
+ * their report was "I don't see the cursor in tmux". Nothing here composes or
+ * moves one: tmux is ASKED where its cursor ended up, in the same invocation
+ * that reads the screen, and `terminal-cursor.ts` marks that one cell. The
+ * contract is unchanged in the part that matters -- vam draws what tmux
+ * composed and invents nothing.
+ *
+ * IT DOES NOT BLINK, and the absence is the deliberate half. This screen is a
+ * snapshot on a one-second poll, so the caret is up to a second old; an
+ * animation is the one thing on a surface like this that a person reads as
+ * "this is live", and there is no stream behind it to earn that. A steady
+ * block says what is true -- here is where the cursor was when vam last
+ * looked -- and it costs no compositor animation running under an idle tab.
+ *
+ * THREE ANSWERS DRAW NO CARET AT ALL, which is the same rule as everything
+ * else here: `hidden` (the program in the pane turned the cursor off, and vam
+ * honours that), `unreadable` (vam did not find out -- never to be drawn as a
+ * position, least of all 0,0) and a row the capture does not have. On this
+ * surface a caret in the wrong place is a false claim about where the
+ * operator's next keystroke lands.
  *
  * WHAT IT COSTS WHEN CLOSED: nothing. The operator asked for a tab that loads
  * only when opened, so the whole of this component is mounted by the tab
@@ -35,6 +58,7 @@ import {
 } from 'react';
 import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
 import { parseAnsi, spanClasses } from './terminal-ansi.js';
+import { placeCursor } from './terminal-cursor.js';
 import { fitPane, sameSize } from './terminal-size.js';
 
 /**
@@ -183,6 +207,29 @@ function strokeFor(key: string): PaneKey | null {
   // (`ArrowUp`, `F5`) never matches.
   return key.length === 1 ? { kind: 'text', text: key } : null;
 }
+
+/**
+ * What the cursor's cell looks like: a solid block, the character in it drawn
+ * in the pane's own background colour. Reverse video, which is what a terminal
+ * cursor has always been.
+ *
+ * A STATIC STRING for the reason `spanClasses` is a table of them: Tailwind
+ * extracts class names by scanning source text, so anything template-built
+ * compiles to no CSS and the cursor silently never appears. That failure mode
+ * has shipped in this project before, which is also why the e2e guard measures
+ * the RESOLVED background rather than reading this attribute back.
+ *
+ * IT REPLACES THE CELL'S OWN COLOURS RATHER THAN JOINING THEM. A cursor span
+ * carrying both `text-ansi-red` and `text-panel` would resolve by stylesheet
+ * order, not by the order they are written here, so which one won would be an
+ * accident. The character under a block cursor is not readable in its own
+ * colour anyway -- that is what the block is.
+ *
+ * NO ANIMATION. See the note at the top of this file: the screen behind it is
+ * a one-second snapshot, and a blink is a claim about liveness that nothing
+ * here can honour.
+ */
+const CURSOR_CLASSES = 'bg-ink text-panel';
 
 const NO_BRIDGE: PaneView = {
   kind: 'unavailable',
@@ -338,7 +385,15 @@ export function TerminalTab({
    * text only changes when a read answers, which is once a second.
    */
   const lines = useMemo(
-    () => parseAnsi(view !== null && view.kind === 'ok' ? view.text : ''),
+    () =>
+      placeCursor(
+        parseAnsi(view !== null && view.kind === 'ok' ? view.text : ''),
+        // The cursor is taken from THE SAME `view` the text is, and never
+        // held across a read: it is a position in that capture, and one
+        // screen's caret drawn on the next screen is a claim about a cell
+        // that has moved.
+        view !== null && view.kind === 'ok' ? view.cursor : { kind: 'unreadable' },
+      ),
     [view],
   );
 
@@ -730,7 +785,11 @@ export function TerminalTab({
             <Fragment key={index}>
               {spans.map((span, position) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: as above -- a run's identity is where it sits on the line
-                <span key={position} className={spanClasses(span)}>
+                <span
+                  key={position}
+                  data-terminal-cursor={span.cursor ? '' : undefined}
+                  className={span.cursor ? CURSOR_CLASSES : spanClasses(span)}
+                >
                   {span.text}
                 </span>
               ))}
