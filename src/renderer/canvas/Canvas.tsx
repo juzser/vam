@@ -521,16 +521,28 @@ function NewTabButton({
   readonly onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      data-tab-new
-      aria-label="new session in this pane"
-      title={decline ?? 'New session in this pane'}
-      onClick={onClick}
-      className="vam-tap flex flex-none cursor-pointer items-center self-center rounded-[4px] px-1.5 py-1 text-ink-faint hover:text-ink"
+    // `ShortcutTip`, not `title`: the decline is the one thing this button has
+    // to say that its `aria-label` does not, and a `title` opens on hover and
+    // on nothing else -- so a keyboard user pressed it, got silence, and had
+    // no route to the reason. The sidebar's New session already carries the
+    // same string this way.
+    // The chord is offered only when there IS a route: `o` takes the same
+    // declined path, so printing it beside the refusal would read as "press
+    // this instead" for a key that refuses identically.
+    <ShortcutTip
+      label={decline ?? 'New session in this pane'}
+      action={decline === null ? { kind: 'newSession' } : undefined}
     >
-      <Plus size={13} strokeWidth={1.7} />
-    </button>
+      <button
+        type="button"
+        data-tab-new
+        aria-label="new session in this pane"
+        onClick={onClick}
+        className="vam-tap flex flex-none cursor-pointer items-center self-center rounded-[4px] px-1.5 py-1 text-ink-faint hover:text-ink"
+      >
+        <Plus size={13} strokeWidth={1.7} />
+      </button>
+    </ShortcutTip>
   );
 }
 
@@ -4419,7 +4431,17 @@ function CanvasInner({
             </span>
           ) : (
             <Note text={usage.reason}>
-              <span data-usage>{usage.text}</span>
+              {/* A tab stop for the same reason `StatusCell` takes one. This
+                  sentence is the explanation for a MISSING NUMBER -- on the
+                  web/Tailscale build it was keyboard-unreachable, and with no
+                  hover on touch it was unreachable at all. */}
+              <span
+                data-usage
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
+                tabIndex={0}
+              >
+                {usage.text}
+              </span>
             </Note>
           )}
           {usage.windows !== null && (
@@ -4591,6 +4613,15 @@ function SourceGlyph({ source }: { readonly source: SourceId | null }) {
         data-source-mark={register}
         role="img"
         aria-label={`source: ${source}`}
+        // The tab stop is what makes the `Note` above worth having:
+        // `StatusCell` reached this conclusion first, in its own doc comment
+        // -- a tooltip that opens on focus is worth nothing on an element
+        // that cannot be focused, and hung on a bare span it degrades to the
+        // `title` `Note` exists to replace. The suppression sits on the line
+        // directly above the attribute because biome reports it there and
+        // suppresses by line.
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
+        tabIndex={0}
         className="flex items-center text-ink-dim"
       >
         {mark === undefined ? (

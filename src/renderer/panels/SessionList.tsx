@@ -1944,26 +1944,37 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   tabindex anywhere in this row -- so moving the markup moved
                   the keyboard path, and that is the intent, not a side
                   effect. */}
-                  <button
-                    type="button"
-                    data-new-session-in-project={section.project.id}
-                    onClick={() => onAddInProject(section.project)}
-                    title={newSessionDecline ?? `New session in ${section.project.name}`}
-                    aria-label={`new session in ${section.project.name}`}
-                    className={[
-                      'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-quiet hover:border-line-strong hover:text-ink-dim focus:opacity-100',
-                      isRevealed ||
-                      section.items.some((entry) => entry.session.id === focusedSessionId)
-                        ? 'opacity-100'
-                        : 'opacity-0',
-                    ].join(' ')}
-                    {...pending(
-                      section.project.id,
-                      `Starting a session in ${section.project.name}…`,
-                    )}
+                  {/* The refusal rides in the TOOLTIP, not a `title`: the
+                  `aria-label` promises a new session unconditionally, so
+                  without this a keyboard user pressed the button, got silence,
+                  and had no route to why. Same treatment as New session
+                  above. The chord is offered only when there is a route --
+                  `o` declines identically, so naming it beside the refusal
+                  would read as "press this instead". */}
+                  <ShortcutTip
+                    label={newSessionDecline ?? `New session in ${section.project.name}`}
+                    action={newSessionDecline === null ? { kind: 'newSession' } : undefined}
                   >
-                    <Plus size={13} strokeWidth={1.7} />
-                  </button>
+                    <button
+                      type="button"
+                      data-new-session-in-project={section.project.id}
+                      onClick={() => onAddInProject(section.project)}
+                      aria-label={`new session in ${section.project.name}`}
+                      className={[
+                        'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-quiet hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                        isRevealed ||
+                        section.items.some((entry) => entry.session.id === focusedSessionId)
+                          ? 'opacity-100'
+                          : 'opacity-0',
+                      ].join(' ')}
+                      {...pending(
+                        section.project.id,
+                        `Starting a session in ${section.project.name}…`,
+                      )}
+                    >
+                      <Plus size={13} strokeWidth={1.7} />
+                    </button>
+                  </ShortcutTip>
 
                   {/* There is still no "Project settings": vam has no
                     per-project setting to open.
@@ -2260,14 +2271,26 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                     <span className="flex-none">·</span>
                                     <span
                                       data-session-age
+                                      // The gap's explanation is `sr-only` rather than a
+                                      // `title`, which opens on hover and on nothing else --
+                                      // and this span lives inside the row's own <button>, so
+                                      // it cannot take a tab stop of its own without nesting an
+                                      // interactive control. The row button already has an
+                                      // accessible name built from its contents; the sentence
+                                      // joins it there, and the em-dash stays as drawn.
                                       title={
                                         session.age === null
-                                          ? 'this source cannot say when the session last did anything'
+                                          ? undefined
                                           : `last activity ${session.age} ago`
                                       }
                                       className="flex-none"
                                     >
                                       {session.age ?? 'no age'}
+                                      {session.age === null && (
+                                        <span className="sr-only">
+                                          this source cannot say when the session last did anything
+                                        </span>
+                                      )}
                                     </span>
                                     {session.branch !== null && (
                                       <>
@@ -2328,11 +2351,13 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                       <GitBranch size={10} strokeWidth={1.6} />
                                       <span
                                         data-session-branch
-                                        title={
-                                          session.branch === null
-                                            ? 'this source cannot say which branch the session is on'
-                                            : session.branch
-                                        }
+                                        // `title` survives ONLY for the non-null case, where it
+                                        // reveals text that is already in the DOM and merely
+                                        // clipped -- the one legitimate use of the attribute.
+                                        // The null case's sentence is information found nowhere
+                                        // else, so it becomes `sr-only` text inside the row
+                                        // button's own accessible name (see the age cell).
+                                        title={session.branch ?? undefined}
                                         // `overflow-hidden` IS the guarantee (see
                                         // `BRANCH_TAIL_MAX_CHARS`'s doc comment): this box is
                                         // already sized correctly by the row's own flex layout
@@ -2346,7 +2371,12 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                         className="flex min-w-0 items-center overflow-hidden"
                                       >
                                         {session.branch === null ? (
-                                          '—'
+                                          <>
+                                            —
+                                            <span className="sr-only">
+                                              this source cannot say which branch the session is on
+                                            </span>
+                                          </>
                                         ) : (
                                           <>
                                             <span data-branch-head className="truncate">
@@ -2390,14 +2420,26 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                     </span>
                                     <span
                                       data-session-age
+                                      // The gap's explanation is `sr-only` rather than a
+                                      // `title`, which opens on hover and on nothing else --
+                                      // and this span lives inside the row's own <button>, so
+                                      // it cannot take a tab stop of its own without nesting an
+                                      // interactive control. The row button already has an
+                                      // accessible name built from its contents; the sentence
+                                      // joins it there, and the em-dash stays as drawn.
                                       title={
                                         session.age === null
-                                          ? 'this source cannot say when the session last did anything'
+                                          ? undefined
                                           : `last activity ${session.age} ago`
                                       }
                                       className="flex-none"
                                     >
                                       {session.age ?? '—'}
+                                      {session.age === null && (
+                                        <span className="sr-only">
+                                          this source cannot say when the session last did anything
+                                        </span>
+                                      )}
                                     </span>
                                   </span>
                                 )}

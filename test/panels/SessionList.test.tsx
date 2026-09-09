@@ -44,6 +44,17 @@ function mount(entries: readonly SessionEntry[]) {
 }
 
 /** Same defaults, with a few props overridden -- focus, mostly. */
+/** Focus is the keyboard's hover, and Radix opens on it without a timer. */
+function openTipOn(el: HTMLElement | null | undefined): string {
+  act(() => {
+    el?.focus();
+    el?.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+  });
+  const tip = document.querySelector('[role="tooltip"]');
+  if (tip === null) throw new Error('focusing the control opened no tooltip');
+  return tip.textContent ?? '';
+}
+
 function mountWith(entries: readonly SessionEntry[], over: Partial<SessionListProps>) {
   return render(<SessionList {...baseProps(entries)} {...over} />);
 }
@@ -193,13 +204,31 @@ describe('SessionList placeholder row', () => {
     ).toBe('a/');
   });
 
-  it('shows an em-dash for the branch when the source cannot say, and names the gap', () => {
+  /**
+   * Audit item 7 (S3). Both sentences said something found nowhere else on
+   * screen -- an em-dash names a gap but not whose gap it is -- and both said
+   * it in a `title`, which opens on hover and on nothing else. Nine of these
+   * were still live at 390px, where there is no hover at all, and mobile is a
+   * real target (Tailscale Serve).
+   *
+   * A tab stop is NOT the fix here, and that is the whole reason these two
+   * differ from the status bar's notes: every one of these spans is inside the
+   * session row's own `<button>` (one element, ~250 lines of it), so a
+   * focusable child would be a nested interactive control. The row button is
+   * already a tab stop and already has an accessible name computed from its
+   * contents -- so the sentence goes into that name as `sr-only` text. The
+   * em-dash stays exactly as drawn: this is a row at rest, and the design of
+   * the quiet row is not what was broken.
+   */
+  it('shows an em-dash for the branch when the source cannot say, and names the gap aloud', () => {
     const { container } = mount(entriesOf([makeSession({ branch: null })]));
     const branch = container.querySelector('[data-session-branch]');
-    expect(branch?.textContent).toBe('—');
+    expect(branch?.textContent).toContain('—');
     // Not the old claim, which named factory on every row including a
     // Claude Code one that simply had no transcript yet.
-    expect(branch?.getAttribute('title')).toContain('cannot say');
+    expect(branch?.getAttribute('title')).toBeNull();
+    const row = container.querySelector('[data-session-row]');
+    expect(row?.textContent).toContain('cannot say which branch');
   });
 
   it('shows an em-dash for the time when the source cannot say, never a zero', () => {
@@ -207,8 +236,10 @@ describe('SessionList placeholder row', () => {
     // reported activity a moment ago; `0m` would read as the second.
     const { container } = mount(entriesOf([makeSession({ age: null })]));
     const age = container.querySelector('[data-session-age]');
-    expect(age?.textContent).toBe('—');
-    expect(age?.getAttribute('title')).toContain('cannot say');
+    expect(age?.textContent).toContain('—');
+    expect(age?.getAttribute('title')).toBeNull();
+    const row = container.querySelector('[data-session-row]');
+    expect(row?.textContent).toContain('cannot say when the session last did anything');
   });
 
   it('names the gap on the branch placeholder, and draws no verb pill for any status', () => {
@@ -1222,16 +1253,27 @@ describe('SessionList new-project control', () => {
     const { container } = mountWith(entries, { focusedSessionId: 'b1' });
     expect(container.querySelector('[data-placeholder="new-session-in-project"]')).toBeNull();
     const add = container.querySelector<HTMLButtonElement>('[data-new-session-in-project="p2"]');
-    expect(add?.getAttribute('title')).toBe('New session in beta');
+    // No native `title` any more, for the reason the header `+` above lost
+    // its own: the caption has to open on keyboard focus, and a `title`
+    // never does.
+    expect(add?.getAttribute('title')).toBeNull();
+    expect(openTipOn(add)).toContain('New session in beta');
   });
 
+  /**
+   * Audit item 1 (S2). This is the assertion that had to move surfaces. The
+   * refusal used to be a `title` while `aria-label` promised a new session
+   * unconditionally, so a keyboard user pressed the button, got silence, and
+   * had no route to the reason -- the tooltip is the route.
+   */
   it('captions the per-project `+` with the refusal when the source cannot create', () => {
     const { container } = mountWith(twoProjects(), {
       focusedSessionId: 'b1',
       newSessionDecline: 'factory has no new-session command',
     });
     const add = container.querySelector<HTMLButtonElement>('[data-new-session-in-project]');
-    expect(add?.getAttribute('title')).toBe('factory has no new-session command');
+    expect(add?.getAttribute('title')).toBeNull();
+    expect(openTipOn(add)).toContain('factory has no new-session command');
   });
 });
 

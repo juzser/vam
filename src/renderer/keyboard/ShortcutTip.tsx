@@ -133,6 +133,36 @@ export function TipProvider({ children }: { readonly children: ReactNode }) {
   );
 }
 
+/**
+ * The chord, drawn as a chip and SAID as a shortcut.
+ *
+ * The chip's separation from the label is entirely visual -- a gap and a
+ * border -- and the whole tip is the target of `aria-describedby`, so a
+ * screen reader flattens it into the label. Measured, the Settings tip
+ * announced as "Settings," : a name with a comma welded to it, where the
+ * comma is the entire shortcut. "Search sessions/" and "Filter sessionsF"
+ * were the same sentence.
+ *
+ * A border is not readable, so the word is spoken instead: the visible chip
+ * goes `aria-hidden` and an `sr-only` twin carries "shortcut: <chord>". The
+ * chord itself is `chordText`'s output verbatim in both, so the two surfaces
+ * cannot drift and neither one prettifies what the key sheet spells.
+ */
+function Chip({ keys }: { readonly keys: string }) {
+  return (
+    <>
+      <span
+        data-tip-keys
+        aria-hidden="true"
+        className="shrink-0 rounded-[4px] border border-line-strong px-1 py-px font-mono text-[10px] text-ink-dim"
+      >
+        {keys}
+      </span>
+      <span className="sr-only">{` shortcut: ${keys}`}</span>
+    </>
+  );
+}
+
 export function ShortcutTip({
   label,
   action,
@@ -164,21 +194,14 @@ export function ShortcutTip({
           side="top"
           sideOffset={6}
           collisionPadding={8}
-          className="z-50 flex max-w-[280px] flex-col gap-1 rounded-[7px] border border-line-strong bg-raised px-2 py-1.5 text-[11px] leading-[1.45]"
+          className="z-50 flex max-w-[280px] flex-col gap-1 rounded-[7px] border border-line-tip bg-raised px-2 py-1.5 text-[11px] leading-[1.45] shadow-tip"
         >
           {/* ink on raised (14.9:1 dark, 15.5:1 light) and ink-dim (6.7:1 in
               both), never ink-faint: faint measures 3.27 / 3.01, under AA. */}
           {merge ? (
             <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
               <span className="min-w-0 flex-1 text-ink">{label}</span>
-              {lines[0] === undefined ? null : (
-                <span
-                  data-tip-keys
-                  className="shrink-0 rounded-[4px] border border-line-strong px-1 py-px font-mono text-[10px] text-ink-dim"
-                >
-                  {lines[0].keys}
-                </span>
-              )}
+              {lines[0] === undefined ? null : <Chip keys={lines[0].keys} />}
             </span>
           ) : (
             <>
@@ -188,12 +211,7 @@ export function ShortcutTip({
                   {line.caption === null ? null : (
                     <span className="min-w-0 flex-1 text-ink-dim">{line.caption}</span>
                   )}
-                  <span
-                    data-tip-keys
-                    className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-[10px] text-ink-dim"
-                  >
-                    {line.keys}
-                  </span>
+                  <Chip keys={line.keys} />
                 </span>
               ))}
             </>

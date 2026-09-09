@@ -350,3 +350,57 @@ describe('the status bar no longer states which session is focused', () => {
     expect(document.querySelectorAll('[data-session-tab][data-active="true"]')).toHaveLength(1);
   });
 });
+
+/**
+ * Audit item 3 (S2). Both of these wear a `Note`, and a `Note` exists for one
+ * reason: no browser opens a `title` on keyboard focus. Hung on a `<span>`
+ * with no tab stop it opens on hover and nothing else -- which is the `title`
+ * it replaced, with extra machinery.
+ *
+ * This codebase states the rule against itself twice: `Note.tsx`'s own doc
+ * comment, and `StatusCell`'s -- "a tooltip that opens on focus is worth
+ * nothing on an element that cannot be focused" -- where the cell takes a tab
+ * stop and carries a `biome-ignore` justifying it. These two follow that
+ * precedent.
+ *
+ * The usage sentence is the explanation for a MISSING NUMBER, and on the
+ * web/Tailscale build it was keyboard-unreachable and, with no hover on
+ * touch, unreachable entirely.
+ */
+describe('a note nobody can focus is a note nobody can read', () => {
+  it('gives the usage cell a tab stop when it is explaining an absent number', async () => {
+    (window as unknown as { api: unknown }).api = {
+      usage: { get: vi.fn(async () => ({ kind: 'unknown', reason: 'no-token' }) as UsageSnapshot) },
+    };
+
+    render(<Canvas model={EMPTY} />);
+    await act(async () => {});
+
+    const cell = usageCell() as HTMLElement | null;
+    expect(cell?.textContent).toBe('—');
+    expect(cell?.getAttribute('tabindex')).toBe('0');
+    act(() => {
+      cell?.focus();
+      cell?.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+    });
+    expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+  });
+
+  it('gives the source glyph one too', async () => {
+    const model: CanvasModel = {
+      projects: [{ id: 'p1', name: 'alpha', sessions: [fixtureSession('a1', 'claude-code')] }],
+    };
+
+    render(<Canvas model={model} />);
+    await act(async () => {});
+
+    const glyph = sourceGlyph() as HTMLElement | null;
+    expect(glyph?.getAttribute('tabindex')).toBe('0');
+    act(() => {
+      glyph?.focus();
+      glyph?.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+    });
+    const tip = document.querySelector('[role="tooltip"]');
+    expect(tip?.textContent ?? '').toContain('claude-code');
+  });
+});
