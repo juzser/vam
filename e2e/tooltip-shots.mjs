@@ -294,5 +294,112 @@ await page.screenshot({
   clip: { x: 0, y: 0, width: 520, height: 300 },
 });
 
+// --- THE VIEW ICONS, WHICH SIT IN THE PANE'S TOP-RIGHT CORNER.
+//
+// `ShortcutTip` asks for `side="top"`, and these four are the only tips in
+// the app whose trigger is ALREADY at the top of its region -- so they are
+// the one place Radix's collision flip has to do real work. It cannot be
+// reasoned about from the source: `collisionPadding={8}` is a request, and
+// whether the box ends up on screen depends on layout no unit test computes.
+// So it is measured here: fully inside the viewport, and not covering the
+// icon it explains.
+await closeTip().catch(() => {});
+const viewIcon = '[data-view="prs"]';
+const viewTip = await openTipOn(viewIcon);
+const viewText = (await viewTip.evaluate((el) => el.textContent ?? '')).trim();
+const viewChip = viewTip.locator('[data-tip-keys]').first();
+if ((await viewChip.count()) === 0) {
+  throw new Error(`the view icon tip drew no chord chip: ${JSON.stringify(viewText)}`);
+}
+const viewChord = (await viewChip.evaluate((el) => el.textContent ?? '')).trim();
+console.log(`view icon tip: ${JSON.stringify(viewText)}, chip ${JSON.stringify(viewChord)}`);
+if (viewChord === '') throw new Error('the view icon chip is empty');
+// The name is in the tip, and the chord is NOT in the button's own name --
+// an accessible name that repeats it announces it on every focus of all four.
+const iconName = await page.evaluate(
+  (sel) => document.querySelector(sel)?.getAttribute('aria-label') ?? '',
+  viewIcon,
+);
+console.log(`view icon accessible name: ${JSON.stringify(iconName)}`);
+if (iconName.includes(viewChord)) {
+  throw new Error(`the chord is welded back into the accessible name: ${JSON.stringify(iconName)}`);
+}
+if (!viewText.includes(iconName)) {
+  throw new Error(`the tip does not name the button: ${JSON.stringify(viewText)}`);
+}
+
+const tipBox = await viewTip.boundingBox();
+const iconBox = await page.locator(viewIcon).boundingBox();
+const view = page.viewportSize();
+console.log(
+  `view tip box x ${Math.round(tipBox.x)}-${Math.round(tipBox.x + tipBox.width)} ` +
+    `y ${Math.round(tipBox.y)}-${Math.round(tipBox.y + tipBox.height)}; ` +
+    `icon y ${Math.round(iconBox.y)}-${Math.round(iconBox.y + iconBox.height)}; ` +
+    `viewport ${view.width}x${view.height}`,
+);
+// The corner is what makes this worth measuring: if the icon were nowhere
+// near the top, "it did not go off the top" would be true for free.
+if (iconBox.y > 200) {
+  throw new Error(
+    `the view icons are ${Math.round(iconBox.y)}px down the page -- they are not in the ` +
+      `corner this guard was written for, so the flip below is vacuous.`,
+  );
+}
+for (const [name, ok] of [
+  ['off the top', tipBox.y >= 0],
+  ['off the left', tipBox.x >= 0],
+  ['off the right', tipBox.x + tipBox.width <= view.width],
+  ['off the bottom', tipBox.y + tipBox.height <= view.height],
+]) {
+  if (!ok) throw new Error(`the view icon tooltip runs ${name} of the viewport`);
+}
+// And it did not solve that by sitting on top of the button.
+const overlap =
+  Math.max(0, Math.min(tipBox.y + tipBox.height, iconBox.y + iconBox.height) - Math.max(tipBox.y, iconBox.y)) *
+  Math.max(0, Math.min(tipBox.x + tipBox.width, iconBox.x + iconBox.width) - Math.max(tipBox.x, iconBox.x));
+if (overlap > 0) {
+  throw new Error(`the view icon tooltip covers ${Math.round(overlap)}px2 of the icon it explains`);
+}
+await page.screenshot({
+  path: `${outDir}/view-icon-tooltip.png`,
+  clip: {
+    x: Math.max(0, tipBox.x - 220),
+    y: 0,
+    width: Math.min(view.width, tipBox.width + 300),
+    height: Math.round(iconBox.y + iconBox.height + 40),
+  },
+});
+
+// --- AND THE SAME CHORDS IN THE KEY SHEET, which is the other surface that
+// must not disagree with the tip. Both read `effectiveBindings`.
+await closeTip().catch(() => {});
+await page.keyboard.press('?');
+await page.waitForSelector('[data-key-sheet]', { timeout: 3000 });
+const sheetText = await page.evaluate(
+  () => document.querySelector('[data-key-sheet]')?.textContent ?? '',
+);
+if (!sheetText.includes(viewChord)) {
+  throw new Error(
+    `the key sheet does not list ${viewChord}, the chord the tip just printed -- ` +
+      `the two surfaces disagree`,
+  );
+}
+console.log(`key sheet lists the view chord ${JSON.stringify(viewChord)}`);
+// Scrolled to the rows in question, so the shot is evidence rather than a
+// picture of the sheet's first screen: `Alt-1` is in "panes & focus", well
+// below the fold at this height.
+const scrolled = await page.evaluate((chord) => {
+  const cell = [...document.querySelectorAll('[data-key-sheet-keys]')].find(
+    (el) => (el.textContent ?? '').trim() === chord,
+  );
+  if (cell === undefined) return false;
+  cell.scrollIntoView({ block: 'center' });
+  return true;
+}, `Alt-1`);
+if (!scrolled) throw new Error('the key sheet has no Alt-1 cell to scroll to');
+await page.waitForTimeout(150);
+await page.screenshot({ path: `${outDir}/key-sheet-view-chords.png`, fullPage: false });
+await page.keyboard.press('Escape');
+
 console.log('tooltip guards: all assertions passed');
 await browser.close();

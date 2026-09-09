@@ -102,6 +102,7 @@ import type {
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { questionKeys } from '../keyboard/question-keys.js';
+import { ShortcutTip } from '../keyboard/ShortcutTip.js';
 import { describeFailure } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
@@ -119,7 +120,7 @@ import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 
 import { TerminalTab } from './TerminalTab.js';
-import { TABS, type Tab, tabForDigit, visibleTabs } from './tabs.js';
+import { TABS, type Tab, visibleTabs } from './tabs.js';
 
 /**
  * How often the pane is re-read while a row says it is waiting.
@@ -507,6 +508,18 @@ export type DetailPanelProps = {
    */
   readonly tabRequest?: { readonly tab: Tab } | null;
   /**
+   * What the last view shortcut REFUSED, drawn as a `role="status"` line
+   * beside the icons — or null at rest.
+   *
+   * A PROP, not state, since `Alt+<digit>` became a real binding: the chord
+   * machine in `Canvas.tsx` owns the keystroke now (`pickView`), so it is
+   * the only thing that can know a digit was refused. This panel used to
+   * hold both the listener and the note; keeping the note here while the
+   * listener moved would mean a second listener, which is the whole hole
+   * promotion closed.
+   */
+  readonly viewNote?: string | null;
+  /**
    * The tab a previous run left showing, as an OPAQUE STRING, and the way to
    * report a change back.
    *
@@ -662,14 +675,31 @@ const VIEW_ICON: Readonly<Record<Tab, typeof MessageSquare>> = {
  * things the same word is the collision the sidebar's project/repo naming
  * already hit once.
  *
- * ICON-ONLY DOES NOT MEAN UNLABELLED. `aria-label` carries the name AND the
- * shortcut (`Alt+N`, A2.5/A5.4) — a `title` alone would be the exact defect
- * this file already refused once for the pill row ("a tooltip alone is not
- * one"): a `title` never opens on keyboard focus and screen readers are not
- * required to read it. The Agents badge survives unchanged (a real source,
- * omitted at zero) and is now the ONLY place the running-agent count is
- * shown in this pane — see the identity line in the `in` block for why the
- * header's old "N agents" line does not need a second home.
+ * ICON-ONLY DOES NOT MEAN UNLABELLED. `aria-label` carries the NAME — just
+ * the name, since the operator asked for tooltips here. It used to end
+ * `— Alt+N`, with a byte-identical `title` beside it, and both are gone:
+ *
+ *   - the chord in the accessible NAME is announced on every focus of all
+ *     four buttons and cannot be dismissed, which is noise a screen-reader
+ *     user pays for four times over;
+ *   - and it was a LITERAL. `Alt+<digit>` is a real binding now (`pickView`
+ *     in `keyboard/chords.ts`), so an operator who rebinds it would have
+ *     been left with a name announcing a key that does nothing — the
+ *     "caption that lies" this project already deleted from the key sheet.
+ *   - the `title` was the same string a second time, and the worse copy: no
+ *     browser opens one on keyboard focus, so it was invisible to the
+ *     primary input device of a keyboard-first tool.
+ *
+ * The shortcut lives in `ShortcutTip` instead, which re-reads the binding
+ * table on every open, and in the generated key sheet. Derived in both, so
+ * neither can go stale — and `ShortcutTip` prints NOTHING for an unbound
+ * action rather than an empty bracket.
+ *
+ * The Agents badge survives unchanged (a real source, omitted at zero) and
+ * is now the ONLY place the running-agent count is shown in this pane, which
+ * is why the count stays in the name — see the identity line in the `in`
+ * block for why the header's old "N agents" line does not need a second
+ * home.
  *
  * EVERY ICON IS STILL A REAL <button> — Tab reaches it, Enter and Space
  * activate it, `aria-pressed` says which one is showing. That property is
@@ -720,35 +750,37 @@ function ViewIcons({
         // a digit `tabForDigit` refuses — the exact defect fixed there, just
         // spoken instead of wired.
         const digit = TABS.indexOf(tab) + 1;
-        const name =
-          badge === null
-            ? `${tab} view — Alt+${digit}`
-            : `${tab} view, ${badge} running — Alt+${digit}`;
+        const name = badge === null ? `${tab} view` : `${tab} view, ${badge} running`;
         return (
-          <button
-            key={tab}
-            type="button"
-            data-view={tab.toLowerCase()}
-            aria-pressed={selected}
-            aria-label={name}
-            title={name}
-            onClick={() => onSelect(tab)}
-            className={[
-              'vam-tap relative flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-[7px]',
-              selected ? 'bg-line-strong text-ink' : 'text-ink-dim hover:bg-raised hover:text-ink',
-            ].join(' ')}
-          >
-            <Icon size={13} strokeWidth={1.7} aria-hidden="true" />
-            {badge !== null && (
-              <span
-                data-view-badge
-                aria-hidden="true"
-                className="absolute -top-[3px] -right-[3px] flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-waiting px-[3px] font-mono text-[9px] text-ink leading-none"
-              >
-                {badge}
-              </span>
-            )}
-          </button>
+          // The chord is READ from the table on every open, off the same
+          // fixed digit the name is derived from -- so a rebind moves the
+          // hint, and an unbound view simply shows its name.
+          <ShortcutTip key={tab} label={name} action={{ kind: 'pickView', digit }}>
+            <button
+              type="button"
+              data-view={tab.toLowerCase()}
+              aria-pressed={selected}
+              aria-label={name}
+              onClick={() => onSelect(tab)}
+              className={[
+                'vam-tap relative flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-[7px]',
+                selected
+                  ? 'bg-line-strong text-ink'
+                  : 'text-ink-dim hover:bg-raised hover:text-ink',
+              ].join(' ')}
+            >
+              <Icon size={13} strokeWidth={1.7} aria-hidden="true" />
+              {badge !== null && (
+                <span
+                  data-view-badge
+                  aria-hidden="true"
+                  className="absolute -top-[3px] -right-[3px] flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-waiting px-[3px] font-mono text-[9px] text-ink leading-none"
+                >
+                  {badge}
+                </span>
+              )}
+            </button>
+          </ShortcutTip>
         );
       })}
     </nav>
@@ -2375,6 +2407,7 @@ export function DetailPanel(props: DetailPanelProps) {
     onTabChange?.(tab);
   }, [tab, onTabChange, paneFocused]);
   const tabRequest = props.tabRequest ?? null;
+  const viewNote = props.viewNote ?? null;
   // A withdrawn tab is not refused here: `current` below already falls back to
   // Response when the showing tab is not on offer, so asking for Terminal
   // where there is none lands exactly where clicking would have.
@@ -2390,104 +2423,6 @@ export function DetailPanel(props: DetailPanelProps) {
   const tabs = visibleTabs(terminal !== false);
   const current = tabs.includes(tab) ? tab : 'Response';
 
-  /**
-   * What the last `Alt+<digit>` refused, or `null` at rest — the "refuses
-   * aloud" half of A2.5/A5.4's promise, carried the same way `cycleNote`
-   * above carries the pane-key press's own outcome: local state, read by a
-   * small `role="status"` line beside the icons, cleared the moment a press
-   * actually lands somewhere.
-   */
-  const [viewNote, setViewNote] = useState<string | null>(null);
-  // `sessionKey` is the trigger, not something the body reads: a refusal
-  // raised for the session just left must not still be showing over the one
-  // the operator switched to.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: clear on session change, body reads nothing
-  useEffect(() => {
-    setViewNote(null);
-  }, [sessionKey]);
-  /**
-   * `Alt+<digit>` picks a view (A12.2, A2.5, A5.4) — resolved through
-   * `tabForDigit(tabs, …)`, the SAME derivation `visibleTabs` already forces
-   * on the click handler two lines up, never a second count of `TABS`.
-   *
-   * A WINDOW LISTENER OF ITS OWN, not a new case in the shared chord switch
-   * (`keyboard/chords.ts`/`Canvas.tsx`) — the pattern A5.1 already
-   * established for `ProjectPicker`/`GroupPicker`/`IconPicker`.
-   *
-   * GATED ON `paneFocused`, which is what makes a window listener safe HERE.
-   * It was written when exactly one `DetailPanel` was ever mounted, and said
-   * so; A15.1's `renderLeaf` mounts one per pane and deleted that invariant
-   * without deleting the sentence. Ungated, one `Alt+2` fired in every open
-   * pane at once: the background pane swapped its content with no icon row
-   * and no note on screen to explain it, both instances wrote
-   * `prefs.detailTab`, and `Alt+3` mounted a `TerminalTab` PER PANE, each
-   * polling `capture-pane`/`resize-window` against a session the operator is
-   * not looking at — the laziness the Terminal branch below promises, undone
-   * by a keystroke. Focused-only matches `tabRequest`, which the canvas has
-   * always sent to one pane.
-   *
-   * THE CONTRACT (A5.3): decline what this widget does not own. A key typed
-   * into an INPUT/TEXTAREA (the composer, the terminal's own hidden field)
-   * is left alone entirely — not even inspected — and any key that is not a
-   * bare `Alt+<digit>` (no other modifier) falls through with no
-   * `preventDefault`. Only that one combination is ever claimed.
-   *
-   * WHAT MAKES THAT COMBINATION SAFE TO CLAIM, honestly. This comment used
-   * to cite two registries in `chords.ts` as promising nothing else takes
-   * it. NEITHER HAS EVER EXISTED: each name appeared exactly once in this
-   * tree, in that sentence, so the citation sent an auditor to read nothing.
-   * (`test/keyboard/alt-digit-is-free.test.ts` names both and holds them
-   * out of this file, so the sentence cannot come back.) The real basis,
-   * which is WEAKER, is three facts:
-   *
-   *   - the shipped grammar binds no `Alt-` key at all. `BINDING_TABLES`
-   *     (`chords.ts`) is its one enumeration -- the shortcut sheet is built
-   *     by walking it -- so that is the whole surface, not a sample.
-   *   - `normalizeKey` spells this combination `Alt-<digit>` off
-   *     `event.code`, so a collision would be two identical names rather
-   *     than two spellings sliding past each other.
-   *   - and NOTHING FORBIDS ONE. `RESERVED_KEYS` is `['Escape',
-   *     ...PREFIXES]`: it protects the chord doors, not this. An operator
-   *     override may bind `Alt-1`, and then that binding and this listener
-   *     both answer one keystroke, this one having called
-   *     `preventDefault`. That hole is real and open; promoting
-   *     `Alt+<digit>` into the tables is what would close it, and it is
-   *     queued separately.
-   *
-   * `test/keyboard/alt-digit-is-free.test.ts` holds all three, so the day
-   * one of them stops being true this paragraph goes red rather than stale.
-   */
-  useEffect(() => {
-    if (!paneFocused) return;
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
-      const target = event.target;
-      if (target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName)) return;
-      const match = /^Digit([1-9])$/.exec(event.code);
-      if (match === null) return;
-      event.preventDefault();
-      const digit = Number(match[1]);
-      const requested = tabForDigit(tabs, digit);
-      if (requested === undefined) {
-        // Two different refusals, because they are two different facts. A
-        // digit inside TABS' own range names a real view that THIS SOURCE
-        // has withdrawn (A5.4: "refuses aloud when the source has none") —
-        // say which one by name. A digit past TABS' length names nothing at
-        // all, so the only honest thing to report is how many views exist.
-        const named = TABS[digit - 1];
-        setViewNote(
-          named === undefined
-            ? `no view ${digit} — only ${tabs.length} shown (${tabs.join(', ')})`
-            : `${named} — this source has none`,
-        );
-        return;
-      }
-      setViewNote(null);
-      setTab(requested);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [tabs, paneFocused]);
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
   /**

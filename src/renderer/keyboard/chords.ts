@@ -186,6 +186,27 @@ export type KeyAction =
       reads — so resolving it here would mean either threading React state
       into the grammar or keeping a second copy of it. See `SINGLE`. */
   | { readonly kind: 'position'; readonly digit: number }
+  /** `Alt-1` … `Alt-9` — pick a VIEW in the focused response pane: Response,
+      PRs, Terminal, Agents. A SLOT IN `TABS`, never a position in the drawn
+      bar — `Alt-3` is Terminal because Terminal is `TABS[2]`, whether or not
+      this source offers one, and `tabForDigit` is the one place that
+      resolution happens (`panels/tabs.ts`; A5.4/A15.6, won twice after
+      positional indexing shipped as a bug twice).
+
+      Distinct from `position` on purpose. `position` means whatever the
+      focused PANE counts — a session in Select, a tab in Insert — and
+      changes meaning with the cursor mode; this one names the same view in
+      both, which is why it carries no `byMode` caption in the key sheet.
+
+      It shipped OUTSIDE this table, as a bare `window` listener in
+      `DetailPanel.tsx`, and paid for it four ways: absent from a key sheet
+      whose contract is "every binding is here", not rebindable while its
+      `Mod-` cousin was, its chord hand-written into an `aria-label` a screen
+      reader repeated on every focus, and an operator override free to take
+      `Alt-1` — after which the override and the listener both answered one
+      keystroke. Being here is the fix for all four, and the second listener
+      is gone rather than guarded. */
+  | { readonly kind: 'pickView'; readonly digit: number }
   /** `p` — reveal the focused session's project in the sidebar and put the
       keyboard on its fold. */
   | { readonly kind: 'revealProject' }
@@ -304,6 +325,33 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   'Mod-7': { kind: 'position', digit: 7 },
   'Mod-8': { kind: 'position', digit: 8 },
   'Mod-9': { kind: 'position', digit: 9 },
+  // The response pane's four views, by name. The same digit row under the
+  // OTHER modifier, and that is the whole distinction: Cmd counts whatever
+  // the focused pane counts, Alt names a view. `normalizeKey` spells them
+  // apart (`Mod-1` vs `Alt-1`) off `event.code`, so neither can answer the
+  // other's keystroke on any layout.
+  //
+  // ALL NINE, though only four name a view. Digits 5-9 are what make the
+  // refusal reachable: `Alt-5` says "no view 5" instead of falling through
+  // to the browser, and the key sheet captions them as the nothing they are
+  // rather than promising a fifth view. The same shape `position` already
+  // has for digits past the tab count.
+  //
+  // Free when they were taken: nothing in any table held an `Alt-` key
+  // (`test/keyboard/pick-view-binding.test.ts` re-derives that no two
+  // actions share a chord, over the generated bindings rather than over
+  // these lines). `RESERVED_KEYS` forbids nothing here — it guards the chord
+  // doors — so the guarantee is uniqueness within the grammar, not a
+  // registry.
+  'Alt-1': { kind: 'pickView', digit: 1 },
+  'Alt-2': { kind: 'pickView', digit: 2 },
+  'Alt-3': { kind: 'pickView', digit: 3 },
+  'Alt-4': { kind: 'pickView', digit: 4 },
+  'Alt-5': { kind: 'pickView', digit: 5 },
+  'Alt-6': { kind: 'pickView', digit: 6 },
+  'Alt-7': { kind: 'pickView', digit: 7 },
+  'Alt-8': { kind: 'pickView', digit: 8 },
+  'Alt-9': { kind: 'pickView', digit: 9 },
   // `p` for project. It shipped hand-wired to its own window listener in
   // SessionList.tsx, which cost it both properties this table exists to give:
   // it appeared in no key sheet, and it fired straight through an open
@@ -476,6 +524,8 @@ export function actionId(action: KeyAction): string {
       return `move:${action.direction}`;
     case 'position':
       return `position:${action.digit}`;
+    case 'pickView':
+      return `pickView:${action.digit}`;
     case 'project':
       return `project:${action.delta}`;
     case 'resizePane':

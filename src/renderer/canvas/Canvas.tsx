@@ -1461,6 +1461,31 @@ function CanvasInner({
    * presentation into the canvas's model.
    */
   const [tabRequest, setTabRequest] = useState<{ readonly tab: DetailTab } | null>(null);
+  /**
+   * What the last `Alt+<digit>` REFUSED, or null at rest — the "refuses
+   * aloud" half of A2.5/A5.4.
+   *
+   * It lives here rather than in the panel because the key does: promoting
+   * `Alt+<digit>` into the binding tables moved the listener into this file
+   * and deleted the panel's own. The refusal still draws where it always
+   * drew — a `role="status"` line beside the view icons, in the focused pane
+   * — so it travels down as a prop the same way `tabRequest` does, and is
+   * gated on `isFocused` for the same reason: the pane that could not have
+   * answered the key must not be the one apologising for it.
+   *
+   * Not `setStatus`: that is the canvas-wide cell in the status bar, where
+   * `Mod-<digit>`'s refusal goes because `Mod-<digit>` may be about the
+   * sidebar. This one is always about a view in one pane, and it says so
+   * next to that pane's icons.
+   */
+  const [viewNote, setViewNote] = useState<string | null>(null);
+  // A refusal raised for the session just left must not hang over the one
+  // the operator moved to — the panel's own listener cleared it on exactly
+  // this fact before the key moved here.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: clear on focus change, the body reads nothing
+  useEffect(() => {
+    setViewNote(null);
+  }, [focusedSessionId]);
   const [revealRequest, setRevealRequest] = useState<{ readonly projectId: string } | null>(null);
   /** True while a write is in flight for THAT session — Enter must not fire
    *  twice, and a send in one tab must not gate Enter in another. */
@@ -3307,6 +3332,39 @@ function CanvasInner({
           focusSession(target.session.id);
           return;
         }
+        case 'pickView': {
+          /**
+           * One digit, one VIEW, in either cursor mode — the difference from
+           * `position` directly above, which counts whatever the focused
+           * pane counts and therefore means two things.
+           *
+           * THROUGH `tabForDigit`, the one place a digit becomes a name
+           * (A5.4/A15.6). Never an index into the drawn list: `visibleTabs`
+           * withdraws Terminal without renumbering what follows it, so
+           * counting positions there makes Agents answer to Terminal's digit
+           * the moment the source has no terminal, and its own again the
+           * moment it does.
+           *
+           * Two refusals, because they are two facts — the wording the
+           * panel's own listener carried before this one replaced it: a
+           * digit inside `TABS` names a real view THIS SOURCE has withdrawn,
+           * and a digit past `TABS` names nothing at all.
+           */
+          const drawn = visibleTabs(terminalTab);
+          const view = tabForDigit(drawn, action.digit);
+          if (view === undefined) {
+            const named = TABS[action.digit - 1];
+            setViewNote(
+              named === undefined
+                ? `no view ${action.digit} — only ${drawn.length} shown (${drawn.join(', ')})`
+                : `${named} — this source has none`,
+            );
+            return;
+          }
+          setViewNote(null);
+          setTabRequest({ tab: view });
+          return;
+        }
         case 'project':
           stepSession(action.delta);
           return;
@@ -3902,6 +3960,11 @@ function CanvasInner({
         // A one-shot ask only the FOCUSED pane may consume — see the doc
         // comment above.
         tabRequest: isFocused ? tabRequest : null,
+        // The refusal is the focused pane's too, and for the same reason:
+        // a background pane cannot have answered the key it would be
+        // explaining. Keyed to that pane's own session, so a refusal raised
+        // for the session just left does not hang over the next one.
+        viewNote: isFocused ? viewNote : null,
         // The view icons are drawn in the focused pane and nowhere else
         // (operator instruction) — the SAME fact `tabRequest` above is gated
         // on, which is the point: a pane that cannot consume an `Alt+<digit>`
@@ -3951,6 +4014,7 @@ function CanvasInner({
       source,
       terminalTab,
       tabRequest,
+      viewNote,
       prefs,
       savePrefs,
       setFocusedPaneId,

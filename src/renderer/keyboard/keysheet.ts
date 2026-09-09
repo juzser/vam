@@ -144,6 +144,28 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
           : `nothing — the response pane holds ${TABS.length} tabs at most`,
     }),
   },
+  // The response pane's four views, and the one row family whose caption is
+  // GENERATED FROM `TABS` rather than written out: the bar's contents have
+  // changed twice in this epic, and a hand-written caption is how the sheet
+  // came to promise a view that had been renamed.
+  //
+  // No `byMode`: unlike `position` on the other modifier, this digit names
+  // the same view in either cursor mode, and a row printed twice saying the
+  // same thing is noise the sheet already refuses for `yy`.
+  //
+  // Digits past the last view get the honest caption instead of a promise.
+  // `Alt-5`..`Alt-9` are bound so the pane can refuse them ALOUD rather than
+  // let them reach the browser, and a sheet that captioned them as views
+  // would be naming four that do not exist.
+  pickView: {
+    group: 'panes',
+    label: (a) => {
+      const name = TABS[a.digit - 1];
+      return name === undefined
+        ? `no view ${a.digit} — the pane holds ${TABS.length}`
+        : `the ${name} view, in the focused pane`;
+    },
+  },
   revealProject: { group: 'navigation', label: () => 'reveal this session’s project' },
   moveToGroup: { group: 'session', label: () => 'move this project into a folder' },
   search: { group: 'navigation', label: () => 'search sessions' },
