@@ -109,8 +109,12 @@ describe('what promotion had to leave true', () => {
       Object.entries(table).map(([key, action]) => [`${prefix}${key}`, action] as const),
     );
     for (const digit of DIGITS) {
+      // The Cmd row's meaning changed under this file (it is the session tab
+      // at that position now, not a context-dependent position); what this
+      // guards is unchanged and is the reason the change was possible at all
+      // -- the two families never share a spelling.
       expect(tables.find(([key]) => key === `Mod-${digit}`)?.[1]).toEqual({
-        kind: 'position',
+        kind: 'selectTab',
         digit,
       });
       expect(tables.find(([key]) => key === `Alt-${digit}`)?.[1]).toEqual({

@@ -1,14 +1,20 @@
 // @vitest-environment happy-dom
 
 /**
- * `Mod-<digit>` is a position in whichever pane has the keyboard, and `p`
- * joins the grammar.
+ * TWO digit families that must never answer each other's keystroke, and `p`.
  *
- * There is one digit family now, and both of its meanings are pressed here on
- * purpose: the failure mode of a context-dependent key is that the context is
- * ignored. It took three arrangements to get here — sessions on the bare row
- * with tabs under Shift, then the reverse — and both were wrong in the same
- * way, plus a defect neither could survive: macOS captures `Cmd+Shift+3/4/5`
+ * `Mod-<digit>` picks a session TAB in the focused pane; `Alt-<digit>` picks
+ * one of that pane's four VIEWS. Both are pressed here, in one mounted shell,
+ * because the failure mode of two families on one row is that one of them
+ * quietly answers the other — which this codebase has shipped twice, once by
+ * indexing the drawn list and once by letting a hand-written window listener
+ * live beside the table.
+ *
+ * It took four arrangements to get here. Sessions on the bare row with tabs
+ * under Shift; then the reverse; then one context-dependent meaning per
+ * cursor mode; and now one fixed meaning, at the operator's request, made
+ * possible by the views having moved to the other modifier. The first two
+ * carried a defect neither could survive: macOS captures `Cmd+Shift+3/4/5`
  * for screenshots before any Electron window sees them, so a quarter of each
  * arrangement was unreachable on the only platform vam ships to.
  *
@@ -70,12 +76,22 @@ function press(key: string, modifiers: KeyboardEventInit = {}, target?: HTMLElem
   });
 }
 
-/** `Cmd+<n>`, spelled the way a real keyboard reports it. ONE chord now: what
- *  it counts depends on which pane has the keyboard, which is the subject of
- *  the tests below. */
+/** `Cmd+<n>`, spelled the way a real keyboard reports it — a SESSION TAB in
+ *  the focused pane, in either cursor mode. */
 function digitChord(n: number, target?: HTMLElement) {
   press(String(n), { metaKey: true, code: `Digit${n}` }, target);
 }
+
+/** `Alt+<n>` — the other family on the same row: one of the pane's VIEWS. */
+function viewChord(n: number, target?: HTMLElement) {
+  press(String(n), { altKey: true, code: `Digit${n}` }, target);
+}
+
+/** Which tab of the focused pane wears the active mark. */
+const activeTab = () =>
+  document.querySelector(
+    '[data-split-pane][data-split-focused="true"] [data-session-tab][data-active="true"] [data-tab-select]',
+  )?.textContent ?? null;
 
 /** Into the response pane and back, the way an operator gets there. */
 const intoResponsePane = () => press('I');
@@ -121,49 +137,36 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe('Mod-<digit> is a position in whatever pane has the keyboard', () => {
-  it('switches SESSION while the cursor is in the sidebar', () => {
+describe('the two digit families on one row, told apart by the modifier', () => {
+  it('Cmd switches the SESSION TAB, and leaves the view alone', () => {
     mountFocused();
     expect(focusedTitle()).toBe('a1');
     digitChord(2);
+    expect(activeTab()).toBe('a2');
     expect(focusedTitle()).toBe('a2');
-    // And the tab it shares a digit with did not move.
+    // Alt's family did not move with it: the two share a row, not a meaning.
     expect(selectedTab()).toBe('response');
+  });
+
+  it('Alt switches the VIEW, and leaves the tab alone', () => {
+    mountFocused();
+    digitChord(2);
+    expect(activeTab()).toBe('a2');
+    viewChord(4);
+    expect(selectedTab()).toBe('agents');
+    // Still on a2. If either family were reading the other's keystroke this
+    // is the assertion that would catch it.
+    expect(activeTab()).toBe('a2');
   });
 
   /**
    * THE DIGIT NAMES A VIEW, and the same view every time — `tabForDigit`'s
-   * rule (A15.6), which `Alt+<digit>` has followed since it was written and
-   * which this chord did not. It counted the DRAWN list positionally, the
-   * very defect `tabForDigit` was added to abolish: with this model's source
-   * declaring no terminal, `Mod-3` opened Agents because Agents had slid
-   * into third place, while the icon beside it captioned itself `Alt+4` and
-   * `Alt+3` refused. One digit, two answers, depending on which route the
-   * operator took.
+   * rule (A15.6). `Alt-3` is Terminal because Terminal is `TABS[2]`, whether
+   * or not this source offers one; counting the DRAWN list positionally is
+   * the defect `tabForDigit` was added to abolish, and it has been shipped
+   * twice.
    */
-  it('switches TAB once the keyboard is in the response pane', () => {
-    mountFocused();
-    intoResponsePane();
-    digitChord(4);
-    expect(selectedTab()).toBe('agents');
-    digitChord(2);
-    expect(selectedTab()).toBe('prs');
-    // The sidebar cursor stayed where it was: this press was not for it.
-    expect(focusedTitle()).toBe('a1');
-  });
-
-  /**
-   * The two routes to a view must agree, because the operator reads one of
-   * them off the icons and presses the other.
-   *
-   * WHERE THEY READ IT MOVED. The icon used to caption itself `— Alt+4`
-   * inside its own `aria-label`; the digit now comes from the icon's TOOLTIP,
-   * which resolves it from the binding table on every open. So this reads the
-   * tip, which is what an operator reads, rather than a literal that no
-   * longer exists — and `Mod-4` must still be the same view, with `Mod-3`
-   * still Terminal's digit whether or not this source has one.
-   */
-  it('agrees with the icon tooltips: the digit is a NAME, not a position', () => {
+  it('agrees with the icon tooltips: the Alt digit is a NAME, not a position', () => {
     mountFocused();
     intoResponsePane();
     const agents = document.querySelector('[data-view="agents"]') as HTMLElement;
@@ -172,74 +175,66 @@ describe('Mod-<digit> is a position in whatever pane has the keyboard', () => {
     expect(caption).toContain('Agents');
     expect(caption).toContain('4');
     fireEvent.blur(agents);
-    digitChord(3);
+    viewChord(3);
     // Terminal is TABS[2] and this source has none: refused, aloud, and NOT
-    // silently landed on whatever is drawn third.
+    // silently landed on whatever is drawn third. The refusal is the PANE's
+    // own note rather than the status bar -- `pickView` writes `viewNote`,
+    // which is drawn in the pane the digit was aimed at.
     expect(selectedTab()).toBe('response');
-    expect(statusBar()).toContain('Terminal');
-    digitChord(4);
+    expect(document.body.textContent).toContain('Terminal');
+    viewChord(4);
     expect(selectedTab()).toBe('agents');
   });
 
-  it('goes back to sessions when the keyboard goes back to the list', () => {
+  it('means the same thing with the keyboard in either place', () => {
     mountFocused();
     intoResponsePane();
-    digitChord(4);
-    expect(selectedTab()).toBe('agents');
-    backToList();
     digitChord(2);
-    expect(focusedTitle()).toBe('a2');
-    // Still on the tab the operator chose — moving in the list is not a
-    // reason to reset the pane they were reading.
+    expect(activeTab()).toBe('a2');
+    backToList();
+    digitChord(1);
+    expect(activeTab()).toBe('a1');
+    // And the view the operator chose is not reset by moving between tabs.
+    viewChord(4);
+    expect(selectedTab()).toBe('agents');
+    digitChord(2);
+    expect(activeTab()).toBe('a2');
     expect(selectedTab()).toBe('agents');
   });
 
   /**
-   * `Mod-5`..`Mod-9` are bound and no tab answers them. In the response pane
-   * they refuse OUT LOUD rather than falling through to the sidebar: a digit
-   * that quietly moved the cursor in a pane the operator is not looking at is
-   * the exact defect this arrangement exists to fix, and silence would leave
-   * them pressing it again.
-   *
-   * The COUNT it refuses with is the drawn one. "only 4 tabs" over a bar
-   * showing three is the same handler-with-its-own-idea the position rule was
-   * written against.
+   * Both families refuse OUT LOUD past their last member, and they refuse in
+   * DIFFERENT words, because they are different facts. A digit that quietly
+   * did nothing is the defect family this repo tracks; a digit that quietly
+   * did the other family's job is the one this file is named for.
    */
-  it('refuses a digit past the last tab, and does not fall through to sessions', () => {
+  it('refuses past the last tab, and past the last view, in its own words', () => {
     mountFocused();
-    intoResponsePane();
     digitChord(7);
+    expect(activeTab()).toBe('a1');
+    expect(statusBar()).toContain('only 2 tabs');
+    viewChord(7);
     expect(selectedTab()).toBe('response');
-    expect(focusedTitle()).toBe('a1');
-    expect(statusBar()).toContain('only 3 tabs');
+    expect(document.body.textContent).toContain('no view 7');
   });
 
-  it('refuses the digit of a tab that was WITHDRAWN, rather than landing nowhere', () => {
-    mountFocused();
-    intoResponsePane();
-    // 3 is Terminal's digit in `TABS`, and this source has none. Asking for
-    // it must be refused BY NAME — not accepted and silently reverted to
-    // Response, and not quietly handed to whatever slid into third place.
-    digitChord(2);
-    expect(selectedTab()).toBe('prs');
-    digitChord(3);
-    expect(selectedTab()).toBe('prs');
-    expect(statusBar()).toContain('Terminal');
-  });
-
-  it('the ninth is the LAST session while the sidebar has the keyboard', () => {
-    mountFocused();
-    digitChord(9);
-    expect(focusedTitle()).toBe('b1'); // three sessions, and 9 still lands
-  });
-
+  /**
+   * The Cmd family only. A Cmd/Ctrl chord produces a character on no layout,
+   * so a text box has no claim on it; ALT DOES produce one on macOS (`Alt+4`
+   * is `¢`), so the typing guard in `Canvas.tsx` deliberately keeps Alt out of
+   * a focused box and `Alt+<digit>` is not reachable from inside the composer.
+   * Asserted in both directions here so the asymmetry is a decision on record
+   * rather than something a later reader discovers by pressing it.
+   */
   it('fires with the prompt box focused, where the operator actually is', () => {
     const { container } = mountFocused();
     intoResponsePane();
     const box = container.querySelector('[aria-label="prompt to session"]') as HTMLTextAreaElement;
     box.focus();
-    digitChord(4, box);
-    expect(selectedTab()).toBe('agents');
+    digitChord(2, box);
+    expect(activeTab()).toBe('a2');
+    viewChord(4, box);
+    expect(selectedTab()).toBe('response');
   });
 
   it('leaves an unmodified key typed in the prompt box alone', () => {
@@ -283,30 +278,34 @@ describe('the generated key sheet tells the truth about the digits', () => {
   const rows = () => buildKeySheet().flatMap((group) => group.rows);
   const keys = () => rows().map((row) => row.keys);
 
-  it('lists every bound digit, and only those', () => {
+  it('lists every bound digit, zero included', () => {
     for (let digit = 1; digit <= 9; digit += 1) {
       expect(keys(), `Mod-${digit}`).toContain(`Mod-${digit}`);
+      expect(keys(), `Alt-${digit}`).toContain(`Alt-${digit}`);
     }
-    expect(keys()).not.toContain('Mod-0');
+    // `Mod-0` is bound now (the sidebar), and a sheet that omitted it would be
+    // hiding a key the operator can press -- the one thing a generated sheet
+    // exists to make impossible.
+    expect(keys()).toContain('Mod-0');
   });
 
   /**
-   * The sheet may not name a tab that cannot exist. `Mod-5`..`Mod-9` are bound
-   * and the pane holds four tabs at most, so the Insert caption for those five
-   * used to print "tab 5 in the response pane" through "tab 9" -- a binding
-   * that is real under a caption that is not, which is the one thing a
-   * generated sheet exists to make impossible.
+   * The sheet may not name a VIEW that cannot exist. `Alt-5`..`Alt-9` are
+   * bound so the pane can refuse them aloud rather than let them reach the
+   * browser, and a sheet that captioned them as views would be naming five
+   * that do not exist. (The Cmd row has no such ceiling — a pane's strip holds
+   * as many tabs as the project has sessions — which is why its caption names
+   * no count at all.)
    */
-  it('names no tab past the last one the pane can hold', () => {
-    const insertLabels = rows()
-      .filter((row) => row.mode === 'insert' && row.keys.startsWith('Mod-'))
+  it('names no view past the last one the pane can hold', () => {
+    const viewLabels = rows()
+      .filter((row) => row.keys.startsWith('Alt-'))
       .map((row) => row.label);
-    expect(insertLabels.some((label) => label.includes('tab 4'))).toBe(true);
+    expect(viewLabels.length).toBe(9);
+    expect(viewLabels.some((label) => label.includes('Agents'))).toBe(true);
     for (const digit of [5, 6, 7, 8, 9]) {
-      expect(
-        insertLabels.some((label) => label.includes(`tab ${digit}`)),
-        `tab ${digit}`,
-      ).toBe(false);
+      const row = rows().find((each) => each.keys === `Alt-${digit}`);
+      expect(row?.label, `Alt-${digit}`).toContain(`no view ${digit}`);
     }
   });
 
@@ -317,24 +316,21 @@ describe('the generated key sheet tells the truth about the digits', () => {
   });
 
   /**
-   * The row cannot say "session 1", because that is wrong every time the
-   * operator is in the response pane. It names BOTH, which is what the key
-   * actually does.
+   * ONE row, with no mode on it. The digit had two captions because it had two
+   * meanings; it has one now, and a row printed once per mode saying the same
+   * sentence would be the sheet padding itself.
+   *
+   * The caption must not say "session", either: the sidebar's positions are
+   * what the fourth arrangement gave up, and a row still naming them would be
+   * the generated sheet promising a key that no longer does that.
    */
-  it('says a digit means a session or a tab, one row per cursor mode', () => {
-    // Two rows now, not one caption naming both: the operator's point is that
-    // the two meanings belong to two named modes and do not interfere, and a
-    // single undifferentiated row is what hid that.
+  it('gives the Cmd digit one row, captioned as a tab, with no mode on it', () => {
     const digit = rows().filter((candidate) => candidate.keys === 'Mod-2');
-    expect(digit.map((row) => row.mode)).toEqual(['select', 'insert']);
-    const select = digit.find((row) => row.mode === 'select');
-    const insert = digit.find((row) => row.mode === 'insert');
-    expect(select?.label).toContain('Select');
-    expect(select?.label).toContain('session 2');
-    expect(select?.label).not.toContain('tab 2');
-    expect(insert?.label).toContain('Insert');
-    expect(insert?.label).toContain('tab 2');
-    expect(insert?.label).not.toContain('session 2');
+    expect(digit).toHaveLength(1);
+    expect(digit[0]?.mode).toBeNull();
+    expect(digit[0]?.label).toContain('tab 2');
+    expect(digit[0]?.label).not.toContain('session 2');
+    expect(digit[0]?.label).not.toContain('Select');
   });
 
   it('splits hjkl the same way — a session in Select, an option in Insert', () => {
@@ -344,7 +340,7 @@ describe('the generated key sheet tells the truth about the digits', () => {
     expect(walk.find((row) => row.mode === 'insert')?.label).toContain('options');
   });
 
-  it('says the ninth is the last session rather than a ninth one', () => {
+  it('says the ninth is the last tab rather than a ninth one', () => {
     const row = rows().find((candidate) => candidate.keys === 'Mod-9');
     expect(row?.label).toContain('LAST');
   });

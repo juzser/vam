@@ -279,33 +279,34 @@ describe('split-pane chords (A15.1) — zs/zv/zc/zw/zW', () => {
 });
 
 /**
- * ONE digit family, whose meaning follows the keyboard.
+ * ONE digit family, with ONE meaning: the session tab at that position.
  *
- * Three arrangements in three changes, so this one is written as a RULE
- * rather than as a table: `Mod-<digit>` is a POSITION, in whatever the
- * keyboard is pointed at. The sidebar has the keyboard, it is a session; the
- * response pane has it, it is a tab. The grammar therefore reports the
- * position and nothing else — which pane is looking is not something a pure
- * reducer over a one-key memory can know, and `Canvas` already owns that
- * state as `pane`.
+ * Four arrangements in four changes. The third made the digit follow the
+ * keyboard — a session in the sidebar, a view in the response pane — and the
+ * fourth took that back at the operator's request, because Cmd+number is
+ * "switch tab" in every browser and editor and a key that means two things is
+ * a key you have to think about. `chords.ts` argues it; what this file holds
+ * is the grammar's half: the action reports a POSITION and nothing else, and
+ * which strip that position counts in stays `Canvas`'s to know.
  *
- * What killed the previous arrangement is not taste: `Cmd+Shift+3`, `4` and
+ * What killed the FIRST two arrangements is not taste: `Cmd+Shift+3`, `4` and
  * `5` are macOS screenshot hotkeys, matched by the OS before any Electron
  * window sees the keydown (verified on this machine in
  * `com.apple.symbolichotkeys`, entries 28-31 and 184, all enabled, with
  * modifier mask 0x120000 = shift|command over keycodes for 3, 4 and 5). Any
- * binding placed there is unreachable, whichever family holds it.
+ * binding placed there is unreachable, whichever family holds it — so the row
+ * stays empty in this arrangement too.
  */
-describe('Mod-digit is a position, and the pane decides what it is a position in', () => {
+describe('Mod-digit selects a tab, and the grammar carries only the digit', () => {
   it('reports the position, 1-based, for every digit the row offers', () => {
-    expect(type(['Mod-1']).actions).toEqual([{ kind: 'position', digit: 1 }]);
-    expect(type(['Mod-4']).actions).toEqual([{ kind: 'position', digit: 4 }]);
-    expect(type(['Mod-9']).actions).toEqual([{ kind: 'position', digit: 9 }]);
+    expect(type(['Mod-1']).actions).toEqual([{ kind: 'selectTab', digit: 1 }]);
+    expect(type(['Mod-4']).actions).toEqual([{ kind: 'selectTab', digit: 4 }]);
+    expect(type(['Mod-9']).actions).toEqual([{ kind: 'selectTab', digit: 9 }]);
   });
 
   it('carries no pane of its own — the grammar stays a pure reducer', () => {
-    // The same keystroke yields the same action whatever is on screen; the
-    // fork lives in `Canvas`, which is the one place that knows `pane`.
+    // The same keystroke yields the same action whatever is on screen; WHICH
+    // strip it counts lives in `Canvas`, the one place that knows the panes.
     expect(type(['Mod-2']).actions).toEqual(type(['Mod-2']).actions);
     expect(Object.keys(type(['Mod-2']).actions[0] as object).sort()).toEqual(['digit', 'kind']);
   });
@@ -316,9 +317,23 @@ describe('Mod-digit is a position, and the pane decides what it is a position in
     }
   });
 
-  it('leaves Mod-0 unbound — z0 already owns the zero', () => {
-    expect(type(['Mod-0']).actions).toEqual([]);
+  /**
+   * `Mod-0` was held back twice: Electron's default View menu claimed
+   * `CommandOrControl+0` for Actual Size, and `z0` was said to "own the zero".
+   * The first is gone (vam builds its own menu and ships no `viewMenu`); the
+   * second was never true of the SPELLING — `z0` is a chord whose second key
+   * is a bare `0`, and `normalizeKey` writes a modified digit `Mod-0`. Both
+   * are asserted here, together, because the risk is that binding one breaks
+   * the other.
+   */
+  it('binds Mod-0 to the sidebar without disturbing z0', () => {
+    expect(type(['Mod-0']).actions).toEqual([{ kind: 'focusList' }]);
     expect(type(['z', '0']).actions).toEqual([{ kind: 'resetPanes' }]);
+    // And in either order, so neither one leaves the chord machine armed.
+    expect(type(['Mod-0', 'z', '0']).actions).toEqual([
+      { kind: 'focusList' },
+      { kind: 'resetPanes' },
+    ]);
   });
 
   it('a bare digit stays unbound, so a stray 7 does not move the cursor', () => {
@@ -336,9 +351,29 @@ describe('Mod-digit is a position, and the pane decides what it is a position in
   it('resolves from a real keydown, spelled by position rather than by character', () => {
     const azerty = normalizeKey({ key: '&', code: 'Digit1', metaKey: true });
     expect(azerty).toBe('Mod-1');
-    expect(type([azerty as string]).actions).toEqual([{ kind: 'position', digit: 1 }]);
+    expect(type([azerty as string]).actions).toEqual([{ kind: 'selectTab', digit: 1 }]);
     const us = normalizeKey({ key: '1', code: 'Digit1', ctrlKey: true });
-    expect(type([us as string]).actions).toEqual([{ kind: 'position', digit: 1 }]);
+    expect(type([us as string]).actions).toEqual([{ kind: 'selectTab', digit: 1 }]);
+    // And zero the same way: `à` sits at `Digit0` on AZERTY.
+    expect(normalizeKey({ key: 'à', code: 'Digit0', metaKey: true })).toBe('Mod-0');
+  });
+});
+
+/**
+ * `Mod-t` and `Mod-n` are two actions, and the grammar must keep them two.
+ * Folding them would make one key's refusal the other's, which is the whole
+ * distinction (`newTab` in `chords.ts`).
+ */
+describe('Mod-t is its own action, beside Mod-n', () => {
+  it('resolves to newTab, while o and Mod-n stay newSession', () => {
+    expect(type(['Mod-t']).actions).toEqual([{ kind: 'newTab' }]);
+    expect(type(['Mod-n']).actions).toEqual([{ kind: 'newSession' }]);
+    expect(type(['o']).actions).toEqual([{ kind: 'newSession' }]);
+  });
+
+  it('leaves the `g` door alone — bare `t` is still gt second key', () => {
+    expect(type(['t']).actions).toEqual([]);
+    expect(type(['g', 't']).actions).toEqual([{ kind: 'project', delta: 1 }]);
   });
 });
 

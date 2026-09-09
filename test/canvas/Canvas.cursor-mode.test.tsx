@@ -11,7 +11,12 @@
  *
  *   |            | Select                | Insert                          |
  *   | `hjkl`     | choose a session      | choose an agent option, if any   |
- *   | `Mod+digit`| session by position   | switch tab                       |
+ *
+ * `Mod+digit` was the second row of that table until the fourth arrangement
+ * of the digit row gave it ONE meaning — the session tab at that position, in
+ * either mode — so `hjkl` is the only mode-dependent family left. What the
+ * digit still proves here is the other half of the rule: it reaches the
+ * grammar from inside a focused text box, where an unmodified key does not.
  *
  * "if any" is doing real work. In Insert with no question open, the composer
  * is drawn and owns its keys — stealing `j` from someone writing a prompt
@@ -236,10 +241,12 @@ describe('the digits keep working alongside', () => {
     expect(cursorOption()).toBe('Emerald');
   });
 
-  it('leaves a MODIFIED digit to the grammar, which switches tabs in Insert', () => {
+  it('leaves a MODIFIED digit to the grammar, which switches session tabs', () => {
     render(<Canvas model={ASKING} />);
     press('I');
     pressFocused('2', { metaKey: true });
+    // The option list did not answer it: a Cmd chord is the grammar's, and
+    // the grammar moved a tab rather than marking option 2.
     expect(marked()).toHaveLength(0);
   });
 });
@@ -272,14 +279,17 @@ describe('the mouse reaches the composer by the same route the keyboard does', (
     expect(mode()).toBe('Insert');
   });
 
-  it('leaves Mod+digit meaning a TAB from inside the clicked box', () => {
+  it('still reaches the grammar from inside the clicked box', () => {
     render(<Canvas model={QUIET} />);
     act(() => {
       fireEvent.focus(composer() as HTMLTextAreaElement);
     });
     press('2', { metaKey: true });
-    // The sidebar cursor did not move: the digit went to the response pane.
-    expect(focusedSession()).toBe('a1');
+    // A Cmd chord produces a character on no layout, so the box has no claim
+    // on it and the second tab came forward. This was the state the mode cell
+    // used to lie about; the digit no longer reads the mode at all, and what
+    // is left to hold is that the box did not swallow the keystroke.
+    expect(focusedSession()).toBe('a2');
   });
 });
 
