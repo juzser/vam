@@ -126,21 +126,56 @@ const unavailable = (code: string, message: string): TranscriptPage => ({
 });
 
 /**
- * The order the four answers come in, one entry per ask.
+ * The order the answers come in, one entry per ASK -- not per gesture. One
+ * gesture may consume several of these, because `walkOlder` keeps going through
+ * a blank window; the four states an operator can actually SEE are laid out so
+ * that each of them ends a gesture at least once:
+ *
+ *   ask 1        -> a page of turns.                          (gesture 1 ends)
+ *   asks 2-3     -> a blank window, then a refusal.           (gesture 2 ends,
+ *                   drawn as `unavailable` in the source's own words)
+ *   ask 4        -> the retry succeeds, another page.         (gesture 3 ends)
+ *   asks 5-7     -> three blank windows in a row, which is
+ *                   `MAX_BLANK_STEPS`, so the walk stops and
+ *                   the column says there is MORE.            (gesture 4 ends,
+ *                   `read-limit` with no new turns and the control still there)
+ *   ask 8        -> the last turns, and the proven start.     (gesture 5 ends)
  *
  * WRITTEN OUT RATHER THAN COMPUTED, because the whole value of this fixture is
- * that a guard can say "the third answer is the refusal" and be right every
- * run. `blank` sits immediately before `refuse` on purpose: those two are the
- * pair most easily confused for one another, and a reader who meets them back
- * to back can see that the column does not confuse them.
+ * that a guard can say "the fourth gesture ends with nothing new and still
+ * offers to go on" and be right every run.
  *
  * Past the end of the script the pager has handed over everything it has and
  * answers the start, however often it is asked.
  */
-const SCRIPT = ['page', 'blank', 'refuse', 'page', 'page'] as const;
+const SCRIPT = ['page', 'blank', 'refuse', 'page', 'blank', 'blank', 'blank', 'page'] as const;
 
 /** Turns per page. Three of eight, so the walk takes more than one step. */
 const PAGE_TURNS = 3;
+
+/**
+ * How long one ask takes, and it is not padding.
+ *
+ * A real read opens a 128 KiB window over a file that can be 157 MB and may
+ * widen it six times before it answers; it takes tens to hundreds of
+ * milliseconds. A fixture that resolved in the same tick would make the
+ * IN-FLIGHT state of the column unobservable -- there would be no frame in
+ * which "Reading further back…" is on screen, so neither an operator looking at
+ * the demo nor a guard driving it could ever see the one state that says a
+ * request exists. It would also make "one request in flight at a time"
+ * untestable in a browser, because there would never be a moment during which a
+ * second could be attempted.
+ *
+ * Short enough that the demo does not feel broken, long enough that a frame
+ * exists. Measured against the guard: one Playwright round trip is ~10 ms, so
+ * this leaves room for several.
+ */
+const ASK_MS = 150;
+
+const pause = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 /**
  * A pager for one demo canvas.
@@ -151,10 +186,14 @@ const PAGE_TURNS = 3;
  * is allowed to know. Each answer hands back a cursor that this pager alone
  * understands, exactly as a real source does.
  */
-export function createDemoHistory(): (
-  sessionId: string,
-  cursor: HistoryCursor | null,
-) => Promise<TranscriptPage> {
+export function createDemoHistory(
+  /**
+   * Injected so the unit suite can run the whole script in no time: this is a
+   * timing knob, not behaviour, and a suite that slept 1.2 s per walk to
+   * exercise it would be paying for the browser's benefit.
+   */
+  askMs: number = ASK_MS,
+): (sessionId: string, cursor: HistoryCursor | null) => Promise<TranscriptPage> {
   // Where the script has got to, and how many turns have been handed over.
   let at = 0;
   let given = 0;
@@ -171,6 +210,10 @@ export function createDemoHistory(): (
     }
     const instruction = SCRIPT[at];
     at += 1;
+    // AFTER the step is taken, so a caller that fires twice cannot get the same
+    // step twice by racing the wait -- and before every answer below, so each
+    // of them is reachable while the column is drawing "Reading further back…".
+    await pause(askMs);
     if (instruction === 'blank') {
       // A window vam read that held no complete turn. NOT an ending: it carries
       // a cursor, and the ask after it returns turns.

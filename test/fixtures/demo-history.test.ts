@@ -33,14 +33,14 @@ async function walk(read: ReturnType<typeof createDemoHistory>, from: string) {
 
 describe('the demo pager', () => {
   it('answers only for the session it has a transcript for', async () => {
-    const read = createDemoHistory();
+    const read = createDemoHistory(0);
     const answer = await read('some-other-session', null);
     expect(answer.kind).toBe('unavailable');
     expect(answer.kind === 'unavailable' && answer.error.code).toBe('no-demo-transcript');
   });
 
   it('gives all four answers over one walk, in a fixed order', async () => {
-    const read = createDemoHistory();
+    const read = createDemoHistory(0);
     const answers = await walk(read, 'd-hello');
     const shapes = answers.map((a) =>
       a.kind === 'unavailable'
@@ -52,12 +52,23 @@ describe('the demo pager', () => {
             : 'blank',
     );
     // 1. turns, 2. a blank window that is NOT the end, 3. a read that failed,
-    // 4. the retry that succeeds, 5. the proven start.
-    expect(shapes).toEqual(['turns', 'blank', 'unavailable', 'turns', 'start']);
+    // 4. the retry that succeeds, 5-7. three more blank windows -- which is
+    // `MAX_BLANK_STEPS`, so one gesture ends on one of them and the column has
+    // to say "there is more" with nothing new to show -- 8. the proven start.
+    expect(shapes).toEqual([
+      'turns',
+      'blank',
+      'unavailable',
+      'turns',
+      'blank',
+      'blank',
+      'blank',
+      'start',
+    ]);
   });
 
   it('the blank window carries a cursor, so it can never read as an ending', async () => {
-    const read = createDemoHistory();
+    const read = createDemoHistory(0);
     const answers = await walk(read, 'd-hello');
     const blank = answers[1];
     expect(blank?.kind).toBe('page');
@@ -68,7 +79,7 @@ describe('the demo pager', () => {
   });
 
   it('the refusal carries words a person can act on, and is TRANSIENT', async () => {
-    const read = createDemoHistory();
+    const read = createDemoHistory(0);
     const answers = await walk(read, 'd-hello');
     const refused = answers[2];
     expect(refused?.kind).toBe('unavailable');
@@ -80,7 +91,7 @@ describe('the demo pager', () => {
   });
 
   it('hands over every one of its turns exactly once, oldest last', async () => {
-    const read = createDemoHistory();
+    const read = createDemoHistory(0);
     const answers = await walk(read, 'd-hello');
     const ids = answers.flatMap((a) => (a.kind === 'page' ? a.turns.map((t) => t.id) : []));
     expect(new Set(ids).size).toBe(ids.length);
@@ -90,7 +101,7 @@ describe('the demo pager', () => {
   });
 
   it('says the start ONLY at the start, never merely because a page was short', async () => {
-    const read = createDemoHistory();
+    const read = createDemoHistory(0);
     const answers = await walk(read, 'd-hello');
     const starts = answers.filter((a) => a.kind === 'page' && a.reachedStart);
     expect(starts).toHaveLength(1);
@@ -99,7 +110,7 @@ describe('the demo pager', () => {
   });
 
   it('keeps answering the start once it has reached it', async () => {
-    const read = createDemoHistory();
+    const read = createDemoHistory(0);
     const answers = await walk(read, 'd-hello');
     const last = answers.at(-1);
     const again = await read('factory-sse-1', null);
@@ -111,8 +122,8 @@ describe('the demo pager', () => {
   it('is one walk per instance, so a reload starts the sequence over', async () => {
     // The refusal is a state in a closure, not a global: two demo canvases in
     // one browser must not steal each other's step.
-    const first = await walk(createDemoHistory(), 'd-hello');
-    const second = await walk(createDemoHistory(), 'd-hello');
+    const first = await walk(createDemoHistory(0), 'd-hello');
+    const second = await walk(createDemoHistory(0), 'd-hello');
     expect(second.map((a) => a.kind)).toEqual(first.map((a) => a.kind));
   });
 });

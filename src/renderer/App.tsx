@@ -110,6 +110,30 @@ function demoTurns(): number {
   return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 }
 
+/**
+ * Whether the demo has a backward pager — `?demo=1&history=off` takes it away.
+ *
+ * THE SAME KIND OF KNOB AS `?turns=N` ABOVE, and it earns its keep the same
+ * way: it makes a real state of the app REACHABLE that otherwise is not.
+ * `SessionSource.history` is optional (`sources/port.ts`), and every source vam
+ * itself assembles has it — so the branch where it is ABSENT, which the column
+ * draws as a stated refusal rather than as "there is nothing older", is a
+ * branch no shipped source can put on screen. Without this it would ship
+ * undrawn and untested in a browser, which is how a message ends up wrong for
+ * a year.
+ *
+ * It is also what keeps the column's geometry guards honest. With a pager, the
+ * column GROWS whenever a check scrolls near its top, so a sticky-position
+ * sweep computed against one set of offsets would be walking a different
+ * column by the time it got there. Off, the fixture is the fixed seven turns
+ * those checks were written against.
+ *
+ * Read only inside the demo, like `demoTurns`.
+ */
+function demoHasHistory(): boolean {
+  return new URLSearchParams(globalThis.location?.search ?? '').get('history') !== 'off';
+}
+
 export function App() {
   const client = useMemo(() => new SmithClient({ baseUrl: smithUrl() }), []);
   // The bridge exists only in the Electron shell. In a browser there is no
@@ -354,7 +378,7 @@ function DemoCanvas() {
    * ONCE PER MOUNT, like the model above: the scripted refusal is a step in a
    * closure, so a pager rebuilt on every render would refuse forever.
    */
-  const history = useMemo(() => createDemoHistory(), []);
+  const history = useMemo(() => (demoHasHistory() ? createDemoHistory() : null), []);
   return (
     <HistoryReaderProvider value={history}>
       <Canvas
