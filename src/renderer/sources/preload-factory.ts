@@ -75,6 +75,12 @@ export async function createSourceFromPreload(api: PreloadSourceApi): Promise<Se
     declines: descriptor.declines,
     viewerScope: descriptor.viewerScope,
     load: () => api.load(),
+    // ASSIGNED UNCONDITIONALLY, unlike the three members below it, and
+    // `port.ts` says why: this one is not gated by a capability flag. A source
+    // that cannot page answers `unavailable` in its own words rather than
+    // being absent, so leaving it off here would hide a working surface behind
+    // a check no descriptor makes.
+    history: (sessionId, cursor) => api.history(sessionId, cursor),
   };
 
   // A mutable view of the same object: the port declares the optional members

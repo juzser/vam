@@ -17,6 +17,7 @@
  * politeness, on top of a refusal that does not depend on it.
  */
 
+import type { TranscriptPage } from '../../shared/history.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../../shared/preload-api.js';
 import type { Project } from '../domain/model.js';
 import type { SessionSource, SourceError } from './port.js';
@@ -112,12 +113,17 @@ async function call<T>(
 }
 
 /**
- * The ten-member api, over HTTP. Every member is present unconditionally, for
- * the same reason the preload's are: what a source can do is answered by the
- * descriptor, not by the shape of this object. Three of them
- * (`renameSession`, `applyWaivers`, `transitionLesson`) address routes the
- * remote server does not register -- calling one gets `no-such-route`, and the
- * descriptor's `false` is what keeps anything from calling it.
+ * The api over HTTP. Every member is present unconditionally, for the same
+ * reason the preload's are: what a source can do is answered by the descriptor,
+ * not by the shape of this object. Three of them (`renameSession`,
+ * `applyWaivers`, `transitionLesson`) address routes the remote server does not
+ * register -- calling one gets `no-such-route`, and the descriptor's `false` is
+ * what keeps anything from calling it.
+ *
+ * `history` is deliberately NOT one of those three. Scrolling back through a
+ * session is most of what a phone is for, and the phone is exactly what this
+ * module serves, so `remote/server.ts` registers `/api/history` beside
+ * `/api/load` -- as a READ, available even to a server started read-only.
  */
 export function createHttpSourceApi(options: HttpSourceOptions = {}): PreloadSourceApi {
   const base = options.baseUrl ?? '';
@@ -157,6 +163,26 @@ export function createHttpSourceApi(options: HttpSourceOptions = {}): PreloadSou
     // this -- present only because the api is unconditional.
     pickImageAttachment: () =>
       Promise.reject(unreachable('no-such-route', 'vam serves no image picker over HTTP')),
+    // The one member that resolves rather than rejects, exactly as the
+    // preload's does and for the same reason: `TranscriptPage` already carries
+    // the failure, and a caller with two ways to be told one thing eventually
+    // draws neither. `no-such-route` and a dead tunnel both land in that arm.
+    history: async (sessionId, cursor) => {
+      try {
+        return await call<TranscriptPage>(transport, `${base}/api/history`, {
+          sessionId,
+          cursor,
+        });
+      } catch (reason) {
+        return {
+          kind: 'unavailable',
+          error:
+            typeof reason === 'object' && reason !== null && 'code' in reason
+              ? (reason as SourceError)
+              : unreachable('transport-failed', 'the remote endpoint did not answer'),
+        };
+      }
+    },
     applyWaivers: (sessionId, findingIds) => post('/api/apply-waivers', { sessionId, findingIds }),
     transitionLesson: (sessionId, lessonId, status) =>
       post('/api/transition-lesson', { sessionId, lessonId, status }),

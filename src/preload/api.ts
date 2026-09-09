@@ -22,7 +22,9 @@ import type { MainFailureEvent } from '../main/errors/log.js';
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
 import type { RemoteState } from '../main/remote/state.js';
 import type { Project } from '../renderer/domain/model.js';
+import type { SourceError } from '../renderer/sources/port.js';
 import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.js';
+import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
 import type { PaneKey, PaneSendResult, PaneView } from '../shared/terminal.js';
 import type { UpdateStatus } from '../shared/update.js';
@@ -51,6 +53,43 @@ async function unwrap<T>(pending: Promise<unknown>): Promise<T> {
     return result.value;
   }
   throw result.error;
+}
+
+/**
+ * `unwrap`, for the one member that must not reject.
+ *
+ * A scroll-back has to tell "vam could not read" apart from "there is nothing
+ * older", and `TranscriptPage` already carries both. Rejecting for the first
+ * would put that state somewhere a caller has to remember to look, and the
+ * caller that forgot would draw the second. So every failure -- a refusal main
+ * returned, a channel that is not registered, a bridge that is gone -- lands in
+ * the arm the type already has.
+ */
+export async function unwrapPage(pending: Promise<unknown>): Promise<TranscriptPage> {
+  try {
+    return await unwrap<TranscriptPage>(pending);
+  } catch (reason) {
+    // A refusal main RETURNED keeps its own `kind`, `code` and message -- the
+    // same shape `port.ts`'s `describeFailure` renders. Only something that is
+    // not one of those gets a code minted here.
+    if (
+      typeof reason === 'object' &&
+      reason !== null &&
+      'kind' in reason &&
+      'code' in reason &&
+      'message' in reason
+    ) {
+      return { kind: 'unavailable', error: reason as SourceError };
+    }
+    return {
+      kind: 'unavailable',
+      error: {
+        kind: 'unreachable',
+        code: 'bridge-failed',
+        message: reason instanceof Error ? reason.message : String(reason),
+      },
+    };
+  }
 }
 
 export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
@@ -98,6 +137,14 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
     | 'pickImageAttachment'
   >;
 
+  const history = {
+    // Cursor-in, page-out, and NEVER a rejection: see `unwrapPage`. The cursor
+    // is forwarded as-is, `null` included -- main takes null as "from the
+    // newest end", which is the first thing any caller asks for.
+    history: (sessionId: string, cursor: HistoryCursor | null) =>
+      unwrapPage(ipc.invoke(CHANNELS.sessionHistory, sessionId, cursor)),
+  } satisfies Pick<PreloadSourceApi, 'history'>;
+
   const governance = {
     applyWaivers: (sessionId, findingIds) =>
       unwrap<void>(ipc.invoke(CHANNELS.applyWaivers, sessionId, findingIds)),
@@ -105,7 +152,7 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
       unwrap<void>(ipc.invoke(CHANNELS.transitionLesson, sessionId, lessonId, status)),
   } satisfies Pick<PreloadSourceApi, 'applyWaivers' | 'transitionLesson'>;
 
-  return { ...reads, ...writes, ...governance };
+  return { ...reads, ...writes, ...history, ...governance };
 }
 
 /** The bridge's usage member: one read, no write, no argument. */

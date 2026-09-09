@@ -30,10 +30,11 @@
  * web target is unaffected.
  */
 
-import { open, readdir, stat } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { Project, Session, SlashCommand } from '../../../renderer/domain/model.js';
+import type { HistoryCursor, TranscriptPage } from '../../../shared/history.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
 import type { MainSource } from '../source.js';
@@ -42,6 +43,7 @@ import { type AgentRoster, readAgentRoster } from './agent-roster.js';
 import { type AgentsResult, type LiveAgent, listLiveAgents } from './agents.js';
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
 import { deliverPromptViaCli } from './deliver.js';
+import { readTranscriptHistory } from './history.js';
 import { projectIdOf } from './project-id.js';
 import {
   createPullRequestReader,
@@ -65,13 +67,30 @@ import {
   summarizeTranscript,
   type TranscriptFacts,
 } from './transcript.js';
+import { fileTranscriptSource, readTranscriptWindow, type TranscriptSource } from './window.js';
 
 /**
  * The read budget. Only sessions the CLI reported are opened -- single digits
- * in practice -- and each is read for its last `TAIL_BYTES` and no more, so
- * `load()` costs kilobytes against the 814 MB of transcripts on this disk,
+ * in practice -- and each is read for its last `TAIL_BYTES` and no more (plus
+ * the one byte `window.ts` probes to find the line boundary), so `load()`
+ * costs kilobytes against the 0.94 GB of session transcripts on this disk,
  * independent of how large any one of them is. A transcript shared by two
  * resumed processes is read once.
+ *
+ * THIS IS THE LIVE VIEW'S BUDGET AND NOTHING ELSE'S. Scrolling back through a
+ * session is a separate, on-demand read (`history.ts`), asked for by a person
+ * and never by the poll; it does not widen this and this does not bound it.
+ *
+ * WHAT THE OPERATOR SEES FOR IT, said here because it is this constant that
+ * decides it: 34 of the 77 sessions here fit inside the window entirely and
+ * show every turn they have. The rest open MID-TURN, and the oldest turn on
+ * the canvas is then one whose beginning vam never read -- its prompt is whole
+ * (`last-prompt` re-emits the text in full) and its answer is the real one,
+ * but the tool failures counted against it are only those inside the window.
+ * That turn is not dropped: on five of the six largest transcripts here the
+ * tail holds exactly one turn, so dropping it would leave the canvas empty.
+ * `history.ts` is what reaches everything before it, and its cursor rules are
+ * written so that turn is never handed over a second time.
  *
  * The per-process status files are the one read that is per ROW rather than
  * per session -- there is no sharing them, since telling two rows apart is
@@ -83,19 +102,6 @@ const TAIL_BYTES = 128 * 1024;
 
 /** Where Claude Code keeps transcripts. Derived, never a literal home path. */
 export const defaultTranscriptRoot = (): string => join(homedir(), '.claude', 'projects');
-
-/** The last `bytes` of a file, decoded loosely -- a cut token is the parser's problem. */
-async function readTail(path: string, size: number, bytes: number): Promise<string> {
-  const length = Math.min(size, bytes);
-  const handle = await open(path, 'r');
-  try {
-    const buffer = Buffer.alloc(length);
-    await handle.read(buffer, 0, length, Math.max(0, size - length));
-    return buffer.toString('utf8');
-  } finally {
-    await handle.close();
-  }
-}
 
 /**
  * Where each session id's transcript lives, by walking the slug directories
@@ -155,9 +161,12 @@ async function readTranscript(
 ): Promise<TranscriptRead> {
   try {
     const info = await stat(path);
-    const tail = await readTail(path, info.size, TAIL_BYTES);
+    // The SAME window primitive `history.ts` pages with, so the ids the canvas
+    // holds and the ids a page hands back are minted from the same offsets --
+    // which is the whole reason a page can be merged into the tail at all.
+    const tail = await readTranscriptWindow(path, info.size - TAIL_BYTES, info.size);
     return {
-      facts: summarizeTranscript(tail, sessionId),
+      facts: summarizeTranscript(tail.text, sessionId, tail.start),
       roster: await readAgentRoster(path, nowMs),
       mtimeMs: info.mtimeMs,
     };
@@ -166,6 +175,46 @@ async function readTranscript(
     // session is live and the operator should still see it.
     return NO_TRANSCRIPT;
   }
+}
+
+/**
+ * The turns BEFORE a cursor, for one session -- the on-demand read `load()`
+ * deliberately is not (`history.ts` says why, and what it costs).
+ *
+ * `rowId` is what the renderer holds: `<sessionId>#<pid>`, one per PROCESS,
+ * because two processes can resume the same session (`agents.ts`'s `key`). A
+ * transcript is per SESSION, so the id is tried whole first and then at its
+ * last `#`. That is the one place this string is re-split, and it is defensible
+ * here for the reason `LiveAgent.pid` says it is not elsewhere: nothing is
+ * being addressed -- no process, no pane, no signal -- only a file is being
+ * named, and the session id is what names it. Asking the CLI instead would
+ * spawn a subprocess per scroll step.
+ */
+export async function readClaudeCodeHistory(
+  root: string,
+  rowId: string,
+  cursor: HistoryCursor | null,
+  // Injectable for the reason every read here is: a test names an invented
+  // transcript under a temp directory, never the operator's own.
+  sourceOf: (path: string) => TranscriptSource = fileTranscriptSource,
+): Promise<TranscriptPage> {
+  const index = await indexTranscripts(root);
+  const hash = rowId.lastIndexOf('#');
+  const sessionId = index.has(rowId) || hash === -1 ? rowId : rowId.slice(0, hash);
+  const path = index.get(sessionId);
+  if (path === undefined) {
+    // vam looked and this session has no transcript -- a refusal naming what
+    // it could not find, never an empty page claiming the session is empty.
+    return {
+      kind: 'unavailable',
+      error: {
+        kind: 'refused',
+        code: 'unknown-session',
+        message: `vam found no transcript for ${sessionId}; it may have been removed`,
+      },
+    };
+  }
+  return await readTranscriptHistory(sourceOf(path), sessionId, cursor);
 }
 
 export async function loadClaudeCodeProjects(
@@ -547,4 +596,13 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
   /** No agent list to consult: the operator named the directory themselves. */
   createSessionInDirectory: async (cwd, title, provider) =>
     createSessionInDirectory({ cwd, title, provider, run: createTmuxRunner() }),
+  /**
+   * NO agent list is asked for here, unlike every write above, and that is the
+   * point of the difference: this reads a FILE, and a transcript outlives the
+   * process that wrote it. Re-asking the CLI would spawn a subprocess on every
+   * scroll step and would refuse to show the history of a session that has
+   * since exited -- which is exactly a session worth scrolling back through.
+   */
+  readHistory: async (sessionId, cursor) =>
+    readClaudeCodeHistory(defaultTranscriptRoot(), sessionId, cursor),
 };

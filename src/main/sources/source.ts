@@ -11,6 +11,7 @@
  */
 
 import type { Project } from '../../renderer/domain/model.js';
+import type { HistoryCursor, TranscriptPage } from '../../shared/history.js';
 import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
 
@@ -55,4 +56,21 @@ export type MainSource = {
     title: string,
     provider?: string,
   ): Promise<SourceError | null>;
+  /**
+   * The turns BEFORE a point in a session -- scrolling back, which `load()`
+   * deliberately cannot do: it reads a fixed tail per session so the poll stays
+   * cheap, and the median session is three times that tail.
+   *
+   * NOT GATED BY A CAPABILITY BOOLEAN, and that is deliberate. `TranscriptPage`
+   * already carries its own `unavailable` arm with the source's own words, so a
+   * source without a surface says so in the answer -- the same shape `PaneView`
+   * and `AgentsResult` use. Adding a thirteenth flag to `SourceCapabilities`
+   * would gate an affordance the canvas does not yet draw, which that type's
+   * own doc forbids.
+   *
+   * RESOLVES, never throws, like every member above: the reason a page could
+   * not be read is the whole content of the failure, and a thrown error would
+   * arrive as `unreachable/source-failed` with that reason rewritten.
+   */
+  readHistory?(sessionId: string, cursor: HistoryCursor | null): Promise<TranscriptPage>;
 };
