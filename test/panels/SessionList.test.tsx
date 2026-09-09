@@ -204,13 +204,31 @@ describe('SessionList placeholder row', () => {
     ).toBe('a/');
   });
 
-  it('shows an em-dash for the branch when the source cannot say, and names the gap', () => {
+  /**
+   * Audit item 7 (S3). Both sentences said something found nowhere else on
+   * screen -- an em-dash names a gap but not whose gap it is -- and both said
+   * it in a `title`, which opens on hover and on nothing else. Nine of these
+   * were still live at 390px, where there is no hover at all, and mobile is a
+   * real target (Tailscale Serve).
+   *
+   * A tab stop is NOT the fix here, and that is the whole reason these two
+   * differ from the status bar's notes: every one of these spans is inside the
+   * session row's own `<button>` (one element, ~250 lines of it), so a
+   * focusable child would be a nested interactive control. The row button is
+   * already a tab stop and already has an accessible name computed from its
+   * contents -- so the sentence goes into that name as `sr-only` text. The
+   * em-dash stays exactly as drawn: this is a row at rest, and the design of
+   * the quiet row is not what was broken.
+   */
+  it('shows an em-dash for the branch when the source cannot say, and names the gap aloud', () => {
     const { container } = mount(entriesOf([makeSession({ branch: null })]));
     const branch = container.querySelector('[data-session-branch]');
-    expect(branch?.textContent).toBe('—');
+    expect(branch?.textContent).toContain('—');
     // Not the old claim, which named factory on every row including a
     // Claude Code one that simply had no transcript yet.
-    expect(branch?.getAttribute('title')).toContain('cannot say');
+    expect(branch?.getAttribute('title')).toBeNull();
+    const row = container.querySelector('[data-session-row]');
+    expect(row?.textContent).toContain('cannot say which branch');
   });
 
   it('shows an em-dash for the time when the source cannot say, never a zero', () => {
@@ -218,8 +236,10 @@ describe('SessionList placeholder row', () => {
     // reported activity a moment ago; `0m` would read as the second.
     const { container } = mount(entriesOf([makeSession({ age: null })]));
     const age = container.querySelector('[data-session-age]');
-    expect(age?.textContent).toBe('—');
-    expect(age?.getAttribute('title')).toContain('cannot say');
+    expect(age?.textContent).toContain('—');
+    expect(age?.getAttribute('title')).toBeNull();
+    const row = container.querySelector('[data-session-row]');
+    expect(row?.textContent).toContain('cannot say when the session last did anything');
   });
 
   it('names the gap on the branch placeholder, and draws no verb pill for any status', () => {

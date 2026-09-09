@@ -2271,14 +2271,26 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                     <span className="flex-none">·</span>
                                     <span
                                       data-session-age
+                                      // The gap's explanation is `sr-only` rather than a
+                                      // `title`, which opens on hover and on nothing else --
+                                      // and this span lives inside the row's own <button>, so
+                                      // it cannot take a tab stop of its own without nesting an
+                                      // interactive control. The row button already has an
+                                      // accessible name built from its contents; the sentence
+                                      // joins it there, and the em-dash stays as drawn.
                                       title={
                                         session.age === null
-                                          ? 'this source cannot say when the session last did anything'
+                                          ? undefined
                                           : `last activity ${session.age} ago`
                                       }
                                       className="flex-none"
                                     >
                                       {session.age ?? 'no age'}
+                                      {session.age === null && (
+                                        <span className="sr-only">
+                                          this source cannot say when the session last did anything
+                                        </span>
+                                      )}
                                     </span>
                                     {session.branch !== null && (
                                       <>
@@ -2339,11 +2351,13 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                       <GitBranch size={10} strokeWidth={1.6} />
                                       <span
                                         data-session-branch
-                                        title={
-                                          session.branch === null
-                                            ? 'this source cannot say which branch the session is on'
-                                            : session.branch
-                                        }
+                                        // `title` survives ONLY for the non-null case, where it
+                                        // reveals text that is already in the DOM and merely
+                                        // clipped -- the one legitimate use of the attribute.
+                                        // The null case's sentence is information found nowhere
+                                        // else, so it becomes `sr-only` text inside the row
+                                        // button's own accessible name (see the age cell).
+                                        title={session.branch ?? undefined}
                                         // `overflow-hidden` IS the guarantee (see
                                         // `BRANCH_TAIL_MAX_CHARS`'s doc comment): this box is
                                         // already sized correctly by the row's own flex layout
@@ -2357,7 +2371,12 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                         className="flex min-w-0 items-center overflow-hidden"
                                       >
                                         {session.branch === null ? (
-                                          '—'
+                                          <>
+                                            —
+                                            <span className="sr-only">
+                                              this source cannot say which branch the session is on
+                                            </span>
+                                          </>
                                         ) : (
                                           <>
                                             <span data-branch-head className="truncate">
@@ -2401,14 +2420,26 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                     </span>
                                     <span
                                       data-session-age
+                                      // The gap's explanation is `sr-only` rather than a
+                                      // `title`, which opens on hover and on nothing else --
+                                      // and this span lives inside the row's own <button>, so
+                                      // it cannot take a tab stop of its own without nesting an
+                                      // interactive control. The row button already has an
+                                      // accessible name built from its contents; the sentence
+                                      // joins it there, and the em-dash stays as drawn.
                                       title={
                                         session.age === null
-                                          ? 'this source cannot say when the session last did anything'
+                                          ? undefined
                                           : `last activity ${session.age} ago`
                                       }
                                       className="flex-none"
                                     >
                                       {session.age ?? '—'}
+                                      {session.age === null && (
+                                        <span className="sr-only">
+                                          this source cannot say when the session last did anything
+                                        </span>
+                                      )}
                                     </span>
                                   </span>
                                 )}
