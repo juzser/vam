@@ -192,7 +192,7 @@ describe('a source that can page', () => {
   });
 
   it('a refusal keeps the source own words, and does not look like an ending', async () => {
-    const read = vi.fn(async () => ({
+    const read = vi.fn(async (_id: string, _cursor: string | null) => ({
       kind: 'unavailable' as const,
       error: {
         kind: 'unreachable' as const,

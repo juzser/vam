@@ -202,7 +202,7 @@ describe('walkOlder', () => {
     // from somewhere else. Every ask after the first must be a cursor the
     // previous page handed back, verbatim.
     const handed = ['@600', '@300'];
-    const read = vi.fn(async () => {
+    const read = vi.fn(async (_id: string, _asked: HistoryCursor | null) => {
       const cursor = handed.shift() ?? null;
       return page({ turns: [], cursor, reachedStart: cursor === null });
     });
