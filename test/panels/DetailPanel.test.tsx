@@ -1833,28 +1833,52 @@ describe('an unfocused pane does not persist its tab — one pane holds the pen'
  * in `TABS`, never its position in the drawn bar.
  */
 describe('the view icons are named controls, each for its own fixed slot in TABS', () => {
-  it('every icon is a real <button>, in the tab order, named beyond a tooltip', () => {
+  it('every icon is a real <button>, in the tab order, and carries its own name', () => {
     draw();
     for (const icon of all('[data-view]') as HTMLButtonElement[]) {
       expect(icon.tagName).toBe('BUTTON');
       // Reachable by Tab: no explicit removal from the tab order.
       expect(icon.getAttribute('tabindex')).not.toBe('-1');
-      // The accessible name is `aria-label`, not merely `title` — a screen
-      // reader is not required to read `title`, and it never opens on
-      // keyboard focus at all, which is the exact defect this file already
-      // refused once for the old pill row.
+      // ICON-ONLY DOES NOT MEAN UNLABELLED. The accessible name is
+      // `aria-label` — a screen reader is not required to read a `title`, and
+      // a `title` never opens on keyboard focus at all, which is the defect
+      // this file already refused once for the old pill row.
       const label = icon.getAttribute('aria-label');
       expect(label, 'icon must carry its own aria-label').not.toBeNull();
       expect(label).not.toBe('');
-      expect(icon.getAttribute('title')).toBe(label);
     }
   });
 
-  it('labels each icon with its own fixed Alt-digit, even once Terminal is withdrawn', () => {
+  /**
+   * AND THE NAME IS NOT WHERE THE SHORTCUT GOES.
+   *
+   * Each label used to end `— Alt+N`, and a `title` repeated it byte for
+   * byte. That is a chord welded into the accessible name: a screen reader
+   * says it on every focus of all four buttons and the operator has no way to
+   * dismiss it, and it is a LITERAL — the operator can rebind `pickView` now,
+   * after which the name would be announcing a key that does nothing.
+   *
+   * The shortcut has two honest homes instead, both derived from the binding
+   * table: the tooltip (`ShortcutTip`, covered in
+   * `test/keyboard/shortcut-tip.test.tsx`) and the generated key sheet. The
+   * `title` is gone outright — it was identical to the `aria-label`, so it
+   * added a second, worse copy of the same string.
+   */
+  it('keeps the shortcut OUT of the accessible name, and drops the title entirely', () => {
     draw({ terminal: false });
-    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-label')).toContain('Alt+1');
-    expect(q<HTMLElement>('[data-view="prs"]')?.getAttribute('aria-label')).toContain('Alt+2');
-    expect(q<HTMLElement>('[data-view="agents"]')?.getAttribute('aria-label')).toContain('Alt+4');
+    for (const icon of all('[data-view]') as HTMLButtonElement[]) {
+      const label = icon.getAttribute('aria-label') ?? '';
+      expect(label, 'no chord welded into the name').not.toMatch(/Alt[+-]/);
+      expect(icon.getAttribute('title'), 'the title was a worse copy of the label').toBeNull();
+    }
+    // The name itself survives, and so does the running-agent count, which is
+    // the only place this pane still reports it.
+    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-label')).toBe(
+      'Response view',
+    );
+    expect(q<HTMLElement>('[data-view="agents"]')?.getAttribute('aria-label')).toBe(
+      'Agents view, 2 running',
+    );
   });
 });
 

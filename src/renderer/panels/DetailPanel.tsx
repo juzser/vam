@@ -102,6 +102,7 @@ import type {
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { questionKeys } from '../keyboard/question-keys.js';
+import { ShortcutTip } from '../keyboard/ShortcutTip.js';
 import { describeFailure } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
@@ -674,14 +675,31 @@ const VIEW_ICON: Readonly<Record<Tab, typeof MessageSquare>> = {
  * things the same word is the collision the sidebar's project/repo naming
  * already hit once.
  *
- * ICON-ONLY DOES NOT MEAN UNLABELLED. `aria-label` carries the name AND the
- * shortcut (`Alt+N`, A2.5/A5.4) — a `title` alone would be the exact defect
- * this file already refused once for the pill row ("a tooltip alone is not
- * one"): a `title` never opens on keyboard focus and screen readers are not
- * required to read it. The Agents badge survives unchanged (a real source,
- * omitted at zero) and is now the ONLY place the running-agent count is
- * shown in this pane — see the identity line in the `in` block for why the
- * header's old "N agents" line does not need a second home.
+ * ICON-ONLY DOES NOT MEAN UNLABELLED. `aria-label` carries the NAME — just
+ * the name, since the operator asked for tooltips here. It used to end
+ * `— Alt+N`, with a byte-identical `title` beside it, and both are gone:
+ *
+ *   - the chord in the accessible NAME is announced on every focus of all
+ *     four buttons and cannot be dismissed, which is noise a screen-reader
+ *     user pays for four times over;
+ *   - and it was a LITERAL. `Alt+<digit>` is a real binding now (`pickView`
+ *     in `keyboard/chords.ts`), so an operator who rebinds it would have
+ *     been left with a name announcing a key that does nothing — the
+ *     "caption that lies" this project already deleted from the key sheet.
+ *   - the `title` was the same string a second time, and the worse copy: no
+ *     browser opens one on keyboard focus, so it was invisible to the
+ *     primary input device of a keyboard-first tool.
+ *
+ * The shortcut lives in `ShortcutTip` instead, which re-reads the binding
+ * table on every open, and in the generated key sheet. Derived in both, so
+ * neither can go stale — and `ShortcutTip` prints NOTHING for an unbound
+ * action rather than an empty bracket.
+ *
+ * The Agents badge survives unchanged (a real source, omitted at zero) and
+ * is now the ONLY place the running-agent count is shown in this pane, which
+ * is why the count stays in the name — see the identity line in the `in`
+ * block for why the header's old "N agents" line does not need a second
+ * home.
  *
  * EVERY ICON IS STILL A REAL <button> — Tab reaches it, Enter and Space
  * activate it, `aria-pressed` says which one is showing. That property is
@@ -732,35 +750,37 @@ function ViewIcons({
         // a digit `tabForDigit` refuses — the exact defect fixed there, just
         // spoken instead of wired.
         const digit = TABS.indexOf(tab) + 1;
-        const name =
-          badge === null
-            ? `${tab} view — Alt+${digit}`
-            : `${tab} view, ${badge} running — Alt+${digit}`;
+        const name = badge === null ? `${tab} view` : `${tab} view, ${badge} running`;
         return (
-          <button
-            key={tab}
-            type="button"
-            data-view={tab.toLowerCase()}
-            aria-pressed={selected}
-            aria-label={name}
-            title={name}
-            onClick={() => onSelect(tab)}
-            className={[
-              'vam-tap relative flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-[7px]',
-              selected ? 'bg-line-strong text-ink' : 'text-ink-dim hover:bg-raised hover:text-ink',
-            ].join(' ')}
-          >
-            <Icon size={13} strokeWidth={1.7} aria-hidden="true" />
-            {badge !== null && (
-              <span
-                data-view-badge
-                aria-hidden="true"
-                className="absolute -top-[3px] -right-[3px] flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-waiting px-[3px] font-mono text-[9px] text-ink leading-none"
-              >
-                {badge}
-              </span>
-            )}
-          </button>
+          // The chord is READ from the table on every open, off the same
+          // fixed digit the name is derived from -- so a rebind moves the
+          // hint, and an unbound view simply shows its name.
+          <ShortcutTip key={tab} label={name} action={{ kind: 'pickView', digit }}>
+            <button
+              type="button"
+              data-view={tab.toLowerCase()}
+              aria-pressed={selected}
+              aria-label={name}
+              onClick={() => onSelect(tab)}
+              className={[
+                'vam-tap relative flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-[7px]',
+                selected
+                  ? 'bg-line-strong text-ink'
+                  : 'text-ink-dim hover:bg-raised hover:text-ink',
+              ].join(' ')}
+            >
+              <Icon size={13} strokeWidth={1.7} aria-hidden="true" />
+              {badge !== null && (
+                <span
+                  data-view-badge
+                  aria-hidden="true"
+                  className="absolute -top-[3px] -right-[3px] flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-waiting px-[3px] font-mono text-[9px] text-ink leading-none"
+                >
+                  {badge}
+                </span>
+              )}
+            </button>
+          </ShortcutTip>
         );
       })}
     </nav>

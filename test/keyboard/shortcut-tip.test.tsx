@@ -321,3 +321,58 @@ describe('the chord is announced as a shortcut, not as punctuation', () => {
     expect(tip.textContent ?? '').toContain(`shortcut: ${keys}`);
   });
 });
+
+/**
+ * The four view icons — the operator's own request ("add tooltips for the 4
+ * functions in the tab, with the shortcut key"), and the reason
+ * `Alt+<digit>` had to become a real binding first.
+ *
+ * These icons carried their chord as a LITERAL in two places at once, an
+ * `aria-label` and a byte-identical `title`: `Response view — Alt+1`. A
+ * tooltip built on that literal would be the third copy of a string nothing
+ * keeps true — and `pickView` is rebindable now, so "nothing keeps it true"
+ * stopped being hypothetical. Everything below asks the binding table what is
+ * in force; not one assertion spells a shipped chord of its own.
+ */
+describe('the view icons derive their shortcut, and do not repeat it in their name', () => {
+  const icon = (view: string) =>
+    document.querySelector<HTMLButtonElement>(`[data-view="${view}"]`) as HTMLButtonElement;
+
+  it('names the view and prints the chord the table holds for its digit', () => {
+    render(<Canvas model={DEMO_MODEL} />);
+    const action: KeyAction = { kind: 'pickView', digit: 2 };
+    const keys = bindingChords(NO_BINDINGS, actionId(action));
+    expect(keys, 'the fixture must have the digit bound, or this asserts nothing').not.toEqual([]);
+    const text = openByFocus(icon('prs')).textContent ?? '';
+    expect(text).toContain('PRs view');
+    expect(text).toContain(keys.join(' or '));
+  });
+
+  it('follows the operator to a rebound key rather than to the shipped one', () => {
+    // Through STORED prefs, the operator's own route: the canvas activates
+    // them on mount, so a direct `setActiveBindings` would be overwritten.
+    localStorage.setItem('vam.prefs.v1', JSON.stringify({ keyBindings: { 'pickView:2': ['F2'] } }));
+    render(<Canvas model={DEMO_MODEL} />);
+    const text = openByFocus(icon('prs')).textContent ?? '';
+    expect(text).toContain('F2');
+    // And the shipped chord is not ALSO printed — the tip reads what is in
+    // force, it does not accumulate.
+    expect(text).not.toContain('Alt-2');
+  });
+
+  it('prints no shortcut at all for a view the operator unbound', () => {
+    localStorage.setItem('vam.prefs.v1', JSON.stringify({ keyBindings: { 'pickView:2': [] } }));
+    render(<Canvas model={DEMO_MODEL} />);
+    const tip = openByFocus(icon('prs'));
+    expect(tip.textContent?.trim()).toBe('PRs view');
+    // Not an empty bracket, not the word "unbound": no chip element at all.
+    expect(tip.querySelector('[data-tip-keys]')).toBeNull();
+  });
+
+  it('carries no `title`, so the tooltip is the only hover surface', () => {
+    render(<Canvas model={DEMO_MODEL} />);
+    for (const button of document.querySelectorAll('[data-view]')) {
+      expect(button.getAttribute('title'), `${button.getAttribute('data-view')}`).toBeNull();
+    }
+  });
+});

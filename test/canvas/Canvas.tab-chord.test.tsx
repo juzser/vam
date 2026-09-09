@@ -154,16 +154,24 @@ describe('Mod-<digit> is a position in whatever pane has the keyboard', () => {
 
   /**
    * The two routes to a view must agree, because the operator reads one of
-   * them off the icons and presses the other. `Alt+4` is what the Agents
-   * icon captions itself with here; `Mod-4` is the same view, and `Mod-3` is
-   * Terminal's digit whether or not this source has one.
+   * them off the icons and presses the other.
+   *
+   * WHERE THEY READ IT MOVED. The icon used to caption itself `— Alt+4`
+   * inside its own `aria-label`; the digit now comes from the icon's TOOLTIP,
+   * which resolves it from the binding table on every open. So this reads the
+   * tip, which is what an operator reads, rather than a literal that no
+   * longer exists — and `Mod-4` must still be the same view, with `Mod-3`
+   * still Terminal's digit whether or not this source has one.
    */
-  it('agrees with the icon captions: the digit is a NAME, not a position', () => {
+  it('agrees with the icon tooltips: the digit is a NAME, not a position', () => {
     mountFocused();
     intoResponsePane();
-    const caption =
-      document.querySelector('[data-view="agents"]')?.getAttribute('aria-label') ?? '';
+    const agents = document.querySelector('[data-view="agents"]') as HTMLElement;
+    fireEvent.focus(agents);
+    const caption = document.querySelector('[role="tooltip"]')?.textContent ?? '';
+    expect(caption).toContain('Agents');
     expect(caption).toContain('4');
+    fireEvent.blur(agents);
     digitChord(3);
     // Terminal is TABS[2] and this source has none: refused, aloud, and NOT
     // silently landed on whatever is drawn third.
