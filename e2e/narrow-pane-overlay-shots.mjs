@@ -91,8 +91,8 @@ if (navBox.y + navBox.height <= bubbleBox.y) {
  * nodes gives the rectangles the glyph runs actually occupy, and
  * `elementFromPoint` says what is on top of each.
  */
-async function coveredText(selector) {
-  return page.evaluate((sel) => {
+async function coveredText(selector, depth = 24) {
+  return page.evaluate(([sel, depth]) => {
     const root = document.querySelector(sel);
     const nav = document.querySelector('[data-view-tabs]');
     const note = document.querySelector('[data-view-note]');
@@ -117,9 +117,15 @@ async function coveredText(selector) {
     let covered = 0;
     let samples = 0;
     for (const r of rects) {
-      // Only the first 24px of the block can meet the overlay at all; below
-      // that the pill has ended, and sampling a 10,000px paragraph is slow.
-      if (r.y > root.getBoundingClientRect().y + 24) continue;
+      // Only the top of the block can meet the overlay at all; below that the
+      // pill has ended, and sampling a 10,000px paragraph is slow. `depth` is
+      // how far down that reaches, and it is not one number for every element:
+      // for the prompt bubble the pill's bottom is a line and a bit down, for
+      // the column's boundary block it is three lines down, and a 24px default
+      // there sampled only the short count line -- which never reaches the
+      // corner, so the check could not fail. Measured and passed in by the
+      // caller.
+      if (r.y > root.getBoundingClientRect().y + depth) continue;
       for (let dx = 1; dx < r.width; dx += 3) {
         samples += 1;
         // THREE HEIGHTS, not the midline. The audit's second half was "the
@@ -137,7 +143,7 @@ async function coveredText(selector) {
       }
     }
     return { covered, samples, rects: rects.length };
-  }, selector);
+  }, [selector, depth]);
 }
 
 // 1. NOT ONE PIXEL OF THE PROMPT'S FIRST LINE IS UNDER THE PILL. This is
@@ -206,7 +212,35 @@ await page.locator('[data-detail-column]').evaluate((el) => {
   el.scrollTop = 0;
 });
 await page.waitForTimeout(200);
-const boundary = await coveredText('[data-column-start]');
+/**
+ * A SENTENCE LONG ENOUGH TO REACH THE CORNER, injected the way
+ * `long-prompt-shots` injects its prompt.
+ *
+ * FALSIFIED, AND THIS IS WHAT THE FALSIFICATION BOUGHT: with the shipped
+ * wording the check passed whether or not the block reserved the pill's corner
+ * — measured at 620px wide, the text's own line break happened to land 7px
+ * short of the pill either way. An assertion that cannot fail is worse than
+ * none, so the line is made long enough that it MUST fill the content box, and
+ * the reservation is then the only thing keeping it out of the corner. The text
+ * still wraps inside the block's own padding, so what is measured is the
+ * padding, not the injection.
+ */
+await page.locator('[data-column-start-note]').evaluate((el) => {
+  el.textContent =
+    'This is as far back as vam has read, and it is not necessarily where the session began, ' +
+    'because only the newest part of the transcript is ever opened.';
+});
+await page.waitForTimeout(200);
+// DOWN TO THE PILL'S OWN BOTTOM EDGE, measured rather than assumed: the
+// boundary block is three short lines and the pill covers most of them, where
+// the default depth of 24px reached only the first.
+const boundaryDepth = await page.evaluate(() => {
+  const start = document.querySelector('[data-column-start]').getBoundingClientRect();
+  const nav = document.querySelector('[data-view-tabs]').getBoundingClientRect();
+  return Math.max(24, Math.ceil(nav.bottom - start.top) + 4);
+});
+console.log(`sampling the boundary down to ${boundaryDepth}px, the pill's own bottom edge`);
+const boundary = await coveredText('[data-column-start]', boundaryDepth);
 console.log(
   `column boundary: ${boundary.covered} of ${boundary.samples} sampled glyph pixels covered ` +
     `(${boundary.rects} text runs)`,
