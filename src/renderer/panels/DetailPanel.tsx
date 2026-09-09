@@ -2430,9 +2430,32 @@ export function DetailPanel(props: DetailPanelProps) {
    * into an INPUT/TEXTAREA (the composer, the terminal's own hidden field)
    * is left alone entirely — not even inspected — and any key that is not a
    * bare `Alt+<digit>` (no other modifier) falls through with no
-   * `preventDefault`. Only that one combination is ever claimed, which is
-   * the whole of what `DELIBERATELY_FREE`/`UNREACHABLE_KEYS` (`chords.ts`)
-   * promise nothing else has.
+   * `preventDefault`. Only that one combination is ever claimed.
+   *
+   * WHAT MAKES THAT COMBINATION SAFE TO CLAIM, honestly. This comment used
+   * to cite two registries in `chords.ts` as promising nothing else takes
+   * it. NEITHER HAS EVER EXISTED: each name appeared exactly once in this
+   * tree, in that sentence, so the citation sent an auditor to read nothing.
+   * (`test/keyboard/alt-digit-is-free.test.ts` names both and holds them
+   * out of this file, so the sentence cannot come back.) The real basis,
+   * which is WEAKER, is three facts:
+   *
+   *   - the shipped grammar binds no `Alt-` key at all. `BINDING_TABLES`
+   *     (`chords.ts`) is its one enumeration -- the shortcut sheet is built
+   *     by walking it -- so that is the whole surface, not a sample.
+   *   - `normalizeKey` spells this combination `Alt-<digit>` off
+   *     `event.code`, so a collision would be two identical names rather
+   *     than two spellings sliding past each other.
+   *   - and NOTHING FORBIDS ONE. `RESERVED_KEYS` is `['Escape',
+   *     ...PREFIXES]`: it protects the chord doors, not this. An operator
+   *     override may bind `Alt-1`, and then that binding and this listener
+   *     both answer one keystroke, this one having called
+   *     `preventDefault`. That hole is real and open; promoting
+   *     `Alt+<digit>` into the tables is what would close it, and it is
+   *     queued separately.
+   *
+   * `test/keyboard/alt-digit-is-free.test.ts` holds all three, so the day
+   * one of them stops being true this paragraph goes red rather than stale.
    */
   useEffect(() => {
     if (!paneFocused) return;
