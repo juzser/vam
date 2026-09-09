@@ -1,80 +1,60 @@
 /**
- * Giving Cmd+W to the canvas instead of to the window.
+ * vam builds its own application menu.
  *
- * THE FACT FIRST: this app builds no application menu -- nothing in `src/`
- * imports `Menu` or calls `Menu.setApplicationMenu` -- so Electron installs
- * its DEFAULT template. On macOS that template's Window submenu contains
- * `role: 'close'`, whose accelerator is Cmd+W, and a native menu matches its
- * key equivalents in `performKeyEquivalent`, BEFORE the event reaches the web
- * page. So `Mod-w` in `chords.ts` would be dead in the packaged app while
- * every renderer test passed: the operator would press it and vam would
- * vanish instead of the session stopping. That is exactly the "sometimes
- * closes a session, sometimes closes the app" surprise the binding must not
- * become.
+ * With no `Menu.setApplicationMenu` call, Electron installs its DEFAULT
+ * template, and a native menu matches its key equivalents BEFORE the keydown
+ * reaches the page. Read off the built menu of the launched app, that default
+ * claimed:
  *
- * The remedy is small on purpose: ONE item is taken out of play, and nothing
- * else about the default menu changes -- Quit, Copy, Paste, Minimise and the
- * rest all keep their keys. vam is a single-window app, so the item removed
- * is the one whose only job was to close the window Cmd+Q already closes.
+ *   View > Actual Size   [resetzoom]  CommandOrControl+0
+ *   View > Zoom In       [zoomin]     CommandOrControl+Plus
+ *   View > Zoom Out      [zoomout]    CommandOrControl+-
+ *   File > Close Window  [close]      CommandOrControl+W
  *
- * WHAT IS PROVEN AND WHAT IS NOT. The walk below is pure and unit-tested. The
- * step after it -- that AppKit then declines to match Cmd+W and lets the key
- * fall through to the page -- is a property of the platform, not of this
- * code, and it cannot be asserted without launching the app and typing into
- * it. It rests on hidden and disabled items failing menu-item validation, so
- * `performKeyEquivalent` returns NO and the responder chain carries on. Both
- * flags are set rather than one, and the menu is re-applied afterwards so the
- * change is not left to in-place mutation semantics. If a future launch test
- * ever shows Cmd+W still closing the window, this is the file to fix -- not
- * the binding in `chords.ts`.
+ * All four are keys vam wants: the operator asked for zoom to be gone, and
+ * `src/renderer/keyboard/chords.ts` binds `Mod-w` to close the focused
+ * SESSION. This file used to hide and disable that `close` item and hope
+ * AppKit's validation would then decline the key -- a platform property it
+ * admitted it could not assert. Owning the template removes the question:
+ * the item is not there, so there is nothing to match.
+ *
+ * KEPT DELIBERATELY: on macOS the clipboard works THROUGH the menu, so
+ * dropping the Edit roles kills Cmd+C/V/X/A app-wide with no error anywhere.
+ * `appMenu`/`editMenu`/`fileMenu` are taken as Electron's own roles rather
+ * than retyped, and `test/electron/launch.test.ts` asserts each surviving
+ * role off the BUILT menu. `viewMenu` is the one standard role not used: it
+ * is where `resetZoom`, `zoomIn` and `zoomOut` live.
  */
 
-import { Menu } from 'electron';
-
-/** The slice of a menu this walks, so the walk is testable without electron. */
-type MenuItemLike = {
-  role?: string | undefined;
-  enabled?: boolean;
-  visible?: boolean;
-  submenu?: MenuLike | undefined;
-};
-type MenuLike = { items: MenuItemLike[] } | null | undefined;
+import { Menu, type MenuItemConstructorOptions } from 'electron';
 
 /**
- * Disable and hide the `close` role wherever it sits in the tree. Returns
- * whether one was found, so a caller can say so rather than assume it.
+ * By hand, because Electron's `windowMenu` role contains `role: 'close'` on
+ * macOS -- the Cmd+W this exists to give back to the renderer.
+ *
+ * `role: 'zoom'` is the macOS green-button WINDOW zoom. It carries no
+ * accelerator and is unrelated to page zoom.
  */
-export function releaseCloseItem(menu: MenuLike): boolean {
-  if (menu === null || menu === undefined) {
-    return false;
+function windowSubmenu(isMac: boolean): MenuItemConstructorOptions[] {
+  if (!isMac) {
+    return [{ role: 'minimize' }];
   }
-  let found = false;
-  for (const item of menu.items) {
-    if (item.role === 'close') {
-      item.enabled = false;
-      item.visible = false;
-      found = true;
-      continue;
-    }
-    if (releaseCloseItem(item.submenu)) {
-      found = true;
-    }
-  }
-  return found;
+  return [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }];
 }
 
-/**
- * Do it to the live application menu. Called once at startup; safe to call
- * when there is no menu (Linux and Windows builds may have none), where it
- * simply reports that nothing needed releasing.
- */
-export function releaseCloseAccelerator(): boolean {
-  const menu = Menu.getApplicationMenu();
-  const released = releaseCloseItem(menu as unknown as MenuLike);
-  if (released && menu !== null) {
-    // Re-applied rather than trusting in-place mutation to reach the native
-    // menu on every platform.
-    Menu.setApplicationMenu(menu);
-  }
-  return released;
+/** The template as a value, so the non-darwin branch is reachable in a test. */
+export function buildMenuTemplate(platform: NodeJS.Platform): MenuItemConstructorOptions[] {
+  const isMac = platform === 'darwin';
+  return [
+    // macOS: About/Services/Hide/Quit. Elsewhere `fileMenu`, which is where
+    // Quit lives -- the only way out once the default menu is gone.
+    isMac ? { role: 'appMenu' } : { role: 'fileMenu' },
+    { role: 'editMenu' },
+    { label: 'Window', role: 'window', submenu: windowSubmenu(isMac) },
+  ];
+}
+
+/** Install it. Called once, at `app.whenReady`, before the window exists. */
+export function applyApplicationMenu(): void {
+  Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate(process.platform)));
 }

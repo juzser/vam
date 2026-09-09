@@ -21,7 +21,7 @@ import { applyLoginShellPath, probeLoginShellPath } from './env/resolve-path.js'
 import { registerMainErrorIpc } from './errors/ipc.js';
 import { recordMainFailure } from './errors/log.js';
 import { registerSourceIpc } from './ipc/handlers.js';
-import { releaseCloseAccelerator } from './menu.js';
+import { applyApplicationMenu } from './menu.js';
 import { isSameOrigin } from './origin.js';
 import { openDeviceRegistry, registryPath } from './remote/devices.js';
 import { bindFailureEvent, setupFailureEvent } from './remote/failure-messages.js';
@@ -43,6 +43,7 @@ import { checkForUpdate } from './update/check.js';
 import { registerUpdateIpc } from './update/ipc.js';
 import { registerUsageIpc } from './usage/ipc.js';
 import { readUsage } from './usage/reader.js';
+import { lockZoom } from './zoom.js';
 
 /**
  * Serves `test/electron/launch.test.ts` only, selected by `VAM_FIXTURE_SOURCE`
@@ -137,6 +138,11 @@ app.on('web-contents-created', (_event, contents) => {
   // Deny by default. A handler returning `{ action: 'allow' }` is the exact bug
   // a static presence scan cannot see, so the harness opens a window instead.
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+  // No page zoom, on this contents and on every later one. Bound here rather
+  // than in `createWindow` for the same reason the navigation policy is: a
+  // second `webContents` created after startup must obey the same rule.
+  lockZoom(contents);
 
   // Nothing navigates this window away from its own origin. A renderer that is
   // talked into setting `location.href` must not take the app with it.
@@ -432,11 +438,11 @@ void app.whenReady().then(async () => {
   });
   registerPermissionPolicy();
   registerContentSecurityPolicy();
-  // Cmd+W belongs to the canvas here: it closes the focused SESSION, not the
-  // window. Electron's default macOS menu claims that key for `role: 'close'`
-  // and a native menu is matched before the page sees the keydown, so the
-  // renderer's binding is only real once this runs. See `./menu.js`.
-  releaseCloseAccelerator();
+  // vam's own menu, replacing Electron's default one. The default claims
+  // Cmd+0/Cmd+Plus/Cmd+- for page zoom and Cmd+W for Close Window, and a
+  // native menu is matched before the page sees the keydown -- so those keys
+  // are the renderer's only once this runs. See `./menu.js`.
+  applyApplicationMenu();
   // Registered before the window is created, so the renderer's first call can
   // never race an unregistered channel.
   registerSourceIpc(ipcMain, DESKTOP_SOURCE);

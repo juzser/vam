@@ -49,7 +49,53 @@ interface SmokeResult {
   secondWindowCountAfterOpen: number;
   secondWindowNavigated: boolean;
   cspHeader: string | null;
+  menu: MenuRow[];
+  clipboardAfterContentsCopy: string;
+  zoomFactorAtRest: number;
+  zoomLevelAtRest: number;
+  zoomLevelAfterCtrlWheel: number;
+  zoomFactorAfterCtrlWheel: number;
+  zoomLevelAfterMetaWheel: number;
+  zoomLevelAfterZoomChanged: number;
+  zoomLevelAfterReload: number;
+  zoomFactorAfterReload: number;
 }
+
+interface MenuRow {
+  path: string;
+  role: string | null;
+  type: string;
+  accelerator: string | null;
+  enabled: boolean;
+  visible: boolean;
+}
+
+/**
+ * Gone from the menu, in the spelling `MenuItem.accelerator` reports. Zoom is
+ * the operator's request; Cmd+W is what `src/renderer/keyboard/chords.ts`
+ * binds to close-the-focused-session, and a menu key equivalent would swallow
+ * it before the page ever saw it.
+ */
+const FORBIDDEN_ACCELERATORS = [
+  'CommandOrControl+0',
+  'CommandOrControl+Plus',
+  'CommandOrControl+=',
+  'CommandOrControl+-',
+  'CommandOrControl+Shift+Plus',
+  'CommandOrControl+W',
+];
+
+/**
+ * LOWERCASE ON PURPOSE: a live `MenuItem.role` reads back `resetzoom`, not the
+ * `resetZoom` the template and the docs use. Written in camelCase, these rows
+ * passed against the UNMODIFIED default menu, matching nothing -- guards that
+ * could not fail. Measured, then fixed.
+ */
+const FORBIDDEN_ROLES = ['resetzoom', 'zoomin', 'zoomout', 'close'];
+
+const roleOf = (row: MenuRow): string => (row.role ?? '').toLowerCase();
+const withRole = (rows: MenuRow[], role: string): MenuRow[] =>
+  rows.filter((row) => roleOf(row) === role);
 
 interface Launch {
   code: number | null;
@@ -402,5 +448,79 @@ describe('the Electron shell launches', () => {
   // response, not merely configured somewhere main never wires up.
   it('serves the document with a Content-Security-Policy header', () => {
     expect(smoke().cspHeader).toContain("script-src 'self'");
+  });
+
+  // The application menu vam builds for itself, read off the BUILT menu.
+  // A menu that failed to install reads as an empty walk, and every "no
+  // forbidden accelerator" below would then be vacuously true.
+  it('installs an application menu with a real tree behind it', () => {
+    expect(smoke().menu.length).toBeGreaterThan(10);
+    expect(smoke().menu.map((row) => row.path.split(' > ')[0])).toContain('Edit');
+  });
+
+  it.each(FORBIDDEN_ACCELERATORS)('never claims %s anywhere in the menu', (accelerator) => {
+    const claimed = smoke().menu.filter((row) => row.accelerator === accelerator);
+    expect(claimed.map((row) => `${row.path} [${row.role}]`)).toEqual([]);
+  });
+
+  it.each(FORBIDDEN_ROLES)(
+    'carries no %s role, so no key equivalent can be derived for it',
+    (role) => {
+      // Accelerator alone is not enough: a role-derived key equivalent comes
+      // from the platform and can read back null while still being matched.
+      expect(withRole(smoke().menu, role).map((row) => row.path)).toEqual([]);
+    },
+  );
+
+  // COPY AND PASTE MUST SURVIVE. On macOS the clipboard works THROUGH the
+  // menu: a hand-built menu that drops the Edit roles kills Cmd+C/V/X/A in
+  // the whole app while every other test here still passes.
+  it.each(['undo', 'redo', 'cut', 'copy', 'paste', 'selectall'])(
+    'keeps the %s role, without which the clipboard dies app-wide',
+    (role) => {
+      expect(withRole(smoke().menu, role)).toHaveLength(1);
+    },
+  );
+
+  // ...and the clipboard PERFORMED, not merely wired: this selects text in the
+  // real renderer, runs the action the `copy` role invokes, and reads the real
+  // system clipboard back. Seeded with a sentinel first, so "the value was
+  // already there" cannot pass it.
+  it('really copies the renderer selection to the system clipboard', () => {
+    expect(smoke().clipboardAfterContentsCopy).toBe('vam-clipboard-proof');
+  });
+
+  it.each(['quit', 'minimize'])('keeps the %s role a desktop app needs', (role) => {
+    expect(withRole(smoke().menu, role)).toHaveLength(1);
+  });
+
+  // Zoom, route by route.
+  it('rests at zoom factor 1 and zoom level 0', () => {
+    expect(smoke().zoomFactorAtRest).toBe(1);
+    expect(smoke().zoomLevelAtRest).toBe(0);
+  });
+
+  // MEASURED, AND NOT A GUARD. Synthetic Ctrl+wheel and Cmd+wheel move the
+  // zoom level by nothing -- and moved it by nothing against the UNLOCKED
+  // build too, so `sendInputEvent` does not reach Chromium's wheel-zoom path
+  // and this cannot fail either way. Kept as a recorded measurement, not
+  // dressed up as protection; the wheel route's real cover is `zoom-changed`
+  // below, which IS falsifiable.
+  it('records what a synthetic modifier + wheel does to the zoom level', () => {
+    expect(smoke().zoomLevelAfterCtrlWheel).toBe(0);
+    expect(smoke().zoomLevelAfterMetaWheel).toBe(0);
+    expect(smoke().zoomFactorAfterCtrlWheel).toBe(1);
+  });
+
+  it('restores the zoom level when Chromium reports a zoom change', () => {
+    expect(smoke().zoomLevelAfterZoomChanged).toBe(0);
+  });
+
+  // The route that was NOT predicted: Chromium re-applies a stored per-origin
+  // zoom on navigation, so a level outlives a reload here and a relaunch in
+  // the wild.
+  it('does not restore a persisted zoom level after a reload', () => {
+    expect(smoke().zoomLevelAfterReload).toBe(0);
+    expect(smoke().zoomFactorAfterReload).toBe(1);
   });
 });
