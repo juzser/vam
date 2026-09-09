@@ -784,9 +784,12 @@ export function TerminalTab({
             // biome-ignore lint/suspicious/noArrayIndexKey: a screen line's identity is its position
             <Fragment key={index}>
               {spans.map((span, position) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: as above -- a run's identity is where it sits on the line
                 <span
+                  // biome-ignore lint/suspicious/noArrayIndexKey: as above -- a run's identity is where it sits on the line
                   key={position}
+                  /* The cursor's own cell, and the ONLY span that carries this
+                     -- `placeCursor` splits the run it fell inside so that the
+                     mark is exactly one cell wide (`terminal-cursor.ts`). */
                   data-terminal-cursor={span.cursor ? '' : undefined}
                   className={span.cursor ? CURSOR_CLASSES : spanClasses(span)}
                 >

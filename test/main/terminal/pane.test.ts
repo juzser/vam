@@ -52,8 +52,7 @@ function runner(answers: Record<string, TmuxRunResult>) {
   return {
     run,
     argvs,
-    verbs: () =>
-      argvs.map((argv) => (argv.includes('capture-pane') ? 'capture-pane' : argv[0])),
+    verbs: () => argvs.map((argv) => (argv.includes('capture-pane') ? 'capture-pane' : argv[0])),
   };
 }
 

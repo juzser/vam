@@ -150,7 +150,9 @@ export function placeCursor(
   if (cursor.kind !== 'at') return lines.map(plain);
   const target = lines[cursor.row];
   if (target === undefined) return lines.map(plain);
-  return lines.map((spans, row) => (row === cursor.row ? mark(target, cursor.column) : plain(spans)));
+  return lines.map((spans, row) =>
+    row === cursor.row ? mark(target, cursor.column) : plain(spans),
+  );
 }
 
 /**
