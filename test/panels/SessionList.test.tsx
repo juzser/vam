@@ -1707,4 +1707,3 @@ describe('A15.3: the restore strip shows for a while, then goes — reachably', 
     expect(container.querySelector('[data-filter-hidden-projects]')).toBeNull();
   });
 });
-

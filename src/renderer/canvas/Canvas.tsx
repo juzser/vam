@@ -4431,7 +4431,17 @@ function CanvasInner({
             </span>
           ) : (
             <Note text={usage.reason}>
-              <span data-usage>{usage.text}</span>
+              {/* A tab stop for the same reason `StatusCell` takes one. This
+                  sentence is the explanation for a MISSING NUMBER -- on the
+                  web/Tailscale build it was keyboard-unreachable, and with no
+                  hover on touch it was unreachable at all. */}
+              <span
+                data-usage
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
+                tabIndex={0}
+              >
+                {usage.text}
+              </span>
             </Note>
           )}
           {usage.windows !== null && (
@@ -4603,6 +4613,15 @@ function SourceGlyph({ source }: { readonly source: SourceId | null }) {
         data-source-mark={register}
         role="img"
         aria-label={`source: ${source}`}
+        // The tab stop is what makes the `Note` above worth having:
+        // `StatusCell` reached this conclusion first, in its own doc comment
+        // -- a tooltip that opens on focus is worth nothing on an element
+        // that cannot be focused, and hung on a bare span it degrades to the
+        // `title` `Note` exists to replace. The suppression sits on the line
+        // directly above the attribute because biome reports it there and
+        // suppresses by line.
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
+        tabIndex={0}
         className="flex items-center text-ink-dim"
       >
         {mark === undefined ? (
