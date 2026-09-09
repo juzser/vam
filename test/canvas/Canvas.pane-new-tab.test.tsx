@@ -183,3 +183,29 @@ describe('the per-pane `+`', () => {
     expect(statusBar()).not.toMatch(/^started/i);
   });
 });
+
+/**
+ * Audit item 1 (S2). The refusal used to live in `title` while `aria-label`
+ * promised a new session unconditionally, so a keyboard user pressed the
+ * button, got silence, and had no route to the reason. `title` opens on hover
+ * and on nothing else; the sidebar's own New session already wraps the same
+ * string in `ShortcutTip`, which opens on focus.
+ */
+describe('the `+`’s refusal is reachable without a pointer', () => {
+  it('opens the decline on keyboard focus, and keeps no `title`', () => {
+    const { source } = sourceWith();
+    render(<Canvas model={modelWith('a1')} source={source} />);
+    const button = newTabIn(splitPanes()[0]);
+    expect(button).not.toBeNull();
+    // The reason the source itself gives, not a string this test invents.
+    const reason = 'this source has no way to start one';
+    expect(button?.getAttribute('title')).toBeNull();
+    act(() => {
+      button?.focus();
+      button?.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+    });
+    const tip = document.querySelector('[role="tooltip"]');
+    expect(tip, 'focusing the `+` opened no tooltip').not.toBeNull();
+    expect(tip?.textContent ?? '').toContain(reason);
+  });
+});

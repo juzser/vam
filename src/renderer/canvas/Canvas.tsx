@@ -521,16 +521,28 @@ function NewTabButton({
   readonly onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      data-tab-new
-      aria-label="new session in this pane"
-      title={decline ?? 'New session in this pane'}
-      onClick={onClick}
-      className="vam-tap flex flex-none cursor-pointer items-center self-center rounded-[4px] px-1.5 py-1 text-ink-faint hover:text-ink"
+    // `ShortcutTip`, not `title`: the decline is the one thing this button has
+    // to say that its `aria-label` does not, and a `title` opens on hover and
+    // on nothing else -- so a keyboard user pressed it, got silence, and had
+    // no route to the reason. The sidebar's New session already carries the
+    // same string this way.
+    // The chord is offered only when there IS a route: `o` takes the same
+    // declined path, so printing it beside the refusal would read as "press
+    // this instead" for a key that refuses identically.
+    <ShortcutTip
+      label={decline ?? 'New session in this pane'}
+      action={decline === null ? { kind: 'newSession' } : undefined}
     >
-      <Plus size={13} strokeWidth={1.7} />
-    </button>
+      <button
+        type="button"
+        data-tab-new
+        aria-label="new session in this pane"
+        onClick={onClick}
+        className="vam-tap flex flex-none cursor-pointer items-center self-center rounded-[4px] px-1.5 py-1 text-ink-faint hover:text-ink"
+      >
+        <Plus size={13} strokeWidth={1.7} />
+      </button>
+    </ShortcutTip>
   );
 }
 

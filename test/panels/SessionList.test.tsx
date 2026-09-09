@@ -44,6 +44,17 @@ function mount(entries: readonly SessionEntry[]) {
 }
 
 /** Same defaults, with a few props overridden -- focus, mostly. */
+/** Focus is the keyboard's hover, and Radix opens on it without a timer. */
+function openTipOn(el: HTMLElement | null | undefined): string {
+  act(() => {
+    el?.focus();
+    el?.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+  });
+  const tip = document.querySelector('[role="tooltip"]');
+  if (tip === null) throw new Error('focusing the control opened no tooltip');
+  return tip.textContent ?? '';
+}
+
 function mountWith(entries: readonly SessionEntry[], over: Partial<SessionListProps>) {
   return render(<SessionList {...baseProps(entries)} {...over} />);
 }
@@ -1222,16 +1233,27 @@ describe('SessionList new-project control', () => {
     const { container } = mountWith(entries, { focusedSessionId: 'b1' });
     expect(container.querySelector('[data-placeholder="new-session-in-project"]')).toBeNull();
     const add = container.querySelector<HTMLButtonElement>('[data-new-session-in-project="p2"]');
-    expect(add?.getAttribute('title')).toBe('New session in beta');
+    // No native `title` any more, for the reason the header `+` above lost
+    // its own: the caption has to open on keyboard focus, and a `title`
+    // never does.
+    expect(add?.getAttribute('title')).toBeNull();
+    expect(openTipOn(add)).toContain('New session in beta');
   });
 
+  /**
+   * Audit item 1 (S2). This is the assertion that had to move surfaces. The
+   * refusal used to be a `title` while `aria-label` promised a new session
+   * unconditionally, so a keyboard user pressed the button, got silence, and
+   * had no route to the reason -- the tooltip is the route.
+   */
   it('captions the per-project `+` with the refusal when the source cannot create', () => {
     const { container } = mountWith(twoProjects(), {
       focusedSessionId: 'b1',
       newSessionDecline: 'factory has no new-session command',
     });
     const add = container.querySelector<HTMLButtonElement>('[data-new-session-in-project]');
-    expect(add?.getAttribute('title')).toBe('factory has no new-session command');
+    expect(add?.getAttribute('title')).toBeNull();
+    expect(openTipOn(add)).toContain('factory has no new-session command');
   });
 });
 
@@ -1685,3 +1707,4 @@ describe('A15.3: the restore strip shows for a while, then goes — reachably', 
     expect(container.querySelector('[data-filter-hidden-projects]')).toBeNull();
   });
 });
+

@@ -1944,26 +1944,37 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   tabindex anywhere in this row -- so moving the markup moved
                   the keyboard path, and that is the intent, not a side
                   effect. */}
-                  <button
-                    type="button"
-                    data-new-session-in-project={section.project.id}
-                    onClick={() => onAddInProject(section.project)}
-                    title={newSessionDecline ?? `New session in ${section.project.name}`}
-                    aria-label={`new session in ${section.project.name}`}
-                    className={[
-                      'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-quiet hover:border-line-strong hover:text-ink-dim focus:opacity-100',
-                      isRevealed ||
-                      section.items.some((entry) => entry.session.id === focusedSessionId)
-                        ? 'opacity-100'
-                        : 'opacity-0',
-                    ].join(' ')}
-                    {...pending(
-                      section.project.id,
-                      `Starting a session in ${section.project.name}…`,
-                    )}
+                  {/* The refusal rides in the TOOLTIP, not a `title`: the
+                  `aria-label` promises a new session unconditionally, so
+                  without this a keyboard user pressed the button, got silence,
+                  and had no route to why. Same treatment as New session
+                  above. The chord is offered only when there is a route --
+                  `o` declines identically, so naming it beside the refusal
+                  would read as "press this instead". */}
+                  <ShortcutTip
+                    label={newSessionDecline ?? `New session in ${section.project.name}`}
+                    action={newSessionDecline === null ? { kind: 'newSession' } : undefined}
                   >
-                    <Plus size={13} strokeWidth={1.7} />
-                  </button>
+                    <button
+                      type="button"
+                      data-new-session-in-project={section.project.id}
+                      onClick={() => onAddInProject(section.project)}
+                      aria-label={`new session in ${section.project.name}`}
+                      className={[
+                        'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-quiet hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                        isRevealed ||
+                        section.items.some((entry) => entry.session.id === focusedSessionId)
+                          ? 'opacity-100'
+                          : 'opacity-0',
+                      ].join(' ')}
+                      {...pending(
+                        section.project.id,
+                        `Starting a session in ${section.project.name}…`,
+                      )}
+                    >
+                      <Plus size={13} strokeWidth={1.7} />
+                    </button>
+                  </ShortcutTip>
 
                   {/* There is still no "Project settings": vam has no
                     per-project setting to open.
