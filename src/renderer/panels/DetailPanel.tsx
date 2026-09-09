@@ -3373,7 +3373,17 @@ export function DetailPanel(props: DetailPanelProps) {
                    saying the prompt continues past the bubble's bottom
                    edge, and a bound nobody can see is how "the answer is
                    unreachable" became "the prompt is". */
-                className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-2.5 py-2"
+                /* PADDING IS WHAT MAKES THE TINT A SHAPE (the operator:
+                   "the In section's background needs padding"). At 10x8 the
+                   ground sat tight against the words and read as a highlight
+                   behind them; a bubble is a ground the text sits INSIDE.
+                   14x12, and the `in` block's own `max-h-[45%]` absorbs the
+                   extra height rather than passing it on to the answer:
+                   measured with a 10,800-character prompt, `in` is 156px of a
+                   348px column before and after, with 40 of the answer's 42px
+                   painted on top at maximum scroll either way. Measured as
+                   paint, not as a class, by `e2e/long-prompt-shots.mjs`. */
+                className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-3.5 py-3"
               >
                 <p className="whitespace-pre-wrap break-words text-[13px] text-ink-dim leading-[1.55]">
                   {decision.input}
