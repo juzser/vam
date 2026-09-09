@@ -231,23 +231,26 @@ describe('DetailPanel active-pane signal survives with the handle mounted (AC-6 
     };
   }
 
-  // What this file is about has not changed -- the active-pane signal survives
-  // the resize handle being mounted beside it -- but the signal has. It was a
-  // left border (amber, then `focus-edge`); it is now the line along the top
-  // edge and nothing else, so the assertion follows it to `[data-focus-edge]`
-  // and holds the border to being absent, which is the operator's correction.
-  it('carries the top line when active, with the handle present', () => {
+  // What this file is about has not changed -- the pane's own chrome survives
+  // the resize handle being mounted beside it -- but the chrome has. It was a
+  // left border (amber, then `focus-edge`), then the line along the top edge,
+  // and now NEITHER: the operator asked the line off, so the pane paints
+  // nothing at all for holding the keyboard and the assertions hold both to
+  // being absent in both states. `data-action-pane` still carries the state
+  // as an attribute, which is what these read.
+  it('paints no active chrome when active, with the handle present', () => {
     const { container } = render(<DetailPanel {...detailPanelProps(true)} />);
     const aside = container.querySelector('[data-action-pane="active"]');
     expect(aside).not.toBeNull();
-    expect(aside?.querySelector('[data-focus-edge]')).not.toBeNull();
+    expect(aside?.querySelector('[data-focus-edge]')).toBeNull();
     expect(aside?.className).not.toMatch(/border-l-2/);
     expect(container.querySelector('[data-pane-resize-handle="detail"]')).not.toBeNull();
   });
 
-  it('does not carry the active signal when idle', () => {
+  it('paints no active chrome when idle either', () => {
     const { container } = render(<DetailPanel {...detailPanelProps(false)} />);
     const aside = container.querySelector('[data-action-pane="idle"]');
+    expect(aside).not.toBeNull();
     expect(aside?.querySelector('[data-focus-edge]')).toBeNull();
     expect(aside?.className).not.toMatch(/border-l-2/);
   });

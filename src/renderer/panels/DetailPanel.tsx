@@ -106,7 +106,6 @@ import { describeFailure } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
-import { FocusEdge } from './FocusEdge.js';
 import {
   type DiffKind,
   diffLineKind,
@@ -3047,18 +3046,25 @@ export function DetailPanel(props: DetailPanelProps) {
       ].join(' ')}
     >
       {/*
-        The pane says out loud when it holds the keyboard, and says it ONCE.
+        THE PANE DRAWS NOTHING FOR HOLDING THE KEYBOARD.
 
-        It used to say it twice: this border grew to `border-l-2` in a colour
-        as well, first `waiting` -- the amber that means "a session is waiting
-        on your answer" everywhere else -- and then `focus-edge`. The operator
-        called the border wrong, and two indicators for one fact is how they
-        come to disagree. So the border is gone in both states and the pane
-        keeps the ordinary 1px `line` every other column draws; the line along
-        the top edge is the whole signal, the same one the sidebar wears, which
-        is what was asked for.
+        It used to say so twice, then once, then not at all. First the left
+        border grew to `border-l-2` in a colour -- `waiting`, the amber that
+        means "a session is waiting on your answer" everywhere else, then
+        `focus-edge` -- and the operator called the border wrong. Then the
+        line along the top edge was the whole signal, until the operator asked
+        for that off too ("remove the running-line animation at the top of the
+        pane when focused"), the same way the sidebar's copy had already gone.
+        Being the last mount, it took the whole feature with it: component,
+        class, keyframe hook and the token pair only it read.
+
+        What still answers "where do my keys go": the status bar prints the
+        mode as a word, the focused row or card inside the mode draws its own
+        ring, and the view-icon overlay is drawn in the FOCUSED pane alone --
+        so with two panes open, only one wears it. `data-action-pane` still
+        carries `active`/`idle` for tests and for whatever draws next; it is
+        simply not painted here.
       */}
-      {active && <FocusEdge />}
       {resizeHandle}
       {/*
         A12.2: THE HEADER IS GONE. It used to carry five facts — the status
