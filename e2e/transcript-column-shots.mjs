@@ -281,7 +281,312 @@ check(
 const startControls = await start.locator('button, [role="button"], [aria-busy]').count();
 check('and offers no control it cannot honour', startControls === 0, `${startControls} found`);
 
-// ------------------------------------------------------------- 6. SCREENSHOTS
+// ------------------------------------ 6. THE JUMPS FLOAT, AND COVER NOTHING
+//
+// The operator's report was the STRIP: a `bg-ground` band across the pane's
+// full width holding the two scroll-to-edge buttons, drawn on every session
+// whether or not either glyph in it was. It is gone, and the two controls
+// float over the column's own edges instead.
+//
+// WHY A REAL BROWSER, again, and it is the whole of this section: "floats over
+// the transcript without covering it" is a statement about PAINT AT A SCROLL
+// OFFSET. jsdom has no layout, so a unit test can read the classes back and
+// stay green while a chip sits on top of somebody's sentence -- which is
+// exactly the shape of audit F1, where a `truncate` label was laid out,
+// measured as visible, and then painted over by the view-icon pill.
+//
+// The column reserves a 44px strip on its right for these (`pr-11` in
+// `DetailPanel.tsx`), so the claim being held here is not "no glyph happened
+// to be there in this fixture" but "no glyph CAN be there": every text run in
+// the column is measured against the buttons' own boxes, at every offset
+// walked, and the reservation is measured as the gap it is.
+const jumpTop = '[data-out-to-top]';
+const jumpBottom = '[data-out-to-bottom]';
+
+check(
+  'the bar the jumps used to sit in is gone',
+  (await page.locator('[data-column-bar]').count()) === 0,
+);
+
+/** Every painted text run inside the column, in the column's own coordinates. */
+const textRuns = () =>
+  page.evaluate(() => {
+    const col = document.querySelector('[data-detail-column]');
+    const cb = col.getBoundingClientRect();
+    const runs = [];
+    const walker = document.createTreeWalker(col, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+      if ((n.textContent ?? '').trim() === '') continue;
+      const parent = n.parentElement;
+      if (parent === null) continue;
+      // `sr-only` is announced, not drawn, and it is laid out off in a 1px
+      // box; counting it would report an occlusion nobody can see.
+      if (parent.closest('.sr-only') !== null) continue;
+      if (getComputedStyle(parent).visibility === 'hidden') continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      for (const box of range.getClientRects()) {
+        if (box.width < 1 || box.height < 1) continue;
+        if (box.bottom < cb.top || box.top > cb.bottom) continue;
+        runs.push({
+          x: box.left - cb.left,
+          y: box.top - cb.top,
+          right: box.right - cb.left,
+          bottom: box.bottom - cb.top,
+          text: (n.textContent ?? '').trim().slice(0, 32),
+          // Which block it belongs to, so a failure names WHAT was covered --
+          // the pinned prompt and the newest answer are the two the overlay
+          // owes its clearance to by name.
+          block: parent.closest('[data-detail-block]')?.getAttribute('data-detail-block') ?? 'column',
+          pinned:
+            parent.closest('[data-column-turn]') ===
+            (document.elementFromPoint(cb.left + cb.width / 2, cb.top + 4)?.closest(
+              '[data-column-turn]',
+            ) ?? null),
+          newest: parent.closest('[data-column-turn][data-turn-newest]') !== null,
+        });
+      }
+    }
+    return { runs, width: cb.width, height: cb.height };
+  });
+
+/** Each drawn jump: its hit box, its painted skin, and what is on top of it. */
+const jumpBoxes = () =>
+  page.evaluate(() => {
+    const col = document.querySelector('[data-detail-column]');
+    const cb = col.getBoundingClientRect();
+    const read = (selector) => {
+      const el = document.querySelector(selector);
+      if (el === null) return null;
+      const box = el.getBoundingClientRect();
+      const skinEl = el.firstElementChild;
+      const skin = skinEl?.getBoundingClientRect() ?? null;
+      // The icon inside the skin: a skin that does not contain its own glyph
+      // is the defect a hit-box assertion cannot see (a 44px box can clear
+      // every touch rule while the visible chip clips the arrow inside it).
+      const glyph = skinEl?.querySelector('svg')?.getBoundingClientRect() ?? null;
+      const mid = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return {
+        x: box.left - cb.left,
+        y: box.top - cb.top,
+        right: box.right - cb.left,
+        bottom: box.bottom - cb.top,
+        w: box.width,
+        h: box.height,
+        skin:
+          skin === null
+            ? null
+            : { w: skin.width, h: skin.height, x: skin.left - cb.left, y: skin.top - cb.top },
+        glyph:
+          glyph === null
+            ? null
+            : {
+                fits:
+                  glyph.left >= skin.left - 0.5 &&
+                  glyph.right <= skin.right + 0.5 &&
+                  glyph.top >= skin.top - 0.5 &&
+                  glyph.bottom <= skin.bottom + 0.5,
+              },
+        // Hit-testable AND fully painted: a control that is present must be
+        // neither a dimmed decoration nor an invisible click target.
+        onTop: mid?.closest('[data-out-to-top], [data-out-to-bottom]') === el,
+        // EFFECTIVE opacity, walked up the ancestors -- found by falsification:
+        // an `opacity-50` on the LAYER these two sit in left every one of them
+        // reporting 1 for itself, and the check passed over a pair of chips
+        // painted at half strength. Opacity composites down the tree; a guard
+        // that reads one node's own value is measuring the wrong thing.
+        opacity: (() => {
+          let composed = 1;
+          for (let node = el; node !== null && node !== document.body; node = node.parentElement) {
+            composed *= Number(getComputedStyle(node).opacity);
+          }
+          return composed * Number(getComputedStyle(skinEl).opacity);
+        })(),
+        // In the scroller's flow it would ride the transcript out of frame.
+        insideScroller: el.closest('[data-detail-column]') !== null,
+      };
+    };
+    const pill = document.querySelector('[data-view-overlay]')?.getBoundingClientRect() ?? null;
+    return {
+      top: read('[data-out-to-top]'),
+      bottom: read('[data-out-to-bottom]'),
+      pill:
+        pill === null
+          ? null
+          : {
+              x: pill.left - cb.left,
+              y: pill.top - cb.top,
+              right: pill.right - cb.left,
+              bottom: pill.bottom - cb.top,
+            },
+      colWidth: cb.width,
+    };
+  });
+
+const overlaps = (a, b) => a.x < b.right && a.right > b.x && a.y < b.bottom && a.bottom > b.y;
+
+// AT TWO WIDTHS, AND THAT SECOND ONE IS NOT DECORATION -- IT IS WHAT MAKES
+// THE OCCLUSION CHECKS BELOW MEAN ANYTHING.
+//
+// FOUND BY FALSIFICATION, which is the only way it could have been: with the
+// reserved strip deleted outright, every "covers no text" check below still
+// passed at 1100x620. At that width the demo's longest line breaks 45px short
+// of the column's content edge, so the jumps were clear by luck and the guard
+// was reporting the fixture rather than the fix. At 700x520 the same prose
+// wraps to the edge exactly, so a missing reservation puts a glyph under a
+// control. `filledTheWidth` below refuses to let that go unnoticed again: a
+// sweep that proves nothing has to say so.
+//
+// AT THE TWO ENDS AND THROUGH THE MIDDLE. The rule each jump is drawn under is
+// "only while it would actually move the column", so the ends are where that
+// rule is provable and the middle is where both are drawn at once.
+let sawBoth = 0;
+let sawGap = Number.POSITIVE_INFINITY;
+let filledTheWidth = 0;
+for (const size of [
+  { width: 1100, height: 620 },
+  { width: 700, height: 520 },
+]) {
+  await page.setViewportSize(size);
+  await page.waitForTimeout(200);
+  const ends = await metrics();
+  const endScroll = ends.scrollHeight - ends.clientHeight;
+  const offsets = [
+    0,
+    Math.round(endScroll * 0.25),
+    Math.round(endScroll * 0.5),
+    Math.round(endScroll * 0.75),
+    endScroll,
+  ];
+  for (const offset of offsets) {
+    await column.evaluate((el, top) => {
+      el.scrollTop = top;
+    }, offset);
+    await page.waitForTimeout(150);
+    const boxes = await jumpBoxes();
+    const drawn = [
+      ['to-top', boxes.top],
+      ['to-bottom', boxes.bottom],
+    ].filter(([, box]) => box !== null);
+    // A CONTROL THAT SCROLLS NOWHERE IS WORSE THAN NO CONTROL -- the rule the
+    // deleted bar already got right, kept.
+    check(
+      `at scrollTop ${offset}, only the jumps that would move the column are drawn`,
+      (boxes.top !== null) === offset > 24 &&
+        (boxes.bottom !== null) === endScroll - offset > 24,
+      `top=${boxes.top !== null} bottom=${boxes.bottom !== null} of ${endScroll}`,
+    );
+    if (drawn.length === 2) sawBoth += 1;
+
+    for (const [name, box] of drawn) {
+      // 44x44 is WCAG 2.2 SC 2.5.5 and this pane is the phone's session screen.
+      check(
+        `${name} at ${offset}: the hit box clears 44x44`,
+        box.w >= 44 && box.h >= 44,
+        `${Math.round(box.w)}x${Math.round(box.h)}`,
+      );
+      // AND THE PAINT IS ITS OWN, SMALLER BOX -- with the glyph inside it. Every
+      // touch assertion in this repo checks the hit box; none checked whether
+      // the visible skin fits what it draws, and that is how a chip ships with
+      // its arrow clipped.
+      check(
+        `${name} at ${offset}: the painted skin is smaller than the hit box, and holds its glyph`,
+        box.skin !== null &&
+          box.skin.w >= 20 &&
+          box.skin.w < box.w &&
+          box.skin.h < box.h &&
+          box.glyph?.fits === true,
+        JSON.stringify({ skin: box.skin, glyph: box.glyph }),
+      );
+      // PRESENT MEANS FULLY VISIBLE AND FULLY CLICKABLE. There is no fade here
+      // on purpose: mid-transition a control is either half-painted and live or
+      // painted and inert, and both are states this pane must not have.
+      check(
+        `${name} at ${offset}: fully opaque and on top at its own centre`,
+        box.onTop && box.opacity === 1,
+        JSON.stringify({ onTop: box.onTop, opacity: box.opacity }),
+      );
+      check(`${name} at ${offset}: floats over the scroller rather than in it`, !box.insideScroller);
+    }
+
+    // THE RESERVED CORNER (audit F1), which the top jump inherits: the view-icon
+    // pill is opaque and floats at the pane's top right, so a jump placed at the
+    // column's own top right would sit under it.
+    if (boxes.top !== null && boxes.pill !== null) {
+      check(
+        `at ${offset}, the top jump clears the view-icon pill`,
+        !overlaps(boxes.top, boxes.pill),
+        `jump ${JSON.stringify(boxes.top)} vs pill ${JSON.stringify(boxes.pill)}`,
+      );
+    }
+
+    // AND NOW THE POINT: not one glyph under either of them.
+    const { runs } = await textRuns();
+    for (const [name, box] of drawn) {
+      const covered = runs.filter((run) => overlaps(box, run));
+      check(
+        `at ${offset}, ${name} covers no text in the column`,
+        covered.length === 0,
+        covered
+          .slice(0, 3)
+          .map((c) => `${c.block}${c.pinned ? ' (PINNED)' : ''} ${JSON.stringify(c.text)}`)
+          .join(' ; '),
+      );
+      // Named separately, because these two are the ones the overlay owes its
+      // clearance to by name: the prompt pinned at the top of the column, and
+      // the newest answer, which is what the operator came to read.
+      const pinned = covered.filter((c) => c.pinned && c.block === 'in');
+      const newestOut = covered.filter((c) => c.newest && c.block === 'out');
+      check(
+        `at ${offset}, ${name} covers neither the pinned prompt nor the newest answer`,
+        pinned.length === 0 && newestOut.length === 0,
+        `${pinned.length} pinned-prompt runs, ${newestOut.length} newest-answer runs`,
+      );
+      const gap = Math.min(...runs.map((run) => box.x - run.right));
+      if (Number.isFinite(gap)) sawGap = Math.min(sawGap, gap);
+    }
+    // DID THE SWEEP FIND A CORPUS? A line that reaches the column's own
+    // content edge is the only kind that can be covered, so at least one has
+    // to have been measured or every check above is vacuous. Within 8px of the
+    // edge, not exactly on it: prose wraps at word boundaries, and "this line
+    // used all the width there was" is the fact, not a coincidence of where
+    // the last space fell.
+    const contentEdge = await column.evaluate(
+      (el) => el.clientWidth - Number.parseFloat(getComputedStyle(el).paddingRight),
+    );
+    if (runs.some((run) => run.right >= contentEdge - 8)) filledTheWidth += 1;
+  }
+}
+await page.setViewportSize({ width: 1100, height: 620 });
+await page.waitForTimeout(200);
+check(
+  'at least one line was measured actually filling the column, or the sweep proves nothing',
+  filledTheWidth >= 1,
+  `${filledTheWidth} of the offsets swept had a line reaching the content edge`,
+);
+check('both jumps were on screen together at some offset', sawBoth >= 1, `${sawBoth} offsets`);
+console.log(`  narrowest gap between a text run and a jump's hit box: ${Math.round(sawGap)}px`);
+check('no glyph came nearer a jump than its own edge', sawGap >= 0, `${Math.round(sawGap)}px`);
+// AND THE GUTTER IS THE MECHANISM, measured as itself rather than inferred
+// from where this fixture's lines happened to break. The column's right
+// padding is what stops a line before the jumps, so it has to be EXACTLY one
+// hit box: narrower and text runs under a control, wider and the transcript
+// gives up reading width for a strip nothing stands in. Read as resolved
+// pixels, because `pr-11` is a class name and a class name is the guard that
+// stays green while the padding resolves to nothing.
+const gutter = await page.evaluate(() => {
+  const col = document.querySelector('[data-detail-column]');
+  return { padding: Number.parseFloat(getComputedStyle(col).paddingRight) };
+});
+const hitWidth = (await jumpBoxes()).bottom?.w ?? (await jumpBoxes()).top?.w ?? 0;
+console.log(`  column reserves ${gutter.padding}px on the right; a jump is ${hitWidth}px wide`);
+check(
+  'the strip the jumps stand in is exactly one hit box wide',
+  gutter.padding > 0 && Math.abs(gutter.padding - hitWidth) <= 0.5,
+  `${gutter.padding}px reserved for a ${hitWidth}px control`,
+);
+
+// ------------------------------------------------------------- 7. SCREENSHOTS
 //
 // TAKEN BEFORE THE PICKER IS TOUCHED. The checks below open the turn list and
 // leave the column marking its OLDEST turn, which is a state a check asked for
@@ -306,47 +611,55 @@ await page.waitForTimeout(200);
 await page.screenshot({ path: `${outDir}/transcript-column-top.png` });
 console.log(`${outDir}/transcript-column-top.png`);
 
-// -------------------------------------------- 7. PICKING SCROLLS, NEVER HIDES
+// ------------------------------------- 8. A JUMP MOVES, AND HIDES NOTHING
 //
-// `selectedId` used to swap WHICH turn was drawn. In a column that is the
-// wrong verb: the others must stay, the column must move, and the picked turn
-// must be marked or "where am I" has no answer.
-await page.locator('[data-progress-expand]').click();
-await page.waitForTimeout(150);
-const rows = page.locator('[data-progress-turn]');
-check(`the turn list opens with all ${DEMO_TURNS}`, (await rows.count()) === DEMO_TURNS);
-await rows.first().click();
+// WAS: `'PICKING SCROLLS, NEVER HIDES'`, driven through the turn list the
+// column's bar opened. `selectedId` used to swap WHICH turn was drawn, and
+// that list was how you asked it to; both the list and the bar are gone, and
+// the fact they were protecting is the column's, not the control's -- moving
+// to a turn must move the column and hide nothing.
+//
+// So it is driven through the control that is left, which is the same claim
+// with one fewer indirection: the top jump takes the column to the oldest turn
+// vam read, and every turn is still there when it arrives.
+await column.evaluate((el) => {
+  el.scrollTop = el.scrollHeight;
+});
+await page.waitForTimeout(200);
+check('at the bottom, only the jump that would move is offered', {
+  top: (await page.locator(jumpTop).count()) === 1,
+  bottom: (await page.locator(jumpBottom).count()) === 0,
+}.top);
+await page.locator(jumpTop).click();
 await page.waitForTimeout(250);
+const jumped = await metrics();
+check('the top jump takes the column to its own top', jumped.scrollTop === 0, `${jumped.scrollTop}`);
 check(
-  'picking the oldest turn hides nothing',
+  'and hides nothing on the way',
   (await turns.count()) === DEMO_TURNS,
   `${await turns.count()} left`,
 );
-const landed = await page.evaluate(() => {
-  const col = document.querySelector('[data-detail-column]');
-  const marked = col.querySelector('[data-column-turn][data-turn-current="true"]');
-  if (marked === null) return { marked: null };
-  return {
-    marked: marked.getAttribute('data-column-turn'),
-    offset:
-      marked.getBoundingClientRect().top - col.getBoundingClientRect().top,
-    input: marked.querySelector('[data-detail-scroll="in"]')?.textContent ?? '',
-  };
-});
-console.log(`  picked: ${JSON.stringify({ ...landed, input: landed.input?.slice(0, 40) })}`);
-check('the picked turn is MARKED in the column', landed.marked !== null, JSON.stringify(landed));
 check(
-  'and the column scrolled to it',
-  landed.offset !== undefined && Math.abs(landed.offset) <= 6,
-  `${landed.offset}px from the top of the column`,
+  'and the boundary that says what the top IS is what is on screen there',
+  (await page.locator('[data-column-start]').boundingBox()).y >= 0,
 );
+// AND BACK, which is the half the old sticky bar existed for: a reader far up
+// must not have to scroll down to find the control that scrolls them down.
 check(
-  'and it is the turn that was picked',
-  (landed.input ?? '').includes(OLDEST_INPUT),
-  JSON.stringify((landed.input ?? '').slice(0, 60)),
+  'at the top, the other jump is the one offered',
+  (await page.locator(jumpTop).count()) === 0 &&
+    (await page.locator(jumpBottom).count()) === 1,
+);
+await page.locator(jumpBottom).click();
+await page.waitForTimeout(250);
+const returned = await metrics();
+check(
+  'the bottom jump takes it back to the newest turn',
+  returned.scrollHeight - returned.clientHeight - returned.scrollTop <= 24,
+  `resting at ${returned.scrollTop} of ${returned.scrollHeight - returned.clientHeight}`,
 );
 
-// ------------------------------------------------------------ 8. ONE SCROLLER
+// ------------------------------------------------------------ 9. ONE SCROLLER
 //
 // #266's property, kept: nothing inside the column may own a scrollbar except
 // the prompt bubbles, which is the bound that makes the pin a pin.
@@ -363,7 +676,7 @@ check(
   nested.join(', '),
 );
 
-// --------------------------------------------------------------- 9. AT VOLUME
+// -------------------------------------------------------------- 10. AT VOLUME
 //
 // 3,276 turns is not a hypothetical: it is `MAX_DECISIONS`, what the source
 // hands over for a long-running session. The claim being held is that the pane

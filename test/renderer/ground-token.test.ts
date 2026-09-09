@@ -1,12 +1,18 @@
 /**
- * The surface a pane paints on is called `ground`, everywhere, once.
+ * The deepest surface is called `ground`, everywhere, once.
  *
  * It used to be called `canvas`, after the column vam deleted in 0.2. The
- * colour never went anywhere — it is the detail pane's own fill, and the
- * sticky prompt block leans on it to stop the transcript bleeding through
- * (`DetailPanel.tsx`, `data-detail-block="in"`) — but the Appearance
- * section offered a swatch called "canvas" for a thing no operator could
- * point at.
+ * colour never went anywhere — it is the page behind the panes, the code
+ * fence's fill and what the modal scrims tint — but the Appearance section
+ * offered a swatch called "canvas" for a thing no operator could point at.
+ *
+ * (This file used to open "the surface a pane paints on", and named the
+ * sticky prompt block as the thing leaning on it. Both were true until the
+ * operator reported the black bands that description was describing: the
+ * detail pane and every band inside it paint `--vam-pane` now, and `ground`
+ * is no longer offered as a swatch at all. The scan below is unchanged — it
+ * is about the retired CANVAS spelling, which is a storage key and nothing
+ * else.)
  *
  * A rename across a dozen files is exactly where one stale spelling
  * survives and quietly resolves to nothing: a Tailwind utility whose token

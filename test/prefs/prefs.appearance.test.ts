@@ -231,10 +231,118 @@ describe('a colour customised under the old `canvas` name survives the rename', 
     expect(reversed.palette.dark['--vam-ground']).toBe('#999999');
   });
 
-  it('offers the swatch under an honest label', () => {
-    const ground = PALETTE_TOKENS.find((t) => t.token === '--vam-ground');
-    expect(ground?.label).toBe('ground');
+  it('never offers the retired name as a swatch, under either spelling', () => {
+    // The `ground` swatch has since gone too (the block below), so what this
+    // pins is the half that has not changed: the OLD name is a storage key and
+    // nothing else, and it must never reach the grid under either spelling.
     expect(PALETTE_TOKENS.map((t) => t.token)).not.toContain('--vam-canvas');
     expect(PALETTE_TOKENS.map((t) => t.label)).not.toContain('canvas');
+  });
+});
+
+/**
+ * THE PANE GETS ITS OWN COLOUR, AND `ground` STOPS BEING ONE THE OPERATOR SETS.
+ *
+ * Two operator asks, one migration, because they land on the same table.
+ *
+ * 1. "Split the pane's colour setting from the sidebar." The detail pane was
+ *    painted `bg-sidebar` -- the mockup gives them the same value -- so the
+ *    sidebar swatch moved the whole right-hand pane with it. `--vam-pane` is
+ *    that fill's own token now, and it is SEEDED from a stored sidebar
+ *    override on load: an operator who has already customised the sidebar must
+ *    not open this build to find the pane a different colour than they left it.
+ *    The split is invisible until they move one of the two.
+ *
+ * 2. "The ground setting is unnecessary." It is gone from the swatch grid. The
+ *    token is NOT gone -- it still paints the page behind the panes, the code
+ *    fence and the modal scrims -- so a stored override for it is still read
+ *    and still applied. Dropping it would be the silent change on upgrade this
+ *    file exists to catch, and carrying it onto the pane would be worse: it is
+ *    the deepest surface in the palette and the pane is two steps up, so an
+ *    operator's near-black `ground` would arrive as a near-black PANE they
+ *    never asked for.
+ */
+describe('the pane takes its own colour, and ground stops being a swatch', () => {
+  const paneToken = '--vam-pane';
+  const groundToken = '--vam-ground';
+  const sidebarToken = '--vam-sidebar';
+
+  it('offers a pane swatch and no ground swatch', () => {
+    const tokens = PALETTE_TOKENS.map((t) => t.token);
+    expect(tokens).toContain(paneToken);
+    expect(tokens).not.toContain(groundToken);
+    expect(PALETTE_TOKENS.find((t) => t.token === paneToken)?.label).toBe('pane');
+    expect(PALETTE_TOKENS.map((t) => t.label)).not.toContain('ground');
+  });
+
+  it('seeds the pane from a stored sidebar override, per theme', () => {
+    const prefs = readPrefs(
+      storage({
+        palette: {
+          dark: { '--vam-sidebar': '#202024' },
+          light: { '--vam-sidebar': '#eae7e0' },
+        },
+      }),
+    );
+    expect(prefs.palette.dark[paneToken]).toBe('#202024');
+    expect(prefs.palette.light[paneToken]).toBe('#eae7e0');
+    // The sidebar keeps its own: this is a split, not a move.
+    expect(prefs.palette.dark[sidebarToken]).toBe('#202024');
+  });
+
+  it('leaves the pane unset when the sidebar was never customised', () => {
+    // Seeding an unset token would freeze the pane on the stylesheet's
+    // current value -- a theme change would then move the sidebar and leave
+    // the pane behind.
+    const prefs = readPrefs(storage({ palette: { dark: { '--vam-panel': '#181818' } } }));
+    expect(prefs.palette.dark[paneToken]).toBeUndefined();
+    expect(prefs.palette.dark['--vam-panel']).toBe('#181818');
+  });
+
+  it('never overwrites a pane colour the operator has already picked', () => {
+    const prefs = readPrefs(
+      storage({
+        palette: { dark: { '--vam-sidebar': '#202024', '--vam-pane': '#333344' } },
+      }),
+    );
+    expect(prefs.palette.dark[paneToken]).toBe('#333344');
+  });
+
+  it('keeps a stored ground override, reads it back, and still paints it', () => {
+    const store = storage({ palette: { dark: { '--vam-ground': '#101820' } } });
+    const prefs = readPrefs(store);
+    expect(prefs.palette.dark[groundToken]).toBe('#101820');
+    // On the document, or "kept" means kept in a file nobody reads.
+    const root = fakeRoot();
+    applyPalette(prefs.palette.dark, root.element);
+    expect(root.read(groundToken)).toBe('#101820');
+    // And it survives the next save, which stringifies whatever was parsed.
+    writePrefs(store, prefs);
+    expect(JSON.parse(store.getItem(KEY) ?? '{}').palette.dark[groundToken]).toBe('#101820');
+  });
+
+  it('does not carry a ground override onto the pane', () => {
+    const prefs = readPrefs(storage({ palette: { dark: { '--vam-ground': '#101820' } } }));
+    expect(prefs.palette.dark[paneToken]).toBeUndefined();
+  });
+
+  it('still lets a reset clear the retired colour', () => {
+    // The swatch is gone, so per-token reset is out of reach: "reset colours"
+    // has to reach it, or the operator has a colour they cannot undo.
+    const prefs = readPrefs(storage({ palette: { dark: { '--vam-ground': '#101820' } } }));
+    const cleared = clearPalette(prefs, 'dark');
+    expect(cleared.palette.dark[groundToken]).toBeUndefined();
+    const root = fakeRoot();
+    applyPalette(cleared.palette.dark, root.element);
+    expect(root.removed).toContain(groundToken);
+  });
+
+  it('still migrates the oldest `canvas` name, onto the retired token', () => {
+    // The rename that came before this one still has to land somewhere: the
+    // colour is the same colour, and it is applied even though nothing offers
+    // it any more.
+    const prefs = readPrefs(storage({ palette: { '--vam-canvas': '#222233' } }));
+    expect(prefs.palette.dark[groundToken]).toBe('#222233');
+    expect(prefs.palette.light[groundToken]).toBe('#222233');
   });
 });
