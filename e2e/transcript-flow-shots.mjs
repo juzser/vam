@@ -19,6 +19,14 @@
  * can only assert the CLASS NAME, and a class name is exactly the kind of
  * guard that stays green while the element sits off screen. So the assertions
  * below MEASURE: they scroll the column and read where `in` actually is.
+ *
+ * RE-POINTED WHEN THE COLUMN GREW TO THE WHOLE SESSION. Every one of these
+ * facts used to have exactly one instance on screen, because the pane drew one
+ * turn; it now draws all of them, so each selector below names WHICH turn it
+ * is about — the newest, the one the column opens on. What the checks assert
+ * is unchanged. Which turn's prompt is pinned at a given scroll offset, and
+ * whether it hands the pin over to the next, is a different question and has
+ * its own guard: `e2e/transcript-column-shots.mjs`.
  */
 import { chromium } from 'playwright-core';
 
@@ -38,7 +46,8 @@ await page.locator('[data-session-row="factory-sse-1"]').click();
 await page.waitForSelector('[data-detail-column]');
 
 const column = page.locator('[data-detail-column]');
-const inBlock = page.locator('[data-detail-block="in"]');
+/** The NEWEST turn's prompt — the one pinned where the column opens. */
+const inBlock = page.locator('[data-column-turn][data-turn-newest] [data-detail-block="in"]');
 
 // --- The bands are gone, and gone from the PAINT, not only from the markup.
 const metas = await page.locator('[data-rule-meta]').count();
@@ -86,14 +95,23 @@ if (nested.length !== 0) {
 }
 
 /**
- * `in` STICKS: scroll the column to its bottom and read where the prompt
- * ACTUALLY is. The demo fixture's turns are short prose, so the column only
- * overflows at a small height or with the turn list open — both are exercised
- * below, because sticky failing in one state and not the other is precisely
- * the kind of thing a class-name assertion cannot see.
+ * `in` STICKS: scroll the column to its bottom and read where a prompt ACTUALLY
+ * is. The demo fixture's turns are short prose, so the column only overflows at
+ * a small height or with the turn list open — both are exercised below, because
+ * sticky failing in one state and not the other is precisely the kind of thing
+ * a class-name assertion cannot see.
+ *
+ * A PROMPT, NOT *THE* PROMPT, since the column grew to the whole session. This
+ * used to name the newest turn's `in` and require it at the column's top edge
+ * at maximum scroll, which was sound while one turn filled the column by
+ * itself: it does not now — the newest turn is ~215px of a 324px viewport, so
+ * at the end of the scroll it sits below the top and the turn BEFORE it owns
+ * that edge. What survives, and is what "the sticky In follows wherever you
+ * scroll" actually promises, is that SOME turn's prompt is pinned there
+ * whatever the offset. Which turn, at which offset, is
+ * `e2e/transcript-column-shots.mjs`'s question, and it walks every one of them.
  */
 async function assertSticksWhileScrolling(label) {
-  const box = await column.boundingBox();
   const before = await metrics();
   if (before.scrollHeight <= before.clientHeight + 8) {
     throw new Error(
@@ -101,31 +119,79 @@ async function assertSticksWhileScrolling(label) {
         `${before.clientHeight}), so scrolling it would prove nothing.`,
     );
   }
-  await column.evaluate((el) => {
-    el.scrollTop = el.scrollHeight;
+  /**
+   * INTO THE THIRD TURN, not to the column's bottom.
+   *
+   * The offset is chosen so the answer is unambiguous: at a turn's own start
+   * exactly one prompt can be pinned, and it is that turn's. The column's
+   * bottom is not such an offset — the demo's turns are ~55px of prose, so the
+   * end of the scroll lands in whatever happens to be up there, and with the
+   * turn list open it landed in the 6px gap BETWEEN two turns, where nothing
+   * paints and every answer is wrong.
+   */
+  const at = await column.evaluate((el) => {
+    const article = el.querySelectorAll('[data-column-turn]')[2];
+    const top = article.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+    el.scrollTop = top;
+    return { asked: Math.round(top), got: Math.round(el.scrollTop) };
   });
   await page.waitForTimeout(200);
-  const after = await metrics();
-  const inAfter = await inBlock.boundingBox();
-  console.log(`${label}: scrolled to ${after.scrollTop}, in at y=${inAfter.y} (column ${box.y})`);
-  if (after.scrollTop <= 0) throw new Error(`${label}: the column did not scroll at all`);
-  if (Math.abs(inAfter.y - box.y) > 4) {
+  // WHAT IS PAINTED at the column's top edge, not what merely overlaps it:
+  // hit-testing is the only thing that can tell a pinned prompt from one lying
+  // underneath the next turn's.
+  const pinned = await column.evaluate((el) => {
+    const colBox = el.getBoundingClientRect();
+    const top = document.elementFromPoint(colBox.left + colBox.width / 2, colBox.top + 4);
+    const block = top?.closest('[data-detail-block="in"]') ?? null;
+    if (block === null) {
+      return { region: top?.closest('[data-detail-block]')?.dataset.detailBlock ?? null };
+    }
+    const rect = block.getBoundingClientRect();
+    return {
+      region: 'in',
+      turn: block.closest('[data-column-turn]')?.getAttribute('data-column-turn') ?? null,
+      offset: rect.top - colBox.top,
+      height: rect.height,
+    };
+  });
+  console.log(`${label}: scrolled ${JSON.stringify(at)}, pinned ${JSON.stringify(pinned)}`);
+  if (at.got <= 0) throw new Error(`${label}: the column did not scroll at all`);
+  if (pinned.region !== 'in') {
     throw new Error(
-      `${label}: after scrolling ${after.scrollTop}px the prompt sits at y=${inAfter.y} while ` +
-        `the column starts at y=${box.y} — it did not stick, it scrolled away.`,
+      `${label}: at the third turn's own start the top of the column paints ` +
+        `"${pinned.region}", not a prompt — nothing stuck, it all scrolled away.`,
     );
   }
-  if (inAfter.height < 4) throw new Error(`${label}: the pinned prompt collapsed to nothing`);
+  if (Math.abs(pinned.offset) > 4) {
+    throw new Error(
+      `${label}: the prompt painted at the top of the column sits ${pinned.offset.toFixed(1)}px ` +
+        `from its edge — it is passing through, not pinned.`,
+    );
+  }
+  if (pinned.height < 4) throw new Error(`${label}: the pinned prompt collapsed to nothing`);
+  // The pinned prompt must still belong to a turn, not to some other block that
+  // happens to sit at the top edge.
+  if (pinned.turn === null) throw new Error(`${label}: the pinned prompt belongs to no turn`);
 }
 
 // --- Shot 1: the whole turn, straight through — no band headers, no boxes,
-// and progress condensed to one line.
+// and progress condensed to one line. ONE LINE PER TURN now, not one per pane:
+// the count of turns and the picker were the pane's facts and moved to the
+// column's two ends, and what is left on a turn's line is that turn's own.
+const turnsDrawn = await page.locator('[data-column-turn]').count();
 const progressLine = page.locator('[data-progress-line]');
-if ((await progressLine.count()) !== 1) throw new Error('no condensed progress line');
+const lines = await progressLine.count();
+if (lines !== turnsDrawn) {
+  throw new Error(`${turnsDrawn} turns are drawn but ${lines} carry a condensed progress line`);
+}
 if ((await page.locator('[data-progress-turns]').count()) !== 0) {
   throw new Error('the turn list is open before anything asked it to be');
 }
-console.log('condensed progress line height:', (await progressLine.boundingBox()).height);
+console.log(
+  'condensed progress line height:',
+  (await progressLine.last().boundingBox()).height,
+  `(${lines} of them, one per turn)`,
+);
 await page.screenshot({ path: `${outDir}/transcript-flow-condensed.png` });
 console.log(`${outDir}/transcript-flow-condensed.png`);
 

@@ -386,3 +386,60 @@ export const DEMO_MODEL: CanvasModel = {
     },
   ],
 };
+
+/**
+ * The same fixture with `factory-sse-1` padded out to `count` turns.
+ *
+ * WHY IT EXISTS: the detail pane now draws every turn `entry.session.decisions`
+ * carries, and that list is capped at `MAX_DECISIONS = 3276`
+ * (`main/sources/claude-code/transcript.ts`). A seven-turn fixture cannot say
+ * whether the column still answers a scroll at that size, and "it will
+ * probably be fine" is not a measurement. So the worst case is buildable:
+ * `?demo=1&turns=3276` renders it, and `e2e/transcript-column-shots.mjs`
+ * times it in a real browser, so CI holds the number rather than a memory of
+ * one.
+ *
+ * SYNTHETIC AND OLDER, NEVER A SUBSTITUTE. The real turns stay at the front of
+ * the list -- `decisions` is newest first -- so the newest turns, the ones
+ * every screenshot is taken of, are byte-identical to the plain demo. The
+ * padding is only ever what scrolls off the top, which is exactly the part
+ * this fixture is about.
+ *
+ * `count` at or below what the fixture already carries returns it untouched:
+ * this pads, it never truncates, because a fixture that quietly dropped turns
+ * would make the very count it exists to prove a lie.
+ */
+export function demoModelWithTurns(count: number): CanvasModel {
+  const project = DEMO_MODEL.projects[0];
+  const session = project?.sessions[0];
+  if (project === undefined || session === undefined) return DEMO_MODEL;
+  const real = session.decisions;
+  if (count <= real.length) return DEMO_MODEL;
+  const padding = Array.from({ length: count - real.length }, (_, index) => {
+    // Numbered from the oldest end, so a turn's label does not depend on how
+    // many were asked for: turn 1 is turn 1 at any size, which is what makes a
+    // screenshot of one comparable with a screenshot of another.
+    const ordinal = count - real.length - index;
+    return {
+      id: `demo-pad-${ordinal}`,
+      label: `T-${ordinal}`,
+      input: `Turn ${ordinal} of a long session — what did the previous step leave open?`,
+      output: `Answer ${ordinal}. Nothing was left open; the step closed clean, so the next one can start.`,
+      commands: [],
+      // Every seventh padded turn carries a failure, so the per-turn
+      // `· N failed` count has something to draw at volume rather than only in
+      // the three hand-written turns above.
+      ...(ordinal % 7 === 0 ? { errorCount: 2 } : {}),
+    };
+  });
+  return {
+    ...DEMO_MODEL,
+    projects: [
+      {
+        ...project,
+        sessions: [{ ...session, decisions: [...real, ...padding] }, ...project.sessions.slice(1)],
+      },
+      ...DEMO_MODEL.projects.slice(1),
+    ],
+  };
+}

@@ -30,7 +30,7 @@ import { useCanvas } from './adapter/useCanvas.js';
 import { Canvas } from './canvas/Canvas.js';
 import { ErrorBoundary } from './errors/ErrorBoundary.js';
 import { bridgeMainErrors } from './errors/main-errors-bridge.js';
-import { DEMO_MODEL } from './fixtures/demo.js';
+import { DEMO_MODEL, demoModelWithTurns } from './fixtures/demo.js';
 import { createSourceFromHttp } from './sources/http-factory.js';
 import { describeFailure, type SessionSource } from './sources/port.js';
 import { createSourceFromPreload } from './sources/preload-factory.js';
@@ -84,6 +84,28 @@ function smithUrl(): string {
 
 function isDemo(): boolean {
   return new URLSearchParams(globalThis.location?.search ?? '').get('demo') === '1';
+}
+
+/**
+ * How many turns the demo's first session should carry — `?turns=N`, and only
+ * inside the demo.
+ *
+ * A MEASUREMENT KNOB, not a feature. The detail pane draws every turn the
+ * model gives it, and the real cap is `MAX_DECISIONS = 3276`
+ * (`main/sources/claude-code/transcript.ts`); the hand-written fixture has
+ * seven. Without a way to build the worst case in a real browser, the only
+ * thing anyone could say about the pane at volume is a guess, and this repo
+ * has a rule against those. `e2e/transcript-column-shots.mjs` uses it to time
+ * the column at 3,276 turns.
+ *
+ * Read only where the demo model is built, so it is unreachable outside
+ * `?demo=1`; anything unparseable or below the fixture's own length simply
+ * leaves the fixture alone.
+ */
+function demoTurns(): number {
+  const asked = new URLSearchParams(globalThis.location?.search ?? '').get('turns');
+  const count = Number(asked);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 }
 
 export function App() {
@@ -297,9 +319,15 @@ function SourceCanvas({
 }
 
 function DemoCanvas() {
+  // Once per mount: padding 3,276 turns is real work, and doing it on every
+  // render would measure the fixture instead of the pane.
+  const model = useMemo(() => {
+    const asked = demoTurns();
+    return asked > 0 ? demoModelWithTurns(asked) : DEMO_MODEL;
+  }, []);
   return (
     <Canvas
-      model={DEMO_MODEL}
+      model={model}
       source={{
         kind: 'demo',
         // Refused here rather than at the server: in demo mode there is no

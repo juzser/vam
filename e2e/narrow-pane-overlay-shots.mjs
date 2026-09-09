@@ -59,8 +59,16 @@ if ((await page.locator('[data-detail-identity]').count()) > 0) {
   throw new Error('the identity line above the prompt is back -- this guard now measures the wrong element.');
 }
 
+/**
+ * WHICH PROMPT IS IN THE CORNER. The pane draws the whole session now, one
+ * prompt bubble per turn, and the one the pill floats over is whichever is
+ * PINNED at the top of the column. The column opens at its end, so that is the
+ * newest turn's — named here rather than left to `querySelector`'s first match,
+ * which would be the OLDEST turn's bubble, seven screens away from the pill.
+ */
+const PINNED = '[data-column-turn][data-turn-newest]';
 const overlay = page.locator('[data-view-tabs]');
-const bubbleBox = await page.locator('[data-detail-scroll="in"]').boundingBox();
+const bubbleBox = await page.locator(`${PINNED} [data-detail-scroll="in"]`).boundingBox();
 const navBox = await overlay.boundingBox();
 console.log(
   `prompt bubble x ${Math.round(bubbleBox.x)}-${Math.round(bubbleBox.x + bubbleBox.width)} ` +
@@ -137,7 +145,7 @@ async function coveredText(selector) {
 //    whole of it, because the bubble is what sits in that corner. The bubble's
 //    padding alone does NOT discharge it (measured: 24 of 100 points covered);
 //    the floated spacer inside the paragraph does.
-const bubble = await coveredText('[data-detail-scroll="in"]');
+const bubble = await coveredText(`${PINNED} [data-detail-scroll="in"]`);
 console.log(
   `prompt first line: ${bubble.covered} of ${bubble.samples} sampled glyph pixels covered ` +
     `(${bubble.rects} text runs)`,
@@ -159,7 +167,7 @@ if (bubble.covered > 0) {
 //    the opening words by a second route -- which is what the identity line's
 //    7rem did (40px past the pill). Measured against the pill's own left edge
 //    rather than against a remembered number.
-const reserve = await page.locator('[data-detail-corner-reserve]').boundingBox();
+const reserve = await page.locator(`${PINNED} [data-detail-corner-reserve]`).boundingBox();
 const slack = Math.round(navBox.x - reserve.x);
 console.log(
   `corner reservation x ${Math.round(reserve.x)}-${Math.round(reserve.x + reserve.width)}, ` +
@@ -187,6 +195,42 @@ if (tap.width < 22 || tap.height < 22) {
   throw new Error(`the view icons were shrunk to ${tap.width}x${tap.height} to make room`);
 }
 
+// 4. THE OTHER THING THAT REACHES THAT CORNER. Since the pane became a column
+//    of the whole session, the element at the very top of it is not a prompt at
+//    all: it is the boundary that says how far back vam has read, and at
+//    scrollTop 0 THAT is what the pill floats over. F1's obligation follows
+//    whatever sits in the corner, so it is measured there too — with the same
+//    method, because the reservation is padding here and a box test cannot tell
+//    padding from a collision.
+await page.locator('[data-detail-column]').evaluate((el) => {
+  el.scrollTop = 0;
+});
+await page.waitForTimeout(200);
+const boundary = await coveredText('[data-column-start]');
+console.log(
+  `column boundary: ${boundary.covered} of ${boundary.samples} sampled glyph pixels covered ` +
+    `(${boundary.rects} text runs)`,
+);
+if (boundary.samples < 10) {
+  throw new Error(
+    `only ${boundary.samples} glyph pixels of the boundary were sampled -- a check over almost ` +
+      `no points passes for the wrong reason.`,
+  );
+}
+if (boundary.covered > 0) {
+  throw new Error(
+    `the overlay covers the column's boundary line at ${boundary.covered} of ` +
+      `${boundary.samples} points -- the one sentence that says the session may go back further`,
+  );
+}
+await page.screenshot({ path: `${outDir}/narrow-pane-overlay-boundary.png` });
+console.log(`${outDir}/narrow-pane-overlay-boundary.png`);
+
+// Back to where the shot belongs: the pinned prompt in the corner.
+await page.locator('[data-detail-column]').evaluate((el) => {
+  el.scrollTop = el.scrollHeight;
+});
+await page.waitForTimeout(200);
 await page.screenshot({ path: `${outDir}/narrow-pane-overlay.png` });
 console.log(`${outDir}/narrow-pane-overlay.png`);
 
