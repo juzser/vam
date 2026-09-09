@@ -510,8 +510,7 @@ describe('the panel remembers which turn you are reading, independent of the can
    * other six.
    */
   const markedTurn = () => q<HTMLElement>('[data-column-turn][data-turn-current="true"]');
-  const inText = () =>
-    markedTurn()?.querySelector('[data-detail-scroll="in"]')?.textContent ?? '';
+  const inText = () => markedTurn()?.querySelector('[data-detail-scroll="in"]')?.textContent ?? '';
   // A12.2 moved the removed header's `[data-detail-step]` chip into the `in`
   // rule's meta beside "you", then onto the identity line -- and the operator
   // has now had that line removed as well. The label was never only there:
@@ -3003,9 +3002,7 @@ describe('the live line stands beside the answer, not instead of it', () => {
     expect(older.textContent ?? '').not.toContain('editing transcript.ts');
     // And the live line is where it belongs: on the newest turn, once.
     expect(all('[data-out-live]')).toHaveLength(1);
-    expect(
-      q<HTMLElement>('[data-column-turn][data-turn-newest] [data-out-live]'),
-    ).not.toBeNull();
+    expect(q<HTMLElement>('[data-column-turn][data-turn-newest] [data-out-live]')).not.toBeNull();
   });
 });
 

@@ -120,7 +120,7 @@ describe('the collapsed line reports failures it would otherwise fold away', () 
     expect(document.querySelector('[data-column-start]')?.textContent).toContain('turns read');
   });
 
-  it('also puts each turn\'s own count on that turn\'s own line', () => {
+  it("also puts each turn's own count on that turn's own line", () => {
     // The column can say which turn went wrong, which the single folded line
     // never could: the total says three tools failed, the lines say where.
     draw([turn('a', { errorCount: 1 }), turn('b', { errorCount: 2 })]);

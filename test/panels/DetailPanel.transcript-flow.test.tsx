@@ -176,9 +176,7 @@ describe('what the out rule carried survives its removal', () => {
     // And picking an older turn does not move it there.
     draw({ decision: TURNS[2] as Decision });
     expect(all('[data-progress-activity]')).toHaveLength(1);
-    expect(
-      q('[data-column-turn][data-turn-current="true"] [data-progress-activity]'),
-    ).toBeNull();
+    expect(q('[data-column-turn][data-turn-current="true"] [data-progress-activity]')).toBeNull();
   });
 
   it('keeps both scroll-to-edge buttons, in the one row of chrome that is left', () => {

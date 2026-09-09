@@ -3020,6 +3020,7 @@ export function DetailPanel(props: DetailPanelProps) {
    * `typeof` guarded for happy-dom, where the unit suite runs.
    */
   const columnMounted = current === 'Response' && turnCount > 0;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `syncJumps` is a fresh closure every render, so listing it would tear down and re-attach the observer on every keystroke in the composer -- it only ever calls `setJumps`, which is stable
   useEffect(() => {
     const box = outRef.current;
     if (box === null || !columnMounted) return;
@@ -3034,7 +3035,6 @@ export function DetailPanel(props: DetailPanelProps) {
     });
     observer.observe(box);
     return () => observer.disconnect();
-    // biome-ignore lint/correctness/useExhaustiveDependencies: `syncJumps` is a fresh closure every render and re-attaching the observer on each one would be the loop this guards against
   }, [columnMounted]);
 
   /**
