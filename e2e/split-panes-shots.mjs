@@ -190,6 +190,20 @@ if (drawnHere.length !== 3) {
       `${drawnHere.join(', ')}.`,
   );
 }
+// EVERY POSITION, not one. A middle position over three tabs is symmetric
+// under a reversed strip, so pressing only `2` cannot tell a strip the
+// keyboard agrees with from one it happens to match (measured by mutation).
+for (const [index, title] of drawnHere.entries()) {
+  await modChord(String(index + 1));
+  const landed = await activeTabTitle();
+  if (landed !== title) {
+    throw new Error(
+      `Cmd+${index + 1} brought "${landed}" forward; the tab DRAWN at position ${index + 1} is ` +
+        `"${title}" (strip: ${drawnHere.join(', ')}). The digit indexes the strip on screen, ` +
+        'never a list the handler keeps of its own.',
+    );
+  }
+}
 await modChord('2');
 const onSecond = await activeTabTitle();
 console.log('after Cmd+2:', onSecond, '| strip:', drawnHere);

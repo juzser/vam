@@ -147,6 +147,26 @@ describe('Cmd+<digit> is the tab strip in front of the operator', () => {
     expect(selectedView()).toBe('response');
   });
 
+  /**
+   * THE DIGIT INDEXES THE LIST ON SCREEN, read back off the DOM rather than
+   * compared against a literal typed into this file.
+   *
+   * Every position is walked, not one: a middle position is symmetric under a
+   * reversed strip, so an assertion that only presses `2` over three tabs
+   * cannot tell a strip the keyboard agrees with from one it merely happens to
+   * match. Measured by mutation — reversing `drawnPaneTabs` under `renderLeaf`
+   * left the two-of-three assertion green.
+   */
+  it('lands on the tab DRAWN at that position, every position', () => {
+    render(<Canvas model={THREE} />);
+    const drawn = tabsIn(focusedPane());
+    expect(drawn).toHaveLength(3);
+    for (const [index, title] of drawn.entries()) {
+      digit(index + 1);
+      expect(activeTab(), `Cmd+${index + 1} over ${drawn.join(', ')}`).toBe(title);
+    }
+  });
+
   it('switches the same tab with the keyboard in the RESPONSE pane', () => {
     render(<Canvas model={THREE} />);
     press('I');

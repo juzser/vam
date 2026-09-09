@@ -1967,7 +1967,8 @@ function CanvasInner({
    * reach into a pane the operator is not in.
    */
   const focusedPaneTabs = useMemo(
-    () => drawnPaneTabs(allEntries, findLeaf(panes, focusedPaneId)?.sessionIds ?? [], activeProjectId),
+    () =>
+      drawnPaneTabs(allEntries, findLeaf(panes, focusedPaneId)?.sessionIds ?? [], activeProjectId),
     [allEntries, panes, focusedPaneId, activeProjectId],
   );
   /**
