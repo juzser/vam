@@ -646,4 +646,477 @@ if (stillEmpty.length !== 0 || acrossPanes.length !== 1) {
 await page.screenshot({ path: `${outDir}/split-empties-source-pane.png` });
 console.log(`${outDir}/split-empties-source-pane.png`);
 
+// ===========================================================================
+// PANE RESIZING WHEN SPLIT.
+//
+// This section is the load-bearing evidence for that feature: jsdom has no
+// layout engine, no pointer capture and no computed styles, so everything
+// below — that a drag MOVES a boundary, that the minimum holds, that nothing
+// is left behind eating clicks, that the pane's real BOX is what changed —
+// can only be measured here.
+// ===========================================================================
+
+/** `MIN_PANE_PX` from `src/renderer/canvas/split.ts`, which is `DETAIL_MIN`.
+ *  Written out because this file cannot import TypeScript; if the constant
+ *  moves, this guard goes red rather than quietly measuring the wrong floor. */
+const MIN_PANE_PX = 320;
+/** `PANE_RESIZE_STEP` from `src/renderer/prefs/panes.ts`, same bargain. */
+const PANE_RESIZE_STEP = 24;
+
+/** Every sized slot's real width, in the order they are drawn. */
+async function slotWidths() {
+  return page
+    .locator('[data-split-slot]')
+    .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().width)));
+}
+
+/** Drag the first divider by `dx` pixels, through a real mouse. */
+async function dragDivider(dx) {
+  const box = await page.locator('[data-split-resize-handle]').first().boundingBox();
+  if (box === null) {
+    throw new Error(
+      'the divider has no box — it is not laid out, so nothing below would be measuring a resize.',
+    );
+  }
+  const y = box.y + box.height / 2;
+  const x = box.x + box.width / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y, { steps: 12 });
+  await page.mouse.up();
+  await page.waitForTimeout(200);
+}
+
+// Back to one pane, then into the project with three sessions, so both halves
+// of the split have something in them to look at.
+//
+// `dogfood-4` and not `factory-sse-1`: the split MOVES the focused tab into
+// the new pane, and the minimum-size check below asks whether that pane still
+// draws its composer. `factory-sse-1` is mid permission-prompt in the demo
+// fixture, so it draws a question CARD instead of a composer whatever its
+// width — a pane that would have failed that check at any size, which is a
+// guard measuring the fixture rather than the layout.
+await chord('z', 'c', 'close', 1);
+await page.locator('[data-session-row="dogfood-4"]').click();
+await page.waitForTimeout(200);
+await chord('z', 'v', 'split for the resize checks', 2);
+
+// --- A FRESH SPLIT IS EVEN. The equal-share layout every pane had before
+// sizes existed, now produced by `flex-grow: 0.5` on both slots rather than
+// by `flex-1` — asserted so the migration cannot silently change the default.
+const even = await slotWidths();
+console.log('a fresh split measures:', even);
+if (even.length !== 2) {
+  throw new Error(`expected 2 sized slots, found ${even.length}: ${even.join(', ')}.`);
+}
+if (Math.abs(even[0] - even[1]) > 2) {
+  throw new Error(
+    `a fresh split is uneven (${even[0]}px vs ${even[1]}px). Sizes default to equal shares, ` +
+      'which is exactly what the layout was before sizes existed.',
+  );
+}
+
+// --- THE HANDLE ITSELF: invisible until you go near it, and shaped like the
+// axis it moves. `PaneResizer`'s own rule, followed rather than reinvented.
+// Tailwind is compiled in this bundle, so these are what actually paint.
+const dividerAt = () => page.locator('[data-split-resize-handle]').first();
+const restPaint = await dividerAt().evaluate((el) => getComputedStyle(el).backgroundColor);
+const restCursor = await dividerAt().evaluate((el) => getComputedStyle(el).cursor);
+await dividerAt().hover();
+await page.waitForTimeout(120);
+const hoverPaint = await dividerAt().evaluate((el) => getComputedStyle(el).backgroundColor);
+console.log(
+  `the divider paints "${restPaint}" at rest, "${hoverPaint}" hovered, cursor ${restCursor}`,
+);
+if (!/^rgba\(0, 0, 0, 0\)$|^transparent$/.test(restPaint)) {
+  throw new Error(`the divider paints "${restPaint}" at rest — it must be invisible until hovered.`);
+}
+if (restPaint === hoverPaint) {
+  throw new Error(
+    `hovering the divider changed nothing (still "${hoverPaint}"). A drag target that never ` +
+      'shows itself cannot be found by the person who needs it.',
+  );
+}
+if (restCursor !== 'col-resize') {
+  throw new Error(
+    `the divider of a side-by-side split shows the "${restCursor}" cursor, not col-resize.`,
+  );
+}
+
+// --- A DRAG MOVES THE BOUNDARY, and the two panes exchange exactly what the
+// pointer travelled. The split they sit in does not change size.
+// LEFT, so the screenshot this section takes is unmistakably a non-default
+// ratio and unmistakably not the minimum-size shot taken further down.
+await dragDivider(-160);
+const dragged = await slotWidths();
+console.log('after dragging the divider 160px left:', dragged);
+if (Math.abs(dragged[0] - (even[0] - 160)) > 4) {
+  throw new Error(
+    `dragging 160px left left the leading pane at ${dragged[0]}px, expected about ` +
+      `${even[0] - 160}px. The pane must follow the pointer.`,
+  );
+}
+if (Math.abs(dragged[0] + dragged[1] - (even[0] + even[1])) > 4) {
+  throw new Error(
+    `the pair grew from ${even[0] + even[1]}px to ${dragged[0] + dragged[1]}px. A drag moves a ` +
+      'boundary between two panes; it does not resize the split they are in.',
+  );
+}
+
+/**
+ * WHAT TMUX WILL BE TOLD. `TerminalTab` learns a pane's new size from a
+ * `ResizeObserver` on its own element, and an observer sees a changed BOX,
+ * never a transform. A resize faked with a `scale()` would look right on
+ * screen and leave every terminal drawing text wrapped for the width it used
+ * to have, because `capture-pane` returns a screen tmux has already composed.
+ */
+const painted = await page
+  .locator('[data-split-pane]')
+  .first()
+  .evaluate((el) => ({
+    transform: getComputedStyle(el).transform,
+    width: Math.round(el.getBoundingClientRect().width),
+  }));
+console.log('the resized pane itself:', painted);
+if (painted.transform !== 'none') {
+  throw new Error(
+    `the resized pane carries transform "${painted.transform}". A ResizeObserver does not fire ` +
+      'for a transform, so tmux would never be told the new column count and every terminal in ' +
+      'that pane would keep drawing text wrapped for its old width.',
+  );
+}
+if (Math.abs(painted.width - dragged[0]) > 4) {
+  throw new Error(
+    `the pane measures ${painted.width}px inside a ${dragged[0]}px slot — the box a ` +
+      'ResizeObserver watches is not the box the drag moved.',
+  );
+}
+await page.screenshot({ path: `${outDir}/split-resize-ratio.png` });
+console.log(`${outDir}/split-resize-ratio.png`);
+
+// --- NOTHING SURVIVES THE DRAG. An overlay held across a pointer-capture
+// gesture is the classic way this feature breaks the whole app: it outlives
+// its drag and silently eats every click. Proven by clicking, not by counting
+// elements — a click that lands is the only evidence that settles it.
+await page.locator('[data-split-pane]').nth(1).locator('[data-tab-select]').first().click({
+  timeout: 3000,
+});
+await page.waitForTimeout(150);
+const focusedAfterDrag = await page
+  .locator('[data-split-pane][data-split-focused="true"]')
+  .evaluateAll((els) => els.map((el) => el.getAttribute('data-split-pane')));
+const paneIds = await page
+  .locator('[data-split-pane]')
+  .evaluateAll((els) => els.map((el) => el.getAttribute('data-split-pane')));
+console.log('after the drag, a click landed in:', focusedAfterDrag, 'of', paneIds);
+if (focusedAfterDrag.length !== 1 || focusedAfterDrag[0] !== paneIds[1]) {
+  throw new Error(
+    `clicking a tab in the second pane did not move the keyboard there (focused: ` +
+      `${focusedAfterDrag.join(', ')}). Something is still intercepting clicks after the drag ` +
+      'ended — the overlay failure this handle has no overlay in order to avoid.',
+  );
+}
+
+// --- THE MINIMUM. A drag can never make a pane unusable: it stops at
+// `MIN_PANE_PX`, and a pane pinned there still draws its strip, its tabs and
+// its composer, and the divider that pinned it is still there to drag back.
+await dragDivider(4000);
+const pinned = await slotWidths();
+console.log('after dragging far past the right edge:', pinned);
+if (Math.abs(pinned[1] - MIN_PANE_PX) > 2) {
+  throw new Error(
+    `the squeezed pane stopped at ${pinned[1]}px, not the ${MIN_PANE_PX}px minimum. A pane that ` +
+      'can be dragged down to nothing is a pane the operator cannot get back.',
+  );
+}
+const survives = await page
+  .locator('[data-split-pane]')
+  .nth(1)
+  .evaluate((el) => ({
+    strip: el.querySelector('[data-tab-strip]') !== null,
+    composer: el.querySelector('textarea[aria-label="prompt to session"]') !== null,
+    tabs: el.querySelectorAll('[data-tab-select]').length,
+  }));
+console.log('the pane pinned at the minimum still draws:', survives);
+if (!survives.strip || !survives.composer || survives.tabs === 0) {
+  throw new Error(
+    `a pane at the ${MIN_PANE_PX}px minimum lost part of itself (${JSON.stringify(survives)}). ` +
+      'The minimum exists so a pane stays USABLE, not merely so it stays present.',
+  );
+}
+const escapeHatch = await dividerAt().boundingBox();
+if (escapeHatch === null || escapeHatch.width < 3) {
+  throw new Error(
+    `the divider is ${escapeHatch === null ? 'gone' : `${escapeHatch.width}px wide`} once a pane ` +
+      'is pinned at the minimum — there would be no way to drag it back out.',
+  );
+}
+await page.screenshot({ path: `${outDir}/split-resize-minimum.png` });
+console.log(`${outDir}/split-resize-minimum.png`);
+
+// --- THE KEYBOARD. vam is keyboard-first: a resize reachable only by mouse
+// is half a feature. The divider is a focusable slider, and one arrow press
+// moves it by the same constant the sidebar handle already uses.
+await dragDivider(-4000);
+const beforeKeys = await slotWidths();
+await dividerAt().focus();
+const focusedHandle = await page.evaluate(
+  () => document.activeElement?.getAttribute('data-split-resize-handle') ?? null,
+);
+if (focusedHandle === null) {
+  throw new Error('the divider cannot take focus, so no key could ever reach it.');
+}
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(150);
+const afterOneStep = await slotWidths();
+console.log(`ArrowRight moved the divider ${afterOneStep[0] - beforeKeys[0]}px`);
+if (Math.abs(afterOneStep[0] - beforeKeys[0] - PANE_RESIZE_STEP) > 2) {
+  throw new Error(
+    `one ArrowRight moved the divider ${afterOneStep[0] - beforeKeys[0]}px, expected ` +
+      `${PANE_RESIZE_STEP}px — one step size, not two keyboard routes disagreeing.`,
+  );
+}
+await page.keyboard.press('Shift+ArrowRight');
+await page.waitForTimeout(150);
+const afterJump = await slotWidths();
+if (Math.abs(afterJump[0] - afterOneStep[0] - PANE_RESIZE_STEP * 4) > 2) {
+  throw new Error(
+    `Shift+ArrowRight moved ${afterJump[0] - afterOneStep[0]}px, expected ` +
+      `${PANE_RESIZE_STEP * 4}px — the jump multiplier the sidebar handle uses.`,
+  );
+}
+// TAB REACHES IT. A control only `.focus()` can reach is not keyboard
+// reachable; this walks the real tab order until it lands on one.
+await page.locator('[data-session-row="factory-sse-1"]').click();
+await page.waitForTimeout(150);
+await page.evaluate(() => document.activeElement?.blur());
+let reachedByTab = false;
+for (let attempt = 0; attempt < 160 && !reachedByTab; attempt += 1) {
+  await page.keyboard.press('Tab');
+  reachedByTab = await page.evaluate(
+    () => document.activeElement?.hasAttribute('data-split-resize-handle') === true,
+  );
+}
+console.log(`Tab reached the divider: ${reachedByTab}`);
+if (!reachedByTab) {
+  throw new Error(
+    'walking the tab order never landed on a divider. vam is keyboard-first; a resize handle ' +
+      'only a mouse can reach is half the feature.',
+  );
+}
+
+// --- THE ARRANGEMENT IS REMEMBERED. Layouts are per project (A15.7); a ratio
+// is part of a layout, so it has to survive the same round trip the split
+// itself does — the operator's "when I come back, the split state is lost"
+// asked once about the split and now also about how it was divided.
+await dividerAt().focus();
+for (let attempt = 0; attempt < 4; attempt += 1) {
+  await page.keyboard.press('Shift+ArrowLeft');
+}
+await page.waitForTimeout(200);
+const arranged = await slotWidths();
+console.log('arranged before leaving the project:', arranged);
+if (Math.abs(arranged[0] - arranged[1]) < 40) {
+  throw new Error(
+    `the arrangement to be remembered is ${arranged.join(' / ')}, too close to even to tell a ` +
+      'restored ratio from a fresh default. This check would prove nothing.',
+  );
+}
+await page.locator('[data-session-row="vam-build-1"]').click();
+await page.waitForTimeout(250);
+const away = await paneCount();
+if (away !== 1) {
+  throw new Error(`the other project should open with its own layout (1 pane), it has ${away}.`);
+}
+await page.locator('[data-session-row="factory-sse-1"]').click();
+await page.waitForTimeout(250);
+const restored = await slotWidths();
+console.log('and coming back:', restored);
+if (restored.length !== 2) {
+  throw new Error(`coming back gave ${restored.length} slot(s) — the split itself was lost.`);
+}
+if (Math.abs(restored[0] - arranged[0]) > 4) {
+  throw new Error(
+    `the divider came back at ${restored[0]}px, it was left at ${arranged[0]}px. Sizes travel ` +
+      'with the layout they belong to, or the arrangement is lost on every project switch.',
+  );
+}
+
+// --- A DIVIDER WITH NOWHERE TO GO SAYS SO.
+//
+// "Absent, not dimmed": a control that cannot act is withdrawn or refuses
+// audibly, never sits there looking draggable and doing nothing. Four panes
+// side by side on this 1280px viewport leave 508px between any adjacent two,
+// and two panes need MIN_PANE_PX each — so every divider here is at the one
+// position it can hold. A handle that accepted a grab and answered with
+// silence would teach the operator that resizing is broken.
+//
+// Worth a real browser twice over: the state is decided by a MEASUREMENT of
+// the laid-out slots, and the withdrawal is a computed `cursor` — neither
+// exists in jsdom.
+// BACK TO SELECT FIRST, and asserted rather than assumed. Sections above
+// click tab strips, and a POINTER click on a tab puts the shell in Insert so
+// the operator can type — at which point `z` is a letter, not a chord, and
+// every `chord()` below would quietly type into a composer and then fail on a
+// pane count with no hint as to why. Measured: that is exactly what happened
+// the first time this section was written.
+await page.keyboard.press('Escape');
+await page.waitForTimeout(150);
+const modeHere = await modeCell();
+console.log('mode before the refusal checks:', modeHere);
+if (!modeHere.includes('Select')) {
+  throw new Error(
+    `the shell is in "${modeHere}" mode, so a chord would be typed rather than obeyed. Every ` +
+      'pane count below would be measuring the wrong thing.',
+  );
+}
+await chord('z', 'c', 'close', 1);
+await page.locator('[data-session-row="factory-sse-1"]').click();
+await page.waitForTimeout(200);
+await chord('z', 'v', 'first of four', 2);
+// A ROOMY divider first, measured in the same run: without this contrast the
+// checks below would pass just as happily against a handle hardcoded inert.
+const roomy = await dividerAt().evaluate((el) => ({
+  inert: el.getAttribute('data-split-resize-inert'),
+  disabled: el.getAttribute('aria-disabled'),
+  cursor: getComputedStyle(el).cursor,
+}));
+console.log('a divider with room:', roomy);
+if (roomy.inert !== 'false' || roomy.disabled !== 'false' || roomy.cursor !== 'col-resize') {
+  throw new Error(
+    `a two-pane split's divider reports ${JSON.stringify(roomy)} — it has 1016px to work with ` +
+      'and must be an ordinary, draggable handle. Every check below would be vacuous.',
+  );
+}
+
+await chord('z', 'v', 'second of four', 3);
+await chord('z', 'v', 'third of four', 4);
+const cramped = await slotWidths();
+const dividers = await page.locator('[data-split-resize-handle]').evaluateAll((els) =>
+  els.map((el) => ({
+    inert: el.getAttribute('data-split-resize-inert'),
+    disabled: el.getAttribute('aria-disabled'),
+    cursor: getComputedStyle(el).cursor,
+    named: (el.getAttribute('aria-label') ?? '').includes('cannot move'),
+  })),
+);
+console.log('four panes measure:', cramped);
+console.log('their dividers:', dividers);
+if (dividers.length !== 3) {
+  throw new Error(`four panes should draw 3 dividers, they draw ${dividers.length}.`);
+}
+// `zv` halves the FOCUSED pane, so these four are not even — which is better
+// than even here, because the same layout carries dividers of both kinds and
+// the rule can be checked rather than a hardcoded expectation. Each divider is
+// judged against its OWN measured pair.
+const inertAt = [];
+for (const [at, state] of dividers.entries()) {
+  const pair = cramped[at] + cramped[at + 1];
+  const shouldBeInert = pair <= MIN_PANE_PX * 2;
+  if (shouldBeInert) inertAt.push(at);
+  if (state.inert !== String(shouldBeInert) || state.disabled !== String(shouldBeInert)) {
+    throw new Error(
+      `divider ${at} spans a ${Math.round(pair)}px pair, so it ${shouldBeInert ? 'cannot' : 'can'} ` +
+        `move, but it reports ${JSON.stringify(state)}.`,
+    );
+  }
+  const wantCursor = shouldBeInert ? 'not-allowed' : 'col-resize';
+  if (state.cursor !== wantCursor) {
+    throw new Error(
+      `divider ${at} over a ${Math.round(pair)}px pair shows the "${state.cursor}" cursor, not ` +
+        `"${wantCursor}". The affordance IS the cursor: a handle that goes on promising a drag ` +
+        'it cannot perform is the silence this state exists to end.',
+    );
+  }
+  if (state.named !== shouldBeInert) {
+    throw new Error(
+      `divider ${at}'s accessible name ${state.named ? 'carries' : 'omits'} the reason and should ` +
+        `${shouldBeInert ? 'carry' : 'omit'} it. A reader who never grabs anything has no other route to it.`,
+    );
+  }
+}
+// BOTH KINDS, in one measurement. A loop that happened to see only roomy
+// dividers would pass having checked nothing about the refusal, and one that
+// saw only cramped ones could not tell the attribute from a hardcoded 'true'.
+// TWO inert ones, because the two refusal ROUTES are compared below and React
+// does not re-render for an identical status string — so the pointer and the
+// keyboard have to be aimed at dividers whose pairs differ, which also proves
+// each message carries its own divider's measurement rather than a constant.
+if (inertAt.length < 2 || inertAt.length === dividers.length) {
+  throw new Error(
+    `this layout produced ${inertAt.length} inert divider(s) out of ${dividers.length}; the ` +
+      'checks below need at least two, and at least one roomy, to measure a rule rather than a ' +
+      'constant.',
+  );
+}
+
+// AND IT REFUSES ALOUD, on both routes, in the one place every other refusal
+// in this shell lands.
+async function refusalSaid(label) {
+  const said = await page.evaluate(
+    () => document.querySelector('[data-status]')?.textContent ?? '',
+  );
+  console.log(`${label} says: ${said}`);
+  if (!said.includes('cannot move') || !said.includes(`${MIN_PANE_PX}px`)) {
+    throw new Error(
+      `${label} left the status bar saying "${said}". A divider that accepts the gesture, moves ` +
+        'nothing and stays quiet teaches the operator that resizing is broken.',
+    );
+  }
+  if (said.includes('\u2026')) {
+    throw new Error(
+      `${label} was truncated to "${said}" — the status bar cuts at 72 characters and the ` +
+        'measurement is the part that explains the refusal.',
+    );
+  }
+  return said;
+}
+
+const beforeRefusing = await slotWidths();
+const grabbed = page.locator('[data-split-resize-handle]').nth(inertAt[0]);
+const grabBox = await grabbed.boundingBox();
+await page.mouse.move(grabBox.x + grabBox.width / 2, grabBox.y + grabBox.height / 2);
+await page.mouse.down();
+await page.mouse.move(grabBox.x + 200, grabBox.y + grabBox.height / 2, { steps: 8 });
+await page.mouse.up();
+await page.waitForTimeout(200);
+const fromPointer = await refusalSaid('a pointer grab');
+const afterRefusing = await slotWidths();
+if (JSON.stringify(beforeRefusing) !== JSON.stringify(afterRefusing)) {
+  throw new Error(
+    `the refused drag moved the panes anyway: ${beforeRefusing.join('/')} became ` +
+      `${afterRefusing.join('/')}. A divider that cannot divide must not snap its pair to even.`,
+  );
+}
+
+// The keyboard route must say the SAME SENTENCE — one refusal, not two that
+// could drift, and certainly not silence on one of the two routes. Aimed at
+// the OTHER inert divider so the string genuinely changes; the two are then
+// compared with their own measurements masked out, which is what "the same
+// sentence" means when each one is measuring a different pair.
+await page.locator('[data-split-resize-handle]').nth(inertAt[1]).focus();
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(200);
+const fromKeyboard = await refusalSaid('an arrow key');
+const shape = (said) => said.replace(/\d+px/g, '<n>px');
+if (shape(fromKeyboard) !== shape(fromPointer)) {
+  throw new Error(
+    `the pointer said "${fromPointer}" and the keyboard said "${fromKeyboard}". vam is ` +
+      'keyboard-first: the two routes are one refusal or they are two different bugs.',
+  );
+}
+if (fromKeyboard === fromPointer) {
+  throw new Error(
+    'both routes reported the identical string, so the keyboard check may be reading the ' +
+      "pointer's stale message. They were aimed at dividers of different widths and must differ " +
+      'in their measurement.',
+  );
+}
+const afterKey = await slotWidths();
+if (JSON.stringify(afterKey) !== JSON.stringify(afterRefusing)) {
+  throw new Error(`the refused arrow key moved the panes: ${afterKey.join('/')}.`);
+}
+await page.screenshot({ path: `${outDir}/split-resize-refusal.png` });
+console.log(`${outDir}/split-resize-refusal.png`);
+
 await browser.close();

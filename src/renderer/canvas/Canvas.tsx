@@ -89,6 +89,7 @@ import { PaneResizer } from '../panels/PaneResizer.js';
 import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { NEW_PROJECT_PENDING, SessionList } from '../panels/SessionList.js';
+import { SplitResizer } from '../panels/SplitResizer.js';
 import { resolveSessionGlyph } from '../panels/session-icon.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
@@ -147,12 +148,14 @@ import {
   paneHolding,
   pruneClosedTabs,
   removeTab,
+  resizeSplit,
   restoreLayout,
   type SplitOrientation,
   type SplitTree,
   setPaneSession,
   singlePane,
   splitPane,
+  splitSizes,
   stepPane,
 } from './split.js';
 
@@ -956,17 +959,47 @@ function DropZoneOverlay({ edge }: { readonly edge: Edge }) {
  * single-pixel line without a border on every child fighting its neighbour
  * for whose edge draws it — the same trick a two-column CSS grid uses for a
  * shared divider.
+ *
+ * HOW A FRACTION BECOMES A WIDTH. Each slot is `flex-grow: <fraction>` over
+ * `flex-basis: 0`, which is `flex-1` with the grow factor taken from the tree
+ * instead of hardcoded to 1 — panes were equal-share by construction before
+ * sizes existed, and equal shares are exactly what the same expression still
+ * produces when every fraction is `1 / n`. A zero basis is what makes the
+ * grow factor a RATIO of the whole rather than a share of the room left over
+ * after content, which would make two panes holding different transcripts
+ * start at different widths and the stored fraction a lie.
+ *
+ * A DIVIDER IS A CHILD OF THE SLOT BEFORE IT, absolutely positioned over the
+ * seam, so `SplitResizer` can find its own pair through `parentElement` and
+ * `nextElementSibling` rather than being told pixel sizes this component
+ * would have to measure on every render.
+ *
+ * Resizing a pane changes the width its `TerminalTab` reports to tmux, and
+ * that is DELIBERATE: `capture-pane` returns the screen tmux has already
+ * composed, so a pane that changed size without telling tmux would draw text
+ * wrapped for the width it used to have. `TerminalTab`'s `ResizeObserver`
+ * picks the change up from the DOM — which is why the slot's real box has to
+ * move, and why nothing here may fake a resize with a transform, which an
+ * observer does not see at all. Its 120ms debounce and its unchanged-cell
+ * check were written for exactly this gesture (see `RESIZE_DEBOUNCE_MS`), so
+ * a drag costs at most one `tmux resize-window` after the pointer stops.
  */
 function SplitLayout({
   tree,
   renderLeaf,
+  onResize,
+  onRefuse,
 }: {
   readonly tree: SplitTree;
   readonly renderLeaf: (leaf: Leaf) => ReactNode;
+  readonly onResize: (splitId: string, at: number, share: number) => void;
+  readonly onRefuse: (message: string) => void;
 }) {
   if (tree.kind === 'leaf') {
     return <>{renderLeaf(tree)}</>;
   }
+  const sizes = splitSizes(tree);
+  const last = tree.children.length - 1;
   return (
     <div
       data-split
@@ -975,9 +1008,30 @@ function SplitLayout({
         tree.orientation === 'row' ? 'flex-row' : 'flex-col'
       }`}
     >
-      {tree.children.map((child) => (
-        <div key={child.id} className="flex min-h-0 min-w-0 flex-1">
-          <SplitLayout tree={child} renderLeaf={renderLeaf} />
+      {tree.children.map((child, at) => (
+        <div
+          key={child.id}
+          data-split-slot={child.id}
+          className="relative flex min-h-0 min-w-0"
+          style={{ flexGrow: sizes[at] ?? 1 / tree.children.length, flexShrink: 1, flexBasis: 0 }}
+        >
+          <SplitLayout
+            tree={child}
+            renderLeaf={renderLeaf}
+            onResize={onResize}
+            onRefuse={onRefuse}
+          />
+          {at < last && (
+            <SplitResizer
+              splitId={tree.id}
+              at={at}
+              orientation={tree.orientation}
+              ariaLabel={`resize pane ${at + 1} and pane ${at + 2}`}
+              share={(sizes[at] ?? 0.5) / ((sizes[at] ?? 0.5) + (sizes[at + 1] ?? 0.5))}
+              onResize={onResize}
+              onRefuse={onRefuse}
+            />
+          )}
         </div>
       ))}
     </div>
@@ -2312,6 +2366,35 @@ function CanvasInner({
     },
     [focusedSessionId, panes, setFocusedPaneId],
   );
+
+  /**
+   * A divider moved — from a drag or from an arrow key, through the one
+   * `SplitResizer` that owns both.
+   *
+   * An updater rather than a read of `panes`, so ONE stably-identified
+   * callback serves every divider in the tree: this fires on every animation
+   * frame of a drag, and a callback whose identity changed with the tree
+   * would remount the handle mid-gesture and drop the pointer capture that is
+   * holding it.
+   *
+   * No debounce and no commit phase. The position lives in the split tree,
+   * which is React state and per-project memory (`paneLayouts`), never
+   * `localStorage`, so there is no write here to spare. The one thing
+   * downstream that IS expensive — telling tmux — already debounces itself
+   * (`TerminalTab`'s `RESIZE_DEBOUNCE_MS`, written for this very gesture).
+   * `resizeSplit` is total, so a handle whose split was closed by the same
+   * frame is a no-op rather than a crash.
+   *
+   * Its REFUSAL goes to `setStatus` directly — the divider composes the
+   * sentence, because only it has measured the pixels the sentence is about,
+   * and the shell only has to say it in the one place every other refusal in
+   * this file already lands ("only one pane open — nothing to close", the
+   * cross-project drop, `newTabInPane`'s decline). One surface for "vam will
+   * not do that and here is why", never a second channel a divider invented.
+   */
+  const onSplitResize = useCallback((splitId: string, at: number, share: number) => {
+    setPanes((tree) => resizeSplit(tree, splitId, at, share));
+  }, []);
 
   /**
    * Close the focused split. The SESSION keeps running — only the pane
@@ -4268,7 +4351,12 @@ function CanvasInner({
               whether or not a session is focused, so "is vam connected" is
               never something the tab row alone had to say. */}
           <DetailColumn width={detailWidth}>
-            <SplitLayout tree={panes} renderLeaf={renderLeaf} />
+            <SplitLayout
+              tree={panes}
+              renderLeaf={renderLeaf}
+              onResize={onSplitResize}
+              onRefuse={setStatus}
+            />
           </DetailColumn>
         </div>
       )}
