@@ -52,7 +52,7 @@ export function ErrorLogPanel({ onClose }: ErrorLogPanelProps) {
       <button
         type="button"
         aria-label="close the error log"
-        className="absolute inset-0 cursor-default bg-canvas/70"
+        className="absolute inset-0 cursor-default bg-ground/70"
         onMouseDown={onClose}
       />
       <div className="relative flex max-h-[80vh] w-[min(760px,92vw)] flex-col overflow-y-auto rounded-md border border-line bg-panel p-4">

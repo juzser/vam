@@ -1634,10 +1634,16 @@ export type ThemePalettes = Readonly<Record<EffectiveTheme, PaletteOverrides>>;
  * than enumerated.
  *
  * Two families, because they are the two that change the app's character: the
- * surfaces you look at all day (canvas, panel, sidebar, raised) with the ink
+ * surfaces you look at all day (ground, panel, sidebar, raised) with the ink
  * that has to stay readable on them, and the status family (running, waiting,
- * done, failed) plus the cursor ring, which is what a glance at the canvas is
- * actually reading.
+ * done, failed) plus the cursor ring, which is what a glance at the session
+ * list is actually reading.
+ *
+ * `ground` is the deepest surface -- the fill a pane paints on. It shipped as
+ * `canvas`, named after the column 0.2 deleted, so the swatch described a
+ * thing the operator could no longer point at while quietly setting the
+ * detail pane's background. `LEGACY_GROUND_TOKEN` below carries the stored
+ * colour across.
  *
  * The rest are deliberately NOT here, and the reason is the same for all of
  * them: they are measured against these. The tints and washes
@@ -1657,7 +1663,7 @@ export type ThemePalettes = Readonly<Record<EffectiveTheme, PaletteOverrides>>;
  * the other theme on the first pick.)
  */
 export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: string }[] = [
-  { token: '--vam-canvas', label: 'canvas' },
+  { token: '--vam-ground', label: 'ground' },
   { token: '--vam-panel', label: 'panel' },
   { token: '--vam-sidebar', label: 'sidebar' },
   { token: '--vam-raised', label: 'raised' },
@@ -1671,6 +1677,21 @@ export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: 
 ];
 
 const PALETTE_KEYS = new Set(PALETTE_TOKENS.map((entry) => entry.token));
+
+/**
+ * What `--vam-ground` was called before the canvas it was named after was
+ * deleted, and the only place that spelling may still appear.
+ *
+ * A rename is free for a stylesheet and expensive for a stored file: the key
+ * is the CSS custom property itself, so an operator who had customised this
+ * colour would open the new build to find their pick gone -- dropped by
+ * `readBucket` for not being a known token, then erased for good by the next
+ * `writePrefs`, which stringifies whatever was parsed. Read on LOAD rather
+ * than written as a fallback at paint time, so the migration happens once and
+ * everything downstream sees exactly one name.
+ */
+const LEGACY_GROUND_TOKEN = '--vam-canvas';
+const GROUND_TOKEN = '--vam-ground';
 
 /**
  * What may be written into a custom property.
@@ -1688,10 +1709,17 @@ function readBucket(raw: unknown): PaletteOverrides {
   }
   const out = emptyMap<string>();
   for (const [token, value] of Object.entries(raw as Record<string, unknown>)) {
+    // The retired name is accepted and rewritten, never carried: a payload
+    // written by two versions can hold both, and the CURRENT name is the one
+    // the operator last picked with, so it wins.
+    const key = token === LEGACY_GROUND_TOKEN ? GROUND_TOKEN : token;
+    if (token === LEGACY_GROUND_TOKEN && out[GROUND_TOKEN] !== undefined) {
+      continue;
+    }
     // Per entry, like every other reader here: one hand-edited colour cannot
     // drag the others back to the stylesheet with it.
-    if (PALETTE_KEYS.has(token) && typeof value === 'string' && COLOUR.test(value)) {
-      out[token] = value;
+    if (PALETTE_KEYS.has(key) && typeof value === 'string' && COLOUR.test(value)) {
+      out[key] = value;
     }
   }
   return out;

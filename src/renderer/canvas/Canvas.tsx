@@ -762,7 +762,7 @@ function TabStrip({
             */
             className={`group flex flex-none items-center gap-1.5 border-line border-r border-b-2 px-2.5 text-[11px] ${
               active
-                ? `bg-canvas text-ink ${paneFocused ? 'border-b-cursor-ring' : 'border-b-line-loud'}`
+                ? `bg-ground text-ink ${paneFocused ? 'border-b-cursor-ring' : 'border-b-line-loud'}`
                 : 'border-b-transparent text-ink-dim opacity-85 hover:text-ink hover:opacity-100'
             }`}
           >
@@ -878,7 +878,7 @@ function SourceReadout({ source }: { source: CanvasSource }) {
  * `--color-cursor-ring` (`styles.css`): the token has carried no consumer
  * since its own graph-node origin died in the 0.2 migration, its VALUE is
  * independent of who reads it, and `token-contrast.test.ts` already pins it
- * for contrast against `--color-canvas` — exactly the background this draws
+ * for contrast against `--color-ground` — exactly the background this draws
  * over.
  */
 function DropZoneOverlay({ edge }: { readonly edge: Edge }) {
@@ -4019,7 +4019,7 @@ function CanvasInner({
           // and `data-split-focused` is what the tests and the browser guard
           // read — neither is a class, so neither goes with the ring.
           data-split-focused={isFocused ? 'true' : 'false'}
-          className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-canvas"
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-ground"
           onMouseDownCapture={() => {
             if (!isFocused) setFocusedPaneId(leaf.id);
           }}

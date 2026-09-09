@@ -48,7 +48,7 @@ export function KeySheet({ onClose }: KeySheetProps) {
       <button
         type="button"
         aria-label="close keyboard shortcuts"
-        className="absolute inset-0 cursor-default bg-canvas/70"
+        className="absolute inset-0 cursor-default bg-ground/70"
         onMouseDown={onClose}
       />
       <div className="relative max-h-[80vh] w-[min(720px,92vw)] overflow-y-auto rounded-md border border-line bg-panel p-4">

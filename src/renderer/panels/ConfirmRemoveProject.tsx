@@ -69,7 +69,7 @@ export function ConfirmRemoveProject({
         tabIndex={-1}
         aria-label="cancel removing the project"
         onClick={onCancel}
-        className="absolute inset-0 cursor-default bg-canvas/70"
+        className="absolute inset-0 cursor-default bg-ground/70"
       />
       <div className="relative z-10 w-[320px] rounded-[var(--radius-lg)] border border-line-strong bg-panel p-3.5 shadow-[var(--shadow-node)]">
         <div className="flex items-center gap-2">
@@ -109,7 +109,7 @@ export function ConfirmRemoveProject({
             type="button"
             data-confirm-remove-go
             onClick={onConfirm}
-            className="cursor-pointer rounded-[var(--radius-sm)] border border-danger px-2 py-1 text-[11.5px] text-danger hover:bg-danger hover:text-canvas"
+            className="cursor-pointer rounded-[var(--radius-sm)] border border-danger px-2 py-1 text-[11.5px] text-danger hover:bg-danger hover:text-ground"
           >
             Remove
           </button>

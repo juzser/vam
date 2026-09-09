@@ -301,7 +301,7 @@ describe('the turn reads straight through, as one scrolling column', () => {
     // stop bleed-through, and matching the column is how it does that without
     // drawing a band across the turn. What distinguishes the prompt is the
     // bubble inside it, which has its own ground.
-    expect(inBlock.className).toContain('bg-canvas');
+    expect(inBlock.className).toContain('bg-ground');
     // Sticky is resolved against the nearest scrolling ancestor. If anything
     // between `in` and the column scrolled, `in` would stick to THAT and go
     // off screen with it -- the exact failure a class-name-only assertion

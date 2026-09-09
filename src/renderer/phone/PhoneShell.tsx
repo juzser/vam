@@ -471,7 +471,7 @@ export function PhoneShell({
 
   if (!open || entry === null) {
     return (
-      <div data-phone-shell="list" className="flex h-[100dvh] min-h-0 flex-col bg-canvas">
+      <div data-phone-shell="list" className="flex h-[100dvh] min-h-0 flex-col bg-ground">
         <header className="flex h-12 flex-none select-none items-center gap-2 border-line border-b bg-panel px-3">
           {sourceReadout}
         </header>
@@ -533,7 +533,7 @@ export function PhoneShell({
     <div
       data-phone-shell="session"
       data-phone-keyboard={typing ? 'open' : 'closed'}
-      className={`flex h-[100dvh] min-h-0 flex-col bg-canvas ${typing ? 'vam-phone-typing' : ''}`}
+      className={`flex h-[100dvh] min-h-0 flex-col bg-ground ${typing ? 'vam-phone-typing' : ''}`}
     >
       <header className="flex h-12 flex-none select-none items-center gap-2 border-line border-b bg-panel px-2">
         <button

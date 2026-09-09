@@ -156,7 +156,7 @@ const FOCUS_RING =
 const ACTION_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-line px-4 text-[13px] text-ink hover:bg-raised disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${FOCUS_RING}`;
 
 /** The same shape, for an act that revokes access rather than merely toggling a setting. */
-const DANGER_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-danger px-4 text-[13px] text-danger hover:bg-danger hover:text-canvas ${FOCUS_RING}`;
+const DANGER_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-danger px-4 text-[13px] text-danger hover:bg-danger hover:text-ground ${FOCUS_RING}`;
 
 /** The alert-box recipe `ErrorBoundary.tsx` already uses for a refusal in the operator's face. */
 const ALERT_BOX = 'rounded-md border border-danger bg-panel p-3 text-[12px] text-danger';

@@ -283,7 +283,7 @@ export function SettingsOverlay({
       <button
         type="button"
         aria-label="close settings"
-        className="absolute inset-0 cursor-default bg-canvas/70"
+        className="absolute inset-0 cursor-default bg-ground/70"
         onMouseDown={onClose}
       />
       {/* Fixed height, not `max-h`: with a nav column, a box that resizes per
@@ -415,11 +415,11 @@ export function SettingsOverlay({
 
               {/* Here, and not in a section of its own: a text size is not
                   behaviour, it is the paint — the family the theme and the
-                  palette above it are in. And `out` is the right pane, drawn by
-                  two layouts that hide the canvas entirely, so it was never a
-                  canvas setting. (This comment used to argue the point against
-                  a Canvas section, which has since been retired; its own count
-                  of the sections was stale before that.) */}
+                  palette above it are in. `out` is the detail pane's answer
+                  block (`data-detail-block="out"` in `DetailPanel.tsx`), which
+                  is a live thing with a live name; the earlier arguments this
+                  comment carried were about a Canvas section and the layouts
+                  that hid the canvas, and both are gone. */}
               <Block
                 label="out text"
                 hint="how large the agent's answer is drawn in the right pane"
@@ -640,8 +640,9 @@ function SectionRail(props: NavProps) {
 /**
  * The narrow form: `DetailPanel`'s tab-bar geometry, reused rather than
  * re-invented. Not an icon rail — `lucide-react` has no glyph that
- * unambiguously means "Layout" at 13px with no label, and four new symbols is a
- * poor trade for 168px on a window size a desktop tool is rarely at.
+ * unambiguously means "Appearance" or "Remote" at 13px with no label, and a
+ * symbol per section is a poor trade for 168px on a window size a desktop tool
+ * is rarely at.
  */
 function SectionStrip(props: NavProps) {
   return (

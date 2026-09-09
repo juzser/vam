@@ -1232,7 +1232,7 @@ describe('the merged column scrolls the whole turn, `in` pinned to its top', () 
     // Opaque, or `out` text scrolling underneath would show through the two
     // pinned lines of `in` -- the PANE's ground since the prompt got a bubble
     // of its own, so the backing stops bleed-through without painting a band.
-    expect(inBlock?.className).toContain('bg-canvas');
+    expect(inBlock?.className).toContain('bg-ground');
   });
 });
 

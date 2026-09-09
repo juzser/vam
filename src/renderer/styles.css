@@ -33,11 +33,14 @@
  * `html.light` replaces them. One class on <html> moves the entire app.
  */
 @theme inline {
-  /* Surfaces, by elevation. Note `panel` and `canvas` collapse to the same
+  /* Surfaces, by elevation. `ground` is the deepest of them: the fill a pane
+     paints on, and the page's own background. It was called `canvas` until
+     the canvas column was deleted in 0.2 — the colour never moved, only the
+     name it was borrowing. Note `panel` and `ground` collapse to the same
      white in light — the mockup separates cards from the ground with a border
      there, not with a fill, and forcing a tint would be inventing a step the
      design does not have. */
-  --color-canvas: var(--vam-canvas);
+  --color-ground: var(--vam-ground);
   --color-sunken: var(--vam-sunken);
   --color-panel: var(--vam-panel);
   --color-raised: var(--vam-raised);
@@ -196,7 +199,7 @@
 /* Dark — artboard 1a, and the default, so a document that never gets a class
    still renders the theme vam was designed in. */
 :root {
-  --vam-canvas: #0a0a0a;
+  --vam-ground: #0a0a0a;
   --vam-sunken: #0f0f0f;
   --vam-panel: #141414;
   --vam-raised: #1a1a1a;
@@ -264,7 +267,7 @@
      the row beside it. */
   --vam-danger: #fb7185;
 
-  /* Indigo. 6.01 on `sidebar` and 6.64 on `canvas` in this theme -- the only
+  /* Indigo. 6.01 on `sidebar` and 6.64 on `ground` in this theme -- the only
      candidate measured that stays balanced against its light counterpart
      rather than being dramatic here and thin there. */
   --vam-focus-edge: #818cf8;
@@ -290,7 +293,7 @@
 
   --vam-shadow-node: 0 8px 28px rgb(0 0 0 / 0.4);
 
-  /* Syntax, dark. Measured against `--vam-canvas` (#0a0a0a), the fence fill:
+  /* Syntax, dark. Measured against `--vam-ground` (#0a0a0a), the fence fill:
      every value below clears 4.5:1 there, which the grey it replaces did not
      do while also being the same grey as everything around it. */
   --vam-diff-add: #3fb950;
@@ -321,7 +324,7 @@
 
 /* Light — artboard 1b. Same screen, same states, none of the same greys. */
 html.light {
-  --vam-canvas: #ffffff;
+  --vam-ground: #ffffff;
   --vam-sunken: #fafaf9;
   --vam-panel: #ffffff;
   --vam-raised: #f0f0ee;
@@ -393,7 +396,7 @@ html.light {
      step off `--vam-failed` here -- see the note there. */
   --vam-danger: #be123c;
 
-  /* The light theme's indigo: 6.82 on `sidebar`, 7.90 on `canvas`, so the
+  /* The light theme's indigo: 6.82 on `sidebar`, 7.90 on `ground`, so the
      indicator is the same amount of PRESENT in both themes. */
   --vam-focus-edge: #4338ca;
 
@@ -441,7 +444,7 @@ body,
 
 body {
   margin: 0;
-  background: var(--color-canvas);
+  background: var(--color-ground);
   color: var(--color-ink);
   font-family: var(--font-sans);
   /* 12px is orca's workhorse size; 13px is reserved for titles. A fourth
@@ -450,7 +453,7 @@ body {
      with. Recorded here rather than absorbed silently. */
   font-size: 12px;
   -webkit-font-smoothing: antialiased;
-  /* This is a keyboard tool. A stray double-click that selects half the canvas
+  /* This is a keyboard tool. A stray double-click that selects half a pane
      is pure noise; text meant to be copied is copied with `yy`. */
   user-select: none;
 }
@@ -487,8 +490,8 @@ body {
  * nodeterm's note on its own working glow is the reason they are shaped this
  * way: it animates OPACITY on a pseudo-element and never `box-shadow`, because
  * animating a shadow repaints the whole glowing node every frame and that adds
- * up once several are running at once. Vam has the same problem — a canvas is
- * exactly where several nodes are working at the same time.
+ * up once several are running at once. Vam has the same problem — a session
+ * list is exactly where several agents are working at the same time.
  *
  * `prefers-reduced-motion` stops all three. A moving dashboard is a liability
  * for anyone it makes ill, and the colour already carries the state.
@@ -700,7 +703,7 @@ body {
  * "This session is waiting on YOU."
  *
  * Given its own treatment rather than another status colour because it is the
- * only state on this canvas that is *about the reader*. Everything else is a
+ * only state on screen that is *about the reader*. Everything else is a
  * report; this is a request, and a request that reads like a report is one that
  * sits unanswered. So it gets a halo that grows outward — motion pointing away
  * from the card, which the eye catches even in a column it is not reading.
@@ -710,8 +713,7 @@ body {
  *
  * It replaces the word FOCUSED, which cost a whole tag's worth of width in a
  * card that is mostly title. A dot that pulses reads at a glance and at any
- * zoom, where an 8.5px label stops being legible the moment you zoom out —
- * and the canvas now opens at 80%.
+ * zoom, where an 8.5px label stops being legible the moment you zoom out.
  *
  * Animating `box-shadow` alone keeps this off the layout path: no reflow, and
  * it composites with the `vam-breathe` already running on a status dot in the
