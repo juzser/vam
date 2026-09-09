@@ -18,9 +18,16 @@
  * (`test/canvas/topology-constraints.test.ts`) even though it is a disabling
  * form, because that scan only allows two exact spellings and this is not
  * one of them.
+ *
+ * Both of those decisions now live in `usePointerDrag` (`pane-drag.ts`),
+ * shared with `SplitResizer`, the handle on a split's own dividers. They are
+ * shared as CODE and not as prose: two handles that had each written the
+ * gesture out would be two places for an overlay to reappear in. What is NOT
+ * shared is the arithmetic below, which is specific to a two-column layout
+ * whose second width is derived from the first.
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import {
   DETAIL_MAX,
   DETAIL_MIN,
@@ -30,6 +37,7 @@ import {
   SIDEBAR_MAX,
   SIDEBAR_MIN,
 } from '../prefs/panes.js';
+import { usePointerDrag } from './pane-drag.js';
 
 /** A Shift-held arrow press moves further than a bare one — the standard
  *  slider pattern (WAI-ARIA APG "Slider"), sized against the same step the
@@ -70,8 +78,6 @@ export function PaneResizer(props: PaneResizerProps) {
   const { pane, ariaLabel, stored, viewportWidth, onChange, onCommit } = props;
   const width = layoutWidths(stored, viewportWidth)[pane];
   const bounds = BOUNDS[pane];
-  const [dragging, setDragging] = useState(false);
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const proposedWidth = useCallback(
     (clientX: number, startX: number, startWidth: number) => {
@@ -85,32 +91,17 @@ export function PaneResizer(props: PaneResizerProps) {
     [pane, stored, viewportWidth],
   );
 
-  function onPointerDown(event: React.PointerEvent<HTMLHRElement>) {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = { startX: event.clientX, startWidth: width };
-    setDragging(true);
-  }
-
-  function onPointerMove(event: React.PointerEvent<HTMLHRElement>) {
-    const drag = dragRef.current;
-    if (drag === null) {
-      return;
-    }
-    onChange(pane, proposedWidth(event.clientX, drag.startX, drag.startWidth));
-  }
-
-  function onPointerUp(event: React.PointerEvent<HTMLHRElement>) {
-    const drag = dragRef.current;
-    if (drag === null) {
-      return;
-    }
-    event.currentTarget.releasePointerCapture(event.pointerId);
-    const next = proposedWidth(event.clientX, drag.startX, drag.startWidth);
-    dragRef.current = null;
-    setDragging(false);
-    onCommit(pane, next);
-  }
+  // The gesture is `usePointerDrag`'s; what it measures at pointerdown is this
+  // handle's own rendered width, and every callback is handed that width plus
+  // how far the pointer has travelled — the same two numbers `proposedWidth`
+  // has always taken, now supplied by one shared gesture rather than by three
+  // hand-written handlers.
+  const { dragging, handlers } = usePointerDrag<HTMLHRElement, number>({
+    axis: 'x',
+    onStart: () => width,
+    onMove: (startWidth, delta) => onChange(pane, proposedWidth(delta, 0, startWidth)),
+    onEnd: (startWidth, delta) => onCommit(pane, proposedWidth(delta, 0, startWidth)),
+  });
 
   /**
    * The keyboard half of the ARIA contract this element already claims —
@@ -189,10 +180,8 @@ export function PaneResizer(props: PaneResizerProps) {
         'cursor-col-resize',
         dragging ? 'bg-line-loudest' : 'bg-transparent hover:bg-line-loudest',
       ].join(' ')}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
       onKeyDown={onKeyDown}
+      {...handlers}
     />
   );
 }
