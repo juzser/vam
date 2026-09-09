@@ -281,7 +281,32 @@ check(
 const startControls = await start.locator('button, [role="button"], [aria-busy]').count();
 check('and offers no control it cannot honour', startControls === 0, `${startControls} found`);
 
-// -------------------------------------------- 6. PICKING SCROLLS, NEVER HIDES
+// ------------------------------------------------------------- 6. SCREENSHOTS
+//
+// TAKEN BEFORE THE PICKER IS TOUCHED. The checks below open the turn list and
+// leave the column marking its OLDEST turn, which is a state a check asked for
+// and not one the pane rests in -- a screenshot of it would be a picture of the
+// test rather than of the feature.
+await column.evaluate((el) => {
+  el.scrollTop = el.scrollHeight;
+});
+await page.waitForTimeout(200);
+await page.screenshot({ path: `${outDir}/transcript-column-bottom.png` });
+console.log(`${outDir}/transcript-column-bottom.png`);
+await column.evaluate((el) => {
+  el.scrollTop = Math.round(el.scrollHeight * 0.35);
+});
+await page.waitForTimeout(200);
+await page.screenshot({ path: `${outDir}/transcript-column-scrolled.png` });
+console.log(`${outDir}/transcript-column-scrolled.png`);
+await column.evaluate((el) => {
+  el.scrollTop = 0;
+});
+await page.waitForTimeout(200);
+await page.screenshot({ path: `${outDir}/transcript-column-top.png` });
+console.log(`${outDir}/transcript-column-top.png`);
+
+// -------------------------------------------- 7. PICKING SCROLLS, NEVER HIDES
 //
 // `selectedId` used to swap WHICH turn was drawn. In a column that is the
 // wrong verb: the others must stay, the column must move, and the picked turn
@@ -321,7 +346,7 @@ check(
   JSON.stringify((landed.input ?? '').slice(0, 60)),
 );
 
-// ------------------------------------------------------------ 7. ONE SCROLLER
+// ------------------------------------------------------------ 8. ONE SCROLLER
 //
 // #266's property, kept: nothing inside the column may own a scrollbar except
 // the prompt bubbles, which is the bound that makes the pin a pin.
@@ -337,32 +362,6 @@ check(
   nested.every((name) => name === 'in'),
   nested.join(', '),
 );
-
-// ------------------------------------------------------------- 8. SCREENSHOTS
-//
-// With the turn list put back away: it is a control the checks above opened,
-// not the resting state of the pane, and a screenshot of it says nothing about
-// the column.
-await page.locator('[data-progress-expand]').click();
-await page.waitForTimeout(150);
-await column.evaluate((el) => {
-  el.scrollTop = el.scrollHeight;
-});
-await page.waitForTimeout(200);
-await page.screenshot({ path: `${outDir}/transcript-column-bottom.png` });
-console.log(`${outDir}/transcript-column-bottom.png`);
-await column.evaluate((el) => {
-  el.scrollTop = Math.round(el.scrollHeight * 0.35);
-});
-await page.waitForTimeout(200);
-await page.screenshot({ path: `${outDir}/transcript-column-scrolled.png` });
-console.log(`${outDir}/transcript-column-scrolled.png`);
-await column.evaluate((el) => {
-  el.scrollTop = 0;
-});
-await page.waitForTimeout(200);
-await page.screenshot({ path: `${outDir}/transcript-column-top.png` });
-console.log(`${outDir}/transcript-column-top.png`);
 
 // --------------------------------------------------------------- 9. AT VOLUME
 //
