@@ -280,3 +280,44 @@ describe('the status bar prints the key that opens the sheet, not a default', ()
     expect(document.body.textContent).toContain('Keyboard shortcut');
   });
 });
+
+/**
+ * Audit item 2 (S2). The chip's separation from the label is purely visual — a
+ * gap and a border — and the tip content is the target of `aria-describedby`,
+ * so a screen reader flattens the two into one string. Measured live, the
+ * Settings tip announced as `"Settings,"`: a label with a comma stuck to it,
+ * where the comma is the whole shortcut. `"Search sessions/"`, `"Filter
+ * sessionsF"` and `"Close this sessionx or Mod-w"` were the same defect.
+ *
+ * The border cannot be read, so the word has to be said.
+ */
+describe('the chord is announced as a shortcut, not as punctuation', () => {
+  it('names it in text for a screen reader and hides the visual chip', () => {
+    renderTip();
+    const tip = openByFocus();
+    const keys = bindingChords(NO_BINDINGS, actionId(SETTINGS)).join(' or ');
+    expect(keys).not.toBe('');
+    // The visual chip is decoration once the text alternative exists; left
+    // readable it would say the chord twice.
+    const chip = tip.querySelector('[data-tip-keys]');
+    expect(chip?.getAttribute('aria-hidden')).toBe('true');
+    // What a screen reader actually flattens to.
+    expect(tip.textContent ?? '').toContain(`shortcut: ${keys}`);
+    // The defect itself: the label must no longer be welded to a bare chord.
+    expect(tip.textContent ?? '').not.toBe(`Settings${keys}`);
+  });
+
+  it('says it for a mode-qualified action too, where each row carries its own chip', () => {
+    render(
+      <ShortcutTip label="Move left" action={MOVE_LEFT}>
+        <button type="button">M</button>
+      </ShortcutTip>,
+    );
+    const tip = openByFocus();
+    const keys = bindingChords(NO_BINDINGS, actionId(MOVE_LEFT)).join(' or ');
+    for (const chip of tip.querySelectorAll('[data-tip-keys]')) {
+      expect(chip.getAttribute('aria-hidden')).toBe('true');
+    }
+    expect(tip.textContent ?? '').toContain(`shortcut: ${keys}`);
+  });
+});
