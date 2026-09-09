@@ -513,15 +513,24 @@ for (const offset of offsets) {
 }
 check('both jumps were on screen together at some offset', sawBoth >= 1, `${sawBoth} offsets`);
 console.log(`  narrowest gap between a text run and a jump's hit box: ${Math.round(sawGap)}px`);
-// THE GUTTER IS THE MECHANISM, and this is what makes the checks above a
-// property rather than a coincidence of this fixture: the column reserves the
-// strip, so the nearest a glyph can come to a jump is the reservation itself.
-// A negative number here would mean text ran under a control; a large positive
-// one would mean the reservation is wider than the control it is for.
+check('no glyph came nearer a jump than its own edge', sawGap >= 0, `${Math.round(sawGap)}px`);
+// AND THE GUTTER IS THE MECHANISM, measured as itself rather than inferred
+// from where this fixture's lines happened to break. The column's right
+// padding is what stops a line before the jumps, so it has to be EXACTLY one
+// hit box: narrower and text runs under a control, wider and the transcript
+// gives up reading width for a strip nothing stands in. Read as resolved
+// pixels, because `pr-11` is a class name and a class name is the guard that
+// stays green while the padding resolves to nothing.
+const gutter = await page.evaluate(() => {
+  const col = document.querySelector('[data-detail-column]');
+  return { padding: Number.parseFloat(getComputedStyle(col).paddingRight) };
+});
+const hitWidth = (await jumpBoxes()).bottom?.w ?? (await jumpBoxes()).top?.w ?? 0;
+console.log(`  column reserves ${gutter.padding}px on the right; a jump is ${hitWidth}px wide`);
 check(
-  'the reserved strip is what keeps them clear, not luck',
-  sawGap >= 0 && sawGap < 32,
-  `${Math.round(sawGap)}px`,
+  'the strip the jumps stand in is exactly one hit box wide',
+  gutter.padding > 0 && Math.abs(gutter.padding - hitWidth) <= 0.5,
+  `${gutter.padding}px reserved for a ${hitWidth}px control`,
 );
 
 // ------------------------------------------------------------- 7. SCREENSHOTS
