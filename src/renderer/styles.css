@@ -86,6 +86,7 @@
   --color-line-strong: var(--vam-line-strong);
   --color-line-loud: var(--vam-line-loud);
   --color-line-loudest: var(--vam-line-loudest);
+  --color-line-tip: var(--vam-line-tip);
 
   --color-ink: var(--vam-ink);
   --color-ink-dim: var(--vam-ink-dim);
@@ -194,6 +195,7 @@
   --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
   --shadow-node: var(--vam-shadow-node);
+  --shadow-tip: var(--vam-shadow-tip);
 }
 
 /* Dark — artboard 1a, and the default, so a document that never gets a class
@@ -213,6 +215,18 @@
   --vam-line-strong: #262626;
   --vam-line-loud: #2e2e2e;
   --vam-line-loudest: #4a4a4a;
+  /* The tooltip's own boundary, and the only line token that exists to clear
+     a contrast floor rather than to sit at a place in the visual order.
+     WCAG 1.4.11 asks 3:1 of a boundary that identifies a component, and a tip
+     floats over `--vam-sidebar` (#171717) while being filled with
+     `--vam-raised` (#1a1a1a): measured, that fill is 1.03:1 against what is
+     behind it and `line-strong` is 1.18:1, so the box had no edge at all.
+     `line-loudest`, the loudest line vam owns, still only reaches 2.02:1.
+     Hence a value of its own — and it is not a new colour: #6b6b6b is the
+     artboard's own third-rung dark grey, named in this file's header comment.
+     3.36:1 against the sidebar behind and 3.27:1 against the tip's own fill,
+     so the edge is identifiable from both sides. */
+  --vam-line-tip: #6b6b6b;
 
   --vam-ink: #ededed;
   --vam-ink-dim: #a1a1a1;
@@ -293,6 +307,11 @@
 
   --vam-shadow-node: 0 8px 28px rgb(0 0 0 / 0.4);
 
+  /* A tooltip is a small box that has to read as floating over a surface of
+     nearly its own colour, so it gets a tighter, darker shadow than a node's:
+     `ViewIcons` already reached for `shadow-sm` over exactly this problem. */
+  --vam-shadow-tip: 0 4px 12px rgb(0 0 0 / 0.45);
+
   /* Syntax, dark. Measured against `--vam-ground` (#0a0a0a), the fence fill:
      every value below clears 4.5:1 there, which the grey it replaces did not
      do while also being the same grey as everything around it. */
@@ -343,6 +362,13 @@ html.light {
      both wear. */
   --vam-line-loud: #c9c7c1;
   --vam-line-loudest: #8f8f8a;
+  /* Light's tip boundary — see the dark block for the measurement and the
+     reason. The artboard's own third-rung grey is #8a8a8f and it lands at
+     2.96:1, four hundredths under the floor, so this is that value carried
+     four units darker on the same hue rather than a colour from elsewhere:
+     3.13:1 against `--vam-sidebar` (#f0eeea) and 3.17:1 against the
+     `--vam-raised` fill. The old `line-strong` measured 1.26:1. */
+  --vam-line-tip: #86868b;
 
   --vam-ink: #18181b;
   --vam-ink-dim: #52525b;
@@ -410,6 +436,7 @@ html.light {
   /* A card sits above white by a hairline and a whisper, not by the 40% black
      that reads as a hole in a light document. */
   --vam-shadow-node: 0 8px 28px rgb(0 0 0 / 0.06);
+  --vam-shadow-tip: 0 4px 12px rgb(0 0 0 / 0.14);
 
   /* Syntax, light. Not the dark values dimmed: a fence sits on #ffffff here,
      so each hue is taken down to its dark-on-white step instead. */
