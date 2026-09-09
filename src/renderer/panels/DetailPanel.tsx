@@ -2924,6 +2924,13 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const cornerOverlay = !phone && paneFocused;
   /**
+   * Is the failed-session banner drawn above the column? Two readers, which
+   * is why it is named: the banner itself, and the column, which hands its
+   * top padding to the sticky ground and must NOT when something is sitting
+   * in that padding already.
+   */
+  const failedBanner = current === 'Response' && entry?.session.status === 'failed';
+  /**
    * The phone keystroke strip's own gate -- structurally the SAME boolean
    * `canCycleMode` already is, shared rather than re-derived, AND the card
    * must not be live: `newestQuestion === null || !openQuestion` is
@@ -3196,7 +3203,7 @@ export function DetailPanel(props: DetailPanelProps) {
             reports `working` for a session the CLI calls failed, so it is not
             a second opinion worth showing. Naming the gap is the whole of
             what can honestly be said. */}
-        {current === 'Response' && entry?.session.status === 'failed' && (
+        {failedBanner && (
           <p
             data-session-failed
             className="flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-panel px-3 py-2 text-[12px] text-failed leading-[1.45]"
@@ -3292,7 +3299,25 @@ export function DetailPanel(props: DetailPanelProps) {
               stuckRef.current = isAtBottom(event.currentTarget);
               syncJumps(event.currentTarget);
             }}
-            className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto"
+            /* FULL-BLEED, so the sticky ground below can be. The pane body
+               puts `px-3.5 py-3` around everything; a scroll column inside
+               that padding can only paint as wide as the padding box, which
+               left a 14px gutter down each side of the pinned prompt with
+               the transcript scrolling past in it, in full view. So the
+               column takes the padding OFF the body (`-mx-3.5`) and puts it
+               back on itself (`px-3.5`): every child lays out exactly where
+               it did, and the two that ask for it -- the sticky ground --
+               can reach the pane's own edges with `-mx-3.5`.
+
+               The TOP is the same move without the give-back: `-mt-3` hands
+               the body's top padding to the sticky block, which re-spends it
+               as its own `pt-3`, so the ground covers the strip above the
+               bubble instead of leaving pane fill there. Not when the failed
+               banner is drawn -- there IS something above the column then,
+               and pulling up would slide the column under it. */
+            className={`vam-no-scrollbar -mx-3.5 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-3.5 ${
+              failedBanner ? '' : '-mt-3'
+            }`}
           >
             {/* STICKY, not merely first: `position: sticky` against the
                 column's own scroll (the operator's ask, A12.2 — "IN stays
@@ -3324,7 +3349,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 the prompt now is the bubble inside it, below. */}
             <section
               data-detail-block="in"
-              className="sticky top-0 z-10 flex max-h-[45%] min-h-0 flex-none flex-col gap-1 bg-ground pb-1.5"
+              className="-mx-3.5 sticky top-0 z-10 flex max-h-[45%] min-h-0 flex-none flex-col gap-1 bg-ground px-3.5 pt-3 pb-1.5"
             >
               {/* The region's name, announced and not drawn -- see the
                   band-removal note above `IN_BODY_PX`. */}
@@ -3378,16 +3403,18 @@ export function DetailPanel(props: DetailPanelProps) {
                    edge, and a bound nobody can see is how "the answer is
                    unreachable" became "the prompt is". */
                 /* PADDING IS WHAT MAKES THE TINT A SHAPE (the operator:
-                   "the In section's background needs padding"). At 10x8 the
-                   ground sat tight against the words and read as a highlight
-                   behind them; a bubble is a ground the text sits INSIDE.
-                   14x12, and the `in` block's own `max-h-[45%]` absorbs the
-                   extra height rather than passing it on to the answer:
-                   measured with a 10,800-character prompt, `in` is 156px of a
-                   348px column before and after, with 40 of the answer's 42px
-                   painted on top at maximum scroll either way. Measured as
-                   paint, not as a class, by `e2e/long-prompt-shots.mjs`. */
-                className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-3.5 py-3"
+                   "the In section's background needs padding"), and it is
+                   bounded on BOTH sides. At 10x8 the ground sat tight against
+                   the words and read as a highlight behind them; at 14x12 the
+                   operator called the bubble too big ("the In bubble needs to
+                   be smaller"). 12x10 is what is left, and the guard holds it
+                   to a 9-12px band measured AS PAINT rather than as a class
+                   (`e2e/long-prompt-shots.mjs`), because a padding rule that
+                   matches nothing has passed review in this project before.
+
+                   The height it gives back goes to the answer, not to the
+                   pin: `max-h-[45%]` bounds the block either way. */
+                className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-3 py-2.5"
               >
                 <p className="whitespace-pre-wrap break-words text-[13px] text-ink-dim leading-[1.55]">
                   {/* THE RESERVED CORNER, audit F1's obligation, inherited
