@@ -372,21 +372,59 @@ const q = <T extends Element>(selector: string) => document.querySelector<T>(sel
 const all = (selector: string) => [...document.querySelectorAll(selector)];
 const progress = () => q<HTMLElement>('[data-detail-block="progress"]');
 /**
- * A12.2: `progress` collapsed from a toggle-and-list into a single
- * `<select>` — one control regardless of how many turns exist. `jump()` is
- * that control; `turnLabels()` reads its options oldest-first (unchanged
- * ordering), and `pickTurn` drives it the way an operator would, with a
- * `change` event rather than a click (native `<select>`s are not clicked
- * open in a test environment the way a styled row-button was).
+ * THE PICKER IS GONE, THE PICK IS NOT — and these three helpers are where
+ * that distinction lives for this whole file.
+ *
+ * A12.2 collapsed `progress` from a toggle-and-list into a single `<select>`;
+ * the operator has now had the bar that `<select>` sat in removed altogether
+ * (`DetailPanel.tsx`), because the pane draws EVERY turn and a jump-to-turn
+ * control is a second way to do what the scrollbar does. So there is no
+ * in-pane control to drive any more.
+ *
+ * What survives is the model the control drove: `selectedId`/`markedId`, which
+ * the CANVAS's step focus moves. `navigateTo` is that door -- a new
+ * `focusNodeId` alongside the turn the canvas landed on, exactly what
+ * `Canvas.tsx` hands over when `h`/`l` walks onto a step. `markedTurnId` and
+ * `turnLabels` read the same facts off the column, which is where they are
+ * painted now: `data-turn-current` on the turn being read, and one
+ * `[data-progress-turn-label]` per turn, oldest first -- the ordering the
+ * options had.
  */
-const jump = () => q<HTMLSelectElement>('[data-progress-jump]');
-const turnLabels = () => [...(jump()?.querySelectorAll('option') ?? [])].map((o) => o.textContent);
-function pickTurn(id: string) {
-  const select = jump();
-  if (select === null)
-    throw new Error('no progress select to change — is there more than one turn?');
-  fireEvent.change(select, { target: { value: id } });
+type PanelView = { readonly rerender: (extra: Partial<DetailPanelProps>) => void };
+/**
+ * PUT THE PANEL ON AN OLDER TURN, THE WAY THE RUNNING APP DOES.
+ *
+ * There is no control to click any more, and there does not need to be.
+ * `Canvas.tsx` hands this panel `decisions[0]` as the canvas's pick and the
+ * pane's SESSION as `focusNodeId`, so the turn the panel considers itself to
+ * be reading is whichever was newest WHEN THE PANE ARRIVED -- and it stays
+ * there as later turns land, because `focusNodeId` does not change and nothing
+ * tells the panel to follow. That is the state every case below wants.
+ *
+ * So: land on the session as it was when `index` turns ago was the newest one,
+ * then let the turns that have arrived since arrive. `index` counts from the
+ * newest end, the order `decisions` is in.
+ */
+function arriveOn(view: PanelView, entry: SessionEntry, index: number) {
+  const asOfThen = entry.session.decisions.slice(index);
+  const focusNodeId = entry.session.id;
+  act(() =>
+    view.rerender({
+      entry: { ...entry, session: { ...entry.session, decisions: asOfThen } },
+      decision: asOfThen[0] as Decision,
+      focusNodeId,
+    }),
+  );
+  act(() =>
+    view.rerender({ entry, decision: entry.session.decisions[0] as Decision, focusNodeId }),
+  );
 }
+const markedTurnId = () =>
+  q<HTMLElement>('[data-column-turn][data-turn-current="true"]')?.getAttribute(
+    'data-column-turn',
+  ) ?? null;
+const turnLabels = () =>
+  all('[data-column-turn] [data-progress-turn-label]').map((el) => el.textContent);
 
 afterEach(cleanup);
 
@@ -399,19 +437,24 @@ describe('the progress region is a single step, not a list of rows (A12.2)', () 
   };
 
   /**
-   * RETIRED: `'draws no turn collapsed, every turn expanded, and says which
-   * it is'` (toggle open/closed, a `<ul>` of `<li data-progress-turn>` rows).
-   * The toggle-and-list shape it pinned no longer exists — A12.2 collapses
-   * `progress` into a single `<select>`, always present, never a list of
-   * rendered rows. The replacement below pins the same underlying facts
-   * (every turn reachable, oldest first, the newest one included) against
-   * the new shape rather than the old one.
+   * RETIRED TWICE, and the subject outlived both shapes.
+   *
+   * First it was `'draws no turn collapsed, every turn expanded, and says
+   * which it is'` — a toggle and a `<ul>` of rows. A12.2 collapsed that into
+   * a single `<select>` and this case was rewritten against it. The
+   * `<select>` has now gone too, with the column's bar: every turn is DRAWN,
+   * so a control listing them is a second way to reach what is already on
+   * screen.
+   *
+   * The facts underneath never changed — all seven turns reachable, oldest
+   * first, the newest one included, and the pane saying which one it is
+   * reading — so the case follows them onto the column itself.
    */
-  it('offers every turn as one option each, oldest first, with none rendered as its own row', () => {
+  it('draws every turn, oldest first, and marks the one being read', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
-    // No list of rows exists at all, collapsed or otherwise — collapsing IS
-    // the point, not a state the control toggles into and out of.
+    // No list of rows and no picker exists at all: the column IS the list.
     expect(all('[data-progress-turn]')).toHaveLength(0);
+    expect(all('[data-progress-jump]')).toHaveLength(0);
     expect(progress()?.querySelector('ul')).toBeNull();
     // ALL SEVEN, not the newest five: `PROGRESS_LINES` used to slice the
     // data itself at the parser, which was the defect this whole change
@@ -422,8 +465,8 @@ describe('the progress region is a single step, not a list of rows (A12.2)', () 
     expect(labels).toHaveLength(7);
     expect(labels[0]).toContain('step d1');
     expect(labels[6]).toContain('step d7');
-    // The canvas's own pick (the newest turn) is what the control shows.
-    expect(jump()?.value).toBe('d7');
+    // The canvas's own pick (the newest turn) is the one marked.
+    expect(markedTurnId()).toBe('d7');
   });
 
   /**
@@ -443,24 +486,49 @@ describe('the progress region is a single step, not a list of rows (A12.2)', () 
     expect(progress()?.className).toContain('flex-none');
   });
 
-  it('is a real, labelled control reachable by keyboard, not a styled row', () => {
+  /**
+   * FOLLOWED TO THE CONTROL THAT IS LEFT. This case pinned that the region's
+   * one control was a real, labelled, keyboard-reachable element rather than
+   * a styled row -- first of a `<li>` toggle, then of the `<select>`. Neither
+   * exists; what the region has now is the pair of jumps floating over the
+   * column, and the claim is worth exactly as much about them.
+   */
+  it('offers its jumps as real, labelled controls reachable by keyboard', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
-    const select = jump();
-    expect(select?.tagName).toBe('SELECT');
-    expect(select?.getAttribute('aria-label')).toBe('jump to a turn');
+    const column = q<HTMLElement>('[data-detail-column]') as HTMLElement;
+    // happy-dom lays nothing out, so the metrics the jump rule reads are
+    // faked: a tall content resting in the middle has both edges to offer.
+    Object.defineProperty(column, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(column, 'clientHeight', { value: 100, configurable: true });
+    column.scrollTop = 500;
+    fireEvent.scroll(column);
+    for (const [sel, label] of [
+      ['[data-out-to-top]', 'scroll to the oldest turn read'],
+      ['[data-out-to-bottom]', 'scroll to the newest turn'],
+    ]) {
+      const button = q<HTMLElement>(sel as string);
+      expect(button?.tagName, sel).toBe('BUTTON');
+      expect(button?.getAttribute('aria-label'), sel).toBe(label);
+    }
   });
 
   /**
-   * With only ONE turn there is nothing to jump between, so the control
-   * costs no DOM at all rather than a dead dropdown holding a single choice.
+   * A CONTROL THAT CAN DO NOTHING COSTS NO DOM — the rule this case has
+   * always been about, moved from the picker (absent with one turn, since
+   * there was nothing to jump between) to the jumps that replaced it (absent
+   * while the column has no room to move).
    */
-  it('draws no jump control at all with only one turn to show', () => {
+  it('draws no jump at all while neither would move the column', () => {
     const one: SessionEntry = {
       project: PROJECT,
       session: { ...SESSION, decisions: [DECISIONS[0] as Decision] },
     };
     draw({ entry: one, decision: DECISIONS[0] as Decision });
-    expect(jump()).toBeNull();
+    // happy-dom reports 0 for every metric, which is exactly the state being
+    // asserted: a column resting at its own bottom with nothing above it.
+    expect(all('[data-out-to-top]')).toHaveLength(0);
+    expect(all('[data-out-to-bottom]')).toHaveLength(0);
+    expect(all('[data-progress-jump]')).toHaveLength(0);
   });
 
   it('says how many turns vam read, not a bare total it cannot prove', () => {
@@ -489,14 +557,9 @@ describe('the progress region is a single step, not a list of rows (A12.2)', () 
  */
 describe('the panel remembers which turn you are reading, independent of the canvas', () => {
   // Seven turns; the canvas would only ever focus one of the newest three, so
-  // `d1`, the oldest, is reachable ONLY through this panel's own list.
+  // `d1`, the oldest, is a turn the canvas's DEFAULT pick never lands on.
   const MANY = ['d7', 'd6', 'd5', 'd4', 'd3', 'd2', 'd1'].map((id) => decision(id));
   const manyEntry: SessionEntry = { project: PROJECT, session: { ...SESSION, decisions: MANY } };
-
-  // A12.2: picking a turn out of history is now a `change` on the single
-  // `<select>` (`pickTurn`, declared beside `jump()` near the top of this
-  // file) rather than a click on a list row opened by a toggle first.
-  const pick = pickTurn;
 
   /**
    * THE MARKED TURN'S PROMPT, not "the first prompt on screen".
@@ -513,11 +576,11 @@ describe('the panel remembers which turn you are reading, independent of the can
   const inText = () => markedTurn()?.querySelector('[data-detail-scroll="in"]')?.textContent ?? '';
   // A12.2 moved the removed header's `[data-detail-step]` chip into the `in`
   // rule's meta beside "you", then onto the identity line -- and the operator
-  // has now had that line removed as well. The label was never only there:
-  // the jump control prints one per turn and marks the current one by BEING
-  // a `<select>`, so the selected option is the same fact in the same words,
-  // read where it is actually painted.
-  const stepLabel = () => jump()?.selectedOptions[0]?.textContent ?? '';
+  // has now had that line removed as well, and the picker that printed the
+  // labels after it. The label's home is the turn's OWN condensed line, one
+  // per turn; read off the MARKED one, it is the same fact in the same words.
+  const stepLabel = () =>
+    markedTurn()?.querySelector('[data-progress-turn-label]')?.textContent ?? '';
 
   it('shows the canvas’s own pick by default', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
@@ -525,20 +588,29 @@ describe('the panel remembers which turn you are reading, independent of the can
     expect(stepLabel()).toContain('step d7');
   });
 
-  it('draws a turn the canvas never focused once picked from the jump control', () => {
+  /**
+   * RE-POINTED, AND THE HALF THAT CANNOT BE RE-POINTED IS NAMED.
+   *
+   * "once picked from the jump control" was the point of this case: the panel
+   * could put a turn on screen that the canvas never focuses. The control is
+   * gone, and with it the panel's ability to MARK such a turn -- nothing in
+   * the pane can now select `d1` if the canvas cannot reach it. What survives,
+   * and is the thing an operator actually wanted, is that the turn is DRAWN
+   * and readable without the canvas: the column holds all seven, `d1`'s prompt
+   * and answer included, which is why the picker could go at all.
+   */
+  it('draws every turn the canvas never focuses, prompt and answer alike', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
-    pick('d1');
-    expect(inText()).toContain('ask d1');
-    expect(stepLabel()).toContain('step d1');
-    // RETIRED half: "the picked row marks itself" checked a `<li>` row's own
-    // marking `<span>` class, which no longer exists (no rows at all). The
-    // equivalent fact for a native control is simply its OWN value, which
-    // every other assertion in this block already exercises via `inText`/
-    // `stepLabel`; restated once, directly, rather than duplicated per test.
-    expect(jump()?.value).toBe('d1');
+    const oldest = q<HTMLElement>('[data-column-turn="d1"]');
+    expect(oldest).not.toBeNull();
+    expect(oldest?.querySelector('[data-detail-scroll="in"]')?.textContent).toContain('ask d1');
+    expect(oldest?.querySelector('[data-detail-scroll="out"]')?.textContent).toContain('answered');
+    // And the canvas's own pick is still the one MARKED -- drawing every turn
+    // is not the same as claiming to be reading each of them.
+    expect(markedTurnId()).toBe('d7');
   });
 
-  it('keeps the picked turn across a re-render the canvas did not cause', () => {
+  it('keeps the turn it was reading across a re-render the canvas did not cause', () => {
     // `focusNodeId` HELD CONSTANT -- the canvas's own cursor did not move,
     // which is the real-world shape of "something unrelated refreshed":
     // `Canvas.tsx` always reports a `focusedId`, it just did not change.
@@ -547,36 +619,39 @@ describe('the panel remembers which turn you are reading, independent of the can
       decision: MANY[0] as Decision,
       focusNodeId: 'info:s1',
     });
-    pick('d1');
+    arriveOn(view, manyEntry, 6);
     expect(inText()).toContain('ask d1');
-    // The canvas's OWN cursor is unchanged (still the info node) -- only
-    // something unrelated moved, e.g. the session's activity line on a poll,
-    // or -- the case that matters most -- `decision` itself, because turn ids
-    // are now content-derived (`transcript.ts`) and the canvas's DEFAULT pick
+    // The canvas's OWN cursor is unchanged (still on `d1`) -- only something
+    // unrelated moved, e.g. the session's activity line on a poll, or -- the
+    // case that matters most -- `decision` itself, because turn ids are now
+    // content-derived (`transcript.ts`) and the canvas's DEFAULT pick
     // (`decisions[0]`) genuinely gets a new id every time a new turn really
     // arrives. Neither must yank the operator back to the newest turn.
     view.rerender({
       entry: { project: PROJECT, session: { ...manyEntry.session, activity: 'still going' } },
       decision: MANY[0] as Decision,
-      focusNodeId: 'info:s1',
+      focusNodeId: 's1',
     });
     expect(inText()).toContain('ask d1');
     expect(stepLabel()).toContain('step d1');
   });
 
-  it('defers back to the canvas the moment the canvas’s own cursor moves', () => {
+  it('defers back to the canvas the moment the canvas’s own cursor moves again', () => {
     const view = drawFor({
       entry: manyEntry,
       decision: MANY[0] as Decision,
       focusNodeId: 'info:s1',
     });
-    pick('d1');
+    arriveOn(view, manyEntry, 6);
     expect(inText()).toContain('ask d1');
-    // `h`/`l` moved the canvas cursor onto a specific step: `focusNodeId`
-    // changes along with `decision`, which is what tells the panel this is a
-    // real navigation rather than the default pick's id merely drifting --
-    // and that wins over the in-panel pick, the panel's memory being a
-    // default, not a lock.
+    // THE PROP'S CONTRACT, which is broader than any chord bound today: a
+    // `focusNodeId` that CHANGES alongside `decision` is a navigation and the
+    // panel follows it, rather than the default pick's id merely drifting
+    // under a poll. `Canvas.tsx` currently only ever reports the pane's
+    // session here (the graph's step cursor went with the graph), so the case
+    // below is the shape that actually reaches this today -- but the rule is
+    // the prop's, not that one caller's, and the panel's memory is a default
+    // rather than a lock either way.
     view.rerender({
       entry: manyEntry,
       decision: MANY[1] as Decision,
@@ -598,29 +673,34 @@ describe('the panel remembers which turn you are reading, independent of the can
       decision: MANY[0] as Decision,
       focusNodeId: 'info:s1',
     });
-    pick('d1');
+    arriveOn(view, manyEntry, 6);
     expect(inText()).toContain('ask d1');
     const otherSession: Session = { ...manyEntry.session, id: 's2' };
     view.rerender({
       entry: { project: PROJECT, session: otherSession },
       decision: otherSession.decisions[0] as Decision,
-      focusNodeId: 'info:s2',
+      focusNodeId: 's2',
     });
     expect(inText()).toContain('ask d7');
     expect(stepLabel()).toContain('step d7');
   });
 
-  it('turns off the live turn markers for a turn picked out of history', () => {
+  it('turns off the live turn markers for the older turn it is reading', () => {
     // Companion to "does not animate an older turn of a running session"
-    // above, which reaches the same state through the `decision` PROP. This
-    // reaches it through a progress-row CLICK instead, proving the in-panel
-    // selector feeds the same `isNewestTurn`/`outIsLive` rule rather than a
+    // above, which reaches the same state on FIRST RENDER through the
+    // `decision` prop. This reaches it mid-life, the way the app does: land on
+    // the session, then let newer turns arrive under it -- a different path
+    // (`followCanvas` during render, plus the layout effect that scrolls) that
+    // has to feed the same `isNewestTurn`/`outIsLive` rule rather than a
     // second one that could disagree with it.
-    draw({
-      entry: { project: PROJECT, session: { ...manyEntry.session, status: 'running' } },
-      decision: MANY[0] as Decision,
-    });
-    pick('d1');
+    // It used to come in through a progress-row click; that door went with
+    // the column's bar, and arriving-then-polling is the one that is left.
+    const running: SessionEntry = {
+      project: PROJECT,
+      session: { ...manyEntry.session, status: 'running' },
+    };
+    const view = drawFor({ entry: running, decision: MANY[0] as Decision });
+    arriveOn(view, running, 6);
     // `data-out-live` is `outIsLive` rendered, and it is not gated on empty
     // output the way `data-out-empty` is -- asserting on it (rather than
     // `data-out-empty`) is what keeps this test from passing vacuously
@@ -676,9 +756,13 @@ describe('a selected historical turn survives a poll that delivers a new one', (
    *  unqualified lookup reads the oldest one whatever was picked. */
   const marked = () => q<HTMLElement>('[data-column-turn][data-turn-current="true"]');
   const inText = () => marked()?.querySelector('[data-detail-scroll="in"]')?.textContent ?? '';
-  /** The `<option>` at oldest-first position `index` in the jump control. */
-  const optionAt = (index: number) =>
-    [...(jump()?.querySelectorAll('option') ?? [])][index] as HTMLOptionElement | undefined;
+  /**
+   * The turn at oldest-first position `index`. It used to be the `<option>` at
+   * that position in the jump control; the control went with the column's bar,
+   * so the same turn is taken from the parser's own list -- which is newest
+   * first (`model.ts`), hence the reversal.
+   */
+  const oldestFirst = (turns: readonly Decision[]) => [...turns].reverse();
 
   it('keeps the same turn on screen after the source delivers one more turn', () => {
     // A real parse: two turns, oldest-first "ask 0" then "ask 1".
@@ -686,16 +770,21 @@ describe('a selected historical turn survives a poll that delivers a new one', (
     const view = drawFor({ entry: entryWith(before), decision: before[0] as Decision });
 
     // Read the OLDEST turn, which the canvas never focuses by default.
-    const oldest = optionAt(0);
-    expect(oldest, 'fixture has no oldest option to pick').not.toBeUndefined();
-    pickTurn((oldest as HTMLOptionElement).value);
+    const oldest = oldestFirst(before)[0];
+    expect(oldest, 'fixture has no oldest turn to navigate to').not.toBeUndefined();
+    arriveOn(view, entryWith(before), 1);
     expect(inText()).toContain('ask 0');
 
     // The poll: the source is asked again and now reports THREE turns --
     // one more request landed while "ask 0" was on screen. Exactly the
-    // operator's own bug report.
+    // operator's own bug report. `focusNodeId` is held where the navigation
+    // left it: the canvas's cursor did not move, only the model refreshed.
     const after = turnsFor(['ask 0', 'ask 1', 'ask 2']);
-    view.rerender({ entry: entryWith(after), decision: after[0] as Decision });
+    view.rerender({
+      entry: entryWith(after),
+      decision: after[0] as Decision,
+      focusNodeId: 'sess-1',
+    });
 
     // Still "ask 0" -- the same real, content-derived id survived the poll.
     expect(inText()).toContain('ask 0');
@@ -710,16 +799,20 @@ describe('a selected historical turn survives a poll that delivers a new one', (
     const before = turnsFor(['continue', 'something else', 'continue']);
     const view = drawFor({ entry: entryWith(before), decision: before[0] as Decision });
 
-    // Both "continue" options exist; the SECOND occurrence (newer) is what is
-    // picked here, oldest-first so it is the last of the three options.
-    const secondContinue = optionAt(2);
-    expect(secondContinue, 'fixture has no second "continue" option to pick').not.toBeUndefined();
-    pickTurn((secondContinue as HTMLOptionElement).value);
+    // Both "continue" turns exist; the SECOND occurrence (newer) is what is
+    // navigated to here, oldest-first so it is the last of the three.
+    const secondContinue = oldestFirst(before)[2];
+    expect(secondContinue, 'fixture has no second "continue" turn').not.toBeUndefined();
+    arriveOn(view, entryWith(before), 0);
     expect(inText()).toContain('continue');
     expect(outText()).toContain('answer 2'); // the third turn's own reply
 
     const after = turnsFor(['continue', 'something else', 'continue', 'a fourth ask']);
-    view.rerender({ entry: entryWith(after), decision: after[0] as Decision });
+    view.rerender({
+      entry: entryWith(after),
+      decision: after[0] as Decision,
+      focusNodeId: 'sess-1',
+    });
 
     // Still the SECOND "continue" turn's own answer -- not the first
     // occurrence's, which a rank collision would have resolved to instead.
@@ -747,31 +840,34 @@ describe('a turn that has genuinely scrolled out of the window', () => {
       decision: MANY[0] as Decision,
       focusNodeId: 'info:s1',
     });
-    pickTurn('d1');
+    arriveOn(view, manyEntry, 2);
     expect(
       q<HTMLElement>('[data-column-turn][data-turn-current="true"]')?.textContent ?? '',
     ).toContain('ask d1');
 
     // The window no longer carries `d1` at all -- every id in the new
     // decisions list is one the panel has never seen, simulating it having
-    // fallen out of `TAIL_BYTES` rather than merely off a slice.
+    // fallen out of `TAIL_BYTES` rather than merely off a slice. The canvas's
+    // own cursor is HELD where it was: the poll is what moved, not the
+    // operator, which is the whole shape of this failure.
     const REPLACED = ['d5', 'd4'].map((id) => decision(id));
     view.rerender({
       entry: { project: PROJECT, session: { ...manyEntry.session, decisions: REPLACED } },
       decision: REPLACED[0] as Decision,
-      focusNodeId: 'info:s1',
+      focusNodeId: 's1',
     });
 
     expect(document.body.textContent ?? '').toContain('scrolled out');
     // NOT MARKED AS THE ONE BEING READ. `d5` is on screen -- it is a turn of
     // this session and the column draws every turn it has, which is not a
     // substitution. The substitution this refuses is the pane pointing at
-    // `d5` and calling it the turn the operator picked, so what is asserted
-    // is that NOTHING is marked while the pick is missing, and that the
-    // picker says so rather than quietly selecting somebody else's turn.
+    // `d5` and calling it the turn the operator was reading, so what is
+    // asserted is that NOTHING is marked while the pick is missing, that the
+    // pane says so in words, and that it hid nothing to say it.
     expect(all('[data-column-turn][data-turn-current="true"]')).toHaveLength(0);
-    expect(jump()?.value ?? '').toBe('');
+    expect(markedTurnId()).toBeNull();
     expect(all('[data-progress-turn-missing]')).toHaveLength(1);
+    expect(all('[data-column-turn]')).toHaveLength(2);
   });
 
   it('offers a way back to the turn the canvas is actually showing', () => {
@@ -780,13 +876,13 @@ describe('a turn that has genuinely scrolled out of the window', () => {
       decision: MANY[0] as Decision,
       focusNodeId: 'info:s1',
     });
-    pickTurn('d1');
+    arriveOn(view, manyEntry, 2);
 
     const REPLACED = ['d5', 'd4'].map((id) => decision(id));
     view.rerender({
       entry: { project: PROJECT, session: { ...manyEntry.session, decisions: REPLACED } },
       decision: REPLACED[0] as Decision,
-      focusNodeId: 'info:s1',
+      focusNodeId: 's1',
     });
 
     const back = q<HTMLButtonElement>('[data-progress-turn-return]');
@@ -3432,7 +3528,11 @@ describe('the +1px type bump reaches everything in this pane except out', () => 
     // navigation bar at the bottom of the column (the picker and the two
     // jumps) -- two call sites where there was one, both at the 10.5px the
     // line already used, because both ARE that line, moved.
-    '10.5': 8,
+    // -3: and the bar has now gone, taking all three of its 10.5px call sites
+    // with it (the row itself, the turn-list rows and the `<select>`). The
+    // jumps that survived it are icons in a floating chip and carry no type
+    // class at all; the per-turn line still does, and is what is left here.
+    '10.5': 5,
     // +2: the folded question row's "marked, not sent" caption and the
     // `change` control that reopens the list (audit-adjacent operator
     // request: the option list folds away once a pick is made).

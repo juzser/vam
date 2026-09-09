@@ -15,7 +15,7 @@
  * sidebar, tab strip and detail panel all follow the same single focus.
  */
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SmithApiError, type SmithClient } from '../../src/renderer/adapter/client.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
@@ -358,33 +358,27 @@ describe('walking sessions with j and k', () => {
  *
  * 0.2 migration, step 2: re-pointed, not deleted. It used to click a graph
  * step card (`[data-step-input]`, `stepNodeId(sessionId, decision.id)` in
- * the deleted `layout.ts`); the pane's own turn picker
- * (`[data-progress-jump]`, `DetailPanel.tsx` — a single `<select>` since
- * A12.2, formerly a list of `data-progress-select` rows) is driven by the
- * same content-derived `decision.id` (`transcript.ts`'s `turnFingerprint`),
- * so the defect class is identical: a poll that adds a new turn must not
- * swap the content under a cursor an operator left on an OLDER one just
- * because that turn's position in the list moved. This is what proves that
- * end to end, through the real `<Canvas>` render and the real detail panel
- * it drives.
+ * the deleted `layout.ts`), then the pane's own turn picker
+ * (`[data-progress-jump]`, a single `<select>` since A12.2).
+ *
+ * RE-POINTED A SECOND TIME, and this time to no control at all -- the picker
+ * went with the column's bar, because the column draws every turn and a
+ * jump-to-turn control was a second way to reach what is on screen. The state
+ * it produced is still exactly where the app puts an operator every day, and
+ * with no clicking: `Canvas.tsx` hands the pane `decisions[0]` and the pane's
+ * SESSION as `focusNodeId`, so the turn a pane considers itself to be reading
+ * is whichever was newest when it arrived, and it stays there while newer
+ * turns land. So the fixture arrives on `turnB` and lets `turnC`/`turnD`
+ * arrive under it.
+ *
+ * The defect class is unchanged and so is the reason this runs through the
+ * real `<Canvas>`: turn ids are content-derived (`transcript.ts`'s
+ * `turnFingerprint`), and a poll that adds a turn must not swap the content
+ * under a cursor an operator left on an OLDER one just because that turn's
+ * position in the list moved.
  */
 describe('a focused turn keeps its own content across a model refresh', () => {
-  const selectTurnByLabel = (label: string) => {
-    const select = document.querySelector<HTMLSelectElement>('[data-progress-jump]');
-    const option = [...(select?.querySelectorAll('option') ?? [])].find((o) =>
-      o.textContent?.includes(label),
-    ) as HTMLOptionElement | undefined;
-    if (select === null || option === undefined) throw new Error(`no "${label}" turn to pick`);
-    act(() => fireEvent.change(select, { target: { value: option.value } }));
-  };
-
   it('does not let a newly arrived turn swap the content under a focused older one', () => {
-    // THREE turns, all visible (`VISIBLE_DECISION_COUNT`) -- the fourth below
-    // is what pushes `turnB` from slot 1 to slot 0 while it stays on screen
-    // the whole time. A fixture with only two or three turns total never
-    // moves anything between slots, so it would pass even against a pane
-    // that focused by SLOT rather than by turn -- this shape is the one that
-    // actually exercises the difference.
     const turnA = decision('sess:fp-aaa:0', {
       label: 'oldest',
       input: 'ask 0',
@@ -396,25 +390,26 @@ describe('a focused turn keeps its own content across a model refresh', () => {
       output: 'answer 1',
     });
     const turnC = decision('sess:fp-ccc:0', { label: 'newer', input: 'ask 2', output: 'answer 2' });
+    // ARRIVED WHEN `turnB` WAS THE NEWEST: that is what makes the pane
+    // consider itself to be reading it, and it is the only way in now.
     const before: CanvasModel = {
       projects: [
         {
           id: 'p1',
           name: 'alpha',
           source: 'factory',
-          sessions: [session('a1', { decisions: [turnC, turnB, turnA] })], // newest-first
+          sessions: [session('a1', { decisions: [turnB, turnA] })], // newest-first
         },
       ],
     };
     const { rerender } = render(<Canvas model={before} />);
-
-    // Pick the MIDDLE turn -- slot 1 of 3 today, about to become slot 0.
-    selectTurnByLabel('middle');
     expect(detailBlock('in')).toContain('ask 1');
 
-    // The poll: a fourth turn arrives with its OWN id. `turnA` (the old
-    // slot-0 occupant) falls out of the visible three; `turnB` -- still
-    // selected -- slides from slot 1 into slot 0.
+    // The poll: TWO more turns arrive, each with its OWN id, pushing `turnB`
+    // from index 0 to index 2 while it stays on screen the whole time. A
+    // fixture that added only one turn would move it a single slot; this shape
+    // is the one that would catch a pane holding a POSITION rather than a
+    // turn.
     const turnD = decision('sess:fp-ddd:0', {
       label: 'newest',
       input: 'ask 3',
@@ -432,7 +427,7 @@ describe('a focused turn keeps its own content across a model refresh', () => {
     };
     act(() => rerender(<Canvas model={after} />));
 
-    // Still the turn that was selected, not whatever now sits in slot 1.
+    // Still the turn that was being read, not whatever now sits at its index.
     expect(detailBlock('in')).toContain('ask 1');
   });
 });

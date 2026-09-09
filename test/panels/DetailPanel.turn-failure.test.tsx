@@ -3,10 +3,11 @@
 /**
  * THE FOLD MUST NOT SWALLOW A FAILURE.
  *
- * A turn's mark was binary -- `output === null ? '◌' : '✓'` -- in both the
- * condensed `<select>` and the expanded list, so a turn whose tools blew up
- * three times still read `✓`, and the collapsed line said "12 turns read" over
- * a run that was on fire. vam and the reference agree that intermediate work
+ * A turn's mark was binary -- `output === null ? '◌' : '✓'` -- wherever it was
+ * drawn, so a turn whose tools blew up three times still read `✓`, and the
+ * collapsed line said "12 turns read" over a run that was on fire. (It was
+ * drawn in the condensed `<select>` and the expanded list then; both went with
+ * the column's bar, and the turn's own line is where it is drawn now.) vam and the reference agree that intermediate work
  * should collapse; collapsing may cost the operator DETAIL, never ALARM.
  *
  * WHAT IS ASSERTED HERE is rendered text, not a computed value -- the whole
@@ -17,7 +18,7 @@
  * ever opened. The failure count is added BESIDE that qualifier: a test below
  * fails if it is ever swapped for it.
  */
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
@@ -77,13 +78,22 @@ const perTurn = () =>
   [...document.querySelectorAll<HTMLElement>('[data-progress-failed]')].map(
     (el) => el.textContent ?? '',
   );
-const options = () => [
-  ...document.querySelectorAll<HTMLOptionElement>('[data-progress-jump] option'),
-];
-const marks = () =>
-  [...document.querySelectorAll<HTMLElement>('[data-progress-turn]')].map(
-    (b) => b.firstElementChild?.textContent ?? '',
-  );
+/**
+ * EACH TURN'S OWN MARK AND LABEL, OLDEST FIRST.
+ *
+ * These used to be read off the picker's `<option>`s and off the expanded turn
+ * list's rows -- two controls printing the same glyph from the same
+ * `turnMark`. Both went with the column's bar (the column draws every turn, so
+ * a list of turns to jump between was a second way to reach what is on
+ * screen), and the glyph is left where it always also was: on the turn's own
+ * condensed line, beside the turn it is about.
+ */
+const turnLines = () =>
+  [...document.querySelectorAll<HTMLElement>('[data-progress-turn-label]')].map((el) => ({
+    mark: el.firstElementChild?.textContent ?? '',
+    label: el.lastElementChild?.textContent ?? '',
+    markHidden: el.firstElementChild?.getAttribute('aria-hidden') === 'true',
+  }));
 
 afterEach(cleanup);
 
@@ -131,20 +141,32 @@ describe('the collapsed line reports failures it would otherwise fold away', () 
 });
 
 describe('a turn that errored carries its own mark', () => {
-  it('marks the errored turn apart from the answered ones in the picker', () => {
+  it('marks the errored turn apart from the answered ones, on its own line', () => {
     draw([turn('a', { errorCount: 2 }), turn('b', { errorCount: 0 })]);
-    const [newest, older] = options().map((o) => o.textContent ?? '');
-    // Oldest first in the list, so the clean turn `b` leads.
-    expect(newest?.startsWith('✓')).toBe(true);
-    expect(older?.startsWith('!')).toBe(true);
+    const [oldest, newest] = turnLines();
+    // Oldest first in the column, so the clean turn `b` leads.
+    expect(oldest?.mark).toBe('✓');
+    expect(newest?.mark).toBe('!');
+    // And each mark is beside the turn it is about -- which is the whole gain
+    // of the fold moving onto the turns: `!` on a session-wide control said
+    // only "something, somewhere".
+    expect(oldest?.label).toBe(turn('b').label);
+    expect(newest?.label).toBe(turn('a').label);
   });
 
-  it('marks it in the expanded list too, where the same glyphs are drawn', () => {
-    draw([turn('a', { errorCount: 1 }), turn('b')], {});
-    const expand = document.querySelector<HTMLButtonElement>('[data-progress-expand]');
-    if (expand === null) throw new Error('no expander to open the turn list with');
-    fireEvent.click(expand);
-    expect(marks()).toContain('!');
+  /**
+   * RE-POINTED. This case read the same glyph out of the second control that
+   * drew it -- the expanded turn list -- to pin that the two agreed. There is
+   * one place now, so agreement is not a claim that can be made; what CAN be,
+   * and could not before, is that the glyph is decoration and the label is the
+   * text: a screen reader that read "exclamation mark turn-a" would be reading
+   * the fold's shorthand rather than its meaning.
+   */
+  it('leaves the mark to the eye and the label to the screen reader', () => {
+    draw([turn('a', { errorCount: 1 }), turn('b')]);
+    const lines = turnLines();
+    expect(lines).toHaveLength(2);
+    for (const line of lines) expect(line.markHidden, line.label).toBe(true);
   });
 
   it('lets the failure outrank the still-working mark', () => {
@@ -152,12 +174,15 @@ describe('a turn that errored carries its own mark', () => {
     // problem. `◌` says only "not finished", which is the one reading that
     // would let the alarm collapse away.
     draw([turn('a', { output: null, errorCount: 1 }), turn('b')]);
-    expect(options().map((o) => o.textContent ?? '')).toContain(`! ${turn('a').label}`);
+    expect(turnLines()).toContainEqual({
+      mark: '!',
+      label: turn('a').label,
+      markHidden: true,
+    });
   });
 
   it('leaves a clean turn’s marks exactly as they were', () => {
     draw([turn('a', { output: null, errorCount: 0 }), turn('b', { errorCount: 0 })]);
-    const text = options().map((o) => (o.textContent ?? '').slice(0, 1));
-    expect(text).toEqual(['✓', '◌']);
+    expect(turnLines().map((l) => l.mark)).toEqual(['✓', '◌']);
   });
 });
