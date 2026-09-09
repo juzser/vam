@@ -123,6 +123,17 @@ for (const [session, bar] of [
   const { paneFill, found } = await darkerThanThePane();
   const bands = found.filter((f) => !f.fence);
   console.log(`  ${session}: pane ${paneFill}, ${found.length} darker fill(s)`);
+  // FIRST, THAT THERE IS A FILL AT ALL -- found by falsification, and it is
+  // the oldest trap in this repo: deleting `--vam-pane` from the stylesheet
+  // makes `bg-pane` resolve to nothing, the pane and every band inside it go
+  // transparent TOGETHER, and every "the band matches the pane" check below
+  // passes on two absences. A relative comparison cannot see a token that
+  // does not exist; only an absolute one can.
+  check(
+    `${session}: the pane paints an opaque fill of its own`,
+    /^rgb\(/.test(paneFill),
+    paneFill,
+  );
   for (const f of found) console.log(`    ${f.fill} ${f.area} ${f.what}${f.fence ? ' (fence)' : ''}`);
   check(
     `${session}: no band inside the pane is painted darker than the pane`,
