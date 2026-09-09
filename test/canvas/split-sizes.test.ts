@@ -32,10 +32,10 @@ import {
   removeTab,
   resizeSplit,
   restoreLayout,
-  setPaneSession,
-  singlePane,
   type Split,
   type SplitTree,
+  setPaneSession,
+  singlePane,
   splitPane,
   splitSizes,
 } from '../../src/renderer/canvas/split.js';
