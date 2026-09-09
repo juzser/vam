@@ -3,9 +3,7 @@
  *
  * Every section is wiring rather than invention: the theme is `prefs.theme`
  * and `applyTheme`, which shipped long ago with one toggle as their whole
- * interface; the layout section is a plain show/hide toggle per pane
- * (epic.md decision 5 — vam is two panes now, and there is nothing left to
- * pick a NAMED arrangement of); and the keyboard reference is
+ * interface; and the keyboard reference is
  * `buildKeySheet()`, the same generator the `?` sheet renders, so a row here
  * can only exist because a binding exists.
  *
@@ -34,7 +32,6 @@ import {
   normalizeKey,
 } from '../keyboard/chords.js';
 import { type BindingRow, buildBindingSheet } from '../keyboard/keysheet.js';
-import type { PaneVisibility } from '../prefs/panes.js';
 import {
   clearPalette,
   clearPaletteColor,
@@ -49,7 +46,6 @@ import {
   setKeyBindings,
   setOutFontSize,
   setPaletteColor,
-  setPaneVisibility,
   setTheme,
   type Theme,
 } from '../prefs/prefs.js';
@@ -441,48 +437,6 @@ export function SettingsOverlay({
             </Panel>
 
             <Panel
-              id="layout"
-              active={section === 'layout'}
-              hint="show or hide either pane — z0 brings both back"
-            >
-              <Block
-                label="panes"
-                hint="vam is the sidebar and the detail pane; either can be hidden, never both"
-              >
-                <div className="flex gap-1">
-                  <PaneToggle
-                    label="Sidebar"
-                    visible={prefs.paneVisibility.sidebar}
-                    // The last pane standing cannot be turned off: there is
-                    // nothing on screen left to turn it back on FROM.
-                    disabled={prefs.paneVisibility.sidebar && !prefs.paneVisibility.detail}
-                    onPick={() =>
-                      onChange(
-                        setPaneVisibility(prefs, {
-                          ...prefs.paneVisibility,
-                          sidebar: !prefs.paneVisibility.sidebar,
-                        }),
-                      )
-                    }
-                  />
-                  <PaneToggle
-                    label="Detail pane"
-                    visible={prefs.paneVisibility.detail}
-                    disabled={prefs.paneVisibility.detail && !prefs.paneVisibility.sidebar}
-                    onPick={() =>
-                      onChange(
-                        setPaneVisibility(prefs, {
-                          ...prefs.paneVisibility,
-                          detail: !prefs.paneVisibility.detail,
-                        }),
-                      )
-                    }
-                  />
-                </div>
-              </Block>
-            </Panel>
-
-            <Panel
               id="sessions"
               active={section === 'sessions'}
               hint="which agent a new session starts"
@@ -786,43 +740,6 @@ function Choice({
   );
 }
 
-/**
- * One pane's show/hide toggle — a pressed toggle, not a `Choice` radio: two
- * of these are independent booleans, not one selection among many, so
- * `aria-pressed` is the correct role rather than a borrowed one.
- *
- * `disabled` is the caller's job (it needs to know the OTHER pane's state,
- * which this component does not) — a disabled toggle still announces
- * `aria-pressed`, it just refuses the click, the same contract every other
- * disabled control in this file already keeps.
- */
-function PaneToggle({
-  label,
-  visible,
-  disabled,
-  onPick,
-}: {
-  readonly label: string;
-  readonly visible: boolean;
-  readonly disabled: boolean;
-  readonly onPick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      data-pane-toggle={label}
-      aria-pressed={visible}
-      disabled={disabled}
-      onClick={onPick}
-      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-[12px] disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING} ${
-        visible ? 'border-line-loudest bg-raised text-ink' : 'border-line text-ink-dim'
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
-
 /** What an action is called, read off the same rows the editor renders. */
 function labelFor(overrides: KeyBindings, id: string): string {
   for (const group of buildBindingSheet(overrides)) {
@@ -1062,7 +979,7 @@ function Stepper({
             as a thicker border rather than as a cursor. */}
         {/* One tab stop, the field: the arrows do by keyboard what these do by
             mouse, which is the ARIA spinbutton pattern and the roving idiom the
-            nav and the layout picker already use in this overlay. */}
+            nav already uses in this overlay. */}
         <button
           type="button"
           tabIndex={-1}

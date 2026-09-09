@@ -16,12 +16,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
 import { PaneResizer } from '../../src/renderer/panels/PaneResizer.js';
-import {
-  ALL_VISIBLE,
-  DETAIL_MIN,
-  renderedWidth,
-  SIDEBAR_MAX,
-} from '../../src/renderer/prefs/panes.js';
+import { DETAIL_MIN, renderedWidth, SIDEBAR_MAX } from '../../src/renderer/prefs/panes.js';
 import {
   EMPTY_PREFS,
   readPrefs,
@@ -42,7 +37,6 @@ describe('PaneResizer', () => {
       <PaneResizer
         pane="sidebar"
         ariaLabel="resize sessions panel"
-        layout={ALL_VISIBLE}
         stored={{ sidebar: 264, detail: 408 }}
         viewportWidth={1400}
         onChange={noop}
@@ -53,7 +47,6 @@ describe('PaneResizer', () => {
       <PaneResizer
         pane="detail"
         ariaLabel="resize detail panel"
-        layout={ALL_VISIBLE}
         stored={{ sidebar: 264, detail: 408 }}
         viewportWidth={1400}
         onChange={noop}
@@ -80,7 +73,6 @@ describe('PaneResizer', () => {
       <PaneResizer
         pane="sidebar"
         ariaLabel="resize sessions panel"
-        layout={ALL_VISIBLE}
         stored={{ sidebar: 264, detail: 408 }}
         viewportWidth={1400}
         onChange={(_, w) => changes.push(w)}
@@ -117,7 +109,6 @@ describe('PaneResizer', () => {
       <PaneResizer
         pane="sidebar"
         ariaLabel="resize sessions panel"
-        layout={ALL_VISIBLE}
         stored={{ sidebar: 264, detail: 408 }}
         viewportWidth={1400}
         onChange={noop}
@@ -231,7 +222,6 @@ describe('DetailPanel active-pane signal survives with the handle mounted (AC-6 
         <PaneResizer
           pane="detail"
           ariaLabel="resize detail panel"
-          layout={ALL_VISIBLE}
           stored={{ sidebar: 264, detail: 408 }}
           viewportWidth={1400}
           onChange={noop}
@@ -272,7 +262,6 @@ describe('PaneResizer defensive guards (branch coverage)', () => {
       <PaneResizer
         pane="sidebar"
         ariaLabel="resize sessions panel"
-        layout={ALL_VISIBLE}
         stored={{ sidebar: 264, detail: 408 }}
         viewportWidth={1400}
         onChange={(_, w) => changes.push(w)}
@@ -293,11 +282,9 @@ describe('PaneResizer defensive guards (branch coverage)', () => {
 });
 
 /**
- * A12.1: the three named `LAYOUTS` this block used to drag against
- * (`focusResponse`, `noCanvas`, plus the shipped `ALL_VISIBLE`) are gone
- * with the canvas column whose reservation they varied — there is now
- * exactly one visibility shape's worth of arithmetic, and it is already
+ * A12.1 retired the three named `LAYOUTS` this block used to drag against;
+ * the `layout` prop that replaced them is gone too, with the settings
+ * section that was the only thing able to set it. The arithmetic is
  * exercised exhaustively (including the sidebar's live drag ceiling) by
  * `test/prefs/panes.test.ts` and the "Canvas wiring" describe block above.
- * A layout-dependent reservation test has nothing left to vary.
  */

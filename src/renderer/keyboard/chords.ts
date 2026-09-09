@@ -358,10 +358,10 @@ const AFTER_Y: Readonly<Record<string, KeyAction>> = {
  * `z` is vim's "adjust the view" namespace. The three named layouts that used
  * to live here (`zc`/`zC`/`zf`) hid or reordered the canvas column, and the
  * canvas is gone (A12.1, epic.md decision 5) — `c`, `C` and `f` are free.
- * `z0` survives: with exactly two panes there is still a "put it back" key,
- * restoring both panes' visibility and their default widths in one press —
- * see the `resetPanes` handler in `Canvas.tsx` for why that is one idea, not
- * two.
+ * `z0` survives as the "put it back" key. It restores the two panes' default
+ * WIDTHS and nothing else — the visibility it also used to restore went with
+ * the settings section that was the only way to lose it (see the `resetPanes`
+ * handler in `Canvas.tsx`).
  *
  * A15.1 spends four more letters here on split panes, in vim's own window
  * spelling: `s`/`v` split (horizontal/vertical), `c` closes the focused

@@ -94,7 +94,7 @@ import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
-import { ALL_VISIBLE, DEFAULT_PANES, layoutWidths, PANE_RESIZE_STEP } from '../prefs/panes.js';
+import { DEFAULT_PANES, layoutWidths, PANE_RESIZE_STEP } from '../prefs/panes.js';
 import {
   addProjectToGroup,
   applyIcons,
@@ -119,7 +119,6 @@ import {
   setGroupIcon,
   setIcon,
   setLastFocus,
-  setPaneVisibility,
   setPaneWidth,
   setProjectHidden,
   setProjectIcon,
@@ -424,23 +423,6 @@ function useUsageSnapshot(getUsage: (() => Promise<UsageSnapshot>) | undefined):
 }
 
 /**
- * The three columns, mounted or not.
- *
- * Wrappers around the call sites rather than a guard inside SessionList and
- * DetailPanel: both panels open with hooks, so an early `return null` inside
- * them would be a conditional hook. A wrapper never creates the component at
- * all, which is what "unmounted" has to mean — a display:none pane is still a
- * pane, still measured, and still findable by every query that should now miss.
- *
- * A hidden pane's children are still BUILT (JSX is evaluated at the call
- * site) — they are plain element objects, never rendered, so nothing in them
- * mounts, subscribes or measures.
- */
-function SidebarSlot({ show, ...props }: ComponentProps<typeof SessionList> & { show: boolean }) {
-  return show ? <SessionList {...props} /> : null;
-}
-
-/**
  * The detail pane's own column: the tab strip along its top edge, and
  * `DetailPanel` filling the rest — A12.1's "a tab IS that session's detail
  * pane", not a strip above a separate column.
@@ -451,26 +433,24 @@ function SidebarSlot({ show, ...props }: ComponentProps<typeof SessionList> & { 
  * toolbar above `DetailPanel` cannot render a different width than the pane
  * below it.
  *
- * `DetailPanel` is still mounted only while `show` is true, for the same
- * "unmounted is not display:none" reason `SidebarSlot` gives: it opens with
- * hooks, so an early return inside it would be a conditional hook, and a
- * wrapper is what keeps this a real unmount rather than a hidden pane still
- * measured and still findable by every query that should now miss it.
+ * The `show` prop this and the sidebar's own `SidebarSlot` wrapper used to
+ * take is gone with the settings section that was its only writer: both
+ * panes are always drawn now, so the wrappers were guarding a state nothing
+ * could reach. `SidebarSlot` existed only for that guard and is deleted;
+ * `SessionList` is rendered directly.
  */
 function DetailColumn({
-  show,
   width,
   children,
 }: {
-  readonly show: boolean;
   readonly width: number;
   readonly children: ReactNode;
 }) {
-  return show ? (
+  return (
     <div data-detail-pane className="relative flex min-w-0 flex-col" style={{ width }}>
       {children}
     </div>
-  ) : null;
+  );
 }
 
 /** A15.2: the strip is chrome, not content — `h-9` (36px) is the shortest
@@ -1006,10 +986,6 @@ function CanvasInner({
 
   const storedSidebar = liveWidths.sidebar ?? prefs.panes.sidebar;
   const storedDetail = liveWidths.detail ?? prefs.panes.detail;
-  // Visibility is read here and passed down, never asked of a child: which
-  // panes exist is a fact about the layout, and `layoutWidths` is the one
-  // place that knows an unmounted pane owes its sibling nothing.
-  const visible = prefs.paneVisibility;
   /**
    * Which shell this viewport gets. `false` wherever `matchMedia` is missing,
    * so every environment without one -- jsdom, happy-dom, the tests -- keeps
@@ -1018,7 +994,6 @@ function CanvasInner({
   const phone = usePhoneViewport();
 
   const { sidebar: sidebarWidth, detail: detailWidth } = layoutWidths(
-    visible,
     { sidebar: storedSidebar, detail: storedDetail },
     viewportWidth,
   );
@@ -3269,10 +3244,6 @@ function CanvasInner({
            * below already does for an out-of-range row.
            */
           if (mode === 'insert') {
-            if (!visible.detail) {
-              setStatus('the detail pane is hidden — z0 brings it back');
-              return;
-            }
             // THROUGH `tabForDigit`, the one place a digit becomes a name,
             // and the same derivation `Alt+<digit>` already uses. Two
             // mistakes have lived on this line: counting the CONSTANT while
@@ -3367,14 +3338,6 @@ function CanvasInner({
         case 'focusAction':
           if (focusedEntry === null) {
             setStatus('pick a session first');
-            return;
-          }
-          // The second half of the action-parity invariant: the cursor may
-          // only enter a pane that is DRAWN. Without this, `I` sets 'action' on an
-          // unmounted detail pane and every `j`/`k`/Enter after it walks and
-          // fires actions nothing is showing.
-          if (!visible.detail) {
-            setStatus('the detail pane is hidden — z0 brings it back');
             return;
           }
           setMode('insert');
@@ -3473,32 +3436,25 @@ function CanvasInner({
           // so the sign flips. In Select it is the sidebar's own edge, sign
           // unchanged — the same `pane` state `I`/`H` already set decides
           // which (epic.md §4.5).
-          if (!visible.sidebar) {
-            setStatus('the sidebar is hidden — z0 brings it back');
-            return;
-          }
           const sign = mode === 'insert' ? -1 : 1;
           const step = action.delta * sign * PANE_RESIZE_STEP;
           savePrefs(setPaneWidth(prefs, 'sidebar', prefs.panes.sidebar + step));
           return;
         }
         case 'resetPanes':
-          // `z0` restores VISIBILITY as well as the two widths. It is the only
-          // "put it back" key, and the person most likely to press it is the
-          // one who just hid the wrong pane and cannot see the chord table any
-          // more — so the narrow reading ("widths only") would answer that
-          // person with a layout that still has a column missing, and set both
-          // widths they cannot see while it did. Restoring the shipped layout
-          // is one idea, not two.
+          // `z0` is a WIDTH reset now, and only that. It used to restore
+          // visibility as well, because the person most likely to press it
+          // was the one who had just hidden the wrong pane and could no
+          // longer see the chord table. Nothing can hide a pane any more
+          // (the settings section that could is gone), so there is no
+          // visibility left to lose and none to put back: the two widths
+          // are the whole of what `z0` undoes.
           setMode('select');
           savePrefs(
-            setPaneVisibility(
-              setPaneWidth(
-                setPaneWidth(prefs, 'sidebar', DEFAULT_PANES.sidebar),
-                'detail',
-                DEFAULT_PANES.detail,
-              ),
-              ALL_VISIBLE,
+            setPaneWidth(
+              setPaneWidth(prefs, 'sidebar', DEFAULT_PANES.sidebar),
+              'detail',
+              DEFAULT_PANES.detail,
             ),
           );
           return;
@@ -3600,7 +3556,6 @@ function CanvasInner({
     prefs,
     savePrefs,
     terminalTab,
-    visible,
     overlayOpen,
     openSessionIconPicker,
     splitFocused,
@@ -3765,22 +3720,19 @@ function CanvasInner({
 
   // Memoised for the same reason as the callbacks above: a JSX element
   // literal is a fresh object every render, and `resizeHandle` is one of
-  // `SessionListProps`' members. `visible` is `prefs.paneVisibility` itself
-  // now that there is no viewport-dependent layout swap to give it a second
-  // identity, so this stays stable across a re-render that changed nothing.
+  // `SessionListProps`' members.
   const sidebarResizeHandle = useMemo(
     () => (
       <PaneResizer
         pane="sidebar"
         ariaLabel="resize sessions panel"
-        layout={visible}
         stored={{ sidebar: storedSidebar, detail: storedDetail }}
         viewportWidth={viewportWidth}
         onChange={onPaneChange}
         onCommit={onPaneCommit}
       />
     ),
-    [visible, storedSidebar, storedDetail, viewportWidth, onPaneChange, onPaneCommit],
+    [storedSidebar, storedDetail, viewportWidth, onPaneChange, onPaneCommit],
   );
 
   /**
@@ -3807,9 +3759,7 @@ function CanvasInner({
     // The line at this column's top edge, off the SAME `mode` the status
     // bar's word reads. Select is the sidebar's mode and only the
     // sidebar's -- the canvas is a view, not a place the keyboard goes, so
-    // no other column takes this. A hidden column is not rendered at all,
-    // so it needs no second test against `visible` here either -- the slot
-    // already is that test.
+    // no other column takes this.
     entries: entries,
     loading: sidebarLoading,
     // The UNFILTERED set, for the two things about removing a project
@@ -4186,7 +4136,7 @@ function CanvasInner({
           place entirely, so nothing here mounts a pane it also draws. */}
       {!phone && (
         <div className="flex min-h-0 flex-1">
-          <SidebarSlot show={visible.sidebar} {...sidebarProps} />
+          <SessionList {...sidebarProps} />
           {/* A12.1: the tab strip is the top of the detail pane's OWN
               column, not a strip above a separate middle column — there is
               no middle column any more. The source readout that used to
@@ -4194,7 +4144,7 @@ function CanvasInner({
               moved to the status bar, the one place already on screen
               whether or not a session is focused, so "is vam connected" is
               never something the tab row alone had to say. */}
-          <DetailColumn show={visible.detail} width={detailWidth}>
+          <DetailColumn width={detailWidth}>
             <SplitLayout tree={panes} renderLeaf={renderLeaf} />
           </DetailColumn>
         </div>

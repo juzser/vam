@@ -161,7 +161,7 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
     group: 'panes',
     label: (a) => (a.delta === 1 ? 'widen the pane' : 'narrow the pane'),
   },
-  resetPanes: { group: 'panes', label: () => 'reset both side panes' },
+  resetPanes: { group: 'panes', label: () => 'reset both pane widths' },
   splitPane: {
     group: 'panes',
     label: (a) =>

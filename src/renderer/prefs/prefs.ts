@@ -26,13 +26,7 @@ import type { CanvasModel, SourceId } from '../domain/model.js';
 import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
 import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/chords.js';
 import { setActiveProvider } from '../sources/provider.js';
-import {
-  ALL_VISIBLE,
-  clampPaneWidth,
-  DEFAULT_PANES,
-  type Pane,
-  type PaneVisibility,
-} from './panes.js';
+import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
 
 const KEY = 'vam.prefs.v1';
 
@@ -176,14 +170,6 @@ export type Prefs = {
    * that already exempts `theme` (epic.md §4.1).
    */
   readonly panes: { readonly sidebar: number; readonly detail: number };
-  /**
-   * Which panes are drawn. NEXT TO `panes`, not inside it: a width is a
-   * number every path already clamps into `[MIN, MAX]`, and folding "not
-   * drawn" into that number would mean unpicking the clamp that keeps a
-   * garbage width from rendering as a pane that has vanished. Same TTL
-   * exemption as `panes` and `theme`, for the same reason.
-   */
-  readonly paneVisibility: PaneVisibility;
   /**
    * Source id → project id → the emoji you gave that project's heading.
    *
@@ -379,7 +365,6 @@ export const EMPTY_PREFS: Prefs = {
   icons: {},
   theme: DEFAULT_THEME,
   panes: DEFAULT_PANES,
-  paneVisibility: ALL_VISIBLE,
   projectIcons: {},
   projectNames: {},
   filters: DEFAULT_SESSION_FILTERS,
@@ -461,7 +446,6 @@ function parsePrefs(
   const record = parsed as {
     icons?: unknown;
     panes?: unknown;
-    paneVisibility?: unknown;
     projectIcons?: unknown;
     projectNames?: unknown;
     filters?: unknown;
@@ -495,11 +479,6 @@ function parsePrefs(
     // field (today's shipped payloads have none), a non-object, or garbage
     // numbers left by devtools or an older vam.
     panes: readPanes(record.panes),
-    // Per FIELD again, which is the whole reason this sits beside `panes`
-    // rather than in it: every payload already in a browser has no
-    // `paneVisibility` key at all, and each of those reads back as "all three
-    // panes are drawn" without a version number or a migration.
-    paneVisibility: readPaneVisibility(record.paneVisibility),
     // Same TTL as session icons, same reasoning: a project's glyph is not
     // worth remembering forever either. Same old-id migration too -- a
     // project's glyph is keyed by source exactly like a session's is.
@@ -1010,32 +989,6 @@ function readPanes(raw: unknown): Prefs['panes'] {
     sidebar: readPaneWidth('sidebar', sidebar),
     detail: readPaneWidth('detail', detail),
   };
-}
-
-/**
- * A missing or garbage field means "drawn", per field: the safe direction to
- * fail is showing a pane you wanted hidden, never hiding one you did not.
- *
- * A 0.1 payload carries `canvas` and `order` too — the reservation and the
- * column sequence a three-column shell needed. Both are simply not read: per
- * field, like every other preference here, an unknown key is not an error,
- * it is a key this version has nothing to say about (epic.md A4.1 — dropped
- * fields need no migration, they sit unread and are gone on the next save).
- */
-function readPaneVisibility(raw: unknown): PaneVisibility {
-  const { sidebar, detail } = (typeof raw === 'object' && raw !== null ? raw : {}) as {
-    sidebar?: unknown;
-    detail?: unknown;
-  };
-  return {
-    sidebar: sidebar !== false,
-    detail: detail !== false,
-  };
-}
-
-/** Written by the settings overlay's pane toggles. */
-export function setPaneVisibility(prefs: Prefs, paneVisibility: PaneVisibility): Prefs {
-  return { ...prefs, paneVisibility };
 }
 
 /** `clampPaneWidth` is already total, so a non-number falls through to `NaN`

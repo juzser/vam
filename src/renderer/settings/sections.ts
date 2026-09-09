@@ -6,14 +6,16 @@
  *
  * 0.2 migration, A12.1: the layout-diagram machinery that used to live here
  * (`diagramColumns`, `canvasDots`, `WEIGHTS`, `DISPLAY_RANK`,
- * `LAYOUT_DESCRIPTION`, `LAYOUT_CHOICES`, `layoutOf`) is gone with its only
+ * `LAYOUT_DESCRIPTION`, `LAYOUT_CHOICES`, `layoutOf`) went with its only
  * caller, `LayoutPicker.tsx` — the three named layouts it drew a picture of
- * were canvas presets, and the canvas is gone (epic.md decision 5). The
- * `layout` section now holds a plain show/hide toggle per pane instead (see
- * `SettingsOverlay.tsx`), which needs no geometry.
+ * were canvas presets, and the canvas is gone (epic.md decision 5). What
+ * replaced it, a show/hide toggle per pane, is gone too at the operator's
+ * request: with two panes and no canvas there was nothing worth hiding, and
+ * the toggles were the only way to reach a state `z0` then had to rescue
+ * people from. `PaneVisibility` went with them (`prefs/panes.ts`).
  */
 
-import { Bot, Columns3, Keyboard, type LucideIcon, Palette, Smartphone } from 'lucide-react';
+import { Bot, Keyboard, type LucideIcon, Palette, Smartphone } from 'lucide-react';
 import {
   type BindingGroup,
   type BindingRow,
@@ -22,7 +24,7 @@ import {
   MODE_TITLES,
 } from '../keyboard/keysheet.js';
 
-export type SectionId = 'appearance' | 'layout' | 'sessions' | 'remote' | 'keyboard';
+export type SectionId = 'appearance' | 'sessions' | 'remote' | 'keyboard';
 
 /**
  * The order is hard-coded and never sorted: a nav that reorders under the
@@ -36,7 +38,6 @@ export const SECTIONS: readonly {
   readonly Icon: LucideIcon;
 }[] = [
   { id: 'appearance', label: 'Appearance', Icon: Palette },
-  { id: 'layout', label: 'Layout', Icon: Columns3 },
   // Before Keyboard rather than after it: Keyboard is the reference section
   // and the longest, and a list that ends in a reference reads as a list that
   // ended. Nothing else depends on the position.

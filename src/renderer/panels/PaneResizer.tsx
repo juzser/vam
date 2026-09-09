@@ -27,7 +27,6 @@ import {
   layoutWidths,
   PANE_RESIZE_STEP,
   type Pane,
-  type PaneVisibility,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
 } from '../prefs/panes.js';
@@ -41,17 +40,14 @@ export type PaneResizerProps = {
   readonly pane: Pane;
   readonly ariaLabel: string;
   /**
-   * The layout being dragged in, and both stored widths — not this pane's
-   * rendered width and its sibling's.
+   * Both stored widths — not this pane's rendered width and its sibling's.
    *
-   * A drag is not "clamp this pane against a fixed sibling": in every layout
-   * where the canvas is not the main column the sibling is DERIVED from this
-   * pane, so a sibling held fixed for the drag is a sidebar that cannot move.
-   * The resizer therefore proposes a stored width and asks `layoutWidths` what
-   * that layout would render — the same call the canvas itself makes, so the
-   * handle cannot disagree with the columns it is moving.
+   * A drag is not "clamp this pane against a fixed sibling": the detail pane
+   * is DERIVED from the sidebar, so a sibling held fixed for the drag is a
+   * sidebar that cannot move. The resizer therefore proposes a stored width
+   * and asks `layoutWidths` what would render — the same call the shell
+   * itself makes, so the handle cannot disagree with the columns it moves.
    */
-  readonly layout: PaneVisibility;
   readonly stored: { readonly sidebar: number; readonly detail: number };
   readonly viewportWidth: number;
   /** Fired on every pointermove while dragging, with the arithmetic result. */
@@ -71,8 +67,8 @@ const SIDE: Readonly<Record<Pane, string>> = {
 };
 
 export function PaneResizer(props: PaneResizerProps) {
-  const { pane, ariaLabel, layout, stored, viewportWidth, onChange, onCommit } = props;
-  const width = layoutWidths(layout, stored, viewportWidth)[pane];
+  const { pane, ariaLabel, stored, viewportWidth, onChange, onCommit } = props;
+  const width = layoutWidths(stored, viewportWidth)[pane];
   const bounds = BOUNDS[pane];
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -84,9 +80,9 @@ export function PaneResizer(props: PaneResizerProps) {
       // it; the detail pane's handle sits on its left edge, so dragging left
       // (a negative delta) is what grows it.
       const raw = pane === 'sidebar' ? startWidth + delta : startWidth - delta;
-      return layoutWidths(layout, { ...stored, [pane]: raw }, viewportWidth)[pane];
+      return layoutWidths({ ...stored, [pane]: raw }, viewportWidth)[pane];
     },
-    [pane, layout, stored, viewportWidth],
+    [pane, stored, viewportWidth],
   );
 
   function onPointerDown(event: React.PointerEvent<HTMLHRElement>) {
@@ -163,17 +159,11 @@ export function PaneResizer(props: PaneResizerProps) {
       }
       case 'Home':
         event.preventDefault();
-        onCommit(
-          pane,
-          layoutWidths(layout, { ...stored, [pane]: bounds.min }, viewportWidth)[pane],
-        );
+        onCommit(pane, layoutWidths({ ...stored, [pane]: bounds.min }, viewportWidth)[pane]);
         return;
       case 'End':
         event.preventDefault();
-        onCommit(
-          pane,
-          layoutWidths(layout, { ...stored, [pane]: bounds.max }, viewportWidth)[pane],
-        );
+        onCommit(pane, layoutWidths({ ...stored, [pane]: bounds.max }, viewportWidth)[pane]);
         return;
       default:
         return;
