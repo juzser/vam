@@ -14,6 +14,7 @@
  * unexpected -- an unhandled rejection must never escape into main.
  */
 
+import type { HistoryCursor, TranscriptPage } from '../../shared/history.js';
 import type { MainSource } from '../sources/source.js';
 import { CHANNELS, type IpcResult, type SourceError } from './channels.js';
 
@@ -104,6 +105,17 @@ const isOptionalText = (value: unknown): boolean => value === undefined || isTex
 const isOptionalBool = (value: unknown): boolean =>
   value === undefined || typeof value === 'boolean';
 
+/**
+ * A history cursor: a turn id, a token a previous page handed back, or NULL --
+ * "from the newest end". `null` is admitted explicitly rather than left to
+ * `isOptionalText`'s `undefined`, because it is what the renderer sends for the
+ * first step back and a validator that only tolerated `undefined` would refuse
+ * every opening request. `isText`'s bound applies to the other two: the cursor
+ * arrives from the least trusted process in the app.
+ */
+const isCursor = (value: unknown): boolean =>
+  value === undefined || value === null || isText(value);
+
 /** What each argumentful channel accepts, positionally. Arity is part of it. */
 const ARGUMENTS: Record<string, readonly ((value: unknown) => boolean)[]> = {
   [CHANNELS.recordPrompt]: [isText, isPromptText],
@@ -111,6 +123,7 @@ const ARGUMENTS: Record<string, readonly ((value: unknown) => boolean)[]> = {
   [CHANNELS.closeSession]: [isText, isOptionalBool],
   [CHANNELS.createSession]: [isText, isText, isOptionalText],
   [CHANNELS.createSessionIn]: [isDirectoryPath, isText, isOptionalText],
+  [CHANNELS.sessionHistory]: [isText, isCursor],
   [CHANNELS.applyWaivers]: [isText, isTextList],
   [CHANNELS.transitionLesson]: [isText, isText, isText],
 };
@@ -166,6 +179,41 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
   ipcMain.handle(
     CHANNELS.load,
     answer(() => source.load()),
+  );
+
+  /**
+   * Scrolling back through one session.
+   *
+   * Registered on its own rather than in the gated loop below for two reasons
+   * it does not share with any of them: it RETURNS A VALUE (the loop's members
+   * all answer `void` or a refusal), and it is not gated by a capability
+   * boolean -- `TranscriptPage` carries the source's own words for "this one
+   * cannot page" in its `unavailable` arm, which is what `sources/source.ts`
+   * explains and what keeps a thirteenth flag out of `SourceCapabilities`.
+   */
+  ipcMain.handle(
+    CHANNELS.sessionHistory,
+    async (_event, ...args): Promise<IpcResult<TranscriptPage>> => {
+      const invalid = validate(CHANNELS.sessionHistory, args);
+      if (invalid !== null) {
+        return { ok: false, error: invalid };
+      }
+      const read = source.readHistory;
+      if (read === undefined) {
+        return {
+          ok: false,
+          error: refused(
+            'unsupported:history',
+            'this source cannot read earlier parts of a session; it serves only what it already loaded',
+          ),
+        };
+      }
+      // `answer` wraps only the UNEXPECTED. A source resolving to the page
+      // type's own `unavailable` arm has answered, so that travels as `ok`.
+      return await answer<TranscriptPage>(() =>
+        read(args[0] as string, (args[1] ?? null) as HistoryCursor | null),
+      )();
+    },
   );
 
   const { capabilities, declines } = source.descriptor;

@@ -344,6 +344,53 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
   );
   read('/api/load', async () => await options.source.load());
 
+  /**
+   * SCROLLING BACK, and it is registered as a READ -- before the `allowWrites`
+   * return below, so a server started read-only still carries it.
+   *
+   * POST only because it takes a body, not because it changes anything: it
+   * opens one transcript file and reads a window of it. This is the surface
+   * vam's phone access exists for (`tailscale serve` in front of this server),
+   * so leaving it out would have made the feature desktop-only in practice
+   * while looking wired.
+   *
+   * The answer is the page type itself, `unavailable` arm included -- the
+   * source already turned "could not read" into words, and this route forwards
+   * them whole rather than flattening them into a status code.
+   */
+  table.set('/api/history', {
+    method: 'POST',
+    route: async (_request, response, { body }) => {
+      if (!isText(body.sessionId) || !(body.cursor === null || isOptionalText(body.cursor))) {
+        send(response, 400, {
+          ok: false,
+          error: { kind: 'refused', code: 'invalid-payload', message: 'history: wrong shape' },
+        });
+        return;
+      }
+      const read = options.source.readHistory;
+      if (read === undefined) {
+        send(response, 200, {
+          ok: true,
+          value: {
+            kind: 'unavailable',
+            error: {
+              kind: 'refused',
+              code: 'unsupported:history',
+              message: 'this source cannot read earlier parts of a session',
+            },
+          },
+        });
+        return;
+      }
+      send(
+        response,
+        200,
+        await envelope(async () => await read(body.sessionId as string, (body.cursor ?? null) as string | null)),
+      );
+    },
+  });
+
   table.set('/api/stream', { method: 'GET', route: stream(options) });
 
   if (!options.allowWrites) {

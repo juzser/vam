@@ -81,6 +81,12 @@ function makeApi(descriptor: SourceDescriptor): PreloadSourceApi {
     createSession: vi.fn(async () => undefined),
     createSessionIn: vi.fn(async () => undefined),
     pickImageAttachment: vi.fn(async () => null),
+    history: vi.fn(async () => ({
+      kind: 'page' as const,
+      turns: [],
+      cursor: null,
+      reachedStart: true,
+    })),
     applyWaivers: vi.fn(async () => undefined),
     transitionLesson: vi.fn(async () => undefined),
   };

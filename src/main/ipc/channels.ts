@@ -26,6 +26,19 @@ export const CHANNELS = {
    * different way.
    */
   createSessionIn: 'vam:source:create-session-in',
+  /**
+   * SCROLLING BACK through one session: the turns before a point, read on
+   * demand. Distinct from `load`, which reads a fixed tail of every live
+   * session on a ten-second poll and must stay that cheap -- the median
+   * transcript here is three times that tail, and the largest is 157 MB.
+   *
+   * It answers through the `IpcResult` envelope like every channel above, and
+   * `TranscriptPage` carries an `unavailable` arm of its own besides. That is
+   * not two ways to say one thing: the envelope's arm is for a request main
+   * could not even validate, and the preload folds it into the page type's own
+   * arm so a caller has exactly one shape to draw (`preload/api.ts`).
+   */
+  sessionHistory: 'vam:session:history',
   applyWaivers: 'vam:source:apply-waivers',
   transitionLesson: 'vam:source:transition-lesson',
   /**

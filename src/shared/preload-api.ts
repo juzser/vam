@@ -39,6 +39,7 @@
  */
 
 import type { Project, SourceId } from '../renderer/domain/model.js';
+import type { HistoryCursor, TranscriptPage } from './history.js';
 import type {
   SessionSource,
   SourceCapabilities,
@@ -83,6 +84,26 @@ export type PreloadSourceApi = {
    * `main/dialog/attach-image.ts` for why this crosses into main at all.
    */
   pickImageAttachment(sessionId: string): Promise<string | null>;
+  /**
+   * The turns BEFORE a point in one session -- scrolling back, which `load()`
+   * deliberately cannot do (it reads a fixed tail per session so a ten-second
+   * poll stays cheap).
+   *
+   * A MEMBER OF THIS API RATHER THAN A BRIDGE NAMESPACE OF ITS OWN, and that
+   * is the load-bearing choice: this type is the ONE protocol both transports
+   * implement -- `preload/api.ts` over `ipcRenderer.invoke` and
+   * `renderer/sources/http-factory.ts` over `fetch`. vam's phone access is
+   * `tailscale serve` in front of the remote server, so a member added beside
+   * `terminal` or `dialog` instead would exist on the desktop and silently not
+   * exist on the surface scrolling back was asked for.
+   *
+   * IT DOES NOT REJECT. Every other member here rejects with a `SourceError`;
+   * this one resolves to a `TranscriptPage`, whose `unavailable` arm carries
+   * the same error. One shape for a caller to draw, because "vam could not
+   * read" and "there is nothing older" are the two answers that must never be
+   * confused and a forgotten `catch` would confuse them.
+   */
+  history(sessionId: string, cursor: HistoryCursor | null): Promise<TranscriptPage>;
   applyWaivers(sessionId: string, findingIds: readonly string[]): Promise<void>;
   transitionLesson(sessionId: string, lessonId: string, status: string): Promise<void>;
 };

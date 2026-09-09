@@ -13,11 +13,18 @@
  * module does not offer a second opinion that could disagree with it.
  *
  * WHY ONLY A TAIL. A transcript is an append-only JSONL log and the operator's
- * largest is 165 MB / 75k lines. Nothing here needs the beginning: the branch,
+ * largest is 157 MB. Nothing the CANVAS draws needs the beginning: the branch,
  * the title, the newest turns and the current tool call are all re-stated near
  * the end. So this function is written to work on a byte suffix and to
  * tolerate the consequences of one -- a first line cut mid-token, and a window
  * that may open in the middle of a turn whose prompt is off-screen.
+ *
+ * IT IS NO LONGER ONLY A TAIL. `history.ts` runs this same function over EARLIER
+ * windows of the same file, on demand, so the operator can scroll back through
+ * a session the tail shows a third of. That is why the window's own position
+ * is now an argument (`windowStart`) rather than an unknown: identity has to
+ * survive the window moving, and nothing on the line that opens a turn is both
+ * present and constant across the window's possible cuts. See `turnFingerprint`.
  *
  * The type-only import of the renderer's model is required: main may name the
  * renderer's types, never load its code.
@@ -81,19 +88,39 @@ export const EMPTY_FACTS: TranscriptFacts = {
 
 type Line = Record<string, unknown>;
 
+/** One parsed line, and where in the FILE it begins. */
+type Located = {
+  readonly line: Line;
+  /**
+   * The absolute byte offset of this line, or `null` when the caller did not
+   * say where its window begins -- see `summarizeTranscript`'s `windowStart`.
+   */
+  readonly start: number | null;
+};
+
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 
-function parseLines(tail: string): Line[] {
-  const out: Line[] = [];
-  // The first line of a byte suffix is almost always a fragment. It is not
-  // special-cased -- it simply fails to parse, like any other damaged line.
+function parseLines(tail: string, windowStart: number | null): Located[] {
+  const out: Located[] = [];
+  // Offsets are counted in BYTES, not characters: one emoji in a prompt would
+  // otherwise put every line after it in the wrong place, and an id minted
+  // from the wrong place is exactly the bug this counting exists to fix.
+  //
+  // The count is only sound because the caller hands over a window that begins
+  // on a whole line (`window.ts`); a leading fragment would decode to U+FFFD
+  // and re-encode to a different length. A caller that cannot promise that
+  // passes `null` and gets the content-derived id below instead.
+  let at = 0;
   for (const raw of tail.split('\n')) {
+    const start = windowStart === null ? null : windowStart + at;
+    at += Buffer.byteLength(raw, 'utf8') + 1;
     if (raw.trim() === '') continue;
     try {
       const value: unknown = JSON.parse(raw);
-      if (typeof value === 'object' && value !== null) out.push(value as Line);
+      if (typeof value === 'object' && value !== null) out.push({ line: value as Line, start });
     } catch {
-      // A partial or non-JSON line is data we do not have, not an error.
+      // A partial or non-JSON line is data we do not have, not an error. The
+      // LAST line of a tail is routinely one: the file is being appended to.
     }
   }
   return out;
@@ -173,7 +200,9 @@ export function compactAge(ms: number): string {
 }
 
 /**
- * A short, content-derived fingerprint of a turn's own prompt.
+ * A short, content-derived fingerprint of a turn's own prompt. THE FALLBACK
+ * identity, used only when the caller cannot say where its window begins;
+ * `idOf` below prefers the turn's absolute position and explains why.
  *
  * WHY CONTENT, NOT POSITION. `id` used to be `${prefix}:${index}`, counted
  * from the newest end of the kept window -- so appending one turn shifted
@@ -181,36 +210,24 @@ export function compactAge(ms: number): string {
  * on the next poll. That was invisible while nothing remembered an id
  * across two parses of the file; it stopped being invisible the moment the
  * detail panel let an operator sit on a historical turn and the canvas's own
- * step focus does the equivalent by slot. Position counted from the START of
- * the file is not available either -- this function is handed only a byte
- * SUFFIX (`source.ts`'s `TAIL_BYTES`), so it has no absolute anchor to count
- * from. The one thing every turn genuinely owns, independent of where the
- * window happens to be cut, is its own prompt -- so identity is derived from
- * that instead of from a place in a list.
+ * step focus does the equivalent by slot. The one thing every turn genuinely
+ * owns, independent of where the window happens to be cut, is its own prompt
+ * -- so identity is derived from that instead of from a place in a list.
  *
  * WHY A HASH OF `input` ALONE IS NOT ENOUGH: two turns can carry the exact
  * same words (an operator resending "continue"), so this is combined with
  * `idOf`'s own rank -- the count of same-fingerprint turns strictly BEFORE
  * this one, oldest-first, within THIS SAME PARSE. Ranking from the oldest
- * end rather than the newest is deliberate and not symmetric with the
- * defect being fixed: a turn's rank depends only on turns before it, so
- * appending ANY new turn (matching or not) never changes it -- the common
- * case stays stable unconditionally. Ranking from the newest end would have
- * inherited the exact instability this function exists to remove, just
- * triggered by a duplicate arriving instead of by any turn arriving. The
- * residual this still cannot fix: if one of two same-input turns is old
- * enough to fall out of the byte window entirely (not merely off the
- * newest-`MAX_DECISIONS` slice below, which keeps every rank), the survivor's
- * rank -- and so its id -- can shift. That requires both a repeated prompt
- * and enough new content to push the earlier occurrence out of 128 KiB, a
- * narrower and later-arriving condition than "any turn arrived", which is
- * what made the old scheme fail on every poll.
+ * end rather than the newest is deliberate: a turn's rank depends only on
+ * turns before it, so appending ANY new turn never changes it.
  *
- * WHY NOT A FIELD THE CLI ALREADY WRITES (e.g. a per-line id): nothing this
- * file already reads carries one (see `Line`'s own shape, built from what
- * `messageText`/`toolUse`/`collectQuestions` use), and minting identity from
- * an undocumented field this codebase has never verified against a real
- * transcript would be a guess baked into parsing, not a fact read from it.
+ * WHAT IT STILL CANNOT DO, and why it is no longer the primary scheme: if one
+ * of two same-input turns falls out of the byte window entirely, the
+ * survivor's rank -- and so its id -- shifts. Paging backwards moves the
+ * window ON PURPOSE, so that is no longer a narrow residual; measured against
+ * the real corpus (35 transcripts over 300 KB, each parsed at 64 KiB, 128 KiB,
+ * 512 KiB and 4 MiB), 28 of 296 turn appearances changed id when only the
+ * window size changed.
  *
  * sha256 mirrors `project-id.ts`'s own digest -- the same move for the same
  * reason: a stable id that carries no raw content. Not a security boundary --
@@ -221,8 +238,52 @@ function turnFingerprint(input: string): string {
   return createHash('sha256').update(input).digest('hex').slice(0, 12);
 }
 
-export function summarizeTranscript(tail: string, decisionIdPrefix: string): TranscriptFacts {
-  const lines = parseLines(tail);
+/**
+ * The mark that separates a positional id from the fingerprint form, and the
+ * one `turnStartOf` reads back. `:` alone would be ambiguous -- the prefix is
+ * a session id and the fingerprint form already uses two of them.
+ */
+const OFFSET_MARK = '@';
+
+/**
+ * The absolute byte offset an id (or a cursor) names, or `null` for one that
+ * names no position at all.
+ *
+ * Deliberately beside the minting site so the two cannot drift: `history.ts`
+ * pages backwards by reading a position back out of the id of the oldest turn
+ * it has, and an id format that changed here without changing there would turn
+ * every "load more" into a silent refusal.
+ *
+ * It accepts BOTH shapes a caller can hold: a decision id
+ * (`<prefix>:@<offset>`) and a bare cursor (`@<offset>`) this endpoint handed
+ * out for a page that contained no turn to name.
+ */
+export function turnStartOf(id: string): number | null {
+  const mark = id.lastIndexOf(OFFSET_MARK);
+  if (mark === -1) return null;
+  // Everything before the mark must be the prefix and its separator, or
+  // nothing at all -- so an `@` inside a session id cannot be read as an
+  // offset marker.
+  if (mark !== 0 && id[mark - 1] !== ':') return null;
+  const digits = id.slice(mark + 1);
+  if (!/^\d+$/.test(digits)) return null;
+  const offset = Number(digits);
+  return Number.isSafeInteger(offset) ? offset : null;
+}
+
+export function summarizeTranscript(
+  tail: string,
+  decisionIdPrefix: string,
+  /**
+   * The absolute byte offset `tail` begins at, or `null` for a caller that
+   * does not know. Only a window trimmed to a whole line may pass a number
+   * (`window.ts` says why), and passing the wrong one would mint ids that
+   * disagree with every other read of the same file.
+   */
+  windowStart: number | null = null,
+): TranscriptFacts {
+  const located = parseLines(tail, windowStart);
+  const lines = located.map((l) => l.line);
 
   let branch: string | null = null;
   let aiTitle: string | null = null;
@@ -235,9 +296,10 @@ export function summarizeTranscript(tail: string, decisionIdPrefix: string): Tra
   // that turn, which is what `Decision.output` is defined to be. vam cannot
   // tell an interim narration from a final answer inside a turn still in
   // flight; it shows the newest text and lets `status` carry "still working".
-  const turns: { input: string; output: string | null; errors: number }[] = [];
+  const turns: { input: string; output: string | null; errors: number; start: number | null }[] =
+    [];
 
-  for (const line of lines) {
+  for (const { line, start } of located) {
     branch = str(line['gitBranch']) ?? branch;
 
     const type = line['type'];
@@ -245,9 +307,11 @@ export function summarizeTranscript(tail: string, decisionIdPrefix: string): Tra
     else if (type === 'agent-name') agentName = str(line['agentName']) ?? agentName;
     else if (type === 'last-prompt') {
       const prompt = str(line['lastPrompt']);
-      // Re-emitted on every resume, so an unchanged value is the same turn.
+      // Re-emitted constantly, and an unchanged value is the same turn:
+      // measured across the whole corpus, 21,604 of 22,668 `last-prompt` lines
+      // repeat the turn that is already open.
       if (prompt !== null && turns.at(-1)?.input !== prompt) {
-        turns.push({ input: prompt, output: null, errors: 0 });
+        turns.push({ input: prompt, output: null, errors: 0, start });
       }
     } else if (type === 'assistant') {
       const text = messageText(line);
@@ -273,12 +337,48 @@ export function summarizeTranscript(tail: string, decisionIdPrefix: string): Tra
   }
 
   // IDS, MINTED OLDEST-FIRST, OVER THE FULL LIST -- before the byte budget
-  // below ever slices it. `turnId` explains why: a turn's id has to depend
-  // only on itself and on same-input turns strictly BEFORE it, never on how
-  // many turns exist after it, or appending a turn (the whole point of this
-  // fix) would keep renumbering everything that already existed.
+  // below ever slices it. A turn's id may depend only on itself and on turns
+  // strictly BEFORE it, never on how many exist after it, or appending a turn
+  // would keep renumbering everything that already existed.
+  //
+  // WHERE THE TURN BEGINS IS THE IDENTITY, when the caller said where its
+  // window begins. A transcript is append-only, so the byte offset of a line
+  // is fixed the moment it is written: the same turn is `<prefix>:@<offset>`
+  // in the 128 KiB tail `load()` reads, in a 4 MiB page read on demand, and in
+  // every later poll of a file that has since grown. That is what makes a
+  // page's overlap with the tail dedupable and an operator's selected turn
+  // survive scrolling back.
+  //
+  // WHY NOT A FIELD THE CLI ALREADY WRITES, which is the obvious question and
+  // was measured before this was written, against 77 real transcripts:
+  //
+  //  - `type:'last-prompt'` -- the only line that opens a turn here -- carries
+  //    NO `uuid` (0 of 224 in the tails sampled). It carries `leafUuid`, on
+  //    100% of them, and that names the conversation leaf at the moment the
+  //    line was written, not the turn: 21,592 of 21,604 re-emissions of an
+  //    already-open turn carry a DIFFERENT one.
+  //  - `promptId` (on 100% of `type:'user'` lines) is finer-grained than a
+  //    turn: keyed on the one in scope when the turn opened, 55 of 296 turn
+  //    appearances disagreed across window sizes -- worse than the fingerprint
+  //    scheme's own 28.
+  //  - The operator's own `user` line CAN be matched to a turn by text, but
+  //    only for 884 of 1,064 turns, and a window opening between that line and
+  //    the first `last-prompt` line would then identify the same turn two
+  //    different ways.
+  //
+  // WHY THIS IS NOT THE POSITIONAL SCHEME THAT WAS REMOVED: that one counted
+  // turns from the newest end of a window, so it moved whenever the file grew
+  // or the window changed. This is an offset into an append-only file, which
+  // is the one position in this data that never moves.
+  //
+  // THE RESIDUAL, stated because it is real: `last-prompt` re-emits, so a
+  // window that opens in the MIDDLE of a turn opens that turn at a re-emission
+  // and gives it that line's offset. Only the oldest turn of a window can be
+  // affected, and `history.ts` drops exactly that one turn from a page rather
+  // than hand out an id it cannot promise.
   const rank = new Map<string, number>();
-  const idOf = (turn: { readonly input: string }): string => {
+  const idOf = (turn: { readonly input: string; readonly start: number | null }): string => {
+    if (turn.start !== null) return `${decisionIdPrefix}:${OFFSET_MARK}${turn.start}`;
     const fp = turnFingerprint(turn.input);
     const n = rank.get(fp) ?? 0;
     rank.set(fp, n + 1);

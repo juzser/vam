@@ -28,9 +28,18 @@ import {
 } from '../../../src/main/remote/server.js';
 import type { MainSource } from '../../../src/main/sources/source.js';
 import type { Project } from '../../../src/renderer/domain/model.js';
+import type { TranscriptPage } from '../../../src/shared/history.js';
 
 const PAIRED: Identity = { deviceId: 'device-1', name: 'the paired phone' };
 const TOKEN = 'a-token-this-server-minted';
+
+/** One backward page, invented here: no transcript on this machine is read. */
+const PAGE: TranscriptPage = {
+  kind: 'page',
+  turns: [],
+  cursor: 's1:@1024',
+  reachedStart: false,
+};
 
 const PROJECTS: readonly Project[] = [
   { id: 'p1', name: 'demo', sessions: [] } as unknown as Project,
@@ -223,6 +232,57 @@ describe('read-only mode', () => {
 
   it('still serves the read routes', async () => {
     expect((await get(await start({ allowWrites: false }), '/api/load')).status).toBe(200);
+  });
+
+  /**
+   * Scrolling back is a READ -- it opens a transcript and reads a window of it
+   * -- so it belongs with `/api/load` and not with the writes. It is a POST
+   * only because it carries a cursor in a body. A phone is the surface this
+   * whole feature is for, and a read-only server is the safe way to expose
+   * one, so gating it on `allowWrites` would have hidden it exactly there.
+   */
+  it('still serves the history route, which is a read that happens to POST', async () => {
+    const readHistory = vi.fn(async () => PAGE);
+    const base = await start({ allowWrites: false, source: makeSource({ readHistory }) });
+    const response = await post(base, '/api/history', { sessionId: 's1', cursor: null });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, value: PAGE });
+    expect(readHistory).toHaveBeenCalledWith('s1', null);
+  });
+});
+
+describe('the history route', () => {
+  it('forwards a cursor and answers the page whole', async () => {
+    const readHistory = vi.fn(async () => PAGE);
+    const base = await start({ source: makeSource({ readHistory }) });
+    const response = await post(base, '/api/history', { sessionId: 's1', cursor: 's1:@4096' });
+    expect(await response.json()).toEqual({ ok: true, value: PAGE });
+    expect(readHistory).toHaveBeenCalledWith('s1', 's1:@4096');
+  });
+
+  it('refuses a body it does not trust without reaching the source', async () => {
+    const readHistory = vi.fn(async () => PAGE);
+    const base = await start({ source: makeSource({ readHistory }) });
+    const response = await post(base, '/api/history', { sessionId: 42 });
+    expect(response.status).toBe(400);
+    expect(readHistory).not.toHaveBeenCalled();
+  });
+
+  it('answers the page type’s own unavailable arm when the source cannot page', async () => {
+    const base = await start({ source: makeSource() });
+    const response = await post(base, '/api/history', { sessionId: 's1', cursor: null });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      value: {
+        kind: 'unavailable',
+        error: {
+          kind: 'refused',
+          code: 'unsupported:history',
+          message: expect.stringContaining('earlier parts'),
+        },
+      },
+    });
   });
 });
 
