@@ -1,66 +1,56 @@
 /**
- * Releasing Cmd+W from the window, so the canvas can have it.
+ * The TEMPLATE, on both platform branches.
  *
- * `src/main/index.ts` never builds an application menu, so Electron installs
- * its DEFAULT one, whose Window submenu carries `role: 'close'` with the
- * accelerator Cmd+W. On macOS a native menu's key equivalent is matched
- * before the key reaches the page, so the renderer's `Mod-w` binding would
- * be dead in the packaged app while passing every renderer test.
- *
- * The walk is pure and is what this file asserts. The one thing it cannot
- * assert is the AppKit behaviour on the other side of the mutation -- see the
- * comment in `src/main/menu.ts`.
+ * Deliberately the smaller half. Asserting a template literal is close to
+ * reading your own input back, so the real guard is in
+ * `test/electron/launch.test.ts`, which walks what `Menu.setApplicationMenu`
+ * actually installed in a launched Electron. What only this file can cover is
+ * the NON-DARWIN branch, unreachable on the harness's one platform: a Windows
+ * build with no way to quit would otherwise ship unnoticed.
  */
 
 import { describe, expect, it } from 'vitest';
-import { releaseCloseItem } from '../../src/main/menu.js';
+import { buildMenuTemplate } from '../../src/main/menu.js';
 
-type Item = {
-  role?: string;
-  label?: string;
-  enabled?: boolean;
-  visible?: boolean;
-  submenu?: { items: Item[] } | undefined;
-};
+type Node = { role?: string; submenu?: readonly Node[] };
 
-const defaultishMenu = () => ({
-  items: [
-    { label: 'vam', submenu: { items: [{ role: 'quit', enabled: true, visible: true }] } },
-    {
-      label: 'Window',
-      submenu: {
-        items: [
-          { role: 'minimize', enabled: true, visible: true },
-          { role: 'close', label: 'Close Window', enabled: true, visible: true },
-        ],
-      },
+const roles = (nodes: readonly Node[]): string[] =>
+  nodes.flatMap((node) => [
+    ...(node.role === undefined ? [] : [node.role]),
+    ...roles(node.submenu ?? []),
+  ]);
+
+const rolesOn = (platform: NodeJS.Platform): string[] =>
+  roles(buildMenuTemplate(platform) as readonly Node[]);
+
+describe('buildMenuTemplate', () => {
+  it.each(['darwin', 'win32', 'linux'] as const)(
+    'claims no zoom role and no close role on %s',
+    (platform) => {
+      const found = rolesOn(platform);
+      expect(found.filter((r) => ['resetZoom', 'zoomIn', 'zoomOut', 'close'].includes(r))).toEqual(
+        [],
+      );
+      // ...and does not reach them indirectly: `viewMenu` contains all three.
+      expect(found).not.toContain('viewMenu');
     },
-  ] as Item[],
-});
+  );
 
-describe('releaseCloseItem', () => {
-  it('finds the close item however deep the submenu is, and takes it out of play', () => {
-    const menu = defaultishMenu();
-    expect(releaseCloseItem(menu)).toBe(true);
-    const close = menu.items[1]?.submenu?.items[1];
-    expect(close?.enabled).toBe(false);
-    expect(close?.visible).toBe(false);
+  it.each(['darwin', 'win32', 'linux'] as const)(
+    'keeps the edit roles the clipboard depends on, on %s',
+    (platform) => {
+      expect(rolesOn(platform)).toContain('editMenu');
+    },
+  );
+
+  it('gives a non-macOS build a way to quit, which the app menu would not', () => {
+    // `appMenu` does not exist off macOS; `fileMenu` is where Quit lives there.
+    expect(rolesOn('win32')).toContain('fileMenu');
+    expect(rolesOn('darwin')).toContain('appMenu');
   });
 
-  it('leaves every other item alone — Quit above all', () => {
-    const menu = defaultishMenu();
-    releaseCloseItem(menu);
-    const quit = menu.items[0]?.submenu?.items[0];
-    expect(quit?.enabled).toBe(true);
-    expect(quit?.visible).toBe(true);
-    expect(menu.items[1]?.submenu?.items[0]?.enabled).toBe(true);
-  });
-
-  it('reports honestly when there is no close item to release', () => {
-    expect(releaseCloseItem({ items: [{ role: 'quit' }] })).toBe(false);
-  });
-
-  it('answers false for no menu at all, rather than throwing into app startup', () => {
-    expect(releaseCloseItem(null)).toBe(false);
+  it('omits the macOS-only window items off macOS', () => {
+    expect(rolesOn('linux')).not.toContain('front');
+    expect(rolesOn('darwin')).toContain('front');
   });
 });
