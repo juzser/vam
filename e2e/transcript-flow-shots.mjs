@@ -82,24 +82,22 @@ const innerScrollers = async () =>
       // `truncate` overflow too, and they clip rather than scroll.
       .filter((el) => el.scrollHeight > el.clientHeight + 2 && el.clientHeight > 0)
       .filter((el) => ['auto', 'scroll'].includes(getComputedStyle(el).overflowY))
-      .filter((el) => el.closest('[data-progress-turns]') === null)
       .map((el) => el.getAttribute('data-detail-scroll') ?? el.tagName);
   });
 const nested = await innerScrollers();
 if (nested.length !== 0) {
   throw new Error(
     `${nested.join(', ')} scrolls inside the column — the turn reads as separate panels ` +
-      'exactly when a region owns its own scrollbar. (The opened turn list is a control, not ' +
-      'a region of the transcript, and is excluded above on purpose.)',
+      'exactly when a region owns its own scrollbar.',
   );
 }
 
 /**
  * `in` STICKS: scroll the column to its bottom and read where a prompt ACTUALLY
  * is. The demo fixture's turns are short prose, so the column only overflows at
- * a small height or with the turn list open — both are exercised below, because
- * sticky failing in one state and not the other is precisely the kind of thing
- * a class-name assertion cannot see.
+ * a small height or with more turns than the fixture's seven — both are
+ * exercised below, because sticky failing in one state and not the other is
+ * precisely the kind of thing a class-name assertion cannot see.
  *
  * A PROMPT, NOT *THE* PROMPT, since the column grew to the whole session. This
  * used to name the newest turn's `in` and require it at the column's top edge
@@ -125,9 +123,9 @@ async function assertSticksWhileScrolling(label) {
    * The offset is chosen so the answer is unambiguous: at a turn's own start
    * exactly one prompt can be pinned, and it is that turn's. The column's
    * bottom is not such an offset — the demo's turns are ~55px of prose, so the
-   * end of the scroll lands in whatever happens to be up there, and with the
-   * turn list open it landed in the 6px gap BETWEEN two turns, where nothing
-   * paints and every answer is wrong.
+   * end of the scroll lands in whatever happens to be up there, which has
+   * already been measured landing in the 6px gap BETWEEN two turns, where
+   * nothing paints and every answer is wrong.
    */
   const at = await column.evaluate((el) => {
     const article = el.querySelectorAll('[data-column-turn]')[2];
@@ -188,16 +186,28 @@ async function assertSticksWhileScrolling(label) {
 
 // --- Shot 1: the whole turn, straight through — no band headers, no boxes,
 // and progress condensed to one line. ONE LINE PER TURN now, not one per pane:
-// the count of turns and the picker were the pane's facts and moved to the
-// column's two ends, and what is left on a turn's line is that turn's own.
+// the count of turns was the pane's fact and moved to the column's boundary
+// block, and what is left on a turn's line is that turn's own.
 const turnsDrawn = await page.locator('[data-column-turn]').count();
 const progressLine = page.locator('[data-progress-line]');
 const lines = await progressLine.count();
 if (lines !== turnsDrawn) {
   throw new Error(`${turnsDrawn} turns are drawn but ${lines} carry a condensed progress line`);
 }
-if ((await page.locator('[data-progress-turns]').count()) !== 0) {
-  throw new Error('the turn list is open before anything asked it to be');
+// THE CHROME THE OPERATOR HAD REMOVED, absent: the bar across the pane's
+// bottom, and all three controls that lived in it (the turn-list chevron, the
+// list itself, and the `<select>` that jumped to a turn). The column draws
+// every turn, so a control listing them was a second way to reach what is
+// already on screen -- and the band was drawn whether or not anything in it
+// was. `e2e/transcript-column-shots.mjs` owns what replaced the two jumps.
+for (const gone of [
+  '[data-column-bar]',
+  '[data-progress-turns]',
+  '[data-progress-expand]',
+  '[data-progress-jump]',
+]) {
+  const left = await page.locator(gone).count();
+  if (left !== 0) throw new Error(`${gone} is still drawn (${left}) — the bar's chrome is back`);
 }
 console.log(
   'condensed progress line height:',
@@ -207,31 +217,29 @@ console.log(
 await page.screenshot({ path: `${outDir}/transcript-flow-condensed.png` });
 console.log(`${outDir}/transcript-flow-condensed.png`);
 
-// --- Shot 2: the same line opened into the turns it stands for, scrolled to
-// the bottom so the pinned prompt is visible above them.
-await page.locator('[data-progress-expand]').click();
+// --- Shot 2: the same column at volume, which is the second state `in` has to
+// stick in. It used to be "with the turn list open" -- that list was what made
+// the demo's seven short turns overflow at this height, and it is gone; more
+// turns is the same overflow without a control to open. Sticky failing in one
+// state and not the other is exactly what one state cannot see.
+await page.goto(`${origin}/?demo=1&turns=24`, { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-tab-strip]');
+await page.locator('[data-session-row="factory-sse-1"]').click();
+await page.waitForSelector('[data-column-turn]');
 await page.waitForTimeout(200);
-const rows = await page.locator('[data-progress-turn]').count();
-console.log('turn rows once expanded:', rows);
-if (rows < 2) throw new Error(`expanding the progress line drew ${rows} turn(s)`);
-if ((await page.locator('[data-progress-jump]').count()) !== 0) {
-  throw new Error('both pickers are on screen at once — the select must stand down when open');
-}
-await assertSticksWhileScrolling('with the turn list open');
-// Photographed from the top, so the line and the list it opened are both in
-// the frame: the scrolled state is Shot 3's job.
-await column.evaluate((el) => {
-  el.scrollTop = 0;
-});
-await page.waitForTimeout(150);
-await page.screenshot({ path: `${outDir}/transcript-flow-expanded.png` });
-console.log(`${outDir}/transcript-flow-expanded.png`);
+const atVolume = await page.locator('[data-column-turn]').count();
+if (atVolume < 20) throw new Error(`?turns=24 drew ${atVolume} turns — the fixture did not take`);
+await assertSticksWhileScrolling('at volume');
+await page.screenshot({ path: `${outDir}/transcript-flow-volume.png` });
+console.log(`${outDir}/transcript-flow-volume.png`);
 
-// --- Shot 3: the pin itself. List closed, a short window so the turn
-// overflows, scrolled to the bottom — the prompt is still the first thing on
-// screen, which is the whole of what the operator asked sticky for.
-await page.locator('[data-progress-expand]').click();
-await page.waitForTimeout(150);
+// --- Shot 3: the pin itself. Back to the seven-turn fixture, a short window so
+// the turn overflows, scrolled to the bottom — the prompt is still the first
+// thing on screen, which is the whole of what the operator asked sticky for.
+await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-tab-strip]');
+await page.locator('[data-session-row="factory-sse-1"]').click();
+await page.waitForSelector('[data-detail-column]');
 await page.setViewportSize({ width: 1100, height: 360 });
 await page.waitForTimeout(200);
 await assertSticksWhileScrolling('condensed, short window');

@@ -116,27 +116,41 @@ for (const [name, seen] of [
   }
 }
 
-// --- 6. A FAILED TURN IS MARKED IN THE PICKER, not folded into `✓`.
-const picker = await page.locator('[data-progress-jump]').first().innerText();
-console.log('picker options:', JSON.stringify(picker.replace(/\s+/g, ' ').trim()));
-if (!picker.includes('!')) {
-  throw new Error('no turn in the picker carries a failure mark, so the fold still hides it');
+// --- 6. A FAILED TURN IS MARKED ON ITS OWN LINE, not folded into `✓`.
+//
+// WAS: read out of the turn picker's `<option>`s, and then out of the list
+// that picker opened. Both went with the column's bar -- the column draws
+// every turn, so a control listing them was a second way to reach what is on
+// screen -- and the mark is where it always also was, on the turn's own
+// condensed line, beside the turn it is about. Which is the stronger form of
+// the same claim: a `!` in a picker said "something, somewhere, failed".
+const marks = await page.evaluate(() =>
+  [...document.querySelectorAll('[data-column-turn]')].map((turn) => ({
+    turn: turn.getAttribute('data-column-turn'),
+    mark: turn.querySelector('[data-progress-turn-label] span')?.textContent?.trim() ?? '',
+    // The mark is decoration; the label is the text. A screen reader must not
+    // read "exclamation mark" in place of what went wrong.
+    hidden:
+      turn.querySelector('[data-progress-turn-label] span')?.getAttribute('aria-hidden') ===
+      'true',
+  })),
+);
+console.log('turn marks:', JSON.stringify(marks));
+const failedTurn = marks.find((m) => m.mark === '!');
+if (failedTurn === undefined) {
+  throw new Error('no turn carries a failure mark on its own line, so the fold still hides it');
+}
+if (!marks.every((m) => m.hidden)) {
+  throw new Error('a turn mark is announced as text -- it is a glyph, and the label is the words');
 }
 
 await page.screenshot({ path: `${outDir}/turn-signal-waiting-cause.png` });
 console.log(`${outDir}/turn-signal-waiting-cause.png`);
 
-// The same pane with the turn list open, where the per-turn mark is readable
-// rather than inside a native `<select>` a screenshot cannot open.
-await page.locator('[data-progress-expand]').first().click();
+// The failing turn itself, brought into frame: the mark and the `· N failed`
+// count sit on one line, which is the whole gain over a session-wide `!`.
+await page.locator(`[data-column-turn="${failedTurn.turn}"]`).scrollIntoViewIfNeeded();
 await page.waitForTimeout(200);
-const marks = await page.evaluate(() =>
-  [...document.querySelectorAll('[data-progress-turn]')].map((b) => b.innerText.trim()),
-);
-console.log('expanded turn marks:', JSON.stringify(marks));
-if (!marks.some((m) => m.startsWith('!'))) {
-  throw new Error('the expanded turn list marks no turn as failed');
-}
 await page.screenshot({ path: `${outDir}/turn-signal-failed-turn.png` });
 console.log(`${outDir}/turn-signal-failed-turn.png`);
 
