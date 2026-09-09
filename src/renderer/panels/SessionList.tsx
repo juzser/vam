@@ -1089,7 +1089,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
         }
       }}
       onBlur={cancelGroupDraft}
-      className="min-w-0 flex-1 rounded-[5px] border border-line-strong bg-panel px-1 py-0.5 font-mono text-[10px] text-ink outline-none"
+      className="min-w-0 flex-1 rounded-[5px] border border-line-strong bg-card px-1 py-0.5 font-mono text-[10px] text-ink outline-none"
     />
   );
 
@@ -1118,7 +1118,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
         }
       }}
       onBlur={cancelProjectDraft}
-      className="min-w-0 flex-1 rounded-[5px] border border-line-strong bg-panel px-1 py-0.5 font-mono text-[10px] text-ink outline-none"
+      className="min-w-0 flex-1 rounded-[5px] border border-line-strong bg-card px-1 py-0.5 font-mono text-[10px] text-ink outline-none"
     />
   );
 
@@ -1221,7 +1221,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
             {filtering ? (
-              <div className="flex h-[30px] items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5">
+              <div className="flex h-[30px] items-center gap-2 rounded-[8px] border border-line bg-card px-2.5">
                 <span className="font-mono text-[11px] text-ink-faint">/</span>
                 <input
                   ref={filterRef}
@@ -1248,7 +1248,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   type="button"
                   onClick={onOpenFilter}
                   aria-label="search sessions"
-                  className="vam-tap flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-panel px-2.5 text-ink-dim hover:border-line-strong"
+                  className="vam-tap flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-card px-2.5 text-ink-dim hover:border-line-strong"
                 >
                   <Search size={14} strokeWidth={1.6} />
                   <span className="flex-1 text-left text-[12px]">Search sessions</span>
@@ -1318,7 +1318,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               <span
                 aria-hidden="true"
                 data-tap-skin
-                className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border border-line bg-panel hover:border-line-strong"
+                className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border border-line bg-card hover:border-line-strong"
               >
                 <FolderPlus size={13} strokeWidth={1.6} />
               </span>
@@ -1344,7 +1344,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             <span
               aria-hidden="true"
               data-tap-skin
-              className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border border-line bg-panel hover:border-line-strong"
+              className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border border-line bg-card hover:border-line-strong"
             >
               <Plus size={13} strokeWidth={1.6} />
             </span>
@@ -1376,7 +1376,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               aria-hidden="true"
               data-tap-skin
               className={[
-                'relative flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border bg-panel',
+                'relative flex h-[26px] w-[26px] items-center justify-center rounded-[7px] border bg-card',
                 filterMenuOpen || narrowing
                   ? 'border-line-loud'
                   : 'border-line hover:border-line-strong',
@@ -1414,7 +1414,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                 ? { width: popoverWidth }
                 : { width: popoverWidth, maxHeight: filterPopoverCap, overflowY: 'auto' }
             }
-            className="absolute top-[36px] right-0 z-20 flex flex-col gap-2 rounded-[9px] border border-line-strong bg-panel p-2.5 shadow-lg"
+            className="absolute top-[36px] right-0 z-20 flex flex-col gap-2 rounded-[9px] border border-line-strong bg-card p-2.5 shadow-lg"
           >
             <span className="font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
               Status
@@ -1716,7 +1716,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             setOpenGroupMenu(null);
                           }
                         }}
-                        className="absolute top-[19px] right-0 z-20 flex w-[168px] flex-col rounded-[9px] border border-line-strong bg-panel p-1 shadow-lg"
+                        className="absolute top-[19px] right-0 z-20 flex w-[168px] flex-col rounded-[9px] border border-line-strong bg-card p-1 shadow-lg"
                       >
                         {onRenameGroup !== undefined && (
                           <button
@@ -1728,7 +1728,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                               setGroupDraft({ kind: 'rename', group });
                               setOpenGroupMenu(null);
                             }}
-                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-line-strong hover:text-ink"
                           >
                             Rename project
                           </button>
@@ -1742,7 +1742,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                               onPickGroupIcon(group);
                               setOpenGroupMenu(null);
                             }}
-                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-line-strong hover:text-ink"
                           >
                             Change project icon
                           </button>
@@ -1769,7 +1769,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                               onUngroup(group);
                               setOpenGroupMenu(null);
                             }}
-                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-line-strong hover:text-ink"
                           >
                             Ungroup
                           </button>
@@ -2002,7 +2002,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           setOpenMenu(null);
                         }
                       }}
-                      className="absolute top-[19px] right-0 z-20 flex w-[168px] flex-col rounded-[9px] border border-line-strong bg-panel p-1 shadow-lg"
+                      className="absolute top-[19px] right-0 z-20 flex w-[168px] flex-col rounded-[9px] border border-line-strong bg-card p-1 shadow-lg"
                     >
                       {/* "Rename repo", not "Rename project" -- the group
                           menu already owns that label one level up (UI
@@ -2021,7 +2021,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             setProjectDraft(section.project);
                             setOpenMenu(null);
                           }}
-                          className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                          className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-line-strong hover:text-ink"
                         >
                           Rename repo
                         </button>
@@ -2034,7 +2034,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           toggleCollapse(section.project);
                           setOpenMenu(null);
                         }}
-                        className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                        className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-line-strong hover:text-ink"
                       >
                         {isCollapsed ? 'Expand project' : 'Collapse project'}
                       </button>
@@ -2046,7 +2046,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           onPickIcon(section.project);
                           setOpenMenu(null);
                         }}
-                        className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                        className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-line-strong hover:text-ink"
                       >
                         Change project icon
                       </button>
@@ -2062,7 +2062,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           setConfirming(section.project);
                           setOpenMenu(null);
                         }}
-                        className="flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-danger hover:bg-raised"
+                        className="flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-danger hover:bg-line-strong"
                       >
                         <Trash2 size={12} strokeWidth={1.8} />
                         Remove project
@@ -2137,7 +2137,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                     onRenameCancel();
                                   }
                                 }}
-                                className="min-w-0 flex-1 rounded-[var(--radius-sm)] bg-panel px-1 font-mono text-[12px] text-ink outline-none ring-1 ring-waiting"
+                                className="min-w-0 flex-1 rounded-[var(--radius-sm)] bg-card px-1 font-mono text-[12px] text-ink outline-none ring-1 ring-waiting"
                                 aria-label="rename session"
                               />
                             </div>
@@ -2467,7 +2467,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                   {...pending(session.id, `Stopping ${session.title}…`)}
                                   className={[
                                     'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] text-ink-faint',
-                                    'opacity-0 hover:bg-panel hover:text-failed group-hover/row:opacity-100',
+                                    'opacity-0 hover:bg-card hover:text-failed group-hover/row:opacity-100',
                                     'pointer-events-none group-hover/row:pointer-events-auto',
                                     'focus-visible:pointer-events-auto focus-visible:opacity-100',
                                     'focus-visible:ring-1 focus-visible:ring-cursor-ring',
@@ -2491,7 +2491,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                   data-row-busy
                                   className="pointer-events-none absolute inset-0 flex items-center justify-center"
                                 >
-                                  <span className="flex items-center gap-1.5 rounded-[7px] border border-line bg-panel px-2 py-1 text-[11px] text-ink-dim">
+                                  <span className="flex items-center gap-1.5 rounded-[7px] border border-line bg-card px-2 py-1 text-[11px] text-ink-dim">
                                     <LoaderCircle
                                       size={11}
                                       strokeWidth={1.8}

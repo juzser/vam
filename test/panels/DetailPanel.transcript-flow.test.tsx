@@ -317,9 +317,19 @@ describe('the turn reads straight through, as one scrolling column', () => {
     // The geometry of all that is measured in a real browser, where layout
     // exists, by `e2e/long-prompt-shots.mjs`. This file pins the skin.
     expect(box.className).toContain('rounded-');
-    expect(box.className).toContain('bg-raised');
+    // `bg-in-bubble`, and this line USED TO SAY `bg-raised`. That was the fill
+    // the operator came back about -- "the In bubble needs more contrast
+    // within the pane" -- and the reason is a number: `raised` on the pane
+    // band measures 1.030:1 in dark and 1.015:1 in light, a bubble that
+    // exists in the DOM and not on the screen. The COLOUR is asserted where a
+    // colour can be: as token values in
+    // `test/renderer/surface-elevation.test.ts`, and as paint in
+    // `e2e/pane-colour-shots.mjs`. A class name cannot tell you whether a fill
+    // resolved to anything, so this line pins only WHICH token is asked for.
+    expect(box.className).toContain('bg-in-bubble');
     expect(box.className).not.toContain('border');
     expect(box.className).not.toContain('bg-panel');
+    expect(box.className).not.toContain('bg-raised');
   });
 
   it('keeps the answer’s region unscrollable, and caps only what sticks', () => {

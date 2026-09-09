@@ -766,7 +766,13 @@ function ViewIcons({
                 'vam-tap relative flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-[7px]',
                 selected
                   ? 'bg-line-strong text-ink'
-                  : 'text-ink-dim hover:bg-raised hover:text-ink',
+                  : // `raised`, NOT `line-strong` like the card-backed menus
+                    // further down this file. This bar sits on `bg-pane`, where
+                    // `raised` is already the rung above the ground -- and
+                    // `line-strong` is what SELECTED wears one line up, so
+                    // hovering to it would make an unselected tab
+                    // indistinguishable from the open one.
+                    'text-ink-dim hover:bg-raised hover:text-ink',
               ].join(' ')}
             >
               <Icon size={13} strokeWidth={1.7} aria-hidden="true" />
@@ -862,7 +868,7 @@ function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestL
           data-pr-row
           data-pr-state={pr.state}
           data-pr-checks={pr.checks}
-          className="flex items-center gap-2 rounded-[9px] border border-line bg-panel px-3 py-2"
+          className="flex items-center gap-2 rounded-[9px] border border-line bg-card px-3 py-2"
         >
           <span
             data-pr-checks-mark
@@ -969,7 +975,7 @@ function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | unde
               key={agent.id}
               data-agent-row
               data-agent-running={agent.running ? 'true' : 'false'}
-              className="flex items-center gap-2 rounded-[9px] border border-line bg-panel px-3 py-2"
+              className="flex items-center gap-2 rounded-[9px] border border-line bg-card px-3 py-2"
             >
               {/* The same dot the pane header uses for a session, meaning the same
               thing: filled and breathing while it works, quiet when it is
@@ -1898,7 +1904,7 @@ function QuestionCard({
       data-question-select={question.multiSelect ? 'multi' : 'single'}
       data-question-waiting={waiting ? 'true' : undefined}
       className={[
-        'flex flex-col gap-1.5 rounded-[10px] border bg-panel px-2.5 py-2',
+        'flex flex-col gap-1.5 rounded-[10px] border bg-card px-2.5 py-2',
         waiting ? 'border-waiting' : 'border-line-strong',
       ].join(' ')}
     >
@@ -2292,7 +2298,22 @@ const TurnBlock = memo(function TurnBlock({
              sides -- 10x8, held to a 7-12px band measured AS PAINT by
              `e2e/long-prompt-shots.mjs`, because a padding rule that matches
              nothing has passed review in this project before. */
-          className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-raised px-2.5 py-2"
+          /* `bg-in-bubble`, NOT `bg-raised`. The operator asked for this bubble
+             twice: once for it to exist, and then -- having got it -- "the In
+             bubble needs more contrast within the pane". `raised` on a `pane`
+             band measures 1.030:1 in dark and 1.015:1 in light, three units
+             per channel, which is under the step at which a person reliably
+             sees an edge: the bubble was in the DOM and not on the screen. Its
+             own token carries the In region's teal at fill strength --
+             1.449:1 / ΔE 21.8 dark, 1.113:1 / ΔE 9.09 light, both measured as
+             paint by `e2e/pane-colour-shots.mjs` and as tokens by
+             `test/renderer/surface-elevation.test.ts`.
+
+             THE INK BELOW IS PART OF THE CHOICE. `text-ink-dim` reads 4.789:1
+             on the dark fill; `text-ink-faint` would read 3.353:1 and must not
+             be used here. The guard measures the ink this element is really
+             painted with, so that constraint is enforced rather than noted. */
+          className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-in-bubble px-2.5 py-2"
         >
           <p className="whitespace-pre-wrap break-words text-[13px] text-ink-dim leading-[1.55]">
             {/* THE RESERVED CORNER, audit F1's obligation. A float rather than
@@ -3655,7 +3676,7 @@ export function DetailPanel(props: DetailPanelProps) {
         {failedBanner && (
           <p
             data-session-failed
-            className="flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-panel px-3 py-2 text-[12px] text-failed leading-[1.45]"
+            className="flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-card px-3 py-2 text-[12px] text-failed leading-[1.45]"
           >
             <span role="img" aria-label="failed" className="flex">
               <CircleSlash size={13} strokeWidth={1.6} />
@@ -4017,7 +4038,7 @@ export function DetailPanel(props: DetailPanelProps) {
                      would put a slab over the transcript. */
                   className="pointer-events-auto absolute top-12 right-0 flex h-11 w-11 cursor-pointer items-center justify-center"
                 >
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-panel text-ink-dim shadow-sm hover:bg-raised hover:text-ink">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-card text-ink-dim shadow-sm hover:bg-line-strong hover:text-ink">
                     <ChevronsUp size={14} strokeWidth={1.8} />
                   </span>
                 </button>
@@ -4033,7 +4054,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   onClick={() => jumpTo('bottom')}
                   className="pointer-events-auto absolute right-0 bottom-1 flex h-11 w-11 cursor-pointer items-center justify-center"
                 >
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-panel text-ink-dim shadow-sm hover:bg-raised hover:text-ink">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-card text-ink-dim shadow-sm hover:bg-line-strong hover:text-ink">
                     <ChevronsDown size={14} strokeWidth={1.8} />
                   </span>
                 </button>
@@ -4141,7 +4162,7 @@ export function DetailPanel(props: DetailPanelProps) {
                     // the square into a width-to-content pill, hit still 44,
                     // paint still 30 tall.
                     data-tap-pill
-                    className="flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-panel px-1.5 font-mono text-[12px] text-ink-quiet active:bg-raised"
+                    className="flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-card px-1.5 font-mono text-[12px] text-ink-quiet active:bg-line-strong"
                   >
                     {item.caption}
                   </span>
@@ -4152,7 +4173,7 @@ export function DetailPanel(props: DetailPanelProps) {
           {suggesting && (
             <div
               data-bang-suggest
-              className="flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-panel px-1.5 py-1.5"
+              className="flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card px-1.5 py-1.5"
             >
               <p className="px-1.5 pb-0.5 text-[11px] text-ink-faint">
                 the agent proposed these — vam does not run them; Enter picks one, Esc keeps what
@@ -4167,7 +4188,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   onClick={() => acceptSuggestion(command)}
                   className={[
                     'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
-                    index === picked ? 'bg-raised' : 'hover:bg-raised',
+                    index === picked ? 'bg-line-strong' : 'hover:bg-line-strong',
                   ].join(' ')}
                 >
                   <span className="max-w-full truncate text-[12px] text-ink">{command.label}</span>
@@ -4184,7 +4205,7 @@ export function DetailPanel(props: DetailPanelProps) {
           {slashSuggesting && (
             <div
               data-slash-suggest
-              className="flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-panel px-1.5 py-1.5"
+              className="flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card px-1.5 py-1.5"
             >
               <p className="px-1.5 pb-0.5 text-[11px] text-ink-faint">
                 the provider's own commands — Enter picks one, Esc keeps what you typed
@@ -4198,7 +4219,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   onClick={() => acceptSlashSuggestion(command)}
                   className={[
                     'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
-                    index === slashPicked ? 'bg-raised' : 'hover:bg-raised',
+                    index === slashPicked ? 'bg-line-strong' : 'hover:bg-line-strong',
                   ].join(' ')}
                 >
                   <span
@@ -4220,7 +4241,7 @@ export function DetailPanel(props: DetailPanelProps) {
             data-prompt-box
             data-action-id="prompt"
             className={[
-              'flex flex-col gap-2.5 rounded-[10px] border bg-panel px-3 py-2.5',
+              'flex flex-col gap-2.5 rounded-[10px] border bg-card px-3 py-2.5',
               active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
             ].join(' ')}
           >
@@ -4413,7 +4434,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   <span
                     aria-hidden="true"
                     data-tap-skin
-                    className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-panel hover:bg-raised"
+                    className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
                   >
                     <Paperclip size={12} strokeWidth={1.7} />
                   </span>
@@ -4457,7 +4478,7 @@ export function DetailPanel(props: DetailPanelProps) {
                     <span
                       aria-hidden="true"
                       data-tap-skin
-                      className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-panel hover:bg-raised"
+                      className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
                     >
                       <ImageIcon size={12} strokeWidth={1.7} />
                     </span>
@@ -4514,7 +4535,7 @@ export function DetailPanel(props: DetailPanelProps) {
                       <span
                         aria-hidden="true"
                         data-tap-skin
-                        className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-panel hover:bg-raised"
+                        className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
                       >
                         {(() => {
                           const mark = PROVIDER_MARKS[currentProvider.id];
@@ -4532,7 +4553,7 @@ export function DetailPanel(props: DetailPanelProps) {
                       data-provider-picker
                       role="listbox"
                       aria-label="default provider for new sessions"
-                      className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-panel p-1 shadow-sm"
+                      className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
                     >
                       {PROVIDERS.map((provider) => {
                         const selected = provider.id === currentProvider.id;
@@ -4550,8 +4571,8 @@ export function DetailPanel(props: DetailPanelProps) {
                             className={[
                               'flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-[12px]',
                               selected
-                                ? 'bg-raised text-ink'
-                                : 'text-ink-dim hover:bg-raised hover:text-ink',
+                                ? 'bg-line-strong text-ink'
+                                : 'text-ink-dim hover:bg-line-strong hover:text-ink',
                             ].join(' ')}
                           >
                             {provider.label}
@@ -4610,7 +4631,7 @@ export function DetailPanel(props: DetailPanelProps) {
                       <span
                         aria-hidden="true"
                         data-tap-skin
-                        className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-panel hover:bg-raised"
+                        className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
                       >
                         <ModeGlyph size={12} strokeWidth={1.7} />
                       </span>
@@ -4621,7 +4642,7 @@ export function DetailPanel(props: DetailPanelProps) {
                       data-mode-picker
                       role="listbox"
                       aria-label="mode for this prompt"
-                      className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-panel p-1 shadow-sm"
+                      className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
                     >
                       {MODES.map((mode) => {
                         const selected = mode === currentMode;
@@ -4640,8 +4661,8 @@ export function DetailPanel(props: DetailPanelProps) {
                             className={[
                               'flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-[12px]',
                               selected
-                                ? 'bg-raised text-ink'
-                                : 'text-ink-dim hover:bg-raised hover:text-ink',
+                                ? 'bg-line-strong text-ink'
+                                : 'text-ink-dim hover:bg-line-strong hover:text-ink',
                             ].join(' ')}
                           >
                             <Glyph size={12} strokeWidth={1.7} />

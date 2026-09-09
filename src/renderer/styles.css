@@ -59,7 +59,7 @@
      pane wore `bg-sidebar` because the mockup paints the two the same, which
      also meant one swatch moved both. They START on the same value in each
      theme -- that is what makes the split invisible on upgrade, together with
-     `seedPane` in `prefs.ts`, which carries a stored sidebar override onto
+     `seedSplits` in `prefs.ts`, which carries a stored sidebar override onto
      this token -- and they are free to diverge from here.
 
      A LITERAL, NOT `var(--vam-sidebar)`. Pointing this at the other token
