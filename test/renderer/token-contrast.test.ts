@@ -35,42 +35,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { contrast } from '../support/contrast.js';
+import { ruleBody, THEMES, tokens } from '../support/css-tokens.js';
 
 const CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
-
-/**
- * The text between the braces of the rule whose selector is `selector`. The
- * selector is matched at the start of a line, so the prose in the file's header
- * comment — which names both of these selectors — is not mistaken for the rule.
- */
-function ruleBody(css: string, selector: string): string {
-  const at = new RegExp(`^${selector.replace('.', '\\.')}\\s*\\{`, 'm').exec(css);
-  if (!at) throw new Error(`no rule for ${selector}`);
-  const open = css.indexOf('{', at.index);
-  let depth = 0;
-  for (let i = open; i < css.length; i += 1) {
-    if (css[i] === '{') depth += 1;
-    else if (css[i] === '}') {
-      depth -= 1;
-      if (depth === 0) return css.slice(open + 1, i);
-    }
-  }
-  throw new Error(`unbalanced braces after ${selector}`);
-}
-
-/** Every `--vam-*: <value>;` declaration in a block, by name. */
-function tokens(block: string): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const m of block.matchAll(/(--vam-[a-z0-9-]+):\s*([^;]+);/g)) {
-    out.set(m[1] as string, (m[2] as string).trim());
-  }
-  return out;
-}
-
-const THEMES = [
-  { name: 'dark', selector: ':root' },
-  { name: 'light', selector: 'html.light' },
-] as const;
 
 /** Text grounds: every surface fill a component paints `--vam-ink-*` text on. */
 const TEXT_GROUNDS = [
@@ -85,7 +52,33 @@ const TEXT_GROUNDS = [
   // free to diverge now, and every line of prose in the right-hand pane is
   // painted on this one.
   '--vam-pane',
+  // The fill of a card sitting ON the pane or the sidebar, split off `panel`
+  // when the operator reported black patches a second time. It carries
+  // captions, key hints, provider names and every menu row in the sidebar's
+  // popovers, so it owes 1.4.3 like the rest -- and it is the ground that
+  // BOUNDS its own value: at #1e1e1e `ink-quiet` measures 4.518:1 and one step
+  // further it fails, which is why `--vam-card` stops where it does instead of
+  // lifting further off the pane.
+  '--vam-card',
 ] as const;
+
+/**
+ * `--vam-in-bubble` IS DELIBERATELY NOT A TEXT GROUND, and the omission is the
+ * interesting half.
+ *
+ * It carries exactly one ink -- `--vam-ink-dim`, the prompt's own paragraph in
+ * `DetailPanel.tsx` -- which measures 4.789:1 on it in dark and 7.424:1 in
+ * light. Listing it above would demand all nine text tokens, and two of them
+ * genuinely fail there in dark: `ink-faint`/`ink-quiet` at 3.353:1 and
+ * `failed` at 4.473:1. Meeting that would mean a fill so close to the pane
+ * that the bubble goes back to being invisible, which is the complaint that
+ * created the token.
+ *
+ * So the pair that exists is asserted, in `surface-elevation.test.ts`, and the
+ * ones that do not exist are PREVENTED rather than measured: the e2e guard
+ * reads the colour the bubble's paragraph is really painted with and holds it
+ * to 4.5:1, so an edit that reaches for a quieter grey fails there.
+ */
 
 /** Tokens that carry body text and therefore owe WCAG 1.4.3's 4.5:1. */
 const TEXT_TOKENS = [
@@ -132,9 +125,9 @@ describe('token contrast, per theme', () => {
         const pairs = TEXT_TOKENS.flatMap((token) =>
           TEXT_GROUNDS.map((ground) => [token, ground] as const),
         );
-        // 9 tokens x 6 grounds. The literal is the point: it is what makes
+        // 9 tokens x 7 grounds. The literal is the point: it is what makes
         // deleting a row from either list a failure rather than a quieter pass.
-        expect(measure(pairs, 4.5)).toEqual({ pairs: 54, failing: [] });
+        expect(measure(pairs, 4.5)).toEqual({ pairs: 63, failing: [] });
       });
 
       it('reads the waiting amber against its own tint and wash', () => {
