@@ -12,14 +12,29 @@
  *
  *  1. THE MERGE. The poll never stops. While an operator sits scrolled back
  *     reading turn 12 of 63, `entry.session.decisions` is rebuilt every ten
- *     seconds -- with new turns at its front and, because the tail is a BYTE
- *     window, with old ones falling off its back. Measured on the operator's
- *     own machine: on five of the six largest transcripts the tail holds
- *     exactly ONE turn, so every new turn evicts the previous one. A column
- *     that drew `decisions` alone would therefore lose turns it had already
- *     drawn, one per poll, under the reader's eye. `mergeColumn` is the answer:
- *     the column is everything vam has read for this session, in one order,
- *     with the poll's copy winning on content and never on membership.
+ *     seconds, with new turns at its front. `columnOf` is what joins that live
+ *     list to the pages walked back from it, and its rule is one line: THE
+ *     POLL OWNS THE LIVE REGION, the pager owns everything older, and a turn
+ *     the poll still carries is never drawn from the pager's copy.
+ *
+ *     THAT RULE COSTS SOMETHING AND THE COST IS NAMED. The tail is a BYTE
+ *     window, so a turn can fall off its old end -- measured, on five of the
+ *     six largest transcripts on the operator's machine the tail holds one
+ *     turn -- and this merge lets it go, which leaves the column drawing the
+ *     turns either side of it. The alternative was tried: keep every turn ever
+ *     drawn and let the poll only refresh their content. It is WORSE, and not
+ *     marginally. `Canvas.tsx` paints a prompt optimistically the moment it is
+ *     sent (`vam-pending-N`) and then RETRACTS it -- replaced by the source's
+ *     own turn when the write lands, removed outright when it is refused --
+ *     and neither retraction is distinguishable, from these two arrays alone,
+ *     from the byte window sliding. Retaining would therefore leave a phantom
+ *     prompt above the real one on every send, which is a defect an operator
+ *     meets several times an hour rather than a turn ageing quietly out of the
+ *     bottom of a column they are reading the top of. It is also the behaviour
+ *     the column already ships and states: a turn gone from the window is
+ *     reported as gone ("the turn you were reading has scrolled out of what vam
+ *     can see"), never substituted, and `decisions` is what that judgement is
+ *     made against.
  *
  *  2. THE WALK. A window with no complete turn in it is NOT the end of the
  *     session -- at ~2.5 MB of transcript per turn on the largest session here
@@ -62,59 +77,46 @@ import type { SourceError } from '../sources/port.js';
 export const MAX_BLANK_STEPS = 3;
 
 /**
- * Everything vam has read for one session, newest first -- the poll's tail and
- * every page walked back from it, in one order.
+ * THE WHOLE COLUMN, newest first: the poll's live list, then every turn walked
+ * back from it that the poll is not already carrying.
  *
- * Called during render with the poll's latest `decisions`, and it returns the
- * SAME ARRAY when nothing changed. That identity is load-bearing: the caller
- * writes the answer back into state during render (React's documented way to
- * adjust state when props change), and a function that minted a fresh array
- * every time would make that an infinite loop.
+ * A DERIVATION, NOT STATE, and that is most of what makes this safe. `older` is
+ * the only thing the pane has to remember and it changes exactly when a page
+ * lands; the live half is used EXACTLY as the poll delivered it, which is what
+ * keeps a streaming answer on the newest turn live, and what keeps
+ * `Canvas.tsx`'s optimistic paint -- and its retraction -- the poll's business
+ * rather than this module's.
  *
- * THREE RULES, and the order between them is the ordering of the column:
- *  - a turn the poll still carries is taken FROM the poll, so a streaming
- *    answer on the newest turn stays live;
- *  - a turn the poll has DROPPED is kept where it is, because the tail sliding
- *    forward is not the operator losing a turn they were reading;
- *  - a turn the poll carries that the column does not is NEW, and a new turn is
- *    the newest thing there is, so it goes to the front.
+ * THE FILTER IS THE OVERLAP GUARD, and it protects a fix rather than doubting
+ * it. PR 283 made the cursor say whether it names a turn the caller already
+ * holds, so the source withholds the overlapping turn; this is the cheap
+ * assertion beside that, and it also covers the case nobody planned for -- a
+ * paged turn that LATER re-enters the tail, which would otherwise put one
+ * prompt in the column twice under two ids nothing can reconcile.
  */
-export function mergeColumn(
-  column: readonly Decision[],
+export function columnOf(
   decisions: readonly Decision[],
+  older: readonly Decision[],
 ): readonly Decision[] {
-  const fresh = new Map(decisions.map((d) => [d.id, d]));
-  let changed = false;
-  const kept = column.map((held) => {
-    const live = fresh.get(held.id);
-    if (live === undefined || live === held) return held;
-    changed = true;
-    return live;
-  });
-  const held = new Set(kept.map((d) => d.id));
-  const arrived = decisions.filter((d) => !held.has(d.id));
-  if (arrived.length === 0) return changed ? kept : column;
-  return [...arrived, ...kept];
+  if (older.length === 0) return decisions;
+  const live = new Set(decisions.map((d) => d.id));
+  return [...decisions, ...older.filter((d) => !live.has(d.id))];
 }
 
 /**
- * A page of older turns, joined onto the older end of the column.
+ * A page of older turns, joined onto the older end of the history the pane
+ * already holds. Newest first throughout, so a page goes on the END.
  *
- * DEDUPED, AND NOT BECAUSE THE SOURCE IS DISTRUSTED. #283 already fixed the
- * overlap this would otherwise produce -- the tail cannot drop its own oldest
- * turn, so it hands out a cursor that NAMES that turn, and the read withholds
- * whatever turn the cursor's line belongs to. This filter is the cheap
- * assertion that protects that fix: a page that ever did return a turn already
- * on screen would put one prompt in the column twice under two ids nothing can
- * reconcile, and that is a defect an operator would have to notice for us.
+ * Deduped against what is held for the same reason `columnOf` dedupes against
+ * the live list: one turn, one block, whatever the source hands over.
  */
 export function appendOlder(
-  column: readonly Decision[],
+  older: readonly Decision[],
   turns: readonly Decision[],
 ): readonly Decision[] {
-  const held = new Set(column.map((d) => d.id));
+  const held = new Set(older.map((d) => d.id));
   const added = turns.filter((d) => !held.has(d.id));
-  return added.length === 0 ? column : [...column, ...added];
+  return added.length === 0 ? older : [...older, ...added];
 }
 
 /**
@@ -125,7 +127,7 @@ export function appendOlder(
  * cursor a previous page handed back, or the id of a turn already on screen --
  * "page the transcript before this". The first step back has no page behind it,
  * so it passes the id of the OLDEST turn the column holds, which is the one the
- * contract expects and the one #283's overlap fix is keyed on. Inventing a
+ * contract expects and the one PR 283's overlap fix is keyed on. Inventing a
  * cursor of our own, or passing `null` (which main reads as "from the newest
  * end"), would both re-read what is already on screen.
  */

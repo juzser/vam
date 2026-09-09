@@ -103,6 +103,7 @@ import type {
 import type { SessionEntry } from '../domain/selectors.js';
 import { questionKeys } from '../keyboard/question-keys.js';
 import { ShortcutTip } from '../keyboard/ShortcutTip.js';
+import { useHistoryReader } from '../sources/history-reader.js';
 import { describeFailure } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
@@ -118,9 +119,18 @@ import {
 import { Note } from './Note.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
-
 import { TerminalTab } from './TerminalTab.js';
 import { TABS, type Tab, visibleTabs } from './tabs.js';
+import {
+  appendOlder,
+  applyWalk,
+  columnOf,
+  cursorToAsk,
+  moreState,
+  type PagerState,
+  RESTING_PAGER,
+  walkOlder,
+} from './transcript-history.js';
 
 /**
  * How often the pane is re-read while a row says it is waiting.
@@ -133,6 +143,24 @@ import { TABS, type Tab, visibleTabs } from './tabs.js';
  * that vam started.
  */
 const PROMPT_POLL_MS = 2_000;
+
+/**
+ * One empty turn list, shared. A frozen constant rather than a fresh `[]` at
+ * each call site: it is the initial value of a `useState` and the fallback for
+ * a pane with no session at all, and both of those are read every render.
+ */
+const NO_TURNS: readonly Decision[] = Object.freeze([]);
+
+/**
+ * HOW NEAR THE TOP COUNTS AS ASKING FOR MORE.
+ *
+ * The operator's own words were "load more when scrolling up", so the gesture
+ * is the scroll and not only the button. A margin rather than zero: at
+ * `scrollTop === 0` the reader has already hit the wall and is waiting, and the
+ * boundary block itself is about this tall, so this fires as it comes into view
+ * rather than after it has been stared at.
+ */
+const NEAR_TOP_PX = 120;
 
 /** The three things this pane needs to know about a file it was handed. */
 export type AttachedFile = {
@@ -2600,19 +2628,82 @@ export function DetailPanel(props: DetailPanelProps) {
   }
   if (followCanvas && selectedId !== canvasDecisionId) setSelectedId(canvasDecisionId);
   /**
-   * A PICK THE WINDOW NO LONGER CARRIES AT ALL -- not merely off the newest
-   * slice, but genuinely absent from `entry.session.decisions`, the same gap
-   * `source.ts` already documents for `questions` past `TAIL_BYTES`: vam
-   * cannot tell "answered a while ago" from "never happened" for something
-   * outside the window, so it must not pretend otherwise. Checked before
-   * falling back to `canvasDecision`, which is what stops that fallback from
-   * quietly relabelling a different turn as the one the operator picked.
+   * THE SOURCE'S BACKWARD PAGER, or `null` when this source has none.
+   *
+   * Read from context rather than taken as a prop, and `sources/history-reader.ts`
+   * carries the argument for that: it is the one member this pane uses that
+   * belongs to the SOURCE rather than to this pane, it takes the session id it
+   * acts on as an argument, and every split leaf wants the same function.
+   * `null` is a real answer -- an honest "this source cannot read further
+   * back" -- never a stub that resolves empty, because a stub is how "nothing
+   * older" and "vam could not ask" become one sentence.
+   */
+  const readHistory = useHistoryReader();
+  /**
+   * THE TURNS THIS PANE HAS WALKED BACK INTO, newest first, and where the walk
+   * has got to. Two pieces of state, one subject.
+   *
+   * WHY THEY LIVE HERE, in this component, rather than in the model:
+   *
+   *  - `entry` is rebuilt WHOLESALE by the poll (`useSourceModel`), so anything
+   *    written into it would be erased every ten seconds by the very thing it
+   *    has to survive;
+   *  - the thing that must not move when a page lands is THIS pane's scroll
+   *    offset, and `Canvas.tsx` mounts one `DetailPanel` per split leaf -- two
+   *    panes on the same session scroll independently, so a store shared
+   *    between them would tie one operator's scroll-back to the other's;
+   *  - and it is per-pane state that nothing outside this pane renders from,
+   *    which is the same test `cycleNote` and the tab already pass.
+   *
+   * ONLY THE OLDER HALF IS REMEMBERED, and `transcript-history.ts` carries the
+   * argument in full: the live list is used exactly as the poll delivered it,
+   * so this pane holds no second opinion about a turn the poll is still
+   * carrying, and `Canvas.tsx`'s optimistic paint -- with the retraction that
+   * follows a refused write -- stays the poll's business rather than becoming a
+   * phantom this pane preserves.
+   */
+  const [older, setOlder] = useState<readonly Decision[]>(NO_TURNS);
+  const [pager, setPager] = useState<PagerState>(RESTING_PAGER);
+  /**
+   * WHICH SESSION A WALK IS RUNNING FOR, or `null` when none is. A ref, because
+   * nothing renders from it -- `pager.phase` is what the block draws -- and
+   * because it has to be readable and writable between two ticks of one async
+   * function without a render in between, which is what makes "one request in
+   * flight" a guarantee rather than a race.
+   */
+  const readingRef = useRef<string | null>(null);
+  // A NEW SESSION IS A NEW DOCUMENT: another session's turns must not be above
+  // it, its cursor is meaningless here, and a walk still in flight for the old
+  // one must not be allowed to block this one's first ask. Read from a local
+  // for THIS render -- the state updates queued here land on the next one, and
+  // drawing the old session's history for one frame is the half-read flash
+  // `focusKey` has always existed to avoid.
+  if (sessionChanged) readingRef.current = null;
+  if (sessionChanged && older.length > 0) setOlder(NO_TURNS);
+  if (sessionChanged && pager !== RESTING_PAGER) setPager(RESTING_PAGER);
+  const olderNow = sessionChanged ? NO_TURNS : older;
+  const pagerNow = sessionChanged ? RESTING_PAGER : pager;
+  const mergedColumn = columnOf(entry?.session.decisions ?? NO_TURNS, olderNow);
+  /**
+   * A PICK THE COLUMN NO LONGER CARRIES AT ALL -- not merely off the newest
+   * slice, but genuinely absent, the same gap `source.ts` already documents for
+   * `questions` past `TAIL_BYTES`: vam cannot tell "answered a while ago" from
+   * "never happened" for something outside the window, so it must not pretend
+   * otherwise. Checked before falling back to `canvasDecision`, which is what
+   * stops that fallback from quietly relabelling a different turn as the one
+   * the operator picked.
+   *
+   * AGAINST THE COLUMN, NOT AGAINST `decisions`, and that changed with paging.
+   * The column now holds turns the live tail does not -- ones read back into
+   * it, and ones the tail's byte window has since slid past -- so asking
+   * `decisions` alone would print "the turn you were reading has scrolled out
+   * of what vam can see" over a turn that is on screen, forty pixels below.
    */
   const selectedTurnMissing =
     entry !== null &&
     selectedId !== null &&
     selectedId !== canvasDecisionId &&
-    !entry.session.decisions.some((d) => d.id === selectedId);
+    !mergedColumn.some((d) => d.id === selectedId);
   /**
    * RENDERED FROM THE PROP WHEN IT MATCHES, RATHER THAN RE-FOUND BY ID. While
    * this panel is following the canvas's own pick (the common case),
@@ -2620,16 +2711,19 @@ export function DetailPanel(props: DetailPanelProps) {
    * from this same `entry.session.decisions` -- so using it as given is what
    * keeps a streaming answer on the newest turn live. A re-lookup would still
    * find the same id, but there is no reason to add one. Only once the
-   * operator has picked something else does this reach into
-   * `entry.session.decisions` for it, which is the one place that turn's
-   * current content actually lives -- and `null` when it is not there at
-   * all, so `selectedTurnMissing`'s message draws instead of a substitute.
+   * operator has picked something else does this reach into the COLUMN for it,
+   * which is the one place that turn's current content actually lives -- the
+   * merged list rather than `decisions`, for `selectedTurnMissing`'s own reason
+   * above, and it stays fresh because `columnOf` puts the poll's own list
+   * first: a turn the poll still carries is found there, in the poll's copy,
+   * before the pager's older one is ever reached. `null` when it is not there
+   * at all, so `selectedTurnMissing`'s message draws instead of a substitute.
    */
   const decision: Decision | null = selectedTurnMissing
     ? null
     : selectedId === canvasDecisionId
       ? canvasDecision
-      : (entry?.session.decisions.find((d) => d.id === selectedId) ?? canvasDecision);
+      : (mergedColumn.find((d) => d.id === selectedId) ?? canvasDecision);
   /**
    * WHAT THE LAST SHIFT-TAB DID, in flight and afterwards, or `null` at rest.
    *
@@ -2866,6 +2960,121 @@ export function DetailPanel(props: DetailPanelProps) {
     stuckRef.current = edge === 'bottom';
     box.scrollTop = edge === 'top' ? 0 : box.scrollHeight;
     syncJumps(box);
+  };
+
+  /**
+   * WHERE THE READER WAS, taken the instant before a page is prepended and
+   * spent by the layout effect below. A ref rather than state because nothing
+   * renders from it and because it has to survive between an async resolution
+   * and the very next commit, with no render of its own in between.
+   */
+  const anchorRef = useRef<{ readonly scrollHeight: number; readonly scrollTop: number } | null>(
+    null,
+  );
+  /**
+   * PUT BACK WHERE THEY WERE, AFTER CONTENT WAS ADDED ABOVE THEM.
+   *
+   * THE DEFECT EVERY INFINITE-SCROLL SHIPS. A scroll offset is measured from
+   * the TOP of the content, so inserting anything above the viewport moves
+   * everything the reader is looking at down by exactly the height of what was
+   * inserted -- mid-sentence, while they read. The fix is arithmetic and it is
+   * not optional: remember `scrollHeight` before, and add whatever it grew by
+   * to `scrollTop` after.
+   *
+   * NOT LEFT TO THE BROWSER. Chrome and Safari both implement CSS scroll
+   * anchoring, which does exactly this by itself -- except that it is
+   * SUPPRESSED WHILE THE SCROLLER IS AT ITS TOP, and the top is the one place
+   * this feature is ever used from. Relying on it would mean shipping the bug
+   * with a spec citation attached.
+   *
+   * A LAYOUT EFFECT, so the correction lands in the same frame the turns do:
+   * a passive effect would paint the jumped position once and then fix it,
+   * which is the flicker rather than the fix. NO DEPENDENCY ARRAY, the same
+   * reasoning `scrollToTurnRef`'s effect states below: the instruction is set
+   * from an async resolution, and a dependency list would have to name every
+   * path that can set a ref.
+   *
+   * `stuckRef` IS NOT TOUCHED. A reader at the top is by definition not at the
+   * bottom, and this correction is what keeps them where they were rather than
+   * a navigation of its own.
+   */
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    if (anchor === null) return;
+    anchorRef.current = null;
+    const box = outRef.current;
+    if (box === null) return;
+    const grew = box.scrollHeight - anchor.scrollHeight;
+    if (grew <= 0) return;
+    box.scrollTop = anchor.scrollTop + grew;
+    syncJumps(box);
+  });
+
+  /**
+   * ONE STEP BACK THROUGH THE TRANSCRIPT: the whole of the join, and the only
+   * thing that calls the source's pager.
+   *
+   * ONE WALK AT A TIME, and the guard is a ref rather than `pager.phase`
+   * because two scroll events in one frame both read the same pre-render state:
+   * a check against rendered state would let both through and fire two requests
+   * for the same cursor. The gesture is not DROPPED either -- the walk that is
+   * already running is for the same cursor, so a second one would be a second
+   * copy of the answer that is already coming.
+   *
+   * THE CURSOR IS NOT OURS TO INVENT (`cursorToAsk`): the first ask passes the
+   * id of the oldest turn on screen, which is the shape PR 283's overlap fix is
+   * keyed on, and every ask after that passes back verbatim what the previous
+   * page handed over.
+   *
+   * THE ANSWER MAY BE ABOUT A SESSION THAT IS NO LONGER HERE. A walk can take
+   * three reads of up to 8 MiB each; the pane can be moved to another session
+   * in that time, and everything below is dropped when it has been -- an answer
+   * about the session that was here then says nothing about the one that is
+   * here now, the same rule `pressPaneKey` above already keeps for its own
+   * refusals.
+   */
+  const readOlder = () => {
+    const sessionId = entry?.session.id;
+    if (sessionId === undefined || readHistory === null) return;
+    if (readingRef.current !== null) return;
+    if (pagerNow.phase === 'start') return;
+    const cursor = cursorToAsk(pagerNow.cursor, mergedColumn);
+    // Nothing on screen to page before, and no cursor either: there is no
+    // question to ask, so no request is made and nothing is drawn as pending.
+    if (cursor === null) return;
+    readingRef.current = sessionId;
+    setPager((now) => ({ ...now, phase: 'reading', error: null }));
+    void walkOlder(readHistory, sessionId, cursor).then((walk) => {
+      if (readingRef.current === sessionId) readingRef.current = null;
+      if (sessionKeyRef.current !== sessionId) return;
+      // BEFORE THE STATE THAT ADDS THEM, and this ordering is the anchoring:
+      // the offsets have to be the ones from the frame the reader is still
+      // looking at, not the ones after React has laid the new turns out.
+      const box = outRef.current;
+      if (walk.kind === 'page' && walk.turns.length > 0 && box !== null) {
+        anchorRef.current = { scrollHeight: box.scrollHeight, scrollTop: box.scrollTop };
+      }
+      if (walk.kind === 'page' && walk.turns.length > 0) {
+        setOlder((held) => appendOlder(held, walk.turns));
+      }
+      setPager((now) => applyWalk(now, walk));
+    });
+  };
+  /**
+   * "Load more when scrolling up" -- the operator's own words, so the scroll IS
+   * the gesture and the control below is the second way to ask, not the first.
+   *
+   * Only while there is genuinely more to ask for: a source with no pager, a
+   * proven start and a read that just failed all fall through here, so a reader
+   * resting at the top of a column that cannot grow makes no requests at all.
+   * A FAILED read in particular is deliberately not retried by scrolling --
+   * that would be a retry loop nobody asked for, running as fast as scroll
+   * events arrive; the control says the words and waits to be pressed.
+   */
+  const askIfNearTop = (box: HTMLElement) => {
+    if (box.scrollTop > NEAR_TOP_PX) return;
+    if (moreState(pagerNow, readHistory) !== 'available') return;
+    readOlder();
   };
 
   /**
@@ -3403,12 +3612,24 @@ export function DetailPanel(props: DetailPanelProps) {
    * about what happened, so this cannot be worded as the session's total --
    * see the label below, which says "read" rather than a bare count for
    * exactly this reason.
+   *
+   * OVER THE WHOLE COLUMN, which is what makes the word "read" keep its
+   * meaning now that the column can grow: a turn walked back into it was READ,
+   * by the same source, out of the same file, and leaving it out of the count
+   * would make the number smaller than the list directly below it.
    */
-  const turnsRead = entry?.session.decisions.length ?? 0;
-  // Oldest first: `decisions` arrives newest first. That
+  const turnsRead = mergedColumn.length;
+  /**
+   * WHAT THE BOUNDARY BLOCK OFFERS AT THE TOP OF THE COLUMN, or `null` when it
+   * offers nothing. Decided in `transcript-history.ts` so that the four answers
+   * are folded in ONE place rather than in a JSX conditional that a later
+   * branch can quietly disagree with.
+   */
+  const columnMore = moreState(pagerNow, readHistory);
+  // Oldest first: the column is newest first. That
   // ordering is what makes "the last line" and "the newest turn" the same
   // line, so the ones kept are taken off the end.
-  const orderedTurns = [...(entry?.session.decisions ?? [])].reverse();
+  const orderedTurns = [...mergedColumn].reverse();
   /**
    * How many tool calls failed across the turns ON SCREEN, or `null` when no
    * turn read carries the field at all.
@@ -3769,6 +3990,7 @@ export function DetailPanel(props: DetailPanelProps) {
               onScroll={(event) => {
                 stuckRef.current = isAtBottom(event.currentTarget);
                 syncJumps(event.currentTarget);
+                askIfNearTop(event.currentTarget);
               }}
               /* FULL-BLEED, so the sticky ground inside can be. The pane body
                  puts `px-3.5 py-3` around everything; a scroll column inside
@@ -3839,23 +4061,35 @@ export function DetailPanel(props: DetailPanelProps) {
               A column that ended silently would be at its most misleading
               exactly there.
 
-              TWO STATES, AND ONLY ONE OF THEM IS ASSERTABLE TODAY:
+              TWO STATES, AND BOTH ARE ASSERTABLE NOW — the seam this block was
+              written against has been joined:
                 - `read-limit` — "this is as far back as vam has read". True
-                  whenever the window is what ended the list, which is always,
-                  because no source can yet report reaching the file's start.
-                - `session-start` — "the session begins here". NOT DRAWN, and
-                  deliberately not stubbed: nothing vam reads can currently
-                  prove it, and a boundary that guessed would be the same lie
-                  in the other direction.
+                  whenever the window is what ended the list.
+                - `session-start` — "the session begins here". Drawn only on
+                  `TranscriptPage.reachedStart`, which is a POSITIVE fact read
+                  off a window that began at byte 0 and is never inferred from
+                  an empty page. A boundary that guessed would be the same lie
+                  in the other direction, so nothing else may set it.
 
-              AND NO CONTROL, because there is nothing behind one. Backward
-              paging is being added to the source in parallel; until it lands,
-              a "load more" button would be a control that cannot act and a
-              spinner would be a fetch that does not exist — both worse than
-              the sentence. THE SEAM: when the source can page, this block
-              gains the `session-start` state and a real button beside it, and
-              nothing else in the column has to change — the column already
-              renders whatever `orderedTurns` holds, oldest first.
+              AND A CONTROL, BECAUSE THERE IS NOW SOMETHING BEHIND ONE. What
+              this comment used to say — a button with nothing behind it is
+              worse than a sentence — has not changed; what changed is that
+              `source.history` exists (`sources/port.ts`), so the button acts.
+              The rule it kept is kept: ABSENT, NOT DIMMED. The control is
+              simply not in the DOM for a source that cannot page, while a walk
+              is in flight, or once the start is proven — see `moreState` in
+              `transcript-history.ts`, which is the one place those states are
+              decided.
+
+              FOUR ANSWERS AND THEY STAY FOUR ON SCREEN, because they are four
+              different things for an operator to do about:
+                - turns arrived        → they are simply above; nothing is said.
+                - the start was proven → `session-start`, and no control.
+                - vam read further back and found no whole turn (the ORDINARY
+                  answer on a large session, ~2.5 MB of transcript per turn)
+                  → still `read-limit`, still offering to go on. Never an end.
+                - vam could not read   → `unavailable`, in the SOURCE's own
+                  words, plus a retry, because the cursor did not move.
             */}
               {/* THE RESERVED CORNER, audit F1's obligation, inherited by
                 whatever sits at the top of the column: at scrollTop 0 that is
@@ -3867,7 +4101,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 drawn -- an unfocused pane paints no pill, and reserving for
                 one would notch every pane the operator is not in. */}
               <div
-                data-column-start="read-limit"
+                data-column-start={pagerNow.phase === 'start' ? 'session-start' : 'read-limit'}
                 /* 11.5px, NOT the 10.5px of the turn lines this block's facts
                  came off. The operator has twice asked for small type to come
                  up a pixel, and a repo-wide bump is its own task (198 literals,
@@ -3909,9 +4143,67 @@ export function DetailPanel(props: DetailPanelProps) {
                     </span>
                   )}
                 </div>
+                {/* THE SENTENCE IS THE STATE, and there are exactly two of them
+                  because there are exactly two things vam can honestly say
+                  about the top of a column. The attribute above and this line
+                  are read off the SAME fact, so a screen that says one thing to
+                  a test and another to a person is not expressible here. */}
                 <p data-column-start-note className="text-ink-faint leading-[1.5]">
-                  This is as far back as vam has read — not necessarily where the session began.
+                  {pagerNow.phase === 'start'
+                    ? 'The session begins here — vam read back to its first turn.'
+                    : 'This is as far back as vam has read — not necessarily where the session began.'}
                 </p>
+                {/* WHAT VAM CAN DO ABOUT THAT, or why it cannot. Absent
+                  entirely once the start is proven: there is nothing left to
+                  ask for, so there is nothing to ask with. */}
+                {columnMore !== null && (
+                  <p
+                    data-column-more={columnMore}
+                    className="flex flex-wrap items-baseline gap-x-1.5 leading-[1.5]"
+                  >
+                    {columnMore === 'unsupported' ? (
+                      // A STATED REFUSAL, NOT A DEAD CONTROL. `history` absent
+                      // from the port is "this source has no way to page", which
+                      // is a different sentence from "there is nothing older" --
+                      // `pull-requests.ts`'s rule, at the one place in this pane
+                      // it can still be got wrong.
+                      <span data-column-more-note>
+                        This source cannot read further back than its own window.
+                      </span>
+                    ) : columnMore === 'reading' ? (
+                      // A STATUS, NEVER A DIMMED BUTTON: mid-flight a control is
+                      // either painted and inert or half-painted and live, and
+                      // both are states this pane must not have. It says what is
+                      // happening and claims nothing about what will be found --
+                      // no count, no progress bar, because vam does not know how
+                      // much is there.
+                      <span data-column-more-note role="status">
+                        Reading further back…
+                      </span>
+                    ) : (
+                      <>
+                        {columnMore === 'unavailable' && pagerNow.error !== null && (
+                          // THE SOURCE'S OWN WORDS, `code: message`, the same
+                          // shape every other refusal in this pane renders --
+                          // and the reason `SourceError` travels the bridge
+                          // verbatim (`sources/port.ts`'s `describeFailure`).
+                          <span data-column-more-error className="text-failed">
+                            vam could not read further back — {pagerNow.error.code}:{' '}
+                            {pagerNow.error.message}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          data-column-more-ask
+                          onClick={readOlder}
+                          className="cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
+                        >
+                          {columnMore === 'unavailable' ? 'Try again' : 'Read earlier turns'}
+                        </button>
+                      </>
+                    )}
+                  </p>
+                )}
                 {/* THE PICK IS GONE, BUT NOT THE ANSWER TO IT. A turn can fall
                   out of the window between one poll and the next; falling
                   through to some other turn would look identical to the

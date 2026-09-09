@@ -12,19 +12,19 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { HistoryCursor, TranscriptPage } from '../../src/shared/history.js';
 import type { Decision } from '../../src/renderer/domain/model.js';
 import {
   appendOlder,
   applyWalk,
+  columnOf,
   cursorToAsk,
   MAX_BLANK_STEPS,
-  mergeColumn,
   moreState,
   type PagerState,
   RESTING_PAGER,
   walkOlder,
 } from '../../src/renderer/panels/transcript-history.js';
+import type { HistoryCursor, TranscriptPage } from '../../src/shared/history.js';
 
 const turn = (id: string, output = `answer ${id}`): Decision => ({
   id,
@@ -42,88 +42,78 @@ const page = (over: Partial<Extract<TranscriptPage, { kind: 'page' }>> = {}): Tr
   ...over,
 });
 
-describe('mergeColumn', () => {
-  it('starts as the live tail, newest first', () => {
+describe('columnOf', () => {
+  it('is the live tail alone when nothing has been walked back', () => {
     const tail = [turn('t3'), turn('t2'), turn('t1')];
-    expect(mergeColumn([], tail).map((d) => d.id)).toEqual(['t3', 't2', 't1']);
+    expect(columnOf(tail, [])).toBe(tail);
   });
 
-  it('returns the SAME array when nothing changed, so a render-phase update cannot loop', () => {
-    const tail = [turn('t3'), turn('t2')];
-    const first = mergeColumn([], tail);
-    expect(mergeColumn(first, tail)).toBe(first);
-  });
-
-  it('puts a newly polled turn at the front, where the newest turn belongs', () => {
-    const column = mergeColumn([], [turn('t2'), turn('t1')]);
-    expect(mergeColumn(column, [turn('t3'), turn('t2'), turn('t1')]).map((d) => d.id)).toEqual([
+  it('puts the pages BEHIND the tail: older turns at the older end', () => {
+    expect(columnOf([turn('t3'), turn('t2')], [turn('t1'), turn('t0')]).map((d) => d.id)).toEqual([
       't3',
       't2',
       't1',
+      't0',
     ]);
   });
 
-  it('takes the FRESH copy of a turn the poll refreshed, in place', () => {
-    const column = mergeColumn([], [turn('t2', null as unknown as string), turn('t1')]);
-    const merged = mergeColumn(column, [turn('t2', 'the answer landed'), turn('t1')]);
-    expect(merged.map((d) => d.id)).toEqual(['t2', 't1']);
+  it('lets the POLL own the live region, whatever the pager remembers', () => {
+    // The rule that keeps `Canvas.tsx`'s optimistic paint working: a turn it
+    // retracts (a refused write, or its replacement by the source's own turn)
+    // must leave the column with it, so the pane keeps no second opinion about
+    // a turn the poll is carrying -- or has stopped carrying.
+    const merged = columnOf([turn('real-1')], []);
+    expect(merged.map((d) => d.id)).toEqual(['real-1']);
+  });
+
+  it('draws the POLL copy of a turn both halves hold, not the pager stale one', () => {
+    const merged = columnOf([turn('t2', 'the answer landed')], [turn('t2', 'still working')]);
+    expect(merged.map((d) => d.id)).toEqual(['t2']);
     expect(merged[0]?.output).toBe('the answer landed');
   });
 
-  it('KEEPS a turn the tail has dropped -- the window slides, the column must not tear', () => {
-    // The measured case: on five of the six largest transcripts on the
-    // operator's machine the tail holds ONE turn, so every new turn evicts the
-    // previous one. A column that only ever drew `decisions` would lose a turn
-    // it had already drawn, mid-read.
-    const column = mergeColumn([], [turn('t2'), turn('t1')]);
-    const merged = mergeColumn(column, [turn('t3')]);
-    expect(merged.map((d) => d.id)).toEqual(['t3', 't2', 't1']);
-  });
-
   it('never returns the same turn twice, whatever arrives', () => {
-    const column = appendOlder(mergeColumn([], [turn('t2'), turn('t1')]), [turn('t1'), turn('t0')]);
-    const merged = mergeColumn(column, [turn('t2'), turn('t1')]);
+    const merged = columnOf([turn('t2'), turn('t1')], [turn('t1'), turn('t0')]);
     expect(merged.map((d) => d.id)).toEqual(['t2', 't1', 't0']);
+    expect(new Set(merged.map((d) => d.id)).size).toBe(merged.length);
   });
 });
 
 describe('appendOlder', () => {
   it('puts a page BEHIND what is held: older turns go to the older end', () => {
-    const column = mergeColumn([], [turn('t3'), turn('t2')]);
-    expect(appendOlder(column, [turn('t1'), turn('t0')]).map((d) => d.id)).toEqual([
-      't3',
-      't2',
-      't1',
-      't0',
-    ]);
+    expect(
+      appendOlder([turn('t3'), turn('t2')], [turn('t1'), turn('t0')]).map((d) => d.id),
+    ).toEqual(['t3', 't2', 't1', 't0']);
   });
 
-  it('drops a turn the column already holds rather than drawing it twice', () => {
-    // #283 made the cursor say whether it names a turn the caller already
+  it('drops a turn the pager already holds rather than drawing it twice', () => {
+    // PR 283 made the cursor say whether it names a turn the caller already
     // holds, so this should not happen -- which is exactly why it is asserted
     // here: a cheap check that protects that fix rather than trusting it.
-    const column = mergeColumn([], [turn('t2'), turn('t1')]);
-    expect(appendOlder(column, [turn('t1'), turn('t0')]).map((d) => d.id)).toEqual([
-      't2',
-      't1',
-      't0',
-    ]);
+    expect(
+      appendOlder([turn('t2'), turn('t1')], [turn('t1'), turn('t0')]).map((d) => d.id),
+    ).toEqual(['t2', 't1', 't0']);
   });
 
   it('returns the same array when a page adds nothing', () => {
-    const column = mergeColumn([], [turn('t2'), turn('t1')]);
-    expect(appendOlder(column, [turn('t1')])).toBe(column);
+    const held = [turn('t2'), turn('t1')];
+    expect(appendOlder(held, [turn('t1')])).toBe(held);
   });
 });
 
 describe('cursorToAsk', () => {
   it('is the id of the OLDEST turn on screen when no page has answered yet', () => {
-    const column = mergeColumn([], [turn('t3'), turn('t2'), turn('t1')]);
+    const column = columnOf([turn('t3'), turn('t2'), turn('t1')], []);
+    expect(cursorToAsk(null, column)).toBe('t1');
+  });
+
+  it('is the id of the oldest turn WALKED BACK TO, once pages have landed', () => {
+    const column = columnOf([turn('t3')], [turn('t2'), turn('t1')]);
     expect(cursorToAsk(null, column)).toBe('t1');
   });
 
   it('is the cursor the last page handed back, once there is one', () => {
-    const column = mergeColumn([], [turn('t3')]);
+    const column = columnOf([turn('t3')], []);
     expect(cursorToAsk('@4096', column)).toBe('@4096');
   });
 
@@ -134,7 +124,9 @@ describe('cursorToAsk', () => {
 
 describe('walkOlder', () => {
   it('answers a page that carries turns, in one read', async () => {
-    const read = vi.fn(async () => page({ turns: [turn('t0')], cursor: '@8', reachedStart: false }));
+    const read = vi.fn(async () =>
+      page({ turns: [turn('t0')], cursor: '@8', reachedStart: false }),
+    );
     const walk = await walkOlder(read, 's1', 't1');
     expect(read).toHaveBeenCalledExactlyOnceWith('s1', 't1');
     expect(walk).toEqual({
