@@ -343,6 +343,259 @@ check('and jump mode really did close', afterJump !== 'JUMP', `the bar still rea
 await page.screenshot({ path: `${outDir}/key-truth-jump-refusal.png` });
 console.log(`${outDir}/key-truth-jump-refusal.png`);
 
+// ---------------------------------------------------------------------------
+// THE MODE BOUNDARY (audit F4, F5) AND THE TWO NEW BRACKET FAMILIES.
+//
+// Everything below is here rather than in a unit test for one reason: it is
+// about WHERE DOM FOCUS IS after a real key press. jsdom has no focus a
+// keystroke can be delivered to, `preventDefault` on a hand-built event is a
+// specified no-op, and `document.activeElement` in a jsdom test is whatever
+// the test itself last called `.focus()` on. Here the presses are the
+// browser's own and land on whatever really holds the keyboard.
+//
+// `Control`, not `Meta`: `normalizeKey` folds both into `Mod`, and CI is
+// ubuntu — a guard spelled with Cmd would be a guard that only ran on one
+// developer's machine.
+
+/**
+ * Wait for a state and REPORT rather than abort. `page.waitForFunction`
+ * throws on timeout, which would end the run and take every case after it
+ * with it — the opposite of this file's rule that failures are collected.
+ */
+async function settle(fn, arg, label) {
+  try {
+    await page.waitForFunction(fn, arg, { timeout: 4000 });
+    return true;
+  } catch {
+    check(label, false, 'the screen never reached the state this case needs');
+    return false;
+  }
+}
+
+/** Where the keyboard really is, and what the bar claims about it. */
+const keyboardAt = () =>
+  page.evaluate(() => {
+    const active = document.activeElement;
+    return {
+      tag: active?.tagName ?? null,
+      isStop: active instanceof HTMLElement && active.hasAttribute('data-insert-stop'),
+      inScope: active instanceof HTMLElement && active.closest('[data-insert-scope]') !== null,
+      mode: document.querySelector('[data-mode]')?.textContent ?? '',
+      cursor:
+        document
+          .querySelector('[data-row-cursor]')
+          ?.closest('[data-session-row]')
+          ?.getAttribute('data-session-row') ?? null,
+    };
+  });
+
+await reset();
+await page.locator(`[data-session-row="${QUIET_SESSION}"]`).click();
+await settle(
+  (id) =>
+    document.querySelector('[data-row-cursor]')?.closest('[data-session-row]')
+      ?.getAttribute('data-session-row') === id,
+  QUIET_SESSION,
+  'the quiet session takes the cursor before the mode cases start',
+);
+
+// F5. `I` LANDS THE KEYBOARD SOMEWHERE REAL, or does not claim Insert.
+await page.keyboard.press('I');
+const entered = (await settle(
+  () => document.activeElement instanceof HTMLElement && document.activeElement.closest('[data-insert-scope]') !== null,
+  undefined,
+  'I moves the keyboard into the pane',
+))
+  ? await keyboardAt()
+  : await keyboardAt();
+console.log('after I:', JSON.stringify(entered));
+check(
+  'I lands on a real insert stop rather than leaving focus on the body',
+  entered.isStop,
+  `activeElement is <${entered.tag}> with no data-insert-stop`,
+);
+check('and the bar agrees, because it is reading that same focus', entered.mode === 'Insert');
+check('and the landing is the prompt ROW, not the box — `i` is the caret', entered.tag !== 'TEXTAREA');
+
+// F4. `Mod-0` FROM INSIDE THE COMPOSER REALLY HANDS THE KEYBOARD BACK.
+//
+// `i` puts the caret in the textarea, which is where the operator is when they
+// reach for `Cmd+0`. The flag-era bug: the mode read Select while that now
+// read-only box still held focus, so the window listener returned at its own
+// typing guard and every bare key after it vanished.
+await reset();
+await page.locator(`[data-session-row="${QUIET_SESSION}"]`).click();
+await page.keyboard.press('i');
+const composing = await settle(
+  () => document.activeElement?.tagName === 'TEXTAREA',
+  undefined,
+  'i puts the caret in the prompt box',
+);
+if (composing) {
+  const before = await keyboardAt();
+  check('the caret really is in the box before Mod-0', before.tag === 'TEXTAREA');
+  check('and the bar reads Insert while it is', before.mode === 'Insert');
+  await page.keyboard.press('Control+Digit0');
+  // Waited for the NEW state — the box letting go — never for "not in Insert",
+  // which was already false a moment ago on some other screen.
+  await settle(
+    () => document.activeElement?.tagName !== 'TEXTAREA',
+    undefined,
+    'Mod-0 releases the composer’s DOM focus',
+  );
+  const released = await keyboardAt();
+  console.log('after Mod-0:', JSON.stringify(released));
+  check(
+    'Mod-0 blurs the box rather than only writing Select',
+    released.tag !== 'TEXTAREA' && !released.inScope,
+    `activeElement is still <${released.tag}>`,
+  );
+  check('and the bar reads Select', released.mode === 'Select');
+
+  // THE ASSERTION THE WHOLE FINDING IS ABOUT: the next bare key gets through.
+  const cursorWas = released.cursor;
+  await page.keyboard.press('j');
+  const moved = await settle(
+    (was) =>
+      (document.querySelector('[data-row-cursor]')?.closest('[data-session-row]')
+        ?.getAttribute('data-session-row') ?? null) !== was,
+    cursorWas,
+    'the next bare j reaches the sidebar',
+  );
+  const after = await keyboardAt();
+  check(
+    'a bare j after Mod-0 walks the sidebar instead of dying in the box',
+    moved && after.cursor !== cursorWas,
+    `cursor stayed on ${after.cursor}`,
+  );
+  await page.screenshot({ path: `${outDir}/key-truth-mode-handback.png` });
+  console.log(`${outDir}/key-truth-mode-handback.png`);
+}
+
+// ---------------------------------------------------------------------------
+// THE BRACKET FAMILIES: a tab step, a pane step, and digits across panes.
+
+/** Every tab drawn, pane by pane, in the order the strips paint them. */
+const drawn = () =>
+  page.evaluate(() => ({
+    panes: [...document.querySelectorAll('[data-split-pane]')].map((pane) => ({
+      id: pane.getAttribute('data-split-pane'),
+      focused: pane.getAttribute('data-split-focused') === 'true',
+      active:
+        pane.querySelector('[data-session-tab][data-active="true"] [data-tab-select]')
+          ?.textContent ?? null,
+      tabs: [...pane.querySelectorAll('[data-tab-select]')].map((t) => t.textContent),
+    })),
+    flat: [...document.querySelectorAll('[data-split-pane] [data-tab-select]')].map(
+      (t) => t.textContent,
+    ),
+  }));
+
+await reset();
+await page.locator(`[data-session-row="${QUIET_SESSION}"]`).click();
+await settle(
+  () => document.querySelectorAll('[data-split-pane] [data-tab-select]').length >= 2,
+  undefined,
+  'the quiet session’s project draws more than one tab',
+);
+
+const oneStrip = await drawn();
+console.log('one pane:', JSON.stringify(oneStrip.flat));
+check('the demo can produce a strip with at least two tabs', oneStrip.flat.length >= 2);
+
+if (oneStrip.flat.length >= 2) {
+  const activeWas = oneStrip.panes[0]?.active ?? null;
+  const nextExpected = oneStrip.flat[(oneStrip.flat.indexOf(activeWas) + 1) % oneStrip.flat.length];
+  await page.keyboard.press('Control+Shift+BracketRight');
+  await settle(
+    (was) =>
+      (document.querySelector('[data-session-tab][data-active="true"] [data-tab-select]')
+        ?.textContent ?? null) !== was,
+    activeWas,
+    'Mod-Shift-] brings another tab forward',
+  );
+  const stepped = await drawn();
+  check(
+    'Mod-Shift-] steps to the NEXT tab as the strip draws them',
+    stepped.panes[0]?.active === nextExpected,
+    `expected ${nextExpected}, got ${stepped.panes[0]?.active}`,
+  );
+  await page.keyboard.press('Control+Shift+BracketLeft');
+  await settle(
+    (want) =>
+      (document.querySelector('[data-session-tab][data-active="true"] [data-tab-select]')
+        ?.textContent ?? null) === want,
+    activeWas,
+    'Mod-Shift-[ comes back',
+  );
+  const back = await drawn();
+  check(
+    'and Mod-Shift-[ is its opposite, not a second forward step',
+    back.panes[0]?.active === activeWas,
+    `expected ${activeWas}, got ${back.panes[0]?.active}`,
+  );
+}
+
+// A SPLIT, which is where the per-pane rule and the across-panes rule differ.
+await page.keyboard.press('z');
+await page.keyboard.press('v');
+const splitOk = await settle(
+  () => document.querySelectorAll('[data-split-pane]').length === 2,
+  undefined,
+  'zv opens a second pane',
+);
+
+if (splitOk) {
+  const split = await drawn();
+  console.log('split:', JSON.stringify(split.panes));
+  const focusedWas = split.panes.find((p) => p.focused)?.id ?? null;
+
+  // `Mod-1` addresses the FIRST tab on screen, which after `zv` lives in the
+  // pane that did NOT keep the keyboard.
+  const firstOnScreen = split.flat[0];
+  const owner = split.panes.find((p) => p.tabs.includes(firstOnScreen))?.id ?? null;
+  check(
+    'the first tab on screen is in a pane that does not hold the keyboard',
+    owner !== null && owner !== focusedWas,
+    `owner ${owner}, focused ${focusedWas}`,
+  );
+  await page.keyboard.press('Control+Digit1');
+  await settle(
+    (id) =>
+      document.querySelector('[data-split-pane][data-split-focused="true"]')?.getAttribute(
+        'data-split-pane',
+      ) === id,
+    owner,
+    'Mod-1 moves the keyboard to the pane the tab lives in',
+  );
+  const picked = await drawn();
+  check(
+    'Mod-1 reaches a tab in ANOTHER pane — it counts the screen, not the strip',
+    picked.panes.find((p) => p.focused)?.active === firstOnScreen,
+    `focused pane shows ${picked.panes.find((p) => p.focused)?.active}, wanted ${firstOnScreen}`,
+  );
+
+  // And the pane pair, one modifier up.
+  const paneWas = picked.panes.find((p) => p.focused)?.id ?? null;
+  await page.keyboard.press('Control+Alt+BracketRight');
+  await settle(
+    (was) =>
+      document.querySelector('[data-split-pane][data-split-focused="true"]')?.getAttribute(
+        'data-split-pane',
+      ) !== was,
+    paneWas,
+    'Mod-Alt-] moves the keyboard to the other pane',
+  );
+  const hopped = await drawn();
+  check(
+    'Mod-Alt-] steps the PANE, not the tab',
+    hopped.panes.find((p) => p.focused)?.id !== paneWas,
+    `still in ${paneWas}`,
+  );
+  await page.screenshot({ path: `${outDir}/key-truth-bracket-families.png` });
+  console.log(`${outDir}/key-truth-bracket-families.png`);
+}
+
 await browser.close();
 
 if (failures.length > 0) {

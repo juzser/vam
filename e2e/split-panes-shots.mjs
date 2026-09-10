@@ -355,13 +355,27 @@ console.log(`${outDir}/a15-5-split-vertical-tabs.png`);
 // `splitFocused`'s comment in `Canvas.tsx`).
 //
 // `zv` left the keyboard in the new pane, which took ONE tab while the project
-// has three open across the two. `Cmd+2` must therefore refuse: the operator's
-// model is the strip in front of them, and reaching into the other pane would
-// move a tab nobody is looking at.
+// has three open across the two. `Cmd+2` must therefore name the SECOND TAB ON
+// SCREEN — which lives in the other pane — and carry the keyboard there.
+//
+// THIS IS THE FIFTH ARRANGEMENT OF THE DIGIT ROW, and a deliberate reversal of
+// what this block used to require. It demanded a refusal here, on the argument
+// that reaching into another pane moves a tab nobody is looking at. The
+// operator's answer is that a split is ONE SCREEN: they are looking at both
+// panes, and the tab they can see at position 2 should be what `Cmd+2` names.
+// `chords.ts` records all five arrangements and the price of this one — past
+// nine open tabs the digits stop covering everything. The tab does not change
+// panes; the KEYBOARD does, which is what a sidebar pick of a session another
+// pane holds has always done.
 const focusedStrip = await page
   .locator('[data-split-pane][data-split-focused="true"] [data-tab-select]')
   .allInnerTexts();
-const everyStrip = await page.locator('[data-split-pane] [data-tab-select]').allInnerTexts();
+const everyStrip = (await page.locator('[data-split-pane] [data-tab-select]').allInnerTexts()).map(
+  // The same glyph strip `tabTitlesInPane` and `activeTabTitle` apply, so the
+  // two sides of the comparison below are read the same way. Without it the
+  // check fails on a leading emoji and reports a real behaviour as broken.
+  (text) => text.replace(/^[^\p{ASCII}]+\s*/u, '').trim(),
+);
 console.log('focused pane strip:', focusedStrip, '| every pane:', everyStrip);
 if (focusedStrip.length !== 1 || everyStrip.length !== 3) {
   throw new Error(
@@ -369,22 +383,44 @@ if (focusedStrip.length !== 1 || everyStrip.length !== 3) {
       `${focusedStrip.length} and ${everyStrip.length}.`,
   );
 }
-const beforeReach = await activeTabTitle();
+const paneIdBefore = await page
+  .locator('[data-split-pane][data-split-focused="true"]')
+  .getAttribute('data-split-pane');
 await modChord('2');
 const afterReach = await activeTabTitle();
 const reachSaid = await statusSaid();
-console.log('after Cmd+2 in a 1-tab pane:', afterReach, '| status:', reachSaid);
-if (afterReach !== beforeReach) {
+const paneIdAfter = await page
+  .locator('[data-split-pane][data-split-focused="true"]')
+  .getAttribute('data-split-pane');
+console.log('after Cmd+2 across the split:', afterReach, '| pane:', paneIdAfter);
+// Compared against the SCREEN's own second tab, read back above, never against
+// a title written into this file.
+if (afterReach !== everyStrip[1]) {
   throw new Error(
-    `Cmd+2 in a pane holding one tab moved to "${afterReach}". The digits count the FOCUSED ` +
-      "pane's own strip — reaching across into the other pane is the failure every previous " +
-      'arrangement of this row shipped in one form or another.',
+    `Cmd+2 over a split showing ${everyStrip.join(', ')} brought "${afterReach}" forward; the ` +
+      `second tab on screen is "${everyStrip[1]}". The digits count every strip, in the order ` +
+      'they are drawn.',
   );
 }
-if (!reachSaid.includes('only 1 tab')) {
+if (paneIdAfter === paneIdBefore) {
   throw new Error(
-    `Cmd+2 in a pane holding one tab said "${reachSaid}" — it must refuse aloud, counting the ` +
-      'strip in front of the operator.',
+    `Cmd+2 showed a tab of another pane while the keyboard stayed in ${paneIdBefore}. A digit ` +
+      'that brings a tab forward in a pane the operator is not in would be the worst of both ' +
+      'rules — the keyboard follows the tab.',
+  );
+}
+if (reachSaid.includes('only')) {
+  throw new Error(`Cmd+2 acted and still refused aloud: "${reachSaid}".`);
+}
+// And past the last tab ON SCREEN it still refuses, counting the whole screen
+// in the sentence rather than whichever pane happens to hold the keyboard.
+await modChord('4');
+const pastEnd = await statusSaid();
+console.log('after Cmd+4 across the split:', pastEnd);
+if (!pastEnd.includes('only 3 tabs')) {
+  throw new Error(
+    `Cmd+4 over three tabs on screen said "${pastEnd}" — it must refuse aloud, counting every ` +
+      'pane, because that is the list the digit addresses.',
   );
 }
 
