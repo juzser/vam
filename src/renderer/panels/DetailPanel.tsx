@@ -337,6 +337,61 @@ export function bangQuery(text: string, caret: number): string | null {
 }
 
 /**
+ * How many suggestion rows the popover draws at once. Whatever it leaves out
+ * is COUNTED on screen (`data-bang-more`), never silently cropped.
+ *
+ * The strip this list replaced showed six, because six was one turn's worth
+ * (`commands.ts`'s own `MAX_COMMANDS`). This list is a whole session's worth,
+ * so it is eight -- enough that the newest turn's six still fit with the
+ * previous turn's beginning visible behind them, and few enough that the box
+ * does not become a page floating over the composer.
+ */
+export const MAX_BANG_ROWS = 8;
+
+/**
+ * EVERY COMMAND THE COLUMN CARRIES, in the order they should be offered.
+ *
+ * WHY THIS IS NOT JUST THE FOCUSED TURN, which is what it used to be. The
+ * focused turn is the newest one unless `h`/`l` moved -- the turn that has
+ * just answered. A command is proposed at the END of a piece of work, so the
+ * newest turn is precisely the turn least likely to carry one, and the
+ * operator's report ("typing `!` shows nothing") was this and not a missing
+ * feature: the list worked, on the one turn in twenty that had a command in
+ * it. The column draws the whole session now, so a list narrower than the
+ * column is a list that hides what is on screen.
+ *
+ * THE ORDER, and the one place it departs from newest-first: the FOCUSED turn
+ * comes first, then everything else newest-first. `h`/`l` is a deliberate
+ * move onto a turn the operator wants to read, so its commands are the ones
+ * being reached for; with no move made it IS the newest turn and the two
+ * orders are the same list. It is also what keeps the focused turn's commands
+ * offered when it sits outside the column entirely -- a turn selected before
+ * the byte window slid past it (`selectedTurnMissing`).
+ *
+ * DEDUPLICATED ON THE COMMAND TEXT, first occurrence winning, because the
+ * command text is what gets inserted: two entries that would type the same
+ * characters are one choice wearing two labels, and rounds of the same work
+ * repeat "run the gate" verbatim on every turn. The LABEL is not part of the
+ * key -- an agent rewording its own request is not a second command.
+ */
+export function commandsInColumn(
+  focused: Decision | null,
+  column: readonly Decision[],
+): readonly Command[] {
+  const seen = new Set<string>();
+  const out: Command[] = [];
+  const turns = focused === null ? column : [focused, ...column.filter((t) => t.id !== focused.id)];
+  for (const turn of turns) {
+    for (const command of turn.commands) {
+      if (seen.has(command.command)) continue;
+      seen.add(command.command);
+      out.push(command);
+    }
+  }
+  return out;
+}
+
+/**
  * The proposed commands a query matches, on either half a person might
  * remember: the label the agent gave it, or the command itself.
  *
@@ -3508,7 +3563,9 @@ export function DetailPanel(props: DetailPanelProps) {
     syncJumps(box);
   });
 
-  const commands = decision?.commands ?? [];
+  // THE WHOLE COLUMN, not the focused turn -- see `commandsInColumn` for why
+  // the narrower source made the feature look absent.
+  const commands = commandsInColumn(decision, mergedColumn);
   const slashCommands = entry?.session.slashCommands ?? [];
   /**
    * The typeaheads' shared state. `caret` is read off the box on every
@@ -3520,7 +3577,12 @@ export function DetailPanel(props: DetailPanelProps) {
   const [dismissed, setDismissed] = useState(false);
   const [pick, setPick] = useState(0);
   const query = composing ? bangQuery(draft, caret) : null;
-  const matches = query === null ? [] : matchCommands(commands, query);
+  const allMatches = query === null ? [] : matchCommands(commands, query);
+  // CROPPED FOR THE BOX, COUNTED ON IT. `bangHidden` is what the popover says
+  // out loud; a list cut to fit with no sign of the cut would teach the
+  // operator that what they can see is all the session proposed.
+  const matches = allMatches.slice(0, MAX_BANG_ROWS);
+  const bangHidden = allMatches.length - matches.length;
   // Closed when nothing matches. A list that stayed to say "no matches" is a
   // stale box over the composer; its absence already says it.
   const suggesting = !dismissed && matches.length > 0;
@@ -4707,7 +4769,11 @@ export function DetailPanel(props: DetailPanelProps) {
               </p>
               {matches.map((command, index) => (
                 <button
-                  key={command.id}
+                  // KEYED ON THE COMMAND TEXT, not on `id`: the list spans
+                  // turns now and two turns number their commands from `c1`
+                  // independently, so ids collide across the column while the
+                  // text cannot -- `commandsInColumn` deduplicates on it.
+                  key={command.command}
                   type="button"
                   data-bang-suggestion
                   data-selected={index === picked ? 'true' : undefined}
@@ -4726,6 +4792,11 @@ export function DetailPanel(props: DetailPanelProps) {
                   </span>
                 </button>
               ))}
+              {bangHidden > 0 && (
+                <p data-bang-more className="px-1.5 pt-0.5 text-[11px] text-ink-faint">
+                  {bangHidden} more from earlier turns — keep typing to narrow
+                </p>
+              )}
             </div>
           )}
           {slashSuggesting && (
