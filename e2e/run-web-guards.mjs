@@ -20,14 +20,20 @@
  * left of the favicon's mark once a tab has rasterised it at 16 and 32, and --
  * since the keyboard audit -- which listener owns a keystroke, which is
  * decided by `defaultPrevented` on a CANCELABLE event and so cannot be
- * measured with a hand-built one). This
+ * measured with a hand-built one, and -- since the pane audit -- what an
+ * option PAINTS against the card it sits inside once a pointer is over it,
+ * whether the composer's submit puts a WORD on screen for the outcome it will
+ * produce rather than one arrow for two, and whether a focused field draws a
+ * ring an operator can see, measured after a real Tab press because
+ * `:focus-visible` is a heuristic about the last input device and no
+ * programmatic `.focus()` satisfies it). This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
  * soon as any assertion throws — so CI can hold them.
  *
  * The other `e2e/*.mjs` scripts (issue-188-shots, pane-refinements-shots,
- * pane-patches-shots, phone-list-shots, phone-prompt-shots) are NOT run
- * here and must not be added: they take screenshots and assert nothing, so
+ * pane-patches-shots, phone-list-shots, phone-prompt-shots, uiux-pane-shots)
+ * are NOT run here and must not be added: they take screenshots and assert nothing, so
  * running them would only turn a green tick into a broader claim than it is.
  *
  * Environment:
@@ -53,6 +59,7 @@ const GUARDS = [
   'turn-signal-shots',
   'tooltip-shots',
   'pane-colour-shots',
+  'composer-bar-shots',
   'settings-chrome-shots',
   'favicon-shots',
   'key-truth-shots',

@@ -68,6 +68,7 @@ import {
   Image as ImageIcon,
   ListChecks,
   MessageSquare,
+  NotepadText,
   Paperclip,
   Sparkles,
   SquareTerminal,
@@ -807,8 +808,26 @@ function ViewIcons({
               {badge !== null && (
                 <span
                   data-view-badge
+                  /* THE PAINT IS NOT THE ANNOUNCEMENT: the count is in the
+                     button's own `aria-label` above, so drawing it twice
+                     would have a screen reader say it twice. */
                   aria-hidden="true"
-                  className="absolute -top-[3px] -right-[3px] flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-waiting px-[3px] font-mono text-[9px] text-ink leading-none"
+                  /* `running`, NOT `waiting`, and this is a correction rather
+                     than a preference. Amber has one meaning in this app and
+                     `styles.css` states it at `--color-waiting`: a session
+                     blocked on your answer. This badge counts agents that are
+                     RUNNING, so wearing amber made a working session read as
+                     one needing intervention -- on the row where that is the
+                     most expensive thing to get wrong. Green is the hue this
+                     count already owns.
+
+                     And the numeral could not be read either way: pale ink on
+                     that amber measured 1.834:1 in dark and 2.499:1 in light,
+                     against WCAG 1.4.3's 4.5. `on-running` is the ink the
+                     green fill needs (11.36:1 / 7.13:1), and 9px of mono in a
+                     13px circle goes up to 10.5 in 16 -- the smallest badge
+                     that fits two digits at that size without clipping. */
+                  className="absolute -top-[4px] -right-[4px] flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-running px-[4px] font-mono text-[10.5px] text-on-running leading-none"
                 >
                   {badge}
                 </span>
@@ -1456,6 +1475,76 @@ const NUMBERED_OPTIONS: readonly (string | undefined)[] = Array.from({ length: 9
 );
 
 /**
+ * THE FOCUS RING, and it is the app's, not a new one.
+ *
+ * `SettingsOverlay.tsx`, `PairingPanel.tsx` and `phone/PhoneShell.tsx` each
+ * declare this exact string, with the reasoning written out in the first of
+ * them: the renderer's other `focus-visible` (`TerminalTab.tsx`) draws
+ * `line-strong`, which is 1.36:1 on `panel` in dark and therefore invisible in
+ * the default theme, while `ink` measures 15.7 / 17.7 and clears every fill
+ * this pane paints. The offset is load-bearing too -- flush against a
+ * control's own border an outline reads as a thicker border rather than as a
+ * cursor.
+ *
+ * A fourth copy rather than a shared export because the three that exist are
+ * three copies already and one of the files holding them is being edited on
+ * another branch; the string is what is shared, and `e2e/tooltip-shots.mjs`
+ * measures the ring as PAINT rather than trusting any of the four.
+ */
+const FOCUS_RING =
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
+
+/**
+ * THE FILL A CONTROL ON THIS CARD TAKES WHEN IT IS TOUCHED, and the reason it
+ * is not `raised`.
+ *
+ * PR 288 repointed the question card from `bg-panel` to `bg-card` and moved
+ * most hover fills with it. The options were missed, and the miss inverted
+ * them: `--vam-raised` is a rung above `panel`, which is what the card used to
+ * be, and a rung BELOW `card`, which is what it is now. Measured on the
+ * painted node, a hovered option sat at 1.032:1 UNDER the card holding it. So
+ * touching an answer punched it below its own surface -- the exact hole PR 288
+ * existed to remove, one level further in, in the flow that unblocks an agent
+ * waiting on a reply.
+ *
+ * `line-strong` rather than a token of its own, because this file already
+ * paints exactly this object: every `[data-tap-skin]` in the composer is
+ * `bg-card hover:bg-line-strong`, which IS "a control on a card, touched". A
+ * second name for a value already spent on that role would be two names for
+ * one decision.
+ *
+ * DIRECTION IS PER THEME AND THAT IS NOT A DODGE. Dark climbs
+ * pane < card < control, so this fill is lighter than the card: 1.114:1, ΔE
+ * 4.39, against the card's own step off the pane of ΔE 3.03. Light's card is
+ * the theme's white -- there is nothing above it -- so its controls darken
+ * instead, as `segment-on`, every tap skin here and the artboard's own answer
+ * pills already do: ΔE 14.63 against a card step of 6.24.
+ * `e2e/pane-colour-shots.mjs` re-measures every one of those numbers on the
+ * painted node, hovered, marked and folded, in both themes.
+ */
+const OPTION_FILL = 'bg-line-strong';
+
+/**
+ * THE OTHER HALF OF THE SAME DECISION, and it cannot be dropped.
+ *
+ * A card is already at the ceiling its own captions allow -- `styles.css` says
+ * so where it fixes `--vam-card`: `ink-quiet`/`ink-faint` measure 4.568:1
+ * there and fail one step lighter. So ANY fill a rung above the card puts an
+ * option's quietest greys under WCAG 1.4.3, and measurement agrees: on
+ * `line-strong` the faint grey reads 4.101:1 in dark and 3.691:1 in light.
+ *
+ * The fill and the ink therefore move TOGETHER. The number and the preview
+ * lift to `ink-dim` (5.857:1 dark, 5.304:1 light) exactly while the fill is
+ * under them, which keeps the resting hierarchy -- label, then description,
+ * then the number and the preview -- that painting them `ink-dim` outright
+ * would collapse. Both halves are held separately by the e2e guard: the fill
+ * without the lift reddens the ink checks, the lift without the fill reddens
+ * the elevation checks.
+ */
+const OPTION_QUIET_INK =
+  'text-ink-faint group-hover:text-ink-dim group-data-[picked=true]:text-ink-dim';
+
+/**
  * What Submit is allowed to claim, in the operator's words.
  *
  * ONE SENTENCE PER OUTCOME, and they are not interchangeable: a pairing vam
@@ -1653,6 +1742,23 @@ function QuestionCard({
   const [outcome, setOutcome] = useState<AnswerResult | null>(null);
   const [sending, setSending] = useState(false);
   /**
+   * WHY THE LAST SUBMIT DID NOT GO, when the reason is on this side.
+   *
+   * Separate from `outcome`, which is what the SESSION'S PICKER said: a set
+   * short of a mark never reached it, so filing that under the same state
+   * would put words in the picker's mouth.
+   *
+   * It exists because Submit used to be `disabled` while any step was
+   * unmarked -- visible, faint, taking no click and no focus, and explaining
+   * nothing. That is "absent, not dimmed" broken in the one flow that
+   * releases a blocked agent, and it was worst on a call carrying ONE
+   * question: the marked-count hint only rendered past the first, so a lone
+   * unanswered question got no sentence at all. The control is operable now
+   * and refuses out loud, naming the step it is short of and putting the
+   * cursor on it.
+   */
+  const [refusal, setRefusal] = useState<string | null>(null);
+  /**
    * WHAT A PREVIOUS SUBMIT ALREADY GOT INTO THE PICKER, in asking order.
    *
    * The set is walked one question at a time and each single-select answer
@@ -1800,6 +1906,7 @@ function QuestionCard({
     }));
     if (onAnswer === null || sending || steps.length === 0) return;
     if (steps.some((one) => one.labels.length === 0)) return;
+    setRefusal(null);
     setSending(true);
     const result = await onAnswer({ steps });
     setOutcome(result);
@@ -1810,7 +1917,30 @@ function QuestionCard({
     setSending(false);
   };
 
+  /**
+   * What Submit does when the set is not complete: say which step is short,
+   * and go to it.
+   *
+   * WALKING IS HALF THE ANSWER. A card shows one step at a time, so naming a
+   * step the operator then has to go and find is a refusal that costs them
+   * the search. `landing` is the same channel the `h`/`l` walk uses, so the
+   * cursor ends up on that step's first option and the next keystroke marks
+   * it.
+   */
+  const refuse = (short: AgentQuestion) => {
+    const at = questions.indexOf(short);
+    const named = short.header ?? `step ${at + 1}`;
+    setRefusal(`not sent — ${named} has no mark yet: ${short.question}`);
+    if (at < 0) return;
+    setShowing(at);
+    setLanding(at);
+  };
+
   const toggle = (label: string, viaPointer = false) => {
+    // The refusal named a missing mark. Marking anything is the operator
+    // answering it, so it stops being on screen -- a refusal that outlives
+    // its cause is the next thing to be ignored.
+    setRefusal(null);
     if (viaPointer && question !== undefined && !question.multiSelect) {
       // Fold only when the click MARKS. Clicking the marked option again
       // clears it, and folding on that would hide an empty list behind a
@@ -2027,11 +2157,15 @@ function QuestionCard({
                and it must not be readable as a receipt. */
             <div
               data-question-collapsed
-              className="flex items-baseline gap-2 rounded-[6px] border border-running bg-raised px-1.5 py-1"
+              className={`flex items-baseline gap-2 rounded-[6px] border border-running px-1.5 py-1 ${OPTION_FILL}`}
             >
               <span data-question-marked className="min-w-0 flex-1 text-[12px] text-ink">
                 {picked.join(', ')}
-                <span className="text-[11px] text-ink-faint"> — marked, not sent</span>
+                {/* `ink-dim`, not `ink-faint`: this row RESTS on the fill,
+                    so there is no hover state to lift its ink and
+                    `OPTION_QUIET_INK` would never fire. 4.10:1 at faint,
+                    5.86:1 here. */}
+                <span className="text-[11px] text-ink-dim"> — marked, not sent</span>
               </span>
               <button
                 type="button"
@@ -2065,15 +2199,17 @@ function QuestionCard({
                   data-picked={picked.includes(option.label) ? 'true' : undefined}
                   onClick={(event) => toggle(option.label, event.detail > 0)}
                   className={[
-                    'vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                    // `group` is what lets the quiet spans below hear about a
+                    // hover on this button -- see `OPTION_QUIET_INK`.
+                    'group vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
                     picked.includes(option.label)
-                      ? 'border-running bg-raised'
-                      : 'border-line hover:bg-raised',
+                      ? `border-running ${OPTION_FILL}`
+                      : `border-line hover:${OPTION_FILL}`,
                   ].join(' ')}
                 >
                   <span className="flex max-w-full items-baseline gap-1.5 text-[12px] text-ink">
                     {NUMBERED_OPTIONS[index] !== undefined && (
-                      <span className="text-[11px] text-ink-faint tabular-nums">
+                      <span className={`text-[11px] tabular-nums ${OPTION_QUIET_INK}`}>
                         {NUMBERED_OPTIONS[index]}
                       </span>
                     )}
@@ -2094,7 +2230,7 @@ function QuestionCard({
                   {(option.preview ?? null) !== null && (
                     <span
                       data-question-preview
-                      className="max-w-full truncate font-mono text-[11px] text-ink-faint"
+                      className={`max-w-full truncate font-mono text-[11px] ${OPTION_QUIET_INK}`}
                     >
                       {option.preview}
                     </span>
@@ -2113,18 +2249,21 @@ function QuestionCard({
             data-question-chat
             data-question-synthetic="true"
             onClick={onChat}
-            className="vam-tap flex cursor-pointer items-baseline gap-1.5 rounded-[6px] border border-line border-dashed px-1.5 py-1 text-left hover:bg-raised"
+            className={`group vam-tap flex cursor-pointer items-baseline gap-1.5 rounded-[6px] border border-line border-dashed px-1.5 py-1 text-left hover:${OPTION_FILL}`}
           >
             {/* THE HINT COMES OFF THE SAME TABLE THE HANDLER READS, and is
               not printed at all when the key is not held -- a caption naming a
               key that does nothing is the defect, not the absence of one. */}
             {keys.chat[0] !== undefined && (
-              <span data-question-chat-key className="text-[11px] text-ink-faint tabular-nums">
+              <span
+                data-question-chat-key
+                className={`text-[11px] tabular-nums ${OPTION_QUIET_INK}`}
+              >
                 {keys.chat[0]}
               </span>
             )}
             <span className="min-w-0 text-[12px] text-ink">Chat about this</span>
-            <span className="min-w-0 text-[11.5px] text-ink-faint">
+            <span className={`min-w-0 text-[11.5px] ${OPTION_QUIET_INK}`}>
               — vam adds this one; it opens the box below
             </span>
           </button>
@@ -2140,23 +2279,57 @@ function QuestionCard({
           <button
             type="button"
             data-question-submit
-            disabled={unmarked.length > 0 || sending}
-            onClick={() => void send()}
+            /* `sending` ONLY. It used to read `unmarked.length > 0 ||
+               sending`, which took the click, the focus and the explanation
+               away together -- see `refusal`. The in-flight half stays: a
+               second Submit while the first is out would type into a picker
+               that is already moving. */
+            disabled={sending}
+            /* What the control is short of, as a fact rather than as a
+               colour, for anything that has to check the state without
+               reading a sentence. */
+            data-question-short={unmarked.length > 0 ? 'true' : undefined}
+            onClick={() => {
+              const short = unmarked[0];
+              if (short === undefined) {
+                void send();
+                return;
+              }
+              refuse(short);
+            }}
             className={[
               'rounded-[6px] border px-1.5 py-1 text-[12px]',
-              unmarked.length > 0 || sending
+              sending
                 ? 'cursor-default border-line text-ink-faint'
-                : 'cursor-pointer border-running text-ink hover:bg-raised',
+                : `cursor-pointer border-running text-ink hover:${OPTION_FILL}`,
             ].join(' ')}
           >
             {sending ? 'Submitting…' : 'Submit'}
           </button>
-          {questions.length > 1 && (
+          {/* WHAT IS STILL MISSING, and now for one question as well as for
+              several. This was `questions.length > 1`, so the commonest call
+              there is -- a single question -- had a faint Submit above a
+              sentence about marking and nothing saying the mark was what it
+              was waiting for. Silent once the set is complete: at that point
+              the button says everything. */}
+          {(pending.length > 1 || unmarked.length > 0) && (
             <span data-question-progress className="text-[11px] text-ink-faint">
-              {pending.length - unmarked.length} of {pending.length} marked
+              {pending.length > 1
+                ? `${pending.length - unmarked.length} of ${pending.length} marked`
+                : 'not marked yet — pick an option above'}
             </span>
           )}
         </div>
+      )}
+      {refusal !== null && (
+        /* `waiting` amber, the same ink the mode row's refusal takes: this is
+           a control declining to act, not a report from the session. The two
+           are separate elements for the same reason they are separate state
+           -- an operator must be able to tell "vam did not send this" from
+           "the picker said no". */
+        <p data-question-refusal className="text-[11px] text-waiting">
+          {refusal}
+        </p>
       )}
       {outcome !== null && (
         <p data-question-outcome data-outcome={outcome.kind} className="text-[11px] text-ink-dim">
@@ -3713,23 +3886,39 @@ export function DetailPanel(props: DetailPanelProps) {
       // watching.
       delivers === true
       ? {
+          word: 'Sending',
+          Glyph: ArrowUp,
           label: 'sending prompt…',
           title: 'handing the prompt to the running agent session — this can take a while',
         }
       : {
+          word: 'Recording',
+          Glyph: NotepadText,
           label: 'recording prompt…',
           title: 'appending the prompt to this session\u2019s log',
         }
     : delivers === true
       ? {
+          word: 'Send',
+          Glyph: ArrowUp,
           label: 'send prompt',
           title: 'sends the prompt into the running agent session — it is delivered, not filed',
         }
       : {
+          word: 'Record',
+          Glyph: NotepadText,
           label: 'record prompt',
           title:
             'appends the prompt to this session\u2019s log — vam cannot hand it to a running agent',
         };
+  /**
+   * EVERY `word` IS A PREFIX OF ITS OWN `label`, and that is a requirement
+   * rather than a coincidence: WCAG 2.5.3 asks that the accessible name
+   * contain the visible one, or a speech user saying the word they can see
+   * does not reach the control. `e2e/composer-bar-shots.mjs` asserts the
+   * containment on the painted button rather than trusting this note.
+   */
+  const ComposerGlyph = composerClaim.Glyph;
   return (
     <aside
       data-action-pane={active ? 'active' : 'idle'}
@@ -3897,16 +4086,57 @@ export function DetailPanel(props: DetailPanelProps) {
         {failedBanner && (
           <p
             data-session-failed
-            className="flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-card px-3 py-2 text-[12px] text-failed leading-[1.45]"
+            className={[
+              'flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-card py-2 pl-3 text-[12px] text-failed leading-[1.45]',
+              /* THE CORNER, RESERVED -- the same obligation the prompt bubble
+                 and the column's boundary block already carry, and the banner
+                 is the third element that lands in it: on a failed session
+                 this `<p>` is the FIRST child of the column, so the view-icon
+                 pill floats over its right end, which is exactly where the
+                 "why?" control sits. Measured at a 253px pane before this
+                 line: 9 of 45 sampled glyph pixels under the pill, and
+                 `elementFromPoint` at the control's own centre returned the
+                 Agents view button -- a click meant to ask why the session
+                 died switched tab instead.
+
+                 `6rem` is the width the boundary block above already reserves
+                 for the same pill, and only while the pill is drawn: an
+                 unfocused pane paints none, and 96px taken out of a narrow
+                 pane for nothing is the over-reservation the identity line's
+                 own `7rem` was deleted for. `e2e/narrow-pane-overlay-shots.mjs`
+                 measures both halves. */
+              cornerOverlay ? 'pr-[6rem]' : 'pr-3',
+            ].join(' ')}
           >
             <span role="img" aria-label="failed" className="flex">
               <CircleSlash size={13} strokeWidth={1.6} />
             </span>
             <span className="min-w-0 flex-1">This session failed.</span>
             <Note text="the source reports no reason for the failure — a failed row carries no error, message or exit code">
-              <span className="flex-none cursor-help font-mono text-[10.5px] text-ink-faint underline decoration-dotted">
+              {/* A BUTTON, because it was a `<span>` and a `Note` on a span is
+                  the `title` this app deleted: measured in a real browser,
+                  `tabIndex` -1 and 300 Tab presses never reached it, while
+                  `Note.tsx`'s own first line promises "A note that a keyboard
+                  can read." It is the explanation for why a session died, so
+                  the keyboard-first tool was hiding its most important
+                  sentence from the keyboard.
+
+                  Not `tabIndex={0}` on the span, which is what the status
+                  bar's two notes do: those are readouts that happen to carry
+                  a note, and each needs a biome suppression to say so. This
+                  one is a control whose whole purpose is to open the note, so
+                  it is the element that means that -- Enter and Space work,
+                  it is announced as a control, and no suppression is needed.
+
+                  The name is not "why?": a screen reader reading a lone "why"
+                  out of the banner's flow has been told nothing. */}
+              <button
+                type="button"
+                aria-label="why this session failed"
+                className={`flex-none cursor-help rounded-[4px] font-mono text-[10.5px] text-ink-faint underline decoration-dotted hover:text-ink ${FOCUS_RING}`}
+              >
                 why?
-              </span>
+              </button>
             </Note>
           </p>
         )}
@@ -4735,7 +4965,10 @@ export function DetailPanel(props: DetailPanelProps) {
               {attachedName !== null && (
                 <span
                   data-attach-chip
-                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[11px] text-ink-dim"
+                  // `line-strong`, not `raised`: this chip sits inside
+                  // `data-prompt-box`, which is `bg-card` -- the same
+                  // inversion the answer options wore. See `OPTION_FILL`.
+                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-[11px] text-ink-dim"
                 >
                   <span className="truncate">{attachedName}</span>
                   <button
@@ -4780,7 +5013,8 @@ export function DetailPanel(props: DetailPanelProps) {
               {attachedImage !== null && (
                 <span
                   data-attach-image-chip
-                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[11px] text-ink-dim"
+                  // The same card, the same inversion -- see `data-attach-chip`.
+                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-[11px] text-ink-dim"
                 >
                   <span className="truncate">{attachedImage}</span>
                   <button
@@ -4886,7 +5120,22 @@ export function DetailPanel(props: DetailPanelProps) {
                   onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
                   placeholder="model"
                   aria-label="model requested in this prompt"
-                  className="vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[11px] text-ink-dim outline-none placeholder:text-ink-quiet focus:text-ink"
+                  /* `outline-none` is GONE, and `focus:text-ink` was never a
+                     substitute for it: recolouring TYPED TEXT says nothing on
+                     an empty field, which is the state this control is in
+                     every time it is first reached. Nothing else drew one
+                     either -- the phone stylesheet's replacement ring applies
+                     to `.vam-tap:has(> [data-tap-skin])` and this field has no
+                     inner skin -- so focusing it put a caret on screen and
+                     nothing more.
+
+                     `FOCUS_RING` is the app's own, in `ink`: measured on the
+                     painted node it is 14.4:1 in dark and 17.7:1 in light
+                     against the card behind it, well past the 3:1 WCAG 1.4.11
+                     asks, and it is a different colour from the composer box's
+                     armed border (`waiting`) so the two signals cannot be read
+                     as each other. */
+                  className={`vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[11px] text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
                 />
               </Note>
               {/* The mode, beside the model field the operator asked to put it
@@ -5002,27 +5251,47 @@ export function DetailPanel(props: DetailPanelProps) {
                 </span>
               )}
               <span className="min-w-0 flex-1" />
-              {/* The mockup draws a send arrow here. This one says RECORD, in
-              the label and in the tooltip, because the factory has no channel
-              into a running agent session — the click appends the prompt to
-              the session's log and nothing reads it back out. A button that
-              implied delivery would leave you waiting for an answer nobody is
-              coming to give. */}
-              <button
-                type="button"
-                data-prompt-record
-                onClick={onSubmit}
-                disabled={sending}
-                aria-busy={sending}
-                aria-label={composerClaim.label}
-                title={composerClaim.title}
-                className={[
-                  'flex h-7 w-7 flex-none items-center justify-center rounded-[7px] bg-line-strong text-ink',
-                  sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
-                ].join(' ')}
-              >
-                <ArrowUp size={14} strokeWidth={1.7} className={sending ? 'vam-breathe' : ''} />
-              </button>
+              {/* TWO OUTCOMES, TWO FACES. The mockup draws a send arrow here
+              and this drew one for both of them -- for a source that hands the
+              prompt to a running `claude --resume` and for a source that
+              appends it to a log and nothing reads it back out. Those are
+              different things to have done, and the whole distinction lived in
+              an `aria-label` and a native `title`: invisible to anyone looking
+              at the screen, and a `title` opens on hover and on nothing else,
+              so on a keyboard-first tool it was invisible to the primary input
+              device as well.
+
+              So the outcome is PAINTED -- the word and the glyph both -- and
+              the sentence moves into `Note`, which opens on focus. The comment
+              that used to stand here said the button "says RECORD"; it had not
+              done that since the wording became per-source, which is the same
+              defect as the `title`, in prose. */}
+              <Note text={composerClaim.title}>
+                <button
+                  type="button"
+                  data-prompt-record
+                  /* Which outcome this button is for, as a fact a guard can
+                     read: the word is copy and may be rewritten, this is the
+                     claim. */
+                  data-prompt-delivers={delivers === true ? 'true' : undefined}
+                  onClick={onSubmit}
+                  disabled={sending}
+                  aria-busy={sending}
+                  aria-label={composerClaim.label}
+                  className={[
+                    `flex h-7 flex-none items-center justify-center gap-1 rounded-[7px] bg-line-strong px-2 text-[11.5px] text-ink ${FOCUS_RING}`,
+                    sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
+                  ].join(' ')}
+                >
+                  <ComposerGlyph
+                    size={13}
+                    strokeWidth={1.7}
+                    aria-hidden="true"
+                    className={sending ? 'vam-breathe' : ''}
+                  />
+                  {composerClaim.word}
+                </button>
+              </Note>
             </div>
           </div>
         </div>

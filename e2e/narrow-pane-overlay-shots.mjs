@@ -260,6 +260,111 @@ if (boundary.covered > 0) {
 await page.screenshot({ path: `${outDir}/narrow-pane-overlay-boundary.png` });
 console.log(`${outDir}/narrow-pane-overlay-boundary.png`);
 
+// 5. AND THE BANNER A FAILED SESSION PUTS IN THAT SAME CORNER.
+//
+//    Found while fixing the note it carries: `data-session-failed` is the
+//    FIRST element of the column, so on a failed session it — not the prompt,
+//    not the boundary — is what the pill floats over. Its "why?" control sits
+//    at its right edge, which is the corner exactly, and measured before the
+//    fix `document.elementFromPoint` at that control's own centre returned the
+//    Agents view button: a click meant to ask why a session died switched tab
+//    instead. Codex reported the explanation as mouse-only; it was not
+//    reachable by either device.
+//
+//    Two measurements, because they catch different things. The glyph sweep
+//    is the same one used above and catches text sliding under the pill; the
+//    hit test is what catches a CONTROL under it, which a text sweep cannot
+//    see — a 25px button has few enough glyph pixels that a sweep can miss the
+//    part that is covered.
+await page.locator('[data-session-row="notes-3"]').click();
+await page.waitForSelector('[data-session-failed]');
+await page.waitForTimeout(300);
+const bannerGeom = await page.evaluate(() => {
+  const banner = document.querySelector('[data-session-failed]').getBoundingClientRect();
+  const nav = document.querySelector('[data-view-tabs]').getBoundingClientRect();
+  return {
+    banner: { x: banner.x, right: banner.right, y: banner.y, bottom: banner.bottom },
+    nav: { x: nav.x, right: nav.right, y: nav.y, bottom: nav.bottom },
+    depth: Math.max(24, Math.ceil(nav.bottom - banner.y) + 4),
+  };
+});
+console.log(
+  `failed banner x ${Math.round(bannerGeom.banner.x)}-${Math.round(bannerGeom.banner.right)} ` +
+    `y ${Math.round(bannerGeom.banner.y)}-${Math.round(bannerGeom.banner.bottom)}, ` +
+    `pill x ${Math.round(bannerGeom.nav.x)}-${Math.round(bannerGeom.nav.right)} ` +
+    `y ${Math.round(bannerGeom.nav.y)}-${Math.round(bannerGeom.nav.bottom)}`,
+);
+// THE COLLISION HAS TO BE REACHABLE OR EVERY LINE BELOW IS VACUOUS: the pill
+// must overlap the banner's own box in both axes, or "nothing is covered" is
+// true for free.
+if (
+  bannerGeom.nav.y >= bannerGeom.banner.bottom ||
+  bannerGeom.nav.bottom <= bannerGeom.banner.y ||
+  bannerGeom.nav.x >= bannerGeom.banner.right
+) {
+  throw new Error(
+    'the pill does not overlap the failed banner at all -- the state this check was written ' +
+      'for is unreachable and it would pass on an absence',
+  );
+}
+const banner = await coveredText('[data-session-failed]', bannerGeom.depth);
+console.log(
+  `failed banner: ${banner.covered} of ${banner.samples} sampled glyph pixels covered ` +
+    `(${banner.rects} text runs)`,
+);
+if (banner.samples < 10) {
+  throw new Error(
+    `only ${banner.samples} glyph pixels of the failed banner were sampled -- a check over ` +
+      `almost no points passes for the wrong reason.`,
+  );
+}
+if (banner.covered > 0) {
+  throw new Error(
+    `the overlay covers the failed banner at ${banner.covered} of ${banner.samples} points -- ` +
+      `the one line that says this session died`,
+  );
+}
+// THE CONTROL, HIT-TESTED. `elementFromPoint` is the only thing that answers
+// "would a click land here", and it is the measurement that caught this.
+const whyHit = await page.evaluate(() => {
+  const why = document.querySelector('[data-session-failed] [data-note]');
+  if (why === null) return null;
+  const r = why.getBoundingClientRect();
+  const at = (dx, dy) => {
+    const top = document.elementFromPoint(r.x + dx, r.y + dy);
+    return top === why || why.contains(top)
+      ? null
+      : `${top?.tagName ?? 'nothing'} ${top?.getAttributeNames().filter((a) => a.startsWith('data-')).join(',') ?? ''}`;
+  };
+  return {
+    box: `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`,
+    // Four corners inset by two pixels and the centre: a control half under
+    // the pill still answers correctly at one point.
+    blockedBy: [
+      at(2, 2),
+      at(r.width - 2, 2),
+      at(2, r.height - 2),
+      at(r.width - 2, r.height - 2),
+      at(r.width / 2, r.height / 2),
+    ].filter((x) => x !== null),
+  };
+});
+console.log(`the "why?" control: ${JSON.stringify(whyHit)}`);
+if (whyHit === null) {
+  throw new Error('the failed banner drew no note control, so this hit test measured nothing');
+}
+if (whyHit.blockedBy.length > 0) {
+  throw new Error(
+    `a click on "why?" lands on something else at ${whyHit.blockedBy.length} of 5 points: ` +
+      whyHit.blockedBy.join(' ; '),
+  );
+}
+await page.screenshot({ path: `${outDir}/narrow-pane-overlay-failed.png` });
+console.log(`${outDir}/narrow-pane-overlay-failed.png`);
+await page.locator('[data-session-row="factory-sse-1"]').click();
+await page.waitForSelector('[data-detail-column]');
+await page.waitForTimeout(200);
+
 // Back to where the shot belongs: the pinned prompt in the corner.
 await page.locator('[data-detail-column]').evaluate((el) => {
   el.scrollTop = el.scrollHeight;

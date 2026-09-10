@@ -157,6 +157,55 @@ describe('surfaces are ordered by elevation, in both themes', () => {
         );
       });
 
+      /**
+       * THE RUNG ABOVE A CARD, which is a different question from the rung
+       * above the pane and was answered wrong by PR #288.
+       *
+       * That PR moved every card from `panel` to `card` and left the question
+       * card's own options on `hover:bg-raised`. `raised` is above the PANE
+       * (#1a1a1a on #171717) and below the CARD (#1d1d1d), so an option under
+       * the pointer sank 1.032:1 into the surface it was drawn on. The fix
+       * points them at `line-strong`, which this file's sibling components
+       * already use for exactly this object (`bg-card hover:bg-line-strong`
+       * on every tap skin in the composer).
+       *
+       * DIRECTION IS PER THEME AND THAT IS NOT A DODGE. Dark climbs
+       * pane < card < control. Light's card is #ffffff -- there is nothing
+       * above it -- so its controls darken, which is what `segment-on`,
+       * `line-strong` and the artboard's own answer pills already do.
+       *
+       * The step is measured against THE CARD'S OWN STEP off the pane rather
+       * than against a number typed here, so neither theme is held to the
+       * other's palette. `e2e/pane-colour-shots.mjs` re-measures all of it on
+       * the painted node, hovered and marked, which is the half a token list
+       * cannot see.
+       */
+      it('paints a touched option clear of the card it sits inside', () => {
+        const fill = hex('--vam-line-strong');
+        const card = hex('--vam-card');
+        expect({
+          lighterThanTheCard: relativeLuminance(fill) > relativeLuminance(card),
+          // At least as visible a step as the card makes over the pane.
+          step: deltaE(fill, card) >= deltaE(card, hex('--vam-pane')),
+        }).toEqual({ lighterThanTheCard: theme.name === 'dark', step: true });
+      });
+
+      it('keeps the ink that reaches that fill readable on it', () => {
+        // `ink-dim` and `ink` are the only two inks an option paints once the
+        // fill is under it: `OPTION_QUIET_INK` in `DetailPanel.tsx` lifts the
+        // number and the preview off `ink-faint` exactly while they are on it,
+        // because a card is already at the ceiling `ink-faint` allows
+        // (`--vam-card` in `styles.css` says so) and one rung above it the
+        // faint grey measures 4.10:1 in dark and 3.69:1 in light. The lift is
+        // half of the fix, not a decoration -- the e2e guard reads the colour
+        // each word is REALLY painted with and holds every one of them to 4.5.
+        const fill = hex('--vam-line-strong');
+        expect({
+          dim: contrast(hex('--vam-ink-dim'), fill) >= 4.5,
+          ink: contrast(hex('--vam-ink'), fill) >= 4.5,
+        }).toEqual({ dim: true, ink: true });
+      });
+
       it('keeps the one ink the bubble actually paints readable on it', () => {
         // `--vam-ink-dim` is the ONLY text colour inside the bubble
         // (`DetailPanel.tsx`, the prompt's own `<p>`), and it is the reason

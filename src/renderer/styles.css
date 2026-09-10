@@ -174,6 +174,16 @@
      links and merged PRs. Amber is reserved for the one state that costs you
      something to ignore — a session waiting on your answer. */
   --color-running: var(--vam-running);
+  /* THE INK THAT READS ON `running`, and the only reason it exists: the
+     Agents badge is the first place in this app where a status hue is a FILL
+     with a glyph on it rather than a dot, a border or a word. `--color-ink`
+     is the wrong answer in both themes at once -- pale ink on dark's bright
+     green measures 1.29:1, and dark ink on light's deep green 2.05:1 -- so
+     the pair needs its own second half. It inverts with the fill: dark's
+     green is bright and takes the ground's near-black, light's is deep and
+     takes white. 11.36:1 and 7.13:1, measured, and re-measured on the
+     painted node by `e2e/pane-colour-shots.mjs`. */
+  --color-on-running: var(--vam-on-running);
   --color-waiting: var(--vam-waiting);
   --color-cursor-ring: var(--vam-cursor-ring);
   /* The quiet one. A live session between turns is not news, so it takes a
@@ -294,8 +304,22 @@
   --vam-line-strong: #262626;
   --vam-line-loud: #2e2e2e;
   --vam-line-loudest: #4a4a4a;
-  /* The tooltip's own boundary, and the only line token that exists to clear
-     a contrast floor rather than to sit at a place in the visual order.
+  /* THE BOUNDARY OF A COMPONENT THAT HAS TO IDENTIFY ITSELF, and the only
+     line token that exists to clear a contrast floor rather than to sit at a
+     place in the visual order.
+
+     It said "the tooltip's own boundary" until PR 291, and by then that was
+     the one call site it happened to have been written for rather than the
+     rule it states. The rule is the second clause, and it is what a third
+     consumer arrived on: no fill in this palette can identify a component,
+     because every surface token vam owns sits within 1.2:1 of `panel` in
+     dark, so anything that owes WCAG 1.4.11's 3:1 has to buy it with a LINE
+     -- and `line-loud` is 1.33:1 there while `line-loudest` reaches only
+     2.04:1. The tooltip hit that wall first (the measurement below);
+     `PairingPanel.tsx`'s action buttons hit it next, at 3.46:1 dark and
+     3.62:1 light against the panel behind them. Anything else that has to
+     draw its own edge belongs here too, and the name says so.
+
      WCAG 1.4.11 asks 3:1 of a boundary that identifies a component, and a tip
      floats over `--vam-sidebar` (#171717) while being filled with
      `--vam-raised` (#1a1a1a): measured, that fill is 1.03:1 against what is
@@ -342,6 +366,11 @@
   --vam-ansi-bright-white: #fafafa;
 
   --vam-running: #4ade80;
+  /* The ground's own near-black on dark's bright green: 11.36:1. Taken under
+     its own name rather than reaching for `--vam-ground`, the way
+     `--vam-filter-badge` is -- the ink on a green chip and the app's deepest
+     surface are two decisions that happen to agree today. */
+  --vam-on-running: #0a0a0a;
   --vam-waiting: #f59e0b;
   /* Neutral zinc, 6.99:1 at worst against the five text grounds in this
      theme. Deliberately not a hue: see `--color-idle`. */
@@ -460,8 +489,8 @@ html.light {
      both wear. */
   --vam-line-loud: #c9c7c1;
   --vam-line-loudest: #8f8f8a;
-  /* Light's tip boundary — see the dark block for the measurement and the
-     reason. The artboard's own third-rung grey is #8a8a8f and it lands at
+  /* The same boundary in light — see the dark block for the measurement and
+     the reason, and for why this is not the tooltip's token alone. The artboard's own third-rung grey is #8a8a8f and it lands at
      2.96:1, four hundredths under the floor, so this is that value carried
      four units darker on the same hue rather than a colour from elsewhere:
      3.13:1 against `--vam-sidebar` (#f0eeea) and 3.17:1 against the
@@ -502,6 +531,10 @@ html.light {
   --vam-ansi-bright-white: #27272a;
 
   --vam-running: #166534;
+  /* Light's running green is a DEEP one -- it has to read as text on white --
+     so the ink on it inverts with the fill: white, at 7.13:1. This is the
+     pair the token exists for; a single value could not serve both themes. */
+  --vam-on-running: #ffffff;
   --vam-waiting: #92400e;
   /* The same neutral, one end of the ladder to the other: 6.67:1 at worst on
      the light grounds. */
