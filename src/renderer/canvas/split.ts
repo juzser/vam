@@ -304,6 +304,52 @@ export function canDivide(pairPx: number, minPx: number): boolean {
   return pairPx > Math.max(0, minPx) * 2;
 }
 
+/**
+ * Would HALVING a pane of `extentPx` leave two panes still worth having?
+ *
+ * `canDivide`'s sibling, and the half that was missing. PR 289 measured
+ * `MIN_PANE_PX` and applied it in `dividerShare` — which is every DRAG, and
+ * only drags. `splitPane` halves whatever it is handed, so a 254px pane split
+ * by `zv` became two 127px panes: straight into the zone the floor was
+ * measured to keep panes out of, by the one gesture the floor did not cover.
+ * A floor that governs how small you may DRAG a pane but not how small you may
+ * MAKE one is not a floor, it is a preference.
+ *
+ * `>=`, where `canDivide` is `>`, and the two are asking different questions
+ * about the same number. `canDivide` asks whether a divider has a RANGE to
+ * move in, and a pair of exactly `2 * minPx` has one legal position, which is
+ * not a range. This asks whether the two panes the split produces are each at
+ * least `minPx`, and at exactly `2 * minPx` they are — exactly.
+ *
+ * TRUE FOR AN UNMEASURED EXTENT, deliberately, and this is the same
+ * degenerate-case policy `dividerShare` documents one function up: a zero,
+ * negative or non-finite extent is a MISSING MEASUREMENT — a pane that has not
+ * been laid out, one that is hidden, a rect read before the first frame — not
+ * a pane that is too small. Refusing there would refuse the first split of a
+ * freshly mounted layout on the strength of a number nobody took. The caller
+ * holding a real rect is the one that gets a refusal.
+ *
+ * A non-finite `minPx` is no floor at all, for the same reason: a floor nobody
+ * could state is not a floor that can be enforced.
+ */
+export function canSplit(extentPx: number, minPx: number): boolean {
+  if (!Number.isFinite(extentPx) || extentPx <= 0 || !Number.isFinite(minPx)) {
+    return true;
+  }
+  return extentPx >= Math.max(0, minPx) * 2;
+}
+
+/** The axis a split lands on, given the edge the new pane goes to.
+ *
+ *  Exported since the split floor: the two callers that must measure a pane
+ *  BEFORE splitting it need to know which of its two extents the split is
+ *  about, and deriving that from the edge a second time — in `Canvas.tsx`,
+ *  beside a `splitPane` call that derives it here — is two rules for one fact.
+ */
+export function orientationFor(edge: Edge): SplitOrientation {
+  return edge === 'left' || edge === 'right' ? 'row' : 'column';
+}
+
 export function dividerShare(firstPx: number, pairPx: number, minPx: number): number {
   if (!Number.isFinite(firstPx) || !Number.isFinite(pairPx) || pairPx <= 0) {
     return 0.5;
@@ -418,10 +464,6 @@ export function setPaneSession(tree: SplitTree, id: string, sessionId: string | 
       : [...leaf.sessionIds, sessionId];
     return { ...leaf, sessionId, sessionIds };
   });
-}
-
-function orientationFor(edge: Edge): SplitOrientation {
-  return edge === 'left' || edge === 'right' ? 'row' : 'column';
 }
 
 function isBefore(edge: Edge): boolean {

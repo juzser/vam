@@ -145,6 +145,7 @@ import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
 import {
   adoptOrphans,
+  canSplit,
   closePane,
   type DropZone,
   detachTab,
@@ -154,6 +155,8 @@ import {
   joinPane,
   type Leaf,
   leaves,
+  MIN_PANE_PX,
+  orientationFor,
   paneHolding,
   pruneClosedTabs,
   removeTab,
@@ -361,6 +364,44 @@ function drawnPaneTabs(
  */
 function paneElement(paneId: string): Element | null {
   return document.querySelector(`[data-split-pane="${CSS.escape(paneId)}"]`);
+}
+
+/**
+ * WHY THIS PANE CANNOT BE SPLIT ON THIS AXIS, or `null` when it can.
+ *
+ * ONE function for every route that makes a pane — `zv`, `zs` and the drop on
+ * a pane's edge — because the floor is an invariant of the LAYOUT and not a
+ * property of one gesture. That distinction is the whole finding: PR 289
+ * measured `MIN_PANE_PX` and applied it in `dividerShare`, which governs
+ * dragging a divider and nothing else, so a 254px pane could not be DRAGGED
+ * below 320 but could be SPLIT into two 127px halves — into the exact broken
+ * zone (the view-icon pill over the first prompt bubble's text, a question
+ * card's option printed over its own explanation) the number was measured
+ * from. Fixing the chord alone would have left the drag still doing it.
+ *
+ * MEASURED FROM THE DOM, like `paneElement` above and for the same reason:
+ * the split tree holds shares, not pixels, and this question is about pixels.
+ * A pane that is not drawn, or one whose rect has not been laid out yet,
+ * measures nothing — and an unmeasured pane is NOT a pane that is too small,
+ * so `canSplit` lets it through. That policy is `dividerShare`'s, kept
+ * deliberately identical; see `canSplit`'s own comment.
+ *
+ * THE SENTENCE FITS THE CELL. `StatusCell` truncates at 72 characters and
+ * hangs the tail on a tooltip, so a longer refusal loses the clause that says
+ * why — PR 289 hit exactly that on the divider's own message, and there is an
+ * assertion on it here too. This one is 57 characters at four digits.
+ */
+function splitRefusal(paneId: string, orientation: SplitOrientation): string | null {
+  const rect = paneElement(paneId)?.getBoundingClientRect() ?? null;
+  if (rect === null) {
+    return null;
+  }
+  const extent = orientation === 'row' ? rect.width : rect.height;
+  if (canSplit(extent, MIN_PANE_PX)) {
+    return null;
+  }
+  const axis = orientation === 'row' ? 'wide' : 'tall';
+  return `can't split — a pane needs ${MIN_PANE_PX}px, this one is ${Math.round(extent)}px ${axis}`;
 }
 
 /**
@@ -2488,6 +2529,14 @@ function CanvasInner({
         setStatus('that pane is gone — nothing to split');
         return;
       }
+      // AND THE FLOOR, before anything is built. A pane too small to halve
+      // would make two panes the shell already refuses to let you DRAG to that
+      // size — see `splitRefusal`.
+      const tooSmall = splitRefusal(targetPaneId, orientation);
+      if (tooSmall !== null) {
+        setStatus(tooSmall);
+        return;
+      }
       paneSeq.current += 1;
       const newId = `pane-${paneSeq.current}`;
       setPanes((tree) =>
@@ -2830,6 +2879,15 @@ function CanvasInner({
         // makes this the one gesture that can un-split a layout.
         setPanes((tree) => joinPane(tree, paneId, drag.paneId, draggedId));
         setFocusedPaneId(paneId);
+        return;
+      }
+      // THE SAME FLOOR THE CHORD OBEYS, on the gesture that reaches it by
+      // mouse. Last of the refusals because it is the only one that has to
+      // measure: the three above are about ids, and an id that named nothing
+      // would make this a question about a pane that is not there.
+      const tooSmall = splitRefusal(paneId, orientationFor(zone));
+      if (tooSmall !== null) {
+        setStatus(tooSmall);
         return;
       }
       paneSeq.current += 1;

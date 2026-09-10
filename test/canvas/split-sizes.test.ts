@@ -22,6 +22,7 @@ import { describe, expect, it } from 'vitest';
 import {
   adoptOrphans,
   canDivide,
+  canSplit,
   closePane,
   detachTab,
   dividerShare,
@@ -399,6 +400,72 @@ describe('canDivide — is there more than one legal position for this divider',
         dividerShare(0, pair, MIN_PANE_PX) === 0.5 && dividerShare(pair, pair, MIN_PANE_PX) === 0.5;
       expect(canDivide(pair, MIN_PANE_PX)).toBe(!pinned);
     }
+  });
+});
+
+/**
+ * THE FLOOR AS AN INVARIANT OF THE LAYOUT, not a property of one gesture.
+ *
+ * PR 289 measured `MIN_PANE_PX` and applied it in `dividerShare`, which is
+ * every DRAG. Nothing applied it to a SPLIT, and `splitPane` halves whatever
+ * it is given: a 254px pane split by `zv` became two 127px panes, straight
+ * into the zone the floor was measured to keep panes out of (the floating
+ * view-icon pill over the first prompt bubble's text, a question card's option
+ * printed on top of its own explanation).
+ *
+ * `canSplit` is the missing half, and `canDivide` is its sibling: the same
+ * question about the same number, asked before the pane exists rather than
+ * after. They differ at exactly one value — `2 * minPx` — and the difference
+ * is not an oversight: a pair with room for exactly two minimums has ONE legal
+ * divider position and so cannot be dragged, while a pane of exactly
+ * `2 * minPx` splits into two panes that are each exactly usable.
+ */
+describe('canSplit — would halving this pane leave two usable ones', () => {
+  it('a pane with room for two minimums splits', () => {
+    expect(canSplit(MIN_PANE_PX * 2, MIN_PANE_PX)).toBe(true);
+    expect(canSplit(1016, MIN_PANE_PX)).toBe(true);
+  });
+
+  it('the reported case: a 254px pane would make two 127px ones, and does not', () => {
+    expect(canSplit(254, MIN_PANE_PX)).toBe(false);
+  });
+
+  it('one pixel short is short', () => {
+    expect(canSplit(MIN_PANE_PX * 2 - 1, MIN_PANE_PX)).toBe(false);
+  });
+
+  it('parts company with canDivide at exactly two minimums, and nowhere else', () => {
+    // The one value where "can this pane be split" and "can this divider move"
+    // are different questions. Written as a sweep rather than as that single
+    // value, so a change that moved the boundary anywhere else lands here too.
+    for (const extent of [1, 100, 319, 320, 639, 640, 641, 800, 1016, 4000]) {
+      expect(canSplit(extent, MIN_PANE_PX)).toBe(
+        canDivide(extent, MIN_PANE_PX) || extent === MIN_PANE_PX * 2,
+      );
+    }
+  });
+
+  /**
+   * A PANE WITH NO PIXELS IS NOT A PANE THAT IS TOO SMALL.
+   *
+   * The same degenerate-case policy `dividerShare` documents: an extent that
+   * has not been laid out yet, is hidden, or arrives as `NaN` is a MISSING
+   * MEASUREMENT, and a floor that bit where there is nothing to measure would
+   * refuse the first split of a freshly mounted layout on a promise it cannot
+   * support. So it answers `true`, and only a caller holding a real rect ever
+   * gets a refusal out of it.
+   */
+  it.each([
+    ['a zero extent', 0],
+    ['a negative extent', -100],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+  ])('%s is unmeasured, not too small — it splits, and does not throw', (_label, extent) => {
+    expect(canSplit(extent as number, MIN_PANE_PX)).toBe(true);
+  });
+
+  it('a non-finite minimum is no floor at all', () => {
+    expect(canSplit(10, Number.NaN)).toBe(true);
   });
 });
 
