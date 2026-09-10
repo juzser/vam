@@ -851,6 +851,41 @@ body {
 }
 
 /*
+ * THE MODE CHANGED. One ring, fading out once, and then nothing.
+ *
+ * vam is a modal app whose mode indicator was a 10px word among six other 10px
+ * cells, and it was the whole of the signal -- the pane's focus border and its
+ * animated top line were both removed at the operator's request. A daily user
+ * concluded the modes had been gone. This is the half of the fix that fires AT
+ * THE MOMENT of the change; the chip's inversion (`ModeCell` in `Canvas.tsx`)
+ * is the half that has to hold at rest.
+ *
+ * FINITE, and that is the difference between an indicator and an alert. Every
+ * other animation in this file loops, because each says "this is still
+ * happening"; a mode change happens once.
+ *
+ * `box-shadow` for `vam-focus-glow`'s reason: off the layout path, no reflow,
+ * and it composites over the chip's own ground. `--color-cursor-ring` because
+ * this is exactly what that token is named for -- where the keyboard is -- and
+ * spending a status hue here would make a mode change read as a session state.
+ *
+ * It restarts by REMOUNTING: `Canvas.tsx` keys the cell on the state it draws.
+ * A CSS animation does not replay when an element's text changes under it.
+ */
+@keyframes vam-mode-change {
+  from {
+    box-shadow: 0 0 0 3px var(--color-cursor-ring);
+  }
+  to {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
+.vam-mode-change {
+  animation: vam-mode-change 620ms ease-out;
+}
+
+/*
  * `.vam-cursor-glow` and its `omGlow`-derived halo — the amber ring the
  * mockup drew around a NEEDS-YOU card, moved to mark FOCUS instead — were
  * graph node styling: `SessionInfoNode`/`StepNode` were the only consumers of
@@ -866,6 +901,12 @@ body {
   [data-pending='true'],
   .vam-ellipsis > span,
   .vam-running-edge::after,
+  /* Stopped, the mode chip keeps its inversion, which is the channel that was
+     always going to carry the state for anyone this ring would make ill --
+     "the colour already carries the state", the same bargain as its siblings
+     above. It parks with no ring rather than with a permanent one because
+     `animation: none` leaves the element's own `box-shadow`, which is none. */
+  .vam-mode-change,
   .vam-focus-glow {
     animation: none;
   }

@@ -277,6 +277,72 @@ export function StatusCell({ text }: { readonly text: string }) {
   );
 }
 
+/**
+ * WHAT THE FOOTER IS SHOWING: the resting mode, or the transient state that
+ * outranks it. One string, and the only new name in this file.
+ *
+ * NOT A SECOND SOURCE OF TRUTH, and the distinction matters here more than
+ * anywhere: PR 295 made the cursor mode DERIVED from DOM focus
+ * (`keyboard/focus-scope.ts`), after an audit found four leaks between a
+ * stored flag and where the keyboard actually was. This is a projection of
+ * that mirror and of `jumping`/`filtering` onto one value, computed at the
+ * point of render. Nothing stores it and nothing writes it.
+ */
+type ModeState = CursorMode | 'jump' | 'filter';
+
+/**
+ * THE MODE INDICATOR — a modal app saying which mode it is in.
+ *
+ * It was `<span data-mode className="font-semibold text-ink">`: a 10px word in
+ * a 32px footer, in the same size and row as six other 10px cells, and it was
+ * the WHOLE of the signal — the pane's focus border and its animated top line
+ * were both removed at the operator's request, so nothing else on screen moves
+ * when the mode changes. A daily user of this app concluded the modes had been
+ * removed. They had not; they were invisible.
+ *
+ * TWO CHANNELS, because the word alone had already failed:
+ *
+ *   AT REST it is a chip with a ground of its own, and the armed states draw
+ *   it INVERTED — the ink ramp's two ends, which is the one pair guaranteed to
+ *   read on every surface in both themes and needs no new token. So Select and
+ *   Insert differ before either word has been read. `TerminalTab`'s cursor
+ *   already spells the same idiom (`bg-ink text-panel`).
+ *
+ *   AT THE MOMENT IT CHANGES something moves. The caller keys this component
+ *   on the state it draws, so a change REMOUNTS it and the CSS animation
+ *   restarts — a `textContent` swap in place would replay nothing. The
+ *   animation is a `box-shadow` ring that fades out once, which is
+ *   `vam-focus-glow`'s form and off the paint-heavy path for the same reason;
+ *   `prefers-reduced-motion` stops it, and the inversion carries the state
+ *   without it.
+ *
+ * QUIET ON PURPOSE. One fade, no loop, no colour that means a session state:
+ * this is a persistent indicator, and an indicator that keeps moving is an
+ * alert. No live region either — `StatusCell` a few cells along is this
+ * footer's one polite region, and a second one would read the mode over every
+ * refusal the first is announcing.
+ *
+ * The WORD is unchanged, deliberately: JUMP and FILTER are transient, a key is
+ * being awaited, and they outrank the resting mode. Since `f` now paints its
+ * labels on the rows they address, the mode the operator returns to is no
+ * longer a thing they have to remember while JUMP is up.
+ */
+function ModeCell({ state }: { readonly state: ModeState }) {
+  const armed = state !== 'select';
+  const word = state === 'jump' ? 'JUMP' : state === 'filter' ? 'FILTER' : MODE_TITLES[state];
+  return (
+    <span
+      data-mode
+      className={[
+        'vam-mode-change inline-flex h-[18px] flex-none items-center rounded-[4px] border px-1.5 font-semibold text-[11px] leading-none tracking-[0.04em]',
+        armed ? 'border-ink bg-ink text-ground' : 'border-line-loud bg-well text-ink',
+      ].join(' ')}
+    >
+      {word}
+    </span>
+  );
+}
+
 function jumpLabels(ids: readonly string[]): Map<string, string> {
   const labels = new Map<string, string>();
   ids.forEach((id, index) => {
@@ -5156,17 +5222,23 @@ function CanvasInner({
           {/* The mode indicator is not in the mockup, and it stays: ADE is a
               mouse-and-keyboard app, vam is a modal one, and a modal app that
               does not say which mode it is in is the single worst thing a modal
-              app can be. */}
-          <span data-mode className="font-semibold text-ink">
-            {/* JUMP and FILTER are transient — a key is being awaited — so they
-                outrank the resting mode and keep their own names. Underneath
-                them there are exactly two, and they are the operator's words:
-                Select and Insert. `PROMPT` is gone as a third name because it
-                never was one: composing happens INSIDE Insert, and printing it
-                as a peer of the other two implied a mode the grammar has no
-                state for. */}
-            {jumping ? 'JUMP' : filtering ? 'FILTER' : MODE_TITLES[mode]}
-          </span>
+              app can be.
+
+              JUMP and FILTER are transient — a key is being awaited — so they
+              outrank the resting mode and keep their own names. Underneath
+              them there are exactly two, and they are the operator's words:
+              Select and Insert. `PROMPT` is gone as a third name because it
+              never was one: composing happens INSIDE Insert, and printing it
+              as a peer of the other two implied a mode the grammar has no
+              state for.
+
+              KEYED ON THE STATE IT DRAWS, and that is the whole of how a
+              change becomes visible: a changed key remounts the cell, and a
+              CSS animation only restarts on a mount. See `ModeCell`. */}
+          <ModeCell
+            key={jumping ? 'jump' : filtering ? 'filter' : mode}
+            state={jumping ? 'jump' : filtering ? 'filter' : mode}
+          />
           {/* A12.1 item 3: relocated here from the tab row, which now draws
               only tabs. This is the one thing a dashboard must never do
               differently depending on whether it is connected (the
