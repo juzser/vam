@@ -198,6 +198,225 @@ for (const width of STRIP_WIDTHS) {
   await page.close();
 }
 
+// ---------------------------------------------------------------- ITEM 4.
+// THE SHORTCUT COLUMN, MEASURED WHERE THE CHORD IS ACTUALLY LAID OUT.
+//
+// The operator: "increase the width of the shortcut column in settings". The
+// column was 68px, sized when the widest thing in it was `gt`. `Mod-Shift-[` /
+// `]` and `Mod-Alt-[` / `]` arrived with the pane-stepping work and nothing
+// resized the column they landed in. Measured here, on the shipped bundle,
+// before the fix:
+//
+//   Mod-Shift-]   50.58px of ink over 2 lines   scrollHeight 36 / client 24
+//   Mod-Shift-[   43.36px of ink over 3 lines   scrollHeight 54 / client 24
+//
+// The slot is 26px tall and does not scroll, so those chords were not tight --
+// they were WRAPPED AND CUT, and what an operator saw of `Mod-Shift-[` was its
+// first line and nothing else.
+//
+// THIS CANNOT BE A UNIT TEST. happy-dom lays nothing out and measures no text,
+// so `scrollHeight` there is 0 and `getClientRects()` is empty: the wrap that
+// did the cutting is invisible to the entire unit suite. What is asserted is
+// the RANGE over the chord's own text -- its widest painted line, and how many
+// lines there are -- against the slot's content box, in a real engine.
+{
+  for (const theme of ['dark', 'light']) {
+    // The wide form and the narrow one where the section strip wraps two by
+    // two: the column has to survive both, and 390 is the narrowest shell.
+    for (const width of [1100, 390]) {
+      const page = await openSettings(width, 800);
+      await page.evaluate((t) => {
+        document.documentElement.classList.toggle('light', t === 'light');
+      }, theme);
+      await page.locator('[data-settings-nav-item="keyboard"]').click();
+      await page.waitForSelector('[data-binding-slot]', { timeout: 5_000 });
+
+      const slots = await page.evaluate(() => {
+        const rows = [];
+        for (const slot of document.querySelectorAll('[data-binding-slot]')) {
+          const kbd = slot.querySelector('[data-settings-keys]');
+          // An empty slot draws a `+` and no chord; it is not a claim about
+          // width and is counted out rather than measured as zero.
+          if (kbd === null) continue;
+          const range = document.createRange();
+          range.selectNodeContents(kbd);
+          const lines = [...range.getClientRects()];
+          rows.push({
+            keys: (kbd.textContent ?? '').trim(),
+            inkW: Math.max(...lines.map((r) => r.width)),
+            lines: lines.length,
+            innerW: slot.clientWidth,
+            scrollW: slot.scrollWidth,
+            scrollH: slot.scrollHeight,
+            clientH: slot.clientHeight,
+          });
+        }
+        return rows;
+      });
+
+      // A CORPUS THAT IS NOT THERE MAKES EVERY LINE BELOW VACUOUS. The
+      // shortcut section draws sixty-odd bound chords; anything near zero
+      // means the section did not open and this measured an empty list.
+      if (slots.length < 40) {
+        throw new Error(
+          `${theme} ${width}px: only ${slots.length} bound chord(s) on screen — the shortcut list did not render`,
+        );
+      }
+      const wrapped = slots.filter((s) => s.lines > 1);
+      const clipped = slots.filter((s) => s.scrollH > s.clientH + 1);
+      // Sideways rather than downwards: with `whitespace-nowrap` a chord that
+      // does not fit runs off the end of a box that cannot scroll, and only
+      // `scrollWidth` sees it. Comparing the ink to `clientWidth` would not —
+      // that box includes the slot's own padding.
+      const spilling = slots.filter((s) => s.scrollW > s.innerW + 1);
+      const widest = slots.reduce((a, b) => (a.inkW >= b.inkW ? a : b));
+      console.log(
+        `${theme} ${width}px: ${slots.length} chords, widest ${widest.keys} at ${widest.inkW.toFixed(2)}px in a ${widest.innerW}px box`,
+      );
+      // THE KEY IS THE ONE THING THAT MAY NOT CLIP. Three ways it can, and
+      // each is a different symptom of the same defect: a second line the 26px
+      // box cannot show, content taller than the box, and ink wider than it.
+      if (wrapped.length > 0) {
+        throw new Error(
+          `${theme} ${width}px: ${wrapped.length} chord(s) wrap onto more than one line in a 26px slot — ${JSON.stringify(wrapped.slice(0, 3))}`,
+        );
+      }
+      if (clipped.length > 0) {
+        throw new Error(
+          `${theme} ${width}px: ${clipped.length} chord(s) are cut by their own box — ${JSON.stringify(clipped.slice(0, 3))}`,
+        );
+      }
+      if (spilling.length > 0) {
+        throw new Error(
+          `${theme} ${width}px: ${spilling.length} chord(s) are wider than the box that holds them — ${JSON.stringify(spilling.slice(0, 3))}`,
+        );
+      }
+      // And the label is what yields, not the key: it must still be marked to
+      // truncate, or a long label would push the key columns off their x.
+      const labelTruncates = await page.evaluate(() =>
+        [...document.querySelectorAll('[data-binding-label]')].every((el) =>
+          el.className.includes('truncate'),
+        ),
+      );
+      if (!labelTruncates) {
+        throw new Error(`${theme} ${width}px: a binding label is not marked to truncate`);
+      }
+      if (theme === 'dark' && width === 1100) {
+        await page.screenshot({ path: `${outDir}/settings-shortcut-column-after.png` });
+        console.log(`${outDir}/settings-shortcut-column-after.png`);
+      }
+      await page.close();
+    }
+  }
+}
+
+// AND THE HALF THE SHIPPED TABLES CANNOT REACH.
+//
+// The floor holds every chord `buildBindingSheet` produces, so a corpus made
+// only of those would pass with `whitespace-nowrap` deleted and the slot's
+// growth taken away — the two things that exist for a chord LONGER than the
+// floor. A capture has no length bound: `normalizeKey` answers
+// `Mod-Alt-<event.key>`, and `event.key` is whatever the keyboard reports.
+// So one is planted, through the same `localStorage` an override really
+// lives in, and asked the same questions.
+//
+// 320px IS IN THIS LIST BECAUSE OF A MUTATION THAT SURVIVED WITHOUT IT.
+// Deleting `whitespace-nowrap` from `SLOT_BOX` and re-running this check at
+// 1100 and 390 changed nothing at all: both of those have room, the
+// `max-content` track takes it, and the chord sits on one line either way. At
+// 320 — the narrowest width this file already tests the nav at — the grid runs
+// out of room, the slot falls back to 154px against 166px of chord, and
+// WITHOUT the class the chord wraps onto a second line that a 26px box cannot
+// show (measured: `lines: 2`, `slotW: 154`). With it, one line, 206px of ink
+// ending 113px inside the panel that clips. So the class is kept for what it
+// actually does — carry the overflow sideways where it stays readable — and
+// this loop runs at the width where deleting it goes red.
+for (const width of [1100, 390, 320]) {
+  const page = await browser.newPage({ viewport: { width, height: 800 } });
+  page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'vam.prefs.v1',
+      JSON.stringify({ keyBindings: { rename: ['Mod-Alt-AudioVolumeDown'] } }),
+    );
+  });
+  await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('button[aria-label="settings"]', { timeout: 15_000 });
+  await page.locator('button[aria-label="settings"]').first().click();
+  await page.waitForSelector('[data-settings-nav]', { timeout: 5_000 });
+  await page.locator('[data-settings-nav-item="keyboard"]').click();
+  await page.waitForSelector('[data-binding-slot]', { timeout: 5_000 });
+
+  const planted = await page.evaluate(() => {
+    const slot = document.querySelector('[data-binding-slot="rename:0"]');
+    if (slot === null) return null;
+    const kbd = slot.querySelector('[data-settings-keys]');
+    if (kbd === null) return null;
+    const range = document.createRange();
+    range.selectNodeContents(kbd);
+    const lines = [...range.getClientRects()];
+    // The nearest ancestor that actually clips — the scrolling panel, not the
+    // slot. A chord that overflows its slot is fine; a chord that overflows
+    // THIS is cut off the screen.
+    let clipper = slot.parentElement;
+    while (clipper !== null && clipper !== document.body) {
+      const cs = getComputedStyle(clipper);
+      if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') break;
+      clipper = clipper.parentElement;
+    }
+    return {
+      keys: (kbd.textContent ?? '').trim(),
+      lines: lines.length,
+      inkW: Math.max(...lines.map((r) => r.width)),
+      inkRight: Math.max(...lines.map((r) => r.right)),
+      innerW: slot.clientWidth,
+      scrollH: slot.scrollHeight,
+      clientH: slot.clientHeight,
+      clipRight: clipper === null ? null : clipper.getBoundingClientRect().right,
+    };
+  });
+  // The plant not landing would make every line below vacuous — a slot
+  // showing `r` passes all of them and proves nothing.
+  if (planted === null || planted.keys !== 'Mod-Alt-AudioVolumeDown') {
+    throw new Error(
+      `${width}px: the long-chord override did not reach the editor: ${JSON.stringify(planted)} — this check measured nothing`,
+    );
+  }
+  console.log(
+    `planted ${width}px: ${planted.keys} at ${planted.inkW.toFixed(2)}px in a ${planted.innerW}px box, ${planted.lines} line(s)`,
+  );
+  // ONE LINE, ALWAYS. Whether the slot grew to hold the chord or the chord
+  // runs off a slot that could not grow, the whole of it is on one line and
+  // therefore readable. A second line in a 26px box is the defect.
+  if (planted.lines > 1) {
+    throw new Error(`${width}px: a captured chord wrapped: ${JSON.stringify(planted)}`);
+  }
+  if (planted.scrollH > planted.clientH + 1) {
+    throw new Error(
+      `${width}px: a captured chord is taller than its own box: ${JSON.stringify(planted)}`,
+    );
+  }
+  // Overflowing the SLOT is allowed and is the design; overflowing the panel
+  // that clips is the chord going off the screen.
+  if (planted.clipRight === null || planted.inkRight > planted.clipRight) {
+    throw new Error(
+      `${width}px: a captured chord runs past the panel that clips it: ${JSON.stringify(planted)}`,
+    );
+  }
+  if (width === 1100) {
+    // Wide, there is room, so the slot is expected to have TAKEN it rather
+    // than overflowed — the label column is what yields.
+    if (planted.innerW < planted.inkW) {
+      throw new Error(
+        `1100px: the slot did not grow for a long chord: ${JSON.stringify(planted)}`,
+      );
+    }
+    await page.screenshot({ path: `${outDir}/settings-shortcut-column-long-chord.png` });
+    console.log(`${outDir}/settings-shortcut-column-long-chord.png`);
+  }
+  await page.close();
+}
+
 // ---------------------------------------------------------------- ITEM 3.
 // The Remote section's buttons, as paint.
 
