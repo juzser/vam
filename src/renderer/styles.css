@@ -304,8 +304,22 @@
   --vam-line-strong: #262626;
   --vam-line-loud: #2e2e2e;
   --vam-line-loudest: #4a4a4a;
-  /* The tooltip's own boundary, and the only line token that exists to clear
-     a contrast floor rather than to sit at a place in the visual order.
+  /* THE BOUNDARY OF A COMPONENT THAT HAS TO IDENTIFY ITSELF, and the only
+     line token that exists to clear a contrast floor rather than to sit at a
+     place in the visual order.
+
+     It said "the tooltip's own boundary" until PR 291, and by then that was
+     the one call site it happened to have been written for rather than the
+     rule it states. The rule is the second clause, and it is what a third
+     consumer arrived on: no fill in this palette can identify a component,
+     because every surface token vam owns sits within 1.2:1 of `panel` in
+     dark, so anything that owes WCAG 1.4.11's 3:1 has to buy it with a LINE
+     -- and `line-loud` is 1.33:1 there while `line-loudest` reaches only
+     2.04:1. The tooltip hit that wall first (the measurement below);
+     `PairingPanel.tsx`'s action buttons hit it next, at 3.46:1 dark and
+     3.62:1 light against the panel behind them. Anything else that has to
+     draw its own edge belongs here too, and the name says so.
+
      WCAG 1.4.11 asks 3:1 of a boundary that identifies a component, and a tip
      floats over `--vam-sidebar` (#171717) while being filled with
      `--vam-raised` (#1a1a1a): measured, that fill is 1.03:1 against what is
@@ -475,8 +489,8 @@ html.light {
      both wear. */
   --vam-line-loud: #c9c7c1;
   --vam-line-loudest: #8f8f8a;
-  /* Light's tip boundary — see the dark block for the measurement and the
-     reason. The artboard's own third-rung grey is #8a8a8f and it lands at
+  /* The same boundary in light — see the dark block for the measurement and
+     the reason, and for why this is not the tooltip's token alone. The artboard's own third-rung grey is #8a8a8f and it lands at
      2.96:1, four hundredths under the floor, so this is that value carried
      four units darker on the same hue rather than a colour from elsewhere:
      3.13:1 against `--vam-sidebar` (#f0eeea) and 3.17:1 against the
