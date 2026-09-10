@@ -1,8 +1,9 @@
 /**
  * THE KEYS TELL THE TRUTH: what a chord claims, and what a dead key says.
  *
- * Two audit findings, measured in a real browser because both of them are
- * about a keystroke arriving somewhere jsdom cannot put it:
+ * Three audit findings, measured in a real browser because each is about a
+ * keystroke arriving somewhere jsdom cannot put it, or about what the screen
+ * really paints:
  *
  *  - F9. `gt`/`gT` were captioned `next project` and stepped one SESSION.
  *    Asserted here against the SIDEBAR AS PAINTED: the project order and each
@@ -13,6 +14,11 @@
  *    an index into a one-entry list, Insert `l` was an unconditional `return`,
  *    `gg`/`G` on an empty list returned, a bad jump label dismissed the mode
  *    and an unbound second chord key dropped the prefix — five silences.
+ *
+ *  - F3. Two actions could come to claim one key, and both surfaces went on
+ *    advertising it for both. The last section seeds that map through
+ *    storage, reads what the sheet PAINTS for the dead half, and then presses
+ *    the key to see which action it really reaches.
  *
  * WHY A REAL BROWSER, for the second one especially. The quiet case and the
  * loud one are told apart by `event.defaultPrevented`: the options list of an
@@ -594,6 +600,184 @@ if (splitOk) {
   );
   await page.screenshot({ path: `${outDir}/key-truth-bracket-families.png` });
   console.log(`${outDir}/key-truth-bracket-families.png`);
+}
+
+// ---------------------------------------------------------------------------
+// F3. A KEY TWO ACTIONS CLAIM: what the sheet says, and what the key does.
+//
+// The editor can no longer mint this state — every write is judged on the
+// whole resulting map now — but a STORED map still can: an override collides
+// with a shipped key the day a later vam moves one onto it, with nothing
+// hand-edited. So it is seeded the way it arrives, through `vam.prefs.v1`,
+// and the app reads it at boot like any other payload.
+//
+// Two things only a real browser can answer. Whether the correction is
+// PAINTED — a row can carry the right text and still occupy no space, and
+// this repo has shipped a style rule that matched no element — and whether
+// the keystroke really reaches the action the sheet now names, which needs a
+// keydown delivered to whatever holds focus.
+
+await page.addInitScript(() => {
+  window.localStorage.setItem('vam.prefs.v1', JSON.stringify({ keyBindings: { icon: ['r'] } }));
+});
+await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-session-row]');
+await page.locator(`[data-session-row="${QUIET_SESSION}"]`).click();
+await settle(
+  (id) =>
+    document.querySelector('[data-row-cursor]')?.closest('[data-session-row]')
+      ?.getAttribute('data-session-row') === id,
+  QUIET_SESSION,
+  'a session takes the cursor before the contested key is pressed',
+);
+
+await page.keyboard.press('?');
+const sheetOpen = await settle(
+  () => document.querySelector('[data-key-sheet]') !== null,
+  undefined,
+  'the key sheet opens over a contested map',
+);
+
+if (sheetOpen) {
+  const onR = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('[data-key-sheet] li')].filter(
+      (li) => (li.querySelector('[data-key-sheet-keys]')?.textContent ?? '') === 'r',
+    );
+    return rows.map((li) => {
+      const mark = li.querySelector('[data-key-sheet-dead]');
+      const chip = li.querySelector('[data-key-sheet-keys]');
+      const box = mark?.getBoundingClientRect() ?? null;
+      return {
+        label: li.querySelector('[data-key-sheet-label]')?.textContent ?? '',
+        dead: mark?.textContent ?? null,
+        // MEASURED, not scanned: the words have to occupy real space on a
+        // real layout, and the chip has to actually strike through.
+        painted: box !== null && box.width > 0 && box.height > 0,
+        struck: chip === null ? '' : getComputedStyle(chip).textDecorationLine,
+      };
+    });
+  });
+  console.log('rows on `r`:', JSON.stringify(onR));
+  check(
+    'the sheet still lists `r` for both actions that claim it',
+    onR.length === 2,
+    `${onR.length} rows`,
+  );
+  const dead = onR.filter((row) => row.dead !== null);
+  const live = onR.filter((row) => row.dead === null);
+  check('exactly one of them is marked dead', dead.length === 1, `${dead.length} marked`);
+  check(
+    'the dead one is the row whose key was taken, and it names the taker',
+    dead[0]?.label.includes('rename') === true && dead[0]?.dead?.includes('icon') === true,
+    `label "${dead[0]?.label}", mark "${dead[0]?.dead}"`,
+  );
+  check(
+    'the correction is painted rather than merely present',
+    dead[0]?.painted === true,
+    'the mark occupies no space on the real layout',
+  );
+  check(
+    'and the dead chord is struck through while the live one is not',
+    dead[0]?.struck.includes('line-through') === true &&
+      live[0]?.struck.includes('line-through') === false,
+    `dead "${dead[0]?.struck}", live "${live[0]?.struck}"`,
+  );
+  await page.screenshot({ path: `${outDir}/key-truth-dead-binding.png` });
+  console.log(`${outDir}/key-truth-dead-binding.png`);
+}
+
+await page.keyboard.press('Escape');
+await settle(
+  () => document.querySelector('[data-key-sheet]') === null,
+  undefined,
+  'the sheet closes before the key is pressed',
+);
+
+// AND THE KEYSTROKE ITSELF. The sheet says `icon` has `r`; if `r` opened a
+// rename field instead, the sheet would be wrong in the new direction rather
+// than the old one — which is why this is measured and not reasoned about.
+await page.keyboard.press('r');
+const reached = await settle(
+  () => document.querySelector('[data-icon-picker]') !== null,
+  undefined,
+  '`r` invokes the action the sheet names as the winner',
+);
+if (reached) {
+  const renaming = await page.evaluate(
+    () => document.querySelector('[aria-label="rename session"]') !== null,
+  );
+  check(
+    'and the shadowed action did not also run',
+    renaming === false,
+    'a rename field opened as well as the icon panel',
+  );
+}
+
+
+// AND THE EDITOR, where the operator would go to fix it. The notice and the
+// struck slot are asserted as PAINTED — a report that renders to a zero box,
+// or scrolls off the panel it belongs to, is a report nobody reads.
+await page.keyboard.press('Escape');
+await page.keyboard.press(',');
+const settingsOpen = await settle(
+  () => document.querySelector('[data-settings-overlay]') !== null,
+  undefined,
+  'the settings overlay opens',
+);
+if (settingsOpen) {
+  await page.locator('[data-settings-nav-item="keyboard"]').click();
+  await settle(
+    () => document.querySelector('[data-binding-clash]') !== null,
+    undefined,
+    'the keyboard section reports the contested key',
+  );
+  const editor = await page.evaluate(() => {
+    const note = document.querySelector('[data-binding-clash]');
+    const slot = document.querySelector('[data-binding-slot="rename:0"]');
+    const noteBox = note?.getBoundingClientRect() ?? null;
+    const panel = document
+      .querySelector('[data-settings-overlay]')
+      ?.querySelector('[data-settings-panel-scroll], .overflow-y-auto');
+    const panelBox = panel?.getBoundingClientRect() ?? null;
+    return {
+      text: note?.textContent ?? '',
+      painted: noteBox !== null && noteBox.width > 0 && noteBox.height > 0,
+      inView:
+        noteBox !== null &&
+        panelBox !== null &&
+        noteBox.top >= panelBox.top - 1 &&
+        noteBox.bottom <= panelBox.bottom + 1,
+      slotLabel: slot?.getAttribute('aria-label') ?? '',
+      slotStruck:
+        slot === null ? '' : getComputedStyle(slot).textDecorationLine,
+    };
+  });
+  console.log('settings over a contested map:', JSON.stringify(editor));
+  check(
+    'the notice names the key, the winner and the loser',
+    editor.text.includes('"r"') && editor.text.includes('icon') && editor.text.includes('rename'),
+    editor.text,
+  );
+  check('and it is painted', editor.painted && editor.inView, 'the notice has no visible box');
+  check(
+    'the dead slot says so in its accessible name, not only in ink',
+    editor.slotLabel.includes('dead') && editor.slotLabel.includes('icon'),
+    editor.slotLabel,
+  );
+  check(
+    'and it is struck through on screen',
+    editor.slotStruck.includes('line-through'),
+    editor.slotStruck,
+  );
+  await page.screenshot({ path: `${outDir}/key-truth-dead-binding-editor.png` });
+  console.log(`${outDir}/key-truth-dead-binding-editor.png`);
+  // A second frame, scrolled to the row itself: the notice is at the top of
+  // the section and the slot it is about is several groups down, and a shot
+  // of one is not a shot of the other.
+  await page.locator('[data-binding-slot="rename:0"]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${outDir}/key-truth-dead-binding-slot.png` });
+  console.log(`${outDir}/key-truth-dead-binding-slot.png`);
+  await page.keyboard.press('Escape');
 }
 
 await browser.close();
