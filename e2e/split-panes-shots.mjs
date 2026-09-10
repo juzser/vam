@@ -588,13 +588,274 @@ if (!landedOn.some((title) => title.includes('crosscheck'))) {
   );
 }
 
+// ===========================================================================
+// JOINING: THE DROP THAT MAKES THE LAYOUT SMALLER.
+//
+// The operator's report: "when the layout is split, if you want to drag a tab
+// back into a pane so it stops being split, you can't." Every drop above
+// splits, because `nearestEdge` names an edge for EVERY point in a pane — so
+// there was no coordinate anywhere on screen that meant "put this tab in that
+// pane's strip", and a drag could only ever add a pane.
+//
+// Everything below is measured HERE and can only be measured here: a drop
+// zone is geometry, the indicator that distinguishes a join from a split is
+// paint, and a layout collapsing back to one pane is a box that has to grow
+// to fill the room the divider gave up. jsdom has none of the three.
+// ===========================================================================
+
+/** Every pane's real box, in draw order. */
+async function paneBoxes() {
+  return page.locator('[data-split-pane]').evaluateAll((els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+    }),
+  );
+}
+/** The width every pane takes together, which a join must not change. */
+const totalPaneWidth = (boxes) => boxes.reduce((sum, box) => sum + box.w, 0);
+
+/** Pick a tab up, for real: Chromium wants pointer travel before it treats a
+ *  press as a drag rather than a click. Leaves the button DOWN. */
+async function pickUp(tab, label) {
+  const box = await tab.boundingBox();
+  if (box === null) {
+    throw new Error(`${label}: the tab has no box — nothing to pick up, so nothing below measures a drag.`);
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2 + 12, { steps: 4 });
+}
+/** Hover a fraction of the way across and down a box, still holding. */
+async function hoverOver(box, fx, fy) {
+  await page.mouse.move(box.x + box.width * fx, box.y + box.height * fy, { steps: 8 });
+  await page.waitForTimeout(120);
+}
+/** What the drop indicator says right now: its zone, its word, and its box. */
+async function indicatorNow() {
+  const el = page.locator('[data-drop-zone]');
+  if ((await el.count()) === 0) {
+    return null;
+  }
+  return el.first().evaluate((node) => {
+    const r = node.getBoundingClientRect();
+    return {
+      zone: node.getAttribute('data-drop-zone'),
+      word: (node.textContent ?? '').trim(),
+      x: Math.round(r.x),
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+    };
+  });
+}
+
+// Three panes stand from the split above: factory-sse-1 | crosscheck-2 |
+// dogfood-4. The FIRST one's tab is the one about to move, and which way round
+// is deliberate. `factory-sse-1` is the waiting session, so it ranks ahead of
+// the running `crosscheck-2` in `orderedSessions` — while `Leaf.sessionIds`
+// appends, which would put it LAST in the pane it joins. The two orders
+// disagree, so the strip check after the drop can tell them apart. Joining the
+// middle pane into the first instead would have left both answers identical
+// and the assertion unable to fail.
+const beforeJoin = await paneBoxes();
+console.log('three panes, before any join:', beforeJoin);
+if (beforeJoin.length !== 3) {
+  throw new Error(`this section needs the 3 panes the drag above built, it sees ${beforeJoin.length}.`);
+}
+const joinSource = page
+  .locator('[data-split-pane]')
+  .nth(0)
+  .locator('[data-tab-select]', { hasText: 'factory-sse-1' });
+if ((await joinSource.count()) === 0) {
+  throw new Error('the first pane does not draw factory-sse-1 — the setup this section needs is gone.');
+}
+const joinTargetBox = beforeJoin[1];
+const targetRect = { x: joinTargetBox.x, y: joinTargetBox.y, width: joinTargetBox.w, height: joinTargetBox.h };
+
+// --- THE TWO OUTCOMES MUST NOT LOOK THE SAME. One drag, two hovers over the
+// SAME pane, a few hundred pixels apart: the operator has to be able to tell
+// before releasing which of them will happen.
+await pickUp(joinSource, 'the join drag');
+await hoverOver(targetRect, 0.5, 0.5);
+const overCentre = await indicatorNow();
+console.log('hovering the centre:', overCentre);
+await page.screenshot({ path: `${outDir}/tab-join-centre-indicator.png` });
+console.log(`${outDir}/tab-join-centre-indicator.png`);
+await hoverOver(targetRect, 0.95, 0.5);
+const overEdge = await indicatorNow();
+console.log('hovering the right edge:', overEdge);
+await page.screenshot({ path: `${outDir}/tab-join-edge-indicator.png` });
+console.log(`${outDir}/tab-join-edge-indicator.png`);
+if (overCentre === null || overEdge === null) {
+  throw new Error(
+    `the drag painted no indicator at one of the two points (centre: ${JSON.stringify(overCentre)}, ` +
+      `edge: ${JSON.stringify(overEdge)}). A drop whose outcome is invisible until it happens is ` +
+      'exactly what this gesture was reported over.',
+  );
+}
+if (overCentre.zone !== 'centre' || overEdge.zone !== 'right') {
+  throw new Error(
+    `the middle of a pane reported "${overCentre.zone}" and its right edge "${overEdge.zone}". ` +
+      'The centre must JOIN and the rim must SPLIT.',
+  );
+}
+if (overCentre.word === overEdge.word || overCentre.word === '' || overEdge.word === '') {
+  throw new Error(
+    `a join and a split both say "${overCentre.word}"/"${overEdge.word}". Two different outcomes ` +
+      'must never look the same, and a word is the channel that does not need to have been learnt.',
+  );
+}
+// And the SHAPES differ, which is the half no unit test can see: a join
+// highlights the whole pane, a split the half the new pane would take.
+if (Math.abs(overCentre.w - joinTargetBox.w) > 4) {
+  throw new Error(
+    `the join indicator is ${overCentre.w}px wide over a ${joinTargetBox.w}px pane — it must cover ` +
+      'the whole pane, because the whole pane is what receives the tab.',
+  );
+}
+if (Math.abs(overEdge.w - joinTargetBox.w / 2) > 4) {
+  throw new Error(
+    `the split indicator is ${overEdge.w}px wide over a ${joinTargetBox.w}px pane — it must cover ` +
+      'the HALF the new pane would take, or it is drawing the same rectangle as a join.',
+  );
+}
+
+// --- THE JOIN ITSELF. Released over the centre, the tab moves into that
+// pane's strip and the pane it emptied closes.
+await hoverOver(targetRect, 0.5, 0.5);
+await page.mouse.up();
+await page.waitForTimeout(200);
+const afterJoin = await paneBoxes();
+console.log('after joining the first pane into the middle one:', afterJoin);
+if (afterJoin.length !== 2) {
+  throw new Error(
+    `dropping a tab in the CENTRE of a pane left ${afterJoin.length} pane(s), expected 2. The ` +
+      "centre must JOIN — this is the operator's report: the layout could grow and never shrink.",
+  );
+}
+await assertStripPerPane('after the join');
+const joinedInto = await tabTitlesInPane(0);
+console.log('the pane it was joined into now draws:', joinedInto);
+if (!joinedInto.includes('factory-sse-1')) {
+  throw new Error(`the pane the tab was joined into does not draw it (${joinedInto.join(', ')}).`);
+}
+// WHERE A JOINED TAB LANDS. The pane held `crosscheck-2` and received
+// `factory-sse-1`, which the membership list appends and `orderedPaneTabs`
+// ranks FIRST — the two disagree here, and what the strip draws is the
+// sidebar's order, never the order things arrived in.
+const joinedOrder = (await sidebarOrder()).filter((id) => joinedInto.includes(id));
+if (JSON.stringify(joinedInto) !== JSON.stringify(joinedOrder)) {
+  throw new Error(
+    `the strip draws ${joinedInto.join(', ')} and the sidebar lists the same two as ` +
+      `${joinedOrder.join(', ')}. A tab that arrives by a drag takes its place in the strip's ` +
+      'order, never the end of the list.',
+  );
+}
+if (joinedInto[0] !== 'factory-sse-1') {
+  throw new Error(
+    `the joined tab came out at position ${joinedInto.indexOf('factory-sse-1') + 1} of ` +
+      `${joinedInto.length} (${joinedInto.join(', ')}). It is the waiting session and outranks the ` +
+      'one already there — if it landed last, the strip is printing membership rather than order.',
+  );
+}
+// THE ROOM THE CLOSED PANE HELD GOES TO THE SURVIVORS, not to nowhere.
+if (Math.abs(totalPaneWidth(afterJoin) - totalPaneWidth(beforeJoin)) > 8) {
+  throw new Error(
+    `the panes covered ${totalPaneWidth(beforeJoin)}px and now cover ${totalPaneWidth(afterJoin)}px. ` +
+      'A join closes a pane; the room it held belongs to the panes that are left.',
+  );
+}
+if (afterJoin[0].w <= joinTargetBox.w) {
+  throw new Error(
+    `the pane that received the tab is ${afterJoin[0].w}px, no wider than the ${joinTargetBox.w}px ` +
+      'it was. A collapsing split hands its slot back.',
+  );
+}
+await page.screenshot({ path: `${outDir}/tab-join-centre-drop.png` });
+console.log(`${outDir}/tab-join-centre-drop.png`);
+
+// --- THE TAB STRIP IS A JOIN TARGET TOO, and it is the one most people reach
+// for. It is also the one the pane's own geometry cannot express: the strip is
+// 36px at the TOP of the pane, so every point in it is inside the `top` band
+// and would have split the pane downward.
+const stripBox = await page.locator('[data-split-pane]').nth(0).locator('[data-tab-strip-row]').boundingBox();
+const lastTab = page
+  .locator('[data-split-pane]')
+  .nth(1)
+  .locator('[data-tab-select]', { hasText: 'dogfood-4' });
+if (stripBox === null || (await lastTab.count()) === 0) {
+  throw new Error('the strip or the last remaining tab did not render — the strip drop cannot be measured.');
+}
+await pickUp(lastTab, 'the strip drag');
+await hoverOver({ x: stripBox.x, y: stripBox.y, width: stripBox.width, height: stripBox.height }, 0.25, 0.5);
+const overStrip = await indicatorNow();
+console.log('hovering the first pane’s strip:', overStrip);
+if (overStrip === null || overStrip.zone !== 'centre') {
+  throw new Error(
+    `a drag over a tab strip reported ${JSON.stringify(overStrip)}. Every point in a strip is in the ` +
+      'pane’s TOP band, so without the strip owning its own drop this reads as a downward split.',
+  );
+}
+await page.screenshot({ path: `${outDir}/tab-join-strip-indicator.png` });
+console.log(`${outDir}/tab-join-strip-indicator.png`);
+await page.mouse.up();
+await page.waitForTimeout(200);
+const afterStripJoin = await paneBoxes();
+const collapsed = await tabTitlesInPane(0);
+console.log('after dropping on the strip:', afterStripJoin, collapsed);
+if (afterStripJoin.length !== 1) {
+  throw new Error(
+    `dropping a tab on another pane's STRIP left ${afterStripJoin.length} pane(s), expected 1 — the ` +
+      'layout must be genuinely un-split, not one pane short of it.',
+  );
+}
+if (collapsed.length !== 3) {
+  throw new Error(
+    `the un-split pane draws ${collapsed.length} tab(s) (${collapsed.join(', ')}), expected all 3 of ` +
+      'the project’s sessions.',
+  );
+}
+// A JOINED TAB LANDS WHERE THE STRIP ORDERS IT, not at the far end.
+// `Leaf.sessionIds` is membership and appends; `orderedPaneTabs` is what the
+// strip draws, and it is the sidebar's own order. The two agree or the tabs
+// come out jumbled — the operator's earlier report, arriving by a new route.
+const joinedListOrder = (await sidebarOrder()).filter((id) => collapsed.includes(id));
+console.log('the sidebar lists:', joinedListOrder, '| the strip draws:', collapsed);
+if (JSON.stringify(collapsed) !== JSON.stringify(joinedListOrder)) {
+  throw new Error(
+    `the strip draws ${collapsed.join(', ')} and the sidebar lists ${joinedListOrder.join(', ')}. A ` +
+      'tab that arrives by a drag takes its place in the strip’s order, never the end of the list.',
+  );
+}
+// THE SPLIT IS GONE, not hidden: no divider is left, and the one pane fills
+// the room the two of them covered.
+const dividersLeft = await page.locator('[data-split-resize-handle]').count();
+if (dividersLeft !== 0) {
+  throw new Error(`${dividersLeft} divider(s) survive a layout with one pane — a divider with nothing to divide.`);
+}
+if (Math.abs(afterStripJoin[0].w - totalPaneWidth(afterJoin)) > 8) {
+  throw new Error(
+    `the surviving pane is ${afterStripJoin[0].w}px where the two it replaced covered ` +
+      `${totalPaneWidth(afterJoin)}px. When a split collapses to one child, that child takes the whole slot.`,
+  );
+}
+await page.screenshot({ path: `${outDir}/tab-join-collapsed.png` });
+console.log(`${outDir}/tab-join-collapsed.png`);
+// AND BACK: an un-split layout is a layout, not a dead end. A tree that had
+// collapsed to a bare leaf still splits, which is the round trip the pure
+// tests make on data and this one makes on the screen.
+await chord('z', 'v', 'split again after collapsing', 2);
+await chord('z', 'c', 'close', 1);
+
 // --- The pane a split EMPTIES. Splitting a pane that holds one tab moves
 // that tab out and leaves the source pane standing with nothing — the
 // operator asked for two panes, and an empty one saying what to do about it
 // is the honest answer to that. (`removeTab`, what a drag and a close use,
 // would have closed it; `detachTab` is the difference.)
-await chord('z', 'c', 'close', 2);
-await chord('z', 'c', 'close', 1);
+//
+// The two `zc`s that used to stand here are gone with the section above: the
+// joins already brought the layout back to one pane, and closing a pane that
+// is the only one refuses aloud rather than obliging.
 await page.waitForTimeout(150);
 // IN THE OTHER PROJECT, because A11.1 makes a single-tab pane in `factory`
 // impossible — it holds three sessions and every one of them is a tab. `vam`
