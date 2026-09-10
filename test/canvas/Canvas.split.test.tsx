@@ -249,11 +249,15 @@ describe('dragging a tab splits — same project only, refused aloud otherwise',
     act(() => sidebarRow(1).click());
     act(() => sidebarRow(0).click());
     const targetPane = paneFor('pane-1') as HTMLElement;
-    stubRect(targetPane, { left: 0, top: 0, width: 200, height: 100 });
+    // A LEGAL PANE. 200x100 made the edge arithmetic readable and is now a
+    // pane the shell refuses to create — a split has a 320px floor per half
+    // (`splitRefusal` in `Canvas.tsx`) — so this is a real pane at a real
+    // window size, with the drop point kept in the same edge band.
+    stubRect(targetPane, { left: 0, top: 0, width: 1000, height: 800 });
     const tab = tabSelect('a2') as HTMLButtonElement;
     fireEvent.dragStart(tab);
-    dragAt(targetPane, 'dragover', 190, 50);
-    dragAt(targetPane, 'drop', 190, 50);
+    dragAt(targetPane, 'dragover', 990, 400);
+    dragAt(targetPane, 'drop', 990, 400);
     expect(splitPanes()).toHaveLength(2);
     expect(splitContainer()?.getAttribute('data-split-orientation')).toBe('row');
     const [first, second] = splitPanes();
@@ -265,11 +269,13 @@ describe('dragging a tab splits — same project only, refused aloud otherwise',
     render(<Canvas model={MODEL} />);
     act(() => sidebarRow(1).click());
     const targetPane = paneFor('pane-1') as HTMLElement;
-    stubRect(targetPane, { left: 0, top: 0, width: 200, height: 100 });
+    // A legal pane — see the case above. A COLUMN split reads the HEIGHT, so
+    // 800 is the extent that has to clear two 320px halves here.
+    stubRect(targetPane, { left: 0, top: 0, width: 1000, height: 800 });
     const tab = tabSelect('a2') as HTMLButtonElement;
     fireEvent.dragStart(tab);
-    dragAt(targetPane, 'dragover', 100, 2);
-    dragAt(targetPane, 'drop', 100, 2);
+    dragAt(targetPane, 'dragover', 500, 10);
+    dragAt(targetPane, 'drop', 500, 10);
     expect(splitContainer()?.getAttribute('data-split-orientation')).toBe('column');
   });
 

@@ -565,6 +565,17 @@ for (const id of ['factory-sse-1', 'crosscheck-2', 'dogfood-4']) {
 // it is the one thing no test in this PR can stand in for.
 // Moves the front tab (dogfood-4) out, leaving factory-sse-1 and crosscheck-2
 // in the first pane — which is the tab the drag below picks up.
+// A WINDOW WITH ROOM FOR WHAT THIS SECTION BUILDS. Since the split floor,
+// every route that makes a pane refuses one that cannot produce two 320px
+// halves -- so a drop on the right edge of a 508px pane (what 1280 leaves
+// after one `zv`) is now answered rather than obeyed, and this section's three
+// panes were unreachable. Widened here rather than reasoned around: 1736px of
+// canvas splits to 868, and 868 splits again, which is the layout the drop
+// below has always been about. Everything measured from here on is relative to
+// what it reads, and the next explicit `setViewportSize` is a few hundred
+// lines down.
+await page.setViewportSize({ width: 2000, height: 800 });
+await page.waitForTimeout(250);
 await chord('z', 'v', 'split for drag demo', 2);
 console.log('tabs before the drag:', await tabsInPane(0), await tabsInPane(1));
 // Scoped to the FIRST pane's own strip: A15.5 means the same session can be
@@ -1312,6 +1323,19 @@ if (!modeHere.includes('Select')) {
 await chord('z', 'c', 'close', 1);
 await page.locator('[data-session-row="factory-sse-1"]').click();
 await page.waitForTimeout(200);
+// A WIDE WINDOW TO BUILD IN, and then the window narrows onto the result.
+//
+// Since the split floor, `zv` refuses a pane that cannot make two 320px
+// halves, so four side-by-side panes are unreachable on a 1280px canvas: the
+// SECOND split would be answered rather than obeyed, which is the floor doing
+// its job. The cramped layout this section needs is still perfectly legitimate
+// and PR 289 said so in `MIN_PANE_PX`'s own comment -- the floor is not
+// applied on the read path, precisely so a layout arranged on a wide screen
+// and restored on a narrow one is kept rather than silently rewritten. So it
+// is built where there is room and then the window is shrunk onto it, which is
+// how an operator reaches this state too.
+await page.setViewportSize({ width: 2900, height: 800 });
+await page.waitForTimeout(200);
 await chord('z', 'v', 'first of four', 2);
 // A ROOMY divider first, measured in the same run: without this contrast the
 // checks below would pass just as happily against a handle hardcoded inert.
@@ -1323,13 +1347,19 @@ const roomy = await dividerAt().evaluate((el) => ({
 console.log('a divider with room:', roomy);
 if (roomy.inert !== 'false' || roomy.disabled !== 'false' || roomy.cursor !== 'col-resize') {
   throw new Error(
-    `a two-pane split's divider reports ${JSON.stringify(roomy)} — it has 1016px to work with ` +
-      'and must be an ordinary, draggable handle. Every check below would be vacuous.',
+    `a two-pane split's divider reports ${JSON.stringify(roomy)} — it has the whole canvas to ` +
+      'work with and must be an ordinary, draggable handle. Every check below would be vacuous.',
   );
 }
 
 await chord('z', 'v', 'second of four', 3);
 await chord('z', 'v', 'third of four', 4);
+// AND NOW THE WINDOW SHRINKS, which is the whole point of building it wide:
+// the sizes are shares, so 2636px of canvas divided 0.5/0.25/0.125/0.125
+// becomes 508/254/127/127 at 1280 -- the four-panes-on-a-laptop case this
+// section was written for, reached the way an operator reaches it.
+await page.setViewportSize({ width: 1280, height: 800 });
+await page.waitForTimeout(250);
 const cramped = await slotWidths();
 const dividers = await page.locator('[data-split-resize-handle]').evaluateAll((els) =>
   els.map((el) => ({
@@ -1457,5 +1487,143 @@ if (JSON.stringify(afterKey) !== JSON.stringify(afterRefusing)) {
 }
 await page.screenshot({ path: `${outDir}/split-resize-refusal.png` });
 console.log(`${outDir}/split-resize-refusal.png`);
+
+// --- THE FLOOR IS AN INVARIANT OF THE LAYOUT, NOT A PROPERTY OF ONE GESTURE.
+//
+// PR 289 measured `MIN_PANE_PX` -- below it the floating view-icon pill covers
+// the first prompt bubble's text and a question card's option prints over its
+// own explanation -- and applied it in `dividerShare`, which is every DRAG and
+// only drags. `splitPane` halves whatever it is handed, so `zv` on a 254px
+// pane made two 127px ones: into the broken zone, by the one gesture the floor
+// did not cover.
+//
+// A REAL BROWSER, because every number below is a laid-out pane. jsdom's rects
+// are all zero, so the unit suite has to stub them; here the extent is the one
+// the shell actually gave the pane, which is also what makes the refusal's
+// quoted measurement checkable rather than a restatement of the stub.
+await page.keyboard.press('Escape');
+await page.waitForTimeout(150);
+while ((await paneCount()) > 1) {
+  await page.keyboard.press('z');
+  await page.keyboard.press('c');
+  await page.waitForTimeout(150);
+}
+await page.setViewportSize({ width: 1280, height: 800 });
+await page.waitForTimeout(250);
+await page.locator('[data-session-row="factory-sse-1"]').click();
+await page.waitForTimeout(200);
+await page.keyboard.press('Escape');
+await page.waitForTimeout(150);
+
+// A SPLIT THAT FITS, first and in the same run: without it every check below
+// would pass just as happily against a `zv` hardcoded to refuse.
+const beforeSplit = await paneBoxes();
+console.log('one pane measures:', beforeSplit);
+if (beforeSplit.length !== 1 || beforeSplit[0].w < MIN_PANE_PX * 2) {
+  throw new Error(
+    `the canvas is ${JSON.stringify(beforeSplit)} — this section needs one pane with room for ` +
+      `two ${MIN_PANE_PX}px halves, or the first split below proves nothing.`,
+  );
+}
+await chord('z', 'v', 'a split that fits', 2);
+console.log('and then two:', await paneBoxes());
+
+// AND ONE THAT DOES NOT. The focused pane is now half the canvas, which on
+// this viewport cannot make two usable halves.
+const focusedWidth = await page
+  .locator('[data-split-pane][data-split-focused="true"]')
+  .evaluate((el) => Math.round(el.getBoundingClientRect().width));
+console.log('the focused pane is', focusedWidth, 'px wide');
+if (focusedWidth >= MIN_PANE_PX * 2) {
+  throw new Error(
+    `the focused pane is ${focusedWidth}px, which HAS room for two ${MIN_PANE_PX}px halves. The ` +
+      'refusal below would be measuring nothing.',
+  );
+}
+await page.keyboard.press('z');
+await page.keyboard.press('v');
+await page.waitForTimeout(200);
+const afterRefused = await paneBoxes();
+console.log('after a zv that cannot fit:', afterRefused);
+if (afterRefused.length !== 2) {
+  throw new Error(
+    `zv on a ${focusedWidth}px pane made ${afterRefused.length} pane(s). It must refuse: two ` +
+      `${Math.round(focusedWidth / 2)}px panes are the state ${MIN_PANE_PX} was measured to ` +
+      'prevent, and the drag floor already refuses to produce them.',
+  );
+}
+
+// THE CLASS, stated as the invariant rather than as this one gesture: no pane
+// the shell has produced is under the floor on either axis.
+for (const [at, box] of afterRefused.entries()) {
+  if (box.w < MIN_PANE_PX || box.h < MIN_PANE_PX) {
+    throw new Error(
+      `pane ${at} measures ${box.w}x${box.h}, under the ${MIN_PANE_PX}px floor. Every ` +
+        'route that makes a pane obeys it, or the number is a preference rather than a floor.',
+    );
+  }
+}
+
+// AND IT REFUSES ALOUD, in the one place every other refusal in this shell
+// lands -- and WHOLE, because `StatusCell` cuts at 72 characters and the
+// measurement is the half that explains the refusal (PR 289's own lesson,
+// asserted on the divider a few hundred lines above).
+const splitSaid = await page.evaluate(
+  () => document.querySelector('[data-status]')?.textContent ?? '',
+);
+console.log('the refused split says:', splitSaid);
+for (const want of ['split', `${MIN_PANE_PX}px`, `${focusedWidth}px`]) {
+  if (!splitSaid.includes(want)) {
+    throw new Error(
+      `the refused split said "${splitSaid}", which omits "${want}". A pane operation that fails ` +
+        'silently is indistinguishable from one that worked.',
+    );
+  }
+}
+if (splitSaid.includes('…')) {
+  throw new Error(
+    `the refusal was truncated to "${splitSaid}" — the cell cuts at 72 characters and the ` +
+      'measurement is what explains it.',
+  );
+}
+await page.screenshot({ path: `${outDir}/split-floor-refusal.png` });
+console.log(`${outDir}/split-floor-refusal.png`);
+
+// THE AXIS IS THE ONE THE SPLIT IS ABOUT. A wide, short canvas splits sideways
+// and refuses to stack -- a floor that measured one extent for both would pass
+// exactly one of these two, and a real browser is the only place the two
+// extents genuinely differ.
+while ((await paneCount()) > 1) {
+  await page.keyboard.press('z');
+  await page.keyboard.press('c');
+  await page.waitForTimeout(150);
+}
+await page.setViewportSize({ width: 2000, height: 600 });
+await page.waitForTimeout(250);
+const wideShort = (await paneBoxes())[0];
+console.log('a wide, short pane:', wideShort);
+if (wideShort.w < MIN_PANE_PX * 2 || wideShort.h >= MIN_PANE_PX * 2) {
+  throw new Error(
+    `this viewport gave a ${wideShort.w}x${wideShort.h} pane; the check needs one wide ` +
+      'enough to split and too short to stack, or it is measuring nothing.',
+  );
+}
+await page.keyboard.press('z');
+await page.keyboard.press('s');
+await page.waitForTimeout(200);
+const stackedPanes = await paneCount();
+const stackSaid = await page.evaluate(
+  () => document.querySelector('[data-status]')?.textContent ?? '',
+);
+console.log('zs on a short pane:', stackedPanes, 'pane(s) —', stackSaid);
+if (stackedPanes !== 1 || !stackSaid.includes(`${wideShort.h}px`) || !stackSaid.includes('tall')) {
+  throw new Error(
+    `zs on a ${wideShort.h}px-tall pane left ${stackedPanes} pane(s) saying "${stackSaid}". A ` +
+      'column split is about the HEIGHT, and this pane has room on the other axis only.',
+  );
+}
+await chord('z', 'v', 'the axis that does have room', 2);
+await page.setViewportSize({ width: 1280, height: 800 });
+await page.waitForTimeout(250);
 
 await browser.close();

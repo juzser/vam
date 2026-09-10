@@ -191,11 +191,15 @@ describe('dragging a tab MOVES it into the pane it is dropped on', () => {
     render(<Canvas model={MODEL} />);
     act(() => sidebarRow(1).click()); // pane-1: a1, a2
     const source = paneFor('pane-1') as HTMLElement;
-    stubRect(source, { left: 0, top: 0, width: 200, height: 100 });
+    // A LEGAL PANE. 200x100 made the edge arithmetic readable and is now a
+    // pane the shell refuses to create — a split has a 320px floor per half
+    // (`splitRefusal` in `Canvas.tsx`) — so the geometry is a real pane at a
+    // real window size and the drop point keeps its place in the edge band.
+    stubRect(source, { left: 0, top: 0, width: 1000, height: 800 });
     const tab = tabIn(source, 'a2') as HTMLButtonElement;
     fireEvent.dragStart(tab);
-    dragAt(source, 'dragover', 190, 50);
-    dragAt(source, 'drop', 190, 50);
+    dragAt(source, 'dragover', 990, 400);
+    dragAt(source, 'drop', 990, 400);
     expect(splitPanes()).toHaveLength(2);
     expect(tabsIn(paneFor('pane-1'))).toEqual(['a1', 'a3']);
     expect(tabsIn(paneFor('pane-2'))).toEqual(['a2']);
@@ -206,11 +210,12 @@ describe('dragging a tab MOVES it into the pane it is dropped on', () => {
     act(() => sidebarRow(1).click()); // pane-1: a1, a2
     pressChord('z', 'v'); // pane-2: a2 alone
     const target = paneFor('pane-1') as HTMLElement;
-    stubRect(target, { left: 0, top: 0, width: 200, height: 100 });
+    // A legal pane — see the case above.
+    stubRect(target, { left: 0, top: 0, width: 1000, height: 800 });
     const tab = tabIn(paneFor('pane-2'), 'a2') as HTMLButtonElement;
     fireEvent.dragStart(tab);
-    dragAt(target, 'dragover', 190, 50);
-    dragAt(target, 'drop', 190, 50);
+    dragAt(target, 'dragover', 990, 400);
+    dragAt(target, 'drop', 990, 400);
     // pane-2 gave up its only tab, so it goes; the drop's own new pane holds
     // it instead, and the layout is still exactly two panes.
     expect(splitPanes()).toHaveLength(2);

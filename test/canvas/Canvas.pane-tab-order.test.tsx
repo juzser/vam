@@ -170,14 +170,19 @@ describe('moving a tab between panes leaves both panes in order', () => {
     pickInSidebar('old');
     pickInSidebar('mid');
     const source = paneFor('pane-1') as HTMLElement;
+    // A LEGAL PANE, not merely a convenient one: 200x100 made the edge
+    // arithmetic readable and is now a pane the shell refuses to create, since
+    // a split has a 320px floor per half (`splitRefusal` in `Canvas.tsx`). A
+    // real pane at a real window size, with the drop point kept in the same
+    // edge band.
     source.getBoundingClientRect = () =>
       ({
         left: 0,
         top: 0,
-        width: 200,
-        height: 100,
-        right: 200,
-        bottom: 100,
+        width: 1000,
+        height: 800,
+        right: 1000,
+        bottom: 800,
         x: 0,
         y: 0,
         toJSON: () => ({}),
@@ -189,7 +194,7 @@ describe('moving a tab between panes leaves both panes in order', () => {
     for (const type of ['dragover', 'drop'] as const) {
       act(() => {
         source.dispatchEvent(
-          new MouseEvent(type, { clientX: 190, clientY: 50, bubbles: true, cancelable: true }),
+          new MouseEvent(type, { clientX: 990, clientY: 400, bubbles: true, cancelable: true }),
         );
       });
     }
