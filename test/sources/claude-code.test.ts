@@ -19,6 +19,10 @@ import {
 } from '../../src/main/sources/claude-code/agents.js';
 import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
 import {
+  createProjectCommandLookup,
+  projectCommandsDir,
+} from '../../src/main/sources/claude-code/slash-commands.js';
+import {
   CLAUDE_CODE_SOURCE,
   loadClaudeCodeProjects,
 } from '../../src/main/sources/claude-code/source.js';
@@ -1065,6 +1069,97 @@ describe('loadClaudeCodeProjects', () => {
 
     it('claims the capability it now really has', () => {
       expect(CLAUDE_CODE_SOURCE.descriptor.capabilities.pullRequests).toBe(true);
+    });
+  });
+
+  /**
+   * THE `/` LIST'S THREE TIERS, as one list per session.
+   *
+   * Built-ins are not files and have to be asked for (`builtin-commands.ts`);
+   * the user tier is one directory read per `load()`; the project tier is one
+   * read per PROJECT, which is the thing the old header said could not be
+   * done at all.
+   */
+  describe('slash commands', () => {
+    const cmd = (id: string, name: string, description: string | null = null) => ({
+      id,
+      name,
+      description,
+    });
+
+    it('merges built-ins, the user’s files and the project’s files into one list', async () => {
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent()],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [cmd('user:notify', 'notify', 'the operator’s own')],
+        async () => [cmd('project:ship', 'ship', 'the project’s own')],
+        { kind: 'ok', commands: [cmd('builtin:compact', 'compact', 'the CLI’s own')] },
+      );
+      expect(project?.sessions[0]?.slashCommands?.map((c) => c.name)).toEqual([
+        'compact',
+        'notify',
+        'ship',
+      ]);
+      expect(project?.sessions[0]?.slashCommandGap).toBeUndefined();
+    });
+
+    it('asks the project tier once per DIRECTORY, not once per session', async () => {
+      // The cost contract, at the level that spends it. Two rows, one cwd.
+      const asked: string[] = [];
+      const lookup = createProjectCommandLookup(async (dir) => {
+        asked.push(dir);
+        return [];
+      });
+      await loadClaudeCodeProjects(
+        root,
+        [agent(), agent({ key: 'sess-2#101', sessionId: 'sess-2' })],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        lookup,
+        null,
+      );
+      expect(asked).toEqual([projectCommandsDir('/w/alpha')]);
+    });
+
+    /**
+     * "NO COMMANDS" AND "VAM COULD NOT ASK" ARE DIFFERENT STATES, and this is
+     * where they part company (`pull-requests.ts` states the rule). A CLI that
+     * could not be asked must not shrink the list in silence.
+     */
+    it('carries the reason when the built-ins could not be read', async () => {
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent()],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [cmd('user:notify', 'notify')],
+        async () => [],
+        { kind: 'unavailable', code: 'cli-missing', message: 'no claude on PATH' },
+      );
+      expect(project?.sessions[0]?.slashCommands?.map((c) => c.name)).toEqual(['notify']);
+      expect(project?.sessions[0]?.slashCommandGap).toEqual({
+        code: 'cli-missing',
+        message: 'no claude on PATH',
+      });
+    });
+
+    it('says nothing about a gap when nobody asked for built-ins at all', async () => {
+      // NULL IS NOT A FAILURE. A caller that did not ask has not been refused,
+      // and a note saying otherwise would be vam inventing a problem.
+      const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+      expect('slashCommandGap' in (project?.sessions[0] ?? {})).toBe(false);
     });
   });
 });

@@ -150,6 +150,19 @@ export type Command = {
   readonly command: string;
 };
 
+/**
+ * A tier of the `/` list vam could not read, in the source's own words.
+ *
+ * `code` is for a reader that wants to branch (`cli-missing`, `timed-out`,
+ * `refused`, ...); `message` is the sentence a person reads. Both, for
+ * `PullRequestList`'s reason: a code alone cannot be shown and a message alone
+ * cannot be matched on.
+ */
+export type SlashCommandGap = {
+  readonly code: string;
+  readonly message: string;
+};
+
 /** One command the PROVIDER configures -- `Command` above is agent-proposed. */
 export type SlashCommand = {
   readonly id: string;
@@ -369,6 +382,28 @@ export type Session = {
    * the source looked and found none, the common case for `claude-code`.
    */
   readonly slashCommands?: readonly SlashCommand[];
+  /**
+   * WHY THE `/` LIST IS SHORT OF WHAT THE PROVIDER ITSELF WOULD OFFER, when
+   * vam knows that it is. Absent is the ordinary state: every tier vam has was
+   * read.
+   *
+   * IT EXISTS BECAUSE THE LIST HAS TIERS THAT FAIL DIFFERENTLY. Command FILES
+   * (`~/.claude/commands`, `<cwd>/.claude/commands`) are silent by design --
+   * a directory that is not there means the operator wrote no commands, which
+   * is a reading and not a failure. The provider's BUILT-INS are not files:
+   * vam has to ask the installed CLI for them (`builtin-commands.ts`), and
+   * that question can genuinely fail -- no CLI on `PATH`, a version that does
+   * not answer, a timeout. `pull-requests.ts` states the rule this serves:
+   * "no commands match" and "vam could not read the commands" must never look
+   * the same, and a list quietly missing fifty entries is the second wearing
+   * the first's clothes.
+   *
+   * A `PullRequestList`-style union will not do here, because the failure is
+   * PARTIAL: the file tiers can be read while the built-ins are not, and the
+   * operator should still get the commands vam does have. So the list stays
+   * the list, and this sits beside it naming what is missing from it.
+   */
+  readonly slashCommandGap?: SlashCommandGap;
   /**
    * The subagents this session spawned, newest first, or absent when the
    * source has no such surface.
