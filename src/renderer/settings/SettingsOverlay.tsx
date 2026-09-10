@@ -488,10 +488,19 @@ export function SettingsOverlay({
                   block (`data-detail-block="out"` in `DetailPanel.tsx`), which
                   is a live thing with a live name; the earlier arguments this
                   comment carried were about a Canvas section and the layouts
-                  that hid the canvas, and both are gone. */}
+                  that hid the canvas, and both are gone.
+
+                  THE HINT NAMES NO PANE, and that is a correction rather than
+                  a rewording. It said "in the right pane", which was true of
+                  the two-column shell it was written for; since the split work
+                  (`leaves(panes)` in `Canvas.tsx`) the shell can hold several
+                  response panes at once, side by side or stacked, and the pref
+                  is applied as `--vam-out-font-size` on the document root, so
+                  it reaches every one of them. A caption pointing at one pane
+                  promises a scope the setting does not have. */}
               <Block
                 label="out text"
-                hint="how large the agent's answer is drawn in the right pane"
+                hint="how large the agent's answer is drawn, in every response pane"
               >
                 <Stepper
                   name="out text size"
