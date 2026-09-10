@@ -3020,6 +3020,72 @@ describe('the / typeahead offers the provider’s own commands', () => {
     expect(q('[data-slash-suggest]')).not.toBeNull();
     expect(q('[data-bang-suggest]')).toBeNull();
   });
+
+  /**
+   * THE TWO UNKNOWNS, ON SCREEN. `pull-requests.ts:12-14` states the rule and
+   * this is the place it is either kept or broken: the `/` list has tiers that
+   * fail differently, and the one made of BUILT-INS is not files -- vam has to
+   * ask the installed CLI for it, and that question can fail. A list fifty
+   * entries short with nothing said about it is "vam could not read the
+   * commands" wearing "no commands match"'s clothes.
+   */
+  describe('a list vam could not fully read says so', () => {
+    const GAP = { code: 'cli-missing', message: 'no `claude` on PATH, so vam cannot list its own' };
+    const withGap = (commands = SLASH_COMMANDS): SessionEntry => ({
+      project: PROJECT,
+      session: { ...SESSION, slashCommands: commands, slashCommandGap: GAP },
+    });
+
+    it('draws nothing at all when nothing matches and nothing failed', () => {
+      // THE OTHER UNKNOWN, pinned so the two cannot converge: a query with no
+      // answer closes the box, and says nothing, because there is nothing to
+      // say.
+      composer();
+      type('/zzz');
+      expect(q('[data-slash-suggest]')).toBeNull();
+      expect(q('[data-slash-gap]')).toBeNull();
+    });
+
+    it('says why the list is short when a query finds nothing and a tier failed', () => {
+      composer(withGap());
+      type('/zzz');
+      expect(q('[data-slash-suggest]')).toBeNull();
+      expect(q('[data-slash-gap]')?.textContent ?? '').toContain('no `claude` on PATH');
+    });
+
+    it('still says it while the list has matches to offer', () => {
+      // A short list that works is the dangerous case: it looks complete.
+      composer(withGap());
+      type('/');
+      expect(suggestedNames()).toEqual(['compact', 'notify', 'review']);
+      expect(q('[data-slash-gap]')?.textContent ?? '').toContain('no `claude` on PATH');
+    });
+
+    it('says nothing when the source read every tier it has', () => {
+      composer();
+      type('/');
+      expect(suggestedNames()).toHaveLength(3);
+      expect(q('[data-slash-gap]')).toBeNull();
+    });
+
+    it('caps the list and counts what it is not drawing', () => {
+      // The CLI's own list runs to fifty-odd commands. Unbounded, the popover
+      // becomes a page floating over the composer, and a page cropped without
+      // saying so is a page that lies about its own length.
+      const many = Array.from({ length: 12 }, (_, i) => ({
+        id: `builtin:c${i}`,
+        name: `wombat${i}`,
+        description: null,
+      }));
+      composer({ project: PROJECT, session: { ...SESSION, slashCommands: many } });
+      type('/wombat');
+      expect(suggestedNames()).toHaveLength(8);
+      expect(q('[data-slash-more]')?.textContent ?? '').toContain('4 more');
+      type('/wombat11');
+      expect(suggestedNames()).toEqual(['wombat11']);
+      expect(q('[data-slash-more]')).toBeNull();
+    });
+  });
 });
 
 describe('a turn with no answer says which kind of nothing it is', () => {
@@ -3796,7 +3862,11 @@ describe('the +1px type bump reaches everything in this pane except out', () => 
     // of going faint and taking the click with it.
     // +1: the `!` popover's overflow count -- the list spans the whole column
     // now, so what it crops has to be counted on screen.
-    '11': 18,
+    // +1: the `/` popover's own overflow count, for the same reason: the
+    // provider's list is fifty-odd commands long.
+    // +1: the `/` popover's gap note -- "vam could not read all of these" is
+    // a different state from "nothing matches" and has to say so.
+    '11': 20,
     // -1: `WaitingNote`'s remedy line, removed with the notice.
     // +1: the column's boundary block. NEW type, so it takes the size it
     // would have after the +1px bump the operator has now asked for twice,

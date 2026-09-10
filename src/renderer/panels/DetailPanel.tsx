@@ -3594,9 +3594,32 @@ export function DetailPanel(props: DetailPanelProps) {
     setDismissed(true);
   };
   const slashQuery = composing ? slashCommandQuery(draft, caret) : null;
-  const slashMatches = slashQuery === null ? [] : matchSlashCommands(slashCommands, slashQuery);
+  const allSlashMatches = slashQuery === null ? [] : matchSlashCommands(slashCommands, slashQuery);
+  // Capped and counted, for `bangHidden`'s reason -- and this list needs it
+  // more: the provider's own is fifty-odd commands long.
+  const slashMatches = allSlashMatches.slice(0, MAX_BANG_ROWS);
+  const slashHidden = allSlashMatches.length - slashMatches.length;
   const slashSuggesting = !dismissed && slashMatches.length > 0;
   const slashPicked = Math.min(pick, slashMatches.length - 1);
+  /**
+   * WHY THE `/` LIST IS SHORT OF THE PROVIDER'S OWN, when the source knows.
+   *
+   * THE TWO UNKNOWNS, AND THIS IS WHERE THEY ARE KEPT APART. `slashCommands`
+   * has tiers that fail differently (`model.ts`): the ones made of files are
+   * silent because a directory that is not there means the operator wrote no
+   * commands, but the BUILT-INS are asked of the installed CLI and that
+   * question can genuinely fail. A list fifty entries short with nothing said
+   * about it is "vam could not read the commands" wearing "no commands match"'s
+   * clothes -- `pull-requests.ts` states the rule this serves.
+   *
+   * DRAWN WHENEVER THE `/` LIST IS BEING ASKED FOR, whether or not anything
+   * matched, and it is the second case that decides the shape: a query that
+   * finds nothing closes the list, so a note attached only to the list would
+   * vanish exactly when the operator most needs to know that the list they are
+   * typing into is not the whole one.
+   */
+  const slashGapNote =
+    !dismissed && slashQuery !== null ? (entry?.session.slashCommandGap ?? null) : null;
   const acceptSlashSuggestion = (command: SlashCommand) => {
     const next = applySlashCommand(draft, caret, command.name);
     onDraftChange(next.text);
@@ -4832,6 +4855,28 @@ export function DetailPanel(props: DetailPanelProps) {
                   )}
                 </button>
               ))}
+              {slashHidden > 0 && (
+                <p data-slash-more className="px-1.5 pt-0.5 text-[11px] text-ink-faint">
+                  {slashHidden} more — keep typing to narrow
+                </p>
+              )}
+            </div>
+          )}
+          {/* WHAT VAM COULD NOT READ, said in the source's own words, and
+              ABSENT rather than dimmed the rest of the time. It stands whether
+              or not the list above it drew: a query that matches nothing
+              closes that list, and that is exactly the moment the operator
+              needs to know they are typing against a partial list rather than
+              a complete one that has nothing for them. */}
+          {slashGapNote !== null && (
+            <div
+              data-slash-gap
+              className="rounded-[10px] border border-line-strong bg-card px-2.5 py-1.5"
+            >
+              <p className="text-[11px] text-ink-dim leading-[1.45]">
+                vam could not read all of Claude Code's commands, so this list is short of the CLI's
+                own: {slashGapNote.message}
+              </p>
             </div>
           )}
           {/* THE ROW IS THE INSERT LANDING, AND THE BOX INSIDE IT IS NOT.
