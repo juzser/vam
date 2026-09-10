@@ -7,8 +7,17 @@
       A PNG file, not an inline SVG data URI: this keeps every colour value
       for the mark out of index.html, which nothing here scans for a literal
       hex the way test/canvas/topology-constraints.test.ts scans src/*.ts,
-      *.tsx and *.css. The source of truth for the mark itself is
-      build/icon.svg.
+      *.tsx and *.css.
+
+      Its source is build/favicon.svg, NOT build/icon.svg. The two are the
+      same mark drawn for two sizes, and the split is the point: at 32 and 16
+      pixels the app icon's 14-unit node ring is under half a pixel wide and
+      averages into the background, which measured 2.31:1 at 32 and 1.79:1 at
+      16 and left the mark reading as one orange spot. build/favicon.svg draws
+      the same graph with strokes that land on whole pixels; build/icon.svg
+      stays exactly as it is, for the 1024px app icon where every one of those
+      details is legible. e2e/favicon-shots.mjs measures the served file at
+      both sizes.
     -->
     <link rel="icon" type="image/png" href="./favicon.png" />
     <title>VAM</title>
