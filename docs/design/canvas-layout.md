@@ -211,7 +211,7 @@ registry keyed by action id rather than scattered `onKeyDown` handlers,
 conflict detection between bindings, a double-tap concept (`gg`/`yy`'s
 shape), gating a binding by which layer is focused, and arbitrating who gets
 a keystroke when a terminal is present. vam's own implementation of each of
-those (`resolveChord`, `bindingConflict`, `PREFIXES`, the mode read in
+those (`resolveChord`, `bindingClashes`, `PREFIXES`, the mode read in
 `Canvas.tsx`) is independent code, written for vam's own data shapes; reading
 orca only fixed the names for problems vam had to solve anyway.
 

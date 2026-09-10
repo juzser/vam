@@ -811,23 +811,6 @@ export function bindingChords(overrides: KeyBindings, id: string): readonly stri
 }
 
 /**
- * The action `key` already belongs to, or null when it is free.
- *
- * Read off what is IN FORCE, not off the shipped tables: a key the operator
- * freed a moment ago by moving its action elsewhere is free, and a key they
- * just took is taken.
- */
-export function bindingConflict(overrides: KeyBindings, id: string, key: string): string | null {
-  for (const binding of effectiveBindings(overrides)) {
-    if (binding.id === id) continue;
-    if (binding.chords.some((chord) => chord.prefix === '' && chord.key === key)) {
-      return binding.id;
-    }
-  }
-  return null;
-}
-
-/**
  * Put `key` in one of an action's slots.
  *
  * Seeded from what the action holds now, so editing the second slot of an
@@ -937,10 +920,25 @@ export function bindingClashes(overrides: KeyBindings): readonly BindingClash[] 
  * hand-edited payload, or a stored override colliding with a shipped key a
  * later vam moved onto it), and refusing every write while one is in force
  * would lock the operator inside the state they are trying to leave.
+ *
+ * The difference is taken over WHO IS SHADOWED, not over which chord is
+ * contested. "That chord was contested already" is too coarse by exactly the
+ * case that matters: over a map where `icon` has taken `rename`'s `r`, giving
+ * `r` to a third action would newly kill `icon` too, and the chord was
+ * contested before and after. What comes back is each clash narrowed to the
+ * bindings this write would newly leave dead, so a refusal can name them.
  */
 export function newClashes(current: KeyBindings, next: KeyBindings): readonly BindingClash[] {
-  const before = new Set(bindingClashes(current).map((clash) => clash.chord));
-  return bindingClashes(next).filter((clash) => !before.has(clash.chord));
+  const pair = (chord: string, id: string) => `${chord} ${id}`;
+  const before = new Set(
+    bindingClashes(current).flatMap((clash) => clash.shadowed.map((id) => pair(clash.chord, id))),
+  );
+  return bindingClashes(next)
+    .map((clash) => ({
+      ...clash,
+      shadowed: clash.shadowed.filter((id) => !before.has(pair(clash.chord, id))),
+    }))
+    .filter((clash) => clash.shadowed.length > 0);
 }
 
 type Tables = {

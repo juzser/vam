@@ -22,13 +22,14 @@ import { Minus, Plus, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { PROVIDERS, resolveProvider } from '../../shared/providers.js';
 import {
-  bindingConflict,
+  bindingClashes,
   bindKey,
   clearBindings,
   isReserved,
   type KeyBindings,
   MAX_BINDINGS,
   NO_BINDINGS,
+  newClashes,
   normalizeKey,
 } from '../keyboard/chords.js';
 import { type BindingRow, buildBindingSheet } from '../keyboard/keysheet.js';
@@ -157,8 +158,39 @@ export function SettingsOverlay({
   const [capturing, setCapturing] = useState<Capturing>(null);
   const [message, setMessage] = useState('');
   const wide = useWideNav();
+  /** Read off the map on screen, not remembered from a write: the overlay can
+   *  be OPENED over a contested map, which is the case no write path sees. */
+  const clashes = bindingClashes(prefs.keyBindings);
 
-  const bind = (next: KeyBindings) => {
+  /**
+   * EVERY write to the binding map, judged on the WHOLE map it would produce.
+   *
+   * Audit F3's fix, and it is here rather than in each caller because the
+   * defect WAS a caller that had no check: the capture box judged the one key
+   * it was handed, and the reset button judged nothing, so resetting `rename`
+   * could hand `r` back to it while `icon` held it — after which `r` invoked
+   * `icon` and the editor went on printing it for `rename`. Reset cannot be
+   * fixed by checking a keystroke, because the key it restores is a DEFAULT
+   * the operator never typed; the only question that covers both acts is the
+   * one about the resulting map.
+   *
+   * REFUSED, NOT RESOLVED. The alternative — take the key and unbind whoever
+   * held it — is the failure the capture path already argues against: it
+   * leaves the other action silently keyless, discoverable only by pressing
+   * its key and watching nothing happen. A refusal is visible in the moment,
+   * names the action in the way, and leaves both exits open: move that action
+   * off the key, or "reset shortcuts", which can never be refused because the
+   * shipped grammar contests nothing.
+   */
+  const bind = (next: KeyBindings, editing: string | null) => {
+    const clash = newClashes(prefs.keyBindings, next)[0];
+    if (clash !== undefined) {
+      const other = clash.winner === editing ? (clash.shadowed[0] ?? clash.winner) : clash.winner;
+      setMessage(
+        `"${clash.chord}" already does: ${labelFor(next, other)} — move that first, or use "reset shortcuts"`,
+      );
+      return;
+    }
     setCapturing(null);
     setMessage('');
     onChange(setKeyBindings(prefs, next));
@@ -193,15 +225,11 @@ export function SettingsOverlay({
       setMessage(`"${key}" is reserved — Escape cancels this capture, g/y/z open chords`);
       return;
     }
-    const clash = bindingConflict(prefs.keyBindings, row.id, key);
-    if (clash !== null) {
-      // Refused rather than stolen, and named. Stealing would leave the other
-      // action silently unbound, discoverable only by pressing its key and
-      // watching nothing happen — the worse of the two failures.
-      setMessage(`"${key}" already does: ${labelFor(prefs.keyBindings, clash)}`);
-      return;
-    }
-    bind(bindKey(prefs.keyBindings, row.id, slot, key));
+    // The conflict check that used to stand here asked only about `key`, and
+    // was the half of the editor that made the missing check on reset look
+    // like protection. `bind` asks about the whole resulting map, which
+    // answers this case and the one it could not see.
+    bind(bindKey(prefs.keyBindings, row.id, slot, key), row.id);
   };
 
   /**
@@ -495,9 +523,34 @@ export function SettingsOverlay({
                   {message}
                 </p>
               )}
+              {/* A STANDING notice, not a reaction to a click: the editor can
+                  no longer MINT a contested key, but it can be opened over one
+                  — a stored override collides with a shipped key the day a
+                  later vam moves one onto it, with nothing hand-edited. That
+                  state used to be legible only by pressing the key and
+                  watching the wrong thing happen. `polite` rather than
+                  `assertive`: it is a report about the list below, not about
+                  the operator's last keystroke. */}
+              {clashes.length === 0 ? null : (
+                <p
+                  data-binding-clash
+                  role="status"
+                  aria-live="polite"
+                  className="mb-2 text-[11px] text-waiting"
+                >
+                  {clashes
+                    .map(
+                      (clash) =>
+                        `two actions claim "${clash.chord}" — ${labelFor(prefs.keyBindings, clash.winner)} has it, ${clash.shadowed
+                          .map((id) => labelFor(prefs.keyBindings, id))
+                          .join(', ')} does not.`,
+                    )
+                    .join(' ')}
+                </p>
+              )}
               <div className="mb-2">
                 {Object.keys(prefs.keyBindings).length === 0 ? null : (
-                  <SmallButton label="reset shortcuts" onPick={() => bind(NO_BINDINGS)} />
+                  <SmallButton label="reset shortcuts" onPick={() => bind(NO_BINDINGS, null)} />
                 )}
               </div>
               {/* One column, not two. Groups of unequal length interleaved
@@ -531,7 +584,7 @@ export function SettingsOverlay({
                           capturing={capturing}
                           onCapture={setCapturing}
                           onKey={(slot, event) => capture(row, slot, event)}
-                          onReset={() => bind(clearBindings(prefs.keyBindings, row.id))}
+                          onReset={() => bind(clearBindings(prefs.keyBindings, row.id), row.id)}
                         />
                       ))}
                     </ul>
@@ -860,6 +913,11 @@ function BindingLine({
             />
           );
         }
+        // A key another action wins is drawn STRUCK THROUGH and says so in its
+        // accessible name — a slot that looks like every other slot is exactly
+        // how F3 stayed invisible, and a strikethrough alone is nothing at all
+        // to a screen reader.
+        const dead = keys === undefined ? undefined : row.dead[keys];
         // An empty second slot is still a control: it is how a second binding
         // is added, and it is the only affordance that says one is possible.
         return (
@@ -867,12 +925,22 @@ function BindingLine({
             key={slot}
             type="button"
             data-binding-slot={`${row.id}:${slot}`}
-            aria-label={keys === undefined ? `add a key for ${row.label}` : `${keys}, ${row.label}`}
+            data-binding-dead={dead === undefined ? undefined : keys}
+            title={dead === undefined ? undefined : `dead — ${dead} has "${keys}"`}
+            aria-label={
+              keys === undefined
+                ? `add a key for ${row.label}`
+                : dead === undefined
+                  ? `${keys}, ${row.label}`
+                  : `${keys}, ${row.label} — dead, ${dead} has this key`
+            }
             onClick={() => onCapture({ id: row.id, slot, scope })}
             className={`${SLOT_BOX} cursor-pointer hover:border-ink hover:text-ink ${FOCUS_RING} ${
               keys === undefined
                 ? 'border-ink-faint border-dashed bg-transparent text-ink-dim'
-                : 'border-ink-faint bg-sunken text-ink'
+                : dead === undefined
+                  ? 'border-ink-faint bg-sunken text-ink'
+                  : 'border-waiting bg-transparent text-ink-dim line-through'
             }`}
           >
             {keys === undefined ? (
