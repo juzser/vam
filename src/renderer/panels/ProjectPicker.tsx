@@ -84,14 +84,14 @@ export function ProjectPicker({ groupName, choices, onToggle, onClose }: Project
         className="relative z-10 flex max-h-[380px] w-[340px] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-line bg-panel shadow-[var(--shadow-node)]"
       >
         <div className="flex items-center gap-2 border-line border-b px-3 py-2">
-          <span className="text-[11px] text-ink-faint">repos in</span>
-          <span className="font-mono font-semibold text-[12px] text-ink">{groupName}</span>
+          <span className="text-meta text-ink-faint">repos in</span>
+          <span className="font-mono font-semibold text-body text-ink">{groupName}</span>
         </div>
         {ordered.length === 0 ? (
           /* vam has no project to offer, and says which fact that is: there is
              nothing here because no session is running anywhere it can see,
              not because the list failed to load. */
-          <p className="px-3 py-4 text-[11px] text-ink-faint">
+          <p className="px-3 py-4 text-control text-ink-faint">
             No repo to add — vam knows a repo by the sessions running in it.
           </p>
         ) : (
@@ -103,7 +103,7 @@ export function ProjectPicker({ groupName, choices, onToggle, onClose }: Project
                   data-project-choice={choice.id}
                   aria-pressed={choice.member}
                   onClick={() => onToggle(choice.id, !choice.member)}
-                  className="flex w-full cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                  className="flex w-full cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-raised hover:text-ink"
                 >
                   <span className="flex h-[13px] w-[13px] flex-none items-center justify-center text-ink-faint">
                     {choice.member ? (
@@ -114,7 +114,7 @@ export function ProjectPicker({ groupName, choices, onToggle, onClose }: Project
                   </span>
                   <span className="truncate">{choice.name}</span>
                   {!choice.member && choice.groupName !== null && (
-                    <span className="ml-auto truncate font-mono text-[9.5px] text-ink-faint">
+                    <span className="ml-auto truncate font-mono text-meta text-ink-faint">
                       in {choice.groupName}
                     </span>
                   )}

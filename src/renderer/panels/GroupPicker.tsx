@@ -86,10 +86,8 @@ export function GroupPicker({
         className="relative z-10 flex max-h-[380px] w-[280px] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-line bg-panel shadow-[var(--shadow-node)]"
       >
         <div className="flex items-center gap-2 border-line border-b px-3 py-2">
-          <span className="text-[11px] text-ink-faint">move</span>
-          <span className="truncate font-mono font-semibold text-[12px] text-ink">
-            {projectName}
-          </span>
+          <span className="text-meta text-ink-faint">move</span>
+          <span className="truncate font-mono font-semibold text-body text-ink">{projectName}</span>
         </div>
         <ul className="flex flex-col gap-0.5 overflow-y-auto p-1">
           {grouped && (
@@ -98,7 +96,7 @@ export function GroupPicker({
                 type="button"
                 data-group-choice="none"
                 onClick={onRemove}
-                className="flex w-full cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                className="flex w-full cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-raised hover:text-ink"
               >
                 <span className="flex h-[13px] w-[13px] flex-none items-center justify-center text-ink-faint">
                   <Folder size={11} strokeWidth={1.7} />
@@ -114,7 +112,7 @@ export function GroupPicker({
                 data-group-choice={choice.id}
                 aria-pressed={choice.current}
                 onClick={() => onPick(choice.id)}
-                className="flex w-full cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-dim hover:bg-raised hover:text-ink"
+                className="flex w-full cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-raised hover:text-ink"
               >
                 <span className="flex h-[13px] w-[13px] flex-none items-center justify-center text-ink-faint">
                   {choice.current ? (
@@ -154,14 +152,14 @@ export function GroupPicker({
                 }
               }}
               onBlur={commitCreate}
-              className="w-full rounded-[5px] border border-line-strong bg-panel px-1.5 py-1 font-mono text-[10.5px] text-ink outline-none"
+              className="w-full rounded-[5px] border border-line-strong bg-panel px-1.5 py-1 font-mono text-control text-ink outline-none"
             />
           ) : (
             <button
               type="button"
               data-new-folder
               onClick={() => setCreating(true)}
-              className="w-full cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-ink-quiet hover:bg-raised hover:text-ink"
+              className="w-full cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-quiet hover:bg-raised hover:text-ink"
             >
               + new folder…
             </button>

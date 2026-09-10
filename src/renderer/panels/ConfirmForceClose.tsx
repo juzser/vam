@@ -66,11 +66,9 @@ export function ConfirmForceClose({ title, onConfirm, onCancel }: ConfirmForceCl
       <div className="relative z-10 w-[340px] rounded-[var(--radius-lg)] border border-line-strong bg-panel p-3.5 shadow-[var(--shadow-node)]">
         <div className="flex items-center gap-2">
           <TriangleAlert size={13} strokeWidth={1.8} className="text-danger" />
-          <span className="font-mono font-semibold text-[12px] text-ink">
-            Kill "{title}" anyway?
-          </span>
+          <span className="font-mono font-semibold text-body text-ink">Kill "{title}" anyway?</span>
         </div>
-        <p className="mt-2.5 text-[11.5px] text-ink-dim">
+        <p className="mt-2.5 text-control text-ink-dim">
           vam could not confirm this is one of its own sessions. Confirming sends a kill signal
           directly to its process -- not the normal, resumable stop. This may be a terminal window
           you are working in right now, and closing it this way cannot be undone.
@@ -81,7 +79,7 @@ export function ConfirmForceClose({ title, onConfirm, onCancel }: ConfirmForceCl
             ref={cancelRef}
             data-confirm-force-close-cancel
             onClick={onCancel}
-            className="cursor-pointer rounded-[var(--radius-sm)] border border-line px-2 py-1 text-[11.5px] text-ink-dim hover:border-line-strong hover:text-ink"
+            className="cursor-pointer rounded-[var(--radius-sm)] border border-line px-2 py-1 text-control text-ink-dim hover:border-line-strong hover:text-ink"
           >
             Cancel
           </button>
@@ -89,7 +87,7 @@ export function ConfirmForceClose({ title, onConfirm, onCancel }: ConfirmForceCl
             type="button"
             data-confirm-force-close-go
             onClick={onConfirm}
-            className="cursor-pointer rounded-[var(--radius-sm)] border border-danger px-2 py-1 text-[11.5px] text-danger hover:bg-danger hover:text-ground"
+            className="cursor-pointer rounded-[var(--radius-sm)] border border-danger px-2 py-1 text-control text-danger hover:bg-danger hover:text-ground"
           >
             Kill anyway
           </button>
