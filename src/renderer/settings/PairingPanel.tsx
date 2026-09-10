@@ -181,17 +181,17 @@ const FOCUS_RING =
  * busy button would return it to the very state this comment exists about.
  * `e2e/settings-chrome-shots.mjs` measures all of it on the painted node.
  */
-const ACTION_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-line-tip bg-raised px-4 text-[13px] text-ink hover:bg-segment-on disabled:cursor-default disabled:opacity-60 disabled:hover:bg-raised ${FOCUS_RING}`;
+const ACTION_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-line-tip bg-raised px-4 text-control text-ink hover:bg-segment-on disabled:cursor-default disabled:opacity-60 disabled:hover:bg-raised ${FOCUS_RING}`;
 
 /** The same shape, for an act that revokes access rather than merely toggling a setting. */
-const DANGER_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-danger px-4 text-[13px] text-danger hover:bg-danger hover:text-ground ${FOCUS_RING}`;
+const DANGER_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-danger px-4 text-control text-danger hover:bg-danger hover:text-ground ${FOCUS_RING}`;
 
 /** The alert-box recipe `ErrorBoundary.tsx` already uses for a refusal in the operator's face. */
-const ALERT_BOX = 'rounded-md border border-danger bg-panel p-3 text-[12px] text-danger';
+const ALERT_BOX = 'rounded-md border border-danger bg-panel p-3 text-control text-danger';
 
-const HINT = 'max-w-[52ch] text-[12px] text-ink-dim';
+const HINT = 'max-w-[52ch] text-control text-ink-dim';
 const SECTION = 'border-line-loud border-t pt-4';
-const HEADING = 'font-medium text-[13px] text-ink';
+const HEADING = 'font-medium text-body text-ink';
 
 export function PairingPanel(props: PairingPanelProps) {
   const { view, nowMs, serve } = props;
@@ -238,7 +238,7 @@ export function PairingPanel(props: PairingPanelProps) {
           <>
             {props.url === null ? null : (
               <p className="mt-1">
-                <span data-testid="pairing-url" className="font-mono text-[12px] text-ink">
+                <span data-testid="pairing-url" className="font-mono text-body text-ink">
                   {props.url}
                 </span>{' '}
                 <button type="button" onClick={props.onCopyUrl} className={`mt-2 ${ACTION_BUTTON}`}>
@@ -296,7 +296,7 @@ export function PairingPanel(props: PairingPanelProps) {
               href={serve.tailnetServeDisabledUrl}
               target="_blank"
               rel="noreferrer"
-              className="mt-1 inline-block break-all font-mono text-[12px] text-ink underline underline-offset-2 hover:text-ink-dim"
+              className="mt-1 inline-block break-all font-mono text-control text-ink underline underline-offset-2 hover:text-ink-dim"
             >
               {serve.tailnetServeDisabledUrl}
             </a>
@@ -345,14 +345,21 @@ export function PairingPanel(props: PairingPanelProps) {
               {/* LARGE, MONOSPACE, GENEROUSLY TRACKED: the one element on this
                   whole screen whose entire job is being read across a room
                   and retyped into a phone, by a human looking away from this
-                  screen while they do it. */}
+                  screen while they do it.
+
+                  OFF THE TYPE SCALE, and named as such in
+                  `test/renderer/type-scale.test.ts`. The scale's four steps
+                  run 11 to 15px and describe text you read at a desk; this is
+                  display type for a transcription task, and folding it into
+                  `heading` would take it from 40px to 15 and undo the whole
+                  point of the element. */}
               <p
                 data-testid="pairing-code"
                 className="font-mono text-[40px] text-ink tracking-[0.3em]"
               >
                 {grouped(view.code)}
               </p>
-              <p data-testid="pairing-countdown" className="mt-1 text-[12px] text-ink-dim">
+              <p data-testid="pairing-countdown" className="mt-1 text-control text-ink-dim">
                 {countdown(view.expiresAtMs, nowMs)}
               </p>
             </div>
@@ -378,7 +385,7 @@ export function PairingPanel(props: PairingPanelProps) {
           <p className={HINT}>A device is asking to pair. It calls itself:</p>
           <p
             data-testid="pairing-device-name"
-            className="mt-1 inline-block rounded border border-line-loud bg-well px-2 py-1 font-mono text-[13px] text-ink"
+            className="mt-1 inline-block rounded border border-line-loud bg-well px-2 py-1 font-mono text-body text-ink"
           >
             {view.awaiting.name}
           </p>
@@ -432,8 +439,8 @@ export function PairingPanel(props: PairingPanelProps) {
                     data-testid={`paired-device-${device.deviceId}`}
                     className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-line px-3 py-2"
                   >
-                    <span className="text-[13px] text-ink">{device.name}</span>
-                    <span className="text-[12px] text-ink-dim">
+                    <span className="text-body text-ink">{device.name}</span>
+                    <span className="text-meta text-ink-dim">
                       paired {ago(device.pairedAt, nowMs)}, last seen{' '}
                       {ago(device.lastSeenAt, nowMs)}
                     </span>
