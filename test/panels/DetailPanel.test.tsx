@@ -3833,116 +3833,64 @@ describe('the out text size roots on the out container and nowhere else', () => 
 });
 
 /**
- * The fifth operator request on this pane: raise every type size by 1px
- * EXCEPT `out`, which the operator has already tuned via its own pref
- * (`DEFAULT_OUT_FONT_SIZE`, `OUT_FONT_SIZE_VAR`) and which must not move a
- * pixel because of an unrelated change here.
+ * THE SIXTH OPERATOR REQUEST ON THIS PANE, AND THE LAST ONE THAT SHOULD NEED A
+ * TEST HERE.
  *
- * Two checks, because either alone would pass with the other broken:
- * - a SOURCE rule counts every literal `text-[Npx]` class in the file and
- *   compares the WHOLE multiset against the exact bumped scale -- catching a
- *   single missed spot the same way a reviewer scanning ~60 call sites by
- *   eye could not. A "the old sizes must be gone" check would NOT do this
- *   safely here: a contiguous +1px shift overlaps itself heavily (old 11px
- *   is new 10px's target, so "11" legitimately still appears after a
- *   correct bump), so presence/absence of individual numbers cannot tell a
- *   correct bump from a missed one. The exact count per size can.
- * - a RENDERED check that a representative sibling actually moved while the
- *   `out` container's own class is byte-for-byte what it was — a test that
- *   only asserted the sibling grew would still pass with `out` bumped too.
+ * This block used to hold `EXPECTED_SIZE_COUNTS`: a per-size ledger of every
+ * literal `text-[Npx]` in `DetailPanel.tsx`, kept exact so that a missed call
+ * site reddened. It was the right shape for a one-file sweep and it is the
+ * wrong shape now — the file has no literal sizes left. Every one of its sixty
+ * is a role on the named scale (`styles.css`, `--text-meta` / `--text-control`
+ * / `--text-body` / `--text-heading`), and the ledger has moved to
+ * `test/renderer/type-scale.test.ts`, which asks the same question of the
+ * WHOLE renderer rather than of this file: no raw `text-[Npx]` outside four
+ * named exceptions, and nothing under the 11px floor.
+ *
+ * What stays here is the half that ledger could never do, because it is about
+ * `out` and `out` is not a class in this file at all: the answer text is sized
+ * by the operator's own pref (`DEFAULT_OUT_FONT_SIZE`, `OUT_FONT_SIZE_VAR`)
+ * and must not move a pixel because of a change to the type around it. A
+ * check that only asserted a sibling moved would still pass with `out`
+ * dragged along, so both halves are asserted together.
  */
-describe('the +1px type bump reaches everything in this pane except out', () => {
-  /**
-   * The exact post-bump multiset, one entry per distinct size this file used
-   * before the change (measured against `55a8b2b`, the branch base): 8→9
-   * (1), 9.5→10.5 (9), 10→11 (14), 10.5→11.5 (11), 11→12 (15), 11.5→12.5 (6),
-   * 12→13 (1), 12.5→13.5 (1). Fixed counts, not "at least" — losing a call
-   * site to some other edit should redden this as loudly as a missed bump.
-   */
-  const EXPECTED_SIZE_COUNTS: Readonly<Record<string, number>> = {
-    // 9px is GONE, and the entry is deleted rather than zeroed so the ledger
-    // keeps saying one line per size this file actually uses. It was the
-    // Agents badge's numeral -- the smallest type in the pane, set inside a
-    // 13px circle -- and it was illegible for a second reason as well: pale
-    // ink on the waiting amber measured 1.834:1. The badge now paints
-    // `running` with `on-running` on it at 10.5px in a 16px circle, which is
-    // why 10.5 gains one below.
-    // -1: the mode row carried two 10.5px captions (`MODE` and the cycle
-    // note); the note kept its size and its home in the prompt block, the
-    // label did not survive the move to an icon.
-    // -1 again: the identity line above the bubble (`you · <turn label>`),
-    // removed at the operator's ask -- its label lives in the progress
-    // picker, which has its own 10.5px class already counted here.
-    // +1: the single condensed progress line became one line PER TURN plus a
-    // navigation bar at the bottom of the column (the picker and the two
-    // jumps) -- two call sites where there was one, both at the 10.5px the
-    // line already used, because both ARE that line, moved.
-    // -3: and the bar has now gone, taking all three of its 10.5px call sites
-    // with it (the row itself, the turn-list rows and the `<select>`). The
-    // jumps that survived it are icons in a floating chip and carry no type
-    // class at all; the per-turn line still does, and is what is left here.
-    // +1: the Agents badge, arriving from 9px -- see the note above.
-    '10.5': 6,
-    // +2: the folded question row's "marked, not sent" caption and the
-    // `change` control that reopens the list (audit-adjacent operator
-    // request: the option list folds away once a pick is made).
-    // +1: the question card's REFUSAL line -- Submit is operable while the
-    // set is short of a mark now, and says which step it is short of instead
-    // of going faint and taking the click with it.
-    // +1: the `!` popover's overflow count -- the list spans the whole column
-    // now, so what it crops has to be counted on screen.
-    // +1: the `/` popover's own overflow count, for the same reason: the
-    // provider's list is fifty-odd commands long.
-    // +1: the `/` popover's gap note -- "vam could not read all of these" is
-    // a different state from "nothing matches" and has to say so.
-    '11': 20,
-    // -1: `WaitingNote`'s remedy line, removed with the notice.
-    // +1: the column's boundary block. NEW type, so it takes the size it
-    // would have after the +1px bump the operator has now asked for twice,
-    // rather than adding a ninth literal at 10.5px -- and the
-    // scrolled-out-turn note inside it dropped its own 12px class to inherit
-    // this one, which is why 12 loses one below.
-    // +1: the composer submit, which now PAINTS the outcome it will produce
-    // (`Send` or `Record`) beside its glyph instead of drawing one arrow for
-    // both -- it was an icon-only button and carried no type class at all.
-    '11.5': 12,
-    // +1: the mode popover's option rows, at the provider popover's own size.
-    // +1: the folded question row's own mark, at the option label's size.
-    // -1: the scrolled-out-turn note, which now inherits the boundary
-    // block's size instead of carrying one.
-    '12': 16,
-    // -2: the three mode pills (one class) and `WaitingNote`'s cause line.
-    '12.5': 4,
-    '13': 1,
-    '13.5': 1,
-  };
+describe('the scale reaches this pane, and out is still the operator’s to set', () => {
+  it('RENDERED: a representative sibling is on the scale, and carries no literal size', () => {
+    draw();
+    // `data-model-request` sat beside the composer at 11px — a literal, and
+    // the thing the previous ledger pinned. It is `control` now, which is the
+    // step a text input takes. Reverting it in `DetailPanel.tsx` alone must
+    // redden this line.
+    const model = q<HTMLElement>('[data-model-request]');
+    expect(model?.className).toContain('text-control');
+    expect(model?.className).not.toMatch(/text-\[\d/);
+  });
 
-  it('SOURCE RULE: every literal text-[Npx] class in this file matches the bumped scale, exactly', () => {
+  it('RENDERED: the out container is byte-for-byte the var()-driven class it was', () => {
+    draw();
+    // Unchanged by anything above, because it was never a literal px class to
+    // convert: the pref writes `--vam-out-font-size` and this reads it. The
+    // `12px` fallback is the value a document with no pref applied resolves
+    // to, and it is deliberately NOT the scale's `body` — `prefs.ts` owns that
+    // default (`DEFAULT_OUT_FONT_SIZE`) and a second spelling of it here would
+    // be a second answer.
+    const out = q<HTMLElement>('[data-detail-scroll="out"]');
+    expect(out?.className).toContain('text-[length:var(--vam-out-font-size,12px)]');
+  });
+
+  it('SOURCE: no literal text-[Npx] is left in this file at all', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'src/renderer/panels/DetailPanel.tsx'),
       'utf8',
     );
-    // The out container's own `text-[length:var(--vam-out-font-size,12px)]`
-    // and OUT_MARKDOWN's `em`-scaled classes both fail this pattern already
-    // (neither is a bare `text-[<digits>px]`), so excluding them is not
-    // needed — the pattern excludes them by construction.
+    // The out container's own `text-[length:var(...)]` and `OUT_MARKDOWN`'s
+    // `em`-scaled classes both fail this pattern by construction — neither is
+    // a bare `text-[<digits>px]` — so nothing has to be excluded by hand.
     const found = [...source.matchAll(/text-\[(\d+(?:\.\d+)?)px\]/g)].map((m) => m[1] as string);
-    const counts: Record<string, number> = {};
-    for (const size of found) counts[size] = (counts[size] ?? 0) + 1;
-    expect(counts).toEqual(EXPECTED_SIZE_COUNTS);
-  });
-
-  it('RENDERED: a representative sibling moved up while the out container is byte-for-byte unchanged', () => {
-    draw();
-    // `data-model-request` sat beside the composer at 10px; it reads 11px
-    // now. Reverting the bump in `DetailPanel.tsx` alone (leaving this test
-    // untouched) must redden this line.
-    expect(q<HTMLElement>('[data-model-request]')?.className).toContain('text-[11px]');
-    expect(q<HTMLElement>('[data-model-request]')?.className).not.toContain('text-[10px]');
-    // The out container: same exact var()-driven class the pref test above
-    // already pins as the ONLY thing wearing `OUT_FONT_SIZE_VAR` — unchanged
-    // by this bump, because it was never a literal px class to bump.
-    const out = q<HTMLElement>('[data-detail-scroll="out"]');
-    expect(out?.className).toContain('text-[length:var(--vam-out-font-size,12px)]');
+    expect(found).toEqual([]);
+    // And the file really did reach for the scale, rather than losing its type
+    // classes: a count, so that deleting sixty classes cannot pass as
+    // converting them.
+    const roles = [...source.matchAll(/text-(meta|control|body|heading)\b/g)];
+    expect(roles.length).toBeGreaterThanOrEqual(60);
   });
 });

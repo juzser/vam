@@ -105,39 +105,37 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, State> {
         className="flex h-full min-h-0 w-full items-start justify-center overflow-y-auto p-4"
       >
         <div className="w-full max-w-[560px] rounded-md border border-danger bg-panel p-4">
-          <h2 className="m-0 font-semibold text-danger text-sm">
+          <h2 className="m-0 font-semibold text-danger text-heading">
             {this.props.surface} stopped rendering
           </h2>
-          <p className="mt-2 mb-0 break-words font-mono text-[11px] text-ink">
+          <p className="mt-2 mb-0 break-words font-mono text-control text-ink">
             {event?.message ?? 'the thrown error carried no message'}
           </p>
-          <p className="mt-2 mb-0 text-ink-faint text-xs">
+          <p className="mt-2 mb-0 text-ink-faint text-control">
             Nothing was sent anywhere. The button below composes an issue you submit yourself, after
             reading it.
           </p>
           <button
             type="button"
             onClick={() => void this.makeReport()}
-            className="mt-3 rounded border border-line px-2 py-1 text-ink-dim text-xs"
+            className="mt-3 rounded border border-line px-2 py-1 text-ink-dim text-control"
           >
             Report
           </button>
           {report !== null && (
             <div className="mt-3 rounded border border-line bg-raised p-2">
-              <p className="mt-0 mb-1 text-ink-dim text-xs">
+              <p className="mt-0 mb-1 text-ink-dim text-control">
                 {copied === true
                   ? 'the prefilled issue URL is on your clipboard — paste it in your browser, read it, then submit'
                   : 'copy failed — the URL is below; vam has not sent anything'}
               </p>
               <pre
                 data-testid="report-preview"
-                className="m-0 max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[10px] text-ink-dim"
+                className="m-0 max-h-48 overflow-auto whitespace-pre-wrap font-mono text-meta text-ink-dim"
               >
                 {report.body}
               </pre>
-              <p className="mt-1 mb-0 break-all font-mono text-[10px] text-ink-faint">
-                {report.url}
-              </p>
+              <p className="mt-1 mb-0 break-all font-mono text-meta text-ink-faint">{report.url}</p>
             </div>
           )}
         </div>

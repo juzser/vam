@@ -262,6 +262,63 @@
   --shadow-tip: var(--vam-shadow-tip);
 }
 
+/*
+ * THE TYPE SCALE. Four steps, each with its own leading, and a floor.
+ *
+ * The operator asked twice, in the same words: "the small fonts need to be 1px
+ * larger". They got a sweep both times, and both times the sizes drifted back —
+ * because there was nothing to drift back FROM. This renderer carried 204
+ * hardcoded `text-[Npx]` classes in twelve sizes with half-pixel steps (54 at
+ * 11px, 47 at 12px, 31 at 11.5px, 19 at 10px, 14 at 9.5px, four at 9px, two at
+ * 8.5px), plus 23 more spelled as Tailwind's `text-xs` / `text-sm`. Fifty of
+ * them were at or below 10.5px. Nobody could answer "what size is a caption
+ * here" without grepping, so every new caption invented an answer.
+ *
+ * A call site now picks a ROLE. The roles are drawn from what the call sites
+ * turned out to be, not from a ladder chosen in the abstract:
+ *
+ *   meta      subordinate text — the eyebrow over a value, the count on an
+ *             icon, the key cap beside an action, the timestamp beside a
+ *             message, the path beside a name, the status bar under the app.
+ *             Never the only thing in its container. THIS IS THE FLOOR: the
+ *             fifty call sites that were below it are the operator's request,
+ *             and `test/renderer/type-scale.test.ts` holds it at 11px.
+ *   control   the workhorse — button and menu labels, inputs, hints, tooltips,
+ *             empty states, refusals, the secondary line under a title.
+ *   body      what the operator is actually reading or naming — session,
+ *             project, PR, agent and device names, question text, the prompt
+ *             they type, the answer they read, a settings label.
+ *   heading   a section heading that has to out-rank the 13px labels under it.
+ *
+ * THE LEADING IS PART OF THE SCALE, and that is the half that stops it
+ * fragmenting again. Every one of those 204 literals set a size and no leading,
+ * so leading fell out of preflight's `line-height: 1.5` on `html` and moved
+ * whenever a size did — which is how 11px and 11.5px became 85 call sites
+ * encoding no distinction at all. Sizes and leadings are one decision here:
+ * 16px under the two small steps, 20px under the two large ones. Both numbers
+ * are Tailwind's own (`text-xs` is 12/16, `text-sm` is 14/20), which is why
+ * moving the nineteen `text-xs` call sites onto `control` moved nothing.
+ *
+ * A `leading-*` utility still wins, by Tailwind's design: `text-*` emits
+ * `line-height: var(--tw-leading, <the role's>)`. That is used where a glyph is
+ * centred in a fixed box (`leading-none`) and nowhere else — a second leading
+ * for prose is the thing this block exists to prevent.
+ *
+ * NOT `inline`, unlike the palette above: the four custom properties are
+ * emitted on `:root` so a stylesheet rule or a guard can read the scale rather
+ * than restate it.
+ */
+@theme {
+  --text-meta: 11px;
+  --text-meta--line-height: 16px;
+  --text-control: 12px;
+  --text-control--line-height: 16px;
+  --text-body: 13px;
+  --text-body--line-height: 20px;
+  --text-heading: 15px;
+  --text-heading--line-height: 20px;
+}
+
 /* Dark — artboard 1a, and the default, so a document that never gets a class
    still renders the theme vam was designed in. */
 :root {

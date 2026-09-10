@@ -942,7 +942,7 @@ function ViewIcons({
                      green fill needs (11.36:1 / 7.13:1), and 9px of mono in a
                      13px circle goes up to 10.5 in 16 -- the smallest badge
                      that fits two digits at that size without clipping. */
-                  className="absolute -top-[4px] -right-[4px] flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-running px-[4px] font-mono text-[10.5px] text-on-running leading-none"
+                  className="absolute -top-[4px] -right-[4px] flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-running px-[4px] font-mono text-meta text-on-running leading-none"
                 >
                   {badge}
                 </span>
@@ -997,7 +997,7 @@ const PR_STATE_INK: Record<PullRequest['state'], string> = {
 function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestList | undefined }) {
   if (pullRequests === undefined) {
     return (
-      <p data-prs data-prs-absent className="text-[12px] text-ink-faint">
+      <p data-prs data-prs-absent className="text-control text-ink-faint">
         This source does not report pull requests for a session.
       </p>
     );
@@ -1008,7 +1008,7 @@ function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestL
         data-prs
         data-prs-unavailable
         data-prs-code={pullRequests.code}
-        className="text-[12px] text-ink-faint"
+        className="text-control text-ink-faint"
       >
         {/* vam could not ask. Not "there are none". */}
         {pullRequests.message}
@@ -1017,7 +1017,7 @@ function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestL
   }
   if (pullRequests.prs.length === 0) {
     return (
-      <p data-prs data-prs-empty className="text-[12px] text-ink-faint">
+      <p data-prs data-prs-empty className="text-control text-ink-faint">
         This branch has no pull request on GitHub.
       </p>
     );
@@ -1040,10 +1040,10 @@ function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestL
           <span className="min-w-0 flex-1">
             {/* Truncated, not shortened: the pane is a narrow column, and the
                 whole title stays in the DOM for anything that reads it. */}
-            <span data-pr-title className="block truncate text-[12.5px] text-ink">
+            <span data-pr-title className="block truncate text-body text-ink">
               {pr.title}
             </span>
-            <span className="mt-0.5 flex items-center gap-1.5 text-[11.5px]">
+            <span className="mt-0.5 flex items-center gap-1.5 text-meta">
               <span data-pr-number className="font-mono text-ink-faint">
                 {`#${pr.number}`}
               </span>
@@ -1101,7 +1101,7 @@ function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | unde
   const [showIdle, setShowIdle] = useState(false);
   if (agents === undefined || agents.length === 0) {
     return (
-      <p data-agents data-agents-empty className="text-[12px] text-ink-faint">
+      <p data-agents data-agents-empty className="text-control text-ink-faint">
         {agents === undefined
           ? 'This source does not report which agents a session is running.'
           : 'This session has spawned no agents.'}
@@ -1117,7 +1117,7 @@ function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | unde
         data-agents-toggle
         aria-pressed={showIdle}
         onClick={() => setShowIdle((open) => !open)}
-        className="flex-none cursor-pointer self-start rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[11.5px] text-ink-faint hover:bg-raised hover:text-ink"
+        className="flex-none cursor-pointer self-start rounded-[var(--radius-sm)] px-1.5 py-0.5 text-control text-ink-faint hover:bg-raised hover:text-ink"
       >
         {showIdle ? `hide ${idleCount} idle` : `show ${idleCount} idle`}
       </button>
@@ -1125,7 +1125,7 @@ function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | unde
   return (
     <div data-agents className="flex min-h-0 flex-1 flex-col gap-1.5">
       {shown.length === 0 ? (
-        <p data-agents-empty className="text-[12px] text-ink-faint">
+        <p data-agents-empty className="text-control text-ink-faint">
           {agents.length === 1
             ? 'This session’s one agent is not running right now.'
             : `None of this session’s ${agents.length} agents is running right now.`}
@@ -1150,14 +1150,14 @@ function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | unde
                 ].join(' ')}
               />
               <span className="min-w-0 flex-1">
-                <span data-agent-type className="block truncate text-[12.5px] text-ink">
+                <span data-agent-type className="block truncate text-body text-ink">
                   {/* No type means no readable meta file beside the transcript, so
                   the id is the only name this agent has. */}
                   {agent.type ?? `${agent.id} (type unknown)`}
                 </span>
                 <span
                   data-agent-description
-                  className="mt-0.5 block truncate text-[11.5px] text-ink-faint"
+                  className="mt-0.5 block truncate text-meta text-ink-faint"
                 >
                   {/* Truncated, not wrapped: the pane is 408px and a spawn
                   description is a sentence. The whole roster stays scannable. */}
@@ -2239,7 +2239,7 @@ function QuestionCard({
                 // (`styles.css`); the phone floor is 44 and these were 21 tall.
                 // The question surface reached a phone viewport for the first
                 // time when the demo fixture gained a question at all.
-                'vam-tap cursor-pointer rounded-[5px] border px-1.5 py-0.5 text-[11px]',
+                'vam-tap cursor-pointer rounded-[5px] border px-1.5 py-0.5 text-control',
                 index === showing ? 'border-running text-ink' : 'border-line text-ink-faint',
               ].join(' ')}
             >
@@ -2247,18 +2247,18 @@ function QuestionCard({
               {one.answer !== null || (marks[one.id] ?? []).length > 0 ? ' ✓' : ''}
             </button>
           ))}
-          <span data-question-position className="ml-auto text-[11px] text-ink-faint">
+          <span data-question-position className="ml-auto text-meta text-ink-faint">
             step {showing + 1} of {questions.length}
           </span>
         </nav>
       )}
       <div className="flex min-w-0 flex-col gap-0.5">
         {question.header !== null && (
-          <span data-question-header className="text-[11px] text-ink-faint uppercase tracking-wide">
+          <span data-question-header className="text-meta text-ink-faint uppercase tracking-wide">
             {question.header}
           </span>
         )}
-        <span data-question-text className="text-[12.5px] text-ink">
+        <span data-question-text className="text-body text-ink">
           {question.question}
         </span>
       </div>
@@ -2266,7 +2266,7 @@ function QuestionCard({
         // THIS step is settled while others may not be. It shows what was
         // answered and offers nothing to mark; the set's Submit below is for
         // whatever is still open.
-        <span data-question-answer className="text-[11.5px] text-ink-dim">
+        <span data-question-answer className="text-control text-ink-dim">
           resolved — {question.answer}
         </span>
       ) : (
@@ -2283,19 +2283,19 @@ function QuestionCard({
               data-question-collapsed
               className={`flex items-baseline gap-2 rounded-[6px] border border-running px-1.5 py-1 ${OPTION_FILL}`}
             >
-              <span data-question-marked className="min-w-0 flex-1 text-[12px] text-ink">
+              <span data-question-marked className="min-w-0 flex-1 text-control text-ink">
                 {picked.join(', ')}
                 {/* `ink-dim`, not `ink-faint`: this row RESTS on the fill,
                     so there is no hover state to lift its ink and
                     `OPTION_QUIET_INK` would never fire. 4.10:1 at faint,
                     5.86:1 here. */}
-                <span className="text-[11px] text-ink-dim"> — marked, not sent</span>
+                <span className="text-meta text-ink-dim"> — marked, not sent</span>
               </span>
               <button
                 type="button"
                 data-question-expand
                 onClick={() => setFoldedStep(null)}
-                className="vam-tap flex-none cursor-pointer rounded-[6px] px-1.5 py-0.5 text-[11px] text-ink-dim underline decoration-dotted hover:text-ink"
+                className="vam-tap flex-none cursor-pointer rounded-[6px] px-1.5 py-0.5 text-control text-ink-dim underline decoration-dotted hover:text-ink"
               >
                 change
               </button>
@@ -2331,19 +2331,16 @@ function QuestionCard({
                       : `border-line hover:${OPTION_FILL}`,
                   ].join(' ')}
                 >
-                  <span className="flex max-w-full items-baseline gap-1.5 text-[12px] text-ink">
+                  <span className="flex max-w-full items-baseline gap-1.5 text-control text-ink">
                     {NUMBERED_OPTIONS[index] !== undefined && (
-                      <span className={`text-[11px] tabular-nums ${OPTION_QUIET_INK}`}>
+                      <span className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
                         {NUMBERED_OPTIONS[index]}
                       </span>
                     )}
                     <span className="min-w-0">{option.label}</span>
                   </span>
                   {option.description !== null && (
-                    <span
-                      data-question-description
-                      className="max-w-full text-[11.5px] text-ink-dim"
-                    >
+                    <span data-question-description className="max-w-full text-meta text-ink-dim">
                       {option.description}
                     </span>
                   )}
@@ -2354,7 +2351,7 @@ function QuestionCard({
                   {(option.preview ?? null) !== null && (
                     <span
                       data-question-preview
-                      className={`max-w-full truncate font-mono text-[11px] ${OPTION_QUIET_INK}`}
+                      className={`max-w-full truncate font-mono text-meta ${OPTION_QUIET_INK}`}
                     >
                       {option.preview}
                     </span>
@@ -2379,15 +2376,12 @@ function QuestionCard({
               not printed at all when the key is not held -- a caption naming a
               key that does nothing is the defect, not the absence of one. */}
             {keys.chat[0] !== undefined && (
-              <span
-                data-question-chat-key
-                className={`text-[11px] tabular-nums ${OPTION_QUIET_INK}`}
-              >
+              <span data-question-chat-key className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
                 {keys.chat[0]}
               </span>
             )}
-            <span className="min-w-0 text-[12px] text-ink">Chat about this</span>
-            <span className={`min-w-0 text-[11.5px] ${OPTION_QUIET_INK}`}>
+            <span className="min-w-0 text-control text-ink">Chat about this</span>
+            <span className={`min-w-0 text-meta ${OPTION_QUIET_INK}`}>
               — vam adds this one; it opens the box below
             </span>
           </button>
@@ -2422,7 +2416,7 @@ function QuestionCard({
               refuse(short);
             }}
             className={[
-              'rounded-[6px] border px-1.5 py-1 text-[12px]',
+              'rounded-[6px] border px-1.5 py-1 text-control',
               sending
                 ? 'cursor-default border-line text-ink-faint'
                 : `cursor-pointer border-running text-ink hover:${OPTION_FILL}`,
@@ -2437,7 +2431,7 @@ function QuestionCard({
               was waiting for. Silent once the set is complete: at that point
               the button says everything. */}
           {(pending.length > 1 || unmarked.length > 0) && (
-            <span data-question-progress className="text-[11px] text-ink-faint">
+            <span data-question-progress className="text-meta text-ink-faint">
               {pending.length > 1
                 ? `${pending.length - unmarked.length} of ${pending.length} marked`
                 : 'not marked yet — pick an option above'}
@@ -2451,17 +2445,17 @@ function QuestionCard({
            are separate elements for the same reason they are separate state
            -- an operator must be able to tell "vam did not send this" from
            "the picker said no". */
-        <p data-question-refusal className="text-[11px] text-waiting">
+        <p data-question-refusal className="text-control text-waiting">
           {refusal}
         </p>
       )}
       {outcome !== null && (
-        <p data-question-outcome data-outcome={outcome.kind} className="text-[11px] text-ink-dim">
+        <p data-question-outcome data-outcome={outcome.kind} className="text-control text-ink-dim">
           {outcomeWording(outcome)}
         </p>
       )}
       {open && (
-        <p data-question-note className="text-[11px] text-ink-faint">
+        <p data-question-note className="text-control text-ink-faint">
           {onAnswer === null
             ? // Still exactly true where there is no delivery: nothing here can
               // reach the tool call, and a control that implied otherwise would
@@ -2658,7 +2652,7 @@ const TurnBlock = memo(function TurnBlock({
              painted with, so that constraint is enforced rather than noted. */
           className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-in-bubble px-2.5 py-2"
         >
-          <p className="whitespace-pre-wrap break-words text-[13px] text-ink-dim leading-[1.55]">
+          <p className="whitespace-pre-wrap break-words text-body text-ink-dim">
             {/* THE RESERVED CORNER, audit F1's obligation. A float rather than
                 padding because only the FIRST LINE meets the pill: padding
                 would indent all 300 lines of a long prompt to clear something
@@ -2722,7 +2716,7 @@ const TurnBlock = memo(function TurnBlock({
           <span className="sr-only">progress</span>
           <div
             data-progress-line
-            className="flex items-center gap-1.5 font-mono text-[10.5px] text-ink-faint"
+            className="flex items-center gap-1.5 font-mono text-meta text-ink-faint"
           >
             <span data-progress-turn-label className="flex min-w-0 items-center gap-1 truncate">
               {/* Answered, still open, or carrying a failure -- the same marks
@@ -2817,7 +2811,7 @@ const TurnBlock = memo(function TurnBlock({
             <p
               data-out-empty={decision.output === null || decision.output === '' ? true : undefined}
               data-out-live={live ? 'true' : undefined}
-              className="text-[12.5px] text-ink-faint"
+              className="text-control text-ink-faint"
             >
               {live ? (
                 /* Star and word share one accent, the app's own `running`
@@ -4232,7 +4226,7 @@ export function DetailPanel(props: DetailPanelProps) {
             <span
               data-view-note
               role="status"
-              className="min-w-0 max-w-[160px] truncate rounded-[7px] border border-line-strong bg-pane px-1.5 py-0.5 text-right font-mono text-[10.5px] text-waiting"
+              className="min-w-0 max-w-[160px] truncate rounded-[7px] border border-line-strong bg-pane px-1.5 py-0.5 text-right font-mono text-meta text-waiting"
             >
               {viewNote}
             </span>
@@ -4275,7 +4269,7 @@ export function DetailPanel(props: DetailPanelProps) {
           <p
             data-session-failed
             className={[
-              'flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-card py-2 pl-3 text-[12px] text-failed leading-[1.45]',
+              'flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-card py-2 pl-3 text-control text-failed',
               /* THE CORNER, RESERVED -- the same obligation the prompt bubble
                  and the column's boundary block already carry, and the banner
                  is the third element that lands in it: on a failed session
@@ -4321,7 +4315,7 @@ export function DetailPanel(props: DetailPanelProps) {
               <button
                 type="button"
                 aria-label="why this session failed"
-                className={`flex-none cursor-help rounded-[4px] font-mono text-[10.5px] text-ink-faint underline decoration-dotted hover:text-ink ${FOCUS_RING}`}
+                className={`flex-none cursor-help rounded-[4px] font-mono text-control text-ink-faint underline decoration-dotted hover:text-ink ${FOCUS_RING}`}
               >
                 why?
               </button>
@@ -4362,7 +4356,7 @@ export function DetailPanel(props: DetailPanelProps) {
           // PHONE has no strip, so there it is the only sentence there is and
           // it stays.
           null : (
-            <p className="text-[12px] text-ink-faint">
+            <p className="text-control text-ink-faint">
               {/* Two different absences. "This session has no steps yet" named a
                 session that did not exist whenever nothing was focused. */}
               {entry === null
@@ -4535,7 +4529,7 @@ export function DetailPanel(props: DetailPanelProps) {
                  is. One `-mx-3.5` would leave it 30px short of the right edge
                  -- invisible here, since this block paints no ground, and a
                  trap for whoever gives it one. */
-                className={`-ml-3.5 -mr-11 flex flex-none flex-col gap-0.5 pt-3 pb-1 pl-3.5 font-mono text-[11.5px] text-ink-faint ${
+                className={`-ml-3.5 -mr-11 flex flex-none flex-col gap-0.5 pt-3 pb-1 pl-3.5 font-mono text-meta text-ink-faint ${
                   cornerOverlay ? 'pr-[6rem]' : 'pr-11'
                 }`}
               >
@@ -4941,7 +4935,7 @@ export function DetailPanel(props: DetailPanelProps) {
                     // the square into a width-to-content pill, hit still 44,
                     // paint still 30 tall.
                     data-tap-pill
-                    className="flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-card px-1.5 font-mono text-[12px] text-ink-quiet active:bg-line-strong"
+                    className="flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-card px-1.5 font-mono text-control text-ink-quiet active:bg-line-strong"
                   >
                     {item.caption}
                   </span>
@@ -4953,7 +4947,7 @@ export function DetailPanel(props: DetailPanelProps) {
             <div data-suggest-layer className={SUGGEST_LAYER}>
               {suggesting && (
                 <div data-bang-suggest className={SUGGEST_BOX}>
-                  <p className="px-1.5 pb-0.5 text-[11px] text-ink-faint">
+                  <p className="px-1.5 pb-0.5 text-control text-ink-faint">
                     the agent proposed these — vam does not run them; Enter picks one, Esc keeps
                     what you typed
                   </p>
@@ -4973,19 +4967,19 @@ export function DetailPanel(props: DetailPanelProps) {
                         index === picked ? 'bg-line-strong' : 'hover:bg-line-strong',
                       ].join(' ')}
                     >
-                      <span className="max-w-full truncate text-[12px] text-ink">
+                      <span className="max-w-full truncate text-control text-ink">
                         {command.label}
                       </span>
                       <span
                         data-bang-command
-                        className="max-w-full truncate font-mono text-[11.5px] text-ink-dim"
+                        className="max-w-full truncate font-mono text-meta text-ink-dim"
                       >
                         {command.command}
                       </span>
                     </button>
                   ))}
                   {bangHidden > 0 && (
-                    <p data-bang-more className="px-1.5 pt-0.5 text-[11px] text-ink-faint">
+                    <p data-bang-more className="px-1.5 pt-0.5 text-meta text-ink-faint">
                       {bangHidden} more from earlier turns — keep typing to narrow
                     </p>
                   )}
@@ -4993,7 +4987,7 @@ export function DetailPanel(props: DetailPanelProps) {
               )}
               {slashSuggesting && (
                 <div data-slash-suggest className={SUGGEST_BOX}>
-                  <p className="px-1.5 pb-0.5 text-[11px] text-ink-faint">
+                  <p className="px-1.5 pb-0.5 text-control text-ink-faint">
                     the provider's own commands — Enter picks one, Esc keeps what you typed
                   </p>
                   {slashMatches.map((command, index) => (
@@ -5010,19 +5004,19 @@ export function DetailPanel(props: DetailPanelProps) {
                     >
                       <span
                         data-slash-command
-                        className="max-w-full truncate font-mono text-[12px] text-ink"
+                        className="max-w-full truncate font-mono text-control text-ink"
                       >
                         /{command.name}
                       </span>
                       {command.description !== null && (
-                        <span className="max-w-full truncate text-[11.5px] text-ink-dim">
+                        <span className="max-w-full truncate text-meta text-ink-dim">
                           {command.description}
                         </span>
                       )}
                     </button>
                   ))}
                   {slashHidden > 0 && (
-                    <p data-slash-more className="px-1.5 pt-0.5 text-[11px] text-ink-faint">
+                    <p data-slash-more className="px-1.5 pt-0.5 text-meta text-ink-faint">
                       {slashHidden} more — keep typing to narrow
                     </p>
                   )}
@@ -5039,7 +5033,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   data-slash-gap
                   className="rounded-[10px] border border-line-strong bg-card px-2.5 py-1.5"
                 >
-                  <p className="text-[11px] text-ink-dim leading-[1.45]">
+                  <p className="text-control text-ink-dim">
                     vam could not read all of Claude Code's commands, so this list is short of the
                     CLI's own: {slashGapNote.message}
                   </p>
@@ -5207,13 +5201,13 @@ export function DetailPanel(props: DetailPanelProps) {
                       ? `${promptSuggestion} — Tab to use`
                       : 'Reply to agent, answer with a number, or paste a plan…'
                 }
-                className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-[13.5px] text-ink leading-[1.55] outline-none placeholder:text-ink-faint"
+                className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint"
                 aria-label="prompt to session"
               />
             </div>
 
             {images.length > 0 && (
-              <p data-pasted-images className="text-[11.5px] text-ink-dim leading-[1.45]">
+              <p data-pasted-images className="text-control text-ink-dim">
                 {images.length === 1 ? '1 image' : `${images.length} images`} pasted and kept here —
                 vam writes text to a session, so only the {'`[image #N]`'} placeholder is sent, not
                 the image.
@@ -5221,7 +5215,7 @@ export function DetailPanel(props: DetailPanelProps) {
             )}
 
             {attachError !== null && (
-              <p data-attach-error className="text-[11.5px] text-waiting leading-[1.45]">
+              <p data-attach-error className="text-control text-waiting">
                 {attachError}
               </p>
             )}
@@ -5273,7 +5267,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   // `line-strong`, not `raised`: this chip sits inside
                   // `data-prompt-box`, which is `bg-card` -- the same
                   // inversion the answer options wore. See `OPTION_FILL`.
-                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-[11px] text-ink-dim"
+                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-meta text-ink-dim"
                 >
                   <span className="truncate">{attachedName}</span>
                   <button
@@ -5319,7 +5313,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 <span
                   data-attach-image-chip
                   // The same card, the same inversion -- see `data-attach-chip`.
-                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-[11px] text-ink-dim"
+                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-meta text-ink-dim"
                 >
                   <span className="truncate">{attachedImage}</span>
                   <button
@@ -5400,7 +5394,7 @@ export function DetailPanel(props: DetailPanelProps) {
                               setProviderPickerOpen(false);
                             }}
                             className={[
-                              'flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-[12px]',
+                              'flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
                               selected
                                 ? 'bg-line-strong text-ink'
                                 : 'text-ink-dim hover:bg-line-strong hover:text-ink',
@@ -5440,7 +5434,7 @@ export function DetailPanel(props: DetailPanelProps) {
                      asks, and it is a different colour from the composer box's
                      armed border (`waiting`) so the two signals cannot be read
                      as each other. */
-                  className={`vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[11px] text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
+                  className={`vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-control text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
                 />
               </Note>
               {/* The mode, beside the model field the operator asked to put it
@@ -5505,7 +5499,7 @@ export function DetailPanel(props: DetailPanelProps) {
                               setModePickerOpen(false);
                             }}
                             className={[
-                              'flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-[12px]',
+                              'flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
                               selected
                                 ? 'bg-line-strong text-ink'
                                 : 'text-ink-dim hover:bg-line-strong hover:text-ink',
@@ -5535,7 +5529,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   data-mode-cycle-state={cycleNote.kind}
                   data-mode-refusal={cycleNote.kind === 'refused' ? 'true' : undefined}
                   className={[
-                    'min-w-0 flex-1 truncate whitespace-nowrap font-mono text-[10.5px]',
+                    'min-w-0 flex-1 truncate whitespace-nowrap font-mono text-meta',
                     cycleNote.kind === 'refused' ? 'text-waiting' : 'text-ink-dim',
                   ].join(' ')}
                 >
@@ -5550,7 +5544,7 @@ export function DetailPanel(props: DetailPanelProps) {
               {composing && (
                 <span
                   data-prompt-escape
-                  className="flex-none whitespace-nowrap font-mono text-[10.5px] text-ink-faint"
+                  className="flex-none whitespace-nowrap font-mono text-meta text-ink-faint"
                 >
                   Esc → sidebar
                 </span>
@@ -5584,7 +5578,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   aria-busy={sending}
                   aria-label={composerClaim.label}
                   className={[
-                    `flex h-7 flex-none items-center justify-center gap-1 rounded-[7px] bg-line-strong px-2 text-[11.5px] text-ink ${FOCUS_RING}`,
+                    `flex h-7 flex-none items-center justify-center gap-1 rounded-[7px] bg-line-strong px-2 text-control text-ink ${FOCUS_RING}`,
                     sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
                   ].join(' ')}
                 >

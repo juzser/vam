@@ -65,19 +65,19 @@ export function IconPicker({ title, onPick, onClose }: IconPickerProps) {
         className="relative z-10 w-[340px] overflow-hidden rounded-[var(--radius-lg)] border border-line bg-panel shadow-[var(--shadow-node)]"
       >
         <div className="flex items-center gap-2 border-line border-b px-3 py-2">
-          <span className="text-[11px] text-ink-faint">icon cho</span>
-          <span className="font-mono font-semibold text-[12px] text-ink">{title}</span>
+          <span className="text-meta text-ink-faint">icon cho</span>
+          <span className="font-mono font-semibold text-body text-ink">{title}</span>
           <button
             type="button"
             onClick={() => onPick('')}
-            className="ml-auto cursor-pointer rounded-[var(--radius-sm)] border border-line px-1.5 py-0.5 text-[10.5px] text-ink-dim hover:border-line-strong hover:text-ink"
+            className="ml-auto cursor-pointer rounded-[var(--radius-sm)] border border-line px-1.5 py-0.5 text-control text-ink-dim hover:border-line-strong hover:text-ink"
           >
             clear icon
           </button>
         </div>
         <Suspense
           fallback={
-            <div className="flex h-[380px] w-full items-center justify-center text-[11px] text-ink-faint">
+            <div className="flex h-[380px] w-full items-center justify-center text-control text-ink-faint">
               loading icon grid…
             </div>
           }

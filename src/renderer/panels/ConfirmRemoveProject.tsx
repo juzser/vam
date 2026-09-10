@@ -74,13 +74,11 @@ export function ConfirmRemoveProject({
       <div className="relative z-10 w-[320px] rounded-[var(--radius-lg)] border border-line-strong bg-panel p-3.5 shadow-[var(--shadow-node)]">
         <div className="flex items-center gap-2">
           <Trash2 size={13} strokeWidth={1.8} className="text-danger" />
-          <span className="font-mono font-semibold text-[12px] text-ink">
-            Remove {projectName}?
-          </span>
+          <span className="font-mono font-semibold text-body text-ink">Remove {projectName}?</span>
         </div>
         {/* The two numbers, each next to what it means. `data-*` so a test
             reads the COUNT rather than a sentence it could match by accident. */}
-        <ul className="mt-2.5 flex flex-col gap-1 text-[11.5px] text-ink-dim">
+        <ul className="mt-2.5 flex flex-col gap-1 text-control text-ink-dim">
           <li>
             vam will end <span data-confirm-end-count>{plan.end.length}</span>{' '}
             {sessions(plan.end.length)} it started.
@@ -90,7 +88,7 @@ export function ConfirmRemoveProject({
             did not start will keep running, and only stop being shown.
           </li>
         </ul>
-        <p className="mt-2 text-[11px] text-ink-faint">
+        <p className="mt-2 text-control text-ink-faint">
           Nothing is deleted from this machine: the directory, its repository and every conversation
           stay exactly where they are. You can bring the project back from the list below the
           sidebar.
@@ -101,7 +99,7 @@ export function ConfirmRemoveProject({
             ref={cancelRef}
             data-confirm-cancel
             onClick={onCancel}
-            className="cursor-pointer rounded-[var(--radius-sm)] border border-line px-2 py-1 text-[11.5px] text-ink-dim hover:border-line-strong hover:text-ink"
+            className="cursor-pointer rounded-[var(--radius-sm)] border border-line px-2 py-1 text-control text-ink-dim hover:border-line-strong hover:text-ink"
           >
             Cancel
           </button>
@@ -109,7 +107,7 @@ export function ConfirmRemoveProject({
             type="button"
             data-confirm-remove-go
             onClick={onConfirm}
-            className="cursor-pointer rounded-[var(--radius-sm)] border border-danger px-2 py-1 text-[11.5px] text-danger hover:bg-danger hover:text-ground"
+            className="cursor-pointer rounded-[var(--radius-sm)] border border-danger px-2 py-1 text-control text-danger hover:bg-danger hover:text-ground"
           >
             Remove
           </button>

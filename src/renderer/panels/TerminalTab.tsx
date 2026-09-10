@@ -595,14 +595,14 @@ export function TerminalTab({
   // at something it had not asked a single question about, forever.
   if (projectId === null) {
     return (
-      <p data-terminal data-terminal-empty className="text-[11px] text-ink-faint">
+      <p data-terminal data-terminal-empty className="text-control text-ink-faint">
         No session selected — pick one in the sidebar.
       </p>
     );
   }
   if (view === null) {
     return (
-      <p data-terminal data-terminal-pending className="text-[11px] text-ink-faint">
+      <p data-terminal data-terminal-pending className="text-control text-ink-faint">
         Reading the session’s screen…
       </p>
     );
@@ -613,7 +613,7 @@ export function TerminalTab({
         data-terminal
         data-terminal-unavailable
         data-terminal-code={view.error.code}
-        className="text-[11px] text-ink-faint"
+        className="text-control text-ink-faint"
       >
         {/* vam could not ask. Not "there is no session". */}
         {view.error.message}
@@ -626,7 +626,7 @@ export function TerminalTab({
         data-terminal
         data-terminal-empty
         data-terminal-mispaired
-        className="text-[11px] text-ink-faint"
+        className="text-control text-ink-faint"
       >
         {/* NOT "vam did not start a session for this one", which is what stood
             here and was false in the way that costs an operator time: vam did
@@ -643,7 +643,7 @@ export function TerminalTab({
   }
   if (view.kind !== 'ok') {
     return (
-      <p data-terminal data-terminal-empty className="text-[11px] text-ink-faint">
+      <p data-terminal data-terminal-empty className="text-control text-ink-faint">
         {view.kind === 'gone'
           ? 'The tmux session vam started for this one has ended.'
           : view.kind === 'ambiguous'
@@ -680,7 +680,7 @@ export function TerminalTab({
           replace. `trim` because tmux pads every row to the pane's width, so
           a screen of only spaces is the same fact as an empty string. */}
       {view.text.trim() === '' && (
-        <p data-terminal-blank className="flex-none text-[10px] text-ink-faint">
+        <p data-terminal-blank className="flex-none text-control text-ink-faint">
           {
             "This session's screen is empty right now — vam reached the pane, there is just nothing drawn on it yet."
           }
@@ -696,7 +696,7 @@ export function TerminalTab({
         <p
           data-terminal-refused
           data-terminal-refusal={refused}
-          className="flex-none text-[10px] text-ink-faint"
+          className="flex-none text-control text-ink-faint"
         >
           {refused === 'unaimed'
             ? // vam declined to guess: no session of its own answers for this
@@ -760,6 +760,22 @@ export function TerminalTab({
         onFocus={() => setHasFocus(true)}
         onBlur={() => setHasFocus(false)}
         aria-label={`terminal of ${view.name}: typing goes to this session, press Tab to leave`}
+        /* THE 10.5px AND THE 1.45 BELOW ARE THE ONE LITERAL SIZE LEFT IN THE
+           RENDERER, and they are a measurement rather than a style choice.
+           `terminal-size.ts` divides this box by the advance of one character
+           rendered HERE -- "Geist Mono at 10.5px measures 6.6015625px per
+           advance", its own header records -- to decide the columns and rows
+           tmux is told to compose at. Moving this onto the type scale would
+           re-flow the operator's live session, and tmux has already wrapped the
+           screen by the time vam sees it, so no CSS here could undo the break.
+           The chrome AROUND the screen is on the scale; the screen is not.
+           `test/renderer/type-scale.test.ts` names this as the exception.
+
+           The sizes are spelled in prose above rather than as classes on
+           purpose: that guard scans this file as TEXT, so a class name written
+           in a comment counts as a call site. Reddening on a comment would be
+           noise, and teaching the scan to strip comments would mean teaching
+           it to strip `//` out of a URL in a string as well. */
         className="vam-no-scrollbar relative min-h-0 flex-1 overflow-auto rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-[10.5px] text-ink leading-[1.45] focus-visible:outline focus-visible:outline-2 focus-visible:outline-line-strong"
       >
         {/* The ruler. It is INSIDE the pane so that it inherits the exact font
@@ -840,7 +856,7 @@ export function TerminalTab({
       <span
         data-terminal-badge
         aria-hidden="true"
-        className="pointer-events-none absolute right-1.5 bottom-1 max-w-[60%] truncate rounded-[5px] border border-line bg-panel px-1.5 py-0.5 font-mono text-[9px] text-ink-faint"
+        className="pointer-events-none absolute right-1.5 bottom-1 max-w-[60%] truncate rounded-[5px] border border-line bg-panel px-1.5 py-0.5 font-mono text-meta text-ink-faint"
       >
         {view.name}
         {hasFocus && (

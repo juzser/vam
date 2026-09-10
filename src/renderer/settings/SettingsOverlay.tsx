@@ -328,7 +328,7 @@ export function SettingsOverlay({
           long one. One height, one nav position; the panel scrolls. */}
       <div className="relative flex h-[min(600px,80vh)] w-[min(880px,94vw)] flex-col overflow-hidden rounded-md border border-line bg-panel">
         <div className="flex h-[38px] flex-none items-center gap-2 border-line border-b px-3">
-          <h2 className="font-semibold text-[13px] text-ink">settings</h2>
+          <h2 className="font-semibold text-body text-ink">settings</h2>
           {/* `ink-faint` measures 3.44 / 3.46 against `panel` — it fails 4.5:1
               in both themes, and every hint in this overlay used to wear it.
 
@@ -336,7 +336,7 @@ export function SettingsOverlay({
               position and of which section is open, so it is where the two
               Escapes get named, in the order they will happen. `polite`
               announces the mode change without stealing the keystroke. */}
-          <span role="status" aria-live="polite" className="text-[11px] text-ink-dim">
+          <span role="status" aria-live="polite" className="text-control text-ink-dim">
             {capturing === null
               ? 'stored in this browser, not in a session'
               : 'waiting for a key — Esc cancels, Esc again closes'}
@@ -346,7 +346,7 @@ export function SettingsOverlay({
             ref={closeButton}
             type="button"
             onClick={onClose}
-            className={`rounded border border-line px-2 py-0.5 text-ink-dim text-xs ${FOCUS_RING}`}
+            className={`rounded border border-line px-2 py-0.5 text-ink-dim text-control ${FOCUS_RING}`}
           >
             Esc
           </button>
@@ -436,7 +436,7 @@ export function SettingsOverlay({
                             overridden ? 'ring-2 ring-ink' : 'ring-1 ring-ink-faint'
                           }`}
                         />
-                        <span className="text-[13px] text-ink">{label}</span>
+                        <span className="text-body text-ink">{label}</span>
                         {overridden ? (
                           <button
                             type="button"
@@ -504,7 +504,7 @@ export function SettingsOverlay({
                       data-turn-progress-option={mode}
                       aria-pressed={prefs.turnProgress === mode}
                       onClick={() => onChange(setTurnProgress(prefs, mode))}
-                      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-[12px] ${FOCUS_RING} ${
+                      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
                         prefs.turnProgress === mode
                           ? 'border-line-loudest bg-raised text-ink'
                           : 'border-line text-ink-dim'
@@ -520,7 +520,7 @@ export function SettingsOverlay({
                     is one the person making the choice cannot read -- so the
                     three things `drawsProgressLine` holds back are named here,
                     in the words the column draws them in. */}
-                <p data-turn-progress-note className="mt-3 max-w-[52ch] text-[12px] text-ink-dim">
+                <p data-turn-progress-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
                   collapsed drops the line from turns with nothing to report. A turn whose tools
                   failed keeps its line and its <code className="text-ink">· N failed</code> count,
                   and so does the newest turn while the session is working or waiting.
@@ -542,7 +542,7 @@ export function SettingsOverlay({
                       data-provider-option={provider.id}
                       aria-pressed={prefs.defaultProvider === provider.id}
                       onClick={() => onChange(setDefaultProvider(prefs, provider.id))}
-                      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-[12px] ${FOCUS_RING} ${
+                      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
                         prefs.defaultProvider === provider.id
                           ? 'border-line-loudest bg-raised text-ink'
                           : 'border-line text-ink-dim'
@@ -552,7 +552,7 @@ export function SettingsOverlay({
                     </button>
                   ))}
                 </div>
-                <p className="mt-3 text-[12px] text-ink-dim">
+                <p className="mt-3 text-control text-ink-dim">
                   o runs{' '}
                   <code className="text-ink">
                     {resolveProvider(prefs.defaultProvider).command.join(' ')}
@@ -594,7 +594,7 @@ export function SettingsOverlay({
               {message === '' && clashes.length === 0 ? null : (
                 <div className="-mx-5 -mt-4 sticky -top-4 z-10 bg-panel px-5 pt-4 pb-2">
                   {message === '' ? null : (
-                    <p data-binding-message className="text-waiting text-xs">
+                    <p data-binding-message className="text-waiting text-control">
                       {message}
                     </p>
                   )}
@@ -612,7 +612,7 @@ export function SettingsOverlay({
                       data-binding-clash
                       role="status"
                       aria-live="polite"
-                      className="text-[11px] text-waiting"
+                      className="text-control text-waiting"
                     >
                       {clashes
                         .map(
@@ -645,11 +645,11 @@ export function SettingsOverlay({
                     {/* The SAME heading as a group's, for a mode as well: the
                         refinement spec fixed one heading here (§4-5) and a mode
                         is not a reason to invent a second. */}
-                    <h4 className="mb-[10px] border-line-loud border-b pb-[6px] font-semibold text-[13px] text-ink">
+                    <h4 className="mb-[10px] border-line-loud border-b pb-[6px] font-semibold text-body text-ink">
                       {section.title}
                     </h4>
                     {section.hint === null ? null : (
-                      <p className="mt-[-4px] mb-[10px] max-w-[52ch] text-[12px] text-ink-dim">
+                      <p className="mt-[-4px] mb-[10px] max-w-[52ch] text-control text-ink-dim">
                         {section.hint}
                       </p>
                     )}
@@ -737,7 +737,7 @@ function SectionRail(props: NavProps) {
       className="hidden w-[168px] flex-none flex-col border-line border-r bg-sidebar md:flex"
     >
       <div className="flex flex-none items-center border-line border-b px-3 py-2">
-        <span className="font-mono text-[9.5px] text-ink-dim uppercase tracking-[0.12em]">
+        <span className="font-mono text-meta text-ink-dim uppercase tracking-[0.12em]">
           Sections
         </span>
       </div>
@@ -752,7 +752,7 @@ function SectionRail(props: NavProps) {
               // author-drawn state needs — so a 2px rail in `ink` (15.3:1)
               // carries the selection. The unselected items reserve the same
               // 2px in `transparent`, or the label jumps when selection moves.
-              className={`flex h-[28px] w-full cursor-pointer items-center gap-2 rounded-[7px] border-l-2 pr-2 pl-[6px] text-left text-[12px] ${FOCUS_RING} ${
+              className={`flex h-[28px] w-full cursor-pointer items-center gap-2 rounded-[7px] border-l-2 pr-2 pl-[6px] text-left text-control ${FOCUS_RING} ${
                 selected
                   ? 'border-ink bg-segment-on font-medium text-ink'
                   : 'border-transparent text-ink-dim hover:text-ink'
@@ -803,7 +803,7 @@ function SectionStrip(props: NavProps) {
         <button
           key={id}
           {...tabProps(props, id)}
-          className={`flex h-[26px] cursor-pointer items-center justify-center gap-[5px] rounded-[7px] text-[12px] ${FOCUS_RING} ${
+          className={`flex h-[26px] cursor-pointer items-center justify-center gap-[5px] rounded-[7px] text-control ${FOCUS_RING} ${
             props.section === id
               ? 'bg-segment-on font-medium text-ink'
               : 'text-ink-dim hover:text-ink'
@@ -852,8 +852,8 @@ function Panel({
           uppercase — at this size it reads as shouting and costs the word-shape
           a scanned list is read by. */}
       <div className="mb-5 border-line-loud border-b pb-3">
-        <h3 className="font-semibold text-[15px] text-ink">{id}</h3>
-        <span className="text-[12px] text-ink-dim">{hint}</span>
+        <h3 className="font-semibold text-heading text-ink">{id}</h3>
+        <span className="text-control text-ink-dim">{hint}</span>
       </div>
       {/* Its own wrapper, so `first:` in `Block` means the first ROW. */}
       <div data-settings-rows>{children}</div>
@@ -878,7 +878,7 @@ function Choice({
       // Restyled, deliberately not re-roled: three `aria-pressed` toggles for a
       // single-select is a real (small) wart, but a radiogroup is outside the
       // asks and costs two assertions. Raised as a follow-up instead.
-      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-[12px] ${FOCUS_RING} ${
+      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
         selected ? 'border-line-loudest bg-raised text-ink' : 'border-line text-ink-dim'
       }`}
     >
@@ -897,11 +897,62 @@ function labelFor(overrides: KeyBindings, id: string): string {
   return id;
 }
 
+/**
+ * The floor the two key columns sit on, in pixels.
+ *
+ * DERIVED FROM THE CHORDS, NOT CHOSEN. The column was 68px, sized when the
+ * widest thing in it was `gt`. `Mod-Shift-[` / `Mod-Shift-]` and `Mod-Alt-[` /
+ * `Mod-Alt-]` arrived with the pane-stepping work and nothing resized the
+ * column they landed in, so — measured in Chromium on the shipped bundle, at
+ * the 68px it had been:
+ *
+ *   Mod-Shift-]   50.58px of ink over 2 lines   scrollHeight 36 / client 24
+ *   Mod-Shift-[   43.36px of ink over 3 lines   scrollHeight 54 / client 24
+ *
+ * The slot is 26px tall and does not scroll, so those were not tight — they
+ * were WRAPPED AND CUT, and of `Mod-Shift-[` an operator saw its first line
+ * and nothing else. A shortcut you cannot read is the same defect as a
+ * shortcut that is not there.
+ *
+ * Eleven characters at a measured 7.226px per advance (`Enter` and `Mod-1`,
+ * five characters each, 36.13px each, at this same 12px) is 79.5px of ink;
+ * with `px-2` and a 1px border either side that is 97.5px. 104 is that plus
+ * one character of headroom, for a fallback face a shade wider than Geist
+ * Mono. `test/settings/binding-columns.test.tsx` recomputes it from the sheet
+ * rather than trusting this comment, and `e2e/settings-chrome-shots.mjs`
+ * measures the rendered result in a browser, where the wrapping was found.
+ *
+ * SPELLED OUT AT BOTH CALL SITES rather than interpolated from a constant:
+ * Tailwind generates a utility only for a class name it can find as text in
+ * the source, so `min-w-[${N}px]` would compile to a class that does not
+ * exist — silently, with no build error and nothing on screen but the old
+ * width. The two places are `SLOT_BOX` below and the row's `grid-cols-[…]`.
+ */
+
 /** One box, one geometry, three fills — a slot is field-shaped in every state,
  *  not a chip that turns into an input. The border is `ink-faint` for the
  *  stepper's reason: `sunken` on `panel` is 1.04:1, so the edge is the sole
- *  identifier of the control and owes 1.4.11 its 3:1. */
-const SLOT_BOX = 'h-[26px] w-[68px] rounded-[6px] border px-2 text-center font-mono text-[12px]';
+ *  identifier of the control and owes 1.4.11 its 3:1.
+ *
+ *  `min-w` AND NOT `w`, because a CAPTURED chord has no length bound —
+ *  `normalizeKey` answers `Mod-Alt-<event.key>` and `event.key` is whatever
+ *  the keyboard reports, so `Mod-Alt-ArrowRight` is eighteen characters and
+ *  `Mod-Alt-AudioVolumeDown` is twenty-three. No fixed width holds those. The
+ *  floor keeps every shipped chord on one x down the list; past it the slot
+ *  grows into the `max-content` half of the row's track and the LABEL yields,
+ *  because a label truncates legibly and a key does not.
+ *
+ *  `whitespace-nowrap` DOES NOT DO THAT — the growth is the track's doing, and
+ *  deleting this class at 1100px or 390px changes nothing, which is exactly
+ *  how it survived its first mutation. It earns its place at 320px, where the
+ *  grid runs OUT of room: the track falls back to the 104px floor, the slot
+ *  measures 154px against 166px of chord, and without this the chord wraps
+ *  onto a second line that a 26px box cannot show. With it the overflow is
+ *  sideways, one line, and still 113px inside the panel that clips. That is
+ *  the whole of what it does, and `e2e/settings-chrome-shots.mjs` plants a
+ *  long chord at 320px so that deleting it goes red. */
+const SLOT_BOX =
+  'h-[26px] min-w-[104px] whitespace-nowrap rounded-[6px] border px-2 text-center font-mono text-control';
 
 /** One action: its name, its slots, and a way back to the shipped keys. */
 function BindingLine({
@@ -925,10 +976,17 @@ function BindingLine({
   return (
     // Three columns, in the order the row is read: what the action is, then its
     // first key, then its second. The label takes the one flexible track and
-    // the key slots are fixed, which is what makes the list scan -- every label
-    // starts at the same x AND both key columns hold one x down the whole list,
-    // however long the label above them was.
-    <li className="grid grid-cols-[1fr_68px_68px] items-center gap-x-[10px] py-[3px]">
+    // the key slots sit on a FLOOR, which is what makes the list scan -- every
+    // label starts at the same x AND both key columns hold one x down the whole
+    // list, however long the label above them was.
+    //
+    // `minmax(104px,max-content)` rather than a fixed width, and the second
+    // half of that is not decoration: the floor holds every chord the shipped
+    // tables contain (see `SLOT_MIN_PX`'s note), and `max-content` is what
+    // happens past it, because a captured chord has no length bound. On such a
+    // row the LABEL gives up the pixels -- it truncates legibly, and a key
+    // missing its last four characters does not.
+    <li className="grid grid-cols-[1fr_minmax(104px,max-content)_minmax(104px,max-content)] items-center gap-x-[10px] py-[3px]">
       {/* The reset control rides in the label column rather than claiming a
           fourth one: a track that exists only on overridden rows would shove
           their key slots sideways, and the operator asked for three columns.
@@ -937,12 +995,12 @@ function BindingLine({
       <span className="flex min-w-0 items-center gap-2">
         {/* While the row is armed the label column carries the instruction that
             used to live in the capture box's 160px placeholder -- which is how
-            the box keeps the same 68px geometry in every state. */}
-        <span
-          data-binding-label={row.id}
-          title={row.label}
-          className="truncate text-[13px] text-ink"
-        >
+            the box keeps the same geometry in every state. The armed box takes
+            a fixed `w-[104px]` rather than `SLOT_BOX`'s floor: an `<input>`
+            with no width contributes its `size` default (about twenty
+            characters) to a `max-content` track, so arming a row would widen
+            the whole column for as long as the box was open. */}
+        <span data-binding-label={row.id} title={row.label} className="truncate text-body text-ink">
           {armed ? 'press a key — Esc cancels' : row.label}
         </span>
         {row.overridden ? (
@@ -987,7 +1045,7 @@ function BindingLine({
               // is showing the armed state, not the cursor. It is also the only
               // permanent ring on this surface, which is how the operator tells
               // which Escape they are about to press.
-              className={`${SLOT_BOX} border-ink bg-raised text-ink outline-2 outline-ink outline-offset-2`}
+              className={`${SLOT_BOX} w-[104px] border-ink bg-raised text-ink outline-2 outline-ink outline-offset-2`}
             />
           );
         }
@@ -1060,12 +1118,12 @@ function Block({
   return (
     <div className="mt-6 border-line-loud border-t pt-6 first:mt-0 first:border-t-0 first:pt-0">
       <div className="flex items-baseline gap-3">
-        <h4 className="font-medium text-[13px] text-ink">{label}</h4>
+        <h4 className="font-medium text-body text-ink">{label}</h4>
         {action === undefined ? null : <span className="ml-auto">{action}</span>}
       </div>
       {/* A 12px line running the full ~660px panel is a paragraph, not a
           caption. */}
-      <p className="mt-1 max-w-[52ch] text-[12px] text-ink-dim">{hint}</p>
+      <p className="mt-1 max-w-[52ch] text-control text-ink-dim">{hint}</p>
       <div className="mt-3">{children}</div>
     </div>
   );
@@ -1076,7 +1134,7 @@ function SmallButton({ label, onPick }: { readonly label: string; readonly onPic
     <button
       type="button"
       onClick={onPick}
-      className={`cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-xs ${FOCUS_RING}`}
+      className={`cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-control ${FOCUS_RING}`}
     >
       {label}
     </button>
@@ -1183,7 +1241,7 @@ function Stepper({
             event.preventDefault();
             nudge(to);
           }}
-          className="h-[24px] w-[52px] bg-transparent text-center font-mono text-[12px] text-ink outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="h-[24px] w-[52px] bg-transparent text-center font-mono text-control text-ink outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
         <button
           type="button"
@@ -1196,7 +1254,7 @@ function Stepper({
           <Plus size={13} strokeWidth={2} />
         </button>
       </div>
-      <span className="ml-2 font-mono text-[12px] text-ink-dim">{unit}</span>
+      <span className="ml-2 font-mono text-control text-ink-dim">{unit}</span>
     </div>
   );
 }

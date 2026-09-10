@@ -154,7 +154,7 @@ function Chip({ keys }: { readonly keys: string }) {
       <span
         data-tip-keys
         aria-hidden="true"
-        className="shrink-0 rounded-[4px] border border-line-strong px-1 py-px font-mono text-[10px] text-ink-dim"
+        className="shrink-0 rounded-[4px] border border-line-strong px-1 py-px font-mono text-meta text-ink-dim"
       >
         {keys}
       </span>
@@ -194,7 +194,7 @@ export function ShortcutTip({
           side="top"
           sideOffset={6}
           collisionPadding={8}
-          className="z-50 flex max-w-[280px] flex-col gap-1 rounded-[7px] border border-line-tip bg-raised px-2 py-1.5 text-[11px] leading-[1.45] shadow-tip"
+          className="z-50 flex max-w-[280px] flex-col gap-1 rounded-[7px] border border-line-tip bg-raised px-2 py-1.5 text-control shadow-tip"
         >
           {/* ink on raised (14.9:1 dark, 15.5:1 light) and ink-dim (6.7:1 in
               both), never ink-faint: faint measures 3.27 / 3.01, under AA. */}

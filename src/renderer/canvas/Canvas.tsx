@@ -334,7 +334,7 @@ function ModeCell({ state }: { readonly state: ModeState }) {
     <span
       data-mode
       className={[
-        'vam-mode-change inline-flex h-[18px] flex-none items-center rounded-[4px] border px-1.5 font-semibold text-[11px] leading-none tracking-[0.04em]',
+        'vam-mode-change inline-flex h-[18px] flex-none items-center rounded-[4px] border px-1.5 font-semibold text-control leading-none tracking-[0.04em]',
         armed ? 'border-ink bg-ink text-ground' : 'border-line-loud bg-well text-ink',
       ].join(' ')}
     >
@@ -899,7 +899,7 @@ function TabStrip({
       <div
         data-tab-strip
         data-orientation={orientation}
-        className="flex min-w-0 shrink items-center whitespace-nowrap px-1 text-[11px] text-ink-faint"
+        className="flex min-w-0 shrink items-center whitespace-nowrap px-1 text-control text-ink-faint"
       >
         no sessions open — pick one from the sidebar
       </div>
@@ -969,7 +969,7 @@ function TabStrip({
               "which tab this pane is on" and "which pane the keyboard is in"
               are two readable facts instead of one ambiguous one.
             */
-            className={`group flex flex-none items-center gap-1.5 border-line border-r border-b-2 px-2.5 text-[11px] ${
+            className={`group flex flex-none items-center gap-1.5 border-line border-r border-b-2 px-2.5 text-control ${
               active
                 ? `bg-ground text-ink ${paneFocused ? 'border-b-cursor-ring' : 'border-b-line-loud'}`
                 : 'border-b-transparent text-ink-dim opacity-85 hover:text-ink hover:opacity-100'
@@ -1045,7 +1045,7 @@ function TabStrip({
  */
 function SourceReadout({ source }: { source: CanvasSource }) {
   return (
-    <span data-source className="min-w-0 truncate font-mono text-[10px]">
+    <span data-source className="min-w-0 truncate font-mono text-meta">
       {source.kind === 'demo' ? (
         <span className="text-waiting">● {source.note}</span>
       ) : source.kind === 'connecting' ? (
@@ -1135,7 +1135,7 @@ function DropZoneOverlay({ zone }: { readonly zone: DropZone }) {
       aria-hidden="true"
       className={`pointer-events-none absolute z-10 flex items-center justify-center border-2 border-cursor-ring bg-cursor-ring/15 ${DROP_ZONE_SHAPE[zone]}`}
     >
-      <span className="rounded-[4px] border border-cursor-ring bg-ground px-2 py-0.5 font-medium text-[11px] text-ink">
+      <span className="rounded-[4px] border border-cursor-ring bg-ground px-2 py-0.5 font-medium text-control text-ink">
         {DROP_ZONE_WORD[zone]}
       </span>
     </div>
@@ -5226,7 +5226,7 @@ function CanvasInner({
       {!phone && (
         <footer
           data-status-bar
-          className="flex h-8 flex-none items-center gap-3 border-line border-t bg-sidebar px-3 font-mono text-[10px] text-ink-faint"
+          className="flex h-8 flex-none items-center gap-3 border-line border-t bg-sidebar px-3 font-mono text-meta text-ink-faint"
         >
           {/* The mode indicator is not in the mockup, and it stays: ADE is a
               mouse-and-keyboard app, vam is a modal one, and a modal app that

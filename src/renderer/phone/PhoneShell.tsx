@@ -188,7 +188,7 @@ function ViewIcons({
               <Icon size={16} aria-hidden="true" />
             </span>
             {count !== null && (
-              <span className="absolute top-[7px] right-[4px] font-mono text-[9.5px] text-ink-dim">
+              <span className="absolute top-[7px] right-[4px] font-mono text-meta text-ink-dim">
                 {count}
               </span>
             )}
@@ -286,12 +286,12 @@ function SessionTabStrip({
                   <span
                     aria-hidden="true"
                     data-phone-session-waiting-badge
-                    className="flex-none font-mono text-[9px] text-waiting"
+                    className="flex-none font-mono text-meta text-waiting"
                   >
                     !
                   </span>
                 )}
-                <span className="truncate text-[11px]">{session.title}</span>
+                <span className="truncate text-control">{session.title}</span>
               </span>
               {on && (
                 <span
@@ -348,12 +348,12 @@ function RemoteLimits({ declines }: { readonly declines: SourceDeclines }) {
   if (entries.length === 0) return null;
   return (
     <details data-remote-limits className="flex-none border-line border-b bg-panel px-3">
-      <summary className="flex min-h-[44px] cursor-pointer items-center text-[12px] text-ink-dim">
+      <summary className="flex min-h-[44px] cursor-pointer items-center text-control text-ink-dim">
         What this connection cannot do
       </summary>
       <ul className="pb-2">
         {entries.map(([name, why]) => (
-          <li key={name} data-remote-limit={name} className="py-1 text-[12px] text-ink-dim">
+          <li key={name} data-remote-limit={name} className="py-1 text-control text-ink-dim">
             {why}
           </li>
         ))}
@@ -492,7 +492,7 @@ export function PhoneShell({
         </div>
         <footer
           data-phone-status-bar
-          className="flex h-[44px] flex-none items-center gap-3 border-line border-t bg-panel px-3 font-mono text-[12px] text-ink-dim"
+          className="flex h-[44px] flex-none items-center gap-3 border-line border-t bg-panel px-3 font-mono text-meta text-ink-dim"
         >
           <span className="flex-none">
             {tally.running} running · {tally.waiting} waiting · {tally.done} done
@@ -541,6 +541,14 @@ export function PhoneShell({
           aria-label="back to sessions"
           data-phone-back
           onClick={back}
+          /* OFF THE TYPE SCALE, named as such in `test/renderer/type-scale.test.ts`:
+             `‹` is a GLYPH used as an icon, not text, and it is sized against
+             the 16px lucide icons in this same bar rather than against a text
+             step. A chevron paints far smaller than its em box -- at the
+             scale's 15px `heading` it would be the smallest mark in a 44px
+             target. The `×` below is 16 for the same reason in the other
+             direction: a multiplication sign fills its box where this does
+             not. Two glyphs, two optical sizes, and neither is prose. */
           className={`${TOUCH} ${FOCUS_RING} flex-none rounded-[7px] text-[18px] text-ink-dim`}
         >
           ‹
@@ -553,7 +561,7 @@ export function PhoneShell({
             session about to be written to, and one composer serving many
             sessions is the easiest way to send the right words to the wrong
             agent. The agent count is on the Agents icon beside it. */}
-        <span data-prompt-target className="min-w-0 flex-1 truncate text-[15px] text-ink">
+        <span data-prompt-target className="min-w-0 flex-1 truncate text-heading text-ink">
           {session?.title}
         </span>
         <ViewIcons
@@ -589,7 +597,7 @@ export function PhoneShell({
       <div
         data-phone-status
         style={statusCell === null ? { display: 'none' } : undefined}
-        className="flex min-h-[24px] flex-none items-center border-line border-b bg-panel px-3 font-mono text-[12px] text-ink-dim"
+        className="flex min-h-[24px] flex-none items-center border-line border-b bg-panel px-3 font-mono text-meta text-ink-dim"
       >
         {statusCell}
       </div>

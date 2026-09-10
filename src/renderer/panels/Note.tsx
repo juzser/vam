@@ -30,7 +30,7 @@ export function Note({ text, children }: { readonly text: string; readonly child
           <Tooltip.Content
             side="top"
             sideOffset={6}
-            className="z-50 max-w-[260px] rounded-[7px] border border-line-tip bg-raised px-2 py-1.5 text-[11px] text-ink-dim leading-[1.45] shadow-tip"
+            className="z-50 max-w-[260px] rounded-[7px] border border-line-tip bg-raised px-2 py-1.5 text-control text-ink-dim shadow-tip"
           >
             {text}
           </Tooltip.Content>
