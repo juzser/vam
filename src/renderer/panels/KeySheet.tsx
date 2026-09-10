@@ -72,16 +72,38 @@ export function KeySheet({ onClose }: KeySheetProps) {
               <h3 className="mb-1 text-ink-faint text-xs uppercase tracking-wide">{group.title}</h3>
               <ul>
                 {group.rows.map((row) => (
-                  <li key={row.keys} className="flex items-baseline gap-2 py-0.5 text-xs">
+                  // Keyed by everything that distinguishes a row, not by its
+                  // keystroke: one key already yields a row PER MODE, and a key
+                  // two actions claim yields one row each. Keyed by `row.keys`
+                  // alone they collided, and React reconciled them by position.
+                  <li
+                    key={`${row.keys}·${row.mode ?? ''}·${row.label}`}
+                    className="flex items-baseline gap-2 py-0.5 text-xs"
+                  >
                     <kbd
                       data-key-sheet-keys
-                      className="min-w-12 rounded border border-line bg-raised px-1 text-center font-mono text-ink"
+                      className={`min-w-12 rounded border border-line px-1 text-center font-mono ${
+                        row.dead === null
+                          ? 'bg-raised text-ink'
+                          : 'bg-transparent text-ink-dim line-through'
+                      }`}
                     >
                       {row.keys}
                     </kbd>
                     <span data-key-sheet-label className="text-ink-dim">
                       {row.label}
                     </span>
+                    {/* IN WORDS, not only in the strikethrough above it: what
+                        an operator cannot work out for themselves is WHO took
+                        the key, and a struck-through chip does not say it. The
+                        row stays rather than being dropped — dropping it would
+                        take the shadowed action off the sheet altogether,
+                        which is the hiding this is the fix for. */}
+                    {row.dead === null ? null : (
+                      <span data-key-sheet-dead className="text-waiting">
+                        dead — {row.dead} has this key
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>

@@ -811,23 +811,6 @@ export function bindingChords(overrides: KeyBindings, id: string): readonly stri
 }
 
 /**
- * The action `key` already belongs to, or null when it is free.
- *
- * Read off what is IN FORCE, not off the shipped tables: a key the operator
- * freed a moment ago by moving its action elsewhere is free, and a key they
- * just took is taken.
- */
-export function bindingConflict(overrides: KeyBindings, id: string, key: string): string | null {
-  for (const binding of effectiveBindings(overrides)) {
-    if (binding.id === id) continue;
-    if (binding.chords.some((chord) => chord.prefix === '' && chord.key === key)) {
-      return binding.id;
-    }
-  }
-  return null;
-}
-
-/**
  * Put `key` in one of an action's slots.
  *
  * Seeded from what the action holds now, so editing the second slot of an
@@ -859,6 +842,105 @@ export function clearBindings(overrides: KeyBindings, id: string): KeyBindings {
   return next;
 }
 
+/**
+ * The order the bindings are laid down in — and therefore who wins a key two
+ * of them claim.
+ *
+ * Shipped first, overrides second: the operator's choice beats a shipped key
+ * something else still holds, deterministically rather than by table order.
+ * ONE spelling of that rule, because both readers of it must agree — the
+ * tables that answer a keystroke, and `bindingClashes`, which tells the
+ * operator which action a contested key really reaches. Two derivations of
+ * "who wins" is a UI naming one action while another fires.
+ */
+function inPrecedenceOrder(overrides: KeyBindings): readonly Binding[] {
+  const bindings = effectiveBindings(overrides);
+  return [
+    ...bindings.filter((binding) => overrides[binding.id] === undefined),
+    ...bindings.filter((binding) => overrides[binding.id] !== undefined),
+  ];
+}
+
+/** One chord two or more actions claim: who answers it, and who is left
+ *  advertising a key that does nothing. */
+export type BindingClash = {
+  /** As it is written down and shown: `r`, `gt`. */
+  readonly chord: string;
+  /** The action the keystroke really invokes — `buildTables`' own winner. */
+  readonly winner: string;
+  /** The actions whose advertised key is dead, in table order. */
+  readonly shadowed: readonly string[];
+};
+
+/**
+ * Every contested chord in a map, resolved the way the keystroke resolves it.
+ *
+ * The editor and the sheet both read this, so a dead binding is a state the
+ * operator can SEE rather than one they discover by pressing a key and
+ * watching something else happen — which is how F3 was found.
+ *
+ * An action that holds one chord in both its slots is not a clash: it wastes a
+ * slot and steals nothing, and refusing it would strand the map.
+ */
+export function bindingClashes(overrides: KeyBindings): readonly BindingClash[] {
+  const claims = new Map<string, string[]>();
+  for (const binding of inPrecedenceOrder(overrides)) {
+    for (const chord of binding.chords) {
+      const text = chordText(chord);
+      const at = claims.get(text) ?? [];
+      at.push(binding.id);
+      claims.set(text, at);
+    }
+  }
+  const out: BindingClash[] = [];
+  for (const [chord, ids] of claims) {
+    // Last laid down is what the table kept, which is what the keystroke gets.
+    const winner = ids[ids.length - 1];
+    if (winner === undefined) continue;
+    const shadowed = [...new Set(ids)].filter((id) => id !== winner);
+    if (shadowed.length > 0) {
+      out.push({ chord, winner, shadowed });
+    }
+  }
+  return out;
+}
+
+/**
+ * The clashes a write would CREATE — the whole resulting map judged, not the
+ * one key that changed.
+ *
+ * This is F3's fix stated as a function. The capture box used to judge the key
+ * it was handed and nothing else, and reset judged nothing at all, so removing
+ * an override could hand a key to another action in silence. Every path that
+ * writes the map now asks this question instead — and a path that cannot ask
+ * about a keystroke, because reset restores a DEFAULT key that the operator
+ * never typed, is the reason the question is about the map.
+ *
+ * Judged as a DIFFERENCE on purpose. A map can arrive already contested (a
+ * hand-edited payload, or a stored override colliding with a shipped key a
+ * later vam moved onto it), and refusing every write while one is in force
+ * would lock the operator inside the state they are trying to leave.
+ *
+ * The difference is taken over WHO IS SHADOWED, not over which chord is
+ * contested. "That chord was contested already" is too coarse by exactly the
+ * case that matters: over a map where `icon` has taken `rename`'s `r`, giving
+ * `r` to a third action would newly kill `icon` too, and the chord was
+ * contested before and after. What comes back is each clash narrowed to the
+ * bindings this write would newly leave dead, so a refusal can name them.
+ */
+export function newClashes(current: KeyBindings, next: KeyBindings): readonly BindingClash[] {
+  const pair = (chord: string, id: string) => `${chord} ${id}`;
+  const before = new Set(
+    bindingClashes(current).flatMap((clash) => clash.shadowed.map((id) => pair(clash.chord, id))),
+  );
+  return bindingClashes(next)
+    .map((clash) => ({
+      ...clash,
+      shadowed: clash.shadowed.filter((id) => !before.has(pair(clash.chord, id))),
+    }))
+    .filter((clash) => clash.shadowed.length > 0);
+}
+
 type Tables = {
   readonly top: Record<string, KeyAction>;
   readonly chords: Record<string, Record<string, KeyAction>>;
@@ -870,7 +952,6 @@ function buildTables(overrides: KeyBindings): Tables {
   for (const prefix of PREFIXES) {
     chords[prefix] = {};
   }
-  const bindings = effectiveBindings(overrides);
   const put = (binding: Binding) => {
     for (const chord of binding.chords) {
       const table = chord.prefix === '' ? top : chords[chord.prefix];
@@ -879,15 +960,26 @@ function buildTables(overrides: KeyBindings): Tables {
       }
     }
   };
-  // Shipped bindings first, overrides second: if the operator took a key that
-  // something else still holds by default, the operator wins — deterministically
-  // rather than by table order. The UI refuses that bind before it gets here;
-  // this is what happens when a hand-edited payload does it anyway.
-  for (const binding of bindings) {
-    if (overrides[binding.id] === undefined) put(binding);
-  }
-  for (const binding of bindings) {
-    if (overrides[binding.id] !== undefined) put(binding);
+  // Laid down in `inPrecedenceOrder`, so the last claim on a contested key is
+  // the one the table keeps: the override wins.
+  //
+  // WHO CAN GET HERE — corrected, because what stood here was false. This
+  // comment used to say the UI refuses such a bind before it can reach this
+  // function, so only a hand-edited payload could produce one. That was audit
+  // finding F3: the capture box checked the key it was given and the RESET
+  // button checked nothing, so `rename` onto `b`, `icon` onto the freed `r`,
+  // then reset `rename` put a second claim on `r` through the ordinary
+  // editor — after which `r` invoked `icon` while the sheet went on
+  // advertising it for `rename`. Both write paths now judge the whole
+  // resulting map (`newClashes`), so the editor cannot mint one.
+  //
+  // Two doors stay open and this precedence is what they land on: a payload
+  // edited by hand, and a stored override that collides with a shipped key a
+  // LATER vam moved onto it — no editing required, just an upgrade. Neither is
+  // silent any more: `bindingClashes` reads the same order this loop lays
+  // down, and the sheet and the editor mark the shadowed key dead.
+  for (const binding of inPrecedenceOrder(overrides)) {
+    put(binding);
   }
   return { top, chords };
 }

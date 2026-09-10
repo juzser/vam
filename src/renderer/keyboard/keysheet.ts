@@ -17,6 +17,7 @@
 import { TABS } from '../panels/tabs.js';
 import {
   activeBindings,
+  bindingClashes,
   chordText,
   effectiveBindings,
   type KeyAction,
@@ -303,6 +304,17 @@ export type SheetRow = {
    * yields two rows, and neither of them is the whole truth on its own.
    */
   readonly mode: CursorMode | null;
+  /**
+   * The action that answers this key INSTEAD of this row's, or `null` when the
+   * row's key really reaches it.
+   *
+   * The sheet's contract is that it names no key nothing is bound to. A key
+   * two actions claim is the neighbouring lie — bound, but not to what the row
+   * says — so the row stays and carries the correction rather than being
+   * dropped, which would make the shadowed action vanish from the sheet
+   * altogether and take the operator's only way of finding it with it.
+   */
+  readonly dead: string | null;
 };
 export type SheetGroup = {
   readonly group: ActionGroup;
@@ -362,6 +374,18 @@ export type BindingRow = {
   readonly byMode: Readonly<Record<CursorMode, string>> | null;
   /** True when the operator moved it off the shipped keys. */
   readonly overridden: boolean;
+  /**
+   * The keys in `keys` that DO NOTHING, each mapped to the name of the action
+   * that answers them instead — empty in the ordinary case.
+   *
+   * A row can advertise a key another action wins (audit F3, and an upgrade
+   * that moves a shipped key onto a stored override). `resolveChord` has
+   * always settled that deterministically; what was missing was any way for
+   * the operator to SEE it, which left "press the key and watch something
+   * else happen" as the only way to find out. Named rather than flagged: a
+   * dead key with no culprit leaves them hunting.
+   */
+  readonly dead: Readonly<Record<string, string>>;
 };
 
 export type BindingGroup = {
@@ -380,8 +404,20 @@ export type BindingGroup = {
 export function buildBindingSheet(
   overrides: KeyBindings = activeBindings(),
 ): readonly BindingGroup[] {
+  const bindings = effectiveBindings(overrides);
+  // Names first, rows second: a dead key is named after the action that took
+  // it, and that action is in some other group.
+  const nameOf = new Map(bindings.map((binding) => [binding.id, describeAction(binding.action)]));
+  const dead = new Map<string, Record<string, string>>();
+  for (const clash of bindingClashes(overrides)) {
+    for (const id of clash.shadowed) {
+      const entry = dead.get(id) ?? {};
+      entry[clash.chord] = nameOf.get(clash.winner)?.label ?? clash.winner;
+      dead.set(id, entry);
+    }
+  }
   const byGroup = new Map<ActionGroup, BindingRow[]>();
-  for (const binding of effectiveBindings(overrides)) {
+  for (const binding of bindings) {
     const { group, label, byMode } = describeAction(binding.action);
     const rows = byGroup.get(group) ?? [];
     rows.push({
@@ -390,6 +426,7 @@ export function buildBindingSheet(
       byMode,
       keys: binding.chords.map(chordText),
       overridden: overrides[binding.id] !== undefined,
+      dead: dead.get(binding.id) ?? {},
     });
     byGroup.set(group, rows);
   }
@@ -419,12 +456,16 @@ export function buildKeySheet(overrides: KeyBindings = activeBindings()): SheetG
         rows: rows.flatMap((row) =>
           row.keys.flatMap((keys): readonly SheetRow[] => {
             const captions = row.byMode;
+            // Per KEY, because a row's two slots are judged separately: one of
+            // them can be shadowed while the other still fires.
+            const dead = row.dead[keys] ?? null;
             return captions === null
-              ? [{ keys, label: row.label, mode: null }]
+              ? [{ keys, label: row.label, mode: null, dead }]
               : CURSOR_MODES.map((mode) => ({
                   keys,
                   label: `${MODE_TITLES[mode]} · ${captions[mode]}`,
                   mode,
+                  dead,
                 }));
           }),
         ),

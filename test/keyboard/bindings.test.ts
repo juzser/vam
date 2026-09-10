@@ -11,7 +11,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   actionId,
-  bindingConflict,
   bindKey,
   clearBindings,
   defaultBindings,
@@ -21,6 +20,7 @@ import {
   type KeyBindings,
   MAX_BINDINGS,
   NO_BINDINGS,
+  newClashes,
   RESERVED_KEYS,
   resolveChord,
 } from '../../src/renderer/keyboard/chords.js';
@@ -102,24 +102,37 @@ describe('an override is what is in force', () => {
   });
 });
 
+/**
+ * The conflict rule used to live in `bindingConflict`, which asked about ONE
+ * KEY and so could only ever answer for the capture box. That was half the
+ * editor, and the other half — reset — had no rule at all (audit F3). It is
+ * gone: `newClashes` judges the whole resulting map for every write, and
+ * `test/keyboard/binding-clashes.test.ts` holds it. What is kept here is the
+ * property that mattered, asserted through the replacement.
+ */
 describe('conflicts are refused, and named', () => {
   it('reports the action a key already belongs to', () => {
-    expect(bindingConflict(NO_BINDINGS, 'rename', 'i')).toBe('prompt');
+    const taken = newClashes(NO_BINDINGS, bindKey(NO_BINDINGS, 'rename', 0, 'i'));
+    expect(taken.map((clash) => clash.chord)).toEqual(['i']);
+    expect(taken[0]?.shadowed).toEqual(['prompt']);
   });
 
   it('does not call an action’s own key a conflict', () => {
-    expect(bindingConflict(NO_BINDINGS, 'rename', 'r')).toBeNull();
+    expect(newClashes(NO_BINDINGS, bindKey(NO_BINDINGS, 'rename', 0, 'r'))).toEqual([]);
   });
 
   it('sees the conflict against what is in force, not against the shipped table', () => {
-    const bindings = bindKey(NO_BINDINGS, 'rename', 0, 'p');
-    // `r` was freed by the override, `p` is now taken.
-    expect(bindingConflict(bindings, 'icon', 'r')).toBeNull();
-    expect(bindingConflict(bindings, 'icon', 'p')).toBe('rename');
+    const bindings = bindKey(NO_BINDINGS, 'rename', 0, 'q');
+    // `r` was freed by the override, `q` is now taken.
+    expect(newClashes(bindings, bindKey(bindings, 'icon', 0, 'r'))).toEqual([]);
+    expect(newClashes(bindings, bindKey(bindings, 'icon', 0, 'q'))[0]?.shadowed).toEqual([
+      'rename',
+    ]);
   });
 
   it('does not confuse a chord’s second key with a top-level one', () => {
-    expect(bindingConflict(NO_BINDINGS, 'rename', 't')).toBeNull();
+    // `t` alone is unbound; `gt` is the binding, and they are different keys.
+    expect(newClashes(NO_BINDINGS, bindKey(NO_BINDINGS, 'rename', 0, 't'))).toEqual([]);
   });
 });
 

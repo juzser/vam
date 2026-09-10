@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { bindingClashes } from '../../src/renderer/keyboard/chords.js';
 import {
   applyPalette,
   clearPalette,
@@ -133,6 +134,26 @@ describe('key bindings in storage', () => {
     const prefs = readPrefs(storage({ keyBindings: { rename: ['p'], icon: 'nope' } }));
     expect(prefs.keyBindings['rename']).toEqual(['p']);
     expect(prefs.keyBindings['icon']).toBeUndefined();
+  });
+
+  /**
+   * THE ONE PATH THAT DOES NOT REFUSE A CONTESTED KEY, and why.
+   *
+   * The editor now judges the whole resulting map on every write (audit F3),
+   * so it cannot mint one. A stored payload still can — hand-edited, or an
+   * override that collides the day a later vam moves a shipped key onto it —
+   * and this read deliberately keeps it: dropping a binding here would throw
+   * away a choice the operator made, on load, with nothing on screen. It is
+   * KEPT AND REPORTED instead: `bindingClashes` names it, and the settings
+   * editor and the `?` sheet mark the dead key.
+   */
+  it('keeps a payload that contests a key, and hands it on reported', () => {
+    const prefs = readPrefs(storage({ keyBindings: { icon: ['r'] } }));
+    expect(prefs.keyBindings['icon']).toEqual(['r']);
+    const clashes = bindingClashes(prefs.keyBindings);
+    expect(clashes.map((clash) => clash.chord)).toEqual(['r']);
+    expect(clashes[0]?.winner).toBe('icon');
+    expect(clashes[0]?.shadowed).toEqual(['rename']);
   });
 });
 
