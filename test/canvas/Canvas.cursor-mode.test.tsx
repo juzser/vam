@@ -23,6 +23,32 @@
  * would be indefensible. So option navigation is exactly the state where a
  * question is open and the composer has stood down, which is the state
  * `DetailPanel` already draws.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * `cancelable: true` IS LOAD-BEARING IN THIS FILE. DO NOT DROP IT.
+ *
+ * The rule that keeps the two mode-dependent key sets out of each other's way
+ * is one line in `Canvas.tsx`: `if (event.defaultPrevented) return`. The
+ * options list answers `j` and calls `preventDefault`; the window listener,
+ * which React's root container sits below in the bubble path, then stands
+ * down on that same native event. Neither side enumerates the other's keys —
+ * the whole arrangement rests on that one flag.
+ *
+ * `preventDefault()` on an event built WITHOUT `cancelable` is a no-op by
+ * specification (happy-dom implements that faithfully), so while these helpers
+ * dispatched `new KeyboardEvent('keydown', { bubbles: true })` the flag was
+ * never set, the guard never fired, and every case below ran with the canvas
+ * listener ALSO handling the keystroke the card had just handled.
+ *
+ * They passed anyway — and the reason is the thing worth remembering. Insert's
+ * own `j`/`k` clamped an index into a one-entry list and Insert's `l` was a
+ * bare `return`, so the canvas half of the double-handling did nothing
+ * observable. The suite was green BECAUSE OF THE DEFECT it was later sent to
+ * fix: the moment those branches learnt to say something, the quiet-case
+ * assertion at the bottom of this file went red and exposed the dead guard.
+ *
+ * A real keydown is cancelable. If a future helper here builds one that is
+ * not, this file goes back to proving nothing about which listener owns a key.
  */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';

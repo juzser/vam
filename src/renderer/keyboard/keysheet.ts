@@ -115,6 +115,14 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // SESSION. It moves projects now (`stepProject` in `Canvas.tsx`), and the
   // second half of the sentence says which session of it you arrive on — the
   // top row, in either direction — so nobody has to press it to find out.
+  //
+  // AND THAT IS A KNOWN DIFFERENCE FROM VIM, stated in the caption rather
+  // than left to be discovered. Vim's `gT` returns to the tab you were on,
+  // cursor and all; vam has no per-project memory to restore, and inventing
+  // one would be a second notion of "where you were" beside the focused
+  // session. So a project's entry point is its top row whichever way you
+  // arrive, `gt` then `gT` comes back to the project rather than the exact
+  // session, and `j`/`k` are the keys that go back to a session.
   project: {
     group: 'navigation',
     label: (a) =>
