@@ -235,17 +235,27 @@ check(
 // ---------------------------------------------------------------------------
 // 2. THE MODE CHIP, AS PAINT, IN BOTH THEMES.
 
-/** The chip's own colours and box, right now. */
+/** The chip's own colours and box, right now — and, beside it, the size the
+ *  status bar's own cells are ACTUALLY drawn at.
+ *
+ *  The cell size is measured rather than typed. This check read `>= 11`
+ *  against a comment saying "the 10px cells"; the day the bar moved onto the
+ *  type scale (`meta`, 11px) that literal would have gone on passing while the
+ *  claim it stands for — the chip out-ranks the cells around it — had quietly
+ *  stopped being true. `[data-source]` is a sibling cell in the same
+ *  `<footer>`, and `null` from it fails the check rather than skipping it. */
 const chipNow = () =>
   page.locator('[data-mode]').evaluate((el) => {
     const style = getComputedStyle(el);
     const box = el.getBoundingClientRect();
+    const cell = el.closest('footer')?.querySelector('[data-source]') ?? null;
     return {
       word: el.textContent ?? '',
       ink: style.color,
       ground: style.backgroundColor,
       border: style.borderTopColor,
       fontPx: Number.parseFloat(style.fontSize),
+      cellPx: cell === null ? null : Number.parseFloat(getComputedStyle(cell).fontSize),
       w: Math.round(box.width),
       h: Math.round(box.height),
     };
@@ -273,8 +283,16 @@ for (const theme of ['dark', 'light']) {
     `${restingContrast.toFixed(2)}:1`,
   );
   check(
-    `${theme}: the chip is bigger than the 10px cells beside it`,
-    resting.fontPx >= 11,
+    `${theme}: the chip is bigger than the cells beside it, whatever those are`,
+    resting.cellPx !== null && resting.fontPx > resting.cellPx,
+    `chip ${resting.fontPx}px vs cell ${resting.cellPx}px`,
+  );
+  // And an absolute floor as well as a relative one, so that shrinking BOTH
+  // could not satisfy the line above. 12px is the type scale's `control` step,
+  // which is where the chip sits; the cells sit on `meta`, one step below.
+  check(
+    `${theme}: and it is at least the scale's control step`,
+    resting.fontPx >= 12,
     `${resting.fontPx}px`,
   );
 
