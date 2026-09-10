@@ -20,6 +20,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { SmithApiError, type SmithClient } from '../../src/renderer/adapter/client.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
+import { buildKeySheet } from '../../src/renderer/keyboard/keysheet.js';
 import { DEFAULT_PANES, SIDEBAR_MAX, SIDEBAR_MIN } from '../../src/renderer/prefs/panes.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
 import type { CanvasSource } from '../../src/renderer/sources/source.js';
@@ -442,25 +443,69 @@ describe('jumps', () => {
     expect(focused()).toBe('alpha/a1');
   });
 
-  it('gt steps to the next session and stops at the end', () => {
+  /**
+   * `gt`/`gT` STEP OVER A PROJECT, not over a session.
+   *
+   * The sheet has captioned this pair `next project` / `previous project`
+   * since it was written, and the handler stepped one row of the flat session
+   * list — so with two sessions in one project `gt` did not leave the project
+   * at all, and where it did, it arrived by counting sessions rather than by
+   * looking for another project. `alpha` holds two sessions and `beta` one
+   * precisely so the two readings disagree: a session step from `a1` lands on
+   * `a2`, a project step lands on `b1`.
+   */
+  it('gt leaves the project rather than stepping one session', () => {
     render(<Canvas model={MODEL} />);
     press('g');
     press('t');
-    expect(focused()).toBe('alpha/a2');
-    press('g');
-    press('t');
+    expect(focused()).toBe('beta/b1');
     press('g');
     press('t'); // would wrap
     expect(focused()).toBe('beta/b1');
-    expect(screen.getByText('last session already')).toBeTruthy();
+    expect(screen.getByText('last project already')).toBeTruthy();
   });
 
-  it('gT stops at the first', () => {
+  /**
+   * And BACKWARDS it lands on the project's FIRST session, not on the last
+   * one it happens to meet walking up. `alpha` has two sessions, so the two
+   * are different rows: the entry point of a project is its top row — the
+   * most urgent session — whichever direction you arrive from.
+   */
+  it('gT lands on the first session of the previous project', () => {
     render(<Canvas model={MODEL} />);
+    press('G');
+    expect(focused()).toBe('beta/b1');
     press('g');
     press('T');
     expect(focused()).toBe('alpha/a1');
-    expect(screen.getByText('first session already')).toBeTruthy();
+    press('g');
+    press('T');
+    expect(focused()).toBe('alpha/a1');
+    expect(screen.getByText('first project already')).toBeTruthy();
+  });
+
+  /**
+   * THE CAPTION AND THE DISPATCH, HELD TO EACH OTHER.
+   *
+   * Read the chord out of the generated sheet by the sentence it prints, then
+   * press it and assert the PROJECT changed. A test that asserted the table
+   * holds `gt` would pass for any behaviour at all; this one fails if the
+   * caption promises a project and the key steps a session, which is exactly
+   * the state that shipped.
+   */
+  it('the row captioned "next project" moves to another project', () => {
+    const row = buildKeySheet()
+      .flatMap((group) => group.rows)
+      .find((one) => one.label.startsWith('next project'));
+    expect(row).toBeDefined();
+    render(<Canvas model={MODEL} />);
+    const before = focused().split('/')[0];
+    for (const key of [...(row?.keys ?? '')]) {
+      press(key);
+    }
+    const after = focused().split('/')[0];
+    expect(after).not.toBe('');
+    expect(after).not.toBe(before);
   });
 
   it('an abandoned chord moves nothing', () => {
@@ -476,7 +521,9 @@ describe('jumps', () => {
     press('g');
     press('Meta', { metaKey: true });
     press('t');
-    expect(focused()).toBe('alpha/a2');
+    // `gt` completing at all is the assertion; where it lands is
+    // `stepProject`'s business, pinned by the two cases above.
+    expect(focused()).toBe('beta/b1');
   });
 
   it('f arms jump mode, and its first label lands on the first node', () => {

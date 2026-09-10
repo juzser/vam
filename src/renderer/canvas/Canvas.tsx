@@ -3189,29 +3189,68 @@ function CanvasInner({
     );
   }, [focusedDecision]);
 
-  const stepSession = useCallback(
+  /**
+   * `gt` / `gT` — THE MOVE THAT THINKS IN PROJECTS.
+   *
+   * It used to be `stepSession`: `entries.findIndex(focused) ± 1`, one row of
+   * the flat session list, under a key sheet that has said `next project` /
+   * `previous project` since the sheet was written. With two sessions in one
+   * project `gt` did not leave the project at all, and where it did leave one
+   * it arrived by counting sessions rather than by looking for a project —
+   * while being an exact second spelling of `j`/`k`, which walk that same
+   * list one row at a time and say so. Two keys doing one thing under a
+   * caption for another is the shape this codebase keeps finding and
+   * deleting; the caption was the honest half, so the behaviour moved to it.
+   *
+   * WHERE IT LANDS: the target project's FIRST entry — its most urgent
+   * session, the top row the sidebar draws under that heading — whichever
+   * direction the cursor arrived from. Walking backwards meets the previous
+   * project's LAST session first, and landing there would make `gT` mean
+   * "the bottom of the project above" while `gt` means "the top of the one
+   * below": one key, two rules, told apart only by which way you pressed. A
+   * project's entry point is its top row, so `gt` then `gT` returns to the
+   * project you left rather than to the exact session — this pair navigates
+   * projects, and `j`/`k` are the keys that go back to a session.
+   *
+   * `entries` is project-major (`orderedSessions`), so a project's sessions
+   * are contiguous and "the next different project id" is genuinely the
+   * adjacent one; the landing lookup scans from the head rather than trusting
+   * that, so a repeated project id could at worst land on the earlier of the
+   * two rather than somewhere unrelated.
+   */
+  const stepProject = useCallback(
     (delta: 1 | -1) => {
-      const index = entries.findIndex((e) => e.session.id === focusedEntry?.session.id);
-      // -1 means the cursor is on nothing this list holds: an empty list, or a
-      // focus the filter or a refresh has just made unreachable. Left to the
-      // arithmetic below it became `-1 + 1 = 0`, which for an empty list read
-      // as "off the end" and announced a LAST session that does not exist,
-      // and for a non-empty one silently jumped to the first row with no word
-      // said. `hjkl` already answers this state honestly one branch away.
-      if (index === -1) {
+      // The cursor on nothing this list holds — an empty list, or a focus the
+      // filter or a refresh has just made unreachable. Left to arithmetic this
+      // read as "off the end" on an empty list and announced a LAST project
+      // that does not exist, and on a non-empty one jumped silently to the
+      // first row. `hjkl` answers this state honestly one branch away and so
+      // does this: the honesty predates the project fix and survives it.
+      const here = focusedEntry;
+      const index = here === null ? -1 : entries.findIndex((e) => e.session.id === here.session.id);
+      if (here === null || index === -1) {
         setStatus('no session matches');
         return;
       }
+      let target: string | null = null;
+      for (let at = index + delta; at >= 0 && at < entries.length; at += delta) {
+        const candidate = entries[at];
+        if (candidate !== undefined && candidate.project.id !== here.project.id) {
+          target = candidate.project.id;
+          break;
+        }
+      }
       // Clamped, not wrapped. Stopping dead is information: it tells you where
-      // you are. Wrapping to the far end tells you nothing.
-      const nextIndex = index + delta;
-      if (nextIndex < 0 || nextIndex >= entries.length) {
-        setStatus(delta > 0 ? 'last session already' : 'first session already');
+      // you are. Wrapping to the far end tells you nothing. And it is refused
+      // ALOUD, because a single-project workspace is exactly where this key
+      // can never act and the operator has no other way to be told.
+      if (target === null) {
+        setStatus(delta > 0 ? 'last project already' : 'first project already');
         return;
       }
-      const target = entries[nextIndex];
-      if (target !== undefined) {
-        focusSession(target.session.id);
+      const landing = entries.find((e) => e.project.id === target);
+      if (landing !== undefined) {
+        focusSession(landing.session.id);
       }
     },
     [entries, focusedEntry, focusSession],
@@ -3530,7 +3569,7 @@ function CanvasInner({
           return;
         }
         case 'project':
-          stepSession(action.delta);
+          stepProject(action.delta);
           return;
         case 'jump':
           setJumping(true);
@@ -3791,7 +3830,7 @@ function CanvasInner({
     beginComposing,
     closeSession,
     createSession,
-    stepSession,
+    stepProject,
     focusSession,
     mode,
     actionIndex,
