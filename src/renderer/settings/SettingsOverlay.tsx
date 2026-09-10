@@ -639,10 +639,26 @@ function SectionRail(props: NavProps) {
 
 /**
  * The narrow form: `DetailPanel`'s tab-bar geometry, reused rather than
- * re-invented. Not an icon rail — `lucide-react` has no glyph that
- * unambiguously means "Appearance" or "Remote" at 13px with no label, and a
- * symbol per section is a poor trade for 168px on a window size a desktop tool
- * is rarely at.
+ * re-invented.
+ *
+ * NEVER AN ICON RAIL, AT ANY WIDTH. `lucide-react` has no glyph that
+ * unambiguously means "Appearance" or "Remote" at 13px with no label, and the
+ * cost is not only that a sighted operator has to decode four small symbols:
+ * a tab whose only content is an unlabelled `<svg>` has NO ACCESSIBLE NAME AT
+ * ALL. This strip used to hide the label below `sm` with `hidden sm:inline`,
+ * and the tree Chromium built at 390px was measured as four anonymous entries
+ * — `tab / tab / tab / tab`. `e2e/settings-chrome-shots.mjs` holds the name at
+ * every width the strip is the nav at, because no unit test can: jsdom applies
+ * no stylesheet and so cannot see a breakpoint.
+ *
+ * THE LABEL THEREFORE NEVER HIDES; THE STRIP WRAPS INSTEAD. Measured in
+ * Chromium, four labelled tabs need 306px of strip and get 278px at a 320px
+ * viewport — one row genuinely does not fit down there, and at 390px it fits
+ * by 2px, with the labels butting against the edges. So below `sm` the four
+ * lay out two by two (134px a cell at 320px, against the 88px the widest —
+ * "Appearance", icon and gap included — actually needs), and from `sm` up they
+ * sit on one row with room to spare (135px a cell at 639px). At `md` the whole
+ * nav is handed to `SectionRail` and this component is not rendered.
  */
 function SectionStrip(props: NavProps) {
   return (
@@ -650,21 +666,20 @@ function SectionStrip(props: NavProps) {
       data-settings-nav
       role="tablist"
       aria-orientation="horizontal"
-      className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px] md:hidden"
+      className="mb-[11px] grid grid-cols-2 gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px] sm:grid-cols-4 md:hidden"
     >
       {SECTIONS.map(({ id, label, Icon }) => (
         <button
           key={id}
           {...tabProps(props, id)}
-          className={`flex h-[26px] flex-1 cursor-pointer items-center justify-center gap-[5px] rounded-[7px] text-[12px] ${FOCUS_RING} ${
+          className={`flex h-[26px] cursor-pointer items-center justify-center gap-[5px] rounded-[7px] text-[12px] ${FOCUS_RING} ${
             props.section === id
               ? 'bg-segment-on font-medium text-ink'
               : 'text-ink-dim hover:text-ink'
           }`}
         >
           <Icon size={13} strokeWidth={1.6} />
-          {/* Four labels at 12px do not fit 300px of strip. */}
-          <span className="hidden sm:inline">{label}</span>
+          {label}
         </button>
       ))}
     </div>

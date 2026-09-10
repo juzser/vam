@@ -14,7 +14,10 @@
  * reaches the element a `Note` hangs on, the computed contrast of the tip's
  * boundary against the surface it floats over in both themes, and -- since the
  * pane took its own colour token -- what a surface ACTUALLY PAINTS and whether
- * a swatch in the settings form reaches it). This driver builds the web bundle, serves it with
+ * a swatch in the settings form reaches it, and -- since the settings audit --
+ * whether the narrow settings nav has an ACCESSIBLE NAME at a breakpoint jsdom
+ * cannot see, and what the Remote section's buttons actually paint). This
+ * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
  * soon as any assertion throws — so CI can hold them.
  *
@@ -46,6 +49,7 @@ const GUARDS = [
   'turn-signal-shots',
   'tooltip-shots',
   'pane-colour-shots',
+  'settings-chrome-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);
