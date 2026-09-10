@@ -102,8 +102,9 @@ import type {
   SlashCommand,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import { normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
-import { questionKeys } from '../keyboard/question-keys.js';
+import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
 import { ShortcutTip } from '../keyboard/ShortcutTip.js';
 import { useHistoryReader } from '../sources/history-reader.js';
 import { describeFailure } from '../sources/port.js';
@@ -1964,65 +1965,70 @@ function QuestionCard({
     });
   };
 
-  // The list walks with the arrows, and jumps with the numbers; every option is
-  // a real button, so Enter and Space already mark one and Tab already leaves.
-  //
-  // The digits are BARE, and safely so because this listener is the listbox's:
-  // it can only fire while the keyboard is already inside the options list,
-  // which is where `i` puts it. The canvas grammar binds no bare digit at all,
-  // and the bare letters that do mean something there (`j`, `k`, and the rest)
-  // are letters. So a number here cannot be a keystroke meant for somewhere
-  // else -- and with no question open there is no list to hold focus.
+  /**
+   * The listbox's keys — ONE RESOLUTION, AND IT IS NOT THIS FILE'S.
+   *
+   * `resolveQuestionKey` (`keyboard/question-keys.ts`) turns a NORMALIZED
+   * keystroke into what the card should do, with the operator's own bindings
+   * ahead of the built-in digits and Enter/Space. That module carries the
+   * argument and audit F2, which is what this listener used to be: a second
+   * vocabulary (raw `event.key`) resolved in a second order (its own digits
+   * first), so a motion rebound onto `1` was silently lost and one rebound
+   * onto `Mod-j` could never match at all.
+   *
+   * The blanket "reject anything modified" guard is gone with it, and nothing
+   * is weaker for that: a normalized `Mod-c` is not `c` and a normalized
+   * `Mod-2` is not `2`, so the copy chord and the tab chords reach the window
+   * listener by construction instead of by this file listing them.
+   *
+   * The digits stay BARE and are still safe for the reason they always were:
+   * this listener only fires while the keyboard is already inside the options
+   * list, and the canvas grammar binds no bare digit.
+   */
   const onKeys = (event: KeyboardEvent<HTMLDivElement>) => {
-    // A MODIFIED key is never one of ours. Scope is what makes the bare keys
-    // below safe -- this listener only hears anything while the keyboard is
-    // already in the options list -- but scope says nothing about modifiers,
-    // and reading `event.key` alone made `Cmd+C` match the `c` branch (killing
-    // the copy and opening the composer) and `Cmd+2` mark an option on its way
-    // to the chord layer. A chord is not text and not a pick, so it belongs to
-    // the grammar and this stands aside, which is the same rule the prompt box
-    // already follows.
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
-    // `c` for chat, the way out of the picker and into prose. Scoped like the
-    // digits: the listener is the listbox's, so it only hears a key while the
-    // keyboard is already in the options list -- which is where `i` puts it.
-    // The entry itself is a button outside the list, reached by Tab or mouse
-    // and activated by Enter, Space or a click, like any other.
-    if (keys.chat.includes(event.key)) {
+    const action = resolveQuestionKey(normalizeKey(event));
+    if (action === null) return;
+    const buttons = [
+      ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-question-option]'),
+    ];
+    if (action.kind === 'chat') {
+      // The way out of the picker and into prose. The entry itself is a button
+      // outside the list, reached by Tab or mouse and activated by Enter,
+      // Space or a click, like any other.
       event.preventDefault();
       onChat();
       return;
     }
-    const buttons = [
-      ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-question-option]'),
-    ];
-    if (/^[1-9]$/.test(event.key)) {
-      const at = Number(event.key) - 1;
-      const option = question?.options[at];
+    if (action.kind === 'mark') {
+      const option = question?.options[action.at];
       if (option === undefined) return;
       event.preventDefault();
       toggle(option.label);
       // The keyboard follows the mark, so the arrows walk on from where you
       // landed rather than from wherever you were.
-      buttons[at]?.focus();
+      buttons[action.at]?.focus();
       return;
     }
     /**
      * `j`/`k` walk the options and `h`/`l` walk the STEPS — the Insert half of
-     * the operator's table, with both axes meaning something now.
+     * the operator's table, with both axes meaning something.
      *
      * The horizontal pair used to do nothing at all, deliberately: unhandled,
-     * it falls through to the canvas grammar and walks the node graph under a
-     * pane the operator is reading, which is the same "the keys work, they
-     * just do the wrong thing" failure the mode naming exists to end. It is
-     * still stopped from reaching the canvas; a set of questions simply gives
-     * it the meaning the vertical pair always had, and it is the obvious one
-     * -- down the options, across the questions. `H` — capital, a different key — is still the way
-     * back to Select, and Escape still leaves.
+     * it falls through to the canvas grammar and walks under a pane the
+     * operator is reading, which is the same "the keys work, they just do the
+     * wrong thing" failure the mode naming exists to end. It is still stopped
+     * from reaching the canvas; a set of questions simply gives it the meaning
+     * the vertical pair always had — down the options, across the questions.
+     * `H` (capital, a different key) is still the way back to Select, and
+     * Escape still leaves.
+     *
+     * BEFORE the option-cursor check below, because a step whose question is
+     * already answered draws no options at all: gating the step walk on a
+     * focused option would strand the keyboard on that step.
      */
-    if (keys.prev.includes(event.key) || keys.next.includes(event.key)) {
+    if (action.kind === 'walkStep') {
       event.preventDefault();
-      walk(keys.next.includes(event.key) ? 1 : -1);
+      walk(action.delta);
       return;
     }
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -2039,19 +2045,15 @@ function QuestionCard({
      * in the list — mark this option — because the canvas listener stands
      * aside for a key that has already been answered.
      */
-    if (event.key === 'Enter' || event.key === ' ') {
+    if (action.kind === 'toggle') {
       const option = question?.options[at];
       if (option === undefined) return;
       event.preventDefault();
       toggle(option.label);
       return;
     }
-    const down = keys.down.includes(event.key);
-    const up = keys.up.includes(event.key);
-    if (!down && !up) return;
     event.preventDefault();
-    const step = down ? 1 : -1;
-    buttons[(at + step + buttons.length) % buttons.length]?.focus();
+    buttons[(at + action.delta + buttons.length) % buttons.length]?.focus();
   };
 
   if (question === undefined) return null;
@@ -2087,12 +2089,20 @@ function QuestionCard({
           // options list carries them, and a step whose question is already
           // answered HAS no options list. Without this the keyboard reaches
           // that step and cannot leave it.
+          //
+          // THROUGH THE SAME RESOLUTION THE LIST USES (audit F2). It read the
+          // literals `h`, `l` and the two arrows, so an operator who moved the
+          // horizontal motion kept a strip answering the keys they had moved
+          // AWAY from and ignoring the ones they had moved to — the identical
+          // defect `question-keys.ts` was written to end one element over, in
+          // a second copy nobody looked at. Only `walkStep` is taken: the
+          // tabs are real buttons, so Enter and Space activate them natively
+          // and a `toggle` claimed here would cancel that.
           onKeyDown={(event) => {
-            if (event.metaKey || event.ctrlKey || event.altKey) return;
-            const forward = event.key === 'l' || event.key === 'ArrowRight';
-            if (!forward && event.key !== 'h' && event.key !== 'ArrowLeft') return;
+            const action = resolveQuestionKey(normalizeKey(event));
+            if (action?.kind !== 'walkStep') return;
             event.preventDefault();
-            walk(forward ? 1 : -1);
+            walk(action.delta);
           }}
           className="flex flex-wrap items-center gap-1 border-line border-b pb-1.5"
         >
