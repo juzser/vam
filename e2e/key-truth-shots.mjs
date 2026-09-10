@@ -735,9 +735,7 @@ if (settingsOpen) {
     const note = document.querySelector('[data-binding-clash]');
     const slot = document.querySelector('[data-binding-slot="rename:0"]');
     const noteBox = note?.getBoundingClientRect() ?? null;
-    const panel = document
-      .querySelector('[data-settings-overlay]')
-      ?.querySelector('[data-settings-panel-scroll], .overflow-y-auto');
+    const panel = document.querySelector('[data-settings-scroll]');
     const panelBox = panel?.getBoundingClientRect() ?? null;
     return {
       text: note?.textContent ?? '',
@@ -778,6 +776,126 @@ if (settingsOpen) {
   await page.screenshot({ path: `${outDir}/key-truth-dead-binding-slot.png` });
   console.log(`${outDir}/key-truth-dead-binding-slot.png`);
   await page.keyboard.press('Escape');
+}
+
+
+// AND THE REFUSAL ITSELF, driven the way an operator drives it. The map is
+// the one F3's first two steps leave behind — `rename` moved to a free key,
+// `icon` on the freed `r` — and the third step is the click that used to hand
+// `r` to two actions in silence. A unit test can prove the write did not
+// happen; only this can prove the control is reachable, the message lands on
+// screen, and the row still shows the binding it refused to change.
+await page.addInitScript(() => {
+  window.localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({ keyBindings: { rename: ['b'], icon: ['r'] } }),
+  );
+});
+await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-session-row]');
+await page.keyboard.press(',');
+const editorOpen = await settle(
+  () => document.querySelector('[data-settings-overlay]') !== null,
+  undefined,
+  'the settings overlay opens for the refusal case',
+);
+if (editorOpen) {
+  await page.locator('[data-settings-nav-item="keyboard"]').click();
+  await settle(
+    () => document.querySelector('[data-binding-reset="rename"]') !== null,
+    undefined,
+    'the moved binding offers a reset',
+  );
+  await page.locator('[data-binding-reset="rename"]').click();
+  const refused = await settle(
+    () => document.querySelector('[data-binding-message]') !== null,
+    undefined,
+    'the reset that would take `r` is refused out loud',
+  );
+  if (refused) {
+    const said = await page.evaluate(() => {
+      const note = document.querySelector('[data-binding-message]');
+      const box = note?.getBoundingClientRect() ?? null;
+      // WHERE IT IS, not merely that it exists. The reset control that
+      // produced it can be far down a scrolling panel — clicking it scrolls
+      // the row into view — and a refusal painted above the fold of that
+      // panel is a refusal the operator never sees. Measured against the
+      // scrollport, because only a real layout knows.
+      const scroller = document.querySelector('[data-settings-scroll]');
+      const view = scroller?.getBoundingClientRect() ?? null;
+      // And what is actually PAINTED at the top of that scrollport: a bar
+      // pinned there still fails if a row scrolling under it comes out on
+      // top, and a scrollport's own padding is a strip a naive `top: 0`
+      // leaves uncovered — measured, because both were true of the first
+      // version of this bar.
+      return {
+        text: note?.textContent ?? '',
+        painted: box !== null && box.width > 0 && box.height > 0,
+        inView:
+          box !== null && view !== null && box.top >= view.top - 1 && box.bottom <= view.bottom + 1,
+        slot: document.querySelector('[data-binding-slot="rename:0"]')?.textContent ?? '',
+        stillClaimed: document.querySelector('[data-binding-clash]') === null,
+      };
+    });
+    console.log('refused reset:', JSON.stringify(said));
+    check(
+      'the refusal names the key and the action that owns it',
+      said.text.includes('"r"') && said.text.includes('icon'),
+      said.text,
+    );
+    check('and a way out of it', said.text.includes('reset shortcuts'), said.text);
+    check('and it is painted', said.painted, 'the message has no visible box');
+    check(
+      'and it is on screen after the click that scrolled the panel',
+      said.inView,
+      'the refusal is outside the panel the operator is looking at',
+    );
+    await page.screenshot({ path: `${outDir}/key-truth-reset-refused.png` });
+    console.log(`${outDir}/key-truth-reset-refused.png`);
+    // AND IT IS OPAQUE — measured in pixels, because the two cheap ways to
+    // ask are both vacuous. `elementFromPoint` answers about HIT TESTING and
+    // returns a transparent element happily; reading `backgroundColor` back
+    // off the class that set it proves only that somebody typed the rule.
+    // So: photograph the pinned strip at two scroll offsets. The bar's own
+    // content is identical in both and it does not move, so identical bytes
+    // mean nothing behind it reached the screen — and a transparent bar
+    // shows two different rows and two different images.
+    const strip = await page.evaluate(() => {
+      const note = document.querySelector('[data-binding-message]');
+      const bar = note?.parentElement?.getBoundingClientRect() ?? null;
+      return bar === null
+        ? null
+        : { x: bar.x + 8, y: bar.y + 1, width: Math.max(bar.width - 16, 1), height: bar.height - 2 };
+    });
+    const shotAt = async (top) => {
+      await page.evaluate((y) => {
+        const scroller = document.querySelector('[data-settings-scroll]');
+        if (scroller !== null) scroller.scrollTop = y;
+      }, top);
+      await page.waitForTimeout(120);
+      return page.screenshot({ clip: strip });
+    };
+    if (strip === null) {
+      check('the pinned refusal can be photographed', false, 'no bar to measure');
+    } else {
+      const [low, high] = [await shotAt(240), await shotAt(420)];
+      check(
+        'and it is opaque — two scroll offsets photograph the same strip',
+        low.equals(high),
+        'the rows behind the pinned refusal reach the screen',
+      );
+    }
+    check(
+      'the row still shows the binding the reset did not change',
+      said.slot.includes('b'),
+      `the slot reads "${said.slot}"`,
+    );
+    check(
+      'and no key ended up claimed twice',
+      said.stillClaimed,
+      'the refusal let the clash through anyway',
+    );
+  }
 }
 
 await browser.close();

@@ -347,7 +347,12 @@ export function SettingsOverlay({
             flex column, and the fixed height above becomes an overflow. */}
         <div className="flex min-h-0 flex-1">
           {wide ? <SectionRail section={section} onGo={go} onStep={step} /> : null}
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {/* Named, because it is the scrollport a `sticky` child measures
+              against and the box an e2e guard has to compare a message to:
+              "the refusal is painted" and "the refusal is where the operator
+              is looking" are different questions, and the second one needs
+              this element. */}
+          <div data-settings-scroll className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {wide ? null : <SectionStrip section={section} onGo={go} onStep={step} />}
 
             <Panel
@@ -518,35 +523,49 @@ export function SettingsOverlay({
               active={section === 'keyboard'}
               hint="click a key and press the one you want — Escape cancels"
             >
-              {message === '' ? null : (
-                <p data-binding-message className="mb-2 text-waiting text-xs">
-                  {message}
-                </p>
-              )}
-              {/* A STANDING notice, not a reaction to a click: the editor can
-                  no longer MINT a contested key, but it can be opened over one
-                  — a stored override collides with a shipped key the day a
-                  later vam moves one onto it, with nothing hand-edited. That
-                  state used to be legible only by pressing the key and
-                  watching the wrong thing happen. `polite` rather than
-                  `assertive`: it is a report about the list below, not about
-                  the operator's last keystroke. */}
-              {clashes.length === 0 ? null : (
-                <p
-                  data-binding-clash
-                  role="status"
-                  aria-live="polite"
-                  className="mb-2 text-[11px] text-waiting"
-                >
-                  {clashes
-                    .map(
-                      (clash) =>
-                        `two actions claim "${clash.chord}" — ${labelFor(prefs.keyBindings, clash.winner)} has it, ${clash.shadowed
-                          .map((id) => labelFor(prefs.keyBindings, id))
-                          .join(', ')} does not.`,
-                    )
-                    .join(' ')}
-                </p>
+              {/* STICKY, and that is the whole point of the wrapper.
+                  MEASURED, not designed: the reset control that produces a
+                  refusal can be thirty rows down a panel that scrolls, and
+                  clicking it scrolls that row into view — so a refusal drawn
+                  at the top of the section was painted somewhere the operator
+                  was not looking. A silent refusal is the same failure as a
+                  silent theft, one step later. `bg-panel` and the negative
+                  margins are what stop the rows scrolling under it from
+                  reading through it and past its edges. */}
+              {message === '' && clashes.length === 0 ? null : (
+                <div className="-mx-5 -mt-4 sticky -top-4 z-10 bg-panel px-5 pt-4 pb-2">
+                  {message === '' ? null : (
+                    <p data-binding-message className="text-waiting text-xs">
+                      {message}
+                    </p>
+                  )}
+                  {/* A STANDING notice, not a reaction to a click: the editor
+                      can no longer MINT a contested key, but it can be opened
+                      over one — a stored override collides with a shipped key
+                      the day a later vam moves one onto it, with nothing
+                      hand-edited. That state used to be legible only by
+                      pressing the key and watching the wrong thing happen.
+                      `polite` rather than `assertive`: it is a report about
+                      the list below, not about the operator's last
+                      keystroke. */}
+                  {clashes.length === 0 ? null : (
+                    <p
+                      data-binding-clash
+                      role="status"
+                      aria-live="polite"
+                      className="text-[11px] text-waiting"
+                    >
+                      {clashes
+                        .map(
+                          (clash) =>
+                            `two actions claim "${clash.chord}" — ${labelFor(prefs.keyBindings, clash.winner)} has it, ${clash.shadowed
+                              .map((id) => labelFor(prefs.keyBindings, id))
+                              .join(', ')} does not.`,
+                        )
+                        .join(' ')}
+                    </p>
+                  )}
+                </div>
               )}
               <div className="mb-2">
                 {Object.keys(prefs.keyBindings).length === 0 ? null : (
