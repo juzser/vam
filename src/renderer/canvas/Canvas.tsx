@@ -1827,6 +1827,18 @@ function CanvasInner({
   /** Removals that cannot be stored, because the project has no source to key
    *  them under. See `hiddenProjects`. */
   const [hiddenSourceless, setHiddenSourceless] = useState<readonly string[]>([]);
+  /**
+   * Folds that cannot be stored, because the project has no source to key them
+   * under. `hiddenSourceless` one gesture over, and it exists for that reason
+   * and one more: `SessionList.collapsedProjects` is OPTIONAL with a fallback
+   * to component state, and passing it turns that fallback off for EVERY
+   * project — so a canvas that passed only the keyed folds would leave a
+   * sourceless project with a fold control that did nothing. Kept for the
+   * session rather than persisted: there is no bucket to write it under, and a
+   * fold forgotten on reload is a far smaller thing than one that cannot be
+   * made at all.
+   */
+  const [collapsedSourceless, setCollapsedSourceless] = useState<readonly string[]>([]);
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
 
