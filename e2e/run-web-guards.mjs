@@ -26,7 +26,11 @@
  * produce rather than one arrow for two, and whether a focused field draws a
  * ring an operator can see, measured after a real Tab press because
  * `:focus-visible` is a heuristic about the last input device and no
- * programmatic `.focus()` satisfies it). This
+ * programmatic `.focus()` satisfies it), and -- since the canvas-truth audit --
+ * whether a jump label is PAINTED on the row it addresses and lands on top of
+ * it rather than behind its title, and whether a mode change actually runs an
+ * animation, which is `Element.getAnimations()` and exists in no unit
+ * environment at all. This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
  * soon as any assertion throws — so CI can hold them.
@@ -63,6 +67,7 @@ const GUARDS = [
   'settings-chrome-shots',
   'favicon-shots',
   'key-truth-shots',
+  'mode-truth-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);
