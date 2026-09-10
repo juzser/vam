@@ -14,7 +14,13 @@
  *
  *  - `--vam-raised`: the only `ink-faint`-on-`raised` sites pair
  *    `hover:bg-raised` with `hover:text-ink`, so the ground and the ink change
- *    together and the combination never renders.
+ *    together and the combination never renders. That sentence was FALSE for
+ *    one release: PR #288 left the question card's options and its fold row on
+ *    `bg-raised` while their number, preview and "marked, not sent" stayed
+ *    `ink-faint` -- the pairing rule held everywhere the comment had looked
+ *    and nowhere it had not. Those sites now paint `line-strong` and lift
+ *    their ink with it (`OPTION_QUIET_INK`), so the exclusion is true again;
+ *    `surface-elevation.test.ts` is what holds the new pair to its numbers.
  *  - `--vam-segment-on`: `ink-faint` reaches it only through a `disabled:`
  *    variant while the fill arrives on `hover:`, and a disabled button takes
  *    no hover fill.

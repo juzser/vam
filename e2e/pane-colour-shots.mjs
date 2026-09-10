@@ -400,6 +400,209 @@ for (const theme of ['dark', 'light']) {
   );
 }
 
+// ----------------------------------- THE ANSWER OPTIONS, INSIDE THEIR CARD
+//
+// The regression PR #288 left behind, and the one flow where it costs the
+// most: a question card is what an operator uses to unblock a waiting agent.
+// #288 repointed the card from `panel` to `card` (#1d1d1d in dark) and moved
+// most hover fills with it, but the options kept `hover:bg-raised` /
+// `border-running bg-raised` -- and `--vam-raised` is #1a1a1a, DARKER than
+// the card it sits inside. Measured here before the fix: 1.032:1 below its
+// own ground. So touching an answer punched it below the card, which is the
+// exact hole #288 existed to remove, one level further in.
+//
+// THE SWEEP ABOVE CANNOT SEE THIS and that is why this block exists. It
+// compares every fill to THE PANE, and `raised` really is above the pane --
+// the option was only a hole relative to its own card. The claim measured
+// here is the general one: a fill is elevated relative to THE SURFACE IT IS
+// DRAWN ON, whatever that surface happens to be.
+//
+// AND THE INK IS MEASURED WITH IT, because the fill cannot be chosen without
+// it. A card is already at the ceiling `--vam-ink-quiet` allows (styles.css
+// says so at `--vam-card`), so any fill a rung above it puts the option's
+// quietest greys under 4.5:1 -- `ink-faint` measures 4.10:1 on #262626. The
+// fix is a fill AND the inks that read on it, so both halves are held here:
+// a fill that moves without the ink following reddens the ink checks, and an
+// ink lift without the fill reddens the elevation checks.
+const OPTION_SESSION = 'vam-build-1';
+
+/**
+ * Which way a fill has to move to read as raised, per theme.
+ *
+ * NOT symmetry, and not a shortcut. In dark the palette climbs
+ * pane < card < control, so an interactive fill on a card is LIGHTER than it.
+ * In light the card is #ffffff -- the lightest colour there is -- so nothing
+ * can sit above it and the theme's own controls darken instead (`segment-on`,
+ * `line-strong` and every `[data-tap-skin]` hover in `DetailPanel.tsx` do it
+ * already). Writing "lighter in both themes" would demand a colour that does
+ * not exist; writing "different in both themes" would accept the 1.032:1 this
+ * block was written to catch. So the direction is per theme and is stated.
+ */
+const OPTION_DIRECTION = { dark: 'lighter', light: 'darker' };
+
+/**
+ * Read one option's fill and every ink painted inside it, against ITS OWN
+ * ground rather than against the pane.
+ *
+ * `bothOpaque` gates every number, for the reason the whole file does: two
+ * transparent nodes compare equal forever, and this repo has already shipped
+ * a guard that passed on exactly that.
+ */
+const optionPaint = (selector) =>
+  page.evaluate((sel) => {
+    const { opaque, lum, ratio, deltaE } = window.vamColour;
+    const el = document.querySelector(sel);
+    const card = document.querySelector('[data-question]');
+    if (el === null || card === null) return null;
+    const fill = getComputedStyle(el).backgroundColor;
+    const cardFill = getComputedStyle(card).backgroundColor;
+    const paneFill = getComputedStyle(document.querySelector('[data-action-pane]')).backgroundColor;
+    const both = opaque(fill) && opaque(cardFill);
+    // THE INK CORPUS: every element inside the option that draws its own
+    // glyphs. A node whose text is only its children's is skipped, or the
+    // option's own wrapper would be counted once per descendant and the
+    // "examined" number would stop meaning anything.
+    const inks = [];
+    for (const node of [el, ...el.querySelectorAll('*')]) {
+      const own = [...node.childNodes]
+        .filter((n) => n.nodeType === Node.TEXT_NODE)
+        .map((n) => n.textContent ?? '')
+        .join('')
+        .trim();
+      if (own === '') continue;
+      const colour = getComputedStyle(node).color;
+      inks.push({
+        text: own.slice(0, 28),
+        colour,
+        opaque: opaque(colour) && both,
+        ratio: opaque(colour) && both ? Number(ratio(colour, fill).toFixed(3)) : null,
+      });
+    }
+    return {
+      fill,
+      cardFill,
+      // The card must itself be raised off the pane, or "the option is above
+      // the card" is a claim about a surface that is not there.
+      cardIsRaised: opaque(cardFill) && opaque(paneFill) && lum(cardFill) > lum(paneFill),
+      bothOpaque: both,
+      ownFill: both && fill !== cardFill,
+      lighter: both ? lum(fill) > lum(cardFill) : null,
+      darker: both ? lum(fill) < lum(cardFill) : null,
+      ratio: both ? Number(ratio(fill, cardFill).toFixed(3)) : null,
+      distance: both ? Number(deltaE(fill, cardFill).toFixed(2)) : null,
+      // The step the CARD itself makes over the pane, in this theme's own
+      // units -- the floor below is calibrated against it rather than against
+      // a number typed here, so neither theme is held to the other's palette.
+      cardDistance:
+        opaque(cardFill) && opaque(paneFill) ? Number(deltaE(cardFill, paneFill).toFixed(2)) : null,
+      inks,
+    };
+  }, selector);
+
+/** One measured surface inside the card, asserted the same way every time. */
+const holdsUp = (label, seen) => {
+  console.log(`  ${label}: ${JSON.stringify(seen)}`);
+  check(
+    `${label}: the option and its card both paint an opaque fill, and not the same one`,
+    seen !== null && seen.bothOpaque && seen.ownFill && seen.cardIsRaised,
+    JSON.stringify(seen),
+  );
+  if (seen === null || !seen.bothOpaque) return;
+  const want = OPTION_DIRECTION[seen.theme];
+  check(
+    `${label}: it reads as ${want} than the card it is drawn inside`,
+    seen[want] === true,
+    `${seen.fill} on ${seen.cardFill} — ${seen.ratio}:1, lighter=${seen.lighter}`,
+  );
+  // At least as distinct from its card as the card is from the pane. A
+  // self-calibrating floor: the light theme cannot reach a dark theme's ratio
+  // and the dark theme cannot reach a light theme's distance, but "as visible
+  // a step as the card itself makes" is a bar both can be held to.
+  check(
+    `${label}: by at least the step the card itself makes (ΔE ${seen.cardDistance})`,
+    seen.distance !== null && seen.cardDistance !== null && seen.distance >= seen.cardDistance,
+    `ΔE ${seen.distance} vs the card's own ΔE ${seen.cardDistance}`,
+  );
+  check(
+    `${label}: the sweep found ink to measure`,
+    seen.inks.length >= 2,
+    `${seen.inks.length} inked node(s)`,
+  );
+  const faint = seen.inks.filter((i) => !i.opaque || i.ratio < 4.5);
+  check(
+    `${label}: every word painted on it clears 4.5:1`,
+    seen.inks.length >= 2 && faint.length === 0,
+    faint.map((i) => `${i.ratio}:1 ${i.colour} "${i.text}"`).join(' ; '),
+  );
+};
+
+for (const theme of ['dark', 'light']) {
+  await page.evaluate((t) => document.documentElement.classList.toggle('light', t === 'light'), theme);
+  console.log(`\n=== ${theme}: the question card's options`);
+  // Re-selected per theme so the card REMOUNTS: its marks are component
+  // state, and a mark left over from the previous pass would make the second
+  // theme measure a different screen from the first.
+  await page.locator(`[data-session-row="${PLAIN_SESSION}"]`).first().click();
+  await page.waitForTimeout(150);
+  await page.locator(`[data-session-row="${OPTION_SESSION}"]`).first().click();
+  await page.waitForSelector('[data-question-option]');
+  await page.waitForTimeout(250);
+
+  // AT REST it has no fill of its own, which is the state the two below are
+  // a step away from. Asserted rather than assumed: an option that painted
+  // the card's own fill at rest would make "hovered is a step up" true for
+  // free.
+  const resting = await fillOf('[data-question-option]');
+  check(
+    `${theme}: an unmarked option paints no fill of its own at rest`,
+    resting !== null && !/^rgb\(\s*\d/.test(resting),
+    String(resting),
+  );
+
+  // HOVERED. The option under the pointer is the one the operator is about
+  // to answer with, and this is the state that punched through the card.
+  await page.locator('[data-question-option]').first().hover();
+  await page.waitForTimeout(200);
+  holdsUp(`${theme}/hovered`, {
+    ...(await optionPaint('[data-question-option]')),
+    theme,
+  });
+
+  // MARKED, measured on the MULTI-select step: a single-select pick folds its
+  // list away behind the summary row (`foldedStep`), so there is no marked
+  // option left to read. The second step of this call is multi-select and
+  // stays open, which is why the walk is here rather than a click on step one.
+  await page.locator('[data-question-step]').nth(1).click();
+  await page.waitForTimeout(200);
+  await page.locator('[data-question-option]').first().click();
+  await page.waitForSelector('[data-question-option][data-picked="true"]');
+  await page.mouse.move(5, 5);
+  await page.waitForTimeout(200);
+  holdsUp(`${theme}/marked`, {
+    ...(await optionPaint('[data-question-option][data-picked="true"]')),
+    theme,
+  });
+
+  // AND THE FOLD. A single-select pick replaces the list with one summary
+  // row, which is a resting fill on the same card and wears the same defect
+  // -- with no hover state to hide behind.
+  await page.locator('[data-question-step]').first().click();
+  await page.waitForTimeout(200);
+  await page.locator('[data-question-option]').first().click();
+  await page.waitForSelector('[data-question-collapsed]');
+  await page.mouse.move(5, 5);
+  await page.waitForTimeout(200);
+  holdsUp(`${theme}/folded`, {
+    ...(await optionPaint('[data-question-collapsed]')),
+    theme,
+  });
+
+  await page.locator('[data-question]').screenshot({
+    path: `${outDir}/question-options-${theme}.png`,
+  });
+  console.log(`${outDir}/question-options-${theme}.png`);
+}
+
 await page.evaluate(() => document.documentElement.classList.remove('light'));
 await page.locator(`[data-session-row="${QUESTION_SESSION}"]`).first().click();
 await page.waitForTimeout(300);

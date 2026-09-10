@@ -1456,6 +1456,56 @@ const NUMBERED_OPTIONS: readonly (string | undefined)[] = Array.from({ length: 9
 );
 
 /**
+ * THE FILL A CONTROL ON THIS CARD TAKES WHEN IT IS TOUCHED, and the reason it
+ * is not `raised`.
+ *
+ * PR 288 repointed the question card from `bg-panel` to `bg-card` and moved
+ * most hover fills with it. The options were missed, and the miss inverted
+ * them: `--vam-raised` is a rung above `panel`, which is what the card used to
+ * be, and a rung BELOW `card`, which is what it is now. Measured on the
+ * painted node, a hovered option sat at 1.032:1 UNDER the card holding it. So
+ * touching an answer punched it below its own surface -- the exact hole PR 288
+ * existed to remove, one level further in, in the flow that unblocks an agent
+ * waiting on a reply.
+ *
+ * `line-strong` rather than a token of its own, because this file already
+ * paints exactly this object: every `[data-tap-skin]` in the composer is
+ * `bg-card hover:bg-line-strong`, which IS "a control on a card, touched". A
+ * second name for a value already spent on that role would be two names for
+ * one decision.
+ *
+ * DIRECTION IS PER THEME AND THAT IS NOT A DODGE. Dark climbs
+ * pane < card < control, so this fill is lighter than the card: 1.114:1, ΔE
+ * 4.39, against the card's own step off the pane of ΔE 3.03. Light's card is
+ * the theme's white -- there is nothing above it -- so its controls darken
+ * instead, as `segment-on`, every tap skin here and the artboard's own answer
+ * pills already do: ΔE 14.63 against a card step of 6.24.
+ * `e2e/pane-colour-shots.mjs` re-measures every one of those numbers on the
+ * painted node, hovered, marked and folded, in both themes.
+ */
+const OPTION_FILL = 'bg-line-strong';
+
+/**
+ * THE OTHER HALF OF THE SAME DECISION, and it cannot be dropped.
+ *
+ * A card is already at the ceiling its own captions allow -- `styles.css` says
+ * so where it fixes `--vam-card`: `ink-quiet`/`ink-faint` measure 4.568:1
+ * there and fail one step lighter. So ANY fill a rung above the card puts an
+ * option's quietest greys under WCAG 1.4.3, and measurement agrees: on
+ * `line-strong` the faint grey reads 4.101:1 in dark and 3.691:1 in light.
+ *
+ * The fill and the ink therefore move TOGETHER. The number and the preview
+ * lift to `ink-dim` (5.857:1 dark, 5.304:1 light) exactly while the fill is
+ * under them, which keeps the resting hierarchy -- label, then description,
+ * then the number and the preview -- that painting them `ink-dim` outright
+ * would collapse. Both halves are held separately by the e2e guard: the fill
+ * without the lift reddens the ink checks, the lift without the fill reddens
+ * the elevation checks.
+ */
+const OPTION_QUIET_INK =
+  'text-ink-faint group-hover:text-ink-dim group-data-[picked=true]:text-ink-dim';
+
+/**
  * What Submit is allowed to claim, in the operator's words.
  *
  * ONE SENTENCE PER OUTCOME, and they are not interchangeable: a pairing vam
@@ -2027,11 +2077,15 @@ function QuestionCard({
                and it must not be readable as a receipt. */
             <div
               data-question-collapsed
-              className="flex items-baseline gap-2 rounded-[6px] border border-running bg-raised px-1.5 py-1"
+              className={`flex items-baseline gap-2 rounded-[6px] border border-running px-1.5 py-1 ${OPTION_FILL}`}
             >
               <span data-question-marked className="min-w-0 flex-1 text-[12px] text-ink">
                 {picked.join(', ')}
-                <span className="text-[11px] text-ink-faint"> — marked, not sent</span>
+                {/* `ink-dim`, not `ink-faint`: this row RESTS on the fill,
+                    so there is no hover state to lift its ink and
+                    `OPTION_QUIET_INK` would never fire. 4.10:1 at faint,
+                    5.86:1 here. */}
+                <span className="text-[11px] text-ink-dim"> — marked, not sent</span>
               </span>
               <button
                 type="button"
@@ -2065,15 +2119,17 @@ function QuestionCard({
                   data-picked={picked.includes(option.label) ? 'true' : undefined}
                   onClick={(event) => toggle(option.label, event.detail > 0)}
                   className={[
-                    'vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                    // `group` is what lets the quiet spans below hear about a
+                    // hover on this button -- see `OPTION_QUIET_INK`.
+                    'group vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
                     picked.includes(option.label)
-                      ? 'border-running bg-raised'
-                      : 'border-line hover:bg-raised',
+                      ? `border-running ${OPTION_FILL}`
+                      : `border-line hover:${OPTION_FILL}`,
                   ].join(' ')}
                 >
                   <span className="flex max-w-full items-baseline gap-1.5 text-[12px] text-ink">
                     {NUMBERED_OPTIONS[index] !== undefined && (
-                      <span className="text-[11px] text-ink-faint tabular-nums">
+                      <span className={`text-[11px] tabular-nums ${OPTION_QUIET_INK}`}>
                         {NUMBERED_OPTIONS[index]}
                       </span>
                     )}
@@ -2094,7 +2150,7 @@ function QuestionCard({
                   {(option.preview ?? null) !== null && (
                     <span
                       data-question-preview
-                      className="max-w-full truncate font-mono text-[11px] text-ink-faint"
+                      className={`max-w-full truncate font-mono text-[11px] ${OPTION_QUIET_INK}`}
                     >
                       {option.preview}
                     </span>
@@ -2113,18 +2169,21 @@ function QuestionCard({
             data-question-chat
             data-question-synthetic="true"
             onClick={onChat}
-            className="vam-tap flex cursor-pointer items-baseline gap-1.5 rounded-[6px] border border-line border-dashed px-1.5 py-1 text-left hover:bg-raised"
+            className={`group vam-tap flex cursor-pointer items-baseline gap-1.5 rounded-[6px] border border-line border-dashed px-1.5 py-1 text-left hover:${OPTION_FILL}`}
           >
             {/* THE HINT COMES OFF THE SAME TABLE THE HANDLER READS, and is
               not printed at all when the key is not held -- a caption naming a
               key that does nothing is the defect, not the absence of one. */}
             {keys.chat[0] !== undefined && (
-              <span data-question-chat-key className="text-[11px] text-ink-faint tabular-nums">
+              <span
+                data-question-chat-key
+                className={`text-[11px] tabular-nums ${OPTION_QUIET_INK}`}
+              >
                 {keys.chat[0]}
               </span>
             )}
             <span className="min-w-0 text-[12px] text-ink">Chat about this</span>
-            <span className="min-w-0 text-[11.5px] text-ink-faint">
+            <span className={`min-w-0 text-[11.5px] ${OPTION_QUIET_INK}`}>
               — vam adds this one; it opens the box below
             </span>
           </button>
@@ -2146,7 +2205,7 @@ function QuestionCard({
               'rounded-[6px] border px-1.5 py-1 text-[12px]',
               unmarked.length > 0 || sending
                 ? 'cursor-default border-line text-ink-faint'
-                : 'cursor-pointer border-running text-ink hover:bg-raised',
+                : `cursor-pointer border-running text-ink hover:${OPTION_FILL}`,
             ].join(' ')}
           >
             {sending ? 'Submitting…' : 'Submit'}
@@ -4735,7 +4794,10 @@ export function DetailPanel(props: DetailPanelProps) {
               {attachedName !== null && (
                 <span
                   data-attach-chip
-                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[11px] text-ink-dim"
+                  // `line-strong`, not `raised`: this chip sits inside
+                  // `data-prompt-box`, which is `bg-card` -- the same
+                  // inversion the answer options wore. See `OPTION_FILL`.
+                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-[11px] text-ink-dim"
                 >
                   <span className="truncate">{attachedName}</span>
                   <button
@@ -4780,7 +4842,8 @@ export function DetailPanel(props: DetailPanelProps) {
               {attachedImage !== null && (
                 <span
                   data-attach-image-chip
-                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[11px] text-ink-dim"
+                  // The same card, the same inversion -- see `data-attach-chip`.
+                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-[11px] text-ink-dim"
                 >
                   <span className="truncate">{attachedImage}</span>
                   <button
