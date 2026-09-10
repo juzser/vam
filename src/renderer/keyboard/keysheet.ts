@@ -102,10 +102,42 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   move: {
     group: 'navigation',
     label: (a) => `move ${a.direction}`,
-    // `hjkl`, the binding the operator's whole naming argument is about.
+    /**
+     * `hjkl`, PER DIRECTION AND PER MODE — audit F1, which was entirely about
+     * these eight captions.
+     *
+     * They used to be two sentences: "the session list" for all four Select
+     * motions and "the options of an open question" for all four Insert ones.
+     * Both were half right, and a caption that is half right about a motion
+     * key is worse than none — it names a list the key does not walk.
+     *
+     *   Select: `j`/`k` DO walk the session list, one row at a time, stopping
+     *   at the ends. `h`/`l` walk the ACTIVE PROJECT's tabs, which is a
+     *   different list AND a different shape: a ring that wraps. The
+     *   behaviour is what the operator asked for; only the caption was wrong.
+     *
+     *   Insert: `j`/`k` DO walk an open question's options. `h` is the way
+     *   BACK to Select — the one thing it never does is choose an option —
+     *   and `l` walks the STEPS of a multi-question call, refusing aloud when
+     *   there is no call to walk.
+     */
     byMode: (a) => ({
-      select: `move ${a.direction} — the session list`,
-      insert: `move ${a.direction} — the options of an open question, when one is asked`,
+      select:
+        a.direction === 'down'
+          ? 'next session in the list — it stops at the end'
+          : a.direction === 'up'
+            ? 'previous session in the list — it stops at the start'
+            : a.direction === 'right'
+              ? 'next tab of this project — a ring, so it wraps'
+              : 'previous tab of this project — a ring, so it wraps',
+      insert:
+        a.direction === 'down'
+          ? 'next option of an open question'
+          : a.direction === 'up'
+            ? 'previous option of an open question'
+            : a.direction === 'right'
+              ? 'next step of a question with several — there is nothing else to step'
+              : 'previous step of a question with several, else back to Select',
     }),
   },
   first: { group: 'navigation', label: () => 'first session' },
@@ -198,12 +230,45 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // the other, or an operator picks whichever they remember and gets a
   // different refusal.
   newTab: { group: 'session', label: () => 'new session as a tab in this pane' },
-  open: { group: 'session', label: () => 'open the focused step' },
+  // ENTER, WHICH OPENS NOTHING IN SELECT — audit F1. It was captioned "open
+  // the focused step" in both modes, and there has been no focused step to
+  // open since the command strip left the pane: in Select the key answers
+  // that the detail is already on screen, and in Insert it marks the option
+  // under the cursor (the question card claims it first) or raises the
+  // composer. Two behaviours, so two captions.
+  open: {
+    group: 'session',
+    label: () => 'open the focused step',
+    byMode: () => ({
+      select: 'nothing to open — the whole detail is already in the right pane',
+      insert: 'mark the option under the cursor, or open the prompt box',
+    }),
+  },
   focusAction: { group: 'panes', label: () => 'keyboard to the action pane' },
   focusList: { group: 'panes', label: () => 'keyboard back to the session list' },
+  // AND THE PAIR THAT REVERSES WITH THE MODE — audit F1's quietest half. One
+  // caption said "widen the focused side pane" while the handler flips the
+  // SIGN by cursor mode, so the same key moved the boundary opposite ways in
+  // the two modes and nothing on screen said so.
+  //
+  // The rule underneath is one sentence — "resize the pane the keyboard is
+  // in" — and naming that pane is what the old caption omitted. There is one
+  // draggable boundary (A12.1: the detail pane fills everything to the
+  // sidebar's right), so widening one pane is narrowing the other; which one
+  // the operator MEANT is exactly what the mode already says.
   resizePane: {
     group: 'panes',
     label: (a) => (a.delta === 1 ? 'widen the pane' : 'narrow the pane'),
+    byMode: (a) => ({
+      select:
+        a.delta === 1
+          ? 'widen the pane the keyboard is in — the session list'
+          : 'narrow the pane the keyboard is in — the session list',
+      insert:
+        a.delta === 1
+          ? 'widen the pane the keyboard is in — the response pane'
+          : 'narrow the pane the keyboard is in — the response pane',
+    }),
   },
   resetPanes: { group: 'panes', label: () => 'reset both pane widths' },
   splitPane: {
