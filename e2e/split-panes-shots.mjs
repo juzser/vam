@@ -626,10 +626,52 @@ async function pickUp(tab, label) {
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2 + 12, { steps: 4 });
 }
-/** Hover a fraction of the way across and down a box, still holding. */
+/**
+ * Hover a fraction of the way across and down a box, still holding.
+ *
+ * WAITS FOR THE INDICATOR, not for a number of milliseconds. Chromium promotes
+ * a press into a DRAG only after enough pointer travel, and how much wall
+ * clock that costs is the runner's business: a fixed 120ms was ample on the
+ * machine this was written on and too short on CI, where the first hover read
+ * `null` and the guard reported an unpainted indicator that was really a
+ * gesture the browser had not started yet. Measuring the screen BEFORE the
+ * action has taken effect is the same mistake in the opposite direction from
+ * measuring one where the condition was already true.
+ *
+ * It keeps nudging by a pixel to feed the drag, and comes to rest on the exact
+ * point asked for, so what is read afterwards is the zone this point names.
+ * BOUNDED and non-throwing: if nothing ever paints, the caller's own assertion
+ * fires with its own sentence rather than a bare timeout, which is what keeps
+ * this file's habit of naming what it expected.
+ */
 async function hoverOver(box, fx, fy) {
-  await page.mouse.move(box.x + box.width * fx, box.y + box.height * fy, { steps: 8 });
-  await page.waitForTimeout(120);
+  const x = box.x + box.width * fx;
+  const y = box.y + box.height * fy;
+  await page.mouse.move(x, y, { steps: 8 });
+  for (let waited = 0; waited < 4000; waited += 100) {
+    if ((await page.locator('[data-drop-zone]').count()) > 0) {
+      break;
+    }
+    await page.mouse.move(x + 1, y, { steps: 2 });
+    await page.mouse.move(x, y, { steps: 2 });
+    await page.waitForTimeout(100);
+  }
+  await page.mouse.move(x, y, { steps: 2 });
+  await page.waitForTimeout(80);
+}
+
+/** How many panes there are once the layout has had a chance to settle —
+ *  bounded, and it answers with whatever it ends on rather than throwing, so
+ *  the caller says what was wrong with it. A drop is applied in a React commit
+ *  the runner may take longer over than this machine does. */
+async function paneCountAfter(expected) {
+  for (let waited = 0; waited < 4000; waited += 100) {
+    if ((await paneCount()) === expected) {
+      break;
+    }
+    await page.waitForTimeout(100);
+  }
+  return paneCount();
 }
 /** What the drop indicator says right now: its zone, its word, and its box. */
 async function indicatorNow() {
@@ -724,7 +766,7 @@ if (Math.abs(overEdge.w - joinTargetBox.w / 2) > 4) {
 // pane's strip and the pane it emptied closes.
 await hoverOver(targetRect, 0.5, 0.5);
 await page.mouse.up();
-await page.waitForTimeout(200);
+await paneCountAfter(2);
 const afterJoin = await paneBoxes();
 console.log('after joining the first pane into the middle one:', afterJoin);
 if (afterJoin.length !== 2) {
@@ -799,7 +841,7 @@ if (overStrip === null || overStrip.zone !== 'centre') {
 await page.screenshot({ path: `${outDir}/tab-join-strip-indicator.png` });
 console.log(`${outDir}/tab-join-strip-indicator.png`);
 await page.mouse.up();
-await page.waitForTimeout(200);
+await paneCountAfter(1);
 const afterStripJoin = await paneBoxes();
 const collapsed = await tabTitlesInPane(0);
 console.log('after dropping on the strip:', afterStripJoin, collapsed);
