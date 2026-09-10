@@ -32,6 +32,18 @@
  * The text runs long on purpose: `in`/`out` clamp at two lines, and a fixture of
  * short strings would let a one-line bug ship looking fine.
  *
+ * AND A FOURTH RULE, LEARNED RATHER THAN DESIGNED: **a guard cannot see what
+ * this file cannot produce.** Every state a component draws needs a row here
+ * or it is outside the reach of every non-unit gate in the repo, however good
+ * those gates are. Three times now the same shape has played out -- the
+ * AskUserQuestion card, the tool-approval prompt above, and `status: 'failed'`
+ * -- and the last one is the clearest: `e2e/tooltip-shots.mjs` was written
+ * to catch a `Note` a keyboard cannot reach, and it ran green for a release
+ * over a banner carrying exactly that defect, because no session here had
+ * ever failed. The rule that would have caught it existed; the element was
+ * never in front of it. So a state added to a component owes a row in this
+ * file, and a row added here should say which gate was blind without it.
+ *
  * Not shipped: `dev` renders it, the real app will not.
  */
 
