@@ -28,6 +28,7 @@ import {
   newClashes,
   resolveChord,
 } from '../../src/renderer/keyboard/chords.js';
+import { buildBindingSheet, buildKeySheet } from '../../src/renderer/keyboard/keysheet.js';
 
 /** The three steps of F3, as the editor performs them. */
 const RENAME_MOVED = bindKey(NO_BINDINGS, 'rename', 0, 'b');
@@ -117,5 +118,57 @@ describe('which write minted it', () => {
     expect(newClashes(RENAME_RESET, wayOut)).toEqual([]);
     expect(fires(wayOut, 'r')).toEqual({ kind: 'rename' });
     expect(newClashes(RENAME_RESET, NO_BINDINGS)).toEqual([]);
+  });
+});
+
+/**
+ * The other half of F3: a map that IS contested — by a payload, or by an
+ * upgrade that moved a shipped key onto a stored override — is a state both
+ * surfaces have to show rather than hide. The sheet used to print `r` twice,
+ * for two actions, with nothing saying which one the key reaches.
+ */
+describe('the sheet shows the winner and marks what is dead', () => {
+  it('marks the shadowed row and leaves the winner’s row alone', () => {
+    const rows = buildBindingSheet(RENAME_RESET).flatMap((group) => group.rows);
+    const rename = rows.find((row) => row.id === 'rename');
+    const icon = rows.find((row) => row.id === 'icon');
+    expect(rename?.keys).toEqual(['r']);
+    // Named by what took it, not merely flagged: "dead" without a culprit
+    // leaves the operator hunting.
+    expect(rename?.dead['r']).toBe(icon?.label);
+    expect(icon?.dead).toEqual({});
+  });
+
+  it('carries the same fact into the reference sheet, per row', () => {
+    const rows = buildKeySheet(RENAME_RESET).flatMap((group) => group.rows);
+    const onR = rows.filter((row) => row.keys === 'r');
+    expect(onR.length).toBe(2);
+    const dead = onR.filter((row) => row.dead !== null);
+    expect(dead.length).toBe(1);
+    expect(dead[0]?.label).toContain('rename');
+    expect(dead[0]?.dead).toContain('icon');
+  });
+
+  it('marks a row dead EXACTLY when its key reaches something else', () => {
+    // The whole corpus, over a contested map: the mark is derived from what
+    // the keystroke does, so it cannot say one thing while the key does
+    // another. A row asserting only its own map entry would pass on the defect.
+    const map: KeyBindings = { ...RENAME_RESET, 'move:left': ['gg'] };
+    const actionOf = new Map(defaultBindings().map((binding) => [binding.id, binding.action]));
+    let marked = 0;
+    let walked = 0;
+    for (const group of buildBindingSheet(map)) {
+      for (const row of group.rows) {
+        for (const key of row.keys) {
+          walked += 1;
+          const reached = fires(map, key);
+          const own = JSON.stringify(reached) === JSON.stringify(actionOf.get(row.id));
+          expect(row.dead[key] !== undefined, `"${key}" on ${row.id}`).toBe(!own);
+          if (!own) marked += 1;
+        }
+      }
+    }
+    expect(walked).toBeGreaterThan(30);
+    expect(marked).toBe(2);
   });
 });
