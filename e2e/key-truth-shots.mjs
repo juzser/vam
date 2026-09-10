@@ -603,6 +603,150 @@ if (splitOk) {
 }
 
 // ---------------------------------------------------------------------------
+// NEW PROJECT HAS A KEY — `Cmd+Shift+P`, and exactly what this build can prove
+// about it.
+//
+// WHAT IT CANNOT: the demo source is `kind: 'demo'`, so `newSessionRoute`
+// declines before any picker is reached, and `window.api` does not exist in
+// the web bundle at all. The success path and the "the browser build has no
+// picker" refusal are therefore UNREACHABLE here by construction, and are
+// covered in `test/canvas/Canvas.new-project.test.tsx` alone. Claiming
+// browser coverage of them would be claiming a guard that ran in front of
+// nothing — the fixture rule `src/renderer/fixtures/demo.ts` states.
+//
+// WHAT IT CAN, and only it: that the keystroke ARRIVES. `Mod-p` is what a real
+// `Cmd+Shift+P` normalizes to — a modified letter folds its Shift away — and
+// no hand-built event can prove that, because a synthesised keydown is spelled
+// by whoever synthesised it. Here the browser spells it. Then that the refusal
+// is the ROUTE's own sentence, and that it is recorded under `new project` as
+// a REFUSAL and not a failure: only `newProject` records one, so this is what
+// tells "the key reached this flow" apart from "the key reached something that
+// reads the same route".
+//
+// `Control`, not `Meta`, for the reason the bracket families above give: CI is
+// ubuntu, and `normalizeKey` folds the two together anyway.
+
+const newProject = await pressAndReadStatus(['Control+Shift+KeyP']);
+console.log('Cmd+Shift+P:', JSON.stringify(newProject.text));
+check(
+  'Cmd+Shift+P is answered at all — it reaches the grammar rather than the browser',
+  newProject.text !== '',
+  'the bar stayed empty, so the chord resolved to nothing',
+);
+check(
+  'and the refusal is the route’s own sentence, not a second vocabulary',
+  newProject.text.includes('no new-session command'),
+  `the bar said "${newProject.text}"`,
+);
+check(
+  'and it fits the 72-character cell whole',
+  newProject.text === newProject.full,
+  `drawn "${newProject.text}" vs full "${newProject.full}"`,
+);
+
+await page.keyboard.press('E');
+const logOpen = await settle(
+  () => document.querySelector('[data-error-log]') !== null,
+  undefined,
+  'E opens the error log over the refusal just recorded',
+);
+
+if (logOpen) {
+  const recorded = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-error-log] li')].map((li) => ({
+      kind: li.querySelector('[data-testid="event-kind"]')?.textContent ?? '',
+      code: li.querySelector('[data-testid="event-code"]')?.textContent ?? '',
+      text: li.textContent ?? '',
+    })),
+  );
+  console.log('error log after Cmd+Shift+P:', JSON.stringify(recorded));
+  const entry = recorded.find((row) => row.text.includes('new project'));
+  check(
+    'the chord reached NEW PROJECT specifically — it is the only path that records one',
+    entry !== undefined,
+    'no entry names "new project"',
+  );
+  check(
+    'and it was recorded as the "no" vam meant to say, never as a failure',
+    entry?.kind === 'refusal' && entry?.code === 'declined',
+    `kind "${entry?.kind}", code "${entry?.code}"`,
+  );
+  check(
+    'and the entry carries the same sentence the bar showed',
+    entry?.text.includes('no new-session command') === true,
+    `entry reads "${entry?.text}"`,
+  );
+  await page.screenshot({ path: `${outDir}/key-truth-new-project-refusal.png` });
+  console.log(`${outDir}/key-truth-new-project-refusal.png`);
+}
+
+// CLOSED BY ITS SCRIM, deliberately, and not by Escape: the `cancel` action
+// closes the palette, the sheet and settings, and the error log is not among
+// them — a separate matter from this chord, left alone rather than fixed in
+// passing. Closing it here is setup, so it uses the exit that exists.
+await page.locator('[aria-label="close the error log"]').click();
+await settle(
+  () => document.querySelector('[data-error-log]') === null,
+  undefined,
+  'the error log closes again, so the next overlay can open at all',
+);
+await reset();
+
+// AND THE SHEET NAMES IT — measured on the real layout, not scanned. A row can
+// carry the right text and occupy no space (this repo has shipped a style rule
+// that matched no element), and a chip the sheet has struck through is a key
+// that does nothing.
+await page.keyboard.press('?');
+const sheetHasIt = await settle(
+  () => document.querySelector('[data-key-sheet]') !== null,
+  undefined,
+  'the key sheet opens',
+);
+
+if (sheetHasIt) {
+  const row = await page.evaluate(() => {
+    const li = [...document.querySelectorAll('[data-key-sheet] li')].find(
+      (each) => (each.querySelector('[data-key-sheet-keys]')?.textContent ?? '') === 'Mod-p',
+    );
+    if (li === undefined) return null;
+    const box = li.getBoundingClientRect();
+    const chip = li.querySelector('[data-key-sheet-keys]');
+    return {
+      label: li.querySelector('[data-key-sheet-label]')?.textContent ?? '',
+      dead: li.querySelector('[data-key-sheet-dead]')?.textContent ?? null,
+      painted: box.width > 0 && box.height > 0,
+      struck: chip === null ? '' : getComputedStyle(chip).textDecorationLine,
+    };
+  });
+  console.log('sheet row for Mod-p:', JSON.stringify(row));
+  check('the sheet lists Mod-p', row !== null, 'no row carries that chord');
+  check(
+    'and captions it by the act rather than by the chord',
+    row?.label.toLowerCase().includes('directory') === true,
+    `label "${row?.label}"`,
+  );
+  check(
+    'and the row is painted rather than merely present',
+    row?.painted === true,
+    'the row occupies no space on the real layout',
+  );
+  check(
+    'and the chord is live — not struck through, not marked dead',
+    row?.dead === null && row?.struck.includes('line-through') === false,
+    `dead "${row?.dead}", decoration "${row?.struck}"`,
+  );
+  await page.screenshot({ path: `${outDir}/key-truth-new-project-sheet.png` });
+  console.log(`${outDir}/key-truth-new-project-sheet.png`);
+}
+
+await page.keyboard.press('Escape');
+await settle(
+  () => document.querySelector('[data-key-sheet]') === null,
+  undefined,
+  'the sheet closes again before the contested-map case starts',
+);
+
+// ---------------------------------------------------------------------------
 // F3. A KEY TWO ACTIONS CLAIM: what the sheet says, and what the key does.
 //
 // The editor can no longer mint this state — every write is judged on the

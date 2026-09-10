@@ -216,6 +216,46 @@ export type KeyAction =
       already does, and why it exists. `Mod-t` because "new tab in this one"
       is Cmd+T in every browser and in VSCode's own editor group. */
   | { readonly kind: 'newTab' }
+  /** `Mod-p` — a NEW PROJECT: choose a directory, then start a session in it.
+      vam has no stored project — a project is a grouping of live sessions on
+      their cwd — so that is the only thing "create a project" can mean, and
+      the directory is why this is the one create path that opens a dialog
+      first. It calls the same `newProject` the Projects header's `+` does
+      (`Canvas.tsx`), so the key and the button cannot drift into two
+      behaviours or two refusals.
+
+      NOT `project`, WHICH IS `gt`/`gT`. That one STEPS between projects that
+      already exist — and its caption had to be corrected once precisely
+      because its name said less than its behaviour did. This one creates the
+      conditions for a project to exist at all, and `newProject` names that
+      verb in the family it belongs to: `newSession` (`o`/`Mod-n`) starts one
+      in the focused session's project, `newTab` (`Mod-t`) in the focused
+      pane's, and this one in a directory nothing is running in yet.
+
+      THE OPERATOR ASKED FOR `Cmd+Shift+P`, AND THIS IS THAT KEYSTROKE.
+      `normalizeKey` folds Shift away for characters and lower-cases a letter
+      under a modifier — deliberately, so `Cmd+K` and `Cmd+Shift+K` cannot
+      become two bindings for one gesture — so a real `Cmd+Shift+P` keydown
+      arrives here spelled `Mod-p`. A table entry written `Mod-Shift-p` would
+      be a string NO keystroke on any layout produces: a dead row in a sheet
+      whose whole contract is that it names no such thing, and one
+      `bindingClashes` could not catch, because a chord with nothing behind it
+      is not a chord two actions claim. The Shift token belongs to the
+      POSITIONAL keys and to nothing else (`POSITION_CODES`).
+
+      AND THE COST, QUOTED: `Cmd+P` is the same folded gesture and reaches the
+      same act. Nothing native answers it — vam owns its application menu and
+      it is appMenu/editMenu/Window, none of which carries a Cmd+P
+      (`src/main/menu.ts`) — and in the browser build the handler's own
+      `preventDefault` keeps print out of it.
+
+      `p` FOR PROJECT, one modifier above the bare `p` that REVEALS the
+      focused session's project: the same subject, and `normalizeKey` gives a
+      modified letter its own `Mod-` spelling, so neither can answer the
+      other's keystroke. Free when it was taken — nothing in any table held
+      it, and `test/keyboard/chords.new-project.test.ts` re-derives that over
+      the generated bindings rather than over this line. */
+  | { readonly kind: 'newProject' }
   /** `F` — open or close the sidebar's filter popover. Shift-f, because
       plain `f` is already the jump-label move and this is its stronger,
       "narrow the whole list" cousin. */
@@ -559,6 +599,14 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // vam's menu (`src/main/menu.ts`) is appMenu/editMenu/Window, none of which
   // carries a Cmd+T, and Electron's default accelerators do not include it.
   'Mod-t': { kind: 'newTab' },
+  // AND THE THIRD CREATE, the one that needs a directory before it can name a
+  // project at all. `Mod-p` is what a real `Cmd+Shift+P` — the keystroke the
+  // operator asked for — normalizes to: a modified letter folds its Shift
+  // away, so `Mod-Shift-p` would be a spelling no keystroke produces. The
+  // action's own doc comment above argues that, the family it joins, and the
+  // `Cmd+P` this also answers. Free: nothing in any table held `Mod-p`, and
+  // bare `p` (`revealProject`) keeps its own spelling.
+  'Mod-p': { kind: 'newProject' },
   // Vim's own "shift this leftwards / rightwards" — literally what moving a
   // side pane's boundary is. A real Shift+, / Shift+. keydown normalizes to
   // the browser-applied `<` / `>` here, distinct from the plain `,` above

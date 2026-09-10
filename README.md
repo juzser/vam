@@ -195,6 +195,7 @@ whichever your platform uses.
 | `x` / `Mod-w` | Close the focused session |
 | `o` / `Mod-n` | Start a new session, in the focused session's project |
 | `Mod-t` | Start a new session as a tab of the FOCUSED PANE — the pane's own `+`, and it names the project on screen when that pane is empty |
+| `Mod-p` | New project — choose a directory, and start a session in it. There is no stored project in vam: a project is live sessions grouped by their cwd, so this is the only thing creating one can mean. It is the keystroke `Cmd+Shift+P` produces — a modified letter folds its Shift away, so `Cmd+P` is the same gesture and reaches the same act |
 | `,` | Open settings |
 | `.` | Open Remote — pair a phone, approve or deny it, unpair one, or revoke every device |
 | `E` | Open the error log and the report vam can compose from it |
