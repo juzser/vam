@@ -23,17 +23,22 @@ import {
   adoptOrphans,
   closePane,
   detachTab,
+  dropZone,
   findLeaf,
+  joinPane,
   leaves,
+  MIN_PANE_PX,
   nearestEdge,
   paneHolding,
   pruneClosedTabs,
   removeTab,
   restoreLayout,
+  type Split,
   type SplitTree,
   setPaneSession,
   singlePane,
   splitPane,
+  splitSizes,
   stepPane,
 } from '../../src/renderer/canvas/split.js';
 
@@ -593,5 +598,211 @@ describe('adoptOrphans', () => {
   it('falls back to the first pane rather than dropping a session on a stale id', () => {
     const grown = adoptOrphans(split, ['s1', 's2', 's3'], 'pane-gone');
     expect(findLeaf(grown, 'pane-1')?.sessionIds).toEqual(['s1', 's3']);
+  });
+});
+
+/**
+ * THE CENTRE OF A PANE JOINS IT; ONLY THE EDGES SPLIT IT.
+ *
+ * The operator's report: "when the layout is split, if you want to drag a tab
+ * back into a pane so it stops being split, you can't." `nearestEdge` above is
+ * total over the WHOLE rectangle — every point in a pane names an edge — so a
+ * drop dead in the middle split the pane it landed on and the layout could
+ * only ever grow. `dropZone` is the model VSCode actually uses: a band around
+ * the rim splits, everything inside it joins.
+ */
+describe('dropZone — the centre joins, the rim splits', () => {
+  it('answers centre for a drop in the middle of a pane', () => {
+    expect(dropZone(500, 400, 1000, 800)).toBe('centre');
+  });
+
+  it('still names the edge the point is deepest into, near the rim', () => {
+    expect(dropZone(10, 400, 1000, 800)).toBe('left');
+    expect(dropZone(990, 400, 1000, 800)).toBe('right');
+    expect(dropZone(500, 10, 1000, 800)).toBe('top');
+    expect(dropZone(500, 790, 1000, 800)).toBe('bottom');
+  });
+
+  it('measures the band as a PROPORTION, so the same gesture works at any size', () => {
+    // The same relative point in a pane sixteen times the area is the same
+    // zone — a tenth of the way in splits at both sizes, the middle joins at
+    // both, and no pixel count says otherwise.
+    expect(dropZone(100, 400, 1000, 800)).toBe('left');
+    expect(dropZone(25, 100, 250, 200)).toBe('left');
+    expect(dropZone(500, 400, 1000, 800)).toBe('centre');
+    expect(dropZone(125, 100, 250, 200)).toBe('centre');
+  });
+
+  it('leaves a pane at the 320px floor a reachable centre', () => {
+    // PR 289's minimum pane. A fixed pixel margin large enough to aim at on a
+    // wide pane would swallow this one whole, and consolidating a layout back
+    // to one pane is exactly what you want most when panes are this narrow.
+    expect(dropZone(160, 160, MIN_PANE_PX, MIN_PANE_PX)).toBe('centre');
+  });
+
+  it('leaves that pane an edge band wider than the 44px touch floor', () => {
+    // A point 43px in from the left of the narrowest legal pane is still a
+    // SPLIT — so the band an operator has to hit is at least 44px across, the
+    // minimum target this codebase holds itself to everywhere else.
+    expect(dropZone(43, 160, MIN_PANE_PX, MIN_PANE_PX)).toBe('left');
+    expect(dropZone(43, 320, MIN_PANE_PX, MIN_PANE_PX * 2)).toBe('left');
+  });
+
+  it('measures depth against the span it crosses, not in raw pixels', () => {
+    // A wide, short pane — a `column` split's own shape. 150px in from the
+    // left of a 1000px pane is a SEVENTH of the way across; 60px down a 200px
+    // one is nearly a third. `nearestEdge`'s absolute reading calls this
+    // point `top`, which would split a wide pane horizontally because it is
+    // short. The zone the pointer is actually inside is the left band.
+    expect(dropZone(150, 60, 1000, 200)).toBe('left');
+    expect(nearestEdge(150, 60, 1000, 200)).toBe('top');
+  });
+
+  it('resolves a corner to the edge it is deepest into, never to two', () => {
+    // 5% in from the top, 15% in from the left: both bands, and the top one
+    // is the one the pointer is furthest inside.
+    expect(dropZone(150, 40, 1000, 800)).toBe('top');
+    expect(dropZone(40, 150, 1000, 800)).toBe('left');
+  });
+
+  it('is total over a degenerate rect, a non-finite point and a point outside', () => {
+    expect(dropZone(0, 0, 0, 0)).toBe('centre');
+    expect(dropZone(Number.NaN, 5, 100, 100)).toBe('centre');
+    expect(dropZone(5, Number.POSITIVE_INFINITY, 100, 100)).toBe('centre');
+    expect(dropZone(50, 50, Number.NaN, 100)).toBe('centre');
+    expect(['left', 'right', 'top', 'bottom', 'centre']).toContain(dropZone(-40, 50, 100, 100));
+  });
+});
+
+/**
+ * JOINING — the other half of the drop model, and the operation the layout had
+ * no way to reach: a tab moves INTO an existing pane's strip, and the pane it
+ * came from collapses when that was its last tab. `splitPane` grows the
+ * layout; this is the only thing that shrinks it by dragging.
+ */
+describe('joinPane — a tab moves into an existing pane, and the layout shrinks', () => {
+  /** pane-1 holds s1 and s3; pane-2 holds s2 alone. */
+  const twoPanes = (): SplitTree => ({
+    kind: 'split',
+    id: 'split-1',
+    orientation: 'row',
+    children: [
+      { kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1', 's3'] },
+      { kind: 'leaf', id: 'pane-2', sessionId: 's2', sessionIds: ['s2'] },
+    ],
+    sizes: [0.5, 0.5],
+  });
+
+  it('moves the tab into the target pane and takes it out of the source', () => {
+    const joined = joinPane(twoPanes(), 'pane-1', 'pane-2', 's2');
+    expect(leaves(joined)).toHaveLength(1);
+    expect(findLeaf(joined, 'pane-1')?.sessionIds).toEqual(['s1', 's3', 's2']);
+    expect(findLeaf(joined, 'pane-2')).toBeNull();
+  });
+
+  it('brings the joined tab to the FRONT of the pane it landed in', () => {
+    const joined = joinPane(twoPanes(), 'pane-1', 'pane-2', 's2');
+    expect(findLeaf(joined, 'pane-1')?.sessionId).toBe('s2');
+  });
+
+  it('COLLAPSES the split when the source pane held only that tab', () => {
+    const joined = joinPane(twoPanes(), 'pane-1', 'pane-2', 's2');
+    expect(joined.kind).toBe('leaf');
+    expect(joined.id).toBe('pane-1');
+  });
+
+  it('leaves the source pane standing when it still holds other tabs', () => {
+    const joined = joinPane(twoPanes(), 'pane-2', 'pane-1', 's1');
+    expect(leaves(joined)).toHaveLength(2);
+    expect(findLeaf(joined, 'pane-1')?.sessionIds).toEqual(['s3']);
+    expect(findLeaf(joined, 'pane-1')?.sessionId).toBe('s3');
+    expect(findLeaf(joined, 'pane-2')?.sessionIds).toEqual(['s2', 's1']);
+  });
+
+  it('hands the freed room to the survivors in proportion', () => {
+    const three: SplitTree = {
+      kind: 'split',
+      id: 'split-1',
+      orientation: 'row',
+      children: [
+        { kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1'] },
+        { kind: 'leaf', id: 'pane-2', sessionId: 's2', sessionIds: ['s2'] },
+        { kind: 'leaf', id: 'pane-3', sessionId: 's3', sessionIds: ['s3'] },
+      ],
+      sizes: [0.5, 0.25, 0.25],
+    };
+    const joined = joinPane(three, 'pane-1', 'pane-3', 's3');
+    expect(joined.kind).toBe('split');
+    const sizes = splitSizes(joined as Split);
+    expect(sizes[0]).toBeCloseTo(2 / 3, 5);
+    expect(sizes[1]).toBeCloseTo(1 / 3, 5);
+  });
+
+  it('gives a collapsing split its whole slot back, leaving the layout around it still', () => {
+    const nested: SplitTree = {
+      kind: 'split',
+      id: 'outer',
+      orientation: 'row',
+      children: [
+        { kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1'] },
+        {
+          kind: 'split',
+          id: 'inner',
+          orientation: 'column',
+          children: [
+            { kind: 'leaf', id: 'pane-2', sessionId: 's2', sessionIds: ['s2'] },
+            { kind: 'leaf', id: 'pane-3', sessionId: 's3', sessionIds: ['s3'] },
+          ],
+          sizes: [0.5, 0.5],
+        },
+      ],
+      sizes: [0.7, 0.3],
+    };
+    const joined = joinPane(nested, 'pane-2', 'pane-3', 's3');
+    expect(joined.kind).toBe('split');
+    const outer = joined as Split;
+    expect(outer.children).toHaveLength(2);
+    expect(outer.children[1]?.kind).toBe('leaf');
+    const sizes = splitSizes(outer);
+    expect(sizes[0]).toBeCloseTo(0.7, 5);
+    expect(sizes[1]).toBeCloseTo(0.3, 5);
+  });
+
+  it('collapses a whole layout back to one pane, which can be split again', () => {
+    let tree: SplitTree = singlePane('s1', 'pane-1');
+    tree = setPaneSession(tree, 'pane-1', 's2');
+    tree = setPaneSession(tree, 'pane-1', 's3');
+    tree = splitPane(tree, 'pane-1', 'right', 's2', 'pane-2');
+    tree = detachTab(tree, 'pane-1', 's2');
+    tree = splitPane(tree, 'pane-2', 'bottom', 's3', 'pane-3');
+    tree = detachTab(tree, 'pane-1', 's3');
+    expect(leaves(tree)).toHaveLength(3);
+    tree = joinPane(tree, 'pane-1', 'pane-3', 's3');
+    expect(leaves(tree)).toHaveLength(2);
+    tree = joinPane(tree, 'pane-1', 'pane-2', 's2');
+    expect(leaves(tree)).toHaveLength(1);
+    expect(tree.kind).toBe('leaf');
+    expect(findLeaf(tree, 'pane-1')?.sessionIds.slice().sort()).toEqual(['s1', 's2', 's3']);
+    // And the un-split layout is a layout, not a dead end.
+    const again = splitPane(tree, 'pane-1', 'right', 's2', 'pane-4');
+    expect(leaves(again)).toHaveLength(2);
+  });
+
+  it('is a no-op on the pane the tab is already in', () => {
+    const tree = twoPanes();
+    expect(joinPane(tree, 'pane-1', 'pane-1', 's1')).toBe(tree);
+  });
+
+  it('is a no-op — the SAME tree — for a stale target, source or session', () => {
+    const tree = twoPanes();
+    expect(joinPane(tree, 'pane-gone', 'pane-2', 's2')).toBe(tree);
+    expect(joinPane(tree, 'pane-1', 'pane-gone', 's2')).toBe(tree);
+    expect(joinPane(tree, 'pane-1', 'pane-2', 's-gone')).toBe(tree);
+  });
+
+  it('never leaves a session in two panes at once', () => {
+    const joined = joinPane(twoPanes(), 'pane-1', 'pane-2', 's2');
+    const held = leaves(joined).flatMap((leaf) => leaf.sessionIds);
+    expect(new Set(held).size).toBe(held.length);
   });
 });

@@ -145,12 +145,14 @@ import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
 import {
   adoptOrphans,
   closePane,
+  type DropZone,
   detachTab,
+  dropZone,
   type Edge,
   findLeaf,
+  joinPane,
   type Leaf,
   leaves,
-  nearestEdge,
   paneHolding,
   pruneClosedTabs,
   removeTab,
@@ -496,11 +498,35 @@ function DetailColumn({
  *  own top/bottom edge (see `TabStrip`'s own `py-1`). A15.5 moved this row
  *  out of `DetailColumn` and INTO each pane: one strip per pane is the whole
  *  point, and a row above the split layout could only ever draw one. */
-function TabStripRow({ children }: { readonly children: ReactNode }) {
+/** The drag handlers are the STRIP's own, not inherited from the pane
+ *  underneath: a tab dropped on a strip becomes a tab of that strip, whatever
+ *  the pane's edge geometry would have said about the same point (the strip is
+ *  36px at the TOP of the pane, so every point in it is inside the `top` band
+ *  and would have split the pane downward). Optional, so the phone shell and
+ *  every test that renders a bare strip are unaffected. */
+function TabStripRow({
+  children,
+  onDragOver,
+  onDrop,
+}: {
+  readonly children: ReactNode;
+  readonly onDragOver?: (event: ReactDragEvent<HTMLDivElement>) => void;
+  readonly onDrop?: (event: ReactDragEvent<HTMLDivElement>) => void;
+}) {
   return (
+    // The same exemption the pane itself takes, for the same reason: this is a
+    // DROP TARGET for a pointer drag, not a control. The interactive things
+    // are the tab buttons inside it, each reachable by Tab and each with its
+    // own name. There is no role for "a place a drag can land" — ARIA's
+    // `aria-dropeffect` was deprecated without a replacement — and no keyboard
+    // user is stranded by it: `zv`/`zs` split, `zw` moves between panes and
+    // the digit row picks a tab, each saying what it did in the status bar.
+    // biome-ignore lint/a11y/noStaticElementInteractions: see above.
     <div
       data-tab-strip-row
       className="flex h-9 flex-none items-stretch gap-[9px] border-line border-b px-1.5"
+      onDragOver={onDragOver}
+      onDrop={onDrop}
     >
       {children}
     </div>
@@ -928,29 +954,65 @@ function SourceReadout({ source }: { source: CanvasSource }) {
 }
 
 /**
- * The highlighted rectangle a drag draws before it lands — the only visible
- * sign, while dragging, of which half of which pane a drop would split.
+ * WHAT THE DROP WILL DO, drawn before it happens — the only sign, while
+ * dragging, of which of the two outcomes releasing here would produce.
+ *
+ * A JOIN AND A SPLIT MUST NOT LOOK THE SAME. Since a drop learnt to join
+ * (`dropZone`), the same pane under the same pointer has two possible
+ * answers, and the operator finding out which by doing it is the one thing
+ * this shell refuses everywhere else. Three channels say them apart, because
+ * one is a single point of failure at a glance:
+ *
+ *  - EXTENT: a split highlights the HALF the new pane would take, so the
+ *    rectangle is the pane that is about to exist; a join highlights the
+ *    WHOLE pane, because the whole pane is what receives the tab.
+ *  - RIM: solid for a split, which draws a boundary that is about to be real;
+ *    dashed for a join, which draws no new boundary at all.
+ *  - A WORD, which is the one an operator does not have to have learnt.
+ *
  * `pointer-events-none` so it never itself becomes a drop target (the drag
  * events are bound to the pane underneath, not to this overlay), and reuses
  * `--color-cursor-ring` (`styles.css`): the token has carried no consumer
  * since its own graph-node origin died in the 0.2 migration, its VALUE is
  * independent of who reads it, and `token-contrast.test.ts` already pins it
  * for contrast against `--color-ground` — exactly the background this draws
- * over.
+ * over. The caption is `bg-ground`/`text-ink`, the app's own base pair, so
+ * the word never has to be legible against a translucent wash.
+ *
+ * `aria-hidden` stays: this duplicates, for the eye, the state of a pointer
+ * gesture a screen reader is not in the middle of, and it changes on every
+ * mouse move. The KEYBOARD route to a split is `zv`/`zs`, which speaks for
+ * itself in the status bar.
  */
-function DropZoneOverlay({ edge }: { readonly edge: Edge }) {
-  const SIDE_CLASS: Readonly<Record<Edge, string>> = {
-    left: 'inset-y-0 left-0 w-1/2',
-    right: 'inset-y-0 right-0 w-1/2',
-    top: 'inset-x-0 top-0 h-1/2',
-    bottom: 'inset-x-0 bottom-0 h-1/2',
-  };
+const DROP_ZONE_SHAPE: Readonly<Record<DropZone, string>> = {
+  left: 'inset-y-0 left-0 w-1/2 border-solid',
+  right: 'inset-y-0 right-0 w-1/2 border-solid',
+  top: 'inset-x-0 top-0 h-1/2 border-solid',
+  bottom: 'inset-x-0 bottom-0 h-1/2 border-solid',
+  centre: 'inset-0 border-dashed',
+};
+
+/** The word each outcome wears. "Move into this pane" and not "Join": the
+ *  gesture MOVES a tab, and the pane it left may well close behind it. */
+const DROP_ZONE_WORD: Readonly<Record<DropZone, string>> = {
+  left: 'Split left',
+  right: 'Split right',
+  top: 'Split above',
+  bottom: 'Split below',
+  centre: 'Move into this pane',
+};
+
+function DropZoneOverlay({ zone }: { readonly zone: DropZone }) {
   return (
     <div
-      data-drop-zone={edge}
+      data-drop-zone={zone}
       aria-hidden="true"
-      className={`pointer-events-none absolute z-10 border-2 border-cursor-ring bg-cursor-ring/15 ${SIDE_CLASS[edge]}`}
-    />
+      className={`pointer-events-none absolute z-10 flex items-center justify-center border-2 border-cursor-ring bg-cursor-ring/15 ${DROP_ZONE_SHAPE[zone]}`}
+    >
+      <span className="rounded-[4px] border border-cursor-ring bg-ground px-2 py-0.5 font-medium text-[11px] text-ink">
+        {DROP_ZONE_WORD[zone]}
+      </span>
+    </div>
   );
 }
 
@@ -2503,7 +2565,7 @@ function CanvasInner({
   } | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     readonly paneId: string;
-    readonly edge: Edge;
+    readonly zone: DropZone;
   } | null>(null);
 
   const onTabDragStart = useCallback(
@@ -2525,6 +2587,32 @@ function CanvasInner({
     setDropTarget(null);
   }, []);
 
+  /**
+   * The indicator's one writer.
+   *
+   * `null` for the CENTRE of the pane the drag started in: that drop is
+   * refused (there is nothing to move — the tab is already there), and
+   * painting the join overlay over it would promise an outcome the release
+   * will not produce. It is not a rare corner either — the first frame of
+   * every drag is over the tab's own strip. The EDGES of that same pane keep
+   * their overlay, because splitting a pane with its own tab is exactly what
+   * `zv` does.
+   */
+  const showDropZone = useCallback(
+    (paneId: string, zone: DropZone) => {
+      if (zone === 'centre' && dragging?.paneId === paneId) {
+        setDropTarget((current) => (current === null ? current : null));
+        return;
+      }
+      setDropTarget((current) =>
+        current !== null && current.paneId === paneId && current.zone === zone
+          ? current
+          : { paneId, zone },
+      );
+    },
+    [dragging],
+  );
+
   const onPaneDragOver = useCallback(
     (paneId: string) => (event: ReactDragEvent<HTMLDivElement>) => {
       if (dragging === null) {
@@ -2534,51 +2622,114 @@ function CanvasInner({
       // for `dragover` — without it, `drop` never fires at all.
       event.preventDefault();
       const rect = event.currentTarget.getBoundingClientRect();
-      const edge = nearestEdge(
-        event.clientX - rect.left,
-        event.clientY - rect.top,
-        rect.width,
-        rect.height,
-      );
-      setDropTarget((current) =>
-        current !== null && current.paneId === paneId && current.edge === edge
-          ? current
-          : { paneId, edge },
+      showDropZone(
+        paneId,
+        dropZone(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height),
       );
     },
-    [dragging],
+    [dragging, showDropZone],
   );
 
+  /**
+   * A DROP ON THE TAB STRIP JOINS, wherever in the strip it lands — the
+   * gesture most people reach for, and the one the pane's own geometry cannot
+   * express: the strip is 36px at the TOP of the pane, so every point in it
+   * sits in the `top` band and would have split the pane downward.
+   *
+   * `stopPropagation` is what makes that true rather than nearly true. These
+   * events bubble to the pane's own handlers, which would recompute the zone
+   * from the pane box and overwrite the join with a `top` split on the very
+   * next frame. Stopping here is also what keeps the two handlers from
+   * disagreeing about a single pointer position.
+   */
+  const onStripDragOver = useCallback(
+    (paneId: string) => (event: ReactDragEvent<HTMLDivElement>) => {
+      if (dragging === null) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      showDropZone(paneId, 'centre');
+    },
+    [dragging, showDropZone],
+  );
+
+  /**
+   * A drag crossing between two children of the SAME pane is not a departure.
+   * `dragleave` fires per element and bubbles, so moving from the transcript
+   * to the composer to the strip all arrive here — and clearing the indicator
+   * on each of them makes it blink through a gesture that never left. The
+   * pointer has gone only when the element it moved ONTO is outside this
+   * pane; `relatedTarget` is that element, and `null` (leaving the window, or
+   * a synthetic event in a test) counts as outside.
+   */
   const onPaneDragLeave = useCallback(
-    (paneId: string) => () => {
+    (paneId: string) => (event: ReactDragEvent<HTMLDivElement>) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && event.currentTarget.contains(next)) {
+        return;
+      }
       setDropTarget((current) => (current !== null && current.paneId === paneId ? null : current));
     },
     [],
   );
 
   /**
-   * The refusal A15.1 asks for. Same project only, and refused ALOUD —
-   * never a drop that just does nothing, which this codebase's standing
-   * rule treats as indistinguishable from success. An empty target pane (no
+   * A RELEASED DRAG, once the gesture has said WHERE it landed — the one
+   * place both drop targets (the pane, and its tab strip) end up, so the two
+   * cannot drift into two policies.
+   *
+   * `zone` decides which of the two things happens: an `Edge` SPLITS the
+   * target pane, `'centre'` JOINS the tab into it. The join is the half that
+   * was missing, and the operator's report is what it cost — every drop
+   * called `splitPane`, so the layout could grow and never shrink, and there
+   * was no way at all to drag a tab back into a pane.
+   *
+   * EVERY REFUSAL IS ALOUD, on both paths — never a drop that just does
+   * nothing, which this codebase's standing rule treats as indistinguishable
+   * from success. `splitPane` and `joinPane` are both total, so a stale id
+   * hands back an untouched tree that looks exactly like a drop that worked.
+   * The four:
+   *
+   *  1. the TARGET pane is gone (a drop that raced a close) — the same
+   *     silent-no-op trap `splitFocused` guards;
+   *  2. the two sessions are in different projects — see below;
+   *  3. the SOURCE pane is gone. This one was missing on the split path and
+   *     is not cosmetic there: a strip is scoped to the active project, so
+   *     `adoptOrphans` puts a tab whose pane closed mid-drag back into the
+   *     focused pane, and splitting from that stale source would leave the
+   *     session drawn in TWO panes at once — the exact invariant (PR 268: a
+   *     session lives in exactly one pane) that `removeTab` was there to
+   *     keep, quietly skipped because it was handed an id nothing holds;
+   *  4. a join onto the pane the tab is already in, where there is nothing
+   *     to move. (An EDGE of that same pane is not refused: splitting a pane
+   *     with its own tab is what `zv` does.)
+   *
+   * THE CROSS-PROJECT REFUSAL COVERS THE JOIN TOO, and that is a decision
+   * rather than an inheritance. A pane's strip draws the ACTIVE project's
+   * sessions and nothing else (`drawnPaneTabs`), so a tab joined in from
+   * another project would join the membership and then draw nothing — a drop
+   * that looks like it worked and shows no tab, which is the worst of the
+   * outcomes this rule exists to prevent. The layout is also remembered per
+   * project, so the tab would come back as another project's session inside
+   * this one's remembered panes. It refuses, in the verb of the gesture the
+   * operator actually made, and names both projects. An empty target pane (no
    * session shown yet, or one filtered/closed out from under it) has no
    * project of its own to conflict with, so it always accepts.
    */
-  const onPaneDrop = useCallback(
-    (paneId: string) => (event: ReactDragEvent<HTMLDivElement>) => {
-      event.preventDefault();
+  const dropTabInPane = useCallback(
+    (paneId: string, zone: DropZone) => {
       const drag = dragging;
       setDragging(null);
       setDropTarget(null);
       if (drag === null) {
         return;
       }
+      const joining = zone === 'centre';
       const draggedId = drag.sessionId;
       const targetLeaf = findLeaf(panes, paneId);
       if (targetLeaf === null) {
-        // The same silent-no-op trap `splitFocused` guards above: a drop
-        // that raced a close would hand `splitPane` an id it cannot find,
-        // and get the tree back untouched with nothing said.
-        setStatus('that pane is gone — nothing to split');
+        setStatus(`that pane is gone — nothing to ${joining ? 'move it into' : 'split'}`);
         return;
       }
       const draggedEntry = entriesById.get(draggedId) ?? null;
@@ -2590,17 +2741,26 @@ function CanvasInner({
         draggedEntry.project.id !== targetEntry.project.id
       ) {
         setStatus(
-          `can't split across projects — "${draggedEntry.project.name}" and "${targetEntry.project.name}" are different projects`,
+          `can't ${joining ? 'move a tab' : 'split'} across projects — "${draggedEntry.project.name}" and "${targetEntry.project.name}" are different projects`,
         );
         return;
       }
-      const rect = event.currentTarget.getBoundingClientRect();
-      const edge = nearestEdge(
-        event.clientX - rect.left,
-        event.clientY - rect.top,
-        rect.width,
-        rect.height,
-      );
+      if (findLeaf(panes, drag.paneId) === null) {
+        setStatus('the pane that tab came from has gone — pick the tab up again');
+        return;
+      }
+      if (joining) {
+        if (paneId === drag.paneId) {
+          setStatus('that tab is already in this pane');
+          return;
+        }
+        // `joinPane` opens the tab in the target and takes it out of the
+        // source, closing that pane when it was its last tab — which is what
+        // makes this the one gesture that can un-split a layout.
+        setPanes((tree) => joinPane(tree, paneId, drag.paneId, draggedId));
+        setFocusedPaneId(paneId);
+        return;
+      }
       paneSeq.current += 1;
       const newId = `pane-${paneSeq.current}`;
       setPanes((tree) => {
@@ -2609,12 +2769,35 @@ function CanvasInner({
         // reading under which "the tab sits on the split side" is true of
         // the tab that was dragged. `removeTab` closes a source pane it
         // empties, and is total over a source that has already gone.
-        const split = splitPane(tree, paneId, edge, draggedId, newId);
+        const split = splitPane(tree, paneId, zone, draggedId, newId);
         return removeTab(split, drag.paneId, draggedId) ?? split;
       });
       setFocusedPaneId(newId);
     },
     [dragging, panes, entriesById, setFocusedPaneId],
+  );
+
+  const onPaneDrop = useCallback(
+    (paneId: string) => (event: ReactDragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const rect = event.currentTarget.getBoundingClientRect();
+      dropTabInPane(
+        paneId,
+        dropZone(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height),
+      );
+    },
+    [dropTabInPane],
+  );
+
+  /** The strip's own drop — always a join, never measured. See
+   *  `onStripDragOver` for why it stops the event here. */
+  const onStripDrop = useCallback(
+    (paneId: string) => (event: ReactDragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropTabInPane(paneId, 'centre');
+    },
+    [dropTabInPane],
   );
 
   /**
@@ -4391,7 +4574,7 @@ function CanvasInner({
           onDragLeave={onPaneDragLeave(leaf.id)}
           onDrop={onPaneDrop(leaf.id)}
         >
-          <TabStripRow>
+          <TabStripRow onDragOver={onStripDragOver(leaf.id)} onDrop={onStripDrop(leaf.id)}>
             <TabStrip
               orientation="horizontal"
               tabs={paneTabs}
@@ -4428,7 +4611,7 @@ function CanvasInner({
           </TabStripRow>
           <DetailPanel {...buildDetailProps(entry, leaf.sessionId, leaf.id, isFocused)} />
           {dropTarget !== null && dropTarget.paneId === leaf.id && (
-            <DropZoneOverlay edge={dropTarget.edge} />
+            <DropZoneOverlay zone={dropTarget.zone} />
           )}
         </div>
       );
@@ -4449,6 +4632,8 @@ function CanvasInner({
       onPaneDragOver,
       onPaneDragLeave,
       onPaneDrop,
+      onStripDragOver,
+      onStripDrop,
       newTabInPane,
       newSessionDecline,
       dropTarget,
