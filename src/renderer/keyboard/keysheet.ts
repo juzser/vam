@@ -231,6 +231,14 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // the other, or an operator picks whichever they remember and gets a
   // different refusal.
   newTab: { group: 'session', label: () => 'new session as a tab in this pane' },
+  // NAMES THE DIRECTORY, because that is what tells this row apart from the
+  // two above it at a glance: the other two are born in a project that
+  // already exists, and this one is how a project comes to exist — vam has no
+  // stored project, so choosing a directory and starting a session in it IS
+  // the act. In `session` rather than `view`: the group holds what the
+  // operator DOES to their work (`gm` files a project into a folder from
+  // here), while `view` is surfaces that open over everything.
+  newProject: { group: 'session', label: () => 'new project — choose a directory to start it in' },
   // ENTER, WHICH OPENS NOTHING IN SELECT — audit F1. It was captioned "open
   // the focused step" in both modes, and there has been no focused step to
   // open since the command strip left the pane: in Select the key answers

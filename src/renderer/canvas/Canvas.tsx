@@ -4231,6 +4231,14 @@ function CanvasInner({
           // `newTabInPane` states it, and `chords.ts` argues it.
           newTabInPane(focusedPaneId, focusedEntry, focusedPaneTabs);
           return;
+        case 'newProject':
+          // `Mod-p` — the Projects header's `+`, down to the same function
+          // that button calls, so the key and the control cannot come to mean
+          // two things or refuse in two ways. Nothing is decided here:
+          // `newProject` owns the three refusals, the picker and the pending
+          // state, and this case exists only to reach it.
+          void newProject();
+          return;
         case 'settings':
           setSettingsSection('appearance');
           setSettingsOpen(true);
@@ -4401,6 +4409,7 @@ function CanvasInner({
     beginComposing,
     closeSession,
     createSession,
+    newProject,
     stepProject,
     focusSession,
     // `mode` is deliberately NOT here any more, and its absence is the change:
