@@ -31,6 +31,8 @@ import { Canvas } from './canvas/Canvas.js';
 import { ErrorBoundary } from './errors/ErrorBoundary.js';
 import { bridgeMainErrors } from './errors/main-errors-bridge.js';
 import { DEMO_MODEL, demoModelWithTurns } from './fixtures/demo.js';
+import { createDemoHistory } from './fixtures/demo-history.js';
+import { HistoryReaderProvider } from './sources/history-reader.js';
 import { createSourceFromHttp } from './sources/http-factory.js';
 import { describeFailure, type SessionSource } from './sources/port.js';
 import { createSourceFromPreload } from './sources/preload-factory.js';
@@ -106,6 +108,30 @@ function demoTurns(): number {
   const asked = new URLSearchParams(globalThis.location?.search ?? '').get('turns');
   const count = Number(asked);
   return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+/**
+ * Whether the demo has a backward pager — `?demo=1&history=off` takes it away.
+ *
+ * THE SAME KIND OF KNOB AS `?turns=N` ABOVE, and it earns its keep the same
+ * way: it makes a real state of the app REACHABLE that otherwise is not.
+ * `SessionSource.history` is optional (`sources/port.ts`), and every source vam
+ * itself assembles has it — so the branch where it is ABSENT, which the column
+ * draws as a stated refusal rather than as "there is nothing older", is a
+ * branch no shipped source can put on screen. Without this it would ship
+ * undrawn and untested in a browser, which is how a message ends up wrong for
+ * a year.
+ *
+ * It is also what keeps the column's geometry guards honest. With a pager, the
+ * column GROWS whenever a check scrolls near its top, so a sticky-position
+ * sweep computed against one set of offsets would be walking a different
+ * column by the time it got there. Off, the fixture is the fixed seven turns
+ * those checks were written against.
+ *
+ * Read only inside the demo, like `demoTurns`.
+ */
+function demoHasHistory(): boolean {
+  return new URLSearchParams(globalThis.location?.search ?? '').get('history') !== 'off';
 }
 
 export function App() {
@@ -299,19 +325,35 @@ function SourceCanvas({
             where it would take the explanation down with the canvas. It also
             covers the phone shell, which `Canvas` renders. */}
         <ErrorBoundary surface="the canvas">
-          <Canvas
-            model={model}
-            source={
-              source === null
-                ? // Not the default `READ_ONLY_SOURCE`: it says "no write route
-                  // — this canvas is read-only", which is a claim about a source
-                  // that has not answered yet and, here, is usually wrong. With
-                  // `shown` set there is no source and there will not be one, so
-                  // the cell says that instead of connecting forever.
-                  { kind: 'connecting', error: shown }
-                : { kind: 'session', source, error: shown, loading, onWrote: reload }
-            }
-          />
+          {/* THE SOURCE'S BACKWARD PAGER, published to every pane below.
+              `source.history ?? null`, and both halves of that are deliberate:
+              the member is optional on the port (`sources/port.ts` says why),
+              and a source that has not answered yet -- or failed to assemble --
+              publishes NOTHING rather than a stub that resolves empty. A stub
+              would tell the column "there is nothing older" about a source that
+              has said no such thing, which is the confusion `TranscriptPage`'s
+              whole shape exists to prevent.
+
+              HERE RATHER THAN THROUGH `Canvas`: it is the source's own member,
+              one per app, and it takes the session id it acts on as an
+              argument, so the panes that draw a column all want the same
+              function. `sources/history-reader.ts` carries the argument in
+              full. */}
+          <HistoryReaderProvider value={source?.history ?? null}>
+            <Canvas
+              model={model}
+              source={
+                source === null
+                  ? // Not the default `READ_ONLY_SOURCE`: it says "no write route
+                    // — this canvas is read-only", which is a claim about a source
+                    // that has not answered yet and, here, is usually wrong. With
+                    // `shown` set there is no source and there will not be one, so
+                    // the cell says that instead of connecting forever.
+                    { kind: 'connecting', error: shown }
+                  : { kind: 'session', source, error: shown, loading, onWrote: reload }
+              }
+            />
+          </HistoryReaderProvider>
         </ErrorBoundary>
       </div>
     </div>
@@ -325,17 +367,31 @@ function DemoCanvas() {
     const asked = demoTurns();
     return asked > 0 ? demoModelWithTurns(asked) : DEMO_MODEL;
   }, []);
+  /**
+   * THE DEMO'S OWN PAGER, and the demo is the only session this repo may drive
+   * a guard against or put in a screenshot -- vam is public and every real
+   * transcript on this machine is somebody's work. It is a real `TranscriptPage`
+   * producer read by the same walk as any source's, and it gives all four of
+   * the answers a source can give, the blank window and the refusal included
+   * (`fixtures/demo-history.ts` states the order).
+   *
+   * ONCE PER MOUNT, like the model above: the scripted refusal is a step in a
+   * closure, so a pager rebuilt on every render would refuse forever.
+   */
+  const history = useMemo(() => (demoHasHistory() ? createDemoHistory() : null), []);
   return (
-    <Canvas
-      model={model}
-      source={{
-        kind: 'demo',
-        // Refused here rather than at the server: in demo mode there is no
-        // session to refuse it, and "unknown session" is a confusing way to
-        // learn the rows were never real.
-        note: 'demo data — every write is refused',
-      }}
-    />
+    <HistoryReaderProvider value={history}>
+      <Canvas
+        model={model}
+        source={{
+          kind: 'demo',
+          // Refused here rather than at the server: in demo mode there is no
+          // session to refuse it, and "unknown session" is a confusing way to
+          // learn the rows were never real.
+          note: 'demo data — every write is refused',
+        }}
+      />
+    </HistoryReaderProvider>
   );
 }
 

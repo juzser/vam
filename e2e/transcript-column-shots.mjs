@@ -57,7 +57,24 @@ function check(label, ok, detail) {
   failures.push(label);
 }
 
-await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+// `history=off` FOR EVERYTHING BELOW, AND IT IS NOT A CONVENIENCE.
+//
+// Two reasons, and both of them are about what a check can honestly claim.
+//
+// FIRST, THE FIFTH ANSWER. `SessionSource.history` is OPTIONAL (`port.ts`), and
+// every source vam assembles has it -- so the state where it is ABSENT, which
+// the column has to draw as a stated refusal rather than as "there is nothing
+// older", is one no shipped source can put on a screen. `history=off` is the
+// only way it is reachable at all, and section 5 below is the only place in
+// this repo it is measured in a real browser.
+//
+// SECOND, THE GEOMETRY. With a pager the column GROWS whenever anything scrolls
+// near its top -- which sections 3, 5, 6 and 8 all do -- so offsets measured
+// once would be walking a different column by the time they were used. Off, the
+// fixture is the fixed seven turns these checks were written against. The
+// pager's own behaviour is section 11, on its own page, where that growth is
+// the subject rather than the noise.
+await page.goto(`${origin}/?demo=1&history=off`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-tab-strip]');
 await page.locator('[data-session-row="factory-sse-1"]').click();
 await page.waitForSelector('[data-detail-column]');
@@ -276,10 +293,45 @@ check(
   !/beginning of|start of the session|no earlier|nothing before/.test(startText),
   startText,
 );
-// A control that cannot act must be absent, never dimmed: vam has no way to
-// ask for older turns yet, so there is no button and no spinner to imply one.
+// ---------------- 5b. A SOURCE WITH NO PAGER SAYS SO, AND OFFERS NOTHING
+//
+// THE FIFTH ANSWER, and the only place it is drawable. `history` is optional on
+// the port and present on every source vam assembles, so without `history=off`
+// this state cannot be reached in a browser at all -- it would ship undrawn.
+//
+// The rule the block was written under is unchanged now that a control exists:
+// ABSENT, NOT DIMMED. What changed is that the reason has to be SAID. A column
+// that simply had no button would be indistinguishable from one whose source
+// can page and has nothing more to give, which is the same confusion one level
+// down from the boundary itself.
+const more = page.locator('[data-column-more]');
+check(
+  'a source that cannot page says so where the column ends',
+  (await more.count()) === 1 && (await more.getAttribute('data-column-more')) === 'unsupported',
+  `data-column-more=${JSON.stringify(await more.getAttribute('data-column-more'))}`,
+);
+const moreText = ((await more.innerText()) ?? '').toLowerCase();
+console.log(`  no-pager note: ${JSON.stringify(await more.innerText())}`);
+// THE FIFTH ANSWER, ON FILE. Nothing else in this repo can produce a picture
+// of it: the state is unreachable from any source vam assembles.
+await page.screenshot({ path: `${outDir}/transcript-column-no-pager.png` });
+console.log(`${outDir}/transcript-column-no-pager.png`);
+check(
+  'in words, not only in an attribute',
+  /cannot read further back/.test(moreText),
+  moreText,
+);
+// A control that cannot act must be absent, never dimmed -- and neither may a
+// spinner stand in for a fetch that will never happen.
 const startControls = await start.locator('button, [role="button"], [aria-busy]').count();
 check('and offers no control it cannot honour', startControls === 0, `${startControls} found`);
+// AND THE ABSENCE IS MEASURED AS AN ABSENCE, not inferred from a selector that
+// might simply be wrong: the same selector finds the control on the page that
+// HAS a pager (section 11), so a typo here would fail there.
+check(
+  'no read-earlier control anywhere in the pane',
+  (await page.locator('[data-column-more-ask]').count()) === 0,
+);
 
 // ------------------------------------ 6. THE JUMPS FLOAT, AND COVER NOTHING
 //
@@ -703,21 +755,45 @@ check(
 );
 
 // Still answering: a scroll moves it, and the frame after it is not a freeze.
+//
+// THIS PAGE KEEPS ITS PAGER, deliberately, and the assertion below had to be
+// re-derived because of it: reaching the top is now also the gesture that asks
+// for more, so the column does NOT rest at scrollTop 0 -- a page lands and the
+// anchoring puts the reader back where they were, which is several hundred
+// pixels down a 340,000px transcript. "It answers" is therefore measured as
+// "it left the bottom", which is what the check was always about, plus the
+// separate fact that anchoring works at this size too.
+const heightBefore = await volume
+  .locator('[data-detail-column]')
+  .evaluate((el) => el.scrollHeight);
 const scrolledAt = Date.now();
 await volume.locator('[data-detail-column]').evaluate((el) => {
   el.scrollTop = 0;
 });
-await volume.waitForTimeout(300);
+await volume.waitForTimeout(600);
 const scrollMs = Date.now() - scrolledAt;
 const volumeMetrics = await volume.locator('[data-detail-column]').evaluate((el) => ({
   scrollTop: el.scrollTop,
   scrollHeight: el.scrollHeight,
+  clientHeight: el.clientHeight,
 }));
 console.log(`  scrolled to the top in ${scrollMs}ms: ${JSON.stringify(volumeMetrics)}`);
 check(
   'and the column still answers a scroll at that size',
-  volumeMetrics.scrollTop === 0 && scrollMs < 3_000,
+  volumeMetrics.scrollTop < volumeMetrics.scrollHeight - volumeMetrics.clientHeight - 1_000 &&
+    scrollMs < 3_000,
   `${scrollMs}ms, ${JSON.stringify(volumeMetrics)}`,
+);
+// AND THE ARITHMETIC IS THE SAME AT 3,276 TURNS AS AT SEVEN: whatever the
+// column grew by is what the offset moved by, to the pixel.
+const volumeGrew = volumeMetrics.scrollHeight - heightBefore;
+console.log(
+  `  at volume: scrollHeight grew ${volumeGrew}px, offset restored to ${Math.round(volumeMetrics.scrollTop)}`,
+);
+check(
+  'a page landing at volume moves the offset by exactly what it added',
+  volumeGrew > 0 && Math.abs(volumeMetrics.scrollTop - volumeGrew) <= 2,
+  `grew ${volumeGrew}, offset ${Math.round(volumeMetrics.scrollTop)}`,
 );
 // WHATEVER IS MOUNTED, THE COUNT IS HONEST. If the column caps what it mounts,
 // the boundary at the top has to say so — a cap that silently drops turns is
@@ -735,6 +811,421 @@ check(
 );
 await volume.screenshot({ path: `${outDir}/transcript-column-volume.png` });
 console.log(`${outDir}/transcript-column-volume.png`);
+
+// --------------------------------------------------- 11. READING FURTHER BACK
+//
+// The other half of the operator's sentence: "load more when scrolling up".
+// PR 284 built the column and said at its top edge that this was as far back as
+// vam had READ; PR 283 built the pager. This section is the join, and it is
+// here rather than in a unit test because every fact it holds is a layout fact:
+// what `scrollHeight` did, where an element ended up, whether the turn under
+// the reader's eye moved.
+//
+// ITS OWN PAGE, and that is load-bearing twice over. The demo's pager is a
+// scripted sequence held in a closure (`fixtures/demo-history.ts`), so it must
+// start at step one; and the column above is measured at a fixed seven turns,
+// which paging would break.
+const back = await browser.newPage({ viewport: { width: 1100, height: 620 } });
+back.on('pageerror', (err) => console.error('PAGE ERROR (read-back):', err));
+back.on('console', (msg) => {
+  if (msg.type() === 'error') console.error('CONSOLE ERROR (read-back):', msg.text());
+});
+await back.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+await back.waitForSelector('[data-tab-strip]');
+await back.locator('[data-session-row="factory-sse-1"]').click();
+await back.waitForSelector('[data-detail-column]');
+
+/** Everything the boundary block and the column are saying, in one read. */
+const columnState = () =>
+  back.evaluate(() => {
+    const col = document.querySelector('[data-detail-column]');
+    const boundary = document.querySelector('[data-column-start]');
+    const offer = document.querySelector('[data-column-more]');
+    const ids = [...col.querySelectorAll('[data-column-turn]')].map((el) =>
+      el.getAttribute('data-column-turn'),
+    );
+    return {
+      scrollTop: col.scrollTop,
+      scrollHeight: col.scrollHeight,
+      start: boundary?.getAttribute('data-column-start') ?? null,
+      more: offer?.getAttribute('data-column-more') ?? null,
+      moreText: (offer?.textContent ?? '').trim(),
+      askLabel: document.querySelector('[data-column-more-ask]')?.textContent ?? null,
+      counted: Number(
+        /^\d+/.exec(document.querySelector('[data-progress-count]')?.textContent ?? '')?.[0] ?? -1,
+      ),
+      ids,
+      duplicates: ids.length - new Set(ids).size,
+    };
+  });
+
+/**
+ * Take the column to its top AND, IN THE SAME TASK, record where the oldest
+ * turn currently sits.
+ *
+ * ONE `evaluate`, and it is the whole of why this measurement means anything.
+ * Setting `scrollTop` and reading the rect in separate round trips leaves a
+ * window in which the fetch can resolve and the turns can land, so the "before"
+ * would already be the "after" and a broken anchor would read as a perfect one.
+ * A scroll handler cannot run between two statements of one synchronous block.
+ */
+const toTopAndMark = () =>
+  back.evaluate(() => {
+    const col = document.querySelector('[data-detail-column]');
+    col.scrollTop = 0;
+    const oldest = col.querySelector('[data-column-turn]');
+    return {
+      id: oldest?.getAttribute('data-column-turn') ?? null,
+      top: oldest.getBoundingClientRect().top - col.getBoundingClientRect().top,
+      scrollTop: col.scrollTop,
+      scrollHeight: col.scrollHeight,
+      turns: col.querySelectorAll('[data-column-turn]').length,
+    };
+  });
+
+/**
+ * Wait for something and REPORT rather than throw when it never happens.
+ *
+ * `waitForFunction` aborts the whole run on a timeout, which costs this file
+ * its own stated rule -- "collect rather than throw on the first: one run should
+ * report every fault". Found by falsification: with a refusal wrongly folded
+ * into the start state, the run died on a bare `TimeoutError` at a line number
+ * instead of naming the three checks that were about to catch it.
+ */
+async function settles(what, ms = 8_000) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (await back.evaluate(what)) return true;
+    await back.waitForTimeout(50);
+  }
+  return false;
+}
+
+/** Where a turn sits now, in the column's own coordinates. */
+const markNow = (id) =>
+  back.evaluate((want) => {
+    const col = document.querySelector('[data-detail-column]');
+    const el = col.querySelector(`[data-column-turn="${want}"]`);
+    return {
+      top: el === null ? null : el.getBoundingClientRect().top - col.getBoundingClientRect().top,
+      scrollTop: col.scrollTop,
+      scrollHeight: col.scrollHeight,
+      turns: col.querySelectorAll('[data-column-turn]').length,
+    };
+  }, id);
+
+const opening = await columnState();
+console.log(`  read-back opens: ${opening.ids.length} turns, boundary ${opening.start}/${opening.more}`);
+check(
+  'a source that CAN page offers a control at the top of the column',
+  opening.more === 'available' && opening.askLabel !== null,
+  JSON.stringify({ more: opening.more, ask: opening.askLabel }),
+);
+check(
+  'and still refuses to claim the session began there',
+  opening.start === 'read-limit',
+  opening.start,
+);
+
+// ------------------ 11a. ANSWER ONE: A PAGE OF TURNS, AND NOBODY MOVED
+//
+// THE DEFECT EVERY INFINITE SCROLL SHIPS, measured rather than asserted. A
+// scroll offset is measured from the top of the content, so anything inserted
+// ABOVE the viewport moves what the reader is looking at down by exactly its
+// own height. The browser's own CSS scroll anchoring does not save this: it is
+// suppressed while a scroller sits at its top, which is the one place this
+// feature is ever used from.
+//
+// TWO NUMBERS, because either alone can be satisfied by doing nothing:
+//   - the column GREW, so turns really did land above the viewport;
+//   - the turn that was at the top edge is still at the same pixel.
+const beforeFirst = await toTopAndMark();
+const firstLanded = await settles(
+  `document.querySelectorAll('[data-column-turn]').length > ${beforeFirst.turns}`,
+);
+check('the gesture finished rather than hanging', firstLanded);
+await back.waitForTimeout(150);
+const afterFirst = await markNow(beforeFirst.id);
+const grewFirst = afterFirst.scrollHeight - beforeFirst.scrollHeight;
+const driftFirst = afterFirst.top - beforeFirst.top;
+console.log(
+  `  scrolling to the top read back ${afterFirst.turns - beforeFirst.turns} turns: ` +
+    `scrollHeight ${Math.round(beforeFirst.scrollHeight)} -> ${Math.round(afterFirst.scrollHeight)} ` +
+    `(+${Math.round(grewFirst)}px), offset ${Math.round(beforeFirst.scrollTop)} -> ${Math.round(afterFirst.scrollTop)}, ` +
+    `turn ${beforeFirst.id} drifted ${driftFirst.toFixed(2)}px`,
+);
+check(
+  'scrolling to the top of the column reads earlier turns in',
+  afterFirst.turns > beforeFirst.turns && grewFirst > 100,
+  `${beforeFirst.turns} -> ${afterFirst.turns} turns, +${Math.round(grewFirst)}px`,
+);
+check(
+  'and the turn the reader was looking at did not move',
+  Math.abs(driftFirst) <= 2,
+  `drifted ${driftFirst.toFixed(2)}px while the column grew ${Math.round(grewFirst)}px`,
+);
+check(
+  'because the offset was moved by exactly what was added',
+  Math.abs(afterFirst.scrollTop - (beforeFirst.scrollTop + grewFirst)) <= 2,
+  `offset ${Math.round(afterFirst.scrollTop)}, expected ${Math.round(beforeFirst.scrollTop + grewFirst)}`,
+);
+const afterFirstState = await columnState();
+check(
+  'the turns read back are ABOVE the ones already drawn, oldest at the top',
+  afterFirstState.ids.slice(-opening.ids.length).join('|') === opening.ids.join('|'),
+  `${afterFirstState.ids.slice(0, 4).join(', ')} … `,
+);
+check('and no turn is drawn twice', afterFirstState.duplicates === 0, `${afterFirstState.duplicates}`);
+check(
+  'and the count says how many were read, not how many the tail holds',
+  afterFirstState.counted === afterFirstState.ids.length,
+  `${afterFirstState.counted} counted, ${afterFirstState.ids.length} drawn`,
+);
+check(
+  'the boundary still says READ-SO-FAR while there is more',
+  afterFirstState.start === 'read-limit' && afterFirstState.more === 'available',
+  `${afterFirstState.start}/${afterFirstState.more}`,
+);
+
+// ---------------- 11b. ANSWER FOUR: A READ THAT FAILED, IN THE SOURCE'S WORDS
+//
+// The demo's second gesture walks a blank window and then meets a refusal
+// (`fixtures/demo-history.ts` writes the sequence out). Both halves matter:
+// the blank window must not have ended the column, and the refusal must not
+// look like an ending either.
+//
+// `pull-requests.ts:12` is the rule being held: "'No PRs' and 'vam could not
+// ask' must never look the same."
+const beforeRefusal = await toTopAndMark();
+// WAIT FOR THE STATE UNDER TEST, not for "not reading". Found by falsification:
+// "not reading" is TRUE for the first frame after the scroll, before React has
+// even rendered the in-flight state, so the check ran against the state the
+// gesture started from and passed or failed on the wrong screen entirely.
+const sawRefusal = await settles(
+  `document.querySelector('[data-column-more]')?.getAttribute('data-column-more') === 'unavailable'`,
+);
+check('a read that could not be made settles into a state of its own', sawRefusal);
+const refused = await columnState();
+console.log(`  refusal: ${refused.start}/${refused.more} — ${JSON.stringify(refused.moreText)}`);
+await back.screenshot({ path: `${outDir}/transcript-column-unavailable.png` });
+console.log(`${outDir}/transcript-column-unavailable.png`);
+check(
+  'a read that failed is drawn as a failure, not as an ending',
+  refused.more === 'unavailable' && refused.start === 'read-limit',
+  `${refused.start}/${refused.more}`,
+);
+check(
+  "and it carries the SOURCE's own words, code and all",
+  refused.moreText.includes('demo-read-refused') && refused.moreText.includes('ask again'),
+  refused.moreText,
+);
+check(
+  'it does not say the session begins here, in any words',
+  !/begins here|beginning of|nothing before|no earlier/i.test(refused.moreText),
+  refused.moreText,
+);
+check(
+  'the turns already read back are still there after a failure',
+  refused.ids.length === afterFirstState.ids.length,
+  `${refused.ids.length} vs ${afterFirstState.ids.length}`,
+);
+check(
+  'and a retry is offered, because the cursor did not move',
+  refused.askLabel !== null,
+  `${refused.askLabel}`,
+);
+void beforeRefusal;
+
+// -------------------------- 11c. THE RETRY RECOVERS, AND STILL DOES NOT MOVE
+//
+// A retry that asks the same thing again is the whole reason the control is
+// legitimate rather than decorative. The anchoring is measured across it too:
+// this is the path where the block's own height changes as well (the failure
+// message goes away), so it is the one most likely to jump.
+const beforeRetry = await back.evaluate(() => {
+  const col = document.querySelector('[data-detail-column]');
+  const oldest = col.querySelector('[data-column-turn]');
+  return {
+    id: oldest.getAttribute('data-column-turn'),
+    turns: col.querySelectorAll('[data-column-turn]').length,
+  };
+});
+await back.locator('[data-column-more-ask]').click();
+// THE IN-FLIGHT STATE, and it is only observable because the demo pager takes
+// 150ms per ask on purpose (`fixtures/demo-history.ts` says why). A status
+// line, and NO control: mid-flight a button is either painted and inert or
+// half-painted and live, and both are states this pane must not have.
+const inFlight = await back.evaluate(() => ({
+  more: document.querySelector('[data-column-more]')?.getAttribute('data-column-more') ?? null,
+  ask: document.querySelector('[data-column-more-ask]') === null ? 'absent' : 'present',
+  said: document.querySelector('[data-column-more]')?.textContent?.trim() ?? '',
+}));
+console.log(`  in flight: ${JSON.stringify(inFlight)}`);
+await back.screenshot({ path: `${outDir}/transcript-column-reading.png` });
+console.log(`${outDir}/transcript-column-reading.png`);
+check(
+  'while a read is in flight the column says so',
+  inFlight.more === 'reading' && /reading/i.test(inFlight.said),
+  JSON.stringify(inFlight),
+);
+check(
+  'and the control is ABSENT rather than dimmed',
+  inFlight.ask === 'absent',
+  inFlight.ask,
+);
+// AND A SECOND ASK CANNOT BE STARTED: scrolling hard at the top while one is
+// running must neither fire a duplicate nor lose the gesture. Measured by the
+// answer, which is the only honest place: exactly one page lands.
+const markMid = await markNow(beforeRetry.id);
+for (let i = 0; i < 6; i += 1) {
+  await back.evaluate(() => {
+    const col = document.querySelector('[data-detail-column]');
+    col.scrollTop = 4;
+    col.scrollTop = 0;
+  });
+}
+const retryLanded = await settles(
+  `document.querySelectorAll('[data-column-turn]').length > ${beforeRetry.turns}`,
+);
+check('the retry actually recovered, rather than refusing again forever', retryLanded);
+await back.waitForTimeout(400);
+const afterRetry = await markNow(beforeRetry.id);
+const retriedState = await columnState();
+const grewRetry = afterRetry.scrollHeight - markMid.scrollHeight;
+const driftRetry = afterRetry.top - markMid.top;
+console.log(
+  `  retry read back ${afterRetry.turns - beforeRetry.turns} turns while 6 scrolls were fired at it: ` +
+    `scrollHeight ${Math.round(markMid.scrollHeight)} -> ${Math.round(afterRetry.scrollHeight)} ` +
+    `(+${Math.round(grewRetry)}px), turn ${beforeRetry.id} drifted ${driftRetry.toFixed(2)}px`,
+);
+check(
+  'the retry reads back exactly one page, however hard it is scrolled at',
+  afterRetry.turns - beforeRetry.turns === 3,
+  `${afterRetry.turns - beforeRetry.turns} turns arrived`,
+);
+check(
+  'and the reader is still looking at the same pixel',
+  Math.abs(driftRetry) <= 2,
+  `drifted ${driftRetry.toFixed(2)}px while the column grew ${Math.round(grewRetry)}px`,
+);
+check('and still no turn is drawn twice', retriedState.duplicates === 0, `${retriedState.duplicates}`);
+
+// ---------- 11d. ANSWER THREE: A WINDOW WITH NO WHOLE TURN IN IT IS NOT AN END
+//
+// The ORDINARY answer on a large session: at ~2.5 MB of transcript per turn,
+// most 128 KiB windows hold no complete turn. The demo's fourth gesture is
+// three of those in a row, which is `MAX_BLANK_STEPS`, so the walk stops with
+// nothing to show — and the one thing it must not do is call that the end.
+const beforeBlank = await columnState();
+await back.locator('[data-column-more-ask]').click();
+// IN, THEN OUT. Waiting only for "not reading" would pass on the frame before
+// the walk had even started -- see 11b's own note.
+const wentReading = await settles(
+  `document.querySelector('[data-column-more]')?.getAttribute('data-column-more') === 'reading'`,
+);
+check('pressing the control starts a read', wentReading);
+const stoppedReading = await settles(
+  `document.querySelector('[data-column-more]')?.getAttribute('data-column-more') !== 'reading'`,
+);
+check('and the read ENDS -- no spinner that never stops', stoppedReading);
+await back.waitForTimeout(200);
+const blanked = await columnState();
+console.log(
+  `  three blank windows: ${blanked.ids.length} turns (was ${beforeBlank.ids.length}), ` +
+    `boundary ${blanked.start}/${blanked.more}`,
+);
+check(
+  'a gesture that found no whole turn adds none',
+  blanked.ids.length === beforeBlank.ids.length,
+  `${beforeBlank.ids.length} -> ${blanked.ids.length}`,
+);
+check(
+  'and is NOT reported as the start of the session',
+  blanked.start === 'read-limit',
+  blanked.start,
+);
+check(
+  'and still offers to go on, because there is more',
+  blanked.more === 'available' && blanked.askLabel !== null,
+  `${blanked.more} / ${blanked.askLabel}`,
+);
+check(
+  'and does not spin: nothing is left in flight',
+  blanked.more !== 'reading',
+  blanked.more,
+);
+
+// ------------------- 11e. ANSWER TWO: THE START, DRAWN FOR THE FIRST TIME
+//
+// `session-start` was defined by PR 284 and deliberately never drawn: nothing
+// vam read could prove it. `TranscriptPage.reachedStart` is that proof, read
+// off a window that really began at byte 0 — never inferred from a short page.
+await back.locator('[data-column-more-ask]').click();
+const reachedStart = await settles(
+  `document.querySelector('[data-column-start]')?.getAttribute('data-column-start') === 'session-start'`,
+);
+check('the walk reaches the beginning of the session at all', reachedStart);
+await back.waitForTimeout(200);
+const atStart = await columnState();
+console.log(`  at the start: ${atStart.ids.length} turns, boundary ${JSON.stringify(atStart.moreText)}`);
+console.log(`  boundary text: ${JSON.stringify(await back.locator('[data-column-start]').innerText())}`);
+check(
+  'reaching the beginning is drawn as the beginning',
+  atStart.start === 'session-start',
+  atStart.start,
+);
+const startedText = (await back.locator('[data-column-start]').innerText()).toLowerCase();
+check(
+  'in words, not only in an attribute',
+  /begins here/.test(startedText),
+  startedText,
+);
+check(
+  'and it no longer says "as far back as vam has read", which is now the wrong sentence',
+  !/as far back as/.test(startedText),
+  startedText,
+);
+// NOTHING LEFT TO ASK FOR MEANS NOTHING TO ASK WITH. Not a dimmed button, not
+// a button that answers "no more" — absent.
+check(
+  'the control is gone once there is nothing left to read',
+  (await back.locator('[data-column-more-ask]').count()) === 0 &&
+    (await back.locator('[data-column-more]').count()) === 0,
+);
+check(
+  'every turn the source had is on screen, exactly once',
+  atStart.duplicates === 0 && atStart.ids.length === DEMO_TURNS + 8,
+  `${atStart.ids.length} turns, ${atStart.duplicates} duplicated`,
+);
+check(
+  'and the count agrees with the column',
+  atStart.counted === atStart.ids.length,
+  `${atStart.counted} counted, ${atStart.ids.length} drawn`,
+);
+// AND IT STAYS. A source at its start must not be asked again on the next
+// scroll, which would be a request loop nobody can see.
+await back.evaluate(() => {
+  const col = document.querySelector('[data-detail-column]');
+  col.scrollTop = 40;
+  col.scrollTop = 0;
+});
+await back.waitForTimeout(400);
+const settled = await columnState();
+check(
+  'scrolling at a column that has reached its start asks for nothing',
+  settled.start === 'session-start' && settled.ids.length === atStart.ids.length,
+  `${settled.start}, ${settled.ids.length} turns`,
+);
+
+await back.evaluate(() => {
+  const col = document.querySelector('[data-detail-column]');
+  col.scrollTop = 0;
+});
+await back.waitForTimeout(200);
+await back.screenshot({ path: `${outDir}/transcript-column-session-start.png` });
+console.log(`${outDir}/transcript-column-session-start.png`);
+await back.screenshot({ path: `${outDir}/transcript-column-read-back.png` });
+console.log(`${outDir}/transcript-column-read-back.png`);
 
 await browser.close();
 
