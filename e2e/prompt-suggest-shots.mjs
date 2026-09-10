@@ -187,5 +187,238 @@ if ((await iconsInPane(focused)) !== 0) {
   fail('the pane that lost focus is still drawing its icons.');
 }
 
+// --- Part three: the two composer typeaheads, in a real browser.
+//
+// WHY THESE NEED A BROWSER AND NOT JSDOM. Two of the claims here are about
+// LAYOUT -- a popover that opens ABOVE the composer and stays inside the
+// viewport is a fact about painted boxes, and jsdom gives every element a
+// zeroed rect (the `aria` test on zeroed rects is a defect this repo has
+// already shipped once). The third is about a REAL Enter: with a list open
+// Enter must complete the word and send nothing, and "nothing was sent" is
+// only observable against a composer that really does clear its draft when it
+// sends -- which this file proves in the same breath, by pressing the same key
+// with no list open and watching the draft go.
+await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-tab-strip]');
+
+/** The oldest turn of `vam-build-1` proposes this; its NEWEST turn proposes nothing. */
+const OLD_TURN_COMMAND = 'pnpm -s lint && pnpm -s typecheck && pnpm -s test && pnpm -s build';
+
+async function openComposer(session) {
+  await page.locator(`[data-session-row="${session}"]`).first().click();
+  await page.waitForTimeout(200);
+  const chat = page.locator('[data-question-chat]');
+  if ((await chat.count()) > 0) await chat.click();
+  await page.waitForSelector('[data-prompt-box] textarea');
+  const box = page.locator('[data-prompt-box] textarea');
+  await box.click();
+  await page.waitForTimeout(120);
+  return box;
+}
+
+/** Type into the box one key at a time, as a person does. */
+async function typeInto(box, text) {
+  await box.fill('');
+  await page.keyboard.type(text, { delay: 12 });
+  await page.waitForTimeout(120);
+}
+
+const composer = await openComposer('vam-build-1');
+
+// A. THE REPORTED BUG. `vam-build-1`'s focused turn is its newest and proposes
+// no command at all; an older one in the same column does. Before this change
+// the list was the focused turn's alone, so `!` opened nothing here -- which
+// is exactly what the operator saw.
+await typeInto(composer, '!');
+await page.waitForSelector('[data-bang-suggest]');
+const bangRows = await page
+  .locator('[data-bang-suggestion] [data-bang-command]')
+  .allTextContents();
+console.log('! offers:', bangRows);
+if (!bangRows.includes(OLD_TURN_COMMAND)) {
+  fail(`typing ! offered ${JSON.stringify(bangRows)} — an older turn's command is missing.`);
+}
+
+// B. ABOVE THE COMPOSER, AND ON SCREEN. A suggestion box that opened below the
+// box it belongs to, or off the bottom of the window, is unreachable however
+// correct its contents. Both popovers are measured, and the `/` one is the
+// case that could actually go wrong: it draws up to eight two-line rows.
+async function checkPlacement(selector, label, { composerMustFit = true } = {}) {
+  const geometry = await page.evaluate((sel) => {
+    const popover = document.querySelector(sel)?.getBoundingClientRect();
+    const box = document.querySelector('[data-prompt-box]')?.getBoundingClientRect();
+    return popover === undefined || box === undefined
+      ? null
+      : {
+          popoverTop: popover.top,
+          popoverBottom: popover.bottom,
+          popoverHeight: popover.height,
+          boxTop: box.top,
+          boxBottom: box.bottom,
+          viewport: window.innerHeight,
+        };
+  }, selector);
+  if (geometry === null) fail(`the ${label} popover or the prompt box is not in the document.`);
+  console.log(`${label} popover geometry:`, geometry);
+  if (geometry.popoverHeight <= 0) {
+    fail(`the ${label} popover has no height — it is in the DOM and paints nothing.`);
+  }
+  if (geometry.popoverBottom > geometry.boxTop + 1) {
+    fail(
+      `the ${label} popover's bottom is at ${geometry.popoverBottom} and the prompt box starts ` +
+        `at ${geometry.boxTop} — it must sit ABOVE the composer, not over it.`,
+    );
+  }
+  if (geometry.popoverTop < 0 || geometry.popoverBottom > geometry.viewport) {
+    fail(`the ${label} popover runs outside the ${geometry.viewport}px viewport.`);
+  }
+  // AND IT MUST NOT PUSH THE COMPOSER OFF THE SCREEN. `composerMustFit` is
+  // off for the short-window pass and that is not a weakened check, it is a
+  // measured one: at 480px this pane's own blocks -- question card, transcript,
+  // composer -- already overflow with no popover open at all, which is a
+  // pre-existing layout fact this file did not introduce and must not pretend
+  // to have caught. What that pass IS for is the popover's own rect, checked
+  // above: it must stay inside the window whatever the window is.
+  if (composerMustFit && geometry.boxBottom > geometry.viewport) {
+    fail(
+      `the ${label} popover pushed the prompt box's bottom to ${geometry.boxBottom}, past the ` +
+        `${geometry.viewport}px viewport — the list must never evict the composer.`,
+    );
+  }
+}
+await checkPlacement('[data-bang-suggest]', '!');
+await page.screenshot({ path: `${outDir}/bang-typeahead-open.png` });
+console.log(`${outDir}/bang-typeahead-open.png`);
+
+// C. WHAT IS INSERTED IS WHAT WAS SHOWN, and Enter sends nothing. Both halves
+// matter: since `deliver.ts` a recorded prompt really is appended to a live
+// session, so a completed `!` line is a command a running agent will run.
+const shown = (
+  await page.locator('[data-bang-suggestion]').first().locator('[data-bang-command]').innerText()
+).trim();
+
+/**
+ * WHAT THIS GUARD CANNOT SEE, MEASURED RATHER THAN ASSUMED.
+ *
+ * "Accepting a suggestion sends nothing" has no browser-visible signature on
+ * this fixture, and both candidates were tried here and rejected:
+ *
+ *  - THE DRAFT. A composer clears its draft when it sends -- but `?demo=1` is
+ *    a `'demo'` source, so a send records nothing and clears nothing. Measured:
+ *    a bare Enter left the draft byte-identical. `composer-bar-shots.mjs` says
+ *    the same about its own wording checks.
+ *  - `defaultPrevented`. The box calls `preventDefault()` on Enter whether it
+ *    accepts a suggestion or submits, so the flag reads `true` either way.
+ *    Measured: `true` with the list open and `true` without it.
+ *
+ * A control that cannot come out both ways is not a control, so neither is
+ * asserted here. `test/panels/DetailPanel.test.tsx` owns that claim, against a
+ * real `onSubmit` spy -- "accepts on Enter and sends nothing" asserts the spy
+ * was never called, which is the fact itself rather than a proxy for it.
+ *
+ * What IS a browser fact, and is checked: Enter with the list open puts the
+ * row's own characters into the draft, exactly, and closes the list.
+ */
+await page.keyboard.press('Enter');
+await page.waitForTimeout(150);
+const afterAccept = await composer.inputValue();
+console.log('draft after accepting:', JSON.stringify(afterAccept));
+if (afterAccept !== `!${shown}`) {
+  fail(`the draft is ${JSON.stringify(afterAccept)}, expected exactly "!" + the row's own text.`);
+}
+if ((await page.locator('[data-bang-suggest]').count()) !== 0) {
+  fail('the ! popover is still open over a draft it has already been accepted into.');
+}
+
+// D. THE `/` LIST, capped and COUNTING what it is not drawing. The provider's
+// real list is fifty-odd commands long; the fixture carries twelve for exactly
+// this row.
+await typeInto(composer, '/');
+await page.waitForSelector('[data-slash-suggest]');
+const slashRows = await page.locator('[data-slash-suggestion]').count();
+const moreNote = await page.locator('[data-slash-more]').innerText();
+console.log(`/ offers ${slashRows} row(s), note: ${JSON.stringify(moreNote)}`);
+if (slashRows !== 8) fail(`the / popover drew ${slashRows} rows, expected the cap of 8.`);
+if (!moreNote.includes('4 more')) {
+  fail(`the / popover's overflow note reads ${JSON.stringify(moreNote)} — it must count the rest.`);
+}
+// AND THE COUNT IS INSIDE THE BOX IT IS DISCLOSING, painted rather than
+// merely present: a count that sat outside the popover's own rect is a
+// disclosure nobody reads.
+const noteVisible = await page.evaluate(() => {
+  const note = document.querySelector('[data-slash-more]')?.getBoundingClientRect();
+  const box = document.querySelector('[data-slash-suggest]')?.getBoundingClientRect();
+  return note === undefined || box === undefined
+    ? null
+    : { noteTop: note.top, noteBottom: note.bottom, boxTop: box.top, boxBottom: box.bottom };
+});
+console.log('overflow note placement:', noteVisible);
+if (
+  noteVisible === null ||
+  noteVisible.noteBottom > noteVisible.boxBottom + 1 ||
+  noteVisible.noteTop < noteVisible.boxTop - 1
+) {
+  fail('the / popover\'s overflow count is outside the box it is disclosing — nobody will see it.');
+}
+await checkPlacement('[data-slash-suggest]', '/');
+await page.screenshot({ path: `${outDir}/slash-typeahead-open.png` });
+
+// AND THE SAME LIST IN A SHORT WINDOW. `src/main/index.ts` sets no
+// `minHeight` and the web build runs in whatever window it is given, so a
+// half-height one is a real state and the placement rule has to hold there
+// too. It is a SECOND VIEWPORT for the same rule, not a guard for a second
+// mechanism -- `SUGGEST_LAYER` records the bounded height that was tried here
+// and removed again because nothing, at any size this pane still works at,
+// could tell it from its absence.
+await page.setViewportSize({ width: 1180, height: 480 });
+await page.waitForTimeout(200);
+await typeInto(composer, '/');
+await page.waitForSelector('[data-slash-suggest]');
+await checkPlacement('[data-slash-suggest]', '/ in a short window', { composerMustFit: false });
+await page.setViewportSize({ width: 1280, height: 800 });
+await page.waitForTimeout(200);
+await typeInto(composer, '/');
+await page.waitForSelector('[data-slash-suggest]');
+
+// Escape closes the list and keeps the text, with a real key press.
+await page.keyboard.press('Escape');
+await page.waitForTimeout(150);
+if ((await page.locator('[data-slash-suggest]').count()) !== 0) {
+  fail('Escape did not close the / popover.');
+}
+if ((await composer.inputValue()) !== '/') {
+  fail('Escape took the typed "/" with it — dismissing a list must not edit the draft.');
+}
+
+// E. THE TWO UNKNOWNS, ON SCREEN. `notes-1` read its command files and could
+// not ask the CLI for its built-ins. A query that matches nothing must not
+// look the same as a list vam could not read.
+const quiet = await openComposer('notes-1');
+await typeInto(quiet, '/zzzz');
+await page.waitForTimeout(150);
+if ((await page.locator('[data-slash-suggest]').count()) !== 0) {
+  fail('a query matching nothing left the / list standing.');
+}
+const gap = await page.locator('[data-slash-gap]').innerText();
+console.log('gap note:', JSON.stringify(gap));
+if (!gap.includes('could not read')) {
+  fail(`the gap note reads ${JSON.stringify(gap)} — it must say vam could not read the list.`);
+}
+const gapBox = await page.locator('[data-slash-gap]').boundingBox();
+if (gapBox === null || gapBox.height <= 0) {
+  fail('the gap note is in the DOM and paints nothing.');
+}
+await page.screenshot({ path: `${outDir}/slash-typeahead-gap.png` });
+console.log(`${outDir}/slash-typeahead-gap.png`);
+
+// And on a session with nothing missing, the note is ABSENT rather than a
+// dimmed placeholder -- the same query, the other answer.
+const full = await openComposer('vam-build-1');
+await typeInto(full, '/zzzz');
+await page.waitForTimeout(150);
+if ((await page.locator('[data-slash-gap]').count()) !== 0) {
+  fail('a session whose list was read in full still drew a "could not read" note.');
+}
+
 await browser.close();
 console.log('all checks passed');

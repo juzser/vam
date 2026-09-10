@@ -290,6 +290,35 @@ export const DEMO_MODEL: CanvasModel = {
           runningAgents: 1,
           activity: null,
           age: '8m',
+          /**
+           * THE `/` TYPEAHEAD'S LIST, and it is here for the fourth rule
+           * above: until this line existed, `session.slashCommands` was
+           * absent on every row in this file, so the `/` popover was outside
+           * the reach of every non-unit gate in the repo -- it could not be
+           * screenshotted, and a real-browser guard could not press a key at
+           * it. `e2e/prompt-suggest-shots.mjs` drives it now.
+           *
+           * INVENTED, like everything here. The real list is three tiers deep
+           * (`slash-commands.ts`, `builtin-commands.ts`) and the third of them
+           * is whatever the operator's installed CLI answers with, which is
+           * exactly the sort of thing that must never reach a public fixture.
+           * Long enough (12) to overflow the popover's eight rows, because the
+           * count of what is NOT drawn is the assertion that needs a row here.
+           */
+          slashCommands: [
+            { id: 'builtin:burrow', name: 'burrow', description: 'dig in and summarise' },
+            { id: 'builtin:clearing', name: 'clearing', description: 'start the context over' },
+            { id: 'builtin:compass', name: 'compass', description: 'say where the session is' },
+            { id: 'builtin:driftwood', name: 'driftwood', description: null },
+            { id: 'builtin:ember', name: 'ember', description: 'keep the last answer warm' },
+            { id: 'builtin:fathom', name: 'fathom', description: 'measure how deep this goes' },
+            { id: 'builtin:gale', name: 'gale', description: 'blow the caches away' },
+            { id: 'builtin:harbour', name: 'harbour', description: 'park the work safely' },
+            { id: 'builtin:inlet', name: 'inlet', description: 'open a narrower channel' },
+            { id: 'user:otter', name: 'otter', description: 'the operator’s own file' },
+            { id: 'project:quarry', name: 'quarry', description: 'this project’s own file' },
+            { id: 'builtin:rename', name: 'rename', description: 'give the session a name' },
+          ],
           decisions: [
             {
               id: 'd-icons',
@@ -348,6 +377,21 @@ export const DEMO_MODEL: CanvasModel = {
           // be typed into right now. That difference is the reason `idle` is
           // its own status and not a second name for `done`.
           vamControlled: true,
+          /**
+           * A SESSION WHOSE `/` LIST IS SHORT, AND SAYS SO. The tiers made of
+           * files were read; the CLI that names the BUILT-INS could not be
+           * asked (`builtin-commands.ts`). That is a different state from
+           * "nothing matches" and the pane draws a different thing for it --
+           * and, like every state in this file, it needed a row or no
+           * screenshot and no browser guard could ever see it.
+           */
+          slashCommands: [
+            { id: 'user:otter', name: 'otter', description: 'the operator’s own file' },
+          ],
+          slashCommandGap: {
+            code: 'cli-missing',
+            message: 'no `claude` on PATH, so vam cannot ask it for its own commands',
+          },
           id: 'notes-1',
           title: 'notes-1',
           icon: '🌙',

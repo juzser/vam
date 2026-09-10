@@ -2914,6 +2914,35 @@ describe('the ! list is drawn from every turn in the column, not the focused one
     expect(suggested()).toEqual(['echo 11']);
     expect(q('[data-bang-more]')).toBeNull();
   });
+
+  /**
+   * WHAT GOES IN IS WHAT WAS SHOWN, character for character.
+   *
+   * This is the one assertion in the file that is about SAFETY rather than
+   * about a list. Since `deliver.ts`, a recorded prompt really is appended to
+   * a live session, so a completed `!` line is a bash command a running agent
+   * will run. The operator reads the row and presses Enter; if the row and the
+   * insertion could ever differ -- a clip for the column's width, a shell
+   * escape, a normalised quote -- they would be approving one command and
+   * sending another.
+   *
+   * Written against the RENDERED row rather than against the fixture, which is
+   * what makes it more than a restatement: a change that cropped the row would
+   * pass a fixture comparison and fail this one.
+   */
+  it('inserts exactly the characters the row displayed, however long they are', () => {
+    const long =
+      'osascript -e \'tell application "Terminal" to do script "cd /w/x && pnpm -s test"\'';
+    const decisions = [withCommands('d5', [{ id: 'c1', label: 'open a terminal', command: long }])];
+    render(<Composer entry={sessionOf(decisions)} decision={null} />);
+    type('!osa');
+    const shown = (
+      all('[data-bang-suggestion]')[0]?.querySelector('[data-bang-command]')?.textContent ?? ''
+    ).trim();
+    expect(shown).toBe(long);
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(box().value).toBe(`!${shown}`);
+  });
 });
 
 /** The `/` typeahead: `session.slashCommands`, built like `!` above. */
