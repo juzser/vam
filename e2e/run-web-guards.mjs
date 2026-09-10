@@ -1,5 +1,5 @@
 /**
- * The four asserting e2e scripts, run for real, in one command.
+ * Every asserting e2e script, run for real, in one command.
  *
  *   node e2e/run-web-guards.mjs
  *
@@ -14,7 +14,11 @@
  * reaches the element a `Note` hangs on, the computed contrast of the tip's
  * boundary against the surface it floats over in both themes, and -- since the
  * pane took its own colour token -- what a surface ACTUALLY PAINTS and whether
- * a swatch in the settings form reaches it). This driver builds the web bundle, serves it with
+ * a swatch in the settings form reaches it, and -- since the settings audit --
+ * whether the narrow settings nav has an ACCESSIBLE NAME at a breakpoint jsdom
+ * cannot see, what the Remote section's buttons actually paint, and what is
+ * left of the favicon's mark once a tab has rasterised it at 16 and 32). This
+ * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
  * soon as any assertion throws — so CI can hold them.
  *
@@ -46,6 +50,8 @@ const GUARDS = [
   'turn-signal-shots',
   'tooltip-shots',
   'pane-colour-shots',
+  'settings-chrome-shots',
+  'favicon-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);
