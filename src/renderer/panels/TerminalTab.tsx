@@ -760,8 +760,8 @@ export function TerminalTab({
         onFocus={() => setHasFocus(true)}
         onBlur={() => setHasFocus(false)}
         aria-label={`terminal of ${view.name}: typing goes to this session, press Tab to leave`}
-        /* `text-[10.5px]` AND `leading-[1.45]` ARE THE ONE LITERAL SIZE LEFT IN
-           THE RENDERER, and they are a measurement rather than a style choice.
+        /* THE 10.5px AND THE 1.45 BELOW ARE THE ONE LITERAL SIZE LEFT IN THE
+           RENDERER, and they are a measurement rather than a style choice.
            `terminal-size.ts` divides this box by the advance of one character
            rendered HERE -- "Geist Mono at 10.5px measures 6.6015625px per
            advance", its own header records -- to decide the columns and rows
@@ -769,7 +769,13 @@ export function TerminalTab({
            re-flow the operator's live session, and tmux has already wrapped the
            screen by the time vam sees it, so no CSS here could undo the break.
            The chrome AROUND the screen is on the scale; the screen is not.
-           `test/renderer/type-scale.test.ts` names this as the exception. */
+           `test/renderer/type-scale.test.ts` names this as the exception.
+
+           The sizes are spelled in prose above rather than as classes on
+           purpose: that guard scans this file as TEXT, so a class name written
+           in a comment counts as a call site. Reddening on a comment would be
+           noise, and teaching the scan to strip comments would mean teaching
+           it to strip `//` out of a URL in a string as well. */
         className="vam-no-scrollbar relative min-h-0 flex-1 overflow-auto rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-[10.5px] text-ink leading-[1.45] focus-visible:outline focus-visible:outline-2 focus-visible:outline-line-strong"
       >
         {/* The ruler. It is INSIDE the pane so that it inherits the exact font
