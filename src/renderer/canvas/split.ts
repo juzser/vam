@@ -507,6 +507,65 @@ export function splitPane(
 }
 
 /**
+ * JOIN: move one tab out of `sourcePaneId` and INTO `targetPaneId`'s strip —
+ * the drop `splitPane` is the other half of, and the only gesture that makes
+ * the layout SMALLER.
+ *
+ * The operator's report was that a split layout could not be undone by
+ * dragging: every drop split something, so panes accumulated and the only way
+ * back was the `zc` chord. A tab dropped in the CENTRE of a pane (`dropZone`)
+ * comes here instead, which is VSCode's rule — the edges of a group split it,
+ * the middle of a group joins it.
+ *
+ * THE TAB LANDS IN FRONT, and its place in the strip is not this file's to
+ * choose: `setPaneSession` appends to MEMBERSHIP, and the visible order comes
+ * from `orderedPaneTabs` (`Leaf`'s own rule, above). So a joined tab draws
+ * where that pane's other tabs would already have put it, not at the far end
+ * — the same answer the sidebar gives — while `sessionId` puts it forward,
+ * because a tab you just dragged somewhere is the tab you want to look at.
+ *
+ * THE EMPTIED SOURCE PANE GOES. `removeTab` closes a pane it empties and
+ * `closePane` collapses a split left with one child, so joining the last tab
+ * out of one half of a two-pane layout genuinely un-splits it: the survivor
+ * takes the whole slot the split occupied, and a three-pane row hands the
+ * freed share to the survivors in proportion.
+ *
+ * Total, like everything here, and the misses are all one shape — the SAME
+ * tree back:
+ *  - a target or source id nothing holds (a drop that raced a close);
+ *  - a source that does not hold that session (a stale drag payload) — moving
+ *    a tab out of a pane that never had it would be a COPY, and PR 268's rule
+ *    is that a session lives in exactly one pane;
+ *  - target and source being the same pane, where there is nothing to move.
+ * Each is a state the CALLER has to speak about (see `Canvas.tsx`'s
+ * `onPaneDrop`): a join handed a stale id must not look like one that worked.
+ */
+export function joinPane(
+  tree: SplitTree,
+  targetPaneId: string,
+  sourcePaneId: string,
+  sessionId: string,
+): SplitTree {
+  if (targetPaneId === sourcePaneId) {
+    return tree;
+  }
+  const source = findLeaf(tree, sourcePaneId);
+  if (findLeaf(tree, targetPaneId) === null || source === null) {
+    return tree;
+  }
+  if (!source.sessionIds.includes(sessionId)) {
+    return tree;
+  }
+  // Opened FIRST, then taken out of the source, so no intermediate tree ever
+  // has the session in NO pane at all — the orphan state `adoptOrphans`
+  // exists to repair, and not one to walk through on the way to a good
+  // answer. (The reverse order lands the same tree; this one cannot be read
+  // half-done.)
+  const opened = setPaneSession(tree, targetPaneId, sessionId);
+  return removeTab(opened, sourcePaneId, sessionId) ?? opened;
+}
+
+/**
  * Remove one pane. `null` means "cannot" — closing the LAST pane would leave
  * nothing to show, so the caller must check `leaves(tree).length > 1` before
  * calling this and refuse aloud rather than pass an id this returns `null`
@@ -704,11 +763,89 @@ export function stepPane(tree: SplitTree, currentId: string, delta: 1 | -1): str
  * `PaneResizer.test.tsx`'s own note on that).
  */
 export function nearestEdge(x: number, y: number, width: number, height: number): Edge {
+  return deepestEdge(x, y, width, height, 1, 1);
+}
+
+/**
+ * WHERE IN A PANE A DROP LANDED, and therefore WHICH of the two things a
+ * dragged tab does: an `Edge` SPLITS the pane, `'centre'` JOINS the tab into
+ * it as another tab of its strip.
+ *
+ * The operator's report is the whole reason this type has a fifth member:
+ * "when the layout is split, if you want to drag a tab back into a pane so it
+ * stops being split, you can't." `nearestEdge` is total over the whole
+ * rectangle — every point in a pane names an edge — so every drop split
+ * something and the layout could only ever grow. VSCode's model, the one the
+ * drop handler already claimed to follow, is that the edges of a group split
+ * it and the CENTRE of a group joins it. This is the missing half.
+ */
+export type DropZone = Edge | 'centre';
+
+/**
+ * How much of a pane, on each side, is the SPLIT band — everything inside is
+ * the join centre.
+ *
+ * A PROPORTION rather than a pixel margin, and that is the load-bearing
+ * choice. PR 289 gave panes a 320px floor (`MIN_PANE_PX`), and a fixed margin
+ * wide enough to aim at on a 1200px pane leaves a 320px one with no centre at
+ * all — the gesture would be unavailable exactly where consolidating a layout
+ * matters most. A proportion cannot do that: the centre is always the middle
+ * three fifths of the pane, at every size, so the same gesture aims the same
+ * way whatever the layout has been dragged to.
+ *
+ * WHY A FIFTH, and not less. At the 320px floor the band is 64px wide, which
+ * clears the 44px minimum target this codebase holds every other control to
+ * (`vam-tap`); a tenth would be 32px and fail it. Splitting therefore stays
+ * comfortably hittable at the narrowest legal pane, while joining — the new
+ * gesture, and the one an operator reaches for by dropping "into" a pane —
+ * gets the largest single target in the box.
+ */
+export const DROP_EDGE_BAND = 0.2;
+
+export function dropZone(x: number, y: number, width: number, height: number): DropZone {
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    // A pane with no measurable extent, or a pointer that reported nothing:
+    // the join is the answer that cannot make the layout worse, because it
+    // moves a tab where a split would add a pane nothing knows the size of.
+    return 'centre';
+  }
+  const depth = Math.min(x / width, (width - x) / width, y / height, (height - y) / height);
+  return depth >= DROP_EDGE_BAND ? 'centre' : deepestEdge(x, y, width, height, width, height);
+}
+
+/**
+ * The edge the point is furthest INSIDE, measuring each distance against the
+ * span it is a distance across — `x` against the width, `y` against the
+ * height when `xSpan`/`ySpan` are the pane's own, and against 1 and 1 for
+ * `nearestEdge`'s absolute-pixel reading.
+ *
+ * One function for both because `dropZone` and its centre test have to agree:
+ * the centre is "every normalised distance is at least `DROP_EDGE_BAND`", so
+ * the edge outside it must be chosen by the same normalised distance, or a
+ * point inside the vertical band and outside the horizontal one could be
+ * answered with a horizontal split. Ties resolve left, right, top, bottom —
+ * `nearestEdge`'s own order, kept so nothing that reads it changes.
+ */
+function deepestEdge(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  xSpan: number,
+  ySpan: number,
+): Edge {
   const distances: readonly [Edge, number][] = [
-    ['left', x],
-    ['right', width - x],
-    ['top', y],
-    ['bottom', height - y],
+    ['left', x / xSpan],
+    ['right', (width - x) / xSpan],
+    ['top', y / ySpan],
+    ['bottom', (height - y) / ySpan],
   ];
   let bestEdge: Edge = 'right';
   let bestDistance = Number.POSITIVE_INFINITY;
