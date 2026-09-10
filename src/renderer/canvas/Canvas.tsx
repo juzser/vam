@@ -3381,10 +3381,36 @@ function CanvasInner({
       switch (action.kind) {
         case 'move': {
           if (mode === 'insert' && (action.direction === 'down' || action.direction === 'up')) {
-            // In the action pane the vertical axis belongs to the actions —
-            // every command the step proposed, and the prompt last.
+            /**
+             * In the action pane the vertical axis belongs to the actions —
+             * every command the step proposed, and the prompt last.
+             *
+             * IT REFUSES WHEN IT CANNOT MOVE, because for a year it could
+             * never move: the commands left the pane for the `!` typeahead
+             * and `buildActions` has returned ONE entry ever since, so the
+             * clamp was arithmetic that always came back with the index it
+             * was given, and `j` in Insert was a key that did nothing and
+             * said nothing. Nothing here can be withdrawn instead — the same
+             * `j` walks an open question's options — so it says so.
+             *
+             * The word "prompt" is keyed off the action's own kind rather
+             * than written into the sentence: one stop that is the prompt is
+             * a fact worth naming, and a second stop, or a different one,
+             * gets the plain boundary sentence `j`/`k` already give the
+             * session list.
+             */
             const delta = action.direction === 'down' ? 1 : -1;
-            setActionIndex((current) => clampIndex(current + delta, actions.length));
+            const next = clampIndex(actionIndex + delta, actions.length);
+            if (next === actionIndex) {
+              const only = actions.length === 1 ? actions[0] : undefined;
+              setStatus(
+                only?.kind === 'prompt'
+                  ? `nothing lies ${action.direction} — the prompt is this pane's only stop`
+                  : `nothing lies ${action.direction}`,
+              );
+              return;
+            }
+            setActionIndex(next);
             return;
           }
           if (mode === 'insert' && action.direction === 'left') {
@@ -3401,6 +3427,16 @@ function CanvasInner({
             // "the keys work, they just do the wrong thing" failure the mode
             // naming exists to end, so the grammar closes it here rather than
             // leaving it to a DOM focus that can be dropped.
+            //
+            // NOT SILENTLY, though, which is what it was: an unconditional
+            // `return`. The reasoning above is an argument for not ACTING,
+            // never one for saying nothing — the operator pressing `l` in
+            // Insert is asking for the one thing `l` does there, the next
+            // step of a question, and the honest answer is that there is no
+            // step to walk. Reached only when the card did not answer the key
+            // itself (`event.defaultPrevented`, above), so a walk between two
+            // real steps is as quiet as it ever was.
+            setStatus(`nothing lies ${action.direction} — only an open question has steps to walk`);
             return;
           }
           // The cursor can be left on a session the filter has just made
