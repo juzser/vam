@@ -49,7 +49,7 @@ export type ClipboardLike = { writeText(text: string): Promise<void> };
 export const MAX_CLIPBOARD_LENGTH = 1_000_000;
 
 export function registerClipboardIpc(ipcMain: IpcMainLike, clipboard: ClipboardLike): void {
-  ipcMain.handle(CHANNELS.clipboardWrite, (_event, ...args: unknown[]): boolean => {
+  ipcMain.handle(CHANNELS.clipboardWrite, async (_event, ...args: unknown[]): Promise<boolean> => {
     const [text] = args;
     if (
       args.length !== 1 ||
@@ -60,30 +60,36 @@ export function registerClipboardIpc(ipcMain: IpcMainLike, clipboard: ClipboardL
       return false;
     }
     try {
-      // DELIBERATELY NOT AWAITED, and that is a measured answer rather than an
-      // oversight -- it is the first thing a reader of the line above will ask.
+      // AWAITED, and the reason is the asymmetry rather than a live bug.
       //
-      // Electron 44's `Clipboard::WriteText` commits the text through a
+      // What was verified about electron 44.1.1, so the next reader does not
+      // re-derive it: `Clipboard::WriteText` commits the text through a
       // `ScopedClipboardWriter` whose scope closes BEFORE the function returns,
-      // and then calls `promise.Resolve()` unconditionally. There is no reject
-      // path in it (`shell/browser/api/electron_api_clipboard.cc`), and
+      // and then calls `promise.Resolve()` UNCONDITIONALLY -- there is no
+      // reject path in it (`shell/browser/api/electron_api_clipboard.cc`), and
       // `lib/browser/api/clipboard.ts` forwards `writeText` straight to it
-      // without adding one. So the promise carries no news: the write has
-      // already happened by the time it exists, and awaiting it could only
-      // report success later -- never failure.
+      // without adding one. On this version the promise carries no news, and
+      // the only way the call fails is a synchronous throw out of gin's
+      // argument conversion.
       //
-      // The one way this call fails is a SYNCHRONOUS throw out of gin's
-      // argument conversion, which the `catch` below answers. If some future
-      // Electron gives `writeText` a reject path, this discard turns into both
-      // a `true` for a write that did not happen and an unhandled rejection in
-      // main -- nothing in `src/` installs a handler for those. That upstream
-      // function is the thing to re-read on an Electron bump.
-      void clipboard.writeText(text);
+      // That is a proof about ONE VERSION, and a version-pinned proof expires
+      // without telling anyone. The day an Electron bump gives `writeText` a
+      // reject path, not awaiting would answer `true` for a write that never
+      // happened -- this channel's entire reason to exist, inverted -- and
+      // leave a floating rejection in main, where nothing in `src/` installs an
+      // `unhandledRejection` handler. Awaiting costs one keyword and a `catch`
+      // that was already here; the renderer already awaits the answer
+      // (`src/preload/api.ts`, `src/renderer/panels/clipboard.ts`), so nothing
+      // observable changes. `Clipboard::WriteText` is the thing to re-read on
+      // an Electron bump, but this no longer depends on the answer.
+      await clipboard.writeText(text);
       return true;
     } catch {
-      // A refusal is data here, like everywhere else on this bridge: a throw
-      // would reach the renderer as an electron-rewritten rejection, and the
-      // caller would have to guess whether the text landed.
+      // Both shapes land here now: the synchronous throw electron 44.1.1 really
+      // does produce, and the rejection it does not yet. A refusal is data on
+      // this bridge, like everywhere else -- rethrowing would reach the renderer
+      // as an electron-rewritten rejection, and the caller would be back to
+      // guessing whether the text landed.
       return false;
     }
   });

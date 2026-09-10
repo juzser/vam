@@ -64,39 +64,52 @@ function harness(writeText: (text: string) => Promise<void> = async () => {}) {
 }
 
 describe('the clipboard channel', () => {
-  it('writes the text and answers true', () => {
+  it('writes the text and answers true', async () => {
     const written: string[] = [];
     const invoke = harness(async (text) => void written.push(text));
-    expect(invoke('smith gate run')).toBe(true);
+    expect(await invoke('smith gate run')).toBe(true);
     expect(written).toEqual(['smith gate run']);
   });
 
-  // A SYNCHRONOUS throw, which is the only way the real `writeText` fails:
-  // its promise has no reject path (see `src/main/clipboard/ipc.ts`), but gin
-  // still throws out of argument conversion before any promise exists --
-  // measured against the real module, which answers a non-string with
-  // "Error processing argument at index 0, conversion failure from ...".
-  // So this is the failure the channel has to keep turning into `false`.
-  it('answers false rather than throwing when the clipboard fails', () => {
+  // A SYNCHRONOUS throw, which is the only way the real `writeText` fails on
+  // electron 44.1.1: its promise has no reject path (see
+  // `src/main/clipboard/ipc.ts`), but gin still throws out of argument
+  // conversion before any promise exists -- measured against the real module,
+  // which answers a non-string with "Error processing argument at index 0,
+  // conversion failure from ...". Awaiting must not stop catching it.
+  it('answers false rather than throwing when the clipboard fails', async () => {
     const invoke = harness(() => {
       throw new Error('no clipboard on this platform');
     });
-    expect(invoke('smith gate run')).toBe(false);
+    expect(await invoke('smith gate run')).toBe(false);
   });
 
-  it('refuses anything that is not one non-empty string', () => {
+  // The failure electron 44.1.1 cannot currently produce -- `Clipboard::
+  // WriteText` resolves unconditionally -- and the whole reason the write is
+  // awaited anyway. That proof is version-pinned, and a version-pinned proof
+  // expires without telling anyone: the day an Electron bump gives `writeText`
+  // a reject path, an unawaited call would answer `true` for a write that never
+  // happened AND leave a floating rejection in main, where nothing in `src/`
+  // installs an `unhandledRejection` handler. This assertion is what makes that
+  // day a red test rather than a silent lie in the status bar.
+  it('answers false when the write rejects', async () => {
+    const invoke = harness(() => Promise.reject(new Error('the clipboard refused the write')));
+    expect(await invoke('smith gate run')).toBe(false);
+  });
+
+  it('refuses anything that is not one non-empty string', async () => {
     const written: string[] = [];
     const invoke = harness(async (text) => void written.push(text));
-    expect(invoke()).toBe(false);
-    expect(invoke('')).toBe(false);
-    expect(invoke(42)).toBe(false);
-    expect(invoke('a', 'b')).toBe(false);
-    expect(invoke('x'.repeat(MAX_CLIPBOARD_LENGTH + 1))).toBe(false);
+    expect(await invoke()).toBe(false);
+    expect(await invoke('')).toBe(false);
+    expect(await invoke(42)).toBe(false);
+    expect(await invoke('a', 'b')).toBe(false);
+    expect(await invoke('x'.repeat(MAX_CLIPBOARD_LENGTH + 1))).toBe(false);
     expect(written).toEqual([]);
   });
 
-  it('accepts text right up to the bound', () => {
+  it('accepts text right up to the bound', async () => {
     const invoke = harness();
-    expect(invoke('x'.repeat(MAX_CLIPBOARD_LENGTH))).toBe(true);
+    expect(await invoke('x'.repeat(MAX_CLIPBOARD_LENGTH))).toBe(true);
   });
 });
