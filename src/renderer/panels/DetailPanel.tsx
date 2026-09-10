@@ -4539,7 +4539,28 @@ export function DetailPanel(props: DetailPanelProps) {
                   cornerOverlay ? 'pr-[6rem]' : 'pr-11'
                 }`}
               >
-                <div className="flex items-center gap-1.5">
+                {/* WRAPPING, since the qualifier below can be a PHRASE where
+                  this row has only ever held tokens.
+
+                  IT IS NOT WHAT STOPS THE OVERFLOW, and saying so would be the
+                  kind of comment this file is written against: a flex item of
+                  text shrinks and wraps inside itself, so the sentence stays
+                  on the pane either way -- MEASURED, at the 320px pane floor,
+                  by deleting this class and watching the guard stay green.
+
+                  WHAT IT SAVES IS THE COUNT. Without it, at that floor, "N
+                  turns read" is squeezed to 49px and breaks across two lines
+                  beside a three-line caveat -- two ragged columns where there
+                  should be a count and a note. With it the count keeps its one
+                  line and the caveat takes the next. Both figures are measured
+                  in `e2e/transcript-column-shots.mjs`, which fails if either
+                  the count breaks or the caveat leaves the pane.
+
+                  `gap-y-0.5`, matching the 2px this block already puts between
+                  its own two children, so a wrapped caveat sits at the block's
+                  rhythm rather than flush against the line above it. The
+                  horizontal 6px is unchanged. */}
+                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                   {/* "read", not a bare count: only the newest `TAIL_BYTES` is
                     ever opened, so on a session bigger than that window this
                     is what vam FOUND, not a provable total for the session's

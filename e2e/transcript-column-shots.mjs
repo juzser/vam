@@ -1227,6 +1227,295 @@ console.log(`${outDir}/transcript-column-session-start.png`);
 await back.screenshot({ path: `${outDir}/transcript-column-read-back.png` });
 console.log(`${outDir}/transcript-column-read-back.png`);
 
+// ------------------------------------------------- 12. CONCISE MODE, COLLAPSED
+//
+// The operator asked for a control over how much of a turn's working the
+// column draws -- "show the progress, or collapse it, like the Claude Code
+// plugin" -- and the rule that bounds it is `drawsProgressLine`
+// (`prefs/progress.ts`): collapsing may cost DETAIL, never ALARM.
+//
+// WHY A REAL BROWSER, when `test/panels/DetailPanel.turn-progress.test.tsx`
+// already pins which elements exist. Three of the four facts below do not
+// exist in happy-dom at all:
+//  - whether withdrawing a line actually SHORTENS the column, which is the
+//    whole of what the operator asked for and is a layout measurement or it is
+//    a guess (an element removed from a DOM with no layout costs nothing);
+//  - whether the caveat this mode owes -- "failures not reported by this
+//    source" -- is PAINTED in an ink that resolved, rather than wearing a
+//    Tailwind class that matched nothing (this repo has shipped that once);
+//  - and whether that caveat, which is a phrase joining a row that used to
+//    hold two tokens, FITS the NARROWEST pane the layout allows (320px,
+//    `DETAIL_MIN`) instead of running off the pane. Measured at that width on
+//    purpose: at 1100px the pane is 800 wide and the check would pass for any
+//    sentence, which is the shape of guard that reads as coverage and is not.
+//
+// AND ONE MORE, which is about the bundle rather than the layout: the mode is
+// picked in a settings overlay and lands on the column through a module store
+// and a subscription. Section 12.4 drives that path with the mouse, in the
+// served bundle, so a green run cannot be a green run over a stale build.
+const CONCISE_PREFS = 'vam.prefs.v1';
+
+/**
+ * A page whose FIRST PAINT is already in the given mode.
+ *
+ * SEEDED THE WAY IT ARRIVES, through `localStorage`, because that is the only
+ * state a reload restores from -- and one page per mode rather than one page
+ * reloaded, because `addInitScript` runs again on every navigation and would
+ * put the seeded mode straight back over anything written since. (Found by
+ * falsification: the reload version reported the collapsed column twice and
+ * called it a comparison.)
+ */
+async function conciseIn(mode, viewport = { width: 1100, height: 620 }, panes = undefined) {
+  const page = await browser.newPage({ viewport });
+  page.on('pageerror', (err) => console.error(`PAGE ERROR (${mode}):`, err));
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') console.error(`CONSOLE ERROR (${mode}):`, msg.text());
+  });
+  await page.addInitScript(
+    ([key, payload]) => window.localStorage.setItem(key, payload),
+    [
+      CONCISE_PREFS,
+      JSON.stringify(panes === undefined ? { turnProgress: mode } : { turnProgress: mode, panes }),
+    ],
+  );
+  await page.goto(`${origin}/?demo=1&history=off`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('[data-tab-strip]');
+  return page;
+}
+
+/** What a column is drawing, and how tall it is while drawing it. */
+const conciseState = (page) =>
+  page.evaluate(() => {
+    const col = document.querySelector('[data-detail-column]');
+    if (col === null) return null;
+    const lines = [...col.querySelectorAll('[data-progress-line]')];
+    const caveat = document.querySelector('[data-column-unreadable]');
+    const count = document.querySelector('[data-progress-count]');
+    const row = count?.parentElement ?? null;
+    const box = (el) => {
+      if (el === null) return null;
+      const r = el.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, right: r.right, width: r.width, height: r.height };
+    };
+    return {
+      paneWidth: col.getBoundingClientRect().width,
+      turns: col.querySelectorAll('[data-column-turn]').length,
+      // The whole `progress` section, not only the line inside it: a wrapper
+      // left behind is an announced region with nothing in it.
+      regions: col.querySelectorAll('[data-detail-block="progress"]').length,
+      lines: lines.length,
+      texts: lines.map((el) => el.textContent.replace(/\s+/g, ' ').trim()),
+      failed: [...col.querySelectorAll('[data-progress-failed]')].map((el) =>
+        el.textContent.trim(),
+      ),
+      scrollHeight: col.scrollHeight,
+      caveat: caveat?.textContent.trim() ?? null,
+      caveatInk: caveat === null ? null : getComputedStyle(caveat).color,
+      caveatBox: box(caveat),
+      countInk: count === null ? null : getComputedStyle(count).color,
+      countBox: box(count),
+      rowBox: box(row),
+    };
+  });
+
+/** Put a session in the pane and wait for its column. */
+async function openSession(page, id) {
+  await page.locator(`[data-session-row="${id}"]`).click();
+  await page.waitForSelector('[data-detail-column]');
+  await page.waitForTimeout(150);
+}
+
+/**
+ * Take a column to its oldest turn before a screenshot.
+ *
+ * The column opens at the newest turn, where three turns are on screen and the
+ * fold's effect is one line. At the top it is four quiet turns, which is what
+ * the operator asked to be rid of and what the picture has to show.
+ */
+async function toOldest(page) {
+  await page.evaluate(() => {
+    document.querySelector('[data-detail-column]').scrollTop = 0;
+  });
+  await page.waitForTimeout(150);
+}
+
+const foldedPage = await conciseIn('collapsed');
+await openSession(foldedPage, 'factory-sse-1');
+const collapsed = await conciseState(foldedPage);
+console.log('collapsed:', JSON.stringify(collapsed));
+
+// --- 12.1 THE FOLD ITSELF. Seven turns, and only the ones with something to
+// report keep a line: `d-task4` (three failed tools) and the newest turn,
+// which carries the session's activity and what it is waiting on.
+check(
+  'collapsed still draws every turn of the session',
+  collapsed.turns === DEMO_TURNS,
+  `${collapsed.turns} turns`,
+);
+check(
+  'but only the turns with something to report keep a progress line',
+  collapsed.lines === 2,
+  `${collapsed.lines} lines: ${JSON.stringify(collapsed.texts)}`,
+);
+check(
+  'and the announced `progress` region goes with the line, never a wrapper left empty',
+  collapsed.regions === collapsed.lines,
+  `${collapsed.regions} regions for ${collapsed.lines} lines`,
+);
+// THE ONE THING THE FOLD MAY NOT COST. `Decision.errorCount` exists because a
+// turn whose tools blew up three times still read `✓` on a collapsed row.
+check(
+  'the failing turn keeps its line and its count',
+  collapsed.failed.length === 1 && /^·\s*3 failed$/.test(collapsed.failed[0] ?? ''),
+  JSON.stringify(collapsed.failed),
+);
+check(
+  'and the newest turn keeps what the session is waiting on',
+  collapsed.texts.some((t) => t.includes('permission prompt')),
+  JSON.stringify(collapsed.texts),
+);
+await toOldest(foldedPage);
+await foldedPage.screenshot({ path: `${outDir}/concise-collapsed.png` });
+console.log(`${outDir}/concise-collapsed.png`);
+
+// --- 12.2 IT IS A FOLD, NOT A CLASS NAME. The same session at the same
+// viewport, launched in the other mode: the column has to be TALLER. jsdom
+// removes the element and the document is the same height either way, so this
+// is the one measurement that says the operator got what they asked for.
+const openPage = await conciseIn('shown');
+await openSession(openPage, 'factory-sse-1');
+const shown = await conciseState(openPage);
+console.log('shown:', JSON.stringify(shown));
+check(
+  'shown draws a line on every turn',
+  shown.lines === DEMO_TURNS && shown.turns === DEMO_TURNS,
+  `${shown.lines} lines over ${shown.turns} turns`,
+);
+check(
+  'and collapsing really shortens the column rather than only changing its markup',
+  collapsed.scrollHeight < shown.scrollHeight,
+  `collapsed ${collapsed.scrollHeight}px vs shown ${shown.scrollHeight}px`,
+);
+// SHOWN CLAIMS NOTHING ABOUT FAILURE, so it owes no caveat: every turn draws a
+// line there and the line's presence is not a verdict.
+check('shown draws no unreadable-failures caveat at all', shown.caveat === null, String(shown.caveat));
+await toOldest(openPage);
+await openPage.screenshot({ path: `${outDir}/concise-shown.png` });
+console.log(`${outDir}/concise-shown.png`);
+await openPage.close();
+
+// --- 12.3 TWO DIFFERENT UNKNOWNS, ON SCREEN. Collapsed, the ABSENCE of a line
+// is the claim -- "nothing here was worth stopping for" -- and over a source
+// that cannot report tool failures at all that claim is unearned. So the
+// window says what it could not read. `dogfood-4` is the demo's session with
+// no `errorCount` anywhere; `crosscheck-2` is the one whose turns report a
+// READ ZERO, which is a different fact and must say nothing.
+//
+// AT THE NARROWEST PANE THE LAYOUT ALLOWS: a 720px viewport with the sidebar
+// dragged to 400 leaves `DETAIL_MIN` exactly. That is where a phrase added to
+// this row either fits or runs off the pane, and it is the only width at which
+// asking is worth anything.
+const narrow = await conciseIn('collapsed', { width: 720, height: 620 }, { sidebar: 400, detail: 320 });
+await openSession(narrow, 'dogfood-4');
+const cannotLook = await conciseState(narrow);
+console.log('cannot look:', JSON.stringify(cannotLook));
+check(
+  'the measurement below is taken at the pane’s floor, not at a comfortable width',
+  cannotLook.paneWidth <= 330,
+  `column ${cannotLook.paneWidth}px`,
+);
+check(
+  'a window where nothing can report failures says so',
+  cannotLook.caveat === '· failures not reported by this source',
+  String(cannotLook.caveat),
+);
+// PAINTED, not merely present. `text-ink-dim` on a row of `text-ink-faint`:
+// a class that resolved to nothing would inherit the row's ink and read as a
+// pass from the class attribute alone.
+check(
+  'and it is painted in an ink that resolved, not the row’s own',
+  cannotLook.caveatInk !== null && cannotLook.caveatInk !== cannotLook.countInk,
+  `${cannotLook.caveatInk} vs ${cannotLook.countInk}`,
+);
+check(
+  'and it fits inside the row it joined, at the narrowest pane there is',
+  cannotLook.caveatBox !== null &&
+    cannotLook.rowBox !== null &&
+    cannotLook.caveatBox.width > 0 &&
+    cannotLook.caveatBox.height > 0 &&
+    cannotLook.caveatBox.right <= cannotLook.rowBox.right + 0.5,
+  `caveat right ${cannotLook.caveatBox?.right} vs row right ${cannotLook.rowBox?.right}`,
+);
+// AND IT DOES NOT COST THE COUNT ITS OWN LINE. Fitting is not enough: sharing
+// the row squeezes "N turns read" to 49px and breaks it across two lines,
+// which is two ragged columns where there should be a count and a note. The
+// caveat takes the NEXT line instead -- measured, because the class that does
+// it (`flex-wrap`) is invisible to a class-name assertion and its absence
+// leaves a screen that still passes every fit check above.
+check(
+  'and the count it joined keeps its own line, unbroken',
+  cannotLook.countBox !== null &&
+    cannotLook.countBox.height < 20 &&
+    cannotLook.caveatBox.top >= cannotLook.countBox.bottom - 0.5,
+  `count ${cannotLook.countBox?.height}px tall, caveat top ${cannotLook.caveatBox?.top} vs count bottom ${cannotLook.countBox?.bottom}`,
+);
+await narrow.screenshot({ path: `${outDir}/concise-unreadable-failures.png` });
+console.log(`${outDir}/concise-unreadable-failures.png`);
+await narrow.close();
+
+await openSession(foldedPage, 'crosscheck-2');
+const lookedAndFoundNone = await conciseState(foldedPage);
+console.log('looked, found none:', JSON.stringify(lookedAndFoundNone));
+check(
+  'a window vam read and found clean says nothing of the kind',
+  lookedAndFoundNone.caveat === null,
+  String(lookedAndFoundNone.caveat),
+);
+
+// --- 12.4 THE CONTROL IS REACHABLE, IN THE BUNDLE THAT IS SERVED. Everything
+// above arrives through `localStorage`, which would stay green if the settings
+// row had never been built. This is the operator's own path: open settings,
+// click the mode, watch the column.
+await openSession(foldedPage, 'factory-sse-1');
+await foldedPage.locator('button[aria-label="settings"]').first().click();
+await foldedPage.waitForSelector('[data-settings-nav]');
+const promised = await foldedPage
+  .locator('[data-turn-progress-note]')
+  .innerText()
+  .catch(() => null);
+console.log('the row promises:', JSON.stringify(promised));
+check(
+  'the row states what collapsing keeps, where the person choosing can read it',
+  promised !== null && /failed/.test(promised) && /waiting/.test(promised),
+  String(promised),
+);
+check(
+  'and the mode in force reads as pressed',
+  (await foldedPage
+    .locator('[data-turn-progress-option="collapsed"]')
+    .getAttribute('aria-pressed')) === 'true',
+);
+// Scrolled to, because the row is the last block of a panel taller than the
+// dialog: a picture of the panel's top says nothing about the control it is
+// meant to show.
+await foldedPage.locator('[data-turn-progress-note]').scrollIntoViewIfNeeded();
+await foldedPage.waitForTimeout(150);
+await foldedPage.screenshot({ path: `${outDir}/concise-settings-row.png` });
+console.log(`${outDir}/concise-settings-row.png`);
+await foldedPage.locator('[data-turn-progress-option="shown"]').click();
+// Escape rather than the backdrop button: the backdrop is `inset-0` UNDER the
+// panel, so a click at its centre lands on the panel instead, and Escape is
+// how an operator closes this dialog anyway.
+await foldedPage.keyboard.press('Escape');
+await foldedPage.waitForTimeout(200);
+const afterPick = await conciseState(foldedPage);
+console.log('after picking shown:', JSON.stringify(afterPick));
+check(
+  'picking a mode in settings moves the column, not only the store',
+  afterPick.lines === DEMO_TURNS,
+  `${afterPick.lines} lines`,
+);
+
 await browser.close();
 
 if (failures.length > 0) {
