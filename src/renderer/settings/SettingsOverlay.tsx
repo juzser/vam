@@ -109,16 +109,43 @@ type Capturing = { readonly id: string; readonly slot: number; readonly scope: s
  * border, an outline reads as a thicker border rather than as a cursor.
  */
 /**
+ * IS THERE A CHOICE HERE AT ALL? Read from the table rather than assumed, and
+ * it is what decides whether this section OFFERS a provider or REPORTS one.
+ *
+ * `PROVIDERS` has one row and will until a second source exists in main
+ * (`src/shared/providers.ts` argues why). A segmented picker over one row is a
+ * control that cannot act: its single button is `aria-pressed` from the first
+ * paint, it hovers, it takes the keyboard, and clicking it calls `onChange`
+ * with a `Prefs` identical to the one it was handed. `RemotePanel`'s header, in
+ * this same directory, states the rule it breaks — "A CONTROL THAT CANNOT ACT
+ * IS NOT DRAWN AS ONE" — and `DetailPanel`'s provider button says the same
+ * thing in the other spelling, "ABSENT, NOT DISABLED".
+ *
+ * So the picker is CONDITIONAL, not deleted. The day a second provider ships
+ * this is `true` and the segmented control is back, unchanged, with no edit
+ * here; `test/settings/provider-double.test.tsx` mocks that table and proves
+ * it. Withdrawing the control does not withdraw the ANSWER: the label and the
+ * command it runs are what the operator came to this section to read, and both
+ * stay.
+ */
+const CAN_CHOOSE_PROVIDER = PROVIDERS.length > 1;
+
+/**
  * Why the list is one item long, said where the operator can read it rather
  * than only in a source comment. Codex CLI and Cursor CLI are on the roadmap
  * and neither is implemented: a provider is not a command to spawn, it is a
  * source that can read back what that command is doing, and vam has one of
  * those. Offering a provider that cannot start would be worse than offering a
  * single honest choice.
+ *
+ * TWO SENTENCES FOR TWO STATES, because "the only one offered" describes a
+ * picker and there is none while this is the one-row world: what the operator
+ * needs told is that nothing is being withheld from them.
  */
-const PROVIDER_HINT =
-  'the agent o starts in a new session. Claude Code is the only one vam can ' +
-  'read back today, so it is the only one offered.';
+const PROVIDER_HINT = CAN_CHOOSE_PROVIDER
+  ? 'the agent o starts in a new session.'
+  : 'the agent o starts in a new session. Claude Code is the only one vam can ' +
+    'read back today, so there is nothing to choose yet.';
 
 const FOCUS_RING =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
@@ -534,24 +561,40 @@ export function SettingsOverlay({
               hint="which agent a new session starts"
             >
               <Block label="default provider" hint={PROVIDER_HINT}>
-                <div className="flex gap-1">
-                  {PROVIDERS.map((provider) => (
-                    <button
-                      key={provider.id}
-                      type="button"
-                      data-provider-option={provider.id}
-                      aria-pressed={prefs.defaultProvider === provider.id}
-                      onClick={() => onChange(setDefaultProvider(prefs, provider.id))}
-                      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
-                        prefs.defaultProvider === provider.id
-                          ? 'border-line-loudest bg-raised text-ink'
-                          : 'border-line text-ink-dim'
-                      }`}
-                    >
-                      {provider.label}
-                    </button>
-                  ))}
-                </div>
+                {CAN_CHOOSE_PROVIDER ? (
+                  <div className="flex gap-1">
+                    {PROVIDERS.map((provider) => (
+                      <button
+                        key={provider.id}
+                        type="button"
+                        data-provider-option={provider.id}
+                        aria-pressed={prefs.defaultProvider === provider.id}
+                        onClick={() => onChange(setDefaultProvider(prefs, provider.id))}
+                        className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
+                          prefs.defaultProvider === provider.id
+                            ? 'border-line-loudest bg-raised text-ink'
+                            : 'border-line text-ink-dim'
+                        }`}
+                      >
+                        {provider.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  /* The answer, drawn as an answer. `text-body` and `ink` are
+                     the steps a settings VALUE takes elsewhere in this dialog,
+                     and the row keeps the 28px the picker occupied so the
+                     section's rhythm does not change when a second provider
+                     brings the buttons back. No border and no fill: an outline
+                     around a sentence is how a statement comes to read as the
+                     button it deliberately is not. */
+                  <p
+                    data-provider-fixed={resolveProvider(prefs.defaultProvider).id}
+                    className="flex h-[28px] items-center text-body text-ink"
+                  >
+                    {resolveProvider(prefs.defaultProvider).label}
+                  </p>
+                )}
                 <p className="mt-3 text-control text-ink-dim">
                   o runs{' '}
                   <code className="text-ink">
