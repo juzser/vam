@@ -73,7 +73,13 @@ import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import { DEMO_PROMPT } from '../fixtures/demo.js';
-import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
+import {
+  type ChordState,
+  chordText,
+  EMPTY_CHORD,
+  normalizeKey,
+  resolveChord,
+} from '../keyboard/chords.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
 import { buildActions, clampIndex } from '../panels/actions.js';
@@ -3359,9 +3365,19 @@ function CanvasInner({
         event.preventDefault();
         const hit = [...labels.entries()].find(([, label]) => label === key);
         setJumping(false);
-        if (hit !== undefined) {
-          setFocusedSessionId(hit[0]);
+        if (hit === undefined) {
+          // A KEY THAT LABELS NOTHING, ANSWERED. Eating the next key whatever
+          // it is is what lets a label reuse a bound letter, and it left a
+          // mistyped label indistinguishable from a dead application: the
+          // labels vanished, the cursor stayed, and nothing said why. The
+          // dismissal itself is right and stays — the labels are off the
+          // screen by the time the key is read, so waiting for a second guess
+          // would be waiting with nothing left to read the guess off.
+          setStatus(`nothing is labelled "${key}" — jump cancelled`);
+          return;
         }
+        setStatus(null);
+        setFocusedSessionId(hit[0]);
         return;
       }
 
@@ -3372,6 +3388,28 @@ function CanvasInner({
         // Swallow a chord's first key so `g` cannot reach the browser.
         if (step.state.pending !== null) {
           event.preventDefault();
+        }
+        /**
+         * A HALF-TYPED CHORD THAT DIED, ANSWERED — and only that.
+         *
+         * `resolveChord` abandons `gx` rather than letting `x` mean what a
+         * bare `x` means, which is the right call and is not what changed:
+         * `gx` closing the focused session would be the expensive mistake.
+         * What changed is that not ACTING was being spelled as not SAYING
+         * ANYTHING, so two keystrokes produced an unchanged screen and no way
+         * to tell an unbound pair from a frozen app.
+         *
+         * The plain `action === null` around it stays silent on purpose. Every
+         * unbound letter, function key and media key on the board arrives
+         * here, and a bar that answered all of them would be a bar nobody is
+         * still reading when a real refusal lands. `abandoned` is the narrow
+         * case: a prefix was typed, so the operator was deliberately spelling
+         * something out.
+         */
+        if (step.abandoned !== null) {
+          setStatus(
+            `"${chordText(step.abandoned)}" is not a chord — the ${step.abandoned.prefix} was dropped`,
+          );
         }
         return;
       }
@@ -3513,18 +3551,33 @@ function CanvasInner({
           }
           return;
         }
+        /**
+         * THE TWO ENDS OF THE LIST — and, with no list, the same sentence
+         * every neighbour in this switch already says.
+         *
+         * Both used to read the row and move focus only if one came back,
+         * which on an empty list is a keypress that does nothing and says
+         * nothing. `hjkl` and `gt`/`gT` have answered this state honestly for
+         * as long as they have had the branch; these two were the pair that
+         * never learnt it, and an empty list is precisely where `gg` and `G`
+         * can never act.
+         */
         case 'first': {
           const first = entries[0];
-          if (first !== undefined) {
-            focusSession(first.session.id);
+          if (first === undefined) {
+            setStatus('no session matches');
+            return;
           }
+          focusSession(first.session.id);
           return;
         }
         case 'last': {
           const lastEntry = entries[entries.length - 1];
-          if (lastEntry !== undefined) {
-            focusSession(lastEntry.session.id);
+          if (lastEntry === undefined) {
+            setStatus('no session matches');
+            return;
           }
+          focusSession(lastEntry.session.id);
           return;
         }
         case 'selectTab': {
