@@ -242,25 +242,43 @@ export type KeyAction =
   /** `z0` — the shipped layout back: both panes at their default width and
       both drawn again. */
   | { readonly kind: 'resetPanes' }
-  /** `Mod-1` … `Mod-9` — the SESSION TAB at that position, 1-based, in the
-      strip of the FOCUSED PANE. One fixed meaning in either cursor mode: the
-      operator asked for the gesture every browser and editor already has, and
-      `SINGLE` records the trade that was made to give it to them.
+  /** `Mod-1` … `Mod-9` — the SESSION TAB at that position, 1-based, counted
+      ACROSS EVERY PANE ON SCREEN in the order the strips draw them. One fixed
+      meaning in either cursor mode: the operator asked for the gesture every
+      browser and editor already has, and `SINGLE` records the five
+      arrangements this row has been through and what this one cost.
 
-      WHICH STRIP, when the shell is split: the focused pane's own. Every
-      pane draws a strip of its own (A15.5) and only one of them has the
-      keyboard, so "the tab strip you are looking at" is the one the pane
-      focus already names — the same pane `zc`, `zw`, the per-pane `+` and
-      `pickView` all act in. Counting the project's whole tab set instead
-      would let a digit reach into a pane the operator is not in, which is
-      the failure the previous two arrangements shipped in another form.
+      WHICH STRIP, when the shell is split: ALL OF THEM, as one list, in leaf
+      order — left to right, top to bottom. It was the FOCUSED pane's own
+      until the operator asked for this, on the grounds that a split is one
+      screen and the tab they can see should be the tab the number names.
+      Selecting a tab that lives in another pane moves the keyboard there with
+      it, which is what `focusSession` already does for a sidebar pick of a
+      session another pane holds.
 
-      The action carries the digit and NOTHING ELSE. Which sessions that
-      strip is drawing is not something a reducer over a one-key memory can
-      know — `Canvas` owns the pane tree — so resolving it here would mean
-      either threading React state into the grammar or keeping a second copy
-      of it. */
+      The action carries the digit and NOTHING ELSE. Which sessions the strips
+      are drawing is not something a reducer over a one-key memory can know —
+      `Canvas` owns the pane tree — so resolving it here would mean either
+      threading React state into the grammar or keeping a second copy of it. */
   | { readonly kind: 'selectTab'; readonly digit: number }
+  /** `Mod-Shift-[` / `Mod-Shift-]` — the previous / next SESSION TAB, over the
+      same across-panes list `selectTab` counts, wrapping at both ends.
+
+      THE BROWSER'S OWN TAB GESTURE ON macOS, and app-level, which is what
+      makes it safe where its digit cousin is not: nothing in
+      `com.apple.symbolichotkeys` claims the brackets, while entries 28-31 and
+      184 take `Cmd+Shift+3/4/5` before any Electron window sees the keydown.
+
+      DISTINCT FROM `h`/`l` on purpose. Those cycle the ACTIVE PROJECT's tabs
+      in Select and belong to the question card in Insert; this steps what is
+      on screen from wherever the keyboard is — including from inside the
+      prompt box, which is where the reason to look at another tab comes from.
+
+      A RING, not a run with two ends: it steps the same closed list the digits
+      address, so the last tab's next is the first. `j`/`k` walk an open-ended
+      session list and stop at the ends; these walk a strip, and every tab
+      strip's own arrows wrap. */
+  | { readonly kind: 'stepTab'; readonly delta: 1 | -1 }
   /** `Alt-1` … `Alt-9` — pick a VIEW in the focused response pane: Response,
       PRs, Terminal, Agents. A SLOT IN `TABS`, never a position in the drawn
       bar — `Alt-3` is Terminal because Terminal is `TABS[2]`, whether or not
@@ -386,42 +404,57 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   N: { kind: 'searchPrev' },
   Enter: { kind: 'open' },
   'Mod-k': { kind: 'palette' },
-  // Cmd/Ctrl + a digit is THE SESSION TAB AT THAT POSITION in the focused
-  // pane's strip. One meaning, in both cursor modes, whatever has the
+  // Cmd/Ctrl + a digit is THE SESSION TAB AT THAT POSITION, counted across
+  // every pane on screen. One meaning, in both cursor modes, whatever has the
   // keyboard.
   //
-  // THIS IS THE FOURTH ARRANGEMENT, AND IT IS A DELIBERATE REVERSAL OF THE
-  // THIRD. The first gave the bare row to sessions and pushed the tabs onto
-  // `Mod-Shift-<digit>`; the second swapped them, because Cmd+number is the
-  // TAB gesture everywhere else. The third abandoned a fixed meaning
-  // altogether and made the digit CONTEXT-DEPENDENT — a session in the
-  // sidebar while the sidebar had the keyboard, a view in the response pane
-  // while it did — on the argument that any fixed meaning sends half the
-  // operator's presses to the pane they are not looking at.
+  // THIS IS THE FIFTH ARRANGEMENT OF THIS ROW. The history is kept because it
+  // is load-bearing: an agent this week was about to "fix" `gt` by renaming
+  // it, and four places documenting the intent are what stopped it.
   //
-  // The operator has now asked for the fixed meaning anyway, and it is their
-  // call: Cmd+number is "switch tab" in every browser and every editor, they
-  // live in this app, and a key whose meaning changes with the cursor is a key
-  // you have to think about before pressing. The third arrangement's argument
-  // is not refuted by that, it is OUTWEIGHED — so the answer to it is written
-  // into the design instead of thrown away. The pane fork it worried about is
-  // gone twice over: the four VIEWS moved off this modifier entirely (see
-  // `Alt-<digit>` below, promoted in the change before this one), so the two
-  // families can no longer collide; and the SIDEBAR's positions, the other
-  // half of the old fork, are not re-homed onto some third chord to keep them
-  // — they are simply gone, because `j`/`k`, `gg`/`G`, `f` and `/` already
-  // reach any row and a digit that counted sidebar rows now had nothing left
-  // to disambiguate it from. What is lost is jumping to sidebar row N by
-  // number; that is the price, and it was quoted.
+  //   1. The bare row picked SESSIONS; tabs sat on `Mod-Shift-<digit>`.
+  //   2. Swapped, because Cmd+number is the TAB gesture everywhere else.
+  //   3. No fixed meaning at all — the digit was CONTEXT-DEPENDENT, a session
+  //      while the sidebar had the keyboard and a view while the response pane
+  //      did — on the argument that any fixed meaning sends half the
+  //      operator's presses to the pane they are not looking at.
+  //   4. Fixed again, at the operator's request: the tab at that position in
+  //      the FOCUSED PANE's own strip. The third arrangement's argument was
+  //      not refuted, it was OUTWEIGHED — Cmd+number is "switch tab" in every
+  //      browser and every editor, and a key whose meaning changes with the
+  //      cursor is a key you have to think about before pressing. Its pane
+  //      fork was gone twice over: the four VIEWS had moved to `Alt-<digit>`,
+  //      and the SIDEBAR's positions were dropped rather than re-homed,
+  //      because `j`/`k`, `gg`/`G`, `f` and `/` already reach any row. What
+  //      that cost was jumping to sidebar row N by number.
+  //   5. THIS ONE: the same fixed meaning, counted ACROSS PANES in the order
+  //      the strips draw, rather than within the focused pane's strip. A split
+  //      is one screen, and the operator's point is that the tab they can SEE
+  //      at position 3 should be the tab `Mod-3` names — under the per-pane
+  //      rule the same key meant different tabs depending on which half of the
+  //      screen last had the keyboard, and half the tabs on screen could not
+  //      be addressed by number at all. Picking a tab in another pane moves
+  //      the keyboard there, which is what a sidebar pick of the same session
+  //      already did.
   //
-  // AND THE SHIFT ROW IS STILL NOT REACHABLE. macOS binds `Cmd+Shift+3`, `4`
-  // and `5` to its screenshot commands and matches them before any Electron
-  // window sees the keydown (`com.apple.symbolichotkeys` entries 28-31 and
-  // 184). So `Mod-Shift-3` and `Mod-Shift-4` were dead bindings in the first
-  // two arrangements — first two session positions, then Terminal and Agents
-  // — and no test could have caught it, because the OS never delivers the
-  // event a test synthesises. Nothing goes there, in this arrangement or the
-  // next one.
+  // AND ITS COST, QUOTED AND CHOSEN. Positions 1-9 stop covering everything
+  // once more than nine tabs are open: per-pane numbering kept every strip
+  // individually reachable, so a tenth tab was still position N of ITS pane,
+  // and now a tenth tab has no digit. `9` still means the LAST tab whatever
+  // the count, and `Mod-Shift-[`/`]` steps the ring one at a time, so nothing
+  // is unreachable — only unaddressable BY NUMBER. The operator was told this
+  // and chose it anyway; it is a trade, not an oversight.
+  //
+  // AND THE SHIFT DIGIT ROW IS STILL NOT REACHABLE. macOS binds `Cmd+Shift+3`,
+  // `4` and `5` to its screenshot commands and matches them before any
+  // Electron window sees the keydown (`com.apple.symbolichotkeys` entries
+  // 28-31 and 184). So `Mod-Shift-3` and `Mod-Shift-4` were dead bindings in
+  // the first two arrangements — first two session positions, then Terminal
+  // and Agents — and no test could have caught it, because the OS never
+  // delivers the event a test synthesises. Nothing goes there, in this
+  // arrangement or the next one. THE BRACKETS BESIDE THEM ARE A DIFFERENT
+  // MATTER and are bound below: nothing native holds `Cmd+Shift+[`/`]`, which
+  // is why the browsers themselves could take it for their tab gesture.
   //
   // The digit is 1-BASED here, because a position is what the KEY means; the
   // handler converts to an index, and 9 is the LAST tab whatever the count,
@@ -445,6 +478,24 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   'Mod-7': { kind: 'selectTab', digit: 7 },
   'Mod-8': { kind: 'selectTab', digit: 8 },
   'Mod-9': { kind: 'selectTab', digit: 9 },
+  // THE SAME LIST, STEPPED — and the reason the digit row can afford to stop
+  // at nine. `Mod-Shift-[`/`]` is the previous/next tab gesture macOS
+  // browsers already teach, and it is app-level: nothing native answers it,
+  // unlike the `Cmd+Shift+<digit>` row three lines up.
+  //
+  // Spelled by POSITION, not by character. A real `Cmd+Shift+[` keydown
+  // arrives as `{`, so `normalizeKey` reads `event.code` here for exactly the
+  // reason it does for the digits — and that is also what lets the `Shift-`
+  // token appear in a binding at all. See `POSITION_CODES`.
+  'Mod-Shift-[': { kind: 'stepTab', delta: -1 },
+  'Mod-Shift-]': { kind: 'stepTab', delta: 1 },
+  // AND THE PANE PAIR, ONE MODIFIER UP, so the two read as a family: Shift
+  // steps the TAB, Alt steps the PANE that holds tabs. A second binding on
+  // the action `zw`/`zW` already carry rather than a second action — the
+  // chord keeps working and the key sheet prints one row with both spellings,
+  // which is what `MAX_BINDINGS = 2` is for.
+  'Mod-Alt-[': { kind: 'stepSplit', delta: -1 },
+  'Mod-Alt-]': { kind: 'stepSplit', delta: 1 },
   // The response pane's four views, by name. The same digit row under the
   // OTHER modifier, and that is the whole distinction: Cmd picks a SESSION
   // TAB in the focused pane, Alt picks one of that pane's four VIEWS.
@@ -666,6 +717,14 @@ export function actionId(action: KeyAction): string {
       return `move:${action.direction}`;
     case 'selectTab':
       return `selectTab:${action.digit}`;
+    // MEASURED, not assumed: `stepTab` was added without a case here and both
+    // bracket bindings collapsed onto the id `stepTab`, so `defaultBindings`
+    // merged them into one entry and `buildTables` gave `Mod-Shift-]` the
+    // FIRST one's action — next tab silently stepped backwards. A test that
+    // only asserted "the pair walks in opposite directions" would have passed;
+    // what caught it was asserting where each one LANDS.
+    case 'stepTab':
+      return `stepTab:${action.delta}`;
     case 'pickView':
       return `pickView:${action.digit}`;
     case 'project':

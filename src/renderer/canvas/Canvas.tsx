@@ -2130,17 +2130,39 @@ function CanvasInner({
    * THE STRIP THE OPERATOR IS LOOKING AT — the focused pane's own tabs, drawn
    * by the same expression that draws them (`drawnPaneTabs`).
    *
-   * What `Mod-<digit>` counts, and where `Mod-t` reads its project from. Every
-   * pane draws a strip of its own (A15.5) and exactly one of them has the
-   * keyboard, so "the tab strip in front of you" is a fact the pane focus
-   * already carries. Deliberately NOT `projectTabs`: that is every tab the
-   * project has open across every pane, and counting it would let a digit
-   * reach into a pane the operator is not in.
+   * Where `Mod-t` reads its project from, and what `Mod-t`'s own refusal
+   * counts. Every pane draws a strip of its own (A15.5) and exactly one of
+   * them has the keyboard, so "the tab strip in front of you" is a fact the
+   * pane focus already carries.
+   *
+   * `Mod-<digit>` USED TO COUNT THIS and does not any more — see
+   * `drawnTabsAcrossPanes` below, and `chords.ts` for the argument.
    */
   const focusedPaneTabs = useMemo(
     () =>
       drawnPaneTabs(allEntries, findLeaf(panes, focusedPaneId)?.sessionIds ?? [], activeProjectId),
     [allEntries, panes, focusedPaneId, activeProjectId],
+  );
+  /**
+   * EVERY TAB ON SCREEN, IN THE ORDER THE STRIPS PAINT THEM — what
+   * `Mod-<digit>` counts and what `Mod-Shift-[`/`]` steps.
+   *
+   * `leaves()` walks the split tree in child order, which is the order
+   * `renderSplit` lays the panes out: left to right for a `row`, top to bottom
+   * for a `column`. Each leaf then contributes `drawnPaneTabs` — the SAME
+   * expression its own strip renders from — so "the tab at position N" can
+   * only ever mean the tab an operator can point at.
+   *
+   * DELIBERATELY NOT `projectTabs`, which is every session of the active
+   * project whether or not a pane is drawing it. The list a number addresses
+   * has to be the list that is painted; those two are the same today only
+   * because every session of the active project is a tab, and a rule that
+   * relies on that coincidence is a rule that breaks the day it stops.
+   */
+  const drawnTabsAcrossPanes = useMemo(
+    () =>
+      leaves(panes).flatMap((leaf) => drawnPaneTabs(allEntries, leaf.sessionIds, activeProjectId)),
+    [allEntries, panes, activeProjectId],
   );
   /**
    * EVERY session of the active project, filters and all — the list A11.1's
@@ -3841,44 +3863,83 @@ function CanvasInner({
         case 'selectTab': {
           /**
            * ONE DIGIT, ONE MEANING, IN EITHER CURSOR MODE: the session tab at
-           * that position in the strip the operator is looking at.
+           * that position ON SCREEN.
            *
-           * `focusedPaneTabs` is that strip, derived by the very expression
-           * that draws it (`drawnPaneTabs`), so "the tab at position N" can
-           * only ever mean the tab drawn at position N. The two mistakes this
+           * `drawnTabsAcrossPanes` is every strip's own list, concatenated in
+           * pane order and derived by the very expression that draws each of
+           * them (`drawnPaneTabs`), so "the tab at position N" can only ever
+           * mean the tab an operator can point at. The two mistakes this
            * family has already made were both a handler counting a list of its
            * own: the constant while the bar drew a filtered one, then the
            * drawn one positionally on a route that was supposed to be by name.
            *
-           * THE FOCUSED PANE'S OWN LIST, not the project's. Every pane draws a
-           * strip (A15.5) and one of them has the keyboard; counting across
-           * all of them would move a tab in a pane nobody is looking at, which
-           * is the exact failure the previous arrangements of this row kept
-           * finding in another form.
+           * ACROSS PANES, not within the focused one — the fifth arrangement
+           * of this row, argued in `chords.ts` with the cost it carries. A
+           * split is one screen; under the per-pane rule the same digit named
+           * different tabs depending on which half last held the keyboard, and
+           * the tabs in the other half had no number at all. Landing on a tab
+           * another pane holds moves the keyboard there, which `focusSession`
+           * already does for a sidebar pick of the same session.
            *
            * Refused out loud both ways, and never clamped: a jump that
            * silently lands one short is worse than one that does not happen,
-           * because you only find out by reading where you ended up. An empty
-           * pane and an out-of-range digit are two different facts and get two
-           * sentences.
+           * because you only find out by reading where you ended up. No tabs
+           * at all and an out-of-range digit are two different facts and get
+           * two sentences.
            */
-          if (focusedPaneTabs.length === 0) {
-            setStatus('no tabs open in this pane');
+          if (drawnTabsAcrossPanes.length === 0) {
+            setStatus('no tabs open');
             return;
           }
           // 9 is the LAST tab whatever the count, the convention every browser
-          // tab bar taught, and far more use than a ninth position once a
-          // project outgrows nine sessions.
+          // tab bar taught — and it is what keeps a tenth tab reachable now
+          // that the digits count one list rather than one strip each.
           const target =
             action.digit === 9
-              ? focusedPaneTabs[focusedPaneTabs.length - 1]
-              : focusedPaneTabs[action.digit - 1];
+              ? drawnTabsAcrossPanes[drawnTabsAcrossPanes.length - 1]
+              : drawnTabsAcrossPanes[action.digit - 1];
           if (target === undefined) {
-            const count = focusedPaneTabs.length;
-            setStatus(`only ${count} tab${count === 1 ? '' : 's'} in this pane`);
+            const count = drawnTabsAcrossPanes.length;
+            // The count is of every pane, because that is the list the digit
+            // addresses. A sentence about "this pane" would be about a
+            // different list from the one that just refused.
+            setStatus(`only ${count} tab${count === 1 ? '' : 's'} open`);
             return;
           }
           focusSession(target.session.id);
+          return;
+        }
+        case 'stepTab': {
+          /**
+           * `Mod-Shift-[` / `Mod-Shift-]` — one step along the SAME list the
+           * digits address, wrapping at both ends.
+           *
+           * A ring rather than a run with two stops: this walks a tab strip,
+           * and every tab strip's own arrows wrap. `j`/`k` do not, and the
+           * distinction is the thing traversed rather than the key — an
+           * open-ended session list has a last row worth stopping at and
+           * announcing; a strip does not.
+           *
+           * With the cursor on nothing the list holds — an empty pane has the
+           * keyboard — it lands on the first tab rather than refusing, exactly
+           * as `h`/`l` do from the same state.
+           */
+          if (drawnTabsAcrossPanes.length === 0) {
+            setStatus('no tabs open');
+            return;
+          }
+          const at =
+            focusedSessionId === null
+              ? -1
+              : drawnTabsAcrossPanes.findIndex((e) => e.session.id === focusedSessionId);
+          const count = drawnTabsAcrossPanes.length;
+          const landing =
+            at === -1
+              ? drawnTabsAcrossPanes[0]
+              : drawnTabsAcrossPanes[(at + action.delta + count) % count];
+          if (landing !== undefined) {
+            focusSession(landing.session.id);
+          }
           return;
         }
         case 'pickView': {
@@ -4203,6 +4264,7 @@ function CanvasInner({
     focusedSessionId,
     focusedPaneId,
     focusedPaneTabs,
+    drawnTabsAcrossPanes,
     newTabInPane,
     projectTabIds,
     sessionIds,

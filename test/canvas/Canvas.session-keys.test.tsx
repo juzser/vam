@@ -193,32 +193,60 @@ describe('Cmd+<digit> is the tab strip in front of the operator', () => {
   });
 
   /**
-   * THE RULE WHEN THE SHELL IS SPLIT, and the one assertion that pins it: the
-   * digits count THE FOCUSED PANE'S OWN STRIP, which is the strip the operator
-   * is looking at. `zv` moves the front tab into the new pane and leaves the
-   * keyboard there, so that pane holds one tab while the project holds three —
-   * and `Cmd+2` must refuse rather than reach across into the other pane.
+   * THE RULE WHEN THE SHELL IS SPLIT, AND IT IS THE FIFTH ARRANGEMENT OF THIS
+   * ROW — a deliberate reversal of what this case used to assert.
+   *
+   * It read "the digits count THE FOCUSED PANE'S OWN STRIP", and `Cmd+2` in a
+   * one-tab pane refused rather than reaching across. The operator asked for
+   * the other rule: a split is one screen, and the tab they can SEE at
+   * position 2 should be what `Cmd+2` names. `chords.ts` records all five
+   * arrangements and this one's price — past nine tabs the digits no longer
+   * cover everything, where per-pane numbering kept every strip individually
+   * reachable.
+   *
+   * `zv` moves the front tab into the new pane and leaves the keyboard there,
+   * so the focused pane holds one of the three tabs on screen.
    */
-  it('counts the FOCUSED pane’s strip, not every tab the project has open', () => {
+  it('counts every strip on screen, not just the focused pane’s', () => {
     render(<Canvas model={THREE} />);
     press('z');
     press('v');
     expect(panes()).toHaveLength(2);
     expect(tabsIn(focusedPane())).toHaveLength(1);
-    const before = activeTab();
+    // WAS: "only 1 tab in this pane". Position 2 is pane-1's second tab, read
+    // off what that pane DRAWS rather than compared to a literal.
     digit(2);
-    expect(activeTab()).toBe(before);
-    expect(statusBar()).toContain('only 1 tab');
-    // And the pane it did NOT reach into is untouched.
-    expect(tabsIn(paneFor('pane-1'))).toHaveLength(2);
+    expect(activeTabIn(paneFor('pane-1'))).toBe(tabsIn(paneFor('pane-1'))[1]);
+    // Read off the status CELL, not the whole bar: the bar carries the source
+    // readout too, and matching against all of it is how a negative assertion
+    // comes to be about a sentence nobody wrote.
+    expect(
+      document.querySelector('[data-status-bar] [data-status]')?.textContent ?? '',
+    ).not.toContain('only');
+    // And the keyboard went with it — a digit that brought a tab forward in a
+    // pane the operator is not in would be the worst of both rules.
+    expect(focusedPane()?.getAttribute('data-split-pane')).toBe('pane-1');
   });
 
-  it('says so rather than nothing when the pane holds no tabs at all', () => {
-    render(<Canvas model={modelWith('a1')} />);
+  it('refuses past the LAST tab on screen, counting every pane in the sentence', () => {
+    render(<Canvas model={THREE} />);
     press('z');
-    press('v'); // moves a1 out, leaving pane-1 empty
-    press('z');
-    press('w'); // and back into the pane the split emptied
+    press('v');
+    const before = activeTab();
+    digit(4);
+    expect(activeTab()).toBe(before);
+    // Three tabs across two panes. The count has to be of the list the digit
+    // addresses, or the refusal is about a different list from the one that
+    // refused.
+    expect(statusBar()).toContain('only 3 tabs');
+  });
+
+  it('says so rather than nothing when nothing is open anywhere', () => {
+    // The empty-pane case this replaced is no longer a refusal: with the tabs
+    // counted across panes, a digit pressed in an emptied pane addresses the
+    // tabs still open in the other one — which is the point of the change.
+    // What is left to refuse is a shell with no tabs at all.
+    render(<Canvas model={{ projects: [] }} />);
     expect(tabsIn(focusedPane())).toHaveLength(0);
     digit(1);
     expect(statusBar()).toContain('no tabs');

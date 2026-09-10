@@ -147,8 +147,19 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
     group: 'navigation',
     label: (a) =>
       a.digit === 9
-        ? 'the LAST tab of this pane, whatever the count'
-        : `tab ${a.digit} of this pane`,
+        ? 'the LAST tab on screen, whatever the count'
+        : `tab ${a.digit}, counted across every pane`,
+  },
+  // The same list, stepped. Named for the RING rather than as "next tab",
+  // which would read as a synonym of `l` — and `l` is a different list: the
+  // active project's tabs in Select, an open question's steps in Insert. This
+  // one steps what is DRAWN, from wherever the keyboard is.
+  stepTab: {
+    group: 'navigation',
+    label: (a) =>
+      a.delta === 1
+        ? 'next tab on screen — wraps at the end'
+        : 'previous tab on screen — wraps at the start',
   },
   // The response pane's four views, and the one row family whose caption is
   // GENERATED FROM `TABS` rather than written out: the bar's contents have
