@@ -58,6 +58,26 @@ export const INSERT_STOP = 'data-insert-stop';
 const SCOPE_SELECTOR = `[${INSERT_SCOPE}]`;
 
 /**
+ * The two marks as JSX props, so each attribute name is spelled ONCE.
+ *
+ * Spreads rather than literal attributes at each site, for the reason this
+ * whole module exists: a second spelling of a fact is a second fact, and a
+ * typo on one of three regions would be a mode that silently stops working in
+ * one pane state and nowhere else.
+ *
+ * NEITHER MARK CARRIES A `tabIndex`, deliberately. Whether an element can
+ * take focus is a property of the element, not of the mark: the prompt row
+ * needs `tabIndex={-1}` (a destination for `I`, not a new station in the Tab
+ * order) while the terminal pane already carries `tabIndex={0}` because Tab
+ * is documented as the way OUT of it. Bundling a value into the mark would
+ * have silently taken the terminal out of the Tab order. `focusInsertStop` is
+ * what catches a stop that cannot in fact be focused — it checks that the
+ * focus landed rather than assuming it.
+ */
+export const insertScopeMark = { [INSERT_SCOPE]: '' } as const;
+export const insertStopMark = { [INSERT_STOP]: '' } as const;
+
+/**
  * Where `I` lands, in DOCUMENT ORDER — which is the priority, not a second
  * list to keep in step with the first.
  *

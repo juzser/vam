@@ -102,6 +102,7 @@ import type {
   SlashCommand,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { questionKeys } from '../keyboard/question-keys.js';
 import { ShortcutTip } from '../keyboard/ShortcutTip.js';
 import { useHistoryReader } from '../sources/history-reader.js';
@@ -3070,40 +3071,24 @@ export function DetailPanel(props: DetailPanelProps) {
   }, [composing]);
 
   /**
-   * ENTERING INSERT PUTS THE KEYBOARD ON THE FIRST OPTION, AND LEAVING TAKES
-   * IT BACK — the wiring that makes "`hjkl` chooses an option in Insert" true.
+   * THIS PANE NO LONGER MOVES FOCUS TO FOLLOW THE MODE — the mode follows
+   * focus, so an effect that did both was the loop as well as the bug.
    *
-   * The option cursor is DOM focus, not a second index: the options are real
-   * buttons, so focus is already the thing the browser, the screen reader and
-   * the focus ring all agree on, and a parallel index in the canvas would be a
-   * second notion of where the cursor is — the exact duplication the mode
-   * naming exists to remove.
+   * What stood here watched `active` (`isFocused && mode === 'insert'`) and
+   * focused the first option on the way in, blurring it on the way out. Both
+   * halves were necessary while the mode was a flag, and both were incomplete:
+   * the entry took nothing when the pane had no question (audit F5 — Insert
+   * with nothing focused to insert into), and the exit blurred ONLY
+   * `[data-question-option]`, so `Mod-0` typed in the composer left a
+   * read-only textarea holding the keyboard while the bar read Select (F4).
    *
-   * Both directions are necessary. Without the first, `I` sets Insert while
-   * focus is still on the body, so `j` reaches the canvas grammar and walks
-   * the session list — the operator's original complaint. Without the second,
-   * `H` returns to Select while focus is still inside the listbox, so the list
-   * goes on eating `j` in a mode where it belongs to the sidebar. That is the
-   * same defect mirrored, and it is the one a reader will not think of.
+   * `Canvas.tsx` owns both directions now, through `keyboard/focus-scope.ts`:
+   * `focusInsertStop` on the way in — which lands on this pane's first stop in
+   * document order, the question's options when there are any and the prompt
+   * row otherwise — and `releaseInsert` on the way out, which blurs whatever
+   * is in an insert scope rather than one attribute's worth of it. One
+   * authority for where the keyboard is, which is the whole point.
    */
-  const wasActive = useRef(false);
-  useEffect(() => {
-    const leaving = wasActive.current && !active;
-    wasActive.current = active;
-    if (active) {
-      firstOptionRef.current?.focus();
-      return;
-    }
-    // ONLY ON THE WAY OUT, never on a first render. `i` focuses an option from
-    // the effect above while `active` is still false — the composer path, which
-    // does not touch the mode — so a blur that fired whenever `active` was
-    // false would undo it on mount and leave the keyboard nowhere.
-    if (!leaving) return;
-    const focused = document.activeElement;
-    if (focused instanceof HTMLElement && focused.hasAttribute('data-question-option')) {
-      focused.blur();
-    }
-  }, [active]);
 
   /**
    * The `out` region rides its own bottom: the newest output is the thing a
@@ -4597,6 +4582,12 @@ export function DetailPanel(props: DetailPanelProps) {
       {current !== 'Terminal' && newestQuestion !== null && (
         <div
           data-question-bar
+          // AN INSERT SCOPE (`keyboard/focus-scope.ts`): while anything in
+          // here holds the keyboard, the app IS in Insert. That is the whole
+          // definition of the mode now, which is why there is no flag left
+          // that could disagree with it. The card's options are also the
+          // LANDING `I` aims at, by being the first stop in document order.
+          {...insertScopeMark}
           className="flex flex-none flex-col gap-2.5 border-line border-t bg-pane px-3.5 py-3"
         >
           {/* The factory's governance queue — findings awaiting a waiver, and
@@ -4644,6 +4635,9 @@ export function DetailPanel(props: DetailPanelProps) {
       {current !== 'Terminal' && !composerHidden && (
         <div
           data-composer-bar
+          // The other insert scope, and the common one: with no question open
+          // this block is the whole of Insert. See the question bar above.
+          {...insertScopeMark}
           className={[
             'flex flex-none flex-col gap-2.5 bg-pane px-3.5 py-3',
             newestQuestion === null ? 'border-line border-t' : '',
@@ -4759,11 +4753,28 @@ export function DetailPanel(props: DetailPanelProps) {
               ))}
             </div>
           )}
+          {/* THE ROW IS THE INSERT LANDING, AND THE BOX INSIDE IT IS NOT.
+              `I` moves the keyboard into the pane and `i` puts the caret in
+              the prose box; they were the same gesture in the flag's day,
+              because the flag could not tell them apart. Landing on the ROW
+              is what keeps them two: this element takes the focus, Insert's
+              own `j`/`k` still reach the window listener from it (a focused
+              TEXTAREA would be swallowed by that listener's typing guard, and
+              the refusal this pane owes for a one-stop cursor would vanish),
+              and `Enter` here is what opens the box for typing.
+
+              `data-action-id="prompt"` is the action list's name for the same
+              row; the two are deliberately not merged. One says WHICH action
+              the pane cursor is on, the other says the keyboard can be sent
+              here — a stop with no action and an action with no stop are both
+              possible, and a shared attribute would hide the day one appears. */}
           <div
             data-prompt-box
             data-action-id="prompt"
+            {...insertStopMark}
+            tabIndex={-1}
             className={[
-              'flex flex-col gap-2.5 rounded-[10px] border bg-card px-3 py-2.5',
+              'flex flex-col gap-2.5 rounded-[10px] border bg-card px-3 py-2.5 outline-none',
               active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
             ].join(' ')}
           >
