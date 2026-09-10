@@ -42,21 +42,56 @@ export type KeyEventLike = {
 const MODIFIER_KEYS = new Set(['Control', 'Meta', 'Alt', 'Shift']);
 
 /**
- * The number row's position, `'0'`..`'9'`, or null when this is not one of
- * those keys.
+ * The keys whose BINDING IS A POSITION rather than a character, spelled by
+ * their `event.code` and written down by the character the unmodified key
+ * carries on a US layout.
  *
- * `code` first, because that is the position; `key` only as the fallback for
- * an event that reports no code — every hand-built `KeyEventLike` in the tests
- * and, historically, every browser before `code` existed. `Numpad1` is
- * deliberately not matched: it is a different key, and under Shift it does not
- * even produce a digit.
+ * The number row, and the bracket pair beside `P`. Both are here for one
+ * reason (see `normalizeKey`): a modifier CHANGES the character these keys
+ * produce, and on some layouts a plain modifier already does. `Numpad1` is
+ * deliberately absent: it is a different key, and under Shift it does not even
+ * produce a digit.
  */
-function digitPosition(event: KeyEventLike): string | null {
-  const fromCode = /^Digit([0-9])$/.exec(event.code ?? '');
-  if (fromCode?.[1] !== undefined) {
-    return fromCode[1];
+const POSITION_CODES: Readonly<Record<string, string>> = {
+  Digit0: '0',
+  Digit1: '1',
+  Digit2: '2',
+  Digit3: '3',
+  Digit4: '4',
+  Digit5: '5',
+  Digit6: '6',
+  Digit7: '7',
+  Digit8: '8',
+  Digit9: '9',
+  BracketLeft: '[',
+  BracketRight: ']',
+};
+
+/**
+ * What a key that reports NO code produces, folded back to its position.
+ *
+ * The fallback for a hand-built `KeyEventLike` — every one in this repo's
+ * tests is `key`-only — and, historically, for a browser older than `code`.
+ * The digits are themselves; the brackets are matched under their shifted
+ * forms too, so a `{` arriving with no code answers `[`'s binding instead of
+ * going dead.
+ */
+const POSITION_CHARS: Readonly<Record<string, string>> = {
+  '[': '[',
+  ']': ']',
+  '{': '[',
+  '}': ']',
+};
+
+function positionKey(event: KeyEventLike): string | null {
+  const fromCode = POSITION_CODES[event.code ?? ''];
+  if (fromCode !== undefined) {
+    return fromCode;
   }
-  return /^[0-9]$/.test(event.key) ? event.key : null;
+  if (/^[0-9]$/.test(event.key)) {
+    return event.key;
+  }
+  return POSITION_CHARS[event.key] ?? null;
 }
 
 /**
@@ -71,7 +106,7 @@ function digitPosition(event: KeyEventLike): string | null {
  * applied it — `G` and `?` arrive as themselves — so adding one would give the
  * same keystroke two spellings, and only one of them would ever match.
  *
- * THE DIGIT ROW UNDER A MODIFIER IS THE EXCEPTION, and it is an exception
+ * A POSITIONAL KEY UNDER A MODIFIER IS THE EXCEPTION, and it is an exception
  * because those bindings are about a POSITION rather than a character. A
  * character-based spelling cannot keep that promise, and failed it twice.
  *
@@ -81,16 +116,27 @@ function digitPosition(event: KeyEventLike): string | null {
  * have to be written `Mod-!` — a spelling no key sheet can render as a
  * position, and one that would silently answer the unshifted binding.
  *
- * Both halves are about the ROW, not about whichever family is sitting on it:
- * the table has been rearranged four times and this reasoning has outlived
- * every arrangement. Nothing is bound under Shift today — macOS captures
- * `Cmd+Shift+3/4/5` for screenshots, so nothing can be — and the Shift token
- * still earns its place by keeping a shifted digit from matching an unshifted
- * binding.
+ * Both halves are about the KEY'S PLACE, not about whichever family is sitting
+ * on it: the table has been rearranged five times and this reasoning has
+ * outlived every arrangement.
  *
- * `event.code` answers both: `Digit1` is the position, whatever the layout put
- * on it, so the digit row keeps one spelling everywhere and Shift can carry a
- * token there without giving any keystroke a second one. Letters stay folded.
+ * THE BRACKET PAIR JOINED THE DIGIT ROW HERE (`POSITION_CODES`), for the
+ * identical reason and with sharper teeth. `Mod-Shift-[` / `Mod-Shift-]` is
+ * the browser's own previous/next tab and `Mod-Alt-[` / `Mod-Alt-]` is the
+ * pane pair one modifier up; a real `Cmd+Shift+[` keydown arrives as `{`, and
+ * on macOS `Alt+[` arrives as `“`. Spelled by character, one of those is
+ * unrenderable in a key sheet and the other is a different string on every
+ * layout — the digit row's two failures, in a family that has both at once.
+ *
+ * NOTHING IS BOUND UNDER `Mod-Shift-<digit>`, and nothing can be: macOS
+ * captures `Cmd+Shift+3/4/5` for screenshots. The Shift token still earns its
+ * place twice over — it keeps a shifted digit from matching an unshifted
+ * binding, and it is what lets the bracket pair be bound under Shift at all.
+ *
+ * `event.code` answers all of it: `Digit1` and `BracketLeft` are POSITIONS,
+ * whatever the layout put on them, so those keys keep one spelling everywhere
+ * and Shift can carry a token there without giving any keystroke a second one.
+ * Letters stay folded.
  *
  * Returning `null` for a bare modifier is what stops reaching for a shortcut
  * and thinking better of it from silently eating a half-typed `g`.
@@ -104,9 +150,9 @@ export function normalizeKey(event: KeyEventLike): string | null {
   if (!mod && !alt) {
     return event.key;
   }
-  const digit = digitPosition(event);
-  if (digit !== null) {
-    return `${mod ? 'Mod-' : ''}${alt ? 'Alt-' : ''}${event.shiftKey === true ? 'Shift-' : ''}${digit}`;
+  const position = positionKey(event);
+  if (position !== null) {
+    return `${mod ? 'Mod-' : ''}${alt ? 'Alt-' : ''}${event.shiftKey === true ? 'Shift-' : ''}${position}`;
   }
   // Under a modifier the letter is lower-cased so Cmd-K and Cmd-Shift-K do not
   // become two different bindings for one gesture.
