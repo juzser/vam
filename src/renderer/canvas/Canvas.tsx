@@ -73,7 +73,13 @@ import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import { DEMO_PROMPT } from '../fixtures/demo.js';
-import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
+import {
+  type ChordState,
+  chordText,
+  EMPTY_CHORD,
+  normalizeKey,
+  resolveChord,
+} from '../keyboard/chords.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
 import { buildActions, clampIndex } from '../panels/actions.js';
@@ -3189,29 +3195,68 @@ function CanvasInner({
     );
   }, [focusedDecision]);
 
-  const stepSession = useCallback(
+  /**
+   * `gt` / `gT` — THE MOVE THAT THINKS IN PROJECTS.
+   *
+   * It used to be `stepSession`: `entries.findIndex(focused) ± 1`, one row of
+   * the flat session list, under a key sheet that has said `next project` /
+   * `previous project` since the sheet was written. With two sessions in one
+   * project `gt` did not leave the project at all, and where it did leave one
+   * it arrived by counting sessions rather than by looking for a project —
+   * while being an exact second spelling of `j`/`k`, which walk that same
+   * list one row at a time and say so. Two keys doing one thing under a
+   * caption for another is the shape this codebase keeps finding and
+   * deleting; the caption was the honest half, so the behaviour moved to it.
+   *
+   * WHERE IT LANDS: the target project's FIRST entry — its most urgent
+   * session, the top row the sidebar draws under that heading — whichever
+   * direction the cursor arrived from. Walking backwards meets the previous
+   * project's LAST session first, and landing there would make `gT` mean
+   * "the bottom of the project above" while `gt` means "the top of the one
+   * below": one key, two rules, told apart only by which way you pressed. A
+   * project's entry point is its top row, so `gt` then `gT` returns to the
+   * project you left rather than to the exact session — this pair navigates
+   * projects, and `j`/`k` are the keys that go back to a session.
+   *
+   * `entries` is project-major (`orderedSessions`), so a project's sessions
+   * are contiguous and "the next different project id" is genuinely the
+   * adjacent one; the landing lookup scans from the head rather than trusting
+   * that, so a repeated project id could at worst land on the earlier of the
+   * two rather than somewhere unrelated.
+   */
+  const stepProject = useCallback(
     (delta: 1 | -1) => {
-      const index = entries.findIndex((e) => e.session.id === focusedEntry?.session.id);
-      // -1 means the cursor is on nothing this list holds: an empty list, or a
-      // focus the filter or a refresh has just made unreachable. Left to the
-      // arithmetic below it became `-1 + 1 = 0`, which for an empty list read
-      // as "off the end" and announced a LAST session that does not exist,
-      // and for a non-empty one silently jumped to the first row with no word
-      // said. `hjkl` already answers this state honestly one branch away.
-      if (index === -1) {
+      // The cursor on nothing this list holds — an empty list, or a focus the
+      // filter or a refresh has just made unreachable. Left to arithmetic this
+      // read as "off the end" on an empty list and announced a LAST project
+      // that does not exist, and on a non-empty one jumped silently to the
+      // first row. `hjkl` answers this state honestly one branch away and so
+      // does this: the honesty predates the project fix and survives it.
+      const here = focusedEntry;
+      const index = here === null ? -1 : entries.findIndex((e) => e.session.id === here.session.id);
+      if (here === null || index === -1) {
         setStatus('no session matches');
         return;
       }
+      let target: string | null = null;
+      for (let at = index + delta; at >= 0 && at < entries.length; at += delta) {
+        const candidate = entries[at];
+        if (candidate !== undefined && candidate.project.id !== here.project.id) {
+          target = candidate.project.id;
+          break;
+        }
+      }
       // Clamped, not wrapped. Stopping dead is information: it tells you where
-      // you are. Wrapping to the far end tells you nothing.
-      const nextIndex = index + delta;
-      if (nextIndex < 0 || nextIndex >= entries.length) {
-        setStatus(delta > 0 ? 'last session already' : 'first session already');
+      // you are. Wrapping to the far end tells you nothing. And it is refused
+      // ALOUD, because a single-project workspace is exactly where this key
+      // can never act and the operator has no other way to be told.
+      if (target === null) {
+        setStatus(delta > 0 ? 'last project already' : 'first project already');
         return;
       }
-      const target = entries[nextIndex];
-      if (target !== undefined) {
-        focusSession(target.session.id);
+      const landing = entries.find((e) => e.project.id === target);
+      if (landing !== undefined) {
+        focusSession(landing.session.id);
       }
     },
     [entries, focusedEntry, focusSession],
@@ -3320,9 +3365,19 @@ function CanvasInner({
         event.preventDefault();
         const hit = [...labels.entries()].find(([, label]) => label === key);
         setJumping(false);
-        if (hit !== undefined) {
-          setFocusedSessionId(hit[0]);
+        if (hit === undefined) {
+          // A KEY THAT LABELS NOTHING, ANSWERED. Eating the next key whatever
+          // it is is what lets a label reuse a bound letter, and it left a
+          // mistyped label indistinguishable from a dead application: the
+          // labels vanished, the cursor stayed, and nothing said why. The
+          // dismissal itself is right and stays — the labels are off the
+          // screen by the time the key is read, so waiting for a second guess
+          // would be waiting with nothing left to read the guess off.
+          setStatus(`nothing is labelled "${key}" — jump cancelled`);
+          return;
         }
+        setStatus(null);
+        setFocusedSessionId(hit[0]);
         return;
       }
 
@@ -3334,6 +3389,28 @@ function CanvasInner({
         if (step.state.pending !== null) {
           event.preventDefault();
         }
+        /**
+         * A HALF-TYPED CHORD THAT DIED, ANSWERED — and only that.
+         *
+         * `resolveChord` abandons `gx` rather than letting `x` mean what a
+         * bare `x` means, which is the right call and is not what changed:
+         * `gx` closing the focused session would be the expensive mistake.
+         * What changed is that not ACTING was being spelled as not SAYING
+         * ANYTHING, so two keystrokes produced an unchanged screen and no way
+         * to tell an unbound pair from a frozen app.
+         *
+         * The plain `action === null` around it stays silent on purpose. Every
+         * unbound letter, function key and media key on the board arrives
+         * here, and a bar that answered all of them would be a bar nobody is
+         * still reading when a real refusal lands. `abandoned` is the narrow
+         * case: a prefix was typed, so the operator was deliberately spelling
+         * something out.
+         */
+        if (step.abandoned !== null) {
+          setStatus(
+            `"${chordText(step.abandoned)}" is not a chord — the ${step.abandoned.prefix} was dropped`,
+          );
+        }
         return;
       }
       event.preventDefault();
@@ -3342,10 +3419,36 @@ function CanvasInner({
       switch (action.kind) {
         case 'move': {
           if (mode === 'insert' && (action.direction === 'down' || action.direction === 'up')) {
-            // In the action pane the vertical axis belongs to the actions —
-            // every command the step proposed, and the prompt last.
+            /**
+             * In the action pane the vertical axis belongs to the actions —
+             * every command the step proposed, and the prompt last.
+             *
+             * IT REFUSES WHEN IT CANNOT MOVE, because for a year it could
+             * never move: the commands left the pane for the `!` typeahead
+             * and `buildActions` has returned ONE entry ever since, so the
+             * clamp was arithmetic that always came back with the index it
+             * was given, and `j` in Insert was a key that did nothing and
+             * said nothing. Nothing here can be withdrawn instead — the same
+             * `j` walks an open question's options — so it says so.
+             *
+             * The word "prompt" is keyed off the action's own kind rather
+             * than written into the sentence: one stop that is the prompt is
+             * a fact worth naming, and a second stop, or a different one,
+             * gets the plain boundary sentence `j`/`k` already give the
+             * session list.
+             */
             const delta = action.direction === 'down' ? 1 : -1;
-            setActionIndex((current) => clampIndex(current + delta, actions.length));
+            const next = clampIndex(actionIndex + delta, actions.length);
+            if (next === actionIndex) {
+              const only = actions.length === 1 ? actions[0] : undefined;
+              setStatus(
+                only?.kind === 'prompt'
+                  ? `nothing lies ${action.direction} — the prompt is this pane's only stop`
+                  : `nothing lies ${action.direction}`,
+              );
+              return;
+            }
+            setActionIndex(next);
             return;
           }
           if (mode === 'insert' && action.direction === 'left') {
@@ -3362,6 +3465,16 @@ function CanvasInner({
             // "the keys work, they just do the wrong thing" failure the mode
             // naming exists to end, so the grammar closes it here rather than
             // leaving it to a DOM focus that can be dropped.
+            //
+            // NOT SILENTLY, though, which is what it was: an unconditional
+            // `return`. The reasoning above is an argument for not ACTING,
+            // never one for saying nothing — the operator pressing `l` in
+            // Insert is asking for the one thing `l` does there, the next
+            // step of a question, and the honest answer is that there is no
+            // step to walk. Reached only when the card did not answer the key
+            // itself (`event.defaultPrevented`, above), so a walk between two
+            // real steps is as quiet as it ever was.
+            setStatus(`nothing lies ${action.direction} — only an open question has steps to walk`);
             return;
           }
           // The cursor can be left on a session the filter has just made
@@ -3438,18 +3551,33 @@ function CanvasInner({
           }
           return;
         }
+        /**
+         * THE TWO ENDS OF THE LIST — and, with no list, the same sentence
+         * every neighbour in this switch already says.
+         *
+         * Both used to read the row and move focus only if one came back,
+         * which on an empty list is a keypress that does nothing and says
+         * nothing. `hjkl` and `gt`/`gT` have answered this state honestly for
+         * as long as they have had the branch; these two were the pair that
+         * never learnt it, and an empty list is precisely where `gg` and `G`
+         * can never act.
+         */
         case 'first': {
           const first = entries[0];
-          if (first !== undefined) {
-            focusSession(first.session.id);
+          if (first === undefined) {
+            setStatus('no session matches');
+            return;
           }
+          focusSession(first.session.id);
           return;
         }
         case 'last': {
           const lastEntry = entries[entries.length - 1];
-          if (lastEntry !== undefined) {
-            focusSession(lastEntry.session.id);
+          if (lastEntry === undefined) {
+            setStatus('no session matches');
+            return;
           }
+          focusSession(lastEntry.session.id);
           return;
         }
         case 'selectTab': {
@@ -3530,7 +3658,7 @@ function CanvasInner({
           return;
         }
         case 'project':
-          stepSession(action.delta);
+          stepProject(action.delta);
           return;
         case 'jump':
           setJumping(true);
@@ -3791,7 +3919,7 @@ function CanvasInner({
     beginComposing,
     closeSession,
     createSession,
-    stepSession,
+    stepProject,
     focusSession,
     mode,
     actionIndex,
