@@ -603,6 +603,100 @@ for (const theme of ['dark', 'light']) {
   console.log(`${outDir}/question-options-${theme}.png`);
 }
 
+// ------------------------------ THE RUNNING-AGENT COUNT, IN ITS OWN COLOUR
+//
+// The badge on the Agents icon says how many of this session's agents are
+// RUNNING. It was painted `bg-waiting` -- and in this app amber has exactly
+// one meaning, stated at `--color-waiting` in `styles.css`: a session that is
+// blocked on your answer. A running count wearing it reads as pending
+// intervention on the one row where that is the most expensive thing to get
+// wrong.
+//
+// The numeral was not legible either way: 9px of `ink` on that amber measured
+// 1.834:1 in dark and 2.499:1 in light, against WCAG 1.4.3's 4.5.
+//
+// SO BOTH HALVES ARE HELD HERE, and the second one is why this is not just a
+// contrast check: a count that clears 4.5:1 while still wearing the waiting
+// hue would pass a contrast guard and still be telling the operator a running
+// session needs them.
+for (const theme of ['dark', 'light']) {
+  await page.evaluate((t) => document.documentElement.classList.toggle('light', t === 'light'), theme);
+  await page.locator(`[data-session-row="${QUESTION_SESSION}"]`).first().click();
+  await page.waitForSelector('[data-view-badge]');
+  await page.waitForTimeout(200);
+  const badge = await page.evaluate(() => {
+    const { opaque, ratio } = window.vamColour;
+    const el = document.querySelector('[data-view-badge]');
+    if (el === null) return null;
+    const cs = getComputedStyle(el);
+    const box = el.getBoundingClientRect();
+    const button = el.closest('button');
+    const root = getComputedStyle(document.documentElement);
+    // The waiting hue as the DOCUMENT resolves it, not as a literal typed
+    // here: the check is "this is not the amber that means blocked", and a
+    // hard-coded value would stop being that claim the day the token moves.
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = root.getPropertyValue('--vam-waiting').trim();
+    document.body.append(probe);
+    const waiting = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return {
+      fill: cs.backgroundColor,
+      ink: cs.color,
+      waiting,
+      fontPx: Number.parseFloat(cs.fontSize),
+      box: Number(Math.min(box.width, box.height).toFixed(1)),
+      drew: (el.textContent ?? '').trim(),
+      hidden: el.getAttribute('aria-hidden'),
+      name: button?.getAttribute('aria-label') ?? '',
+      bothOpaque: opaque(cs.backgroundColor) && opaque(cs.color),
+      ratio:
+        opaque(cs.backgroundColor) && opaque(cs.color)
+          ? Number(ratio(cs.color, cs.backgroundColor).toFixed(3))
+          : null,
+    };
+  });
+  console.log(`\n  agents badge (${theme}): ${JSON.stringify(badge)}`);
+  // A COUNT THAT IS NOT DRAWN MAKES EVERY LINE BELOW VACUOUS -- the fixture
+  // has to be a session with running agents, or this measures an absence.
+  check(
+    `${theme}: the Agents icon draws a running count at all`,
+    badge !== null && /^[0-9]+$/.test(badge.drew) && badge.bothOpaque,
+    JSON.stringify(badge),
+  );
+  if (badge === null || !badge.bothOpaque) continue;
+  check(
+    `${theme}: the numeral reads on its own badge at 4.5:1`,
+    badge.ratio >= 4.5,
+    `${badge.ratio}:1 — ${badge.ink} on ${badge.fill}`,
+  );
+  check(
+    `${theme}: and the badge is NOT the amber that means "this session needs you"`,
+    badge.fill !== badge.waiting,
+    `${badge.fill} vs --vam-waiting ${badge.waiting}`,
+  );
+  // 9px of tabular mono inside a 13px circle was the other half of the
+  // report. A floor rather than a value, so the design can move above it.
+  check(
+    `${theme}: the numeral is set large enough to read`,
+    badge.fontPx >= 10 && badge.box >= 14,
+    `${badge.fontPx}px in a ${badge.box}px badge`,
+  );
+  // THE PAINT IS NOT THE ANNOUNCEMENT. The badge is `aria-hidden` and the
+  // count lives in the button's own name; a fix that recoloured the circle
+  // and dropped the name would leave a screen reader with nothing.
+  check(
+    `${theme}: the count is still in the button's accessible name`,
+    badge.hidden === 'true' && badge.name.includes(badge.drew),
+    `${JSON.stringify(badge.name)} / aria-hidden=${badge.hidden}`,
+  );
+  await page.screenshot({
+    path: `${outDir}/agents-badge-${theme}.png`,
+    clip: { x: 700, y: 0, width: 400, height: 110 },
+  });
+  console.log(`${outDir}/agents-badge-${theme}.png`);
+}
+
 await page.evaluate(() => document.documentElement.classList.remove('light'));
 await page.locator(`[data-session-row="${QUESTION_SESSION}"]`).first().click();
 await page.waitForTimeout(300);

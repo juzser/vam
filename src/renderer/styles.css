@@ -174,6 +174,16 @@
      links and merged PRs. Amber is reserved for the one state that costs you
      something to ignore — a session waiting on your answer. */
   --color-running: var(--vam-running);
+  /* THE INK THAT READS ON `running`, and the only reason it exists: the
+     Agents badge is the first place in this app where a status hue is a FILL
+     with a glyph on it rather than a dot, a border or a word. `--color-ink`
+     is the wrong answer in both themes at once -- pale ink on dark's bright
+     green measures 1.29:1, and dark ink on light's deep green 2.05:1 -- so
+     the pair needs its own second half. It inverts with the fill: dark's
+     green is bright and takes the ground's near-black, light's is deep and
+     takes white. 11.36:1 and 7.13:1, measured, and re-measured on the
+     painted node by `e2e/pane-colour-shots.mjs`. */
+  --color-on-running: var(--vam-on-running);
   --color-waiting: var(--vam-waiting);
   --color-cursor-ring: var(--vam-cursor-ring);
   /* The quiet one. A live session between turns is not news, so it takes a
@@ -342,6 +352,11 @@
   --vam-ansi-bright-white: #fafafa;
 
   --vam-running: #4ade80;
+  /* The ground's own near-black on dark's bright green: 11.36:1. Taken under
+     its own name rather than reaching for `--vam-ground`, the way
+     `--vam-filter-badge` is -- the ink on a green chip and the app's deepest
+     surface are two decisions that happen to agree today. */
+  --vam-on-running: #0a0a0a;
   --vam-waiting: #f59e0b;
   /* Neutral zinc, 6.99:1 at worst against the five text grounds in this
      theme. Deliberately not a hue: see `--color-idle`. */
@@ -502,6 +517,10 @@ html.light {
   --vam-ansi-bright-white: #27272a;
 
   --vam-running: #166534;
+  /* Light's running green is a DEEP one -- it has to read as text on white --
+     so the ink on it inverts with the fill: white, at 7.13:1. This is the
+     pair the token exists for; a single value could not serve both themes. */
+  --vam-on-running: #ffffff;
   --vam-waiting: #92400e;
   /* The same neutral, one end of the ladder to the other: 6.67:1 at worst on
      the light grounds. */

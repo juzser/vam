@@ -3564,7 +3564,13 @@ describe('the +1px type bump reaches everything in this pane except out', () => 
    * site to some other edit should redden this as loudly as a missed bump.
    */
   const EXPECTED_SIZE_COUNTS: Readonly<Record<string, number>> = {
-    '9': 1,
+    // 9px is GONE, and the entry is deleted rather than zeroed so the ledger
+    // keeps saying one line per size this file actually uses. It was the
+    // Agents badge's numeral -- the smallest type in the pane, set inside a
+    // 13px circle -- and it was illegible for a second reason as well: pale
+    // ink on the waiting amber measured 1.834:1. The badge now paints
+    // `running` with `on-running` on it at 10.5px in a 16px circle, which is
+    // why 10.5 gains one below.
     // -1: the mode row carried two 10.5px captions (`MODE` and the cycle
     // note); the note kept its size and its home in the prompt block, the
     // label did not survive the move to an icon.
@@ -3579,7 +3585,8 @@ describe('the +1px type bump reaches everything in this pane except out', () => 
     // with it (the row itself, the turn-list rows and the `<select>`). The
     // jumps that survived it are icons in a floating chip and carry no type
     // class at all; the per-turn line still does, and is what is left here.
-    '10.5': 5,
+    // +1: the Agents badge, arriving from 9px -- see the note above.
+    '10.5': 6,
     // +2: the folded question row's "marked, not sent" caption and the
     // `change` control that reopens the list (audit-adjacent operator
     // request: the option list folds away once a pick is made).

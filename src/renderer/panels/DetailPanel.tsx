@@ -807,8 +807,26 @@ function ViewIcons({
               {badge !== null && (
                 <span
                   data-view-badge
+                  /* THE PAINT IS NOT THE ANNOUNCEMENT: the count is in the
+                     button's own `aria-label` above, so drawing it twice
+                     would have a screen reader say it twice. */
                   aria-hidden="true"
-                  className="absolute -top-[3px] -right-[3px] flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-waiting px-[3px] font-mono text-[9px] text-ink leading-none"
+                  /* `running`, NOT `waiting`, and this is a correction rather
+                     than a preference. Amber has one meaning in this app and
+                     `styles.css` states it at `--color-waiting`: a session
+                     blocked on your answer. This badge counts agents that are
+                     RUNNING, so wearing amber made a working session read as
+                     one needing intervention -- on the row where that is the
+                     most expensive thing to get wrong. Green is the hue this
+                     count already owns.
+
+                     And the numeral could not be read either way: pale ink on
+                     that amber measured 1.834:1 in dark and 2.499:1 in light,
+                     against WCAG 1.4.3's 4.5. `on-running` is the ink the
+                     green fill needs (11.36:1 / 7.13:1), and 9px of mono in a
+                     13px circle goes up to 10.5 in 16 -- the smallest badge
+                     that fits two digits at that size without clipping. */
+                  className="absolute -top-[4px] -right-[4px] flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-running px-[4px] font-mono text-[10.5px] text-on-running leading-none"
                 >
                   {badge}
                 </span>
