@@ -382,6 +382,49 @@ export const DEMO_MODEL: CanvasModel = {
             },
           ],
         },
+        {
+          // FAILED, and it was the last status this fixture did not draw.
+          //
+          // The consequence was not cosmetic: `data-session-failed` -- the
+          // banner the pane puts at the top of a failed session, with the
+          // note that says WHY there is no reason to show -- appeared on no
+          // screen any Playwright run could reach, so nothing outside a jsdom
+          // test had ever seen it. That is how the note on it stayed a bare
+          // `<span>`: a `Note` a keyboard cannot reach is exactly what
+          // `e2e/tooltip-shots.mjs` was written to catch, and the element was
+          // never on screen while it was looking.
+          //
+          // It joins `notes` for the reason `notes` exists at all (see the
+          // project comment above): the split-pane guards are written around
+          // `factory` holding exactly three sessions, and a status fixture
+          // must not buy its visibility by rewriting a guard it has nothing
+          // to do with.
+          //
+          // NO `waitingFor`: a failed session is not blocked on the operator,
+          // and the whole point of the banner is that the source reports no
+          // reason at all -- see the note the pane hangs on it.
+          vamControlled: true,
+          id: 'notes-3',
+          title: 'notes-3',
+          icon: '🧯',
+          epic: 'd257-verdict',
+          branch: 'smith/d257/projection-backfill',
+          status: 'failed',
+          runningAgents: 0,
+          activity: null,
+          age: '51m',
+          decisions: [
+            {
+              id: 'd-backfill',
+              label: 'backfill',
+              input: 'Backfill the projection from the ledger, oldest finding first.',
+              // The turn that was in flight when it stopped: no output, which
+              // is what a session that failed mid-turn actually looks like.
+              output: null,
+              commands: [],
+            },
+          ],
+        },
       ],
     },
   ],

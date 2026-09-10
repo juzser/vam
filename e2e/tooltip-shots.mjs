@@ -275,6 +275,137 @@ for (const selector of reached.present) {
   console.log(`Tab reached ${selector} and its note opened`);
 }
 
+// --- ITEM 3, WIDENED: EVERY note on the screen, not two named ones.
+//
+// The two selectors above are the status bar's, and they are the two the
+// audit that created this file happened to look at. A sweep is what says
+// something about the ones nobody listed -- and the one nobody listed was the
+// worst of them: `data-session-failed`, the banner a session gets when it
+// dies, hangs a `Note` reading "the source reports no reason for the failure"
+// on a bare `<span>`. Measured: `tabIndex` -1, and 220 Tab presses never
+// reached it. `Note.tsx`'s own first line promises "A note that a keyboard
+// can read."
+//
+// IT WAS INVISIBLE TO THIS GUARD FOR A SECOND REASON, and that is the more
+// interesting half: until `notes-3` joined the demo, no fixture in this repo
+// had `status: 'failed'`, so the banner was on no screen Playwright could
+// reach. The rule that would have caught it existed; the element was never in
+// front of it.
+for (const session of ['notes-3']) {
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.locator(`[data-session-row="${session}"]`).first().click();
+  await page.waitForSelector('[data-session-failed]');
+  await page.waitForTimeout(300);
+
+  const notes = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-note]')].map((el) => ({
+      what:
+        el.getAttributeNames().find((a) => a.startsWith('data-') && a !== 'data-note') ??
+        el.tagName,
+      tag: el.tagName,
+      tabIndex: el.tabIndex,
+      text: (el.textContent ?? '').trim().slice(0, 20),
+    })),
+  );
+  console.log(`${session}: ${notes.length} note(s) on screen`);
+  for (const n of notes) console.log(`   ${n.tag} tabIndex=${n.tabIndex} [${n.what}] "${n.text}"`);
+  // A SWEEP THAT FOUND NOTHING PASSES FOR THE WRONG REASON. This screen draws
+  // the failed banner's note plus the composer's four, so a corpus under this
+  // means the hook stopped matching rather than the screen going clean.
+  if (notes.length < 4) {
+    throw new Error(`${session} drew ${notes.length} note(s) — this sweep examined nothing`);
+  }
+  const unreachable = notes.filter((n) => n.tabIndex < 0);
+  if (unreachable.length > 0) {
+    throw new Error(
+      `${session}: ${unreachable.length} Note(s) take no tab stop, so they open on hover only: ` +
+        unreachable.map((n) => `${n.tag}[${n.what}] "${n.text}"`).join(', '),
+    );
+  }
+
+  // AND THE FAILED BANNER'S OWN, WALKED. `tabIndex` is what the DOM claims;
+  // this is the keyboard doing it, with no pointer anywhere -- and it is the
+  // only way to catch a control that is focusable but sits inside something
+  // `inert`, or behind a `display: none` the sweep above cannot see.
+  const why = '[data-session-failed] [data-note]';
+  await page.evaluate(() => document.activeElement?.blur());
+  let landed = false;
+  for (let i = 0; i < 300 && !landed; i += 1) {
+    await page.keyboard.press('Tab');
+    landed = await page.evaluate((s) => document.activeElement?.matches?.(s) === true, why);
+  }
+  if (!landed) throw new Error(`Tab never reached ${why} in 300 stops`);
+  const openedWhy = await page
+    .waitForSelector('[role="tooltip"]', { timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!openedWhy) throw new Error(`${why} took focus but opened no tooltip`);
+  console.log(`Tab reached ${why} and its note opened`);
+
+  // AND IT SAYS SO ON SCREEN. A tab stop nothing draws is a cursor an
+  // operator cannot see: the ring is measured as PAINT, in both themes,
+  // against the surface it is drawn on -- 3:1 is what WCAG 1.4.11 asks of a
+  // non-text indicator. Arrived at by a real Tab press, because
+  // `:focus-visible` is a heuristic about the LAST INPUT and a programmatic
+  // `.focus()` would not satisfy it.
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate((t) => {
+      document.documentElement.classList.toggle('light', t === 'light');
+    }, theme);
+    await page.waitForTimeout(150);
+    const ring = await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      const cs = getComputedStyle(el);
+      const parse = (s) => (s.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number);
+      const chan = (v) => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      };
+      const lum = ([r, g, b]) => 0.2126 * chan(r) + 0.7152 * chan(g) + 0.0722 * chan(b);
+      // What the ring is drawn ON: the nearest ancestor painting an opaque
+      // fill, which for this banner is its own card.
+      let behind = el.parentElement;
+      let ground = 'rgba(0, 0, 0, 0)';
+      while (behind !== null && !/^rgb\(\s*\d/.test(ground)) {
+        ground = getComputedStyle(behind).backgroundColor;
+        behind = behind.parentElement;
+      }
+      const [hi, lo] = [lum(parse(cs.outlineColor)), lum(parse(ground))].sort((a, b) => b - a);
+      return {
+        style: cs.outlineStyle,
+        width: Number.parseFloat(cs.outlineWidth),
+        colour: cs.outlineColor,
+        ground,
+        opaque: /^rgb\(\s*\d/.test(cs.outlineColor) && /^rgb\(\s*\d/.test(ground),
+        ratio: Number((((hi + 0.05) / (lo + 0.05))).toFixed(3)),
+      };
+    }, why);
+    console.log(`${theme}: the note's focus ring ${JSON.stringify(ring)}`);
+    if (ring.style === 'none' || ring.width < 1) {
+      throw new Error(`${theme}: ${why} takes focus and draws no ring (${JSON.stringify(ring)})`);
+    }
+    if (!ring.opaque) {
+      throw new Error(`${theme}: the ring or its ground is transparent (${JSON.stringify(ring)})`);
+    }
+    if (ring.ratio < 3) {
+      throw new Error(
+        `${theme}: the focus ring is ${ring.ratio}:1 on the surface it is drawn on, under the 3:1 of WCAG 1.4.11`,
+      );
+    }
+    const bannerBox = await page.locator('[data-session-failed]').boundingBox();
+    await page.screenshot({
+      path: `${outDir}/failed-note-focus-${theme}.png`,
+      clip: {
+        x: Math.max(0, bannerBox.x - 12),
+        y: Math.max(0, bannerBox.y - 12),
+        width: Math.min(1280 - Math.max(0, bannerBox.x - 12), bannerBox.width + 24),
+        height: bannerBox.height + 150,
+      },
+    });
+  }
+  await page.evaluate(() => document.documentElement.classList.remove('light'));
+}
+
 // --- The decline, reachable. The demo's own sources may all be able to
 // create; when one cannot, its `+` must say so on focus rather than in a
 // `title` nobody can open from the keyboard.

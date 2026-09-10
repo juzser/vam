@@ -1474,6 +1474,26 @@ const NUMBERED_OPTIONS: readonly (string | undefined)[] = Array.from({ length: 9
 );
 
 /**
+ * THE FOCUS RING, and it is the app's, not a new one.
+ *
+ * `SettingsOverlay.tsx`, `PairingPanel.tsx` and `phone/PhoneShell.tsx` each
+ * declare this exact string, with the reasoning written out in the first of
+ * them: the renderer's other `focus-visible` (`TerminalTab.tsx`) draws
+ * `line-strong`, which is 1.36:1 on `panel` in dark and therefore invisible in
+ * the default theme, while `ink` measures 15.7 / 17.7 and clears every fill
+ * this pane paints. The offset is load-bearing too -- flush against a
+ * control's own border an outline reads as a thicker border rather than as a
+ * cursor.
+ *
+ * A fourth copy rather than a shared export because the three that exist are
+ * three copies already and one of the files holding them is being edited on
+ * another branch; the string is what is shared, and `e2e/tooltip-shots.mjs`
+ * measures the ring as PAINT rather than trusting any of the four.
+ */
+const FOCUS_RING =
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
+
+/**
  * THE FILL A CONTROL ON THIS CARD TAKES WHEN IT IS TOUCHED, and the reason it
  * is not `raised`.
  *
@@ -3974,16 +3994,57 @@ export function DetailPanel(props: DetailPanelProps) {
         {failedBanner && (
           <p
             data-session-failed
-            className="flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-card px-3 py-2 text-[12px] text-failed leading-[1.45]"
+            className={[
+              'flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-card py-2 pl-3 text-[12px] text-failed leading-[1.45]',
+              /* THE CORNER, RESERVED -- the same obligation the prompt bubble
+                 and the column's boundary block already carry, and the banner
+                 is the third element that lands in it: on a failed session
+                 this `<p>` is the FIRST child of the column, so the view-icon
+                 pill floats over its right end, which is exactly where the
+                 "why?" control sits. Measured at a 253px pane before this
+                 line: 9 of 45 sampled glyph pixels under the pill, and
+                 `elementFromPoint` at the control's own centre returned the
+                 Agents view button -- a click meant to ask why the session
+                 died switched tab instead.
+
+                 `6rem` is the width the boundary block above already reserves
+                 for the same pill, and only while the pill is drawn: an
+                 unfocused pane paints none, and 96px taken out of a narrow
+                 pane for nothing is the over-reservation the identity line's
+                 own `7rem` was deleted for. `e2e/narrow-pane-overlay-shots.mjs`
+                 measures both halves. */
+              cornerOverlay ? 'pr-[6rem]' : 'pr-3',
+            ].join(' ')}
           >
             <span role="img" aria-label="failed" className="flex">
               <CircleSlash size={13} strokeWidth={1.6} />
             </span>
             <span className="min-w-0 flex-1">This session failed.</span>
             <Note text="the source reports no reason for the failure — a failed row carries no error, message or exit code">
-              <span className="flex-none cursor-help font-mono text-[10.5px] text-ink-faint underline decoration-dotted">
+              {/* A BUTTON, because it was a `<span>` and a `Note` on a span is
+                  the `title` this app deleted: measured in a real browser,
+                  `tabIndex` -1 and 300 Tab presses never reached it, while
+                  `Note.tsx`'s own first line promises "A note that a keyboard
+                  can read." It is the explanation for why a session died, so
+                  the keyboard-first tool was hiding its most important
+                  sentence from the keyboard.
+
+                  Not `tabIndex={0}` on the span, which is what the status
+                  bar's two notes do: those are readouts that happen to carry
+                  a note, and each needs a biome suppression to say so. This
+                  one is a control whose whole purpose is to open the note, so
+                  it is the element that means that -- Enter and Space work,
+                  it is announced as a control, and no suppression is needed.
+
+                  The name is not "why?": a screen reader reading a lone "why"
+                  out of the banner's flow has been told nothing. */}
+              <button
+                type="button"
+                aria-label="why this session failed"
+                className={`flex-none cursor-help rounded-[4px] font-mono text-[10.5px] text-ink-faint underline decoration-dotted hover:text-ink ${FOCUS_RING}`}
+              >
                 why?
-              </span>
+              </button>
             </Note>
           </p>
         )}
