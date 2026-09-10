@@ -51,6 +51,8 @@ interface SmokeResult {
   cspHeader: string | null;
   menu: MenuRow[];
   clipboardAfterContentsCopy: string;
+  bridgeClipboardWriteAnswer: unknown;
+  clipboardAfterBridgeWrite: string;
   zoomFactorAtRest: number;
   zoomLevelAtRest: number;
   zoomLevelAfterCtrlWheel: number;
@@ -488,6 +490,20 @@ describe('the Electron shell launches', () => {
   // already there" cannot pass it.
   it('really copies the renderer selection to the system clipboard', () => {
     expect(smoke().clipboardAfterContentsCopy).toBe('vam-clipboard-proof');
+  });
+
+  // The other clipboard route, and the only coverage main's handler has that
+  // is not holding an injected fake. `src/main/clipboard/ipc.ts` AWAITS
+  // electron's `writeText` -- a promise since Electron 44 -- so the handler is
+  // `async`, and `ipcMain.handle` has to settle it before the answer crosses
+  // the process boundary. A unit test cannot see that boundary; this drives
+  // the renderer's own `window.api.clipboard.writeText` and then reads the
+  // real system clipboard back from main.
+  it('really writes to the system clipboard through the bridge channel', () => {
+    // The channel's whole contract: `true` means the text landed. A handler
+    // that answered a bare Promise, or resolved before the write, fails here.
+    expect(smoke().bridgeClipboardWriteAnswer).toBe(true);
+    expect(smoke().clipboardAfterBridgeWrite).toBe('vam-bridge-clipboard-proof');
   });
 
   it.each(['quit', 'minimize'])('keeps the %s role a desktop app needs', (role) => {

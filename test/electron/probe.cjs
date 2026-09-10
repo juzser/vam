@@ -274,6 +274,27 @@ async function main() {
   } catch (error) {
     result.clipboardAfterContentsCopy = `error:${error && error.message ? error.message : String(error)}`;
   }
+
+  // THE BRIDGE'S OWN CHANNEL, END TO END. `bridgeClipboardWriteType` above
+  // only proves `writeText` is a function; this drives it for real --
+  // renderer -> preload -> `vam:clipboard:write` -> main's own electron
+  // `clipboard` -- and then reads the system clipboard back from main.
+  //
+  // It is the only assertion that covers main's handler being `async`:
+  // `ipcMain.handle` has to settle the returned promise before the answer
+  // crosses the process boundary, and a unit test holding an injected fake
+  // cannot see that boundary at all. Seeded with a sentinel first, so "the
+  // text was already on the clipboard" cannot pass it.
+  try {
+    await clipboard.writeText('sentinel-not-overwritten');
+    result.bridgeClipboardWriteAnswer = await run(
+      "window.api.clipboard.writeText('vam-bridge-clipboard-proof')",
+    );
+    result.clipboardAfterBridgeWrite = await clipboard.readText();
+  } catch (error) {
+    result.clipboardAfterBridgeWrite = `error:${error && error.message ? error.message : String(error)}`;
+  }
+
   // The operator's own clipboard is not collateral damage -- best effort, and
   // never at the cost of the run.
   try {
