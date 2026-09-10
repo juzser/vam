@@ -35,9 +35,11 @@
  * AND A FOURTH RULE, LEARNED RATHER THAN DESIGNED: **a guard cannot see what
  * this file cannot produce.** Every state a component draws needs a row here
  * or it is outside the reach of every non-unit gate in the repo, however good
- * those gates are. Three times now the same shape has played out -- the
- * AskUserQuestion card, the tool-approval prompt above, and `status: 'failed'`
- * -- and the last one is the clearest: `e2e/tooltip-shots.mjs` was written
+ * those gates are. Four times now the same shape has played out -- the
+ * AskUserQuestion card, the tool-approval prompt above, `status: 'failed'`,
+ * and a turn whose `errorCount` is a READ ZERO rather than absent
+ * (`crosscheck-2` below, added when concise mode made the difference between
+ * those two visible) -- and the third is the clearest: `e2e/tooltip-shots.mjs` was written
  * to catch a `Note` a keyboard cannot reach, and it ran green for a release
  * over a banner carrying exactly that defect, because no session here had
  * ever failed. The rule that would have caught it existed; the element was
@@ -193,6 +195,18 @@ export const DEMO_MODEL: CanvasModel = {
               // Still writing. `running`, not `waiting`: it wants nothing yet.
               output: null,
               commands: [],
+              // ZERO, WHICH IS NOT ABSENT, and this session is the only place
+              // in the fixture that says so. `errorCount` absent means "this
+              // source cannot report tool failures"; zero means vam looked
+              // across this turn and found none (model.ts). Every other demo
+              // turn is one or the other -- absent, or a real count -- so the
+              // READING of none was a state no guard in this repo could put on
+              // a screen. Concise mode is what made that expensive: collapsed,
+              // the column says "failures not reported by this source" over a
+              // window where nothing can report, and must say nothing at all
+              // over a window vam read and found clean. Without a session of
+              // zeros here, half of that pair was unreachable.
+              errorCount: 0,
             },
             {
               id: 'd-shadow',
@@ -201,6 +215,7 @@ export const DEMO_MODEL: CanvasModel = {
               output:
                 'Correct, both are mode: shadow. The file header still said promoted — I fixed that too.',
               commands: [],
+              errorCount: 0,
             },
           ],
         },

@@ -27,6 +27,12 @@ import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-
 import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/chords.js';
 import { setActiveProvider } from '../sources/provider.js';
 import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
+import {
+  DEFAULT_TURN_PROGRESS,
+  readTurnProgress,
+  setActiveTurnProgress,
+  type TurnProgress,
+} from './progress.js';
 
 const KEY = 'vam.prefs.v1';
 
@@ -359,6 +365,26 @@ export type Prefs = {
    * first is a fact about you, not about a session.
    */
   readonly detailTab: string | null;
+  /**
+   * How much of each turn's working the transcript column draws — `shown` or
+   * `collapsed`. See `progress.ts` for what the two differ by and for the one
+   * thing `collapsed` may never fold away.
+   *
+   * GLOBAL, not per pane and not per session, and the argument is about what
+   * the operator is choosing. This is a reading preference — how densely they
+   * want a transcript to read — the same kind of fact as `theme` and
+   * `outFontSize`, both of which are one value for the whole app. Per pane it
+   * would be an arrangement rather than a preference, and one the operator
+   * would have to re-make on every split (`Canvas.tsx` mounts a fresh
+   * `DetailPanel` per leaf, and a pane opened by a keystroke has no dialogue
+   * in which to be asked). Per session it would be worse: it would key a
+   * display choice to a session id, which the TTL prunes and which
+   * `lastFocus`'s own note explains cannot be relied on to keep meaning.
+   *
+   * Exempt from the icon TTL for the reason `theme` is: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly turnProgress: TurnProgress;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -380,6 +406,7 @@ export const EMPTY_PREFS: Prefs = {
   defaultProvider: DEFAULT_PROVIDER_ID,
   lastFocus: null,
   detailTab: null,
+  turnProgress: DEFAULT_TURN_PROGRESS,
 };
 
 /**
@@ -595,6 +622,11 @@ function parsePrefs(
     // Anything that is not a string is "no tab remembered", which is what a
     // payload from a vam predating this field already says by having no key.
     detailTab: readDetailTab((parsed as { detailTab?: unknown }).detailTab),
+    // Per field like every line above it, and normalised rather than merely
+    // defaulted: a word this vam does not have a mode for must read back as
+    // the mode that hides nothing. `readTurnProgress` is where that direction
+    // is argued.
+    turnProgress: readTurnProgress((parsed as { turnProgress?: unknown }).turnProgress),
   };
 }
 
@@ -1012,6 +1044,13 @@ export function setOutFontSize(prefs: Prefs, size: number): Prefs {
  *  a provider vam has no command for. */
 export function setDefaultProvider(prefs: Prefs, id: unknown): Prefs {
   return { ...prefs, defaultProvider: readProviderId(id) };
+}
+
+/** Normalised on the way in as well as on the way out, for the same reason and
+ *  in the same direction: a caller that stored an unknown word would take the
+ *  column's progress lines away on the strength of it. */
+export function setTurnProgress(prefs: Prefs, mode: unknown): Prefs {
+  return { ...prefs, turnProgress: readTurnProgress(mode) };
 }
 
 /**
@@ -1982,6 +2021,7 @@ export function activatePrefs(prefs: Prefs): Prefs {
   applyOutFontSize(prefs.outFontSize);
   setActiveBindings(prefs.keyBindings);
   setActiveProvider(prefs.defaultProvider);
+  setActiveTurnProgress(prefs.turnProgress);
   return prefs;
 }
 

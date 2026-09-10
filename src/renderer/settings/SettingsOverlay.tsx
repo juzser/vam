@@ -48,8 +48,10 @@ import {
   setOutFontSize,
   setPaletteColor,
   setTheme,
+  setTurnProgress,
   type Theme,
 } from '../prefs/prefs.js';
+import type { TurnProgress } from '../prefs/progress.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
 import { SECTIONS, type SectionId, shortcutSections } from './sections.js';
 
@@ -78,6 +80,13 @@ export type SettingsOverlayProps = {
 };
 
 const THEMES: readonly Theme[] = ['dark', 'light', 'system'];
+
+/**
+ * The two modes, in the order they escalate: what the column already draws,
+ * then what it folds. Hard-coded here beside the row that draws them, the way
+ * `THEMES` is -- three words in a union are not a table.
+ */
+const TURN_PROGRESS_MODES: readonly TurnProgress[] = ['shown', 'collapsed'];
 
 /** Which slot is listening for a keystroke, spelled as one value so opening a
  *  second capture box closes the first by construction. */
@@ -358,7 +367,7 @@ export function SettingsOverlay({
             <Panel
               id="appearance"
               active={section === 'appearance'}
-              hint="theme, colours and the size of the text in out"
+              hint="theme, colours, the size of the text in out, and how much of a turn the transcript draws"
             >
               <Block label="theme" hint="system follows what the operating system asks for">
                 <div className="flex gap-1">
@@ -466,6 +475,56 @@ export function SettingsOverlay({
                   unit="px"
                   onCommit={(next) => onChange(setOutFontSize(prefs, next))}
                 />
+              </Block>
+
+              {/* CONCISE MODE, and it is here for the same reason `out text`
+                  is: this is not behaviour, it is how densely the transcript
+                  is drawn -- the family the theme, the colours and the text
+                  size above it are in. Nothing it changes reaches a session.
+
+                  GLOBAL, so it belongs in a dialog rather than on a pane. See
+                  `Prefs.turnProgress` for why it is not per pane (an
+                  arrangement the operator would re-make on every split) and
+                  not per session (a display choice keyed to an id the store
+                  prunes).
+
+                  NO SHORTCUT. The grammar would allow one, but the digit row
+                  is contested and every free key is worth more to an action
+                  than to a preference you set once and leave. If the operator
+                  turns out to flip this often, it earns a key then. */}
+              <Block
+                label="turn progress"
+                hint="how much of each turn's working the transcript column draws"
+              >
+                <div className="flex gap-1">
+                  {TURN_PROGRESS_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      data-turn-progress-option={mode}
+                      aria-pressed={prefs.turnProgress === mode}
+                      onClick={() => onChange(setTurnProgress(prefs, mode))}
+                      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-[12px] ${FOCUS_RING} ${
+                        prefs.turnProgress === mode
+                          ? 'border-line-loudest bg-raised text-ink'
+                          : 'border-line text-ink-dim'
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+                {/* THE PROMISE, ON SCREEN. This row asks the operator to give
+                    up detail, and what it must never cost them is the alarm
+                    (`Decision.errorCount`). A guarantee kept only in the source
+                    is one the person making the choice cannot read -- so the
+                    three things `drawsProgressLine` holds back are named here,
+                    in the words the column draws them in. */}
+                <p data-turn-progress-note className="mt-3 max-w-[52ch] text-[12px] text-ink-dim">
+                  collapsed drops the line from turns with nothing to report. A turn whose tools
+                  failed keeps its line and its <code className="text-ink">· N failed</code> count,
+                  and so does the newest turn while the session is working or waiting.
+                </p>
               </Block>
             </Panel>
 
