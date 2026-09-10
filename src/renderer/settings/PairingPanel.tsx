@@ -152,8 +152,36 @@ const FOCUS_RING =
  * floor does not check the PAINT, and a fixed box is exactly the shape that
  * clears a hit measurement while clipping a longer label. `px-4` lets the box
  * grow with its own content instead.
+ *
+ * IT HAS A RESTING FILL BECAUSE IT HAD NONE. The operator's report was "the
+ * button in the Remote section of settings has the same colour as the
+ * background, so it doesn't look like a button", and that was literally what
+ * the paint said: `getComputedStyle` returned `rgba(0, 0, 0, 0)` for the fill,
+ * so the box took whatever surface was behind it, and the only thing marking
+ * it as a control was a `border-line` outline measuring 1.12:1 against the
+ * `bg-panel` this dialog draws.
+ *
+ * WHICH LEAVES THE BOUNDARY TO CARRY THE IDENTIFICATION, and that is not a
+ * preference. Every surface token vam owns sits within 1.2:1 of `panel` in
+ * dark -- `raised` on `panel` measures 1.06:1, and `segment-on`, the top of
+ * the whole ladder, only 1.20:1 -- so no fill in this palette can reach the
+ * 3:1 WCAG 1.4.11 asks of the visual information that identifies a component.
+ * `line-tip` is the one line token that exists to clear exactly that floor
+ * (see its own note in `styles.css`, written when the tooltip hit this same
+ * wall): measured here it is 3.46:1 in dark and 3.62:1 in light against the
+ * panel behind it, where `line-loud` is 1.33:1 and even `line-loudest` only
+ * 2.04:1.
+ *
+ * THE HOVER MOVES AWAY FROM THE SURFACE, never back into it. `raised` ->
+ * `segment-on` is a step further from `panel` in both themes (lighter in dark,
+ * darker in light), which is the direction the 0.2 pane-colour pass
+ * established after a hover that closed the gap read as a hole punched in the
+ * surface. `disabled:` lands
+ * back on the resting fill rather than on `transparent`, or a hover over a
+ * busy button would return it to the very state this comment exists about.
+ * `e2e/settings-chrome-shots.mjs` measures all of it on the painted node.
  */
-const ACTION_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-line px-4 text-[13px] text-ink hover:bg-raised disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${FOCUS_RING}`;
+const ACTION_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-line-tip bg-raised px-4 text-[13px] text-ink hover:bg-segment-on disabled:cursor-default disabled:opacity-60 disabled:hover:bg-raised ${FOCUS_RING}`;
 
 /** The same shape, for an act that revokes access rather than merely toggling a setting. */
 const DANGER_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-danger px-4 text-[13px] text-danger hover:bg-danger hover:text-ground ${FOCUS_RING}`;
