@@ -193,6 +193,16 @@ if (multi !== undefined && start.projects.length >= 2) {
     landed.focused === nextProject.rows[0],
     `expected ${nextProject.rows[0]}, got ${landed.focused}`,
   );
+  // A KEY THAT ACTED SAYS NOTHING — the other half of every refusal added
+  // here. The bar belongs to the keys that could not act; a chord that did
+  // exactly what its caption promises must leave it empty, or the fix for
+  // silence has been paid for with noise on the working path.
+  const afterHop = await status();
+  check(
+    'and a chord that worked said nothing at all',
+    afterHop.text === '',
+    `the bar answered a successful gt with "${afterHop.text}"`,
+  );
   await page.screenshot({ path: `${outDir}/key-truth-gt-crosses-projects.png` });
   console.log(`${outDir}/key-truth-gt-crosses-projects.png`);
 }
