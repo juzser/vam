@@ -85,6 +85,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -106,6 +107,12 @@ import { normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
 import { ShortcutTip } from '../keyboard/ShortcutTip.js';
+import {
+  activeTurnProgress,
+  drawsProgressLine,
+  subscribeTurnProgress,
+  type TurnProgress,
+} from '../prefs/progress.js';
 import { useHistoryReader } from '../sources/history-reader.js';
 import { describeFailure } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
@@ -2523,6 +2530,7 @@ const TurnBlock = memo(function TurnBlock({
   age,
   status,
   reserveCorner,
+  progress,
 }: {
   readonly decision: Decision;
   /** Is this the turn the picker (or the canvas) has landed on? */
@@ -2536,8 +2544,25 @@ const TurnBlock = memo(function TurnBlock({
   readonly age: string | null;
   readonly status: SessionStatus | null;
   readonly reserveCorner: boolean;
+  /** Concise mode, as the operator set it -- see `prefs/progress.ts`. */
+  readonly progress: TurnProgress;
 }) {
   const failed = decision.errorCount ?? 0;
+  /**
+   * DOES THIS TURN SPEND A ROW ON ITS OWN WORKING?
+   *
+   * The rule is `drawsProgressLine`, in `prefs/progress.ts`, and it is there
+   * rather than inline for one reason: it is the thing that must never fold a
+   * failure away, and a conditional written here would be a second opinion
+   * about that -- which is how the two come to disagree. Everything it needs
+   * is on this block already, so nothing is computed for it.
+   */
+  const showProgress = drawsProgressLine(progress, {
+    errorCount: decision.errorCount,
+    newest,
+    activity,
+    waitingCause,
+  });
   return (
     <article
       data-column-turn={decision.id}
@@ -2680,66 +2705,78 @@ const TurnBlock = memo(function TurnBlock({
           about the COLUMN and have moved to its two ends (the boundary block
           at the top, the navigation bar at the bottom); what is left here is
           what is true of THIS turn: which turn it is, and whether anything
-          inside it failed. */}
-      <section data-detail-block="progress" className="flex flex-none flex-col gap-1">
-        {/* Announced, not drawn. */}
-        <span className="sr-only">progress</span>
-        <div
-          data-progress-line
-          className="flex items-center gap-1.5 font-mono text-[10.5px] text-ink-faint"
-        >
-          <span data-progress-turn-label className="flex min-w-0 items-center gap-1 truncate">
-            {/* Answered, still open, or carrying a failure -- the same marks
+          inside it failed.
+
+          AND WHETHER IT IS DRAWN AT ALL IS THE OPERATOR'S, since they asked
+          for concise mode to be adjustable. ABSENT, NOT DIMMED, and the whole
+          `<section>` goes rather than the line inside it: the region carries
+          the announced name `progress`, and a wrapper left behind would have a
+          screen reader open a region containing nothing. `display: none` in a
+          stylesheet would have left exactly that wrapper, which is the second
+          reason this is a React condition and not CSS -- the first being that
+          a hidden element is still an element, and a guard that reads the DOM
+          could not tell the two modes apart at all. */}
+      {showProgress && (
+        <section data-detail-block="progress" className="flex flex-none flex-col gap-1">
+          {/* Announced, not drawn. */}
+          <span className="sr-only">progress</span>
+          <div
+            data-progress-line
+            className="flex items-center gap-1.5 font-mono text-[10.5px] text-ink-faint"
+          >
+            <span data-progress-turn-label className="flex min-w-0 items-center gap-1 truncate">
+              {/* Answered, still open, or carrying a failure -- the same marks
                 the picker draws, from the same function. Decorative, so
                 hidden: the label is what a screen reader should read. */}
-            <span aria-hidden="true" className={failed > 0 ? 'text-failed' : undefined}>
-              {turnMark(decision)}
+              <span aria-hidden="true" className={failed > 0 ? 'text-failed' : undefined}>
+                {turnMark(decision)}
+              </span>
+              <span className="min-w-0 truncate">{decision.label}</span>
             </span>
-            <span className="min-w-0 truncate">{decision.label}</span>
-          </span>
-          {/* THE FOLD MAY COST DETAIL, NEVER ALARM. A turn's mark cannot say
+            {/* THE FOLD MAY COST DETAIL, NEVER ALARM. A turn's mark cannot say
               how many tool calls blew up inside it, and the count is what the
               operator would otherwise have to open the turn to find. Drawn
               only above zero: ABSENT is "this source cannot report tool
               failures" and ZERO is "vam looked and found none", and neither is
               news. */}
-          {failed > 0 && (
-            <span data-progress-failed className="text-failed">
-              · {failed} failed
-            </span>
-          )}
-          {/* `session.activity` is what the session is doing RIGHT NOW, so it
+            {failed > 0 && (
+              <span data-progress-failed className="text-failed">
+                · {failed} failed
+              </span>
+            )}
+            {/* `session.activity` is what the session is doing RIGHT NOW, so it
               belongs to the turn currently being worked and to no other -- on
               an older turn it described the present while the operator read
               the past. In a column that turn is the last one, at the bottom,
               which is where the eye already is. */}
-          {newest && activity !== null && (
-            <>
-              {/* The line's own middot, so the label and the activity do not
+            {newest && activity !== null && (
+              <>
+                {/* The line's own middot, so the label and the activity do not
                   run together into one phrase. Decorative: a screen reader
                   reads two values. */}
-              <span aria-hidden="true">·</span>
-              <span data-progress-activity className="min-w-0 truncate">
-                {activity}
-              </span>
-            </>
-          )}
-          {/* WHAT IT IS BLOCKED ON, in the session's own words. The pane used
+                <span aria-hidden="true">·</span>
+                <span data-progress-activity className="min-w-0 truncate">
+                  {activity}
+                </span>
+              </>
+            )}
+            {/* WHAT IT IS BLOCKED ON, in the session's own words. The pane used
               to compute `waitingFor` and spend it as a boolean, so every
               waiting session read the same on screen: "it needs something" and
               "it needs permission to run rm" were one picture. VERBATIM,
               because the observed causes are a sample of an open set
               (`session-status.ts`). */}
-          {newest && waitingCause !== null && (
-            <>
-              <span aria-hidden="true">·</span>
-              <span data-progress-waiting className="min-w-0 truncate text-waiting">
-                {waitingCause}
-              </span>
-            </>
-          )}
-        </div>
-      </section>
+            {newest && waitingCause !== null && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span data-progress-waiting className="min-w-0 truncate text-waiting">
+                  {waitingCause}
+                </span>
+              </>
+            )}
+          </div>
+        </section>
+      )}
 
       <section data-detail-block="out" className="flex flex-none flex-col gap-1.5">
         <span className="sr-only">out</span>
@@ -3924,6 +3961,26 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const turnsRead = mergedColumn.length;
   /**
+   * CONCISE MODE, off the store rather than down a prop.
+   *
+   * `Canvas.tsx` owns the prefs state and mounts one `DetailPanel` per split
+   * leaf (`PhoneShell` mounts another), so a prop would have to be threaded
+   * through every one of them. `out`'s font size takes the same route for the
+   * same reason and lands on the document as a custom property; this one
+   * decides which elements EXIST, so it has to reach React -- a subscription,
+   * the shape `ErrorLogPanel` already reads its events by.
+   *
+   * The third argument is the server snapshot: this bundle is also built for
+   * the browser, where a hydration mismatch would be a column that renders one
+   * set of lines and then another. The same getter, because the mode is a
+   * module value with no request behind it.
+   */
+  const turnProgress = useSyncExternalStore(
+    subscribeTurnProgress,
+    activeTurnProgress,
+    activeTurnProgress,
+  );
+  /**
    * WHAT THE BOUNDARY BLOCK OFFERS AT THE TOP OF THE COLUMN, or `null` when it
    * offers nothing. Decided in `transcript-history.ts` so that the four answers
    * are folded in ONE place rather than in a JSX conditional that a later
@@ -4503,6 +4560,41 @@ export function DetailPanel(props: DetailPanelProps) {
                       · {failedRead} failed
                     </span>
                   )}
+                  {/* WHAT COLLAPSING PROMISES, AND WHERE THE PROMISE IS EMPTY.
+                    While every turn draws its line, the line claims nothing
+                    about failure -- it says which turn it is. Collapsed, the
+                    ABSENCE of a line is the claim: nothing here was worth
+                    stopping for. Over a source with no failure surface at all
+                    that claim is unearned, and the operator has no way to tell
+                    it from a window vam read and found clean.
+
+                    SO IT IS SAID ONCE, HERE, and not per turn: this is a fact
+                    about the WINDOW -- the same window `turns read` and the
+                    total beside it qualify -- and a caveat repeated on every
+                    turn would be the noise the operator asked to be rid of.
+                    `failedRead === null` is exactly "no turn read carries the
+                    field at all", which is where the two unknowns part: zero
+                    is a reading and says nothing, absent is a source that
+                    cannot look and says so.
+
+                    NO EMPTY-WINDOW CASE TO GUARD, and it is worth saying why
+                    rather than guarding it twice: zero turns read would be vam
+                    having read nothing, which is not a source that cannot
+                    report -- but this whole block sits inside the branch that
+                    runs only when `orderedTurns.length > 0` (the empty column
+                    is a sentence instead, above). A `turnsRead > 0` here read
+                    as caution and was unreachable, which is worse than absent:
+                    it is a condition no test can ever falsify.
+
+                    `ink-dim`, not `failed`: this is a caveat about what vam
+                    could not see, not a report that something went wrong.
+                    Painting it as an alarm would make every source without the
+                    surface look like a source on fire. */}
+                  {turnProgress === 'collapsed' && failedRead === null && (
+                    <span data-column-unreadable className="text-ink-dim">
+                      · failures not reported by this source
+                    </span>
+                  )}
                 </div>
                 {/* THE SENTENCE IS THE STATE, and there are exactly two of them
                   because there are exactly two things vam can honestly say
@@ -4617,6 +4709,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   age={d.id === newestId ? liveAge : null}
                   status={entry?.session.status ?? null}
                   reserveCorner={cornerOverlay}
+                  progress={turnProgress}
                 />
               ))}
             </div>
