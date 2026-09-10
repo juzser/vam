@@ -190,15 +190,84 @@ describe('one Submit, for the set', () => {
   });
 
   it('will not send until every open step has a mark, and says which are missing', () => {
-    draw([COLOUR, FRUIT]);
-    expect(submit()?.disabled).toBe(true);
+    // OPERABLE THROUGHOUT, and that is the fix rather than an oversight: a
+    // `disabled` Submit takes no click, no focus and gives no reason, which
+    // is this file's own "absent, not dimmed" rule broken in the flow that
+    // releases a blocked agent. What must not happen is a SEND, and that is
+    // what is asserted -- see the refusal tests below.
+    const answer = answering({ kind: 'sent', answer: 'x' });
+    draw([COLOUR, FRUIT], { answer });
+    expect(submit()?.disabled).toBe(false);
+    fireEvent.click(submit() as HTMLElement);
+    expect(answer).not.toHaveBeenCalled();
     fireEvent.click(options()[0] as HTMLElement);
     // One of two marked: the set is not answerable yet.
-    expect(submit()?.disabled).toBe(true);
     expect(text()).toContain('1 of 2');
+    fireEvent.click(submit() as HTMLElement);
+    expect(answer).not.toHaveBeenCalled();
     fireEvent.keyDown(listbox(), { key: 'l' });
     fireEvent.click(options()[0] as HTMLElement);
-    expect(submit()?.disabled).toBe(false);
+    fireEvent.click(submit() as HTMLElement);
+    expect(answer).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * REFUSING ALOUD, which is what replaces the dimming.
+   *
+   * Submit stayed visible, faint and natively `disabled` with any step
+   * unmarked: a click did nothing, focus skipped it, and the only hint was a
+   * count that a single-question call never draws. So the one control that
+   * releases a waiting agent was inert and silent about why.
+   */
+  describe('Submit short of a mark refuses aloud, and says which step', () => {
+    it('names the unmarked step rather than doing nothing', () => {
+      const answer = answering({ kind: 'sent', answer: 'x' });
+      draw([COLOUR, FRUIT], { answer });
+      // Mark the SECOND step, leaving the first short: the refusal has to
+      // name the step that is missing, not the one on screen.
+      fireEvent.keyDown(listbox(), { key: 'l' });
+      fireEvent.click(options()[0] as HTMLElement);
+      fireEvent.click(submit() as HTMLElement);
+      expect(answer).not.toHaveBeenCalled();
+      const refusal = q('[data-question-refusal]');
+      expect(refusal).not.toBeNull();
+      expect(refusal?.textContent).toContain('Colour');
+      expect(refusal?.textContent).toContain('Which colour do you prefer?');
+    });
+
+    it('walks to the step it named, so the next keystroke lands on it', () => {
+      draw([COLOUR, FRUIT]);
+      fireEvent.keyDown(listbox(), { key: 'l' });
+      fireEvent.click(options()[0] as HTMLElement);
+      expect(steps()[1]?.getAttribute('data-current')).toBe('true');
+      fireEvent.click(submit() as HTMLElement);
+      // The card moved BACK to the unmarked step, and the cursor with it: a
+      // refusal that names a step you then have to go and find is half a
+      // refusal.
+      expect(steps()[0]?.getAttribute('data-current')).toBe('true');
+      expect(document.activeElement).toBe(options()[0]);
+    });
+
+    it('takes the refusal back the moment the missing mark arrives', () => {
+      draw([COLOUR, FRUIT]);
+      fireEvent.click(submit() as HTMLElement);
+      expect(q('[data-question-refusal]')).not.toBeNull();
+      fireEvent.click(options()[0] as HTMLElement);
+      expect(q('[data-question-refusal]')).toBeNull();
+    });
+
+    it('sends once the set is complete, and says nothing about a refusal', async () => {
+      const answer = answering({ kind: 'sent', answer: 'Crimson, Apple' });
+      draw([COLOUR, FRUIT], { answer });
+      fireEvent.click(submit() as HTMLElement);
+      expect(q('[data-question-refusal]')).not.toBeNull();
+      fireEvent.click(options()[0] as HTMLElement);
+      fireEvent.keyDown(listbox(), { key: 'l' });
+      fireEvent.click(options()[0] as HTMLElement);
+      fireEvent.click(submit() as HTMLElement);
+      await vi.waitFor(() => expect(answer).toHaveBeenCalledTimes(1));
+      expect(q('[data-question-refusal]')).toBeNull();
+    });
   });
 
   it('sends every step, in asking order, each with its own question text', async () => {

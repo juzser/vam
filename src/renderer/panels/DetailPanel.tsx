@@ -1742,6 +1742,23 @@ function QuestionCard({
   const [outcome, setOutcome] = useState<AnswerResult | null>(null);
   const [sending, setSending] = useState(false);
   /**
+   * WHY THE LAST SUBMIT DID NOT GO, when the reason is on this side.
+   *
+   * Separate from `outcome`, which is what the SESSION'S PICKER said: a set
+   * short of a mark never reached it, so filing that under the same state
+   * would put words in the picker's mouth.
+   *
+   * It exists because Submit used to be `disabled` while any step was
+   * unmarked -- visible, faint, taking no click and no focus, and explaining
+   * nothing. That is "absent, not dimmed" broken in the one flow that
+   * releases a blocked agent, and it was worst on a call carrying ONE
+   * question: the marked-count hint only rendered past the first, so a lone
+   * unanswered question got no sentence at all. The control is operable now
+   * and refuses out loud, naming the step it is short of and putting the
+   * cursor on it.
+   */
+  const [refusal, setRefusal] = useState<string | null>(null);
+  /**
    * WHAT A PREVIOUS SUBMIT ALREADY GOT INTO THE PICKER, in asking order.
    *
    * The set is walked one question at a time and each single-select answer
@@ -1889,6 +1906,7 @@ function QuestionCard({
     }));
     if (onAnswer === null || sending || steps.length === 0) return;
     if (steps.some((one) => one.labels.length === 0)) return;
+    setRefusal(null);
     setSending(true);
     const result = await onAnswer({ steps });
     setOutcome(result);
@@ -1899,7 +1917,30 @@ function QuestionCard({
     setSending(false);
   };
 
+  /**
+   * What Submit does when the set is not complete: say which step is short,
+   * and go to it.
+   *
+   * WALKING IS HALF THE ANSWER. A card shows one step at a time, so naming a
+   * step the operator then has to go and find is a refusal that costs them
+   * the search. `landing` is the same channel the `h`/`l` walk uses, so the
+   * cursor ends up on that step's first option and the next keystroke marks
+   * it.
+   */
+  const refuse = (short: AgentQuestion) => {
+    const at = questions.indexOf(short);
+    const named = short.header ?? `step ${at + 1}`;
+    setRefusal(`not sent — ${named} has no mark yet: ${short.question}`);
+    if (at < 0) return;
+    setShowing(at);
+    setLanding(at);
+  };
+
   const toggle = (label: string, viaPointer = false) => {
+    // The refusal named a missing mark. Marking anything is the operator
+    // answering it, so it stops being on screen -- a refusal that outlives
+    // its cause is the next thing to be ignored.
+    setRefusal(null);
     if (viaPointer && question !== undefined && !question.multiSelect) {
       // Fold only when the click MARKS. Clicking the marked option again
       // clears it, and folding on that would hide an empty list behind a
@@ -2238,23 +2279,57 @@ function QuestionCard({
           <button
             type="button"
             data-question-submit
-            disabled={unmarked.length > 0 || sending}
-            onClick={() => void send()}
+            /* `sending` ONLY. It used to read `unmarked.length > 0 ||
+               sending`, which took the click, the focus and the explanation
+               away together -- see `refusal`. The in-flight half stays: a
+               second Submit while the first is out would type into a picker
+               that is already moving. */
+            disabled={sending}
+            /* What the control is short of, as a fact rather than as a
+               colour, for anything that has to check the state without
+               reading a sentence. */
+            data-question-short={unmarked.length > 0 ? 'true' : undefined}
+            onClick={() => {
+              const short = unmarked[0];
+              if (short === undefined) {
+                void send();
+                return;
+              }
+              refuse(short);
+            }}
             className={[
               'rounded-[6px] border px-1.5 py-1 text-[12px]',
-              unmarked.length > 0 || sending
+              sending
                 ? 'cursor-default border-line text-ink-faint'
                 : `cursor-pointer border-running text-ink hover:${OPTION_FILL}`,
             ].join(' ')}
           >
             {sending ? 'Submitting…' : 'Submit'}
           </button>
-          {questions.length > 1 && (
+          {/* WHAT IS STILL MISSING, and now for one question as well as for
+              several. This was `questions.length > 1`, so the commonest call
+              there is -- a single question -- had a faint Submit above a
+              sentence about marking and nothing saying the mark was what it
+              was waiting for. Silent once the set is complete: at that point
+              the button says everything. */}
+          {(pending.length > 1 || unmarked.length > 0) && (
             <span data-question-progress className="text-[11px] text-ink-faint">
-              {pending.length - unmarked.length} of {pending.length} marked
+              {pending.length > 1
+                ? `${pending.length - unmarked.length} of ${pending.length} marked`
+                : 'not marked yet — pick an option above'}
             </span>
           )}
         </div>
+      )}
+      {refusal !== null && (
+        /* `waiting` amber, the same ink the mode row's refusal takes: this is
+           a control declining to act, not a report from the session. The two
+           are separate elements for the same reason they are separate state
+           -- an operator must be able to tell "vam did not send this" from
+           "the picker said no". */
+        <p data-question-refusal className="text-[11px] text-waiting">
+          {refusal}
+        </p>
       )}
       {outcome !== null && (
         <p data-question-outcome data-outcome={outcome.kind} className="text-[11px] text-ink-dim">

@@ -3675,7 +3675,10 @@ describe('the +1px type bump reaches everything in this pane except out', () => 
     // +2: the folded question row's "marked, not sent" caption and the
     // `change` control that reopens the list (audit-adjacent operator
     // request: the option list folds away once a pick is made).
-    '11': 16,
+    // +1: the question card's REFUSAL line -- Submit is operable while the
+    // set is short of a mark now, and says which step it is short of instead
+    // of going faint and taking the click with it.
+    '11': 17,
     // -1: `WaitingNote`'s remedy line, removed with the notice.
     // +1: the column's boundary block. NEW type, so it takes the size it
     // would have after the +1px bump the operator has now asked for twice,
