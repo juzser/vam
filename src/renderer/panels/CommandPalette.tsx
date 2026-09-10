@@ -62,14 +62,14 @@ export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
           <Command.Empty className="px-3 py-4 text-ink-faint">No match</Command.Empty>
 
           {waiting.length > 0 && (
-            <Command.Group heading="needs you" className="px-1 text-ink-faint text-xs">
+            <Command.Group heading="needs you" className="px-1 text-ink-faint text-meta">
               {waiting.map((entry) => (
                 <PaletteRow key={entry.session.id} entry={entry} onPick={onPick} />
               ))}
             </Command.Group>
           )}
 
-          <Command.Group heading="all sessions" className="px-1 text-ink-faint text-xs">
+          <Command.Group heading="all sessions" className="px-1 text-ink-faint text-meta">
             {rest.map((entry) => (
               <PaletteRow key={entry.session.id} entry={entry} onPick={onPick} />
             ))}
@@ -94,7 +94,7 @@ function PaletteRow({
       // type — the project name included, not just the session's own title.
       value={`${project.name} ${session.title} ${session.epic ?? ''} ${session.id}`}
       onSelect={() => onPick(session.id)}
-      className="flex cursor-pointer items-baseline gap-2 rounded px-2 py-1 text-ink text-sm data-[selected=true]:bg-surface-raised"
+      className="flex cursor-pointer items-baseline gap-2 rounded px-2 py-1 text-ink text-body data-[selected=true]:bg-surface-raised"
     >
       <span className="text-ink-faint">{project.name}/</span>
       <span>{session.title}</span>

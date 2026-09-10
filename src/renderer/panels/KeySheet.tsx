@@ -53,15 +53,15 @@ export function KeySheet({ onClose }: KeySheetProps) {
       />
       <div className="relative max-h-[80vh] w-[min(720px,92vw)] overflow-y-auto rounded-md border border-line bg-panel p-4">
         <div className="mb-3 flex items-baseline gap-2">
-          <h2 className="font-semibold text-ink text-sm">keyboard</h2>
-          <span className="text-ink-faint text-xs">
+          <h2 className="font-semibold text-ink text-heading">keyboard</h2>
+          <span className="text-ink-faint text-meta">
             every binding there is — generated from the chord tables
           </span>
           <button
             ref={closeButton}
             type="button"
             onClick={onClose}
-            className="ml-auto rounded border border-line px-2 py-0.5 text-ink-dim text-xs"
+            className="ml-auto rounded border border-line px-2 py-0.5 text-ink-dim text-control"
           >
             Esc
           </button>
@@ -69,7 +69,9 @@ export function KeySheet({ onClose }: KeySheetProps) {
         <div className="grid grid-cols-2 gap-x-6 gap-y-4">
           {groups.map((group) => (
             <section key={group.group}>
-              <h3 className="mb-1 text-ink-faint text-xs uppercase tracking-wide">{group.title}</h3>
+              <h3 className="mb-1 text-ink-faint text-meta uppercase tracking-wide">
+                {group.title}
+              </h3>
               <ul>
                 {group.rows.map((row) => (
                   // Keyed by everything that distinguishes a row, not by its
@@ -78,7 +80,7 @@ export function KeySheet({ onClose }: KeySheetProps) {
                   // alone they collided, and React reconciled them by position.
                   <li
                     key={`${row.keys}·${row.mode ?? ''}·${row.label}`}
-                    className="flex items-baseline gap-2 py-0.5 text-xs"
+                    className="flex items-baseline gap-2 py-0.5 text-control"
                   >
                     <kbd
                       data-key-sheet-keys

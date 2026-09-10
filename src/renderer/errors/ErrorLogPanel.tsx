@@ -57,8 +57,8 @@ export function ErrorLogPanel({ onClose }: ErrorLogPanelProps) {
       />
       <div className="relative flex max-h-[80vh] w-[min(760px,92vw)] flex-col overflow-y-auto rounded-md border border-line bg-panel p-4">
         <div className="mb-3 flex items-baseline gap-2">
-          <h2 className="font-semibold text-ink text-sm">error log</h2>
-          <span className="text-ink-faint text-xs">
+          <h2 className="font-semibold text-ink text-heading">error log</h2>
+          <span className="text-ink-faint text-meta">
             this session only — nothing here is written to disk
           </span>
           <button
@@ -67,14 +67,14 @@ export function ErrorLogPanel({ onClose }: ErrorLogPanelProps) {
               setReport(null);
               clearEvents();
             }}
-            className="ml-auto rounded border border-line px-2 py-0.5 text-ink-dim text-xs"
+            className="ml-auto rounded border border-line px-2 py-0.5 text-ink-dim text-control"
           >
             Clear
           </button>
         </div>
 
         {events.length === 0 ? (
-          <p data-testid="error-log-empty" className="py-6 text-center text-ink-faint text-xs">
+          <p data-testid="error-log-empty" className="py-6 text-center text-ink-faint text-control">
             nothing has failed yet
           </p>
         ) : (
@@ -82,7 +82,7 @@ export function ErrorLogPanel({ onClose }: ErrorLogPanelProps) {
             {events.map((event) => (
               <li
                 key={event.id}
-                className="flex items-baseline gap-2 border-line border-b py-1 font-mono text-[11px] last:border-b-0"
+                className="flex items-baseline gap-2 border-line border-b py-1 font-mono text-control last:border-b-0"
               >
                 <span className="text-ink-faint">{event.at.slice(11, 19)}</span>
                 <span
@@ -112,18 +112,18 @@ export function ErrorLogPanel({ onClose }: ErrorLogPanelProps) {
 
         {report !== null && (
           <div className="mt-3 rounded border border-line bg-raised p-2">
-            <p className="mb-1 text-ink-dim text-xs">
+            <p className="mb-1 text-ink-dim text-control">
               {copied === true
                 ? 'the prefilled issue URL is on your clipboard — paste it in your browser, read this, then submit'
                 : 'copy failed — the URL is below; vam has not sent anything'}
             </p>
             <pre
               data-testid="report-preview"
-              className="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[10px] text-ink-dim"
+              className="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-meta text-ink-dim"
             >
               {report.body}
             </pre>
-            <p className="mt-1 break-all font-mono text-[10px] text-ink-faint">{report.url}</p>
+            <p className="mt-1 break-all font-mono text-meta text-ink-faint">{report.url}</p>
           </div>
         )}
       </div>

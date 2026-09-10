@@ -211,7 +211,7 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
   return (
     <>
       {state.serverError !== null ? (
-        <p data-testid="remote-server-error" role="alert" className="text-[12px] text-ink-dim">
+        <p data-testid="remote-server-error" role="alert" className="text-control text-ink-dim">
           {state.serverError}
         </p>
       ) : null}
