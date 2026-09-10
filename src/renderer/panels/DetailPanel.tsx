@@ -68,6 +68,7 @@ import {
   Image as ImageIcon,
   ListChecks,
   MessageSquare,
+  NotepadText,
   Paperclip,
   Sparkles,
   SquareTerminal,
@@ -3810,23 +3811,39 @@ export function DetailPanel(props: DetailPanelProps) {
       // watching.
       delivers === true
       ? {
+          word: 'Sending',
+          Glyph: ArrowUp,
           label: 'sending prompt…',
           title: 'handing the prompt to the running agent session — this can take a while',
         }
       : {
+          word: 'Recording',
+          Glyph: NotepadText,
           label: 'recording prompt…',
           title: 'appending the prompt to this session\u2019s log',
         }
     : delivers === true
       ? {
+          word: 'Send',
+          Glyph: ArrowUp,
           label: 'send prompt',
           title: 'sends the prompt into the running agent session — it is delivered, not filed',
         }
       : {
+          word: 'Record',
+          Glyph: NotepadText,
           label: 'record prompt',
           title:
             'appends the prompt to this session\u2019s log — vam cannot hand it to a running agent',
         };
+  /**
+   * EVERY `word` IS A PREFIX OF ITS OWN `label`, and that is a requirement
+   * rather than a coincidence: WCAG 2.5.3 asks that the accessible name
+   * contain the visible one, or a speech user saying the word they can see
+   * does not reach the control. `e2e/composer-bar-shots.mjs` asserts the
+   * containment on the painted button rather than trusting this note.
+   */
+  const ComposerGlyph = composerClaim.Glyph;
   return (
     <aside
       data-action-pane={active ? 'active' : 'idle'}
@@ -5028,7 +5045,22 @@ export function DetailPanel(props: DetailPanelProps) {
                   onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
                   placeholder="model"
                   aria-label="model requested in this prompt"
-                  className="vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[11px] text-ink-dim outline-none placeholder:text-ink-quiet focus:text-ink"
+                  /* `outline-none` is GONE, and `focus:text-ink` was never a
+                     substitute for it: recolouring TYPED TEXT says nothing on
+                     an empty field, which is the state this control is in
+                     every time it is first reached. Nothing else drew one
+                     either -- the phone stylesheet's replacement ring applies
+                     to `.vam-tap:has(> [data-tap-skin])` and this field has no
+                     inner skin -- so focusing it put a caret on screen and
+                     nothing more.
+
+                     `FOCUS_RING` is the app's own, in `ink`: measured on the
+                     painted node it is 14.4:1 in dark and 17.7:1 in light
+                     against the card behind it, well past the 3:1 WCAG 1.4.11
+                     asks, and it is a different colour from the composer box's
+                     armed border (`waiting`) so the two signals cannot be read
+                     as each other. */
+                  className={`vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[11px] text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
                 />
               </Note>
               {/* The mode, beside the model field the operator asked to put it
@@ -5144,27 +5176,47 @@ export function DetailPanel(props: DetailPanelProps) {
                 </span>
               )}
               <span className="min-w-0 flex-1" />
-              {/* The mockup draws a send arrow here. This one says RECORD, in
-              the label and in the tooltip, because the factory has no channel
-              into a running agent session — the click appends the prompt to
-              the session's log and nothing reads it back out. A button that
-              implied delivery would leave you waiting for an answer nobody is
-              coming to give. */}
-              <button
-                type="button"
-                data-prompt-record
-                onClick={onSubmit}
-                disabled={sending}
-                aria-busy={sending}
-                aria-label={composerClaim.label}
-                title={composerClaim.title}
-                className={[
-                  'flex h-7 w-7 flex-none items-center justify-center rounded-[7px] bg-line-strong text-ink',
-                  sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
-                ].join(' ')}
-              >
-                <ArrowUp size={14} strokeWidth={1.7} className={sending ? 'vam-breathe' : ''} />
-              </button>
+              {/* TWO OUTCOMES, TWO FACES. The mockup draws a send arrow here
+              and this drew one for both of them -- for a source that hands the
+              prompt to a running `claude --resume` and for a source that
+              appends it to a log and nothing reads it back out. Those are
+              different things to have done, and the whole distinction lived in
+              an `aria-label` and a native `title`: invisible to anyone looking
+              at the screen, and a `title` opens on hover and on nothing else,
+              so on a keyboard-first tool it was invisible to the primary input
+              device as well.
+
+              So the outcome is PAINTED -- the word and the glyph both -- and
+              the sentence moves into `Note`, which opens on focus. The comment
+              that used to stand here said the button "says RECORD"; it had not
+              done that since the wording became per-source, which is the same
+              defect as the `title`, in prose. */}
+              <Note text={composerClaim.title}>
+                <button
+                  type="button"
+                  data-prompt-record
+                  /* Which outcome this button is for, as a fact a guard can
+                     read: the word is copy and may be rewritten, this is the
+                     claim. */
+                  data-prompt-delivers={delivers === true ? 'true' : undefined}
+                  onClick={onSubmit}
+                  disabled={sending}
+                  aria-busy={sending}
+                  aria-label={composerClaim.label}
+                  className={[
+                    `flex h-7 flex-none items-center justify-center gap-1 rounded-[7px] bg-line-strong px-2 text-[11.5px] text-ink ${FOCUS_RING}`,
+                    sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
+                  ].join(' ')}
+                >
+                  <ComposerGlyph
+                    size={13}
+                    strokeWidth={1.7}
+                    aria-hidden="true"
+                    className={sending ? 'vam-breathe' : ''}
+                  />
+                  {composerClaim.word}
+                </button>
+              </Note>
             </div>
           </div>
         </div>

@@ -157,6 +157,91 @@ describe('the composer says when a prompt is in flight', () => {
 });
 
 /**
+ * TWO OUTCOMES MUST NOT SHARE A FACE.
+ *
+ * `main/sources/claude-code/deliver.ts` runs `claude --resume <id> -p
+ * "<prompt>"` and genuinely appends a turn to a running session; the factory
+ * source appends to a log nothing reads back. "Sent to the agent" and "filed
+ * for later" are different things to have done, and the button painted one
+ * `ArrowUp` for both -- the whole distinction lived in an `aria-label` and a
+ * native `title`, neither of which is on screen.
+ *
+ * MOUNTED HERE RATHER THAN MEASURED IN A BROWSER, and that split is the
+ * point: `?demo=1` is a `'demo'` source, so `delivers` is false on every row
+ * a Playwright run can reach and only one of these two faces is ever painted
+ * there. `e2e/composer-bar-shots.mjs` holds everything that needs layout,
+ * focus or paint (the word has a box, the name contains it, the `title` is
+ * gone, Tab opens the tip); this holds the PAIRING, which is a pure
+ * prop-driven render with no layout in it.
+ */
+describe('the composer submit paints which outcome it will produce', () => {
+  const submit = () => document.querySelector('[data-prompt-record]');
+  /** The glyph's own identity, whatever lucide happens to call it. */
+  const glyph = () => submit()?.querySelector('svg')?.getAttribute('class') ?? null;
+  const word = () => (submit()?.textContent ?? '').trim();
+
+  it('says one thing for a source that delivers and another for one that records', () => {
+    draw({ draft: 'ship it', delivers: true });
+    const delivering = { word: word(), glyph: glyph(), name: submit()?.getAttribute('aria-label') };
+    // `render` APPENDS a container; without this the second panel is mounted
+    // beside the first and every `document.querySelector` below reads the
+    // one already measured -- which is how a comparison passes against
+    // itself.
+    cleanup();
+    draw({ draft: 'ship it', delivers: false });
+    const recording = { word: word(), glyph: glyph(), name: submit()?.getAttribute('aria-label') };
+
+    // FIRST, THAT THERE IS ANYTHING TO COMPARE. Both halves of every check
+    // below are relative, and two nulls are equal to each other forever --
+    // which is how a guard passes on an absence.
+    expect(delivering.word).not.toBe('');
+    expect(recording.word).not.toBe('');
+    expect(delivering.glyph).not.toBeNull();
+    expect(recording.glyph).not.toBeNull();
+
+    expect(delivering.word).not.toBe(recording.word);
+    // A DIFFERENT GLYPH, not merely a different word: the button is 72px wide
+    // and the icon is what reads first. Which icon is a design choice and is
+    // not asserted; that the two do not share one is the claim.
+    expect(delivering.glyph).not.toBe(recording.glyph);
+    expect({ delivering: delivering.word, recording: recording.word }).toEqual({
+      delivering: 'Send',
+      recording: 'Record',
+    });
+  });
+
+  it('keeps the visible word inside the accessible name (WCAG 2.5.3)', () => {
+    // A speech user says the word they can see. If the name does not contain
+    // it, "click Record" reaches nothing -- and this is exactly the pairing
+    // that goes wrong first when the in-flight wording is edited, so both
+    // states are read.
+    for (const delivers of [true, false]) {
+      for (const sending of [true, false]) {
+        cleanup();
+        draw({ draft: 'ship it', delivers, sending });
+        const name = submit()?.getAttribute('aria-label') ?? '';
+        expect(name.toLowerCase(), `delivers=${delivers} sending=${sending}`).toContain(
+          word().toLowerCase(),
+        );
+      }
+    }
+  });
+
+  it('carries no native `title` — the tooltip no keyboard can open', () => {
+    // The sentence moved into `Note`, which opens on focus. A `title` left
+    // beside it would announce the same string a second time and go on being
+    // unopenable from the keyboard.
+    draw({ draft: 'ship it', delivers: true });
+    expect(submit()?.hasAttribute('title')).toBe(false);
+    expect(submit()?.getAttribute('data-note')).toMatch(/running agent session/i);
+    cleanup();
+    draw({ draft: 'ship it', delivers: false });
+    expect(submit()?.hasAttribute('title')).toBe(false);
+    expect(submit()?.getAttribute('data-note')).toMatch(/log/i);
+  });
+});
+
+/**
  * Session-level facts must not be captioned as turn-level ones.
  *
  * `Decision` carries no timestamp (`model.ts`), so nothing in the model can
@@ -3597,7 +3682,10 @@ describe('the +1px type bump reaches everything in this pane except out', () => 
     // rather than adding a ninth literal at 10.5px -- and the
     // scrolled-out-turn note inside it dropped its own 12px class to inherit
     // this one, which is why 12 loses one below.
-    '11.5': 11,
+    // +1: the composer submit, which now PAINTS the outcome it will produce
+    // (`Send` or `Record`) beside its glyph instead of drawing one arrow for
+    // both -- it was an icon-only button and carried no type class at all.
+    '11.5': 12,
     // +1: the mode popover's option rows, at the provider popover's own size.
     // +1: the folded question row's own mark, at the option label's size.
     // -1: the scrolled-out-turn note, which now inherits the boundary

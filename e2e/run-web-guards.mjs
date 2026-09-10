@@ -17,7 +17,13 @@
  * a swatch in the settings form reaches it, and -- since the settings audit --
  * whether the narrow settings nav has an ACCESSIBLE NAME at a breakpoint jsdom
  * cannot see, what the Remote section's buttons actually paint, and what is
- * left of the favicon's mark once a tab has rasterised it at 16 and 32). This
+ * left of the favicon's mark once a tab has rasterised it at 16 and 32, and --
+ * since the pane audit -- what an option PAINTS against the card it sits
+ * inside once a pointer is over it, whether the composer's submit puts a WORD
+ * on screen for the outcome it will produce rather than one arrow for two, and
+ * whether a focused field draws a ring an operator can see, measured after a
+ * real Tab press because `:focus-visible` is a heuristic about the last input
+ * device and no programmatic `.focus()` satisfies it). This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
  * soon as any assertion throws — so CI can hold them.
@@ -50,6 +56,7 @@ const GUARDS = [
   'turn-signal-shots',
   'tooltip-shots',
   'pane-colour-shots',
+  'composer-bar-shots',
   'settings-chrome-shots',
   'favicon-shots',
 ];
