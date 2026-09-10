@@ -312,6 +312,10 @@ check(
 );
 const moreText = ((await more.innerText()) ?? '').toLowerCase();
 console.log(`  no-pager note: ${JSON.stringify(await more.innerText())}`);
+// THE FIFTH ANSWER, ON FILE. Nothing else in this repo can produce a picture
+// of it: the state is unreachable from any source vam assembles.
+await page.screenshot({ path: `${outDir}/transcript-column-no-pager.png` });
+console.log(`${outDir}/transcript-column-no-pager.png`);
 check(
   'in words, not only in an attribute',
   /cannot read further back/.test(moreText),
@@ -1003,6 +1007,8 @@ const sawRefusal = await settles(
 check('a read that could not be made settles into a state of its own', sawRefusal);
 const refused = await columnState();
 console.log(`  refusal: ${refused.start}/${refused.more} — ${JSON.stringify(refused.moreText)}`);
+await back.screenshot({ path: `${outDir}/transcript-column-unavailable.png` });
+console.log(`${outDir}/transcript-column-unavailable.png`);
 check(
   'a read that failed is drawn as a failure, not as an ending',
   refused.more === 'unavailable' && refused.start === 'read-limit',
@@ -1055,6 +1061,8 @@ const inFlight = await back.evaluate(() => ({
   said: document.querySelector('[data-column-more]')?.textContent?.trim() ?? '',
 }));
 console.log(`  in flight: ${JSON.stringify(inFlight)}`);
+await back.screenshot({ path: `${outDir}/transcript-column-reading.png` });
+console.log(`${outDir}/transcript-column-reading.png`);
 check(
   'while a read is in flight the column says so',
   inFlight.more === 'reading' && /reading/i.test(inFlight.said),
@@ -1214,6 +1222,8 @@ await back.evaluate(() => {
   col.scrollTop = 0;
 });
 await back.waitForTimeout(200);
+await back.screenshot({ path: `${outDir}/transcript-column-session-start.png` });
+console.log(`${outDir}/transcript-column-session-start.png`);
 await back.screenshot({ path: `${outDir}/transcript-column-read-back.png` });
 console.log(`${outDir}/transcript-column-read-back.png`);
 
