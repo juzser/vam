@@ -337,6 +337,112 @@ export function bangQuery(text: string, caret: number): string | null {
 }
 
 /**
+ * How many suggestion rows the popover draws at once. Whatever it leaves out
+ * is COUNTED on screen (`data-bang-more`), never silently cropped.
+ *
+ * The strip this list replaced showed six, because six was one turn's worth
+ * (`commands.ts`'s own `MAX_COMMANDS`). This list is a whole session's worth,
+ * so it is eight -- enough that the newest turn's six still fit with the
+ * previous turn's beginning visible behind them, and few enough that the box
+ * does not become a page floating over the composer.
+ */
+export const MAX_BANG_ROWS = 8;
+
+/**
+ * The popover's own box, shared by both typeaheads so they cannot drift apart.
+ *
+ * `max-h-[30vh]` IS THE LOAD-BEARING PART, and it was put here by a
+ * measurement rather than by taste: the box sits in normal flow ABOVE the
+ * composer, so a tall list pushes the composer down -- and eight two-line `/`
+ * rows measured 412px in a real browser, which put the prompt box's bottom
+ * edge at 872px in an 800px window. The list had evicted the thing it exists
+ * to complete, Record button and all. `e2e/prompt-suggest-shots.mjs` measures
+ * exactly that now, on both lists.
+ *
+ * A BOUNDED HEIGHT WAS TRIED HERE AND TAKEN OUT AGAIN, which is worth
+ * recording so it is not re-added on the same reasoning. `max-h-[30vh]` plus a
+ * scrolling row container plus a `scrollIntoView` on the selected row: three
+ * moving parts, and nothing could falsify them. With the row cap at eight and
+ * the layer floating, the list fits above the composer at 800px AND at 480px
+ * -- and below 480 this pane's own blocks already overflow with no popover
+ * open at all, so a guard there would have been measuring somebody else's
+ * defect. Deleting the bound changed no measurement, so it is not here: the
+ * row cap bounds the list and this floats it, and both of those a guard can
+ * see go red.
+ */
+/**
+ * WHERE THE TYPEAHEADS ARE PAINTED, and this is a correction with a
+ * measurement behind it.
+ *
+ * They used to sit IN FLOW inside the composer's block, above the prompt box.
+ * That reads fine with one row and is wrong with eight: measured in a real
+ * browser, the `/` list's eight two-line rows came to 412px and pushed the
+ * prompt box's bottom edge to 872px in an 800px window -- the Record button
+ * and the mode row off the bottom of the screen. The list had evicted the
+ * thing it exists to complete, and a shorter cap would only have moved the
+ * window size at which it happened.
+ *
+ * FLOATING OVER THE TRANSCRIPT IS THE FIX, because it makes the composer's
+ * position independent of the list's height: `bottom-full` hangs the layer off
+ * the top edge of the block the composer is in, so nothing below it moves at
+ * all, at any viewport. That is what a popover is, and it is what the `!` list
+ * should have been from the start. `e2e/prompt-suggest-shots.mjs` measures
+ * both lists against the composer's own rect for exactly this.
+ *
+ * One layer for all three blocks -- both lists and the gap note -- so they
+ * stack in a known order instead of three absolute boxes overlapping, and
+ * rendered only when one of them has something to say, so an empty layer never
+ * sits over the transcript catching clicks.
+ */
+const SUGGEST_LAYER = 'absolute inset-x-3.5 bottom-full z-20 mb-2 flex flex-col gap-1.5';
+
+const SUGGEST_BOX =
+  'flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card px-1.5 py-1.5';
+
+/**
+ * EVERY COMMAND THE COLUMN CARRIES, in the order they should be offered.
+ *
+ * WHY THIS IS NOT JUST THE FOCUSED TURN, which is what it used to be. The
+ * focused turn is the newest one unless `h`/`l` moved -- the turn that has
+ * just answered. A command is proposed at the END of a piece of work, so the
+ * newest turn is precisely the turn least likely to carry one, and the
+ * operator's report ("typing `!` shows nothing") was this and not a missing
+ * feature: the list worked, on the one turn in twenty that had a command in
+ * it. The column draws the whole session now, so a list narrower than the
+ * column is a list that hides what is on screen.
+ *
+ * THE ORDER, and the one place it departs from newest-first: the FOCUSED turn
+ * comes first, then everything else newest-first. `h`/`l` is a deliberate
+ * move onto a turn the operator wants to read, so its commands are the ones
+ * being reached for; with no move made it IS the newest turn and the two
+ * orders are the same list. It is also what keeps the focused turn's commands
+ * offered when it sits outside the column entirely -- a turn selected before
+ * the byte window slid past it (`selectedTurnMissing`).
+ *
+ * DEDUPLICATED ON THE COMMAND TEXT, first occurrence winning, because the
+ * command text is what gets inserted: two entries that would type the same
+ * characters are one choice wearing two labels, and rounds of the same work
+ * repeat "run the gate" verbatim on every turn. The LABEL is not part of the
+ * key -- an agent rewording its own request is not a second command.
+ */
+export function commandsInColumn(
+  focused: Decision | null,
+  column: readonly Decision[],
+): readonly Command[] {
+  const seen = new Set<string>();
+  const out: Command[] = [];
+  const turns = focused === null ? column : [focused, ...column.filter((t) => t.id !== focused.id)];
+  for (const turn of turns) {
+    for (const command of turn.commands) {
+      if (seen.has(command.command)) continue;
+      seen.add(command.command);
+      out.push(command);
+    }
+  }
+  return out;
+}
+
+/**
  * The proposed commands a query matches, on either half a person might
  * remember: the label the agent gave it, or the command itself.
  *
@@ -3508,7 +3614,9 @@ export function DetailPanel(props: DetailPanelProps) {
     syncJumps(box);
   });
 
-  const commands = decision?.commands ?? [];
+  // THE WHOLE COLUMN, not the focused turn -- see `commandsInColumn` for why
+  // the narrower source made the feature look absent.
+  const commands = commandsInColumn(decision, mergedColumn);
   const slashCommands = entry?.session.slashCommands ?? [];
   /**
    * The typeaheads' shared state. `caret` is read off the box on every
@@ -3520,7 +3628,12 @@ export function DetailPanel(props: DetailPanelProps) {
   const [dismissed, setDismissed] = useState(false);
   const [pick, setPick] = useState(0);
   const query = composing ? bangQuery(draft, caret) : null;
-  const matches = query === null ? [] : matchCommands(commands, query);
+  const allMatches = query === null ? [] : matchCommands(commands, query);
+  // CROPPED FOR THE BOX, COUNTED ON IT. `bangHidden` is what the popover says
+  // out loud; a list cut to fit with no sign of the cut would teach the
+  // operator that what they can see is all the session proposed.
+  const matches = allMatches.slice(0, MAX_BANG_ROWS);
+  const bangHidden = allMatches.length - matches.length;
   // Closed when nothing matches. A list that stayed to say "no matches" is a
   // stale box over the composer; its absence already says it.
   const suggesting = !dismissed && matches.length > 0;
@@ -3532,9 +3645,32 @@ export function DetailPanel(props: DetailPanelProps) {
     setDismissed(true);
   };
   const slashQuery = composing ? slashCommandQuery(draft, caret) : null;
-  const slashMatches = slashQuery === null ? [] : matchSlashCommands(slashCommands, slashQuery);
+  const allSlashMatches = slashQuery === null ? [] : matchSlashCommands(slashCommands, slashQuery);
+  // Capped and counted, for `bangHidden`'s reason -- and this list needs it
+  // more: the provider's own is fifty-odd commands long.
+  const slashMatches = allSlashMatches.slice(0, MAX_BANG_ROWS);
+  const slashHidden = allSlashMatches.length - slashMatches.length;
   const slashSuggesting = !dismissed && slashMatches.length > 0;
   const slashPicked = Math.min(pick, slashMatches.length - 1);
+  /**
+   * WHY THE `/` LIST IS SHORT OF THE PROVIDER'S OWN, when the source knows.
+   *
+   * THE TWO UNKNOWNS, AND THIS IS WHERE THEY ARE KEPT APART. `slashCommands`
+   * has tiers that fail differently (`model.ts`): the ones made of files are
+   * silent because a directory that is not there means the operator wrote no
+   * commands, but the BUILT-INS are asked of the installed CLI and that
+   * question can genuinely fail. A list fifty entries short with nothing said
+   * about it is "vam could not read the commands" wearing "no commands match"'s
+   * clothes -- `pull-requests.ts` states the rule this serves.
+   *
+   * DRAWN WHENEVER THE `/` LIST IS BEING ASKED FOR, whether or not anything
+   * matched, and it is the second case that decides the shape: a query that
+   * finds nothing closes the list, so a note attached only to the list would
+   * vanish exactly when the operator most needs to know that the list they are
+   * typing into is not the whole one.
+   */
+  const slashGapNote =
+    !dismissed && slashQuery !== null ? (entry?.session.slashCommandGap ?? null) : null;
   const acceptSlashSuggestion = (command: SlashCommand) => {
     const next = applySlashCommand(draft, caret, command.name);
     onDraftChange(next.text);
@@ -4649,7 +4785,10 @@ export function DetailPanel(props: DetailPanelProps) {
           // this block is the whole of Insert. See the question bar above.
           {...insertScopeMark}
           className={[
-            'flex flex-none flex-col gap-2.5 bg-pane px-3.5 py-3',
+            // `relative` is the anchor for `SUGGEST_LAYER`, which floats the
+            // typeaheads OVER the transcript instead of pushing this block
+            // down the pane. See that constant for the measurement behind it.
+            'relative flex flex-none flex-col gap-2.5 bg-pane px-3.5 py-3',
             newestQuestion === null ? 'border-line border-t' : '',
           ].join(' ')}
         >
@@ -4696,71 +4835,102 @@ export function DetailPanel(props: DetailPanelProps) {
               ))}
             </nav>
           )}
-          {suggesting && (
-            <div
-              data-bang-suggest
-              className="flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card px-1.5 py-1.5"
-            >
-              <p className="px-1.5 pb-0.5 text-[11px] text-ink-faint">
-                the agent proposed these — vam does not run them; Enter picks one, Esc keeps what
-                you typed
-              </p>
-              {matches.map((command, index) => (
-                <button
-                  key={command.id}
-                  type="button"
-                  data-bang-suggestion
-                  data-selected={index === picked ? 'true' : undefined}
-                  onClick={() => acceptSuggestion(command)}
-                  className={[
-                    'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
-                    index === picked ? 'bg-line-strong' : 'hover:bg-line-strong',
-                  ].join(' ')}
-                >
-                  <span className="max-w-full truncate text-[12px] text-ink">{command.label}</span>
-                  <span
-                    data-bang-command
-                    className="max-w-full truncate font-mono text-[11.5px] text-ink-dim"
-                  >
-                    {command.command}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-          {slashSuggesting && (
-            <div
-              data-slash-suggest
-              className="flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card px-1.5 py-1.5"
-            >
-              <p className="px-1.5 pb-0.5 text-[11px] text-ink-faint">
-                the provider's own commands — Enter picks one, Esc keeps what you typed
-              </p>
-              {slashMatches.map((command, index) => (
-                <button
-                  key={command.id}
-                  type="button"
-                  data-slash-suggestion
-                  data-selected={index === slashPicked ? 'true' : undefined}
-                  onClick={() => acceptSlashSuggestion(command)}
-                  className={[
-                    'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
-                    index === slashPicked ? 'bg-line-strong' : 'hover:bg-line-strong',
-                  ].join(' ')}
-                >
-                  <span
-                    data-slash-command
-                    className="max-w-full truncate font-mono text-[12px] text-ink"
-                  >
-                    /{command.name}
-                  </span>
-                  {command.description !== null && (
-                    <span className="max-w-full truncate text-[11.5px] text-ink-dim">
-                      {command.description}
-                    </span>
+          {(suggesting || slashSuggesting || slashGapNote !== null) && (
+            <div data-suggest-layer className={SUGGEST_LAYER}>
+              {suggesting && (
+                <div data-bang-suggest className={SUGGEST_BOX}>
+                  <p className="px-1.5 pb-0.5 text-[11px] text-ink-faint">
+                    the agent proposed these — vam does not run them; Enter picks one, Esc keeps
+                    what you typed
+                  </p>
+                  {matches.map((command, index) => (
+                    <button
+                      // KEYED ON THE COMMAND TEXT, not on `id`: the list spans
+                      // turns now and two turns number their commands from `c1`
+                      // independently, so ids collide across the column while the
+                      // text cannot -- `commandsInColumn` deduplicates on it.
+                      key={command.command}
+                      type="button"
+                      data-bang-suggestion
+                      data-selected={index === picked ? 'true' : undefined}
+                      onClick={() => acceptSuggestion(command)}
+                      className={[
+                        'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
+                        index === picked ? 'bg-line-strong' : 'hover:bg-line-strong',
+                      ].join(' ')}
+                    >
+                      <span className="max-w-full truncate text-[12px] text-ink">
+                        {command.label}
+                      </span>
+                      <span
+                        data-bang-command
+                        className="max-w-full truncate font-mono text-[11.5px] text-ink-dim"
+                      >
+                        {command.command}
+                      </span>
+                    </button>
+                  ))}
+                  {bangHidden > 0 && (
+                    <p data-bang-more className="px-1.5 pt-0.5 text-[11px] text-ink-faint">
+                      {bangHidden} more from earlier turns — keep typing to narrow
+                    </p>
                   )}
-                </button>
-              ))}
+                </div>
+              )}
+              {slashSuggesting && (
+                <div data-slash-suggest className={SUGGEST_BOX}>
+                  <p className="px-1.5 pb-0.5 text-[11px] text-ink-faint">
+                    the provider's own commands — Enter picks one, Esc keeps what you typed
+                  </p>
+                  {slashMatches.map((command, index) => (
+                    <button
+                      key={command.id}
+                      type="button"
+                      data-slash-suggestion
+                      data-selected={index === slashPicked ? 'true' : undefined}
+                      onClick={() => acceptSlashSuggestion(command)}
+                      className={[
+                        'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
+                        index === slashPicked ? 'bg-line-strong' : 'hover:bg-line-strong',
+                      ].join(' ')}
+                    >
+                      <span
+                        data-slash-command
+                        className="max-w-full truncate font-mono text-[12px] text-ink"
+                      >
+                        /{command.name}
+                      </span>
+                      {command.description !== null && (
+                        <span className="max-w-full truncate text-[11.5px] text-ink-dim">
+                          {command.description}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                  {slashHidden > 0 && (
+                    <p data-slash-more className="px-1.5 pt-0.5 text-[11px] text-ink-faint">
+                      {slashHidden} more — keep typing to narrow
+                    </p>
+                  )}
+                </div>
+              )}
+              {/* WHAT VAM COULD NOT READ, said in the source's own words, and
+              ABSENT rather than dimmed the rest of the time. It stands whether
+              or not the list above it drew: a query that matches nothing
+              closes that list, and that is exactly the moment the operator
+              needs to know they are typing against a partial list rather than
+              a complete one that has nothing for them. */}
+              {slashGapNote !== null && (
+                <div
+                  data-slash-gap
+                  className="rounded-[10px] border border-line-strong bg-card px-2.5 py-1.5"
+                >
+                  <p className="text-[11px] text-ink-dim leading-[1.45]">
+                    vam could not read all of Claude Code's commands, so this list is short of the
+                    CLI's own: {slashGapNote.message}
+                  </p>
+                </div>
+              )}
             </div>
           )}
           {/* THE ROW IS THE INSERT LANDING, AND THE BOX INSIDE IT IS NOT.

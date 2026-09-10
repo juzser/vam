@@ -41,6 +41,7 @@ import type { MainSource } from '../source.js';
 import { createTmuxRunner, listVamSessions, type TmuxSession } from '../tmux/spawn.js';
 import { type AgentRoster, readAgentRoster } from './agent-roster.js';
 import { type AgentsResult, type LiveAgent, listLiveAgents } from './agents.js';
+import { type BuiltinCommandList, createBuiltinCommandReader } from './builtin-commands.js';
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
 import { deliverPromptViaCli } from './deliver.js';
 import { readTranscriptHistory } from './history.js';
@@ -54,7 +55,11 @@ import { paneForRow, replyToSession } from './reply.js';
 import { createBranchLookup } from './repo-branch.js';
 import { readPublishedPanes, readPublishedPanesAndProcessFacts } from './session-pane.js';
 import { defaultSessionsRoot } from './session-status.js';
-import { readUserSlashCommands } from './slash-commands.js';
+import {
+  createProjectCommandLookup,
+  mergeSlashCommands,
+  readUserSlashCommands,
+} from './slash-commands.js';
 import {
   killPidViaSignal,
   pidHasClaudeSessionFile,
@@ -240,11 +245,23 @@ export async function loadClaudeCodeProjects(
   // vam checked. `CLAUDE_CODE_SOURCE` passes the real listing; a listing vam
   // failed to obtain arrives here as null too, not as an empty array.
   tmuxSessions: readonly TmuxSession[] | null = null,
-  // The `/` typeahead's list, read once per `load()` and stamped onto every
-  // session -- USER-level configuration (`slash-commands.ts`), the same
-  // regardless of the row. Injectable like `branchOf`: tests read invented
-  // commands, never the operator's real `~/.claude/commands`.
+  // The `/` typeahead's USER tier, read once per `load()` and stamped onto
+  // every session -- `~/.claude/commands`, the same regardless of the row.
+  // Injectable like `branchOf`: tests read invented commands, never the
+  // operator's real directory.
   slashCommands: readonly SlashCommand[] = [],
+  // The `/` typeahead's PROJECT tier, per session's own `cwd`. A LOOKUP rather
+  // than a list, because this one is NOT the same regardless of the row --
+  // and cached inside itself, so the sessions of one project cost one read
+  // between them (`createProjectCommandLookup`). The default reads nothing:
+  // like `readPrs` and `tmuxSessions`, a caller that has not asked for a
+  // filesystem read does not get a surprise one.
+  projectCommandsFor: (cwd: string) => Promise<readonly SlashCommand[]> = async () => [],
+  // The `/` typeahead's BUILT-IN tier, or the reason there is none. NULL means
+  // nobody asked -- which is not a failure and draws nothing; an `unavailable`
+  // means vam asked the CLI and could not be told, which the session carries
+  // as `slashCommandGap` so the short list says why it is short.
+  builtinCommands: BuiltinCommandList | null = null,
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
   // What the sessions publish about themselves: `sessionId` -> tmux session,
@@ -332,7 +349,24 @@ export async function loadClaudeCodeProjects(
       // asked and then produced 128 KB of output while still waiting) is the
       // one where the question is stale anyway.
       questions: read.facts.questions,
-      slashCommands,
+      // THREE TIERS, MOST SPECIFIC FIRST, as one list (`mergeSlashCommands`).
+      // The project tier is the only per-row read, and it is shared across the
+      // rows of a project by the lookup's own cache.
+      slashCommands: mergeSlashCommands(
+        await projectCommandsFor(agent.cwd),
+        slashCommands,
+        builtinCommands?.kind === 'ok' ? builtinCommands.commands : [],
+      ),
+      // Spread, so a load with nothing missing carries no key at all -- see
+      // `slashCommandGap` in `model.ts`.
+      ...(builtinCommands !== null && builtinCommands.kind === 'unavailable'
+        ? {
+            slashCommandGap: {
+              code: builtinCommands.code,
+              message: builtinCommands.message,
+            },
+          }
+        : {}),
       // WHAT THE SESSION SAYS IT IS BLOCKED ON, out of the same per-process
       // file the age came from. A tool-approval prompt is a TUI state and
       // writes no transcript record, so `questions` above is empty for it and
@@ -408,9 +442,13 @@ const DESCRIPTOR: SourceDescriptor = {
     // image by content -- happen in main before the draft ever changes
     // (`main/dialog/attach-image.ts`).
     promptAttachments: true,
-    // `readUserSlashCommands` reads `~/.claude/commands/*.md` -- see
-    // `slash-commands.ts` for why that is user-level only, and for why no
-    // built-in is ever listed alongside them.
+    // THREE TIERS, and each is really read. `slash-commands.ts` reads the two
+    // made of files -- `~/.claude/commands/*.md` and the session's own
+    // `<cwd>/.claude/commands/*.md` -- and `builtin-commands.ts` asks the
+    // installed CLI to name its BUILT-INS, which are not files and used to be
+    // left out for a reason that turned out to be a stopping point rather
+    // than a fact. A built-in list vam could not obtain travels as
+    // `Session.slashCommandGap`, never as a shorter list.
     slashCommands: true,
     renameSession: false,
     // `claude stop <id>` is real. It stops BACKGROUND sessions only, and an
@@ -478,6 +516,13 @@ const DESCRIPTOR: SourceDescriptor = {
 const PR_READER = createPullRequestReader(readPullRequestsViaCli());
 
 /**
+ * The process-wide built-in command reader, for the same reason as
+ * `PR_READER`: one spawn for the life of the app, not one per poll. See
+ * `builtin-commands.ts` for what that spawn is and what it costs.
+ */
+const BUILTIN_COMMANDS = createBuiltinCommandReader();
+
+/**
  * `AgentsResult`'s `unavailable` arm, turned into the same `SourceError`
  * shape `recordPrompt`, `closeSession` and `createSession` already resolve
  * to. `kind: 'unreachable'` because this is never a refusal of a request vam
@@ -522,6 +567,13 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
         return listed.kind === 'ok' ? listed.sessions : null;
       })(),
       await readUserSlashCommands(),
+      // One lookup per `load()`, so the sessions of one project read their
+      // `.claude/commands` once between them.
+      createProjectCommandLookup(),
+      // ONE READER FOR THE LIFE OF THE PROCESS, for `PR_READER`'s reason: the
+      // installed CLI does not change under a running app, so this spawn
+      // happens once rather than on every ten-second poll.
+      await BUILTIN_COMMANDS(),
     );
   },
   /**

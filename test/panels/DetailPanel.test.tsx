@@ -22,7 +22,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // `main/`: `test/canvas/Canvas.new-project.test.tsx` already does the same
 // for `whyNotARepository`, which is the precedent this follows.
 import { summarizeTranscript } from '../../src/main/sources/claude-code/transcript.js';
-import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
+import type { Command, Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import {
   ATTACH_LIMIT_BYTES,
@@ -2800,6 +2800,151 @@ describe('the ! typeahead replaces the standing command strip', () => {
   });
 });
 
+/**
+ * WHICH TURNS THE `!` LIST DRAWS FROM.
+ *
+ * The operator reported that typing `!` showed nothing. It was not missing:
+ * the list was sourced from the FOCUSED turn alone, and the focused turn is
+ * the newest one unless `h`/`l` moved -- the turn that has just answered,
+ * which is exactly the turn least likely to have proposed a command yet. So
+ * the feature was invisible on the ordinary session while working perfectly on
+ * the one turn in twenty that happened to carry one.
+ *
+ * The column draws the whole session now, so the source is the whole column:
+ * the focused turn first (it is the one being read, so it is the one being
+ * reached for), then every other turn newest-first. Everything the operator
+ * can scroll to, they can complete.
+ */
+describe('the ! list is drawn from every turn in the column, not the focused one alone', () => {
+  const withCommands = (id: string, commands: Command[]): Decision => ({
+    id,
+    label: `step ${id}`,
+    input: `ask ${id}`,
+    output: 'answered',
+    commands,
+  });
+
+  const suggested = () =>
+    all('[data-bang-suggestion]').map((row) =>
+      (row.querySelector('[data-bang-command]')?.textContent ?? '').trim(),
+    );
+  const box = () =>
+    q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]') as HTMLTextAreaElement;
+
+  /** A session whose turns are newest-first, like the real source's. */
+  const sessionOf = (decisions: readonly Decision[]): SessionEntry => ({
+    project: PROJECT,
+    session: { ...SESSION, decisions },
+  });
+
+  function Composer(props: { readonly entry: SessionEntry; readonly decision: Decision | null }) {
+    const [draft, setDraft] = useState('');
+    return (
+      <DetailPanel
+        entry={props.entry}
+        decision={props.decision}
+        draft={draft}
+        onDraftChange={setDraft}
+        onSubmit={() => {}}
+        composing={true}
+        onCompose={() => {}}
+        onStopComposing={() => {}}
+        active={false}
+        actionIndex={0}
+        width={408}
+        resizeHandle={null}
+      />
+    );
+  }
+
+  function type(text: string) {
+    fireEvent.change(box(), { target: { value: text } });
+  }
+
+  it('offers an older turn’s command while the focused turn has none', () => {
+    // THE REPORTED BUG, as a test. `d5` is newest and proposes nothing, which
+    // is the ordinary shape of a session that has just answered.
+    const decisions = [
+      withCommands('d5', []),
+      withCommands('d4', [{ id: 'c1', label: 'push', command: 'git push -u origin work' }]),
+    ];
+    render(<Composer entry={sessionOf(decisions)} decision={decisions[0] as Decision} />);
+    type('!');
+    expect(suggested()).toEqual(['git push -u origin work']);
+  });
+
+  it('puts the focused turn first and the rest newest-first behind it', () => {
+    const decisions = [
+      withCommands('d5', [{ id: 'a', label: 'newest', command: 'echo newest' }]),
+      withCommands('d4', [{ id: 'b', label: 'focused', command: 'echo focused' }]),
+      withCommands('d3', [{ id: 'c', label: 'oldest', command: 'echo oldest' }]),
+    ];
+    render(<Composer entry={sessionOf(decisions)} decision={decisions[1] as Decision} />);
+    type('!echo');
+    expect(suggested()).toEqual(['echo focused', 'echo newest', 'echo oldest']);
+  });
+
+  it('shows a command proposed by two turns once, not twice', () => {
+    // Agents repeat "run the gate" every round. A list that repeated with them
+    // would push the rest of the session off the bottom of the popover.
+    const repeated = { id: 'gate', label: 'rerun the gate', command: 'pnpm -s test' };
+    const decisions = [
+      withCommands('d5', [repeated]),
+      withCommands('d4', [{ ...repeated, id: 'gate-again', label: 'run the gate again' }]),
+    ];
+    render(<Composer entry={sessionOf(decisions)} decision={null} />);
+    type('!');
+    expect(suggested()).toEqual(['pnpm -s test']);
+  });
+
+  it('caps the list and says how many it is not drawing', () => {
+    // TRUNCATION IS DISCLOSED, NEVER SILENT. A long session can propose
+    // dozens; a popover that showed a cropped list with no sign of it would
+    // teach the operator that what they see is all there is.
+    const decisions = Array.from({ length: 12 }, (_, i) =>
+      withCommands(`d${i}`, [{ id: `c${i}`, label: `step ${i}`, command: `echo ${i}` }]),
+    );
+    render(<Composer entry={sessionOf(decisions)} decision={null} />);
+    type('!');
+    expect(suggested()).toHaveLength(8);
+    expect(q('[data-bang-more]')?.textContent ?? '').toContain('4 more');
+    // And narrowing gets rid of the note rather than leaving it standing.
+    // (No space in the query: `bangQuery` stops the list at the first one.)
+    type('!11');
+    expect(suggested()).toEqual(['echo 11']);
+    expect(q('[data-bang-more]')).toBeNull();
+  });
+
+  /**
+   * WHAT GOES IN IS WHAT WAS SHOWN, character for character.
+   *
+   * This is the one assertion in the file that is about SAFETY rather than
+   * about a list. Since `deliver.ts`, a recorded prompt really is appended to
+   * a live session, so a completed `!` line is a bash command a running agent
+   * will run. The operator reads the row and presses Enter; if the row and the
+   * insertion could ever differ -- a clip for the column's width, a shell
+   * escape, a normalised quote -- they would be approving one command and
+   * sending another.
+   *
+   * Written against the RENDERED row rather than against the fixture, which is
+   * what makes it more than a restatement: a change that cropped the row would
+   * pass a fixture comparison and fail this one.
+   */
+  it('inserts exactly the characters the row displayed, however long they are', () => {
+    const long =
+      'osascript -e \'tell application "Terminal" to do script "cd /w/x && pnpm -s test"\'';
+    const decisions = [withCommands('d5', [{ id: 'c1', label: 'open a terminal', command: long }])];
+    render(<Composer entry={sessionOf(decisions)} decision={null} />);
+    type('!osa');
+    const shown = (
+      all('[data-bang-suggestion]')[0]?.querySelector('[data-bang-command]')?.textContent ?? ''
+    ).trim();
+    expect(shown).toBe(long);
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(box().value).toBe(`!${shown}`);
+  });
+});
+
 /** The `/` typeahead: `session.slashCommands`, built like `!` above. */
 describe('the / typeahead offers the provider’s own commands', () => {
   const SLASH_COMMANDS = [
@@ -2903,6 +3048,72 @@ describe('the / typeahead offers the provider’s own commands', () => {
     type('/');
     expect(q('[data-slash-suggest]')).not.toBeNull();
     expect(q('[data-bang-suggest]')).toBeNull();
+  });
+
+  /**
+   * THE TWO UNKNOWNS, ON SCREEN. `pull-requests.ts:12-14` states the rule and
+   * this is the place it is either kept or broken: the `/` list has tiers that
+   * fail differently, and the one made of BUILT-INS is not files -- vam has to
+   * ask the installed CLI for it, and that question can fail. A list fifty
+   * entries short with nothing said about it is "vam could not read the
+   * commands" wearing "no commands match"'s clothes.
+   */
+  describe('a list vam could not fully read says so', () => {
+    const GAP = { code: 'cli-missing', message: 'no `claude` on PATH, so vam cannot list its own' };
+    const withGap = (commands = SLASH_COMMANDS): SessionEntry => ({
+      project: PROJECT,
+      session: { ...SESSION, slashCommands: commands, slashCommandGap: GAP },
+    });
+
+    it('draws nothing at all when nothing matches and nothing failed', () => {
+      // THE OTHER UNKNOWN, pinned so the two cannot converge: a query with no
+      // answer closes the box, and says nothing, because there is nothing to
+      // say.
+      composer();
+      type('/zzz');
+      expect(q('[data-slash-suggest]')).toBeNull();
+      expect(q('[data-slash-gap]')).toBeNull();
+    });
+
+    it('says why the list is short when a query finds nothing and a tier failed', () => {
+      composer(withGap());
+      type('/zzz');
+      expect(q('[data-slash-suggest]')).toBeNull();
+      expect(q('[data-slash-gap]')?.textContent ?? '').toContain('no `claude` on PATH');
+    });
+
+    it('still says it while the list has matches to offer', () => {
+      // A short list that works is the dangerous case: it looks complete.
+      composer(withGap());
+      type('/');
+      expect(suggestedNames()).toEqual(['compact', 'notify', 'review']);
+      expect(q('[data-slash-gap]')?.textContent ?? '').toContain('no `claude` on PATH');
+    });
+
+    it('says nothing when the source read every tier it has', () => {
+      composer();
+      type('/');
+      expect(suggestedNames()).toHaveLength(3);
+      expect(q('[data-slash-gap]')).toBeNull();
+    });
+
+    it('caps the list and counts what it is not drawing', () => {
+      // The CLI's own list runs to fifty-odd commands. Unbounded, the popover
+      // becomes a page floating over the composer, and a page cropped without
+      // saying so is a page that lies about its own length.
+      const many = Array.from({ length: 12 }, (_, i) => ({
+        id: `builtin:c${i}`,
+        name: `wombat${i}`,
+        description: null,
+      }));
+      composer({ project: PROJECT, session: { ...SESSION, slashCommands: many } });
+      type('/wombat');
+      expect(suggestedNames()).toHaveLength(8);
+      expect(q('[data-slash-more]')?.textContent ?? '').toContain('4 more');
+      type('/wombat11');
+      expect(suggestedNames()).toEqual(['wombat11']);
+      expect(q('[data-slash-more]')).toBeNull();
+    });
   });
 });
 
@@ -3678,7 +3889,13 @@ describe('the +1px type bump reaches everything in this pane except out', () => 
     // +1: the question card's REFUSAL line -- Submit is operable while the
     // set is short of a mark now, and says which step it is short of instead
     // of going faint and taking the click with it.
-    '11': 17,
+    // +1: the `!` popover's overflow count -- the list spans the whole column
+    // now, so what it crops has to be counted on screen.
+    // +1: the `/` popover's own overflow count, for the same reason: the
+    // provider's list is fifty-odd commands long.
+    // +1: the `/` popover's gap note -- "vam could not read all of these" is
+    // a different state from "nothing matches" and has to say so.
+    '11': 20,
     // -1: `WaitingNote`'s remedy line, removed with the notice.
     // +1: the column's boundary block. NEW type, so it takes the size it
     // would have after the +1px bump the operator has now asked for twice,
