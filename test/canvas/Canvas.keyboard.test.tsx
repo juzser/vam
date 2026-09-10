@@ -20,6 +20,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { SmithApiError, type SmithClient } from '../../src/renderer/adapter/client.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
+import { buildKeySheet } from '../../src/renderer/keyboard/keysheet.js';
 import { DEFAULT_PANES, SIDEBAR_MAX, SIDEBAR_MIN } from '../../src/renderer/prefs/panes.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
 import type { CanvasSource } from '../../src/renderer/sources/source.js';
@@ -162,6 +163,15 @@ const statusBar = () => document.querySelector('[data-status-bar]')?.textContent
  *  bar's visible text. See `StatusCell` in `Canvas.tsx`. */
 const statusFull = () =>
   document.querySelector('[data-status-bar] [data-status]')?.getAttribute('data-note') ?? '';
+/**
+ * The message cell's OWN drawn text — the bar around it holds the mode, the
+ * route badge and the shortcut tag, so `statusBar()` contains words no refusal
+ * put there. Read beside `statusFull` it is also the 72-character limit stated
+ * as behaviour: a refusal the cell had to shorten is one whose explanation
+ * only a hover can reach, so the two must come back equal.
+ */
+const statusText = () =>
+  document.querySelector('[data-status-bar] [data-status]')?.textContent ?? '';
 
 const actionPane = () =>
   document.querySelector('[data-action-pane]')?.getAttribute('data-action-pane') ?? '';
@@ -442,25 +452,112 @@ describe('jumps', () => {
     expect(focused()).toBe('alpha/a1');
   });
 
-  it('gt steps to the next session and stops at the end', () => {
+  /**
+   * `gg`/`G` WITH NOTHING TO GO TO.
+   *
+   * Both read `entries[0]` / `entries.at(-1)` and moved focus only if the row
+   * came back defined, which on an empty list is a keypress that does nothing
+   * and says nothing. Their neighbours in the same switch — `hjkl` and
+   * `gt`/`gT` — already answer this exact state with this exact sentence; the
+   * two ends of the list were the pair that never learnt it.
+   */
+  it('gg and G answer an empty list rather than doing nothing', () => {
+    render(<Canvas model={EMPTY} />);
+    press('G');
+    expect(statusText()).toContain('no session matches');
+    press('Escape');
+    press('g');
+    press('g');
+    expect(statusText()).toContain('no session matches');
+  });
+
+  /**
+   * A LABEL NOTHING CARRIES.
+   *
+   * Jump mode eats the very next key — that is what lets a label reuse a
+   * letter bound elsewhere — so a key that labels nothing was swallowed, the
+   * mode closed, and the operator was left looking at an unchanged screen
+   * with no way to tell whether they had mistyped the label or the feature
+   * had broken. The dismissal stays (the labels are gone, so waiting for a
+   * second guess would be waiting with nothing on screen to read); the
+   * silence goes.
+   */
+  it('says so when the jump label names nothing', () => {
+    render(<Canvas model={MODEL} />);
+    press('f');
+    press('q'); // three sessions, so the labels are a, s and d
+    expect(focused()).toBe('alpha/a1');
+    expect(statusText()).toContain('nothing is labelled "q"');
+    // Whole, not shortened: the clause that says WHY has to survive the cell.
+    expect(statusText()).toBe(statusFull());
+    // And the mode really did close — the next key is the grammar's again.
+    press('j');
+    expect(focused()).toBe('alpha/a2');
+  });
+
+  /**
+   * `gt`/`gT` STEP OVER A PROJECT, not over a session.
+   *
+   * The sheet has captioned this pair `next project` / `previous project`
+   * since it was written, and the handler stepped one row of the flat session
+   * list — so with two sessions in one project `gt` did not leave the project
+   * at all, and where it did, it arrived by counting sessions rather than by
+   * looking for another project. `alpha` holds two sessions and `beta` one
+   * precisely so the two readings disagree: a session step from `a1` lands on
+   * `a2`, a project step lands on `b1`.
+   */
+  it('gt leaves the project rather than stepping one session', () => {
     render(<Canvas model={MODEL} />);
     press('g');
     press('t');
-    expect(focused()).toBe('alpha/a2');
-    press('g');
-    press('t');
+    expect(focused()).toBe('beta/b1');
     press('g');
     press('t'); // would wrap
     expect(focused()).toBe('beta/b1');
-    expect(screen.getByText('last session already')).toBeTruthy();
+    expect(screen.getByText('last project already')).toBeTruthy();
   });
 
-  it('gT stops at the first', () => {
+  /**
+   * And BACKWARDS it lands on the project's FIRST session, not on the last
+   * one it happens to meet walking up. `alpha` has two sessions, so the two
+   * are different rows: the entry point of a project is its top row — the
+   * most urgent session — whichever direction you arrive from.
+   */
+  it('gT lands on the first session of the previous project', () => {
     render(<Canvas model={MODEL} />);
+    press('G');
+    expect(focused()).toBe('beta/b1');
     press('g');
     press('T');
     expect(focused()).toBe('alpha/a1');
-    expect(screen.getByText('first session already')).toBeTruthy();
+    press('g');
+    press('T');
+    expect(focused()).toBe('alpha/a1');
+    expect(screen.getByText('first project already')).toBeTruthy();
+  });
+
+  /**
+   * THE CAPTION AND THE DISPATCH, HELD TO EACH OTHER.
+   *
+   * Read the chord out of the generated sheet by the sentence it prints, then
+   * press it and assert the PROJECT changed. A test that asserted the table
+   * holds `gt` would pass for any behaviour at all; this one fails if the
+   * caption promises a project and the key steps a session, which is exactly
+   * the state that shipped.
+   */
+  it('the row captioned "next project" moves to another project', () => {
+    const row = buildKeySheet()
+      .flatMap((group) => group.rows)
+      .find((one) => one.label.startsWith('next project'));
+    expect(row).toBeDefined();
+    render(<Canvas model={MODEL} />);
+    const before = focused().split('/')[0];
+    for (const key of [...(row?.keys ?? '')]) {
+      press(key);
+    }
+    const after = focused().split('/')[0];
+    expect(after).not.toBe('');
+    expect(after).not.toBe(before);
   });
 
   it('an abandoned chord moves nothing', () => {
@@ -470,13 +567,52 @@ describe('jumps', () => {
     expect(focused()).toBe('alpha/a1');
   });
 
+  /**
+   * AND SAYS WHICH PAIR WAS NOT BOUND.
+   *
+   * Abandoning the chord rather than falling through to `x`'s own meaning is
+   * the right call and stays — `gx` closing the focused session would be the
+   * expensive mistake. But not acting is not a reason to say nothing: the
+   * operator has typed two keys, watched a whole session stay where it was,
+   * and cannot tell an unbound pair from a dead application. The prefix is
+   * named too, because the state the message is about is the one that just
+   * ended: the `g` is gone, so the next key starts fresh.
+   */
+  it('an abandoned chord says which pair was not bound', () => {
+    render(<Canvas model={MODEL} />);
+    press('g');
+    press('x');
+    expect(statusText()).toContain('"gx" is not a chord');
+    expect(statusText()).toBe(statusFull());
+    // `x` did not also do what a bare `x` does — the session is still there.
+    expect(rows()).toHaveLength(3);
+  });
+
+  /**
+   * The other half of that rule, and the one that keeps the bar readable: a
+   * key bound to NOTHING AT ALL is not a refusal, it is a stray keystroke.
+   * `q` reaches the same `action === null` branch as `gx`, and every unbound
+   * letter, function key and media key on the board reaches it too. A bar
+   * that answered all of them would be a bar nobody reads by the time a real
+   * refusal arrives.
+   */
+  it('stays silent for a key that opens no chord and means nothing', () => {
+    render(<Canvas model={MODEL} />);
+    press('q');
+    expect(statusFull()).toBe('');
+    press('F5');
+    expect(statusFull()).toBe('');
+  });
+
   it('a bare modifier keydown does not abandon a half-typed chord', () => {
     // Reaching for Cmd and thinking better of it must not eat the `g`.
     render(<Canvas model={MODEL} />);
     press('g');
     press('Meta', { metaKey: true });
     press('t');
-    expect(focused()).toBe('alpha/a2');
+    // `gt` completing at all is the assertion; where it lands is
+    // `stepProject`'s business, pinned by the two cases above.
+    expect(focused()).toBe('beta/b1');
   });
 
   it('f arms jump mode, and its first label lands on the first node', () => {
@@ -952,9 +1088,12 @@ describe('renaming, icons and closing', () => {
     expect(iconPicker()?.textContent).toContain('beta work');
   });
 
-  it('gr does nothing — the chord grammar drops an unrecognised second key silently', () => {
+  it('gr does not rename — the chord grammar drops an unrecognised second key', () => {
     // `g` alone opens a chord; an unbound follower must abandon it without
-    // touching storage or announcing anything on the status bar.
+    // touching storage. It used to also say nothing, which this case pinned;
+    // the drop is the part worth pinning — `r` alone renames, and `gr`
+    // reaching that would be the cursor acting on a chord nobody typed — and
+    // it is asserted below over the whole store rather than over the bar.
     localStorage.setItem(
       'vam.prefs.v1',
       JSON.stringify({ icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
@@ -972,8 +1111,12 @@ describe('renaming, icons and closing', () => {
     const storedBefore = localStorage.getItem('vam.prefs.v1');
     press('g');
     press('r');
-    expect(statusBar()).toBe(before);
+    // The rename box did not open and nothing was written; what changed is the
+    // refusal cell, which now names the pair it dropped.
+    expect(renameInput()).toBeNull();
     expect(localStorage.getItem('vam.prefs.v1')).toBe(storedBefore);
+    expect(statusText()).toContain('"gr" is not a chord');
+    expect(before).not.toContain('"gr" is not a chord');
   });
 
   it('x names the session it did not close', () => {

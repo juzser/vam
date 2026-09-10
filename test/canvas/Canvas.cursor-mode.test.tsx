@@ -23,6 +23,32 @@
  * would be indefensible. So option navigation is exactly the state where a
  * question is open and the composer has stood down, which is the state
  * `DetailPanel` already draws.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * `cancelable: true` IS LOAD-BEARING IN THIS FILE. DO NOT DROP IT.
+ *
+ * The rule that keeps the two mode-dependent key sets out of each other's way
+ * is one line in `Canvas.tsx`: `if (event.defaultPrevented) return`. The
+ * options list answers `j` and calls `preventDefault`; the window listener,
+ * which React's root container sits below in the bubble path, then stands
+ * down on that same native event. Neither side enumerates the other's keys —
+ * the whole arrangement rests on that one flag.
+ *
+ * `preventDefault()` on an event built WITHOUT `cancelable` is a no-op by
+ * specification (happy-dom implements that faithfully), so while these helpers
+ * dispatched `new KeyboardEvent('keydown', { bubbles: true })` the flag was
+ * never set, the guard never fired, and every case below ran with the canvas
+ * listener ALSO handling the keystroke the card had just handled.
+ *
+ * They passed anyway — and the reason is the thing worth remembering. Insert's
+ * own `j`/`k` clamped an index into a one-entry list and Insert's `l` was a
+ * bare `return`, so the canvas half of the double-handling did nothing
+ * observable. The suite was green BECAUSE OF THE DEFECT it was later sent to
+ * fix: the moment those branches learnt to say something, the quiet-case
+ * assertion at the bottom of this file went red and exposed the dead guard.
+ *
+ * A real keydown is cancelable. If a future helper here builds one that is
+ * not, this file goes back to proving nothing about which listener owns a key.
  */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
@@ -79,6 +105,18 @@ const QUIET: CanvasModel = {
 };
 
 const mode = () => document.querySelector('[data-mode]')?.textContent ?? '';
+/**
+ * The refusal channel, read in BOTH halves.
+ *
+ * `StatusCell` draws a message shortened to 72 characters and hangs the whole
+ * of it on a tooltip, so a refusal longer than that loses the clause that
+ * explains it to everyone who does not hover. Asserting the drawn text EQUALS
+ * the full text is that limit stated as behaviour, against the real
+ * `truncateStatus` rather than against a number copied out of it.
+ */
+const statusCell = () => document.querySelector('[data-status-bar] [data-status]');
+const statusText = () => statusCell()?.textContent ?? '';
+const statusFull = () => statusCell()?.getAttribute('data-note') ?? '';
 const focusedSession = () =>
   document
     .querySelector('[data-row-cursor]')
@@ -106,11 +144,22 @@ function press(key: string, modifiers: KeyboardEventInit = {}) {
  * once the keyboard is inside the options list. It must BUBBLE: React listens
  * at its root container, so an event dispatched straight at the window never
  * passes the component that would handle it.
+ *
+ * AND IT MUST BE CANCELABLE, which it was not. `preventDefault()` on an event
+ * built without `cancelable` is a no-op by specification — happy-dom
+ * implements that faithfully — so `defaultPrevented` stayed false however
+ * loudly the options list answered a key, and the canvas listener's whole
+ * "a key something else has already answered is not this grammar's" guard was
+ * inert in every test in this file. A real `keydown` is cancelable; the
+ * cases below only passed because Insert's own branches happened to do
+ * nothing, which is the very defect this file is now also about.
  */
 function pressFocused(key: string, modifiers: KeyboardEventInit = {}) {
   const target = document.activeElement ?? window;
   act(() => {
-    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...modifiers }));
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...modifiers }),
+    );
   });
 }
 
@@ -392,5 +441,62 @@ describe('Insert owns the horizontal keys even with no question open', () => {
     press('l');
     expect(focusedSession()).toBe('a1');
     expect(mode()).toBe('Insert');
+  });
+});
+
+/**
+ * ABSENT, NOT DIMMED — and where a key cannot be withdrawn, it refuses aloud.
+ *
+ * `hjkl` cannot be withdrawn in Insert: the same four keys move an open
+ * question's options, so they are live in the mode and merely have nothing to
+ * act on in the state the operator is actually in. All three did the one thing
+ * this repo will not have a control do — nothing, silently. `j`/`k` clamped an
+ * index into a list `buildActions` has returned ONE entry from since the
+ * command strip left the pane, so the clamp could not move; `l` was an
+ * unconditional `return` with a comment explaining why it must not fall
+ * through, which is an argument for not acting rather than for not saying so.
+ *
+ * The noise case is asserted beside them: with a question open the card
+ * answers `j` itself and calls `preventDefault`, the canvas listener stands
+ * down at `event.defaultPrevented`, and nothing is said. A refusal on an
+ * ordinary walk down three options would be exactly the noise that teaches an
+ * operator to stop reading the bar.
+ */
+describe('Insert says why a key cannot act instead of eating it', () => {
+  it('answers j and k when the pane cursor has one stop', () => {
+    render(<Canvas model={QUIET} />);
+    press('I');
+    press('j');
+    expect(statusText()).toContain('prompt');
+    expect(statusText()).toBe(statusFull());
+    const afterDown = statusText();
+    press('k');
+    expect(statusText()).toContain('prompt');
+    expect(statusText()).toBe(statusFull());
+    // Two directions, two sentences: a refusal that reads the same either way
+    // cannot tell the operator which key it answered.
+    expect(statusText()).not.toBe(afterDown);
+  });
+
+  it('answers l when there is no question to step through', () => {
+    render(<Canvas model={QUIET} />);
+    press('I');
+    press('l');
+    expect(statusText()).not.toBe('');
+    expect(statusText()).toBe(statusFull());
+    // Still no cursor movement — the refusal replaces the silence, not the
+    // guard that stopped `l` reaching the tab ring.
+    expect(focusedSession()).toBe('a1');
+    expect(mode()).toBe('Insert');
+  });
+
+  it('stays quiet while the options list is answering the same keys', () => {
+    render(<Canvas model={ASKING} />);
+    press('I');
+    pressFocused('j');
+    expect(cursorOption()).toBe('Cobalt');
+    expect(statusText()).toBe('');
+    pressFocused('l');
+    expect(statusText()).toBe('');
   });
 });

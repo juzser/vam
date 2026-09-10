@@ -17,7 +17,10 @@
  * a swatch in the settings form reaches it, and -- since the settings audit --
  * whether the narrow settings nav has an ACCESSIBLE NAME at a breakpoint jsdom
  * cannot see, what the Remote section's buttons actually paint, and what is
- * left of the favicon's mark once a tab has rasterised it at 16 and 32). This
+ * left of the favicon's mark once a tab has rasterised it at 16 and 32, and --
+ * since the keyboard audit -- which listener owns a keystroke, which is
+ * decided by `defaultPrevented` on a CANCELABLE event and so cannot be
+ * measured with a hand-built one). This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
  * soon as any assertion throws — so CI can hold them.
@@ -52,6 +55,7 @@ const GUARDS = [
   'pane-colour-shots',
   'settings-chrome-shots',
   'favicon-shots',
+  'key-truth-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

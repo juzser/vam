@@ -272,6 +272,22 @@ export type KeyAction =
 export type ChordStep = {
   readonly state: ChordState;
   readonly action: KeyAction | null;
+  /**
+   * The keystroke that ABANDONED a half-typed chord — the prefix already
+   * typed and the key that followed it — or `null` on every other step.
+   *
+   * The reducer knows the difference between "nothing is bound to this key"
+   * and "nothing is bound to this key AFTER `g`"; its caller could not, both
+   * arriving as `action: null`, so the second was as silent as the first and
+   * a mistyped chord looked exactly like a frozen application. It is a field
+   * rather than a `kind` on the action because nothing happens: an action is
+   * something to do, and this is a report about a keystroke that did not
+   * become one.
+   *
+   * REQUIRED, not optional: every return below has to state it, so a step
+   * added later cannot inherit `null` by being forgotten.
+   */
+  readonly abandoned: Chord | null;
 };
 
 /**
@@ -502,10 +518,18 @@ function isPrefix(key: string): key is Prefix {
  * Escape always wins: it cancels whatever is half-typed *and* reports the
  * cancel, because the top layer may also need closing.
  *
- * An unrecognised second key **abandons the chord silently** rather than
- * falling through to its standalone meaning. `gj` doing nothing is a key that
- * was wasted; `gj` moving down is the cursor going somewhere nobody asked for,
- * and on a canvas you navigate by muscle that is the more expensive mistake.
+ * An unrecognised second key **abandons the chord** rather than falling
+ * through to its standalone meaning. `gj` doing nothing is a key that was
+ * wasted; `gj` moving down is the cursor going somewhere nobody asked for, and
+ * on a canvas you navigate by muscle that is the more expensive mistake.
+ *
+ * It used to abandon it SILENTLY, and that was a second decision wearing the
+ * first one's clothes. Not acting is right; saying nothing left the operator
+ * two keystrokes into a deliberate spelling with an unchanged screen and no
+ * way to tell an unbound pair from a frozen application. So the step reports
+ * the pair it dropped (`abandoned`) and the caller refuses out loud — the
+ * fallback stays closed, and the house rule that a control which cannot act
+ * must be withdrawn or say so is kept by a key that cannot be withdrawn.
  */
 export function resolveChord(
   state: ChordState,
@@ -513,7 +537,7 @@ export function resolveChord(
   overrides: KeyBindings = activeBindings(),
 ): ChordStep {
   if (key === 'Escape') {
-    return { state: EMPTY_CHORD, action: { kind: 'cancel' } };
+    return { state: EMPTY_CHORD, action: { kind: 'cancel' }, abandoned: null };
   }
   const tables = tablesFor(overrides);
 
@@ -521,14 +545,18 @@ export function resolveChord(
     const action = tables.chords[state.pending]?.[key];
     // A completed chord clears the memory, so `ggg` is `gg` then a fresh `g`
     // rather than two jumps to the top.
-    return { state: EMPTY_CHORD, action: action ?? null };
+    return {
+      state: EMPTY_CHORD,
+      action: action ?? null,
+      abandoned: action === undefined ? { prefix: state.pending, key } : null,
+    };
   }
 
   if (isPrefix(key)) {
-    return { state: { pending: key }, action: null };
+    return { state: { pending: key }, action: null, abandoned: null };
   }
 
-  return { state: EMPTY_CHORD, action: tables.top[key] ?? null };
+  return { state: EMPTY_CHORD, action: tables.top[key] ?? null, abandoned: null };
 }
 
 /**
