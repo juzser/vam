@@ -102,7 +102,9 @@ import type {
   SlashCommand,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
-import { questionKeys } from '../keyboard/question-keys.js';
+import { normalizeKey } from '../keyboard/chords.js';
+import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
+import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
 import { ShortcutTip } from '../keyboard/ShortcutTip.js';
 import { useHistoryReader } from '../sources/history-reader.js';
 import { describeFailure } from '../sources/port.js';
@@ -1963,65 +1965,70 @@ function QuestionCard({
     });
   };
 
-  // The list walks with the arrows, and jumps with the numbers; every option is
-  // a real button, so Enter and Space already mark one and Tab already leaves.
-  //
-  // The digits are BARE, and safely so because this listener is the listbox's:
-  // it can only fire while the keyboard is already inside the options list,
-  // which is where `i` puts it. The canvas grammar binds no bare digit at all,
-  // and the bare letters that do mean something there (`j`, `k`, and the rest)
-  // are letters. So a number here cannot be a keystroke meant for somewhere
-  // else -- and with no question open there is no list to hold focus.
+  /**
+   * The listbox's keys — ONE RESOLUTION, AND IT IS NOT THIS FILE'S.
+   *
+   * `resolveQuestionKey` (`keyboard/question-keys.ts`) turns a NORMALIZED
+   * keystroke into what the card should do, with the operator's own bindings
+   * ahead of the built-in digits and Enter/Space. That module carries the
+   * argument and audit F2, which is what this listener used to be: a second
+   * vocabulary (raw `event.key`) resolved in a second order (its own digits
+   * first), so a motion rebound onto `1` was silently lost and one rebound
+   * onto `Mod-j` could never match at all.
+   *
+   * The blanket "reject anything modified" guard is gone with it, and nothing
+   * is weaker for that: a normalized `Mod-c` is not `c` and a normalized
+   * `Mod-2` is not `2`, so the copy chord and the tab chords reach the window
+   * listener by construction instead of by this file listing them.
+   *
+   * The digits stay BARE and are still safe for the reason they always were:
+   * this listener only fires while the keyboard is already inside the options
+   * list, and the canvas grammar binds no bare digit.
+   */
   const onKeys = (event: KeyboardEvent<HTMLDivElement>) => {
-    // A MODIFIED key is never one of ours. Scope is what makes the bare keys
-    // below safe -- this listener only hears anything while the keyboard is
-    // already in the options list -- but scope says nothing about modifiers,
-    // and reading `event.key` alone made `Cmd+C` match the `c` branch (killing
-    // the copy and opening the composer) and `Cmd+2` mark an option on its way
-    // to the chord layer. A chord is not text and not a pick, so it belongs to
-    // the grammar and this stands aside, which is the same rule the prompt box
-    // already follows.
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
-    // `c` for chat, the way out of the picker and into prose. Scoped like the
-    // digits: the listener is the listbox's, so it only hears a key while the
-    // keyboard is already in the options list -- which is where `i` puts it.
-    // The entry itself is a button outside the list, reached by Tab or mouse
-    // and activated by Enter, Space or a click, like any other.
-    if (keys.chat.includes(event.key)) {
+    const action = resolveQuestionKey(normalizeKey(event));
+    if (action === null) return;
+    const buttons = [
+      ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-question-option]'),
+    ];
+    if (action.kind === 'chat') {
+      // The way out of the picker and into prose. The entry itself is a button
+      // outside the list, reached by Tab or mouse and activated by Enter,
+      // Space or a click, like any other.
       event.preventDefault();
       onChat();
       return;
     }
-    const buttons = [
-      ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-question-option]'),
-    ];
-    if (/^[1-9]$/.test(event.key)) {
-      const at = Number(event.key) - 1;
-      const option = question?.options[at];
+    if (action.kind === 'mark') {
+      const option = question?.options[action.at];
       if (option === undefined) return;
       event.preventDefault();
       toggle(option.label);
       // The keyboard follows the mark, so the arrows walk on from where you
       // landed rather than from wherever you were.
-      buttons[at]?.focus();
+      buttons[action.at]?.focus();
       return;
     }
     /**
      * `j`/`k` walk the options and `h`/`l` walk the STEPS — the Insert half of
-     * the operator's table, with both axes meaning something now.
+     * the operator's table, with both axes meaning something.
      *
      * The horizontal pair used to do nothing at all, deliberately: unhandled,
-     * it falls through to the canvas grammar and walks the node graph under a
-     * pane the operator is reading, which is the same "the keys work, they
-     * just do the wrong thing" failure the mode naming exists to end. It is
-     * still stopped from reaching the canvas; a set of questions simply gives
-     * it the meaning the vertical pair always had, and it is the obvious one
-     * -- down the options, across the questions. `H` — capital, a different key — is still the way
-     * back to Select, and Escape still leaves.
+     * it falls through to the canvas grammar and walks under a pane the
+     * operator is reading, which is the same "the keys work, they just do the
+     * wrong thing" failure the mode naming exists to end. It is still stopped
+     * from reaching the canvas; a set of questions simply gives it the meaning
+     * the vertical pair always had — down the options, across the questions.
+     * `H` (capital, a different key) is still the way back to Select, and
+     * Escape still leaves.
+     *
+     * BEFORE the option-cursor check below, because a step whose question is
+     * already answered draws no options at all: gating the step walk on a
+     * focused option would strand the keyboard on that step.
      */
-    if (keys.prev.includes(event.key) || keys.next.includes(event.key)) {
+    if (action.kind === 'walkStep') {
       event.preventDefault();
-      walk(keys.next.includes(event.key) ? 1 : -1);
+      walk(action.delta);
       return;
     }
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -2038,19 +2045,15 @@ function QuestionCard({
      * in the list — mark this option — because the canvas listener stands
      * aside for a key that has already been answered.
      */
-    if (event.key === 'Enter' || event.key === ' ') {
+    if (action.kind === 'toggle') {
       const option = question?.options[at];
       if (option === undefined) return;
       event.preventDefault();
       toggle(option.label);
       return;
     }
-    const down = keys.down.includes(event.key);
-    const up = keys.up.includes(event.key);
-    if (!down && !up) return;
     event.preventDefault();
-    const step = down ? 1 : -1;
-    buttons[(at + step + buttons.length) % buttons.length]?.focus();
+    buttons[(at + action.delta + buttons.length) % buttons.length]?.focus();
   };
 
   if (question === undefined) return null;
@@ -2086,12 +2089,20 @@ function QuestionCard({
           // options list carries them, and a step whose question is already
           // answered HAS no options list. Without this the keyboard reaches
           // that step and cannot leave it.
+          //
+          // THROUGH THE SAME RESOLUTION THE LIST USES (audit F2). It read the
+          // literals `h`, `l` and the two arrows, so an operator who moved the
+          // horizontal motion kept a strip answering the keys they had moved
+          // AWAY from and ignoring the ones they had moved to — the identical
+          // defect `question-keys.ts` was written to end one element over, in
+          // a second copy nobody looked at. Only `walkStep` is taken: the
+          // tabs are real buttons, so Enter and Space activate them natively
+          // and a `toggle` claimed here would cancel that.
           onKeyDown={(event) => {
-            if (event.metaKey || event.ctrlKey || event.altKey) return;
-            const forward = event.key === 'l' || event.key === 'ArrowRight';
-            if (!forward && event.key !== 'h' && event.key !== 'ArrowLeft') return;
+            const action = resolveQuestionKey(normalizeKey(event));
+            if (action?.kind !== 'walkStep') return;
             event.preventDefault();
-            walk(forward ? 1 : -1);
+            walk(action.delta);
           }}
           className="flex flex-wrap items-center gap-1 border-line border-b pb-1.5"
         >
@@ -3070,40 +3081,24 @@ export function DetailPanel(props: DetailPanelProps) {
   }, [composing]);
 
   /**
-   * ENTERING INSERT PUTS THE KEYBOARD ON THE FIRST OPTION, AND LEAVING TAKES
-   * IT BACK — the wiring that makes "`hjkl` chooses an option in Insert" true.
+   * THIS PANE NO LONGER MOVES FOCUS TO FOLLOW THE MODE — the mode follows
+   * focus, so an effect that did both was the loop as well as the bug.
    *
-   * The option cursor is DOM focus, not a second index: the options are real
-   * buttons, so focus is already the thing the browser, the screen reader and
-   * the focus ring all agree on, and a parallel index in the canvas would be a
-   * second notion of where the cursor is — the exact duplication the mode
-   * naming exists to remove.
+   * What stood here watched `active` (`isFocused && mode === 'insert'`) and
+   * focused the first option on the way in, blurring it on the way out. Both
+   * halves were necessary while the mode was a flag, and both were incomplete:
+   * the entry took nothing when the pane had no question (audit F5 — Insert
+   * with nothing focused to insert into), and the exit blurred ONLY
+   * `[data-question-option]`, so `Mod-0` typed in the composer left a
+   * read-only textarea holding the keyboard while the bar read Select (F4).
    *
-   * Both directions are necessary. Without the first, `I` sets Insert while
-   * focus is still on the body, so `j` reaches the canvas grammar and walks
-   * the session list — the operator's original complaint. Without the second,
-   * `H` returns to Select while focus is still inside the listbox, so the list
-   * goes on eating `j` in a mode where it belongs to the sidebar. That is the
-   * same defect mirrored, and it is the one a reader will not think of.
+   * `Canvas.tsx` owns both directions now, through `keyboard/focus-scope.ts`:
+   * `focusInsertStop` on the way in — which lands on this pane's first stop in
+   * document order, the question's options when there are any and the prompt
+   * row otherwise — and `releaseInsert` on the way out, which blurs whatever
+   * is in an insert scope rather than one attribute's worth of it. One
+   * authority for where the keyboard is, which is the whole point.
    */
-  const wasActive = useRef(false);
-  useEffect(() => {
-    const leaving = wasActive.current && !active;
-    wasActive.current = active;
-    if (active) {
-      firstOptionRef.current?.focus();
-      return;
-    }
-    // ONLY ON THE WAY OUT, never on a first render. `i` focuses an option from
-    // the effect above while `active` is still false — the composer path, which
-    // does not touch the mode — so a blur that fired whenever `active` was
-    // false would undo it on mount and leave the keyboard nowhere.
-    if (!leaving) return;
-    const focused = document.activeElement;
-    if (focused instanceof HTMLElement && focused.hasAttribute('data-question-option')) {
-      focused.blur();
-    }
-  }, [active]);
 
   /**
    * The `out` region rides its own bottom: the newest output is the thing a
@@ -4597,6 +4592,12 @@ export function DetailPanel(props: DetailPanelProps) {
       {current !== 'Terminal' && newestQuestion !== null && (
         <div
           data-question-bar
+          // AN INSERT SCOPE (`keyboard/focus-scope.ts`): while anything in
+          // here holds the keyboard, the app IS in Insert. That is the whole
+          // definition of the mode now, which is why there is no flag left
+          // that could disagree with it. The card's options are also the
+          // LANDING `I` aims at, by being the first stop in document order.
+          {...insertScopeMark}
           className="flex flex-none flex-col gap-2.5 border-line border-t bg-pane px-3.5 py-3"
         >
           {/* The factory's governance queue — findings awaiting a waiver, and
@@ -4644,6 +4645,9 @@ export function DetailPanel(props: DetailPanelProps) {
       {current !== 'Terminal' && !composerHidden && (
         <div
           data-composer-bar
+          // The other insert scope, and the common one: with no question open
+          // this block is the whole of Insert. See the question bar above.
+          {...insertScopeMark}
           className={[
             'flex flex-none flex-col gap-2.5 bg-pane px-3.5 py-3',
             newestQuestion === null ? 'border-line border-t' : '',
@@ -4759,11 +4763,28 @@ export function DetailPanel(props: DetailPanelProps) {
               ))}
             </div>
           )}
+          {/* THE ROW IS THE INSERT LANDING, AND THE BOX INSIDE IT IS NOT.
+              `I` moves the keyboard into the pane and `i` puts the caret in
+              the prose box; they were the same gesture in the flag's day,
+              because the flag could not tell them apart. Landing on the ROW
+              is what keeps them two: this element takes the focus, Insert's
+              own `j`/`k` still reach the window listener from it (a focused
+              TEXTAREA would be swallowed by that listener's typing guard, and
+              the refusal this pane owes for a one-stop cursor would vanish),
+              and `Enter` here is what opens the box for typing.
+
+              `data-action-id="prompt"` is the action list's name for the same
+              row; the two are deliberately not merged. One says WHICH action
+              the pane cursor is on, the other says the keyboard can be sent
+              here — a stop with no action and an action with no stop are both
+              possible, and a shared attribute would hide the day one appears. */}
           <div
             data-prompt-box
             data-action-id="prompt"
+            {...insertStopMark}
+            tabIndex={-1}
             className={[
-              'flex flex-col gap-2.5 rounded-[10px] border bg-card px-3 py-2.5',
+              'flex flex-col gap-2.5 rounded-[10px] border bg-card px-3 py-2.5 outline-none',
               active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
             ].join(' ')}
           >

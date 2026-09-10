@@ -439,6 +439,16 @@ describe('the cursor follows the step it walked to', () => {
 
   it('lands on the new step first option', () => {
     draw([COLOUR, APPLES], { active: true });
+    // THE PRECONDITION IS STAGED, not awaited. Entering Insert is
+    // `Canvas.tsx`'s job now, through `keyboard/focus-scope.ts`
+    // (`focusInsertStop` puts the keyboard on this card's first option) —
+    // this component no longer focuses anything because `active` turned
+    // true, which was one of the two authorities over focus the mode rewrite
+    // collapsed into one. That entry is asserted end-to-end in
+    // `Canvas.mode-boundary.test.tsx`; what THIS case is about is the step
+    // after it — that walking carries the cursor rather than dropping it on
+    // the body, which is a `QuestionCard` fact and still lives here.
+    options()[0]?.focus();
     expect(document.activeElement).toBe(options()[0]);
     fireEvent.keyDown(listbox(), { key: 'l' });
     expect(text()).toContain('Which fruit do you prefer?');

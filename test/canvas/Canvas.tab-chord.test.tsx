@@ -336,8 +336,12 @@ describe('the generated key sheet tells the truth about the digits', () => {
   it('splits hjkl the same way — a session in Select, an option in Insert', () => {
     const walk = rows().filter((candidate) => candidate.keys === 'j');
     expect(walk.map((row) => row.mode)).toEqual(['select', 'insert']);
-    expect(walk.find((row) => row.mode === 'select')?.label).toContain('session list');
-    expect(walk.find((row) => row.mode === 'insert')?.label).toContain('options');
+    // The captions are per DIRECTION now as well as per mode (audit F1: all
+    // four Select motions read "the session list" while `h`/`l` walk a
+    // project's tabs), so this reads `j`'s own two rather than the family's
+    // one sentence.
+    expect(walk.find((row) => row.mode === 'select')?.label).toContain('session');
+    expect(walk.find((row) => row.mode === 'insert')?.label).toContain('option');
   });
 
   it('says the ninth is the last tab rather than a ninth one', () => {

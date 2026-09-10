@@ -57,6 +57,7 @@ import {
   useState,
 } from 'react';
 import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
+import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { parseAnsi, spanClasses } from './terminal-ansi.js';
 import { placeCursor } from './terminal-cursor.js';
 import { fitPane, sameSize } from './terminal-size.js';
@@ -734,6 +735,14 @@ export function TerminalTab({
           badge below rather than by a row of chrome above: a surface that eats
           every key with no way out is the trap the sentence that stood here
           promised this was not. */}
+      {/* AN INSERT SCOPE, AND AN INSERT STOP (`keyboard/focus-scope.ts`).
+          While this pane holds the keyboard, printable keys are typed into
+          somebody's running agent — which is as literally Insert as this
+          application gets, and the status bar used to read Select through the
+          whole of it. Marking it makes the bar honest here, and gives the pane
+          a keyboard exit it did not have: `Mod-0` releases whatever is in an
+          insert scope, and the comment above could previously only offer Tab
+          because Escape is one of the keys this pane SENDS. */}
       {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region
           is the one case where WCAG 2.1.1 requires exactly this, and this one
           now also takes text. It is a named <section> and not a textbox role:
@@ -743,6 +752,8 @@ export function TerminalTab({
       <section
         ref={paneRef}
         data-terminal-pane
+        {...insertScopeMark}
+        {...insertStopMark}
         // biome-ignore lint/a11y/noNoninteractiveTabindex: see above -- a scrollable region that also takes keys
         tabIndex={0}
         onKeyDown={onKeyDown}

@@ -84,11 +84,20 @@ export type ShortcutSection = {
   readonly rows: readonly BindingRow[];
 };
 
+/**
+ * WHAT EACH MODE IS, stated as the rule rather than as a description.
+ *
+ * The mode is not a setting and not a toggle: it is a report about where the
+ * keyboard is (`keyboard/focus-scope.ts`). Saying so is the difference between
+ * an operator who knows how to leave Insert and one hunting for the key that
+ * switches it — and the hint that stood here claimed the two key sets "never
+ * clash", which is precisely what an audit then found four leaks in.
+ */
 const MODE_HINTS: Readonly<Record<CursorMode, string>> = {
   select:
-    'the keyboard is on the session list. The same keys as Insert, doing different work — that is why they never clash.',
+    'nothing in a response pane holds the keyboard. This is the resting mode, and any key that takes the keyboard back out of a pane returns to it.',
   insert:
-    'the keyboard is in the response pane. These keys are the ones above, meaning something else while you are here.',
+    'something in a response pane holds the keyboard — an open question’s options, the prompt box, or a terminal. The mode is that fact rather than a switch: these keys are the ones above, meaning something else while you are there.',
 };
 
 export function shortcutSections(groups: readonly BindingGroup[]): readonly ShortcutSection[] {

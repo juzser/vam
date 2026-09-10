@@ -160,9 +160,19 @@ describe('the label and the shortcut read on one line', () => {
 describe('a mode-dependent binding is never flattened to one meaning', () => {
   it('states the meaning of the mode that applies, when the caller knows it', () => {
     renderTip({ label: 'move left', action: MOVE_LEFT, mode: 'insert' });
-    const text = openByFocus().textContent ?? '';
-    expect(text).toContain(MODE_TITLES.insert);
-    expect(text).not.toContain(MODE_TITLES.select);
+    const tip = openByFocus();
+    expect(tip.textContent ?? '').toContain(MODE_TITLES.insert);
+    // ONE LINE, not two — asserted structurally rather than by scanning the
+    // whole tip for the other mode's name. That scan was a proxy for this and
+    // stopped being one: `h` in Insert is the way BACK to Select, so its
+    // caption now says the word (audit F1 — it used to claim `h` walked a
+    // question's options, which is the one thing it never does). Counting the
+    // caption lines is what "did not flatten both modes into one" always meant.
+    expect(tip.querySelectorAll('[data-tip-keys]')).toHaveLength(1);
+    const lines = shortcutLines(MOVE_LEFT, 'insert', NO_BINDINGS);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.caption).toContain(`${MODE_TITLES.insert} · `);
+    expect(lines[0]?.caption).not.toContain(`${MODE_TITLES.select} · `);
   });
 
   it('states both, distinctly, when the button is reachable in either mode', () => {

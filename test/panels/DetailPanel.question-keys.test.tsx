@@ -134,3 +134,73 @@ describe('the question card under a rebound grammar', () => {
     expect(document.activeElement).toBe(options()[1]);
   });
 });
+
+/**
+ * AUDIT F2, DRIVEN THROUGH THE CARD.
+ *
+ * `test/keyboard/question-keys.test.ts` holds the resolution itself; these
+ * press keys at the real widget and read the real DOM, because the leak was
+ * never in a resolver — it was that the widget did not use one.
+ */
+describe('the card resolves in the grammar’s vocabulary, and in its order', () => {
+  const marked = () => options().filter((el) => el.getAttribute('data-picked') === 'true');
+
+  it('gives a rebound motion a digit it used to lose to `mark`', () => {
+    setActiveBindings({ 'move:down': ['1'] });
+    draw();
+    options()[0]?.focus();
+    fireEvent.keyDown(listbox(), { key: '1' });
+    // WAS: `1` marked option one — the built-in digits were resolved before
+    // the operator's table — so a rebind the settings editor had accepted did
+    // nothing at all, under a sheet still promising the new key.
+    expect(document.activeElement).toBe(options()[1]);
+    expect(marked()).toHaveLength(0);
+  });
+
+  it('still marks by the digits the operator did NOT spend', () => {
+    setActiveBindings({ 'move:down': ['1'] });
+    draw();
+    options()[0]?.focus();
+    fireEvent.keyDown(listbox(), { key: '2' });
+    expect(marked()).toHaveLength(1);
+    expect(marked()[0]).toBe(options()[1]);
+  });
+
+  it('answers a motion the operator bound to a CHORD', () => {
+    setActiveBindings({ 'move:down': ['Mod-j'] });
+    draw();
+    options()[0]?.focus();
+    // WAS: rejected by a blanket "anything modified is not ours" guard, and
+    // unmatchable anyway because the card compared raw `event.key` (`j`)
+    // against the stored spelling (`Mod-j`). It fell through to Canvas, which
+    // walked the pane's ACTION index instead of these options.
+    fireEvent.keyDown(listbox(), { key: 'j', metaKey: true });
+    expect(document.activeElement).toBe(options()[1]);
+  });
+
+  it('leaves an unbound chord to the window listener, unmarked and unwalked', () => {
+    draw();
+    options()[0]?.focus();
+    fireEvent.keyDown(listbox(), { key: '2', metaKey: true, code: 'Digit2' });
+    fireEvent.keyDown(listbox(), { key: 'c', metaKey: true });
+    expect(document.activeElement).toBe(options()[0]);
+    expect(marked()).toHaveLength(0);
+  });
+
+  it('walks the STEPS from the step strip with the rebound key, not with `l`', () => {
+    // The strip carried its own hardcoded `h`/`l`/arrows — a second copy of
+    // the vocabulary, one element over from the list that had already been
+    // fixed. A step whose question is answered draws no options, so the strip
+    // is the only thing holding the keyboard on it.
+    setActiveBindings({ 'move:right': ['.'], 'move:left': [','] });
+    draw();
+    const strip = document.querySelector<HTMLElement>('[data-question-steps]') as HTMLElement;
+    expect(step()?.textContent).toContain('Colour');
+    fireEvent.keyDown(strip, { key: 'l' });
+    expect(step()?.textContent).toContain('Colour');
+    fireEvent.keyDown(strip, { key: '.' });
+    expect(step()?.textContent).toContain('Fruit');
+    fireEvent.keyDown(strip, { key: ',' });
+    expect(step()?.textContent).toContain('Colour');
+  });
+});

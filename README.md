@@ -207,7 +207,9 @@ whichever your platform uses.
 | `p` | Reveal the focused session's project in the sidebar |
 | `Enter` | Open the focused step |
 | `Mod-k` | Open the command palette |
-| `Mod-1` `Mod-2` `Mod-3` `Mod-4` `Mod-5` `Mod-6` `Mod-7` `Mod-8` `Mod-9` | Select a session tab by position, in the focused pane's own strip — the same meaning wherever the keyboard is (`Mod-9` is always the last one) |
+| `Mod-1` `Mod-2` `Mod-3` `Mod-4` `Mod-5` `Mod-6` `Mod-7` `Mod-8` `Mod-9` | Select a session tab by position, counting ACROSS every pane on screen in the order the strips draw them — the same meaning wherever the keyboard is, and picking a tab another pane holds moves the keyboard there with it. `Mod-9` is always the last one. Past nine open tabs the digits stop covering everything: that is the price of counting one list rather than one per strip, and `Mod-Shift-[` / `]` is how you reach the rest |
+| `Mod-Shift-[` / `Mod-Shift-]` | Previous / next session tab, over that same across-panes list, wrapping at both ends — the browser's own tab gesture, and it fires from inside the prompt box |
+| `Mod-Alt-[` / `Mod-Alt-]` | Previous / next pane — one modifier up from the tab pair, and the same act as `zw` / `zW` |
 | `Alt-1` `Alt-2` `Alt-3` `Alt-4` | Show a view in the focused pane — Response, PRs, Terminal, Agents, in that fixed order. A digit always names the SAME view: if this source has no terminal, `Alt-3` says so rather than opening whatever sits third |
 | `Alt-5` `Alt-6` `Alt-7` `Alt-8` `Alt-9` | Nothing — bound only so they say there is no fifth view instead of reaching the browser |
 | `<` / `>` | Narrow / widen the focused side pane |

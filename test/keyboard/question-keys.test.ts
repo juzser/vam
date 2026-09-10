@@ -10,7 +10,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { questionKeys } from '../../src/renderer/keyboard/question-keys.js';
+import { normalizeKey } from '../../src/renderer/keyboard/chords.js';
+import { questionKeys, resolveQuestionKey } from '../../src/renderer/keyboard/question-keys.js';
 
 describe('questionKeys', () => {
   it('is hjkl plus the arrows on the shipped grammar', () => {
@@ -51,5 +52,95 @@ describe('questionKeys', () => {
     // agree.
     expect(questionKeys({ 'move:down': ['c'] }).chat).toEqual([]);
     expect(questionKeys({ 'move:down': ['c'] }).down).toEqual(['c', 'ArrowDown']);
+  });
+});
+
+/**
+ * AUDIT F2 — THE CARD USED TO RESOLVE KEYS BEFORE THE GRAMMAR DID, AND BY A
+ * DIFFERENT VOCABULARY.
+ *
+ * The listbox sits below the window listener in the bubble path, so whatever
+ * it claims, it claims first. Two things then leaked, and both are one
+ * mistake: the card read RAW `event.key` and hard-ordered its own built-ins
+ * ahead of the operator's table.
+ *
+ *  - The settings editor happily accepts a rebind of "down" to `1`. `1`
+ *    already marked the first option and was checked FIRST, so the rebind
+ *    silently lost: the sheet promised `1` walks the options, and it did not.
+ *
+ *  - Rebind a motion to a MODIFIED key and `questionKeys()` returns `Mod-j`,
+ *    which no raw `event.key` can ever equal — and the card rejected every
+ *    modified event before matching anyway. The keystroke fell through to
+ *    `Canvas`, which resolved it as `move` and walked the pane's ACTION index
+ *    instead of the options the sheet named.
+ *
+ * `resolveQuestionKey` is the fix: one resolution, over the same normalized
+ * spelling `resolveChord` uses, with the operator's own bindings ahead of the
+ * built-ins.
+ */
+describe('resolveQuestionKey — one resolution, in one vocabulary', () => {
+  const at = (event: Parameters<typeof normalizeKey>[0], overrides = {}) =>
+    resolveQuestionKey(normalizeKey(event), overrides);
+
+  it('walks the options and the steps on the shipped grammar', () => {
+    expect(at({ key: 'j' })).toEqual({ kind: 'walkOption', delta: 1 });
+    expect(at({ key: 'k' })).toEqual({ kind: 'walkOption', delta: -1 });
+    expect(at({ key: 'l' })).toEqual({ kind: 'walkStep', delta: 1 });
+    expect(at({ key: 'h' })).toEqual({ kind: 'walkStep', delta: -1 });
+  });
+
+  it('answers the arrows, which are not the operator’s to unbind in a listbox', () => {
+    expect(at({ key: 'ArrowDown' })).toEqual({ kind: 'walkOption', delta: 1 });
+    expect(at({ key: 'ArrowRight' })).toEqual({ kind: 'walkStep', delta: 1 });
+  });
+
+  it('marks by number, and takes Enter and Space as the pick', () => {
+    expect(at({ key: '3' })).toEqual({ kind: 'mark', at: 2 });
+    expect(at({ key: 'Enter' })).toEqual({ kind: 'toggle' });
+    expect(at({ key: ' ' })).toEqual({ kind: 'toggle' });
+  });
+
+  it('leaves the picker for prose on `c`', () => {
+    expect(at({ key: 'c' })).toEqual({ kind: 'chat' });
+  });
+
+  it('gives the operator’s rebound motion the key, even when a digit held it', () => {
+    // THE SILENT LOSS, made loud. `1` marked option one and was resolved
+    // first, so a rebind the settings editor had accepted did nothing at all.
+    const moved = { 'move:down': ['1'] };
+    expect(at({ key: '1' }, moved)).toEqual({ kind: 'walkOption', delta: 1 });
+    // And the digits that were not taken still mark, so the operator loses
+    // exactly the one they spent and nothing else.
+    expect(at({ key: '2' }, moved)).toEqual({ kind: 'mark', at: 1 });
+  });
+
+  it('answers a MODIFIED motion the operator bound, rather than dropping it', () => {
+    // `questionKeys()` has always returned `Mod-j` here; the card rejected
+    // every modified event before it could match, and `Canvas` then walked
+    // the pane's action index under a caption promising the options.
+    const moved = { 'move:down': ['Mod-j'] };
+    expect(at({ key: 'j', metaKey: true }, moved)).toEqual({ kind: 'walkOption', delta: 1 });
+  });
+
+  it('leaves an UNBOUND chord to the grammar — the two cannot both answer', () => {
+    // The reason the blanket "reject anything modified" guard could go: a
+    // normalized spelling tells `Mod-c` from `c` and `Mod-2` from `2` by
+    // construction, so the copy chord and the tab chords reach the window
+    // listener without the card having to enumerate them.
+    expect(at({ key: 'c', metaKey: true })).toBeNull();
+    expect(at({ key: '2', metaKey: true, code: 'Digit2' })).toBeNull();
+    expect(at({ key: 'j', metaKey: true })).toBeNull();
+  });
+
+  it('says nothing about a key it does not hold', () => {
+    expect(at({ key: 'q' })).toBeNull();
+    expect(at({ key: 'Escape' })).toBeNull();
+    // A bare modifier is a hand moving; `normalizeKey` gives null and so does
+    // this, rather than the card claiming a keystroke that never happened.
+    expect(resolveQuestionKey(null)).toBeNull();
+  });
+
+  it('drops `c` when a motion has taken it, exactly as `questionKeys` reports', () => {
+    expect(at({ key: 'c' }, { 'move:down': ['c'] })).toEqual({ kind: 'walkOption', delta: 1 });
   });
 });

@@ -80,6 +80,7 @@ import {
   normalizeKey,
   resolveChord,
 } from '../keyboard/chords.js';
+import { cursorModeAt, focusInsertStop, releaseInsert } from '../keyboard/focus-scope.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
 import { buildActions, clampIndex } from '../panels/actions.js';
@@ -342,6 +343,24 @@ function drawnPaneTabs(
   return orderedPaneTabs(all, sessionIds).filter(
     (entry) => activeProjectId === null || entry.project.id === activeProjectId,
   );
+}
+
+/**
+ * ONE PANE's element, by the id the tree already names it with.
+ *
+ * A DOM read rather than a ref map, and deliberately: `data-split-pane` is
+ * written by `renderLeaf` a few hundred lines below, so this is this file
+ * asking about its own markup — the same relationship `DetailPanel` already
+ * has with `document.activeElement`. A `Map<string, HTMLElement>` kept by ref
+ * callbacks would be a second index of the pane tree, which is precisely the
+ * shape of duplication the mode rewrite is removing.
+ *
+ * `null` for a pane that is not drawn — a stale id from a closure, or a leaf
+ * closed between the keystroke and the read. Every caller has to answer that
+ * anyway, because a pane with nothing to type into gives the same `false`.
+ */
+function paneElement(paneId: string): Element | null {
+  return document.querySelector(`[data-split-pane="${CSS.escape(paneId)}"]`);
 }
 
 /**
@@ -1508,23 +1527,53 @@ function CanvasInner({
   /**
    * WHICH CURSOR MODE THE KEYBOARD IS IN — Select or Insert.
    *
-   * `I` enters Insert, `H` and `Esc` return to Select. One explicit owner
-   * rather than a guess based on what was last clicked: a keyboard-first tool
-   * cannot afford to be wrong about where the next keystroke goes.
+   * A MIRROR OF DOM FOCUS, NOT A SECOND COPY OF IT. The rule and its argument
+   * live in `keyboard/focus-scope.ts`: the mode is Insert exactly when focus
+   * is inside a `data-insert-scope` region, and Select otherwise.
    *
-   * THIS IS ONE FACT, NOT TWO, and that is the whole reason it is named. The
-   * same state decides which pane the keyboard belongs to AND what a key
-   * means, so `hjkl` and `Mod+<digit>` read it rather than carrying a second
-   * notion of where focus is — two parallel notions of one fact is how the
-   * digit table went stale three times in a day.
+   * It used to be an explicit `useState` each handler set beside whatever it
+   * did to focus, and the two drifted in four documented ways — `Mod-0` set
+   * Select and left a read-only textarea holding the keyboard; `I` set Insert
+   * with nothing focused to insert into. Not a flag any more:
    *
-   *   Select — `hjkl` chooses a session, `Mod+<digit>` a session by position.
-   *   Insert — `hjkl` chooses an agent option when one is being asked,
-   *            `Mod+<digit>` switches tab.
+   *   Select — `hjkl` chooses a session, `h`/`l` its project's tabs.
+   *   Insert — `j`/`k` an open question's options, `h`/`l` its steps.
+   *
+   * WHY THE STATE STILL EXISTS: the status bar has to render from something,
+   * and a footer cannot read `document.activeElement` during render. So this
+   * is written FROM the DOM by the effect below and read only by renderers.
+   * The keydown handler does not read it at all — it calls `cursorModeAt`
+   * against the live `document.activeElement`, because a React state read
+   * inside a window listener is a snapshot of the last render while a
+   * keystroke is always about the present tense.
    *
    * The names are the operator's own, and `keysheet.ts` prints the same two.
    */
   const [mode, setMode] = useState<CursorMode>('select');
+  /**
+   * The mirror, kept by the DOM's own focus events.
+   *
+   * `focusin`/`focusout` rather than `focus`/`blur`: only the first pair
+   * bubbles, and this listens once at the document instead of on every
+   * element that could ever hold the keyboard.
+   *
+   * `focusout` reads `relatedTarget` — the element focus is moving TO — and
+   * not `document.activeElement`, which during a focusout is momentarily the
+   * body whether or not focus is about to land somewhere else. Reading the
+   * wrong one would flash Select on every step between two question options.
+   */
+  useEffect(() => {
+    if (phone) return;
+    const onFocusIn = (event: FocusEvent) => setMode(cursorModeAt(event.target));
+    const onFocusOut = (event: FocusEvent) => setMode(cursorModeAt(event.relatedTarget));
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('focusout', onFocusOut);
+    setMode(cursorModeAt(document.activeElement));
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('focusout', onFocusOut);
+    };
+  }, [phone]);
   /** Same per-session shape as the composer state above, and the same reason:
    *  which action `j`/`k` has landed on in the Insert pane is a fact about
    *  the tab you are reading, not a single global cursor. */
@@ -2081,17 +2130,39 @@ function CanvasInner({
    * THE STRIP THE OPERATOR IS LOOKING AT — the focused pane's own tabs, drawn
    * by the same expression that draws them (`drawnPaneTabs`).
    *
-   * What `Mod-<digit>` counts, and where `Mod-t` reads its project from. Every
-   * pane draws a strip of its own (A15.5) and exactly one of them has the
-   * keyboard, so "the tab strip in front of you" is a fact the pane focus
-   * already carries. Deliberately NOT `projectTabs`: that is every tab the
-   * project has open across every pane, and counting it would let a digit
-   * reach into a pane the operator is not in.
+   * Where `Mod-t` reads its project from, and what `Mod-t`'s own refusal
+   * counts. Every pane draws a strip of its own (A15.5) and exactly one of
+   * them has the keyboard, so "the tab strip in front of you" is a fact the
+   * pane focus already carries.
+   *
+   * `Mod-<digit>` USED TO COUNT THIS and does not any more — see
+   * `drawnTabsAcrossPanes` below, and `chords.ts` for the argument.
    */
   const focusedPaneTabs = useMemo(
     () =>
       drawnPaneTabs(allEntries, findLeaf(panes, focusedPaneId)?.sessionIds ?? [], activeProjectId),
     [allEntries, panes, focusedPaneId, activeProjectId],
+  );
+  /**
+   * EVERY TAB ON SCREEN, IN THE ORDER THE STRIPS PAINT THEM — what
+   * `Mod-<digit>` counts and what `Mod-Shift-[`/`]` steps.
+   *
+   * `leaves()` walks the split tree in child order, which is the order
+   * `renderSplit` lays the panes out: left to right for a `row`, top to bottom
+   * for a `column`. Each leaf then contributes `drawnPaneTabs` — the SAME
+   * expression its own strip renders from — so "the tab at position N" can
+   * only ever mean the tab an operator can point at.
+   *
+   * DELIBERATELY NOT `projectTabs`, which is every session of the active
+   * project whether or not a pane is drawing it. The list a number addresses
+   * has to be the list that is painted; those two are the same today only
+   * because every session of the active project is a tab, and a rule that
+   * relies on that coincidence is a rule that breaks the day it stops.
+   */
+  const drawnTabsAcrossPanes = useMemo(
+    () =>
+      leaves(panes).flatMap((leaf) => drawnPaneTabs(allEntries, leaf.sessionIds, activeProjectId)),
+    [allEntries, panes, activeProjectId],
   );
   /**
    * EVERY session of the active project, filters and all — the list A11.1's
@@ -3031,12 +3102,16 @@ function CanvasInner({
    * entered from two places that could disagree, and they did: `i` set both
    * the mode and the flag, while the textarea's own `onFocus` set the flag
    * alone -- so clicking into the box left the bar reading Select to an
-   * operator typing a prompt, and `Mod+<digit>`, which reads the mode and is
-   * let through the typing guard on purpose, moved a session instead of
-   * switching a tab. One function, three callers, nothing left to diverge.
+   * operator typing a prompt.
+   *
+   * IT NO LONGER SETS A MODE AT ALL, and that is the last of that family of
+   * bug rather than one more patch to it: `composing` puts the caret in the
+   * box (`DetailPanel`'s own effect focuses it), the caret is inside an
+   * insert scope, and the mode is what being there is called. There is
+   * nothing left for the two callers to disagree about because there is only
+   * one fact.
    */
   const beginComposing = useCallback(() => {
-    setMode('insert');
     setComposing(true);
   }, [setComposing]);
 
@@ -3599,9 +3674,25 @@ function CanvasInner({
       event.preventDefault();
       setStatus(null);
 
+      /**
+       * WHICH MODE THIS KEYSTROKE IS IN — asked of the DOM, at the moment it
+       * arrives, and never of React state.
+       *
+       * `keyboard/focus-scope.ts` carries the rule and the four findings that
+       * produced it. What is worth saying HERE is why it is read at the top of
+       * the handler rather than closed over: this listener is registered by an
+       * effect, so a `mode` variable in scope is whatever the last render put
+       * there — and the whole class of bug being removed is a mode that had
+       * stopped being true. `document.activeElement` cannot be stale.
+       */
+      const cursorMode = cursorModeAt(document.activeElement);
+
       switch (action.kind) {
         case 'move': {
-          if (mode === 'insert' && (action.direction === 'down' || action.direction === 'up')) {
+          if (
+            cursorMode === 'insert' &&
+            (action.direction === 'down' || action.direction === 'up')
+          ) {
             /**
              * In the action pane the vertical axis belongs to the actions —
              * every command the step proposed, and the prompt last.
@@ -3634,11 +3725,17 @@ function CanvasInner({
             setActionIndex(next);
             return;
           }
-          if (mode === 'insert' && action.direction === 'left') {
-            setMode('select');
+          if (cursorMode === 'insert' && action.direction === 'left') {
+            // `h` is the way BACK out of Insert, and it has to move the
+            // keyboard to be that — the flag it used to set left focus where
+            // it was, so the key that meant "leave" also left the pane still
+            // eating keys. Reached only when the question card did not answer
+            // `h` itself (`event.defaultPrevented`, above), which is what
+            // keeps a walk between two real steps of a question inside it.
+            releaseInsert(document.activeElement);
             return;
           }
-          if (mode === 'insert') {
+          if (cursorMode === 'insert') {
             // `right` — the fourth direction, and the one that had no branch.
             // Insert owns all of `hjkl` or none of it: while a question is
             // open the listbox handles `l` itself and this never runs, but
@@ -3766,44 +3863,83 @@ function CanvasInner({
         case 'selectTab': {
           /**
            * ONE DIGIT, ONE MEANING, IN EITHER CURSOR MODE: the session tab at
-           * that position in the strip the operator is looking at.
+           * that position ON SCREEN.
            *
-           * `focusedPaneTabs` is that strip, derived by the very expression
-           * that draws it (`drawnPaneTabs`), so "the tab at position N" can
-           * only ever mean the tab drawn at position N. The two mistakes this
+           * `drawnTabsAcrossPanes` is every strip's own list, concatenated in
+           * pane order and derived by the very expression that draws each of
+           * them (`drawnPaneTabs`), so "the tab at position N" can only ever
+           * mean the tab an operator can point at. The two mistakes this
            * family has already made were both a handler counting a list of its
            * own: the constant while the bar drew a filtered one, then the
            * drawn one positionally on a route that was supposed to be by name.
            *
-           * THE FOCUSED PANE'S OWN LIST, not the project's. Every pane draws a
-           * strip (A15.5) and one of them has the keyboard; counting across
-           * all of them would move a tab in a pane nobody is looking at, which
-           * is the exact failure the previous arrangements of this row kept
-           * finding in another form.
+           * ACROSS PANES, not within the focused one — the fifth arrangement
+           * of this row, argued in `chords.ts` with the cost it carries. A
+           * split is one screen; under the per-pane rule the same digit named
+           * different tabs depending on which half last held the keyboard, and
+           * the tabs in the other half had no number at all. Landing on a tab
+           * another pane holds moves the keyboard there, which `focusSession`
+           * already does for a sidebar pick of the same session.
            *
            * Refused out loud both ways, and never clamped: a jump that
            * silently lands one short is worse than one that does not happen,
-           * because you only find out by reading where you ended up. An empty
-           * pane and an out-of-range digit are two different facts and get two
-           * sentences.
+           * because you only find out by reading where you ended up. No tabs
+           * at all and an out-of-range digit are two different facts and get
+           * two sentences.
            */
-          if (focusedPaneTabs.length === 0) {
-            setStatus('no tabs open in this pane');
+          if (drawnTabsAcrossPanes.length === 0) {
+            setStatus('no tabs open');
             return;
           }
           // 9 is the LAST tab whatever the count, the convention every browser
-          // tab bar taught, and far more use than a ninth position once a
-          // project outgrows nine sessions.
+          // tab bar taught — and it is what keeps a tenth tab reachable now
+          // that the digits count one list rather than one strip each.
           const target =
             action.digit === 9
-              ? focusedPaneTabs[focusedPaneTabs.length - 1]
-              : focusedPaneTabs[action.digit - 1];
+              ? drawnTabsAcrossPanes[drawnTabsAcrossPanes.length - 1]
+              : drawnTabsAcrossPanes[action.digit - 1];
           if (target === undefined) {
-            const count = focusedPaneTabs.length;
-            setStatus(`only ${count} tab${count === 1 ? '' : 's'} in this pane`);
+            const count = drawnTabsAcrossPanes.length;
+            // The count is of every pane, because that is the list the digit
+            // addresses. A sentence about "this pane" would be about a
+            // different list from the one that just refused.
+            setStatus(`only ${count} tab${count === 1 ? '' : 's'} open`);
             return;
           }
           focusSession(target.session.id);
+          return;
+        }
+        case 'stepTab': {
+          /**
+           * `Mod-Shift-[` / `Mod-Shift-]` — one step along the SAME list the
+           * digits address, wrapping at both ends.
+           *
+           * A ring rather than a run with two stops: this walks a tab strip,
+           * and every tab strip's own arrows wrap. `j`/`k` do not, and the
+           * distinction is the thing traversed rather than the key — an
+           * open-ended session list has a last row worth stopping at and
+           * announcing; a strip does not.
+           *
+           * With the cursor on nothing the list holds — an empty pane has the
+           * keyboard — it lands on the first tab rather than refusing, exactly
+           * as `h`/`l` do from the same state.
+           */
+          if (drawnTabsAcrossPanes.length === 0) {
+            setStatus('no tabs open');
+            return;
+          }
+          const at =
+            focusedSessionId === null
+              ? -1
+              : drawnTabsAcrossPanes.findIndex((e) => e.session.id === focusedSessionId);
+          const count = drawnTabsAcrossPanes.length;
+          const landing =
+            at === -1
+              ? drawnTabsAcrossPanes[0]
+              : drawnTabsAcrossPanes[(at + action.delta + count) % count];
+          if (landing !== undefined) {
+            focusSession(landing.session.id);
+          }
           return;
         }
         case 'pickView': {
@@ -3880,16 +4016,45 @@ function CanvasInner({
         case 'filterMenu':
           setFilterMenuOpen((open) => !open);
           return;
-        case 'focusAction':
+        case 'focusAction': {
           if (focusedEntry === null) {
             setStatus('pick a session first');
             return;
           }
-          setMode('insert');
+          /**
+           * `I` IS A FOCUS MOVE, and Insert is what having moved it is called.
+           *
+           * It used to be `setMode('insert')` and nothing else, with the pane
+           * left to notice the flag and focus something — which it only did
+           * when a question was open (audit F5). With no question, the mode
+           * read Insert while `document.activeElement` was still the body, so
+           * `hjkl` fell through to the canvas grammar under the pane being
+           * read: precisely the "the keys work, they just do the wrong thing"
+           * failure the mode naming exists to end.
+           *
+           * `focusInsertStop` lands on THIS pane's first stop in document
+           * order — the question's options when a question is open, the
+           * prompt row otherwise — and reports whether it landed. A `false`
+           * is a real state (a pane with no session, or a source with no
+           * route to record a prompt, draws no composer at all) and gets a
+           * sentence rather than a mode nothing can act in.
+           */
+          const landed = focusInsertStop(paneElement(focusedPaneId));
+          if (!landed) {
+            setStatus('nothing in this pane takes the keyboard — no question and no prompt box');
+            return;
+          }
           setActionIndex(0);
           return;
+        }
         case 'focusList':
-          setMode('select');
+          // AND `H` / `Mod-0` ARE THE FOCUS MOVE BACK — audit F4. Setting the
+          // flag was all this used to do, so the bar read Select while a
+          // now read-only textarea still held the keyboard and the window
+          // listener's own typing guard ate every bare `j` that followed.
+          // `releaseInsert` blurs whatever is in an insert scope, which is the
+          // exit `Escape` in the composer already took and this one did not.
+          releaseInsert(document.activeElement);
           setComposing(false);
           return;
         case 'rename':
@@ -3989,7 +4154,7 @@ function CanvasInner({
           // so the sign flips. In Select it is the sidebar's own edge, sign
           // unchanged — the same `pane` state `I`/`H` already set decides
           // which (epic.md §4.5).
-          const sign = mode === 'insert' ? -1 : 1;
+          const sign = cursorMode === 'insert' ? -1 : 1;
           const step = action.delta * sign * PANE_RESIZE_STEP;
           savePrefs(setPaneWidth(prefs, 'sidebar', prefs.panes.sidebar + step));
           return;
@@ -4002,7 +4167,11 @@ function CanvasInner({
           // (the settings section that could is gone), so there is no
           // visibility left to lose and none to put back: the two widths
           // are the whole of what `z0` undoes.
-          setMode('select');
+          //
+          // It hands the keyboard back with them, as it always has — now by
+          // really releasing it rather than by writing Select over a focus
+          // still sitting in a pane.
+          releaseInsert(document.activeElement);
           savePrefs(
             setPaneWidth(
               setPaneWidth(prefs, 'sidebar', DEFAULT_PANES.sidebar),
@@ -4042,7 +4211,7 @@ function CanvasInner({
           return;
         }
         case 'open': {
-          if (mode !== 'insert') {
+          if (cursorMode !== 'insert') {
             setStatus('the full detail is already in the right panel');
             return;
           }
@@ -4067,7 +4236,12 @@ function CanvasInner({
           setRenamingId(null);
           setPickingIconFor(null);
           setConfirmForceClose(null);
-          setMode('select');
+          // The last layer Escape peels is the keyboard itself, and peeling it
+          // is a blur. Note that an Escape typed INSIDE the composer never
+          // reaches here — that box binds its own, blurs itself and stops the
+          // key — so this is the shell-level Escape, from an option list or
+          // from nowhere in particular.
+          releaseInsert(document.activeElement);
           setStatus(null);
           return;
         default: {
@@ -4090,6 +4264,7 @@ function CanvasInner({
     focusedSessionId,
     focusedPaneId,
     focusedPaneTabs,
+    drawnTabsAcrossPanes,
     newTabInPane,
     projectTabIds,
     sessionIds,
@@ -4104,7 +4279,11 @@ function CanvasInner({
     createSession,
     stepProject,
     focusSession,
-    mode,
+    // `mode` is deliberately NOT here any more, and its absence is the change:
+    // this listener asks `cursorModeAt(document.activeElement)` when a key
+    // arrives instead of closing over a rendered value. A dependency would
+    // re-register the listener on every focus change for a fact it no longer
+    // reads.
     actionIndex,
     setActionIndex,
     setComposing,
@@ -4164,7 +4343,11 @@ function CanvasInner({
   const onSidebarPick = useCallback(
     (sessionId: string) => {
       focusSession(sessionId);
-      setMode('select');
+      // Picking a row in the sidebar is an act of Select, so the keyboard
+      // comes back with it — by really coming back. A pointer pick made while
+      // the composer held focus used to write Select over a caret still
+      // blinking in the box.
+      releaseInsert(document.activeElement);
     },
     [focusSession],
   );
@@ -4472,21 +4655,26 @@ function CanvasInner({
         active: isFocused && mode === 'insert',
         actionIndex: paneActionIndex,
         composing: paneComposing,
+        // `onCompose` is the textarea's own `onFocus`, so by the time it runs
+        // the keyboard is ALREADY in an insert scope and the mode has already
+        // followed it. Nothing here writes a mode: it moves the pane focus to
+        // the pane that was clicked into, and records that this session's box
+        // is editable. That is the whole of it now.
         onCompose: () => {
           if (sessionId === null) return;
           if (!isFocused) setFocusedPaneId(paneId);
-          setMode('insert');
           setComposingFor(sessionId, true);
         },
+        // And the exit is the same shape: the box blurs ITSELF before calling
+        // this (see the textarea's Escape branch, which has always done so and
+        // was the one exit that worked), so the mode is Select before this
+        // runs. The `isFocused` fork went with the flag — a background pane's
+        // composer closing never had a mode to write, and now there is none
+        // to write anywhere.
         onStopComposing: () => {
           if (sessionId === null) return;
           setComposingFor(sessionId, false);
           setDraftFor(sessionId, '');
-          // Only the focused pane's Escape hands the keyboard back to the
-          // sidebar — a background pane was never where the keyboard was.
-          if (isFocused) {
-            setMode('select');
-          }
         },
         width: undefined,
         resizeHandle: null,
@@ -4595,8 +4783,10 @@ function CanvasInner({
                 // `setComposingFor` is named with the session rather than
                 // going through `beginComposing`, which reads the focused id
                 // this call is in the middle of changing.
+                //
+                // AND IT SETS NO MODE: composing puts the caret in the box,
+                // and Insert is what the caret being there is called.
                 if (viaPointer) {
-                  setMode('insert');
                   setComposingFor(sessionId, true);
                 }
               }}
