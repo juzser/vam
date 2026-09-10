@@ -4507,6 +4507,11 @@ function CanvasInner({
     // search, the status pills and the origin rules.
     allEntries: allEntries,
     focusedSessionId: focusedEntry?.session.id ?? null,
+    // The map `f` built and the key listener reads, handed to the only column
+    // that can draw it. It had no route here at all: `labels` was built,
+    // matched against inside the listener and given to nobody, so jump mode's
+    // whole visible trace was the status bar's word.
+    jumpLabels: labels,
     workspace: 'factory',
     theme: effective,
     onToggleTheme: onSidebarToggleTheme,

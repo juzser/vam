@@ -80,6 +80,11 @@ const FILTER_MENU_ACTION: KeyAction = { kind: 'filterMenu' };
 const CLOSE_ACTION: KeyAction = { kind: 'close' };
 const NEW_SESSION_ACTION: KeyAction = { kind: 'newSession' };
 
+/** No jump is armed. A module-level constant rather than a `new Map()` in the
+ *  destructuring default, for the reason `Canvas.tsx`'s `EMPTY_GROUPS` is one:
+ *  a fresh reference per render is a prop that always looks changed. */
+const NO_JUMP_LABELS: ReadonlyMap<string, string> = new Map();
+
 const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   running: 'bg-running',
   waiting: 'bg-waiting',
@@ -278,6 +283,27 @@ export type SessionListProps = {
    */
   readonly allEntries?: readonly SessionEntry[];
   readonly focusedSessionId: string | null;
+  /**
+   * THE JUMP LABELS: session id to the one key that jumps to it, empty
+   * whenever `f` has not armed the mode.
+   *
+   * A PROP RATHER THAN A FACT THIS PANE DERIVES, because the map is the key
+   * handler's. `Canvas.tsx` builds it from the same `sessionIds` the window
+   * listener matches a pressed letter against, so the badge a row wears and
+   * the row that letter moves to are one answer. Rebuilding it here from
+   * `entries` would be a second one, and it would be the wrong one the moment
+   * the two lists were ordered differently.
+   *
+   * It shipped with nowhere to be drawn at all: the map was built, read inside
+   * the listener, and handed to no component — so `f` armed a mode whose only
+   * trace on screen was the status bar reading `JUMP`, and asked the operator
+   * to type a label they could not see.
+   *
+   * Optional and defaulting to none, like every flag on this pane: no test
+   * that renders it directly is about jumping, and the phone shell — which is
+   * handed these same props — has no chord layer to arm the mode with.
+   */
+  readonly jumpLabels?: ReadonlyMap<string, string>;
   /**
    * Is this pane the whole screen, on a device with no keyboard and no canvas?
    *
@@ -507,6 +533,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     loading = false,
     allEntries: unfiltered,
     focusedSessionId,
+    jumpLabels = NO_JUMP_LABELS,
     phone = false,
     workspace,
     filter,
@@ -2096,6 +2123,13 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   >
                     {section.items.map(({ session }) => {
                       const isFocused = session.id === focusedSessionId;
+                      // The one key that jumps here, or nothing when no jump
+                      // is armed -- and nothing, too, for a row past the end
+                      // of `JUMP_KEYS`: twenty labels is what the home row and
+                      // the top row can spell, and a twenty-first row wearing
+                      // a letter that jumped nowhere would be worse than a row
+                      // wearing none.
+                      const jumpLabel = jumpLabels.get(session.id);
                       const needsYou = session.status === 'waiting';
                       // The newest step's own input: what the session asked,
                       // in the words the session screen's IN region shows.
@@ -2208,6 +2242,46 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                     data-row-cursor
                                     className={`absolute top-0 bottom-0 left-0 w-0.5 ${STATUS_DOT[session.status]}`}
                                   />
+                                )}
+
+                                {/* THE JUMP LABEL: the key that brings the
+                                    cursor here, drawn on the row it addresses.
+                                    Vimium's idiom and its reasoning -- the
+                                    label has to be ON the thing it names, or
+                                    the operator is matching a letter against a
+                                    list they have to remember.
+
+                                    ABSOLUTE, so arming the mode moves nothing:
+                                    twenty rows all growing a badge in the flow
+                                    at once would reflow the column under the
+                                    cursor at the exact moment the operator is
+                                    reading it. It overlays the tail of a long
+                                    title, which is the trade the gesture is
+                                    worth: one keystroke later it is gone.
+
+                                    `bg-ink`/`text-ground` rather than a status
+                                    hue. The label is not a fact about the
+                                    session -- it is a transient address for
+                                    one keystroke -- and the two ends of the
+                                    ink ramp are the one pair guaranteed to
+                                    read on every surface in both themes.
+
+                                    The letter is drawn EXACTLY as it must be
+                                    typed, lower case and all: the handler
+                                    matches `event.key`, so a label printed `A`
+                                    over a key that only answers to `a` would
+                                    be an instruction that does not work. The
+                                    `sr-only` word is what stops the badge from
+                                    reading as a bare letter in the row's
+                                    accessible name. */}
+                                {jumpLabel !== undefined && (
+                                  <span
+                                    data-jump-label={jumpLabel}
+                                    className="pointer-events-none absolute top-1/2 right-2 z-10 flex h-[18px] min-w-[18px] -translate-y-1/2 items-center justify-center rounded-[4px] bg-ink px-1 font-mono font-semibold text-[11px] text-ground leading-none"
+                                  >
+                                    <span className="sr-only">jump key </span>
+                                    {jumpLabel}
+                                  </span>
                                 )}
 
                                 <span className="flex items-center gap-2">
