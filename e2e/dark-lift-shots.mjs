@@ -1,5 +1,6 @@
 /**
- * THE PR'S PICTURES: the dark theme before and after the lift, at two widths.
+ * THE PR'S PICTURES: the dark theme before and after the lift, at two widths,
+ * and the list markers before and after theirs.
  *
  * Operator: "make the dark UI a bit lighter." That is a judgement they have to
  * make by eye, so the job of this file is to make the comparison easy and
@@ -216,5 +217,75 @@ writeFileSync(
   Buffer.from(composite.split(',')[1], 'base64'),
 );
 console.log(`${outDir}/dark-lift-side-by-side.png`);
+
+// ------------------------------------------- AND THE LIST MARKERS, THE SAME WAY
+//
+// Operator, on the same screen: "the bullets and numbers in the response lists
+// are too faint." That is the second thing they have to judge by eye, so it
+// gets the same treatment -- one build, two frames, only the markers moving.
+//
+// "BEFORE" IS ONE INJECTED RULE, not a token override, because this change was
+// never a token change: both markers were routed through `--vam-ink-ghost` by a
+// single declaration on the shared `<li>`, and the rule below is that
+// declaration, restored. Everything else on screen -- the palette, the body
+// text, the layout -- is the shipped build.
+//
+// CROPPED TO BOTH LISTS, because the whole pane at 1440 makes a marker four
+// pixels wide and the comparison would prove nothing at a glance -- and
+// because the two lists are the whole point: the numbers and the bullets did
+// not move to the same ink, and a crop showing one of them would hide that.
+const MARKER_REVERT = '[data-action-pane] li::marker { color: var(--vam-ink-ghost); }';
+const ordered = page.locator('[data-action-pane] ol').first();
+const unordered = page.locator('[data-action-pane] ul').first();
+await ordered.scrollIntoViewIfNeeded();
+await page.waitForTimeout(300);
+for (const [state, on] of [
+  ['before', true],
+  ['after', false],
+]) {
+  await page.evaluate(
+    ([css, apply]) => {
+      const id = 'vam-marker-revert';
+      document.getElementById(id)?.remove();
+      if (!apply) return;
+      const el = document.createElement('style');
+      el.id = id;
+      el.textContent = css;
+      document.head.append(el);
+    },
+    [MARKER_REVERT, on],
+  );
+  await page.waitForTimeout(250);
+  // MEASURED IN BOTH STATES, for the reason the ladder above is: a
+  // reconstruction nobody checked is a picture nobody should trust. "before"
+  // must come back at ink-ghost and "after" at ink-dim for the number and
+  // ink-quiet for the bullet.
+  const seen = await page.evaluate(() => {
+    const read = (sel) => {
+      const li = document.querySelector(sel);
+      return li === null ? 'not drawn' : getComputedStyle(li, '::marker').color;
+    };
+    const li = document.querySelector('[data-action-pane] ol > li');
+    return {
+      number: read('[data-action-pane] ol > li'),
+      bullet: read('[data-action-pane] ul > li'),
+      bodyTextForScale: li === null ? 'not drawn' : getComputedStyle(li).color,
+    };
+  });
+  console.log(`  ${state.toUpperCase().padEnd(6)} markers: ${JSON.stringify(seen)}`);
+  const top = await ordered.boundingBox();
+  const bottom = await unordered.boundingBox();
+  await page.screenshot({
+    path: `${outDir}/list-markers-${state}.png`,
+    clip: {
+      x: Math.max(0, top.x - 16),
+      y: Math.max(0, top.y - 12),
+      width: Math.min(780, top.width + 32),
+      height: bottom.y + bottom.height - top.y + 24,
+    },
+  });
+  console.log(`${outDir}/list-markers-${state}.png`);
+}
+await page.evaluate(() => document.getElementById('vam-marker-revert')?.remove());
 
 await browser.close();
