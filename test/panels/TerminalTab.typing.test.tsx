@@ -23,6 +23,7 @@
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cursorModeAt } from '../../src/renderer/keyboard/focus-scope.js';
 import { REFRESH_MS, TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
 import type { PaneKey, PaneSendResult, PaneView } from '../../src/shared/terminal.js';
 
@@ -147,6 +148,42 @@ describe('the pane declines the keys that are not its own', () => {
       // Reaching vam is the point: `Cmd+1` picks a tab from anywhere,
       // including from inside a box that is capturing letters.
       expect(heard).toEqual(['1', 'k']);
+    } finally {
+      window.removeEventListener('keydown', onKey);
+    }
+  });
+
+  /**
+   * `Ctrl-D` AND `Ctrl-U`, WHICH VAM NOW BINDS — and the two facts that
+   * together mean this pane keeps them.
+   *
+   * The pane hands every Ctrl chord back, as the case above already pins for
+   * `Ctrl+K`. What is new is that `Mod-d`/`Mod-u` are bound in the grammar
+   * those keys reach, to a half-screen scroll — so "handed back" would have
+   * meant "scrolled a transcript that is not on screen" if the grammar took
+   * them here. It does not: this element carries `data-insert-scope`, the
+   * keystroke arrives in Insert, and `isSelectOnly` stands the grammar down
+   * (`Canvas.tsx`'s keydown handler).
+   *
+   * `cursorModeAt` is asked of the REAL element rather than a synthetic one
+   * carrying the attribute, because the whole point is that the mark is on
+   * this pane. And the tag is asserted beside it: a `section` is invisible to
+   * any `INPUT|TEXTAREA` test, so a scope-based rule is the only kind that can
+   * see this surface at all.
+   */
+  it('hands Ctrl-D and Ctrl-U back to a grammar that stands down in here', async () => {
+    const heard: string[] = [];
+    const onKey = (event: KeyboardEvent) => heard.push(event.key);
+    window.addEventListener('keydown', onKey);
+    try {
+      const send = await open();
+      fireEvent.keyDown(pane() as HTMLElement, { key: 'd', ctrlKey: true });
+      fireEvent.keyDown(pane() as HTMLElement, { key: 'u', ctrlKey: true });
+      await settle();
+      expect(send).not.toHaveBeenCalled();
+      expect(heard).toEqual(['d', 'u']);
+      expect(pane()?.tagName).toBe('SECTION');
+      expect(cursorModeAt(pane())).toBe('insert');
     } finally {
       window.removeEventListener('keydown', onKey);
     }

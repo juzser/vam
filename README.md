@@ -213,6 +213,7 @@ whichever your platform uses.
 | `Mod-Alt-[` / `Mod-Alt-]` | Previous / next pane — one modifier up from the tab pair, and the same act as `zw` / `zW` |
 | `Alt-1` `Alt-2` `Alt-3` `Alt-4` | Show a view in the focused pane — Response, PRs, Terminal, Agents, in that fixed order. A digit always names the SAME view: if this source has no terminal, `Alt-3` says so rather than opening whatever sits third |
 | `Alt-5` `Alt-6` `Alt-7` `Alt-8` `Alt-9` | Nothing — bound only so they say there is no fifth view instead of reaching the browser |
+| `Mod-d` / `Mod-u` | Half a screen down / up the FOCUSED PANE's transcript — vim's own `Ctrl-D` / `Ctrl-U`. Half the column's visible height per press, instant, clamped at both ends; scrolling to the top is what reads earlier turns in, exactly as a trackpad scroll there does. **Select only:** with the caret in the prompt box, on a question card or in the terminal these two stay that surface's own, where `Ctrl-D` is delete-forward (and EOF) and `Ctrl-U` deletes to the start of the line. `Mod` is Ctrl or Cmd as everywhere in this table, so `Cmd+D` scrolls as well |
 | `<` / `>` | Narrow / widen the focused side pane |
 | `Escape` | Cancel whatever is half-typed |
 

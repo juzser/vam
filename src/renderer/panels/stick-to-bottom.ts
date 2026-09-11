@@ -65,3 +65,44 @@ export function hasContentAbove(m: ScrollMetrics, slack: number = BOTTOM_SLACK_P
 export function hasContentBelow(m: ScrollMetrics, slack: number = BOTTOM_SLACK_PX): boolean {
   return !isAtBottom(m, slack);
 }
+
+/**
+ * WHERE `Mod-d` / `Mod-u` LAND: half a viewport from here, or `null` when the
+ * scroller is already resting against that end.
+ *
+ * HALF THE SCROLLER'S OWN `clientHeight`, which is vim's rule read literally —
+ * `Ctrl-D` scrolls half a WINDOW, and the window here is the column's visible
+ * box. Not a line count (this column draws prose, not lines of one height),
+ * not a fixed pixel figure (a pane can be dragged from its 320px floor to the
+ * full width of the shell, and a constant would be a third of a screen in one
+ * and three screens in the other), and not a proportion of the CONTENT, which
+ * would make one press mean something different on a long session than on a
+ * short one.
+ *
+ * CLAMPED, NOT REFUSED, WHEN IT WOULD OVERSHOOT. `Ctrl-D` two hundred pixels
+ * from the end scrolls those two hundred pixels in vim too; refusing there
+ * would leave the last half-screen of a transcript reachable only by the mouse.
+ * The refusal is the OTHER case, and the two are worth keeping apart: `null`
+ * means the scroller is already against that edge and nothing this key can do
+ * will move it.
+ *
+ * `null` RATHER THAN "the offset it already had". A caller cannot tell a move
+ * of zero from a move that did not happen, and this is precisely the key that
+ * has to tell the operator which one it was — the house rule is that a control
+ * which cannot act is withdrawn or says so, and a key cannot be withdrawn.
+ *
+ * THE EDGES ARE `hasContentAbove` / `hasContentBelow` and no new definition of
+ * its own: those are what the floating jump controls are drawn off, so this key
+ * refuses in exactly the states where the control beside it has withdrawn.
+ */
+export function halfPageTarget(m: ScrollMetrics, delta: 1 | -1): number | null {
+  const canMove = delta === 1 ? hasContentBelow(m) : hasContentAbove(m);
+  if (!canMove) {
+    return null;
+  }
+  // At least one pixel: a pane half a pixel tall (mid-drag, mid-animation) must
+  // not turn a press into a no-move that still reports having scrolled.
+  const step = Math.max(1, m.clientHeight / 2);
+  const furthest = Math.max(0, m.scrollHeight - m.clientHeight);
+  return Math.min(furthest, Math.max(0, m.scrollTop + delta * step));
+}

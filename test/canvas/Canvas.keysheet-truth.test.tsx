@@ -157,22 +157,30 @@ afterEach(() => {
  * WHICH BINDINGS ARE MODE-DEPENDENT AT ALL — the sheet's own claim, held
  * against the behaviour asserted in the rest of this file.
  *
- * Of the whole grammar, exactly seven chords branch on the cursor mode:
- * `h j k l Enter < >`, which is three ACTION KINDS. A `byMode` on anything
- * else prints one row twice saying the same sentence, and a missing `byMode`
- * on one of these prints one row for two behaviours — which is F1.
+ * Of the whole grammar, exactly nine chords branch on the cursor mode:
+ * `h j k l Enter < > Mod-d Mod-u`, which is four ACTION KINDS. A `byMode` on
+ * anything else prints one row twice saying the same sentence, and a missing
+ * `byMode` on one of these prints one row for two behaviours — which is F1.
+ *
+ * `scrollHalf` IS THE FOURTH, AND IT BRANCHES THE OTHER WAY. The first three
+ * do something different in each mode; this one does something in Select and
+ * NOTHING in Insert — `isSelectOnly` in `chords.ts`, because `Ctrl-D` and
+ * `Ctrl-U` are already the composer's and the terminal's. An absence is still
+ * a second behaviour to caption: a single row reading "half a screen down"
+ * would promise a scroll to an operator whose caret is in the prompt box,
+ * which is F1's failure exactly.
  */
 describe('the sheet splits by mode exactly where the code branches on it', () => {
-  it('names move, open and resizePane, and nothing else', () => {
+  it('names move, open, resizePane and scrollHalf, and nothing else', () => {
     const split = Object.entries(ACTION_LABELS)
       .filter(([, meta]) => (meta as { byMode?: unknown }).byMode !== undefined)
       .map(([kind]) => kind)
       .sort();
-    expect(split).toEqual(['move', 'open', 'resizePane']);
+    expect(split).toEqual(['move', 'open', 'resizePane', 'scrollHalf']);
   });
 
   it('gives each of them two rows that actually differ', () => {
-    for (const chord of ['h', 'j', 'k', 'l', 'Enter', '<', '>']) {
+    for (const chord of ['h', 'j', 'k', 'l', 'Enter', '<', '>', 'Mod-d', 'Mod-u']) {
       const captions = captionsFor(chord);
       expect(captions.select, `${chord} in Select`).toBeDefined();
       expect(captions.insert, `${chord} in Insert`).toBeDefined();
