@@ -371,6 +371,29 @@ export type KeyAction =
       at both ends, the same ring shape `h`/`l` already give the tab strip.
       Vim's `Ctrl-w w` and `Ctrl-w W`. Refuses aloud with only one pane. */
   | { readonly kind: 'stepSplit'; readonly delta: 1 | -1 }
+  /** `Mod-d` / `Mod-u` — HALF A SCREEN down / up the FOCUSED PANE's transcript
+      column, which is what `Ctrl-D` and `Ctrl-U` do in vim and what the
+      operator asked for by name. The distance is half the column's own
+      `clientHeight` and the arithmetic is `halfPageTarget`
+      (`panels/stick-to-bottom.ts`), which reads the ends off the same two
+      predicates the floating jump controls are drawn from.
+
+      THE FOCUSED PANE, like `Mod-<digit>` and `Mod-t`: a split is one screen,
+      and the column that scrolls is the one in the pane holding the keyboard.
+
+      IT IS THE ONE BINDING IN THIS TABLE THAT STANDS DOWN IN INSERT
+      (`isSelectOnly` below carries the argument). Every other `Mod-` chord is
+      deliberately reachable from inside the prompt box; these two cannot be,
+      because inside a text field `Ctrl-D` is delete-forward and `Ctrl-U` is
+      delete-to-line-start.
+
+      AND `Cmd+D` IS THE SAME CHORD, because `normalizeKey` folds Ctrl and Cmd
+      into one `Mod-` token for every binding in this table — the same alias
+      `Mod-p` already carries for `Cmd+Shift+P`. The operator was told and
+      chose it; `test/keyboard/chords.half-page.test.ts` pins it, so a later
+      attempt to separate the two modifiers reddens rather than passing
+      quietly. */
+  | { readonly kind: 'scrollHalf'; readonly delta: 1 | -1 }
   | { readonly kind: 'cancel' };
 
 export type ChordStep = {
@@ -607,6 +630,26 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // `Cmd+P` this also answers. Free: nothing in any table held `Mod-p`, and
   // bare `p` (`revealProject`) keeps its own spelling.
   'Mod-p': { kind: 'newProject' },
+  // HALF A SCREEN OF TRANSCRIPT, vim's own `Ctrl-D` / `Ctrl-U`, which is the
+  // gesture the operator asked for by name.
+  //
+  // FREE WHEN THEY WERE TAKEN. The whole `Mod-` set was `0`-`9`, `k`, `n`,
+  // `p`, `t`, `w`, `Alt-[`, `Alt-]`, `Shift-[` and `Shift-]`; bare `d` and `u`
+  // are bound nowhere either, and `normalizeKey` gives a modified letter its
+  // own `Mod-` spelling, so both stay free for a plain-key meaning later.
+  // Re-derived over the generated bindings in
+  // `test/keyboard/chords.half-page.test.ts`, never over these two lines.
+  //
+  // AND THEY ARE `isSelectOnly`, the only pair in this table that is. The
+  // action's doc comment above argues it: taken globally, the same two
+  // keystrokes are delete-forward and delete-to-line-start in the composer.
+  // Nothing native holds them in the desktop app — vam's menu is
+  // appMenu/editMenu/Window (`src/main/menu.ts`) — and in the browser build
+  // the handler's own `preventDefault` keeps `Cmd+D` away from bookmarking,
+  // in Select. In Insert it does not prevent anything, which is exactly how
+  // the box being typed in keeps the key's native meaning.
+  'Mod-d': { kind: 'scrollHalf', delta: 1 },
+  'Mod-u': { kind: 'scrollHalf', delta: -1 },
   // Vim's own "shift this leftwards / rightwards" — literally what moving a
   // side pane's boundary is. A real Shift+, / Shift+. keydown normalizes to
   // the browser-applied `<` / `>` here, distinct from the plain `,` above
@@ -724,6 +767,41 @@ export const BINDING_TABLES: readonly {
   { prefix: 'z', table: AFTER_Z },
 ];
 
+/**
+ * ACTIONS AN INSERT SCOPE KEEPS FOR ITSELF — and the rule behind the list.
+ *
+ * ── THE RULE ─────────────────────────────────────────────────────────────
+ *   A binding stands down in Insert exactly when the keystroke ALREADY MEANS
+ *   SOMETHING to whatever is being typed into. Everything else is the
+ *   grammar's in both modes.
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ * HOW IT RELATES TO THE TYPING GUARD, which is the same argument one step
+ * further on. `Canvas.tsx` swallows a bare key for a focused INPUT or TEXTAREA
+ * and lets a `Mod-` chord through, on the grounds that "a Cmd/Ctrl chord is
+ * never text entry — no layout produces a character from one". That premise is
+ * about CHARACTERS and it is still true. What it does not settle is EDITING
+ * COMMANDS: on macOS every Cocoa text view answers `Ctrl-D` with delete-forward
+ * and `Ctrl-U` with delete-to-line-start, and a shell answers `Ctrl-D` with
+ * EOF. Those are not characters, so the guard lets them past — and a grammar
+ * that took them would delete a scroll gesture's worth of somebody's prompt.
+ *
+ * SO IT IS ASKED OF THE CURSOR MODE, NOT OF THE TAG NAME, and that is the
+ * second half of why it is a rule of its own rather than a wider typing guard.
+ * `cursorModeAt` (`keyboard/focus-scope.ts`) reads Insert off
+ * `data-insert-scope`, which marks the question card and the TERMINAL PANE as
+ * well as the composer — and the terminal is a `section`, which no INPUT|
+ * TEXTAREA test can see. A tag-based widening would have left exactly the
+ * surface where `Ctrl-D` means most unprotected.
+ *
+ * A PREDICATE OVER THE ACTION rather than a list of key strings, because the
+ * operator may rebind: whatever chord `scrollHalf` ends up on, it is the ACT
+ * that has no business firing under a caret.
+ */
+export function isSelectOnly(action: KeyAction): boolean {
+  return action.kind === 'scrollHalf';
+}
+
 /* ---------------------------------------------------------------------------
  * Operator overrides.
  *
@@ -783,6 +861,8 @@ export function actionId(action: KeyAction): string {
       return `splitPane:${action.orientation}`;
     case 'stepSplit':
       return `stepSplit:${action.delta}`;
+    case 'scrollHalf':
+      return `scrollHalf:${action.delta}`;
     default:
       return action.kind;
   }
