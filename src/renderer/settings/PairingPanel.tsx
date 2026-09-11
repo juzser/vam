@@ -158,19 +158,19 @@ const FOCUS_RING =
  * background, so it doesn't look like a button", and that was literally what
  * the paint said: `getComputedStyle` returned `rgba(0, 0, 0, 0)` for the fill,
  * so the box took whatever surface was behind it, and the only thing marking
- * it as a control was a `border-line` outline measuring 1.12:1 against the
+ * it as a control was a `border-line` outline measuring 1.14:1 against the
  * `bg-panel` this dialog draws.
  *
  * WHICH LEAVES THE BOUNDARY TO CARRY THE IDENTIFICATION, and that is not a
- * preference. Every surface token vam owns sits within 1.2:1 of `panel` in
- * dark -- `raised` on `panel` measures 1.06:1, and `segment-on`, the top of
- * the whole ladder, only 1.20:1 -- so no fill in this palette can reach the
+ * preference. Every surface token vam owns sits within 1.25:1 of `panel` in
+ * dark -- `raised` on `panel` measures 1.07:1, and `segment-on`, the top of
+ * the whole ladder, only 1.25:1 -- so no fill in this palette can reach the
  * 3:1 WCAG 1.4.11 asks of the visual information that identifies a component.
  * `line-tip` is the one line token that exists to clear exactly that floor
  * (see its own note in `styles.css`, written when the tooltip hit this same
- * wall): measured here it is 3.46:1 in dark and 3.62:1 in light against the
- * panel behind it, where `line-loud` is 1.33:1 and even `line-loudest` only
- * 2.04:1.
+ * wall): measured here it is 3.62:1 in dark and 3.62:1 in light against the
+ * panel behind it, where `line-loud` is 1.42:1 and even `line-loudest` only
+ * 2.19:1.
  *
  * THE HOVER MOVES AWAY FROM THE SURFACE, never back into it. `raised` ->
  * `segment-on` is a step further from `panel` in both themes (lighter in dark,

@@ -196,8 +196,8 @@ export function ShortcutTip({
           collisionPadding={8}
           className="z-50 flex max-w-[280px] flex-col gap-1 rounded-[7px] border border-line-tip bg-raised px-2 py-1.5 text-control shadow-tip"
         >
-          {/* ink on raised (14.9:1 dark, 15.5:1 light) and ink-dim (6.7:1 in
-              both), never ink-faint: faint measures 3.27 / 3.01, under AA. */}
+          {/* ink on raised (13.9:1 dark, 15.5:1 light) and ink-dim (6.9:1 dark,
+              6.8:1 light), never ink-faint. */}
           {merge ? (
             <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
               <span className="min-w-0 flex-1 text-ink">{label}</span>
