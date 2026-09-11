@@ -150,13 +150,22 @@ describe('picking a key changes the composer, not only the store', () => {
     // THROUGH THE WHOLE SEAM: overlay → prefs → `writePrefs` → `activatePrefs`
     // → the module store → the box's subscription. A test that stopped at
     // `onChange` would pass over every one of those.
+    //
+    // THE CAPTION IS NOW THE DEVIATION'S OWN REPORT, which makes this a
+    // sharper end-to-end assertion than it was: on the shipped key the
+    // desktop row says nothing about sending -- the operator asked for that
+    // -- and picking the other key is what brings it back. Absent, present,
+    // absent again, all three driven through the real dialog.
     render(<Canvas model={MODEL} />);
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'i', bubbles: true }));
     });
-    expect(hint(), 'the composer draws no send-key caption at all').not.toBeNull();
-    expect(hint()?.textContent, 'the box starts on the shipped key').toContain('Enter → ');
-    expect(hint()?.textContent).not.toContain('Shift');
+    // A composer to have a caption IN, or every "absent" below is free.
+    expect(
+      document.querySelector('[data-prompt-keys]'),
+      'the composer is not open, so none of this is about a caption',
+    ).not.toBeNull();
+    expect(hint(), 'the shipped key is a convention and says nothing').toBeNull();
 
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
@@ -171,7 +180,7 @@ describe('picking a key changes the composer, not only the store', () => {
     });
     fireEvent.click(option('enter') as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
-    expect(hint()?.textContent).not.toContain('Shift');
+    expect(hint()).toBeNull();
   });
 
   it('makes the swapped key the one that actually submits', () => {

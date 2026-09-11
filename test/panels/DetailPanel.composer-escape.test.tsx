@@ -420,16 +420,25 @@ describe('the box does not claim the chords that belong above or below it', () =
  * happens to be right today.
  */
 describe('the composer names the keys that operate it', () => {
-  it('names the send key, the interrupt and the way out, all three', () => {
+  it('names the interrupt and the way out, and leaves the send key alone', () => {
+    // It named all three until the operator asked for one: "of Enter-to-send
+    // and Mod-[-to-leave, only the leave one needs showing." The send key is
+    // the one thing here a control on screen already performs -- the submit
+    // button, with its own `Note` -- and Return in a text box is the most
+    // guessed-at gesture there is. These two are neither.
     bridge();
     draw();
-    expect(keys()).toContain('Enter');
     expect(keys()).toContain('Esc');
     expect(keys()).toContain('Mod-[');
+    expect(keys()).not.toContain('Enter');
   });
 
-  it('follows the send-key preference rather than naming a fixed key', () => {
-    draw();
+  it('follows the send-key preference rather than naming a fixed key, on a phone', () => {
+    // The caption survives where it is the only one there is: a soft keyboard
+    // has no Esc and no Ctrl, so the phone's row would otherwise be empty --
+    // and the return key is the one key in this box whose behaviour is a
+    // PREFERENCE rather than a convention, which is what a caption is for.
+    draw({}, { phone: true });
     const shipped = keys();
     act(() => setActivePromptSubmitKey('shift-enter'));
     expect(keys()).toContain('Shift-Enter');
