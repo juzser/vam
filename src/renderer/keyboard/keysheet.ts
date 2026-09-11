@@ -31,8 +31,13 @@ import {
  * operator has when they open the sheet ("how do I get to…", "how do I do
  * something to this session…"), not by which table the binding lives in:
  *
- * - `navigation` — moves the cursor and nothing else. Search is here: `/`, `n`
- *   and `N` end with the cursor somewhere new, which is what they are for.
+ * - `navigation` — moves the reader and nothing else. Mostly that is the
+ *   cursor: search is here too, because `/`, `n` and `N` end with the cursor
+ *   somewhere new, which is what they are for. `Mod-d`/`Mod-u` are the one
+ *   pair that moves the VIEWPORT instead — half a screen of transcript — and
+ *   they are here rather than in `panes` because "how do I get back up what
+ *   this session said" is the same question the group answers, asked inside
+ *   one session instead of across the list.
  * - `session` — acts on the focused session (rename, close, open, prompt).
  * - `panes` — the frame around the work: which pane holds the keyboard, and
  *   how wide the side panes are.
@@ -289,6 +294,39 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   stepSplit: {
     group: 'panes',
     label: (a) => (a.delta === 1 ? 'next split' : 'previous split'),
+  },
+  /**
+   * HALF A SCREEN OF TRANSCRIPT — and the second mode-dependent family this
+   * sheet has ever had, for the reason `move`'s entry above states: a binding
+   * that means two things gets one row per mode, because one undifferentiated
+   * caption is the "half right about a motion key" failure audit F1 was
+   * entirely about.
+   *
+   * Its Insert half is not a second behaviour, it is the ABSENCE of one
+   * (`isSelectOnly` in `chords.ts`) — and that is exactly what has to be
+   * printed. A sheet that captioned these "scroll half a screen" full stop
+   * would promise a scroll to an operator whose caret is in the prompt box,
+   * where the keystroke is the box's own delete.
+   *
+   * In `navigation` rather than `panes`: the group answers "how do I get
+   * to…", and reading back up a transcript is the commonest way an operator
+   * gets anywhere inside one. It is the one member that moves the READER
+   * rather than the cursor, which is why the group's own note above now says
+   * so.
+   */
+  scrollHalf: {
+    group: 'navigation',
+    label: (a) =>
+      a.delta === 1
+        ? 'half a screen down this pane’s transcript'
+        : 'half a screen up this pane’s transcript',
+    byMode: (a) => ({
+      select:
+        a.delta === 1
+          ? 'half a screen down this pane’s transcript'
+          : 'half a screen up this pane’s transcript — its head reads further back',
+      insert: 'nothing here — whatever you are typing in keeps Ctrl-D and Ctrl-U',
+    }),
   },
   copy: { group: 'review', label: () => 'copy this step’s commands' },
   palette: { group: 'view', label: () => 'command palette' },
