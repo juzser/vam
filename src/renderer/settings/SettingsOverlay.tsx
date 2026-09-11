@@ -34,6 +34,11 @@ import {
 } from '../keyboard/chords.js';
 import { type BindingRow, buildBindingSheet } from '../keyboard/keysheet.js';
 import {
+  applyPaletteTemplate,
+  PALETTE_TEMPLATES,
+  templatePalette,
+} from '../prefs/palette-templates.js';
+import {
   clearPalette,
   clearPaletteColor,
   type EffectiveTheme,
@@ -419,6 +424,65 @@ export function SettingsOverlay({
                       onPick={() => onChange(setTheme(prefs, choice))}
                     />
                   ))}
+                </div>
+              </Block>
+
+              {/* TEMPLATES FIRST, SWATCHES SECOND — coarse to fine, which is
+                  the order the operator asked for ("at the top") and also the
+                  order the two controls relate in: a template writes every
+                  swatch below at once, and the swatches then edit what it
+                  wrote. NOT above `theme`, because a template applies INTO a
+                  theme -- choosing which screen you are on has to come first,
+                  or both rows under it are editing a palette you cannot see.
+
+                  EACH BUTTON SHOWS ITS OWN COLOURS rather than only its name.
+                  Three discs -- pane, card, In bubble -- are the three surfaces
+                  the operator has actually reported on, drawn in the values the
+                  press will apply, so the preview IS the palette rather than a
+                  picture of one. They are `aria-hidden` and the button keeps a
+                  written name, because a colour is not a label. */}
+              <Block
+                label="templates"
+                hint={`a whole ${theme} palette in one press — the swatches below still edit it afterwards`}
+              >
+                <div className="flex flex-wrap gap-1.5">
+                  {PALETTE_TEMPLATES.map((template) => {
+                    const preview = templatePalette(template.id, theme);
+                    return (
+                      <button
+                        key={template.id}
+                        type="button"
+                        data-palette-template={template.id}
+                        title={`${template.hint} — studied from ${template.studied}`}
+                        aria-label={`apply the ${template.label} colour template to ${theme}`}
+                        onClick={() => onChange(applyPaletteTemplate(prefs, theme, template.id))}
+                        className={`flex h-[28px] cursor-pointer items-center gap-2 rounded border border-line px-2.5 text-control text-ink-dim hover:border-line-loud hover:text-ink ${FOCUS_RING}`}
+                      >
+                        <span aria-hidden="true" className="flex items-center">
+                          {(['--vam-pane', '--vam-card', '--vam-in-bubble'] as const).map(
+                            (token, i) => (
+                              <span
+                                key={token}
+                                data-template-disc={token}
+                                // Overlapped by a third of their width: three
+                                // discs in a row read as one palette, three
+                                // discs apart read as three separate settings.
+                                // The edge is a RING rather than a border so a
+                                // template whose surface sits close to the
+                                // panel behind this row still has one.
+                                className="h-[13px] w-[13px] rounded-full ring-1 ring-line-loud"
+                                style={{
+                                  backgroundColor: preview[token],
+                                  marginLeft: i === 0 ? 0 : -4,
+                                }}
+                              />
+                            ),
+                          )}
+                        </span>
+                        {template.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </Block>
 
