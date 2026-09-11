@@ -256,6 +256,77 @@ describe('the typeahead lists still answer Escape first', () => {
   });
 });
 
+/**
+ * A DIALOG TAKES ESCAPE BEFORE THE AGENT DOES.
+ *
+ * Claude Code's own rule, which this whole change is modelled on: "Interrupt
+ * Claude, or close a dialog … When a dialog is open, `Esc` closes the dialog."
+ * The two typeahead lists above already obeyed it. The composer has two MORE
+ * transient layers -- the provider popover and the mode popover -- and neither
+ * closed on Escape at all before this, from anywhere: they were dismissible
+ * only by picking a row or by clicking their own toggle again.
+ *
+ * That was survivable while Escape merely left the box. It is not now: Escape
+ * in this surface interrupts a running agent, so a layer that does not claim it
+ * first turns "close this popover" into "stop my agent".
+ */
+describe('an open popover takes Escape before the agent does', () => {
+  it('closes the mode popover instead of interrupting, from inside the box', () => {
+    const send = bridge();
+    draw();
+    fireEvent.click(q('[data-mode-toggle]') as HTMLElement);
+    expect(q('[data-mode-picker]')).not.toBeNull();
+    fireEvent.keyDown(box(), { key: 'Escape' });
+    expect(q('[data-mode-picker]')).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+    // And with it closed, Escape is the interrupt again.
+    fireEvent.keyDown(box(), { key: 'Escape' });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the provider popover instead of interrupting, from inside the box', () => {
+    const send = bridge();
+    draw({}, { onSetDefaultProvider: () => {} });
+    fireEvent.click(q('[data-provider-picker-toggle]') as HTMLElement);
+    expect(q('[data-provider-picker]')).not.toBeNull();
+    fireEvent.keyDown(box(), { key: 'Escape' });
+    expect(q('[data-provider-picker]')).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('closes it from the toggle itself, where the pointer left the keyboard', () => {
+    // A popover is opened by CLICKING, which leaves the keyboard on the
+    // button rather than in the textarea. Escape has to work from there too,
+    // or the one gesture that opens it has no matching dismiss.
+    draw();
+    const toggle = q('[data-mode-toggle]') as HTMLElement;
+    fireEvent.click(toggle);
+    expect(q('[data-mode-picker]')).not.toBeNull();
+    expect(fireEvent.keyDown(toggle, { key: 'Escape' })).toBe(false);
+    expect(q('[data-mode-picker]')).toBeNull();
+  });
+
+  it('closes it from an option row, where the keyboard walks to', () => {
+    draw();
+    fireEvent.click(q('[data-mode-toggle]') as HTMLElement);
+    const option = q('[data-mode-option="plan"]') as HTMLElement;
+    expect(option).not.toBeNull();
+    fireEvent.keyDown(option, { key: 'Escape' });
+    expect(q('[data-mode-picker]')).toBeNull();
+  });
+
+  it('does not swallow Escape when no popover is open, so the interrupt still fires', () => {
+    // The guard must be about an OPEN layer, not about the region: a wrapper
+    // that ate Escape unconditionally would make the interrupt unreachable
+    // from the two controls beside it.
+    const send = bridge();
+    draw();
+    fireEvent.keyDown(q('[data-mode-toggle]') as HTMLElement, { key: 'Escape' });
+    expect(q('[data-mode-picker]')).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 describe('Mod-[ is the way out of the box', () => {
   it('lets go of the keyboard and stops composing', () => {
     const stopped = draw();

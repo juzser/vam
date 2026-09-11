@@ -3559,6 +3559,47 @@ export function DetailPanel(props: DetailPanelProps) {
    * with no terminal has nothing to interrupt anywhere, and a session vam did
    * not start has a terminal that belongs to somebody else.
    */
+  /**
+   * A DIALOG TAKES ESCAPE BEFORE THE AGENT DOES -- Claude Code's own rule
+   * ("Interrupt Claude, or close a dialog ... When a dialog is open, `Esc`
+   * closes the dialog"), and the one this composer now has to keep in three
+   * places rather than one.
+   *
+   * Returns whether it CLOSED something, so every caller can answer the same
+   * question the same way. The two typeahead lists answer Escape earlier in
+   * the box's own handler, where they already own the arrow keys; these two
+   * popovers are opened by a POINTER, which leaves the keyboard on a button
+   * rather than in the textarea, so they need the answer from there as well.
+   *
+   * Before this they closed only by picking a row or re-clicking their own
+   * toggle. That was survivable while Escape merely left the box; it is not
+   * now, because an Escape that reaches past an open popover stops an agent.
+   */
+  const closeOpenPopover = (): boolean => {
+    if (!modePickerOpen && !providerPickerOpen) return false;
+    setModePickerOpen(false);
+    setProviderPickerOpen(false);
+    return true;
+  };
+  /**
+   * Escape on a popover's own widgets -- its TOGGLE and its LISTBOX, which are
+   * the two elements the keyboard can actually be on once a pointer opened it.
+   *
+   * On those two rather than on the wrapper around them, and that is an a11y
+   * rule rather than a style: a `div` carrying a key handler and no role is a
+   * control a screen reader cannot find (`noStaticElementInteractions`). Both
+   * of these already ARE controls -- a `button` and a `role="listbox"`.
+   *
+   * `stopPropagation` so the shell's own Escape does not peel a second layer
+   * on the same keystroke: one Escape, one dismissal, which is the rule
+   * `Canvas`'s `cancel` case states for every other overlay in the app.
+   */
+  const dismissPopoverOnEscape = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Escape') return;
+    if (!closeOpenPopover()) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
   const interruptRun = () => {
     if (terminal === false) {
       setCycleNote({
@@ -5292,6 +5333,10 @@ export function DetailPanel(props: DetailPanelProps) {
                     // operator their half-typed prompt would be a worse trade
                     // than pressing nothing at all.
                     event.preventDefault();
+                    // A popover opened from the tools row can still be up while
+                    // the keyboard is in the box. It is a dialog, so it takes
+                    // this Escape and the agent does not.
+                    if (closeOpenPopover()) return;
                     interruptRun();
                   } else if (normalizeKey(event) === 'Mod-[') {
                     // AND THE WAY OUT, which Escape used to be. `Ctrl-[` IS
@@ -5477,6 +5522,7 @@ export function DetailPanel(props: DetailPanelProps) {
                     <button
                       type="button"
                       data-provider-picker-toggle
+                      onKeyDown={dismissPopoverOnEscape}
                       aria-haspopup="listbox"
                       aria-expanded={providerPickerOpen}
                       aria-label={`default provider for new sessions: ${currentProvider.label} — change`}
@@ -5503,6 +5549,7 @@ export function DetailPanel(props: DetailPanelProps) {
                     <div
                       data-provider-picker
                       role="listbox"
+                      onKeyDown={dismissPopoverOnEscape}
                       aria-label="default provider for new sessions"
                       className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
                     >
@@ -5588,6 +5635,7 @@ export function DetailPanel(props: DetailPanelProps) {
                     <button
                       type="button"
                       data-mode-toggle
+                      onKeyDown={dismissPopoverOnEscape}
                       aria-haspopup="listbox"
                       aria-expanded={modePickerOpen}
                       aria-label={`mode: ${currentMode} — change, or ⇧Tab to cycle the session's own`}
@@ -5607,6 +5655,7 @@ export function DetailPanel(props: DetailPanelProps) {
                     <div
                       data-mode-picker
                       role="listbox"
+                      onKeyDown={dismissPopoverOnEscape}
                       aria-label="mode for this prompt"
                       className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
                     >
@@ -5723,7 +5772,22 @@ export function DetailPanel(props: DetailPanelProps) {
             NO INTERRUPT HINT WHERE THERE IS NO INTERRUPT (`canCycleMode`):
             promising one for a session vam cannot press a key in would be a
             control that can only refuse, drawn as one that acts. The way out
-            is named unconditionally, because that one always works. */}
+            is named unconditionally, because that one always works.
+
+            `Mod-[` IS THE ONE NAMED, out of the three keys that would work.
+            It is what Claude Code itself binds for this -- "`Esc` or `Ctrl+[`
+            — Enter NORMAL mode" -- which is the grammar the operator is
+            already in, and it is the reason this key was chosen over a second
+            spelling of something vam had. `Mod-0` (`focusList`) also gets out
+            from here, and is the one the `?` sheet can name; a caption listing
+            both would spend a third of its width teaching a synonym.
+
+            `H` IS DELIBERATELY NOT NAMED, and this is the trap it avoids. `H`
+            is `focusList`'s other binding, so it is the same act everywhere
+            ELSE -- but it is a BARE key, and `Canvas`'s typing guard hands
+            every bare key to the textarea. Pressed here it types an `H` into
+            the operator's prompt and gets nobody out. A hint naming it would
+            send them to press a key that silently edits their draft. */}
             {composing && (
               <p
                 data-prompt-keys
