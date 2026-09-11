@@ -47,11 +47,13 @@ import {
   setKeyBindings,
   setOutFontSize,
   setPaletteColor,
+  setPromptSubmitKey,
   setTheme,
   setTurnProgress,
   type Theme,
 } from '../prefs/prefs.js';
 import type { TurnProgress } from '../prefs/progress.js';
+import { type PromptSubmitKey, SUBMIT_KEY_LABELS } from '../prefs/submit-key.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
 import { SECTIONS, type SectionId, shortcutSections } from './sections.js';
 
@@ -87,6 +89,15 @@ const THEMES: readonly Theme[] = ['dark', 'light', 'system'];
  * `THEMES` is -- three words in a union are not a table.
  */
 const TURN_PROGRESS_MODES: readonly TurnProgress[] = ['shown', 'collapsed'];
+
+/**
+ * The two keys, shipped default first. Hard-coded beside the row that draws
+ * them, like `THEMES` and `TURN_PROGRESS_MODES` above -- two words in a union
+ * are not a table. What each one is CALLED is not decided here: that is
+ * `SUBMIT_KEY_LABELS`, which the composer's own caption reads as well, so the
+ * picker and the box cannot come to spell one key two ways.
+ */
+const SUBMIT_KEYS: readonly PromptSubmitKey[] = ['enter', 'shift-enter'];
 
 /** Which slot is listening for a keystroke, spelled as one value so opening a
  *  second capture box closes the first by construction. */
@@ -258,7 +269,9 @@ export function SettingsOverlay({
       return;
     }
     if (isReserved(key)) {
-      setMessage(`"${key}" is reserved — Escape cancels this capture, g/y/z open chords`);
+      setMessage(
+        `"${key}" is reserved — Escape cancels this capture, g/y/z open chords, Mod-[ leaves the prompt box`,
+      );
       return;
     }
     // The conflict check that used to stand here asked only about `key`, and
@@ -567,7 +580,7 @@ export function SettingsOverlay({
             <Panel
               id="sessions"
               active={section === 'sessions'}
-              hint="which agent a new session starts"
+              hint="which agent a new session starts, and which key sends a prompt to one"
             >
               <Block label="default provider" hint={PROVIDER_HINT}>
                 {CAN_CHOOSE_PROVIDER ? (
@@ -610,6 +623,56 @@ export function SettingsOverlay({
                     {resolveProvider(prefs.defaultProvider).command.join(' ')}
                   </code>{' '}
                   in the project’s directory.
+                </p>
+              </Block>
+
+              {/* HERE, AND NOT UNDER KEYBOARD, and the reason is the one the
+                  `turn progress` row states from the other side: that one is in
+                  Appearance because nothing it changes reaches a session. This
+                  one decides WHEN A PROMPT LEAVES FOR ONE, which is the same
+                  family as the agent that receives it.
+
+                  It could not go under Keyboard in any case. That section is
+                  generated from the chord tables, and this key is not in them
+                  ON PURPOSE -- the window listener never sees a keystroke typed
+                  in a textarea, which is exactly where this one is pressed
+                  (`DetailPanel`'s `onKeyDown` says so over Shift+Tab, bound
+                  there for the identical reason).
+
+                  A REAL CHOICE, which is what earns a row here at all: both
+                  values are reachable, both change what the box does on the
+                  next keystroke, and the composer paints which one is live.
+                  The picker that was withdrawn in PR 303 failed all three. */}
+              <Block
+                label="send key"
+                hint="which key sends the prompt you are typing to the session"
+              >
+                <div className="flex gap-1">
+                  {SUBMIT_KEYS.map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      data-submit-key-option={key}
+                      aria-pressed={prefs.promptSubmitKey === key}
+                      onClick={() => onChange(setPromptSubmitKey(prefs, key))}
+                      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
+                        prefs.promptSubmitKey === key
+                          ? 'border-line-loudest bg-raised text-ink'
+                          : 'border-line text-ink-dim'
+                      }`}
+                    >
+                      {SUBMIT_KEY_LABELS[key]}
+                    </button>
+                  ))}
+                </div>
+                {/* THE OTHER HALF, ON SCREEN. This row moves two keys, not
+                    one: whichever does not send takes the newline. Naming only
+                    the send would leave the operator to find the newline by
+                    losing a draft to it — and the composer's own caption has
+                    room for the send key alone. */}
+                <p data-submit-key-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
+                  the other one takes a newline, so the box stays multiline either way. The composer
+                  says which is which while you type.
                 </p>
               </Block>
             </Panel>

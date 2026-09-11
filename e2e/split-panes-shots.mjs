@@ -1311,6 +1311,12 @@ if (Math.abs(restored[0] - arranged[0]) > 4) {
 // pane count with no hint as to why. Measured: that is exactly what happened
 // the first time this section was written.
 await page.keyboard.press('Escape');
+// AND `Control+[`, WHICH IS THE WAY OUT OF THE COMPOSER NOW. Escape typed in
+// the prompt box is the agent's interrupt since the composer-escape change, so
+// it no longer releases the keyboard. Escape stays first, because it is still
+// what closes an overlay; `Mod-[` folds Ctrl and Cmd, and is a no-op anywhere
+// but in that box.
+await page.keyboard.press('Control+[');
 await page.waitForTimeout(150);
 const modeHere = await modeCell();
 console.log('mode before the refusal checks:', modeHere);
@@ -1502,6 +1508,12 @@ console.log(`${outDir}/split-resize-refusal.png`);
 // the shell actually gave the pane, which is also what makes the refusal's
 // quoted measurement checkable rather than a restatement of the stub.
 await page.keyboard.press('Escape');
+// AND `Control+[`, WHICH IS THE WAY OUT OF THE COMPOSER NOW. Escape typed in
+// the prompt box is the agent's interrupt since the composer-escape change, so
+// it no longer releases the keyboard. Escape stays first, because it is still
+// what closes an overlay; `Mod-[` folds Ctrl and Cmd, and is a no-op anywhere
+// but in that box.
+await page.keyboard.press('Control+[');
 await page.waitForTimeout(150);
 while ((await paneCount()) > 1) {
   await page.keyboard.press('z');
@@ -1513,6 +1525,12 @@ await page.waitForTimeout(250);
 await page.locator('[data-session-row="factory-sse-1"]').click();
 await page.waitForTimeout(200);
 await page.keyboard.press('Escape');
+// AND `Control+[`, WHICH IS THE WAY OUT OF THE COMPOSER NOW. Escape typed in
+// the prompt box is the agent's interrupt since the composer-escape change, so
+// it no longer releases the keyboard. Escape stays first, because it is still
+// what closes an overlay; `Mod-[` folds Ctrl and Cmd, and is a no-op anywhere
+// but in that box.
+await page.keyboard.press('Control+[');
 await page.waitForTimeout(150);
 
 // A SPLIT THAT FITS, first and in the same run: without it every check below

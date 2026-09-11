@@ -17,6 +17,21 @@
  * mocks a two-row table and asserts it comes back, with its write intact. The
  * two files together are the whole rule, and neither can pass for the other's
  * reason.
+ *
+ * TWO ASSERTIONS BELOW ARE SCOPED TO THE ROW, NOT TO THE SECTION, and that is
+ * a correction rather than a loosening. "Nothing in here is pressable" and
+ * "nothing in here writes" are claims about THE PROVIDER ROW; they were
+ * addressed to `[data-settings-panel="sessions"]` because, while the panel held
+ * exactly one row, the section WAS the row and the two could not be told apart.
+ * They can now — the send-key picker is a second row in this section, and it is
+ * a control that very much can act — so the assertions say which row they mean.
+ * Anything else would make this file's subject "whatever else Sessions ever
+ * grows", which is a question it was never written to answer.
+ *
+ * The row is found by its HEADING rather than by `[data-provider-fixed]`,
+ * because that hook exists only in the no-picker state: anchoring on it would
+ * make both assertions vacuous the day the picker comes back, which is the one
+ * day they must still be read.
  */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -36,6 +51,13 @@ function open(prefs: Prefs = EMPTY_PREFS) {
 
 const options = () => [...document.querySelectorAll('[data-provider-option]')];
 const panel = () => document.querySelector('[data-settings-panel="sessions"]');
+/** The provider ROW, by its heading — the one thing present in both states.
+ *  `[data-settings-rows] > div` is a `Block`, the same scope
+ *  `appearance.test.tsx` already reaches a single setting's row by. */
+const row = () =>
+  [...(panel()?.querySelectorAll('[data-settings-rows] > div') ?? [])].find(
+    (block) => block.querySelector('h4')?.textContent === 'default provider',
+  ) ?? null;
 
 describe('the sessions section, while vam can start exactly one agent', () => {
   it('is measuring the one-row table this whole file is about', () => {
@@ -58,7 +80,8 @@ describe('the sessions section, while vam can start exactly one agent', () => {
     expect(options()).toEqual([]);
     // Nor anything else pressable in the row: the point is not the attribute,
     // it is that nothing here invites a click that changes nothing.
-    expect([...(panel()?.querySelectorAll('button') ?? [])]).toEqual([]);
+    expect(row(), 'the provider row was not found, so nothing below was read').not.toBeNull();
+    expect([...(row()?.querySelectorAll('button') ?? [])]).toEqual([]);
   });
 
   it('still NAMES the provider, so the section reports rather than asking', () => {
@@ -76,9 +99,14 @@ describe('the sessions section, while vam can start exactly one agent', () => {
     expect(screen.getByText('sessions')).toBeTruthy();
   });
 
-  it('writes nothing at all: there is no act left in this section', () => {
+  it('writes nothing at all: there is no act left in this row', () => {
     const { onChange } = open();
-    for (const node of panel()?.querySelectorAll('*') ?? []) {
+    expect(row(), 'the provider row was not found, so nothing was clicked').not.toBeNull();
+    const clicked = [...(row()?.querySelectorAll('*') ?? [])];
+    // A sweep that found nothing is a sweep that proves nothing: this row
+    // carries a heading, a hint, the stated provider and the command line.
+    expect(clicked.length).toBeGreaterThan(3);
+    for (const node of clicked) {
       fireEvent.click(node);
     }
     expect(onChange).not.toHaveBeenCalled();

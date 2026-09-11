@@ -33,6 +33,12 @@ import {
   setActiveTurnProgress,
   type TurnProgress,
 } from './progress.js';
+import {
+  DEFAULT_PROMPT_SUBMIT_KEY,
+  type PromptSubmitKey,
+  readPromptSubmitKey,
+  setActivePromptSubmitKey,
+} from './submit-key.js';
 
 const KEY = 'vam.prefs.v1';
 
@@ -393,6 +399,20 @@ export type Prefs = {
    * person, not a session that stopped existing.
    */
   readonly turnProgress: TurnProgress;
+  /**
+   * Which key in the prompt box sends the draft — `enter` or `shift-enter`.
+   * The other one takes a newline; see `submit-key.ts` for why the two swap
+   * together and why this is a named pair rather than a boolean.
+   *
+   * GLOBAL, for the reason `turnProgress` is: there is one composer idiom and
+   * an operator's hands do not change between panes. Per pane it would be an
+   * arrangement they had to re-make on every split; per session it would key a
+   * habit to an id the TTL prunes.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly promptSubmitKey: PromptSubmitKey;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -414,6 +434,7 @@ export const EMPTY_PREFS: Prefs = {
   lastFocus: null,
   detailTab: null,
   turnProgress: DEFAULT_TURN_PROGRESS,
+  promptSubmitKey: DEFAULT_PROMPT_SUBMIT_KEY,
 };
 
 /**
@@ -622,6 +643,11 @@ function parsePrefs(
     // the mode that hides nothing. `readTurnProgress` is where that direction
     // is argued.
     turnProgress: readTurnProgress((parsed as { turnProgress?: unknown }).turnProgress),
+    // Per field like every line above it, and normalised rather than merely
+    // defaulted, in the one safe direction: a word this vam has no mode for
+    // must read back as the key the box has always sent on. `readPromptSubmitKey`
+    // is where that direction is argued.
+    promptSubmitKey: readPromptSubmitKey((parsed as { promptSubmitKey?: unknown }).promptSubmitKey),
   };
 }
 
@@ -1010,6 +1036,13 @@ export function setDefaultProvider(prefs: Prefs, id: unknown): Prefs {
  *  column's progress lines away on the strength of it. */
 export function setTurnProgress(prefs: Prefs, mode: unknown): Prefs {
   return { ...prefs, turnProgress: readTurnProgress(mode) };
+}
+
+/** Normalised on the way in as well as on the way out, for the same reason and
+ *  in the same direction: a caller that stored an unknown word would move the
+ *  operator's send key on the strength of it. */
+export function setPromptSubmitKey(prefs: Prefs, key: unknown): Prefs {
+  return { ...prefs, promptSubmitKey: readPromptSubmitKey(key) };
 }
 
 /**
@@ -1943,6 +1976,7 @@ export function activatePrefs(prefs: Prefs): Prefs {
   setActiveBindings(prefs.keyBindings);
   setActiveProvider(prefs.defaultProvider);
   setActiveTurnProgress(prefs.turnProgress);
+  setActivePromptSubmitKey(prefs.promptSubmitKey);
   return prefs;
 }
 

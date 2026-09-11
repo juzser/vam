@@ -716,11 +716,19 @@ describe('the prompt box', () => {
     expect(statusBar()).toContain('read-only');
   });
 
-  it('Escape leaves it and drops the draft', () => {
+  it('Mod-[ leaves it and drops the draft', () => {
+    // THE KEY MOVED, THE BEHAVIOUR DID NOT. Escape in the composer is the
+    // agent's interrupt now (the operator's request, Claude Code's default),
+    // so the way out took `Mod-[` -- vim's `Ctrl-[`, which IS Escape, and
+    // `Mod` folds Ctrl and Cmd. What it does is byte-for-byte what Escape did.
     render(<Canvas model={MODEL} />);
     press('i');
     typeInto(promptInput() as HTMLTextAreaElement, 'halfway typed');
-    keyOn(promptInput() as HTMLTextAreaElement, 'Escape');
+    keyOn(promptInput() as HTMLTextAreaElement, '[', {
+      code: 'BracketLeft',
+      metaKey: true,
+      cancelable: true,
+    });
     expect(mode()).toBe('Select');
     expect(promptInput()?.value).toBe('');
   });
@@ -1667,7 +1675,7 @@ describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
    * exactly "the keyboard went back to the sidebar" without reaching into
    * component state.
    */
-  it('Escape from a composer opened via I routes the keyboard back to the sidebar', () => {
+  it('Mod-[ from a composer opened via I routes the keyboard back to the sidebar', () => {
     render(<Canvas model={MODEL} />);
     press('I');
     expect(actionPane()).toBe('active');
@@ -1676,10 +1684,11 @@ describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
     expect(box).not.toBeNull();
     expect(document.activeElement).toBe(box);
 
-    keyOn(box as Element, 'Escape');
+    // `Mod-[` rather than Escape since Escape became the agent's interrupt.
+    keyOn(box as Element, '[', { code: 'BracketLeft', metaKey: true, cancelable: true });
 
     // The proof is the DIRECTION: Select's `<` shrinks the sidebar; Insert's
-    // grows it (the test just above this one). Had Escape failed to route
+    // grows it (the test just above this one). Had the way out failed to route
     // the keyboard back, this same `<` would have GROWN the sidebar instead.
     press('<');
     expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar - 24);
