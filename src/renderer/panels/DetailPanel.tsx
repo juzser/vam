@@ -115,6 +115,7 @@ import {
 } from '../prefs/progress.js';
 import {
   activePromptSubmitKey,
+  DEFAULT_PROMPT_SUBMIT_KEY,
   SUBMIT_KEY_LABELS,
   submitsPrompt,
   subscribePromptSubmitKey,
@@ -5860,6 +5861,31 @@ export function DetailPanel(props: DetailPanelProps) {
             beside a working button is the "control that cannot act" rule in
             its caption form. The return key is real, so the send hint stays.
 
+            THE SEND HINT IS NOW FOR THE DEVIATION ONLY. Operator: "of
+            Enter-to-send and Mod-[-to-leave, only the leave one needs
+            showing." The two were never worth the same. Pressing Return in a
+            text box is the most guessed-at gesture there is, and the submit
+            BUTTON sits directly above this row carrying the verb it performs
+            with a `Note` on it; the way out is neither guessable nor drawn
+            anywhere -- and the key an operator WOULD guess for it (Escape)
+            now interrupts their agent. A row that spends half its width on
+            the convention buries the thing that has to be taught.
+
+            BUT A CAPTION FOR A CONVENTION IS CLUTTER AND A CAPTION FOR A
+            DEVIATION IS THE ONLY REPORT THERE IS. Once this row stopped
+            naming the send key, NOTHING on a desktop did -- the button's
+            `Note` names the outcome, never the keystroke, and the picker is
+            two dialogs away. So it is drawn exactly when the operator is not
+            on the shipped key: `Enter` is silence, `Shift-Enter` says so.
+            That is the state they chose deliberately and the one where Return
+            does something they did not ask for.
+
+            ON A PHONE IT IS UNCONDITIONAL. There is no leave hint there to
+            make room for, so withdrawing the send hint would not shorten the
+            row, it would empty it -- and a soft keyboard's return key is the
+            least conventional of all. `test/panels/DetailPanel.test.tsx`
+            holds all three cases.
+
             `H` IS DELIBERATELY NOT NAMED, and this is the trap it avoids. `H`
             is `focusList`'s other binding, so it is the same act everywhere
             ELSE -- but it is a BARE key, and `Canvas`'s typing guard hands
@@ -5871,9 +5897,11 @@ export function DetailPanel(props: DetailPanelProps) {
                 data-prompt-keys
                 className="flex flex-wrap items-center gap-x-3 font-mono text-meta text-ink-faint"
               >
-                <span data-prompt-send-key={submitKey} className="whitespace-nowrap">
-                  {`${SUBMIT_KEY_LABELS[submitKey]} → ${sendVerb}`}
-                </span>
+                {(phone || submitKey !== DEFAULT_PROMPT_SUBMIT_KEY) && (
+                  <span data-prompt-send-key={submitKey} className="whitespace-nowrap">
+                    {`${SUBMIT_KEY_LABELS[submitKey]} → ${sendVerb}`}
+                  </span>
+                )}
                 {!phone && canCycleMode && (
                   <span data-prompt-interrupt-key className="whitespace-nowrap">
                     Esc → interrupt

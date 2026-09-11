@@ -44,6 +44,10 @@ import {
   isAtBottom,
 } from '../../src/renderer/panels/stick-to-bottom.js';
 import { OUT_FONT_SIZE_VAR } from '../../src/renderer/prefs/prefs.js';
+import {
+  DEFAULT_PROMPT_SUBMIT_KEY,
+  setActivePromptSubmitKey,
+} from '../../src/renderer/prefs/submit-key.js';
 import type { PaneSendResult, PaneView } from '../../src/shared/terminal.js';
 
 /** `attachIntoDraft` for the cases a test knows will be accepted. */
@@ -1488,6 +1492,54 @@ describe('there is a way out of the prompt box without a mouse', () => {
     cleanup();
     draw({ composing: false });
     expect(q<HTMLElement>('[data-prompt-keys]')).toBeNull();
+  });
+
+  it('names the way OUT and leaves the send key to the button beside it', () => {
+    // Operator: "of Enter-to-send and Mod-[-to-leave, only the leave one needs
+    // showing."
+    //
+    // THE TWO HINTS ARE NOT WORTH THE SAME. The send key is named twice over
+    // already -- there is a submit BUTTON directly above this row carrying the
+    // verb it performs, with a `Note` on it -- and pressing Return in a text
+    // box is the most guessed-at gesture there is. The way out is neither: no
+    // control on screen performs it, and the key that an operator WOULD guess
+    // (Escape) now interrupts their agent instead. A row that spends half its
+    // width on the obvious one buries the one that has to be taught.
+    draw({ composing: true });
+    const row = q<HTMLElement>('[data-prompt-keys]');
+    expect(row?.textContent).toContain('Mod-[');
+    expect(q<HTMLElement>('[data-prompt-send-key]')).toBeNull();
+    // NOT "the row lost a span": the row still has to say something, or this
+    // assertion would pass just as well over a composer that stopped drawing
+    // the caption at all.
+    expect(q<HTMLElement>('[data-prompt-leave-key]')).not.toBeNull();
+  });
+
+  it('brings the send caption back when the operator is not on the shipped key', () => {
+    // THE OTHER HALF, and the reason the rule is not "never draw it". Once
+    // this row stopped naming the send key, nothing on a desktop did: the
+    // submit button's `Note` names the OUTCOME, never the keystroke, and the
+    // picker is two dialogs away. A caption for a convention is clutter; a
+    // caption for a deviation is the only report there is -- and
+    // `Shift-Enter` is the state where Return does something the operator did
+    // not ask it to.
+    setActivePromptSubmitKey('shift-enter');
+    try {
+      draw({ composing: true });
+      expect(q<HTMLElement>('[data-prompt-send-key]')?.textContent).toContain('Shift-Enter');
+    } finally {
+      setActivePromptSubmitKey(DEFAULT_PROMPT_SUBMIT_KEY);
+    }
+  });
+
+  it('keeps the send key on a phone, where it is the only key there is', () => {
+    // The phone names no `Mod-[` and no `Esc` -- a soft keyboard has neither
+    // -- so dropping the send hint there would not simplify the row, it would
+    // empty it. The return key is real on a phone, and it is the one key whose
+    // behaviour is a PREFERENCE rather than a convention.
+    draw({ composing: true, phone: true });
+    expect(q<HTMLElement>('[data-prompt-send-key]')).not.toBeNull();
+    expect(q<HTMLElement>('[data-prompt-leave-key]')).toBeNull();
   });
 });
 
