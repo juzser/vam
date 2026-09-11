@@ -111,8 +111,16 @@ const message = () => document.querySelector('[data-binding-message]')?.textCont
 describe('the appearance section adjusts colours', () => {
   it('groups the visual settings under one heading', () => {
     open();
-    const heading = screen.getByText('appearance');
-    const section = heading.closest('section');
+    // "Appearance", not "appearance": the panel heading draws the SECTION'S
+    // LABEL now -- the same string the nav tab beside it draws -- where it
+    // used to draw the raw `id`. One destination, one spelling, which is why
+    // this can no longer be `getByText`: the tab and the heading say the same
+    // thing, and that agreement is the point. The capitals on screen are a CSS
+    // transform and do not reach `textContent`.
+    const heading = document.querySelector('[data-settings-panel="appearance"] h3');
+    expect(heading, 'the appearance panel drew no heading at all').not.toBeNull();
+    expect(heading?.textContent).toBe('Appearance');
+    const section = heading?.closest('section');
     expect(section?.textContent).toContain('dark');
     expect(section?.querySelectorAll('input[type="color"]').length).toBeGreaterThan(3);
   });
@@ -386,7 +394,7 @@ describe('the out text size is an appearance setting', () => {
 
   it('lives in Appearance, beside the theme and the colours', () => {
     open();
-    expect(control().closest('section')?.querySelector('h2, h3')?.textContent).toBe('appearance');
+    expect(control().closest('section')?.querySelector('h2, h3')?.textContent).toBe('Appearance');
   });
 
   it('shows the size in force and writes the one you pick', () => {
@@ -425,7 +433,8 @@ describe('the out text size is an appearance setting', () => {
     expect(hint).not.toMatch(NAMES_A_PANE);
     // And the section's own caption, one level up, must not either.
     const caption =
-      document.querySelector('[data-settings-panel="appearance"] h3 + span')?.textContent ?? '';
+      document.querySelector('[data-settings-panel="appearance"] [data-settings-panel-hint]')
+        ?.textContent ?? '';
     expect(caption.length).toBeGreaterThan(20);
     expect(caption).not.toMatch(NAMES_A_PANE);
   });

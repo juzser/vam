@@ -372,7 +372,16 @@ export function SettingsOverlay({
           long one. One height, one nav position; the panel scrolls. */}
       <div className="relative flex h-[min(600px,80vh)] w-[min(880px,94vw)] flex-col overflow-hidden rounded-md border border-line bg-panel">
         <div className="flex h-[38px] flex-none items-center gap-2 border-line border-b px-3">
-          <h2 className="font-semibold text-body text-ink">settings</h2>
+          {/* The dialog's own name, in the rank above the panel heading and
+              wearing the same treatment: uppercase with tracking, which this
+              file already uses for the nav's "Sections" eyebrow. One word,
+              named once, never scanned against siblings. */}
+          <h2
+            data-settings-heading
+            className="font-semibold text-body text-ink uppercase tracking-[0.07em]"
+          >
+            settings
+          </h2>
           {/* `ink-faint` measures 3.44 / 3.46 against `panel` — it fails 4.5:1
               in both themes, and every hint in this overlay used to wear it.
 
@@ -380,7 +389,7 @@ export function SettingsOverlay({
               position and of which section is open, so it is where the two
               Escapes get named, in the order they will happen. `polite`
               announces the mode change without stealing the keystroke. */}
-          <span role="status" aria-live="polite" className="text-control text-ink-dim">
+          <span role="status" aria-live="polite" className="vam-sentence text-control text-ink-dim">
             {capturing === null
               ? 'stored in this browser, not in a session'
               : 'waiting for a key — Esc cancels, Esc again closes'}
@@ -465,7 +474,7 @@ export function SettingsOverlay({
                         title={`${template.hint} — studied from ${template.studied}`}
                         aria-label={`apply the ${template.label} colour template to ${theme}`}
                         onClick={() => onChange(applyPaletteTemplate(prefs, theme, template.id))}
-                        className={`flex h-[28px] cursor-pointer items-center gap-2 rounded border border-line px-2.5 text-control text-ink-dim hover:border-line-loud hover:text-ink ${FOCUS_RING}`}
+                        className={`flex h-[28px] cursor-pointer items-center gap-2 rounded border border-line px-2.5 text-control text-ink-dim capitalize hover:border-line-loud hover:text-ink ${FOCUS_RING}`}
                       >
                         <span aria-hidden="true" className="flex items-center">
                           {(['--vam-pane', '--vam-card', '--vam-in-bubble'] as const).map(
@@ -549,7 +558,7 @@ export function SettingsOverlay({
                             overridden ? 'ring-2 ring-ink' : 'ring-1 ring-ink-faint'
                           }`}
                         />
-                        <span className="text-body text-ink">{label}</span>
+                        <span className="text-body text-ink capitalize">{label}</span>
                         {overridden ? (
                           <button
                             type="button"
@@ -631,7 +640,7 @@ export function SettingsOverlay({
                   role="switch"
                   aria-checked={prefs.focusView}
                   onClick={() => onChange(setFocusView(prefs, !prefs.focusView))}
-                  className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
+                  className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
                     prefs.focusView
                       ? 'border-line-loudest bg-raised text-ink'
                       : 'border-line text-ink-dim'
@@ -734,7 +743,12 @@ export function SettingsOverlay({
                       data-submit-key-option={key}
                       aria-pressed={prefs.promptSubmitKey === key}
                       onClick={() => onChange(setPromptSubmitKey(prefs, key))}
-                      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
+                      // Capitalised with every other control name here. A key
+                      // name is already capital, so the transform changes
+                      // nothing it is applied to -- which is the point: one
+                      // rule with no exceptions beats a rule plus a list of
+                      // strings that are allowed to break it.
+                      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
                         prefs.promptSubmitKey === key
                           ? 'border-line-loudest bg-raised text-ink'
                           : 'border-line text-ink-dim'
@@ -839,7 +853,7 @@ export function SettingsOverlay({
                     {/* The SAME heading as a group's, for a mode as well: the
                         refinement spec fixed one heading here (§4-5) and a mode
                         is not a reason to invent a second. */}
-                    <h4 className="mb-[10px] border-line-loud border-b pb-[6px] font-semibold text-body text-ink">
+                    <h4 className="mb-[10px] border-line-loud border-b pb-[6px] font-semibold text-body text-ink capitalize">
                       {section.title}
                     </h4>
                     {section.hint === null ? null : (
@@ -1042,12 +1056,42 @@ function Panel({
       className={FOCUS_RING}
     >
       {/* 15px is a step the declared scale does not have, and it is deliberate:
-          the heading has to out-rank four setting labels already at 13px. No
-          uppercase — at this size it reads as shouting and costs the word-shape
-          a scanned list is read by. */}
+          the heading has to out-rank four setting labels already at 13px.
+
+          IT SHOUTS NOW, AND THE OLD ARGUMENT AGAINST THAT IS ANSWERED RATHER
+          THAN DELETED. This comment used to read "no uppercase — at this size
+          it reads as shouting and costs the word-shape a scanned list is read
+          by", and the second half is the real objection: capitals are read
+          letter by letter because the ascenders and descenders a word is
+          recognised by are gone. That cost is paid by a LIST. This is one
+          word, once, naming where you are — never scanned against siblings,
+          because the other three are in the nav beside it. The operator asked
+          for the rank to be visible, and tracking is the standard answer to
+          the legibility half: capitals set solid are what actually reads as
+          shouting.
+
+          AND IT IS THE SECTION'S LABEL, NOT ITS `id`. The nav said
+          "Appearance" and this said "appearance" — one destination, spelled
+          two ways, one of them a raw identifier that had never been written
+          for a person to read. */}
       <div className="mb-5 border-line-loud border-b pb-3">
-        <h3 className="font-semibold text-heading text-ink">{id}</h3>
-        <span className="text-control text-ink-dim">{hint}</span>
+        <h3
+          data-settings-heading
+          className="font-semibold text-heading text-ink uppercase tracking-[0.07em]"
+        >
+          {SECTIONS.find((section) => section.id === id)?.label ?? id}
+        </h3>
+        {/* A `<p>`, NOT A `<span>`, and the reason is the case rule rather
+            than semantics -- though it is a paragraph either way.
+            `::first-letter` only applies to a BLOCK container, so this hint
+            wore `vam-sentence` and stayed lower case while the identical class
+            worked on the status line in the title bar, whose parent is a flex
+            container and whose children are therefore blockified. Measured off
+            the screenshot, not reasoned about: the guard's corpus did not
+            reach outside `[data-settings-rows]` and could not see it. */}
+        <p data-settings-panel-hint className="vam-sentence text-control text-ink-dim">
+          {hint}
+        </p>
       </div>
       {/* Its own wrapper, so `first:` in `Block` means the first ROW. */}
       <div data-settings-rows>{children}</div>
@@ -1072,7 +1116,10 @@ function Choice({
       // Restyled, deliberately not re-roled: three `aria-pressed` toggles for a
       // single-select is a real (small) wart, but a radiogroup is outside the
       // asks and costs two assertions. Raised as a follow-up instead.
-      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
+      // Capitalised like every other control name on this surface -- as CSS,
+      // so `label` keeps one canonical spelling for the tests and the
+      // accessible name.
+      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
         selected ? 'border-line-loudest bg-raised text-ink' : 'border-line text-ink-dim'
       }`}
     >
@@ -1194,7 +1241,16 @@ function BindingLine({
             with no width contributes its `size` default (about twenty
             characters) to a `max-content` track, so arming a row would widen
             the whole column for as long as the box was open. */}
-        <span data-binding-label={row.id} title={row.label} className="truncate text-body text-ink">
+        {/* A DESCRIPTION, NOT A NAME, so it takes sentence case like a hint
+            rather than the capitalisation a control's name takes. These read
+            "previous tab of this project — a ring, so it never runs out";
+            `capitalize` would give "Previous Tab Of This Project", which is a
+            title, and there are seventy of them down one list. */}
+        <span
+          data-binding-label={row.id}
+          title={row.label}
+          className="vam-sentence truncate text-body text-ink"
+        >
           {armed ? 'press a key — Esc cancels' : row.label}
         </span>
         {row.overridden ? (
@@ -1312,12 +1368,23 @@ function Block({
   return (
     <div className="mt-6 border-line-loud border-t pt-6 first:mt-0 first:border-t-0 first:pt-0">
       <div className="flex items-baseline gap-3">
-        <h4 className="font-medium text-body text-ink">{label}</h4>
+        {/* CAPITALISED, NOT SHOUTED, and the difference from the panel heading
+            above is the whole reason there are two rules. There are four or
+            five of these down one panel and they ARE scanned against each
+            other; a column of capitals is a column with no word shapes left to
+            find your row by. The transform is CSS rather than rewritten
+            strings so the DOM keeps one canonical spelling -- every test that
+            quotes a label still holds, and a screen reader is handed a word
+            instead of something it may spell out. */}
+        <h4 className="font-medium text-body text-ink capitalize">{label}</h4>
         {action === undefined ? null : <span className="ml-auto">{action}</span>}
       </div>
       {/* A 12px line running the full ~660px panel is a paragraph, not a
-          caption. */}
-      <p className="mt-1 max-w-[52ch] text-control text-ink-dim">{hint}</p>
+          caption -- and a paragraph takes SENTENCE case. `capitalize` here
+          would give "System Follows What The Operating System Asks For", which
+          is the failure that looks most like the fix, so `vam-sentence` moves
+          the first letter and nothing else. */}
+      <p className="vam-sentence mt-1 max-w-[52ch] text-control text-ink-dim">{hint}</p>
       <div className="mt-3">{children}</div>
     </div>
   );
@@ -1449,7 +1516,13 @@ function Stepper({
           <Plus size={13} strokeWidth={2} />
         </button>
       </div>
-      <span className="ml-2 font-mono text-control text-ink-dim">{unit}</span>
+      {/* A UNIT IS NOT A NAME, and it is marked as one so the case ladder can
+          tell the difference. `px` capitalised is `Px`, which is not a CSS
+          unit and not a word -- the one string on this surface that must stay
+          exactly as typed. */}
+      <span data-settings-unit className="ml-2 font-mono text-control text-ink-dim">
+        {unit}
+      </span>
     </div>
   );
 }

@@ -576,5 +576,234 @@ const REMOTE_STUB = {
   await page.close();
 }
 
+// ---------------------------------------------------------------------------
+// THE CASE LADDER, MEASURED AS PAINT.
+//
+// Operator: "the settings text is all lower case — the big headings should be
+// upper case and the normal ones capitalised."
+//
+// THE CASE IS A CSS TRANSFORM, NOT A REWRITTEN STRING, and that choice is what
+// makes this file the only place the change can be checked. The DOM keeps its
+// canonical lower-case text, so `textContent` is unchanged, every unit
+// assertion that quotes a label still holds, and the ACCESSIBLE NAME a screen
+// reader receives stays a normal word rather than four capitals it may spell
+// out. What changes is the paint -- and a class name in a `.tsx` file proves
+// only that somebody typed it. This repo has shipped a stylesheet rule that
+// matched nothing and passed review on exactly that evidence.
+//
+// SO EACH ELEMENT IS ASKED WHAT IT COMPUTED, and the corpus is asserted first:
+// a sweep that found no headings would satisfy every "is uppercase" check
+// below by having nothing to check.
+console.log('\n=== the settings case ladder');
+{
+  const page = await openSettings(1100, 800);
+  // ALL FOUR SECTIONS, not the one that happens to open. Three quarters of
+  // this surface is behind a nav click, and a ladder checked on `appearance`
+  // alone would have left `keyboard` -- the longest list of words here -- in
+  // whatever case it was already in.
+  const sectionIds = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-settings-nav-item]')].map((el) =>
+      el.getAttribute('data-settings-nav-item'),
+    ),
+  );
+  if (sectionIds.length < 4) {
+    throw new Error(`the nav offers ${sectionIds.length} sections, so this sweep is about nothing`);
+  }
+  const seen = { headings: 0, labels: 0, hints: 0, controls: 0, descriptions: 0 };
+  for (const sectionId of sectionIds) {
+  await page.locator(`[data-settings-nav-item="${sectionId}"]`).click();
+  await page.waitForTimeout(150);
+  const cased = await page.evaluate(() => {
+    const read = (el) => ({
+      text: (el.textContent ?? '').trim().slice(0, 40),
+      transform: getComputedStyle(el).textTransform,
+    });
+    const panel = document.querySelector('[data-settings-panel]:not([hidden])');
+    return {
+      // FROM THE PANEL ON SCREEN, not from the document: all four panels are
+      // rendered and the other three carry `hidden`, so a document-wide query
+      // returns four headings and none of them is "the one you are reading".
+      heading: [...(panel?.querySelectorAll('[data-settings-heading]') ?? [])].map(read),
+      labels: [...(panel?.querySelectorAll('[data-settings-rows] h4') ?? [])].map(read),
+      hints: [...(panel?.querySelectorAll('[data-settings-rows] p') ?? [])].map(read),
+      descriptions: [...(panel?.querySelectorAll('[data-binding-label]') ?? [])].map((el) => ({
+        ...read(el),
+        first: getComputedStyle(el, '::first-letter').textTransform,
+      })),
+      // THE CONTROLS THEMSELVES, which are the bulk of the words on this
+      // surface: theme choices, colour-template chips, swatch names, the focus
+      // view switch. A ladder that stopped at the headings would leave a panel
+      // whose every pressable word was still lower case.
+      controls: [
+        ...(panel?.querySelectorAll('[data-settings-rows] button, [data-settings-rows] span') ??
+          []),
+      ]
+        .filter((el) => {
+          // A DIRECT TEXT NODE, not `textContent`: the colour-template chips
+          // wrap three preview discs in a `span`, so a wrapper test on
+          // `querySelector` dropped them from the corpus entirely -- measured,
+          // and they are five of the controls this is about.
+          const own = [...el.childNodes].some(
+            (n) => n.nodeType === 3 && (n.textContent ?? '').trim() !== '',
+          );
+          if (!own) return false;
+          // Sentences and shouted eyebrows are ranks of their own, checked
+          // above. A UNIT is not a name either: `px` capitalised is `Px`.
+          if (el.closest('p') !== null) return false;
+          // A UNIT is not a name: `px` capitalised is `Px`. And a BINDING ROW
+          // is a description -- "previous tab of this project — a ring, so it
+          // never runs out" -- which takes sentence case; there are seventy of
+          // them down one list and title-casing that is a wall of capitals.
+          // Both are checked below, in the rank they belong to.
+          return (
+            el.closest('[data-settings-unit]') === null &&
+            el.closest('[data-binding-label]') === null
+          );
+        })
+        .map(read),
+    };
+  });
+  console.log(`  [${sectionId}] heading: ${JSON.stringify(cased.heading)}`);
+  console.log(`  [${sectionId}] labels: ${JSON.stringify(cased.labels.map((l) => l.text))}`);
+
+  // THE CORPUS FIRST, in every one of the three ranks.
+  if (cased.heading.length !== 1) {
+    throw new Error(`expected one visible panel heading, found ${cased.heading.length}`);
+  }
+  // THE CORPUS IS COUNTED ACROSS THE SWEEP, not per panel, and that is not a
+  // softening. `remote` draws its own chrome and has no `Block` rows at all,
+  // so a per-panel floor is either wrong for that one or vacuous for it -- and
+  // a vacuous floor is how a sweep comes to pass having examined nothing. The
+  // totals are asserted once, after all four, against literals.
+  seen.headings += cased.heading.length;
+  seen.labels += cased.labels.length;
+  seen.hints += cased.hints.length;
+  seen.controls += cased.controls.length;
+
+  // THE BIG HEADING SHOUTS. It is the one piece of text on this surface that
+  // names where you are rather than what you are changing.
+  for (const row of cased.heading) {
+    if (row.transform !== 'uppercase') {
+      throw new Error(
+        `[${sectionId}] the panel heading ${JSON.stringify(row.text)} is ${row.transform}`,
+      );
+    }
+    if (row.text.length === 0) {
+      throw new Error('the panel heading is empty, so its case is about nothing');
+    }
+  }
+
+  // A SETTING'S NAME IS CAPITALISED, never shouted: there are four or five of
+  // them down one panel and a column of capitals is a column with no word
+  // shapes left to scan by.
+  for (const row of cased.labels) {
+    if (row.transform !== 'capitalize') {
+      throw new Error(
+        `[${sectionId}] the setting label ${JSON.stringify(row.text)} is ${row.transform}`,
+      );
+    }
+  }
+
+  // EVERY CONTROL NAME IS CAPITALISED TOO. Corpus first, as above.
+  console.log(`  [${sectionId}] controls: ${JSON.stringify(cased.controls.map((c) => c.text))}`);
+  const shouted = cased.controls.filter((c) => c.transform !== 'capitalize');
+  if (shouted.length > 0) {
+    throw new Error(
+      `[${sectionId}] control names not capitalised: ${JSON.stringify(shouted.map((c) => `${c.text}=${c.transform}`))}`,
+    );
+  }
+
+  // A BINDING ROW IS A DESCRIPTION, in the same rank as a hint.
+  const titled = cased.descriptions.filter(
+    (d) => d.transform !== 'none' || d.first !== 'uppercase',
+  );
+  if (titled.length > 0) {
+    throw new Error(
+      `[${sectionId}] binding rows are not sentences: ${JSON.stringify(titled.slice(0, 3))}`,
+    );
+  }
+  seen.descriptions += cased.descriptions.length;
+
+  // AND A HINT IS A SENTENCE, so only its first letter moves. `capitalize`
+  // here would give "System Follows What The Operating System Asks For",
+  // which is the failure that looks most like the fix.
+  for (const row of cased.hints) {
+    if (row.transform !== 'none') {
+      throw new Error(
+        `[${sectionId}] the hint ${JSON.stringify(row.text)} is ${row.transform}, not a sentence`,
+      );
+    }
+  }
+  // EVERY PARAGRAPH ON THE PANEL, and the panel's OWN hint by name. That one
+  // is the reason this check widened: it wore the sentence class and stayed
+  // lower case, because `::first-letter` applies only to a BLOCK container and
+  // it was a `<span>` -- while the identical class worked one row up, whose
+  // parent is a flex container and whose children are therefore blockified.
+  // The first corpus here stopped at `[data-settings-rows]` and could not see
+  // the element that was wrong.
+  const sentences = await page.evaluate(() => {
+    const panel = document.querySelector('[data-settings-panel]:not([hidden])');
+    const own = panel?.querySelector('[data-settings-panel-hint]') ?? null;
+    const rows = [...(panel?.querySelectorAll('[data-settings-rows] p') ?? [])];
+    const at = (el) =>
+      el === null
+        ? null
+        : {
+            text: (el.textContent ?? '').trim().slice(0, 28),
+            first: getComputedStyle(el, '::first-letter').textTransform,
+          };
+    return { own: at(own), rows: rows.map(at) };
+  });
+  console.log(`  [${sectionId}] panel hint: ${JSON.stringify(sentences.own)}`);
+  if (sentences.own === null) {
+    throw new Error(`[${sectionId}] the panel draws no hint of its own`);
+  }
+  for (const row of [sentences.own, ...sentences.rows]) {
+    if (row.first !== 'uppercase') {
+      throw new Error(
+        `[${sectionId}] ${JSON.stringify(row.text)} starts ${row.first}, not a sentence`,
+      );
+    }
+  }
+
+  // THE HEADING NAMES THE SECTION THE NAV NAMES. Before this the nav said
+  // "Appearance" and the panel beside it said "appearance" -- the same
+  // destination, spelled two ways, one of them a raw id.
+  const agree = await page.evaluate(() => {
+    const heading = document.querySelector(
+      '[data-settings-panel]:not([hidden]) [data-settings-heading]',
+    );
+    const id = heading?.closest('[data-settings-panel]')?.getAttribute('data-settings-panel');
+    const tab = document.querySelector(`[data-settings-nav-item="${id}"]`);
+    return {
+      heading: (heading?.textContent ?? '').trim(),
+      tab: (tab?.textContent ?? '').trim(),
+    };
+  });
+  console.log(`  heading vs tab: ${JSON.stringify(agree)}`);
+  if (agree.heading !== agree.tab || agree.heading === '') {
+    throw new Error(`the panel heading ${JSON.stringify(agree.heading)} is not the tab's ${JSON.stringify(agree.tab)}`);
+  }
+
+  await page.screenshot({ path: `${outDir}/settings-case-${sectionId}.png` });
+  console.log(`${outDir}/settings-case-${sectionId}.png`);
+  }
+  console.log(`  swept: ${JSON.stringify(seen)}`);
+  // ONE HEADING PER SECTION, and enough rows and names across the four that a
+  // panel which quietly stopped drawing them cannot pass this by drawing
+  // nothing. Literals rather than `> 0`: that is the difference between a
+  // corpus and a pulse.
+  if (seen.headings !== sectionIds.length) {
+    throw new Error(`${seen.headings} headings over ${sectionIds.length} sections`);
+  }
+  if (seen.descriptions < 40) {
+    throw new Error(`the keyboard list drew ${seen.descriptions} rows, so its rank is untested`);
+  }
+  if (seen.labels < 7 || seen.hints < 7 || seen.controls < 24) {
+    throw new Error(`the sweep found too little to be about the surface: ${JSON.stringify(seen)}`);
+  }
+  await page.close();
+}
+
 await browser.close();
-console.log('settings chrome: the narrow nav is named at every width, and the Remote button paints.');
+console.log('settings chrome: the narrow nav is named at every width, the Remote button paints, and the case ladder holds.');
