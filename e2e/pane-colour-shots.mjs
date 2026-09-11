@@ -250,25 +250,36 @@ const fillOf = (selector) =>
  * Light's 1.10 is 95% of the 1.159 ceiling that pure white imposes on
  * anything lighter than that theme's pane -- there is no room above it.
  *
- * DARK'S FLOOR MOVED WITH THE BAND, 1.35 -> 1.40, WHICH IS NOT A RE-BASELINE:
- * the derivation is unchanged and the band is what moved. The dark lift (+3
- * L*, `test/renderer/dark-lift.test.ts`) carried the pane and both tints up
- * together, so `waiting-tint` went 1.389 -> 1.446 and `done-tint` 1.444 ->
- * 1.507 against the pane. The old floor sat 0.039 under the old band; this
- * one sits 0.046 under the new one.
+ * DARK'S FLOOR MOVED WITH THE BAND ONCE, 1.35 -> 1.40, WHICH WAS NOT A
+ * RE-BASELINE: the derivation is unchanged and the band is what moved. The
+ * first dark lift (+3 L*, `test/renderer/dark-lift.test.ts`) carried the pane
+ * and both tints up together, so `waiting-tint` went 1.389 -> 1.446 and
+ * `done-tint` 1.444 -> 1.507 against the pane. The old floor sat 0.039 under
+ * the old band; this one sits 0.046 under the new one.
  *
- * It has to move, or this guard stops covering the one bug the lift can
- * cause: the PRE-LIFT teal (#0f3b35) reads 1.362:1 against the LIFTED pane --
- * quieter than both tints, the one thing the bubble may not be -- and 1.362
- * clears 1.35. A pane lifted while the bubble stayed put would have passed
- * here and on the painted node.
+ * AND IT DID NOT MOVE AGAIN FOR THE SECOND LIFT. That pass derives every
+ * tinted ground from the READING it had on the pane rather than from a step,
+ * so the band came out where it went in -- `waiting-tint` 1.446, `done-tint`
+ * 1.510 -- against a pane that rose 4.87 L*. A floor derived from the band had
+ * nothing to follow.
+ *
+ * It had to move that once, or this guard would stop covering the one bug a
+ * lift can cause -- and the same argument has now caught the same bug twice:
+ * the teal from before the first lift (#0f3b35) reads 1.362:1 against the pane
+ * that lift produced, and the teal from before the second (#17423c) reads
+ * 1.338:1 against the pane THIS one produced. Each is quieter than both tints,
+ * the one thing the bubble may not be. 1.362 clears 1.35; neither clears 1.40.
+ * A pane lifted while the bubble stayed put would have passed the original
+ * floor, here and on the painted node.
  *
  * The DISTANCE floor is the same in both themes because it is the one that
  * carries the complaint: 6.24 is what the light theme's own card step (white
  * on the pane) measures, so the bar is "at least as distinct as a card".
  *
  * For scale, the fill this replaced -- `raised` -- measured 1.030:1 / ΔE 1.52
- * in dark and 1.015:1 / ΔE 1.38 in light.
+ * in dark and 1.015:1 / ΔE 1.38 in light. Dark's `raised` has since been
+ * stretched to 1.070:1 / ΔE 2.36 so a hover fill can be seen at all; the
+ * bubble is nine times further from the pane than that.
  */
 const BUBBLE_FLOORS = {
   dark: { ratio: 1.4, distance: 6.24 },
@@ -428,7 +439,7 @@ for (const theme of ['dark', 'light']) {
 // The regression PR #288 left behind, and the one flow where it costs the
 // most: a question card is what an operator uses to unblock a waiting agent.
 // #288 repointed the card from `panel` to `card` (#1d1d1d in dark at the
-// time, #232323 since the dark lift) and moved most hover fills with it, but
+// time, #2e2e2e after two dark lifts) and moved most hover fills with it, but
 // the options kept `hover:bg-raised` / `border-running bg-raised` -- and
 // `raised` is a rung BELOW the card, DARKER than the card it sits inside.
 // Measured here before the fix: 1.032:1 below its own ground. So touching an answer punched it below the card, which is the
@@ -443,7 +454,7 @@ for (const theme of ['dark', 'light']) {
 // AND THE INK IS MEASURED WITH IT, because the fill cannot be chosen without
 // it. A card is already at the ceiling `--vam-ink-quiet` allows (styles.css
 // says so at `--vam-card`), so any fill a rung above it puts the option's
-// quietest greys under 4.5:1 -- `ink-faint` measures 4.21:1 on `line-strong`.
+// quietest greys under 4.5:1 -- `ink-faint` measures 3.96:1 on `line-strong`.
 // The fix is a fill AND the inks that read on it, so both halves are held here:
 // a fill that moves without the ink following reddens the ink checks, and an
 // ink lift without the fill reddens the elevation checks.
@@ -810,30 +821,136 @@ const fenceClass = await page.evaluate(() => {
 });
 console.log(`  fence in this fixture: ${fenceClass ?? 'none drawn (demo writes no fenced code)'}`);
 
+// ------------------------------------- THE LIST MARKERS, AS PAINTED GLYPHS
+//
+// Operator: "the bullets and numbers in the response lists are too faint."
+// They were on `ink-ghost` -- 1.79:1 on the pane, beside body text at 7.21:1
+// -- under a comment in `DetailPanel.tsx` calling them "genuinely decorative".
+//
+// THIS IS THE LOAD-BEARING GUARD FOR THAT FIX, and the unit one is not. A
+// source scan can tell you a class was TYPED; it cannot tell you the rule
+// matched an element, and `token-contrast.test.ts` is honest that its own scan
+// reads a comment and a JSX attribute identically -- put the class string in a
+// comment and delete the real one and it still passes. `::marker` makes that
+// worse than usual, because it is a pseudo-element with its own tiny list of
+// honoured properties and its own inheritance rules: a selector that is one
+// character off still compiles, still ships, and paints nothing. So what is
+// asserted here is `getComputedStyle(li, '::marker').color` on a real item of
+// a real list, rendered by the real markdown component from the real fixture.
+//
+// TWO FLOORS, BECAUSE THEY ARE TWO KINDS OF MARK. The ordered list's "1." is
+// CONTENT -- it is how a reader refers to a step -- so it owes WCAG 1.4.3's
+// 4.5:1 and takes `ink-dim`, the same ink as the words it numbers. The
+// unordered list's disc carries no meaning of its own, so it owes 1.4.11's
+// 3:1 rather than 4.5, and takes `ink-quiet`. `DetailPanel.tsx` argues both.
+//
+// AND THE BULLET MUST STAY UNDER THE BODY TEXT. "Readable next to the item's
+// words without out-shouting them" is half the request and it is the half a
+// floor cannot express, so it is asserted separately: quieter than `ink-dim`,
+// and not by accident -- if a future edit puts the bullet on the body's own
+// ink, that is a different design and this says so.
+const MARKER_FLOORS = [
+  { what: 'an ordered list marker', selector: '[data-action-pane] ol > li', floor: 4.5 },
+  { what: 'an unordered list marker', selector: '[data-action-pane] ul > li', floor: 3 },
+];
+
+console.log('\n=== the list markers, on the painted ::marker');
+const markers = await page.evaluate((rows) => {
+  const { opaque, ratio, lum } = window.vamColour;
+  const pane = getComputedStyle(document.querySelector('[data-action-pane]')).backgroundColor;
+  return rows.map((row) => {
+    const li = document.querySelector(row.selector);
+    if (li === null) return { ...row, drawn: false };
+    // THE PSEUDO-ELEMENT, not the item. `getComputedStyle(li).color` would
+    // report the item's text and pass whatever the marker actually does --
+    // which is the measurement this guard exists to avoid making.
+    const marker = getComputedStyle(li, '::marker').color;
+    const body = getComputedStyle(li).color;
+    const both = opaque(marker) && opaque(pane);
+    return {
+      ...row,
+      drawn: true,
+      text: (li.textContent ?? '').trim().slice(0, 34),
+      marker,
+      body,
+      pane,
+      bothOpaque: both,
+      ratio: both ? Number(ratio(marker, pane).toFixed(3)) : null,
+      // Louder than the ground it is on, quieter than the words beside it.
+      underTheBody: both && opaque(body) ? lum(marker) < lum(body) : null,
+      sameAsTheBody: marker === body,
+    };
+  });
+}, MARKER_FLOORS);
+for (const m of markers) {
+  console.log(`  ${m.what}: ${JSON.stringify(m)}`);
+}
+// A LIST HAS TO BE ON SCREEN AT ALL. No fixture in this repo wrote one until
+// this change, which is the reason the defect was never visible to a guard or
+// to a screenshot -- so "the demo draws both kinds of list" is asserted before
+// anything is read off them.
+check(
+  'the demo renders an ordered AND an unordered list in the pane',
+  markers.length === 2 && markers.every((m) => m.drawn),
+  JSON.stringify(markers),
+);
+if (markers.every((m) => m.drawn)) {
+  check(
+    'both markers paint an opaque colour of their own',
+    markers.every((m) => m.bothOpaque),
+    JSON.stringify(markers.map((m) => `${m.what} ${m.marker}`)),
+  );
+  const short = markers.filter((m) => m.bothOpaque && m.ratio < m.floor);
+  check(
+    'each marker clears the floor its own kind of mark owes (4.5:1 content, 3:1 a mark)',
+    short.length === 0,
+    short.map((m) => `${m.what}: ${m.ratio}:1 on ${m.pane}, floor ${m.floor}`).join(' ; '),
+  );
+  // THE NUMBER READS AS ITS OWN SENTENCE and the BULLET does not, which is the
+  // whole reason the two were decided apart rather than bumped together.
+  const [ordered, unordered] = markers;
+  check(
+    'the number is painted in the same ink as the words it numbers',
+    ordered.sameAsTheBody,
+    `${ordered.marker} vs body ${ordered.body}`,
+  );
+  check(
+    'and the bullet stays quieter than the item text beside it',
+    unordered.underTheBody === true && !unordered.sameAsTheBody,
+    `${unordered.marker} vs body ${unordered.body}`,
+  );
+}
+await page.locator('[data-action-pane]').last().screenshot({
+  path: `${outDir}/list-markers-dark.png`,
+});
+console.log(`${outDir}/list-markers-dark.png`);
+
 // ----------------------------------------------- THE DARK LIFT, AS PAINT
 //
-// Operator: "make the dark UI a bit lighter". `test/renderer/dark-lift.test.ts`
-// holds the stylesheet to +3 L* per token; this holds the SCREEN to it, which
-// is a different claim and the one that can fail on its own. A palette can be
-// lifted in `styles.css` and never reach a surface -- a utility whose token
-// does not exist emits no class, breaks no build and fails no assertion that
-// reads text, and this repo has already shipped a rule that was TYPED while
-// its selector matched nothing.
+// Operator, twice in the same words: "make the dark UI a bit lighter".
+// `test/renderer/dark-lift.test.ts` holds the stylesheet to a band per token;
+// this holds the SCREEN to it, which is a different claim and the one that can
+// fail on its own. A palette can be lifted in `styles.css` and never reach a
+// surface -- a utility whose token does not exist emits no class, breaks no
+// build and fails no assertion that reads text, and this repo has already
+// shipped a rule that was TYPED while its selector matched nothing.
 //
 // EACH NODE IS MEASURED AGAINST THE COLOUR IT USED TO PAINT, recorded here
-// from the pre-lift stylesheet, so what is asserted is the DISTANCE TRAVELLED
-// rather than the value found. A guard that expects what the code now does
-// passes on whatever the code does next.
+// from the stylesheet as it stood before this pass, so what is asserted is the
+// DISTANCE TRAVELLED rather than the value found. A guard that expects what the
+// code now does passes on whatever the code does next.
 //
 // THE BAND IS THE SAME ONE THE UNIT GUARD USES: at least one JND (2.3 L*), at
 // most "a bit" (6.0). Under the floor means somebody walked a surface back;
-// over the ceiling means the theme is drifting up a patch at a time.
+// over the ceiling means the theme is drifting up a patch at a time. Neither
+// number moved for the second lift -- what moved is the SEPARATION block
+// below, which is the half a per-token band cannot express.
 const LIFT_BAND = { floor: 2.3, ceiling: 6 };
 const LIFTED_LADDER = [
-  { what: 'the page behind the panes', selector: 'body', was: '#0a0a0a' },
-  { what: 'the sidebar', selector: '[data-sidebar-pane]', was: '#171717' },
-  { what: 'the detail pane', selector: '[data-action-pane]', was: '#171717' },
-  { what: 'a card on the pane', selector: '[data-question]', was: '#1d1d1d' },
+  { what: 'the page behind the panes', selector: 'body', was: '#131313' },
+  { what: 'the sidebar', selector: '[data-sidebar-pane]', was: '#1d1d1d' },
+  { what: 'the detail pane', selector: '[data-action-pane]', was: '#1d1d1d' },
+  { what: 'a card on the pane', selector: '[data-question]', was: '#232323' },
 ];
 /** What the LIGHT theme paints on the same four nodes, and must still paint. */
 const LIGHT_UNMOVED = ['rgb(255, 255, 255)', 'rgb(240, 238, 234)', 'rgb(240, 238, 234)', 'rgb(255, 255, 255)'];
@@ -889,6 +1006,123 @@ if (lifted.every((r) => r.painted)) {
     'and the ladder still climbs ground < sidebar = pane < card',
     ground < sidebar_ && sidebar_ === pane && pane < card,
     lifted.map((r) => `${r.what} ${r.light}`).join(' ; '),
+  );
+}
+
+// ------------------------------------------- THE SEPARATION, AS PAINT
+//
+// THE HALF THAT MADE THE OPERATOR ASK TWICE. The first lift added a constant
+// to every grey, and a constant in L* preserves every pairwise L* difference
+// exactly -- so it could raise the floor and could not, by construction, put
+// any daylight between one surface and the next. Before this pass, three of
+// the pairs that actually touch on screen were under the 2.3 L* just-noticeable
+// difference, and the loudest of them was a hover fill: a pointer that did not
+// light the row it was on.
+//
+// MEASURED ON PAINTED NODES, NOT ON TOKENS, for the reason the whole file
+// exists -- and the hover case in particular cannot be read from a stylesheet
+// at all, because `hover:bg-raised` only resolves once a real pointer is over a
+// real element. `[data-view]` is the pane's own tab bar, which is where
+// `styles.css` says `raised` belongs ("this bar sits on `bg-pane`, where
+// `raised` is already the rung above the ground"), and it is an unselected tab
+// that is hovered, because the selected one wears `line-strong` instead.
+//
+// `was` IS THE POINT, as it is above: asserting only "clears a JND today" would
+// pass on a palette that was already fine. Each row also has to be WIDER than
+// the distance recorded from the palette this pass replaced.
+//
+// AND THE DIRECTION IS ASSERTED, NOT JUST THE DISTANCE, which is the mistake
+// the first version of this block made. `Math.abs` treats a fill that sank
+// BELOW its own ground as a separation like any other -- so reverting
+// `--vam-raised` to the value this pass replaced would have left the hover
+// 3.39 L* from the pane, on the wrong side of it, and passed. That is the
+// exact defect `--vam-card` was created for ("a hole punched in the surface"),
+// measured here one level down. `a` is always the node that must read as
+// RAISED off `b`, and falsifying the block is what found this.
+const SEPARATION = [
+  {
+    what: 'the sidebar against the page behind it',
+    a: '[data-sidebar-pane]',
+    b: 'body',
+    was: 4.88,
+  },
+  { what: 'the detail pane against that page', a: '[data-action-pane]', b: 'body', was: 4.88 },
+  {
+    what: 'a card against the pane it sits on',
+    a: '[data-question]',
+    b: '[data-action-pane]',
+    was: 2.95,
+  },
+  {
+    what: 'a HOVERED tab against the pane it sits on',
+    a: '[data-view][aria-pressed="false"]',
+    b: '[data-action-pane]',
+    was: 1.48,
+    hover: true,
+  },
+];
+
+console.log('\n=== the separation between surfaces that touch, on the painted node');
+const separations = [];
+for (const row of SEPARATION) {
+  if (row.hover) {
+    await page.locator(row.a).first().hover();
+    await page.waitForTimeout(250);
+  }
+  separations.push(
+    await page.evaluate((r) => {
+      const { opaque, lightness, ratio } = window.vamColour;
+      const a = document.querySelector(r.a);
+      const b = document.querySelector(r.b);
+      const fa = a === null ? null : getComputedStyle(a).backgroundColor;
+      const fb = b === null ? null : getComputedStyle(b).backgroundColor;
+      // BOTH SIDES OPAQUE FIRST, EVERY TIME. A tab that never took its hover
+      // fill is `rgba(0, 0, 0, 0)`, and a transparent node compared against a
+      // painted one reports a huge, entirely fictional separation. This is the
+      // gate that turns "the hover never fired" into a red rather than a pass.
+      const both = fa !== null && fb !== null && opaque(fa) && opaque(fb);
+      return {
+        ...r,
+        a: fa,
+        b: fb,
+        bothOpaque: both,
+        raised: both ? lightness(fa) > lightness(fb) : null,
+        now: both ? Number(Math.abs(lightness(fa) - lightness(fb)).toFixed(2)) : null,
+        ratio: both ? Number(ratio(fa, fb).toFixed(3)) : null,
+      };
+    }, row),
+  );
+}
+await page.mouse.move(5, 5);
+await page.waitForTimeout(150);
+for (const s of separations) {
+  console.log(
+    `  ${s.what}: ${s.a} / ${s.b} — ΔL* ${s.now} (was ${s.was}), ${s.ratio}:1, raised=${s.raised}`,
+  );
+}
+check(
+  'every pair that touches paints two opaque fills',
+  separations.length === 4 && separations.every((s) => s.bothOpaque),
+  JSON.stringify(separations),
+);
+if (separations.every((s) => s.bothOpaque)) {
+  const sunk = separations.filter((s) => !s.raised);
+  check(
+    'each one reads as RAISED off the surface behind it, not merely different from it',
+    sunk.length === 0,
+    sunk.map((s) => `${s.what}: ${s.a} under ${s.b}`).join(' ; '),
+  );
+  const invisible = separations.filter((s) => s.now < LIFT_BAND.floor);
+  check(
+    `each one is at least ${LIFT_BAND.floor} L* apart — a step a person can see`,
+    invisible.length === 0,
+    invisible.map((s) => `${s.what}: ${s.now} L*`).join(' ; '),
+  );
+  const narrowed = separations.filter((s) => s.now <= s.was);
+  check(
+    'and every one of them is wider than it was before this lift',
+    narrowed.length === 0,
+    narrowed.map((s) => `${s.what}: ${s.was} -> ${s.now} L*`).join(' ; '),
   );
 }
 

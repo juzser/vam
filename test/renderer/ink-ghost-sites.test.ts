@@ -14,11 +14,36 @@
  * file's shape as an instance of that lesson; it is the case the lesson
  * itself does not cover.
  *
- * `ink-ghost` measures 1.84:1 dark / 2.39:1 light against `--vam-panel`
+ * `ink-ghost` measures 1.87:1 dark / 2.39:1 light against `--vam-panel`
  * (issue 201) and is decorative-only after the token split: it may carry a
- * scrollbar thumb or a list bullet, never text or a border. A new site
- * outside the allowlist below is exactly the regression issue 201 fixed,
- * shipping again under a different component.
+ * scrollbar thumb, never text, never a border, and never A GLYPH OF ANY KIND.
+ * A new site outside the allowlist below is exactly the regression issue 201
+ * fixed, shipping again under a different component.
+ *
+ * "OR A LIST BULLET" USED TO BE IN THAT SENTENCE, and the allowlist below used
+ * to carry a second entry to match. The bullet AND the number of every list in
+ * an agent's answer were routed through this token by one rule on the shared
+ * `<li>`, at 1.79:1 on the pane beside body text at 7.21:1 -- and the operator
+ * reported the result: "the bullets and numbers in the response lists are too
+ * faint".
+ *
+ * A `::marker` IS A PAINTED GLYPH, which makes it the wrong kind of thing for
+ * this token whichever way the bullet-versus-number argument goes. A number is
+ * content -- it is how a reader refers to a step -- so it owes WCAG 1.4.3's
+ * 4.5:1; a bullet carries no meaning of its own but is still the mark a reader
+ * uses to find where an item begins, so it owes 1.4.11's 3:1. `ink-ghost`
+ * meets neither. Both moved (`DetailPanel.tsx` says which and why), so this
+ * file holds the NEGATIVE claim -- nothing outside the allowlist paints
+ * `ink-ghost` -- while `e2e/pane-colour-shots.mjs` holds the positive one by
+ * reading what a real `li::marker` is painted with in a browser.
+ *
+ * THAT SPLIT IS NOT A STYLE CHOICE. A scan of this shape cannot tell a class
+ * string in JSX from the same string inside a comment, so it can be satisfied
+ * by PROSE -- which makes it sound as a "nobody writes this" check and unsound
+ * as a "somebody still writes this" one. The second assertion below (every
+ * allowlisted site must be FOUND) is the half with that weakness, and it is
+ * kept only because it is cheap: deleting `OverlayScroll.tsx`'s thumb would
+ * still be caught by the rendered guard, and this one just catches it sooner.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -53,11 +78,16 @@ function listSrcFiles(dir: string): string[] {
  */
 const UTILITY_USE = /\b(?:marker:)?(?:text|border|bg)-ink-ghost\b/g;
 
-/** Every file, and the exact utility class, allowed to use `ink-ghost`. */
-const ALLOWLIST = [
-  { file: 'renderer/panels/OverlayScroll.tsx', needle: 'bg-ink-ghost' },
-  { file: 'renderer/panels/DetailPanel.tsx', needle: 'marker:text-ink-ghost' },
-] as const;
+/**
+ * Every file, and the exact utility class, allowed to use `ink-ghost`.
+ *
+ * ONE ENTRY, not two. A scrollbar thumb is the only mark left in this app that
+ * carries no meaning of its own: it reports a position the content already
+ * shows, it is not read, and it is not what tells a reader where anything
+ * begins. The list markers that used to sit beside it here are glyphs, and the
+ * block comment above says why that settles it.
+ */
+const ALLOWLIST = [{ file: 'renderer/panels/OverlayScroll.tsx', needle: 'bg-ink-ghost' }] as const;
 
 interface Use {
   readonly file: string;
@@ -89,7 +119,7 @@ describe('ink-ghost call sites (issue 201)', () => {
     const unexpected = found.filter((use) => !isAllowed(use));
     expect(
       unexpected.map((u) => `${u.file}:${u.line}: ${u.needle}`),
-      'ink-ghost is decorative-only (1.84:1 dark / 2.39:1 light on --vam-panel) -- ' +
+      'ink-ghost is decorative-only (1.87:1 dark / 2.39:1 light on --vam-panel) -- ' +
         'text or a border belongs on --vam-ink-quiet',
     ).toEqual([]);
 

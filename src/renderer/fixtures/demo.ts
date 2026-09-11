@@ -129,8 +129,28 @@ export const DEMO_MODEL: CanvasModel = {
               id: 'd-task4',
               label: 'task-4',
               input: "Run task-4 per plan-v2, TDD first, don't waive the empty-queue branch.",
-              output:
+              // THE ONE ANSWER THAT RENDERS MARKDOWN LISTS, and it is here
+              // because its absence was load-bearing. `out` is drawn by
+              // `OUT_MARKDOWN`, which styles a `ul`, an `ol` and their
+              // `::marker`s -- and no fixture in this repo wrote a list, so
+              // `?demo=1` never drew one marker. That is the only session a
+              // screenshot may show or a guard may drive (`demo-history.ts`
+              // says why), so the markers could not be measured, could not be
+              // photographed, and shipped at 1.79:1 until the operator
+              // reported them. A numbered list AND a bulleted one, because the
+              // two now take different inks and one of them would leave the
+              // other unrendered.
+              output: [
                 'Round 1 done: 340-line diff, 6 files, suite green. Reviewer came back with 2 findings (1×S2, 1×S3).',
+                '',
+                '1. S2 — the queue races when two tasks discharge in the same tick.',
+                '2. S3 — the empty-queue branch has no test; the plan said do not waive it.',
+                '',
+                'Still open:',
+                '',
+                '- round 2 is picking up the S2 first',
+                '- the S3 test lands with it',
+              ].join('\n'),
               commands: [],
               // A TURN THAT FINISHED AND STILL WENT WRONG, which is the case
               // the progress line used to fold away entirely: it answered, so

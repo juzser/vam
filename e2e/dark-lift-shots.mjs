@@ -1,5 +1,6 @@
 /**
- * THE PR'S PICTURES: the dark theme before and after the lift, at two widths.
+ * THE PR'S PICTURES: the dark theme before and after the lift, at two widths,
+ * and the list markers before and after theirs.
  *
  * Operator: "make the dark UI a bit lighter." That is a judgement they have to
  * make by eye, so the job of this file is to make the comparison easy and
@@ -9,18 +10,24 @@
  * driver gives about every screenshot script: it asserts nothing, so running
  * it in CI would turn a green tick into a broader claim than it is.
  *
+ * THE PAIR IS THE SECOND LIFT, not the first. The operator asked the same
+ * thing twice, so "before" here is the palette the FIRST pass shipped -- the
+ * one they looked at and asked again about -- rather than the artboard it came
+ * from. Photographing the artboard would flatter this change by crediting it
+ * with two passes of work; what has to be judged is the step this one adds.
+ *
  * HOW "BEFORE" IS PRODUCED, because it matters that this is not a mock-up.
  * The same build is photographed twice, a few hundred milliseconds apart; the
- * first time with all 23 lifted tokens pushed back to the exact values they
- * held at `ace5bd7`, as inline custom properties on <html> -- which is the
+ * first time with all 24 lifted tokens pushed back to the exact values they
+ * held at `27f773a`, as inline custom properties on <html> -- which is the
  * same mechanism the Appearance swatches use, so the "before" shot is the
  * shipped DOM painting the old palette rather than a rebuild of an old
  * branch. Only the palette moves between the two frames.
  *
  * IT PRINTS WHAT IT MEASURES IN BOTH STATES, so the reconstruction can be
  * checked rather than believed: the "before" ladder must come back at
- * L* 2.74 (ground) / 7.74 (pane) / 10.77 (card) and the "after" at
- * 5.88 / 10.77 / 13.71. If those do not appear, the pictures should not be
+ * L* 5.88 (ground) / 10.77 (pane) / 13.71 (card) and the "after" at
+ * 10.27 / 15.64 / 18.94. If those do not appear, the pictures should not be
  * trusted.
  *
  * DARK ONLY. The light theme did not move -- that is asserted as paint in
@@ -35,31 +42,36 @@ import { chromium } from 'playwright-core';
 const origin = process.argv[2] ?? 'http://localhost:5541';
 const outDir = process.argv[3] ?? 'docs/ui';
 
-/** Every token the lift moved, at the value it held before it. */
+/**
+ * Every token this lift moved, at the value it held before it — the same table
+ * `test/renderer/dark-lift.test.ts` measures the step from, so the pictures and
+ * the assertions cannot come to disagree about what "before" was.
+ */
 const BEFORE_THE_LIFT = {
-  '--vam-ground': '#0a0a0a',
-  '--vam-sunken': '#0f0f0f',
-  '--vam-well': '#101010',
-  '--vam-header': '#111111',
-  '--vam-panel': '#141414',
-  '--vam-sidebar': '#171717',
-  '--vam-pane': '#171717',
-  '--vam-raised': '#1a1a1a',
-  '--vam-card': '#1d1d1d',
-  '--vam-segment-on': '#262626',
-  '--vam-line': '#1f1f1f',
-  '--vam-line-strong': '#262626',
-  '--vam-line-loud': '#2e2e2e',
-  '--vam-line-loudest': '#4a4a4a',
-  '--vam-line-tip': '#6b6b6b',
-  '--vam-ink-dim': '#a1a1a1',
-  '--vam-ink-faint': '#858585',
-  '--vam-ink-quiet': '#858585',
-  '--vam-ink-ghost': '#3f3f3f',
-  '--vam-in-bubble': '#0f3b35',
-  '--vam-waiting-tint': '#3f2f12',
-  '--vam-waiting-wash': '#161208',
-  '--vam-done-tint': '#24354d',
+  '--vam-ground': '#131313',
+  '--vam-sunken': '#161616',
+  '--vam-well': '#171717',
+  '--vam-header': '#181818',
+  '--vam-panel': '#1a1a1a',
+  '--vam-sidebar': '#1d1d1d',
+  '--vam-pane': '#1d1d1d',
+  '--vam-raised': '#202020',
+  '--vam-card': '#232323',
+  '--vam-segment-on': '#2c2c2c',
+  '--vam-line': '#252525',
+  '--vam-line-strong': '#2c2c2c',
+  '--vam-line-loud': '#353535',
+  '--vam-line-loudest': '#515151',
+  '--vam-line-tip': '#727272',
+  '--vam-ink-dim': '#a9a9a9',
+  '--vam-ink-faint': '#8d8d8d',
+  '--vam-ink-quiet': '#8d8d8d',
+  '--vam-ink-ghost': '#464646',
+  '--vam-ansi-black': '#6b6b6b',
+  '--vam-in-bubble': '#17423c',
+  '--vam-waiting-tint': '#463618',
+  '--vam-waiting-wash': '#1c1811',
+  '--vam-done-tint': '#2b3c54',
 };
 
 /** Two widths, because the pane and the sidebar divide the window differently. */
@@ -163,8 +175,8 @@ for (const [state, apply] of [
   console.log(`${outDir}/dark-lift-pane-${state}.png`);
 }
 
-// AND THE TWO OF THEM IN ONE FRAME, which is the only form in which a 3 L*
-// step can actually be judged: side by side with a hard seam, where the eye is
+// AND THE TWO OF THEM IN ONE FRAME, which is the only form in which a step
+// this size can actually be judged: side by side with a hard seam, where the eye is
 // very good at this, rather than in two files a scroll apart, where it is not.
 //
 // Composed in the browser's own canvas from the two PNGs just written -- no
@@ -191,8 +203,8 @@ const composite = await page.evaluate(
     ctx.drawImage(b, a.width + 2, pad);
     ctx.fillStyle = '#ededed';
     ctx.font = '600 15px -apple-system, system-ui, sans-serif';
-    ctx.fillText('before  ·  ground L* 2.74, pane 7.74, card 10.77', 10, 19);
-    ctx.fillText('after  ·  +3 L*  ·  ground 5.88, pane 10.77, card 13.71', a.width + 12, 19);
+    ctx.fillText('before  ·  ground L* 5.88, pane 10.77, card 13.71', 10, 19);
+    ctx.fillText('after  ·  ground 10.27, pane 15.64, card 18.94', a.width + 12, 19);
     return canvas.toDataURL('image/png');
   },
   [
@@ -205,5 +217,75 @@ writeFileSync(
   Buffer.from(composite.split(',')[1], 'base64'),
 );
 console.log(`${outDir}/dark-lift-side-by-side.png`);
+
+// ------------------------------------------- AND THE LIST MARKERS, THE SAME WAY
+//
+// Operator, on the same screen: "the bullets and numbers in the response lists
+// are too faint." That is the second thing they have to judge by eye, so it
+// gets the same treatment -- one build, two frames, only the markers moving.
+//
+// "BEFORE" IS ONE INJECTED RULE, not a token override, because this change was
+// never a token change: both markers were routed through `--vam-ink-ghost` by a
+// single declaration on the shared `<li>`, and the rule below is that
+// declaration, restored. Everything else on screen -- the palette, the body
+// text, the layout -- is the shipped build.
+//
+// CROPPED TO BOTH LISTS, because the whole pane at 1440 makes a marker four
+// pixels wide and the comparison would prove nothing at a glance -- and
+// because the two lists are the whole point: the numbers and the bullets did
+// not move to the same ink, and a crop showing one of them would hide that.
+const MARKER_REVERT = '[data-action-pane] li::marker { color: var(--vam-ink-ghost); }';
+const ordered = page.locator('[data-action-pane] ol').first();
+const unordered = page.locator('[data-action-pane] ul').first();
+await ordered.scrollIntoViewIfNeeded();
+await page.waitForTimeout(300);
+for (const [state, on] of [
+  ['before', true],
+  ['after', false],
+]) {
+  await page.evaluate(
+    ([css, apply]) => {
+      const id = 'vam-marker-revert';
+      document.getElementById(id)?.remove();
+      if (!apply) return;
+      const el = document.createElement('style');
+      el.id = id;
+      el.textContent = css;
+      document.head.append(el);
+    },
+    [MARKER_REVERT, on],
+  );
+  await page.waitForTimeout(250);
+  // MEASURED IN BOTH STATES, for the reason the ladder above is: a
+  // reconstruction nobody checked is a picture nobody should trust. "before"
+  // must come back at ink-ghost and "after" at ink-dim for the number and
+  // ink-quiet for the bullet.
+  const seen = await page.evaluate(() => {
+    const read = (sel) => {
+      const li = document.querySelector(sel);
+      return li === null ? 'not drawn' : getComputedStyle(li, '::marker').color;
+    };
+    const li = document.querySelector('[data-action-pane] ol > li');
+    return {
+      number: read('[data-action-pane] ol > li'),
+      bullet: read('[data-action-pane] ul > li'),
+      bodyTextForScale: li === null ? 'not drawn' : getComputedStyle(li).color,
+    };
+  });
+  console.log(`  ${state.toUpperCase().padEnd(6)} markers: ${JSON.stringify(seen)}`);
+  const top = await ordered.boundingBox();
+  const bottom = await unordered.boundingBox();
+  await page.screenshot({
+    path: `${outDir}/list-markers-${state}.png`,
+    clip: {
+      x: Math.max(0, top.x - 16),
+      y: Math.max(0, top.y - 12),
+      width: Math.min(780, top.width + 32),
+      height: bottom.y + bottom.height - top.y + 24,
+    },
+  });
+  console.log(`${outDir}/list-markers-${state}.png`);
+}
+await page.evaluate(() => document.getElementById('vam-marker-revert')?.remove());
 
 await browser.close();
