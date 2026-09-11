@@ -21,6 +21,7 @@
 import { Minus, Plus, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { PROVIDERS, resolveProvider } from '../../shared/providers.js';
+import { t } from '../i18n/strings.js';
 import {
   bindingClashes,
   bindKey,
@@ -380,7 +381,7 @@ export function SettingsOverlay({
             data-settings-heading
             className="font-semibold text-body text-ink uppercase tracking-[0.07em]"
           >
-            settings
+            {t('settings.title')}
           </h2>
           {/* `ink-faint` measures 3.44 / 3.46 against `panel` — it fails 4.5:1
               in both themes, and every hint in this overlay used to wear it.
@@ -391,7 +392,7 @@ export function SettingsOverlay({
               announces the mode change without stealing the keystroke. */}
           <span role="status" aria-live="polite" className="vam-sentence text-control text-ink-dim">
             {capturing === null
-              ? 'stored in this browser, not in a session'
+              ? t('settings.status.stored')
               : 'waiting for a key — Esc cancels, Esc again closes'}
           </span>
           <span className="flex-1" />
@@ -420,9 +421,12 @@ export function SettingsOverlay({
             <Panel
               id="appearance"
               active={section === 'appearance'}
-              hint="theme, colours, the size of the text in out, and how much of a turn the transcript draws"
+              hint={t('settings.appearance.hint')}
             >
-              <Block label="theme" hint="system follows what the operating system asks for">
+              <Block
+                label={t('settings.appearance.theme.label')}
+                hint={t('settings.appearance.theme.hint')}
+              >
                 <div className="flex gap-1">
                   {THEMES.map((choice) => (
                     <Choice
@@ -450,8 +454,8 @@ export function SettingsOverlay({
                   picture of one. They are `aria-hidden` and the button keeps a
                   written name, because a colour is not a label. */}
               <Block
-                label="templates"
-                hint={`a whole ${theme} palette in one press — the swatches below still edit it afterwards`}
+                label={t('settings.appearance.templates.label')}
+                hint={t('settings.appearance.templates.hint', { theme })}
               >
                 <div className="flex flex-wrap gap-1.5">
                   {PALETTE_TEMPLATES.map((template) => {
@@ -516,12 +520,14 @@ export function SettingsOverlay({
                   reach the other set. The heading says which, so it is never
                   read off the swatches. */}
               <Block
-                label={`colours — ${theme}`}
-                hint={`unset follows the stylesheet, and ${theme === 'dark' ? 'light' : 'dark'} keeps its own`}
+                label={t('settings.appearance.colours.label', { theme })}
+                hint={t('settings.appearance.colours.hint', {
+                  other: theme === 'dark' ? 'light' : 'dark',
+                })}
                 action={
                   Object.keys(paletteFor(prefs.palette, theme)).length === 0 ? null : (
                     <SmallButton
-                      label={`reset ${theme} colours`}
+                      label={t('settings.appearance.colours.reset', { theme })}
                       onPick={() => onChange(clearPalette(prefs, theme))}
                     />
                   )
@@ -594,8 +600,8 @@ export function SettingsOverlay({
                   it reaches every one of them. A caption pointing at one pane
                   promises a scope the setting does not have. */}
               <Block
-                label="out text"
-                hint="how large the agent's answer is drawn, in every response pane"
+                label={t('settings.appearance.outText.label')}
+                hint={t('settings.appearance.outText.hint')}
               >
                 <Stepper
                   name="out text size"
@@ -631,8 +637,8 @@ export function SettingsOverlay({
                   ("how much of each turn's working") and two words that could
                   be read as "deleted" and "kept". */}
               <Block
-                label="focus view"
-                hint="fold each turn's working away, leaving your prompts and the agent's answers"
+                label={t('settings.appearance.focusView.label')}
+                hint={t('settings.appearance.focusView.hint')}
               >
                 <button
                   type="button"
@@ -646,7 +652,11 @@ export function SettingsOverlay({
                       : 'border-line text-ink-dim'
                   }`}
                 >
-                  {prefs.focusView ? 'on' : 'off'}
+                  {t(
+                    prefs.focusView
+                      ? 'settings.appearance.focusView.on'
+                      : 'settings.appearance.focusView.off',
+                  )}
                 </button>
                 {/* THE PROMISE, ON SCREEN. This row asks the operator to give
                     up detail, and what it must never cost them is the alarm
@@ -665,12 +675,8 @@ export function SettingsOverlay({
               </Block>
             </Panel>
 
-            <Panel
-              id="sessions"
-              active={section === 'sessions'}
-              hint="which agent a new session starts, and which key sends a prompt to one"
-            >
-              <Block label="default provider" hint={PROVIDER_HINT}>
+            <Panel id="sessions" active={section === 'sessions'} hint={t('settings.sessions.hint')}>
+              <Block label={t('settings.sessions.provider.label')} hint={PROVIDER_HINT}>
                 {CAN_CHOOSE_PROVIDER ? (
                   <div className="flex gap-1">
                     {PROVIDERS.map((provider) => (
@@ -732,8 +738,8 @@ export function SettingsOverlay({
                   next keystroke, and the composer paints which one is live.
                   The picker that was withdrawn in PR 303 failed all three. */}
               <Block
-                label="send key"
-                hint="which key sends the prompt you are typing to the session"
+                label={t('settings.sessions.sendKey.label')}
+                hint={t('settings.sessions.sendKey.hint')}
               >
                 <div className="flex gap-1">
                   {SUBMIT_KEYS.map((key) => (
@@ -770,11 +776,7 @@ export function SettingsOverlay({
               </Block>
             </Panel>
 
-            <Panel
-              id="remote"
-              active={section === 'remote'}
-              hint="pair a phone over your tailnet — in person, at this machine"
-            >
+            <Panel id="remote" active={section === 'remote'} hint={t('settings.remote.hint')}>
               {/* The bridge is read HERE rather than passed down from the
                   canvas: `window.api` exists only in the Electron shell, and
                   this is the one section that needs it. */}
@@ -785,11 +787,7 @@ export function SettingsOverlay({
               />
             </Panel>
 
-            <Panel
-              id="keyboard"
-              active={section === 'keyboard'}
-              hint="click a key and press the one you want — Escape cancels"
-            >
+            <Panel id="keyboard" active={section === 'keyboard'} hint={t('settings.keyboard.hint')}>
               {/* STICKY, and that is the whole point of the wrapper.
                   MEASURED, not designed: the reset control that produces a
                   refusal can be thirty rows down a panel that scrolls, and
@@ -836,7 +834,10 @@ export function SettingsOverlay({
               )}
               <div className="mb-2">
                 {Object.keys(prefs.keyBindings).length === 0 ? null : (
-                  <SmallButton label="reset shortcuts" onPick={() => bind(NO_BINDINGS, null)} />
+                  <SmallButton
+                    label={t('settings.keyboard.reset')}
+                    onPick={() => bind(NO_BINDINGS, null)}
+                  />
                 )}
               </div>
               {/* One column, not two. Groups of unequal length interleaved
@@ -946,7 +947,7 @@ function SectionRail(props: NavProps) {
     >
       <div className="flex flex-none items-center border-line border-b px-3 py-2">
         <span className="font-mono text-meta text-ink-dim uppercase tracking-[0.12em]">
-          Sections
+          {t('settings.nav.heading')}
         </span>
       </div>
       <div role="tablist" aria-orientation="vertical" className="flex flex-col gap-0.5 p-1.5">
@@ -1288,7 +1289,7 @@ function BindingLine({
               // Self-describing, because while this box is armed it swallows
               // every key except Escape — including `Ctrl-Tab` — and a state
               // that eats the keyboard has to be readable rather than inferred.
-              placeholder="press a key… Esc to cancel"
+              placeholder={t('settings.keyboard.capture')}
               onKeyDown={(event) => onKey(slot, event)}
               onBlur={() => onCapture(null)}
               // The ring is drawn permanently here, not on `focus-visible`: it
