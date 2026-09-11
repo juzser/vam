@@ -5810,6 +5810,14 @@ export function DetailPanel(props: DetailPanelProps) {
             from here, and is the one the `?` sheet can name; a caption listing
             both would spend a third of its width teaching a synonym.
 
+            AND ON A PHONE ONLY THE SEND KEY IS NAMED. A soft keyboard has no
+            Esc and no Ctrl, so two of the three would be naming keys the
+            device does not have -- and the interrupt has a REAL control there
+            already, the keystroke strip's `Esc → agent` button, pressing the
+            same key over the same bridge. A caption pointing at an absent key
+            beside a working button is the "control that cannot act" rule in
+            its caption form. The return key is real, so the send hint stays.
+
             `H` IS DELIBERATELY NOT NAMED, and this is the trap it avoids. `H`
             is `focusList`'s other binding, so it is the same act everywhere
             ELSE -- but it is a BARE key, and `Canvas`'s typing guard hands
@@ -5824,14 +5832,16 @@ export function DetailPanel(props: DetailPanelProps) {
                 <span data-prompt-send-key={submitKey} className="whitespace-nowrap">
                   {`${SUBMIT_KEY_LABELS[submitKey]} → ${sendVerb}`}
                 </span>
-                {canCycleMode && (
+                {!phone && canCycleMode && (
                   <span data-prompt-interrupt-key className="whitespace-nowrap">
                     Esc → interrupt
                   </span>
                 )}
-                <span data-prompt-leave-key className="whitespace-nowrap">
-                  Mod-[ → leave
-                </span>
+                {!phone && (
+                  <span data-prompt-leave-key className="whitespace-nowrap">
+                    Mod-[ → leave
+                  </span>
+                )}
               </p>
             )}
           </div>

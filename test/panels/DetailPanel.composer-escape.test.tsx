@@ -454,6 +454,28 @@ describe('the composer names the keys that operate it', () => {
     expect(keys()).not.toContain('sidebar');
   });
 
+  it('names no key a phone cannot press', () => {
+    // A SOFT KEYBOARD HAS NO Esc AND NO Ctrl. The return key is real, so the
+    // send hint stays; the other two name keys that do not exist on the
+    // device, and the interrupt has a REAL control there already -- the
+    // keystroke strip's `Esc → agent` button, which presses the same key over
+    // the same bridge. Naming an absent key beside a working button is the
+    // "control that cannot act" rule in caption form.
+    draw({}, { phone: true, terminal: true });
+    expect(keys()).toContain('Enter');
+    expect(keys()).not.toContain('Esc');
+    expect(keys()).not.toContain('Mod-[');
+    // And the button that DOES interrupt on a phone is on screen.
+    expect(q('[data-key-strip-key="escape"]')).not.toBeNull();
+  });
+
+  it('names all three on a desktop, where all three keys exist', () => {
+    bridge();
+    draw();
+    expect(keys()).toContain('Esc');
+    expect(keys()).toContain('Mod-[');
+  });
+
   it('costs no width while the box is not open for typing', () => {
     draw({}, { composing: false });
     expect(q('[data-prompt-keys]')).toBeNull();

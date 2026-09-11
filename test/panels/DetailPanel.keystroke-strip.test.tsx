@@ -127,11 +127,13 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
     expect(escapeKey?.textContent).not.toBe('Esc');
     expect(enterKey?.textContent).toContain('agent');
     expect(enterKey?.textContent).not.toBe('Enter');
-    // The textarea's own row names the keys that operate IT, and the strip's
-    // keys go to the agent: `Esc → agent` on the strip beside `Esc →
-    // interrupt` in the box are two spellings of one destination now, which is
-    // why the strip's label says "agent" at all.
-    expect(document.querySelector('[data-prompt-keys]')?.textContent).toContain('Esc');
+    // AND ON A PHONE THE TEXTAREA HAS NO Esc HINT TO BE CONFUSED WITH. The
+    // strip's button is the only Escape a soft keyboard has, so the composer's
+    // own key row names the send key and stops there -- the ambiguity this
+    // test was written about cannot arise here at all. The retired
+    // `Esc → sidebar` caption is asserted gone for the same reason: it
+    // promised a destination Escape no longer has anywhere.
+    expect(document.querySelector('[data-prompt-keys]')?.textContent).not.toContain('Esc');
     expect(document.querySelector('[data-prompt-escape]')).toBeNull();
   });
 
