@@ -1410,6 +1410,39 @@ body {
  * is a different criterion for a different pointer. This one is the desktop AA
  * minimum and applies in both shells.
  */
+/**
+ * SENTENCE CASE, WITHOUT REWRITING THE SENTENCE.
+ *
+ * Operator: "the settings text is all lower case -- the big headings should be
+ * upper case and the normal ones capitalised." A hint is a paragraph, so what
+ * it owes is a capital at the front and nothing else: `text-transform:
+ * capitalize` would give "System Follows What The Operating System Asks For",
+ * which is the failure that looks most like the fix.
+ *
+ * DONE AS A TRANSFORM RATHER THAN IN THE STRINGS so the DOM keeps ONE
+ * canonical spelling. Every test that quotes a hint still holds, the accessible
+ * name a screen reader computes is unchanged, and there is no second place for
+ * the two spellings to drift apart. `::first-letter` applies to the first
+ * formatted letter of a block, which is what a sentence starts with.
+ */
+.vam-sentence::first-letter {
+  text-transform: uppercase;
+}
+
+/**
+ * AND EVERY PARAGRAPH IN A SETTINGS PANEL IS ONE, without each component
+ * having to remember.
+ *
+ * `Block` is not the only thing that writes prose in there: the Remote section
+ * draws its own chrome and its own paragraphs, and a per-component class left
+ * those starting lower case while every `Block` hint was fixed -- measured, by
+ * the sweep in `e2e/settings-chrome-shots.mjs`, which is also why the rule is
+ * structural now. A panel added next week gets it without being told.
+ */
+[data-settings-rows] p::first-letter {
+  text-transform: uppercase;
+}
+
 .vam-hit-24 {
   position: relative;
 }
