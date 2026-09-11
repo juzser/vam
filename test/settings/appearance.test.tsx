@@ -373,8 +373,8 @@ describe('the captured key is really in force', () => {
 
 /**
  * Where an `out` text size belongs: with the paint, alongside the theme and the
- * palette. It is not a canvas setting — `out` is the right pane, and layouts
- * that hide the canvas still draw it.
+ * palette. It is not a canvas setting — `out` is the answer block, and layouts
+ * that hid the canvas still drew it.
  *
  * This used to be asserted twice, the second time as "not in the same section
  * as focus zoom". Both that control and the Canvas section it lived in are
@@ -397,5 +397,36 @@ describe('the out text size is an appearance setting', () => {
     // And offers only sizes inside the readable bounds.
     expect(Number((control() as HTMLInputElement).min)).toBe(OUT_FONT_SIZE_MIN);
     expect(Number((control() as HTMLInputElement).max)).toBe(OUT_FONT_SIZE_MAX);
+  });
+
+  /**
+   * THE HINT MAY NOT NAME A PANE, because the setting does not belong to one.
+   *
+   * It read "how large the agent's answer is drawn in the right pane", which
+   * was true of the two-column shell it was written for. Since the split work
+   * (`leaves(panes)` in `Canvas.tsx`, PRs 289 and 294) the shell can hold
+   * several response panes side by side or stacked, and the pref is applied as
+   * `--vam-out-font-size` on `document.documentElement` -- so it reaches every
+   * one of them, and there is no "the right pane" left to point at.
+   *
+   * The assertion is the PROPERTY rather than the sentence: an exact-string
+   * check would pass for whatever prose happened to be there, which is the one
+   * thing a guard over copy must not do. Reverting the wording reddens this;
+   * rewriting the wording some other honest way does not.
+   */
+  it('promises no particular pane, because the size reaches all of them', () => {
+    open();
+    const NAMES_A_PANE = /\b(right|left|first|second|other)\s+pane\b/i;
+    const row = control().closest('[data-settings-rows] > div');
+    const hint = row?.querySelector('p')?.textContent ?? '';
+    // The row was found and it really does carry a sentence, or the two
+    // negative assertions below are being made about an empty string.
+    expect(hint.length).toBeGreaterThan(20);
+    expect(hint).not.toMatch(NAMES_A_PANE);
+    // And the section's own caption, one level up, must not either.
+    const caption =
+      document.querySelector('[data-settings-panel="appearance"] h3 + span')?.textContent ?? '';
+    expect(caption.length).toBeGreaterThan(20);
+    expect(caption).not.toMatch(NAMES_A_PANE);
   });
 });

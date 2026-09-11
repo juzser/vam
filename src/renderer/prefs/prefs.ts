@@ -37,6 +37,34 @@ import {
 const KEY = 'vam.prefs.v1';
 
 /**
+ * A FIELD THAT WAS RETIRED, AND WHY IT NEEDED NO MIGRATION.
+ *
+ * `dismissedSessions` shipped in PR 248: a field here, a reader branch, a
+ * source-key migration, a TTL exemption, three exported helpers
+ * (`isSessionDismissed`, `setSessionDismissed`, `applySessionDismissals`) and
+ * its own test file — and no caller anywhere in `src/`. No surface ever
+ * dismissed a row and no model was ever filtered by one. Its doc described,
+ * in the present tense, a capability the operator did not have.
+ *
+ * SO NOTHING IS BEING TAKEN FROM ANYBODY, and that is the difference from
+ * `RETIRED_TOKENS` and `LEGACY_GROUND_TOKEN` further down, which are read,
+ * written back and applied precisely because an operator CAN have a value
+ * under them. There was no write path here to produce a stored
+ * `dismissedSessions` at all: `readPrefs` builds an explicit object field by
+ * field, so a key nobody wrote is a key nobody reads, and the next write
+ * simply does not carry it.
+ *
+ * The problem it was built for is real and is still open: a background row a
+ * source reports `done`/`failed` has no job left to close, so `closeSession`
+ * refuses it forever (`stop.ts`'s `already-finished`) and the row sits in the
+ * sidebar for up to `BACKGROUND_WINDOW_MS` (`agents.ts`: 14 days). Solving it
+ * needs an affordance on the row and a route back — a stored list on its own
+ * was never the hard half, and keeping the unused half was not progress
+ * toward the other one. `test/prefs/prefs.no-write-only-field.test.ts` is what
+ * stops the next one shipping the same way.
+ */
+
+/**
  * How long an untouched entry survives.
  *
  * Sessions are not forever and neither are their positions. Without a bound the
@@ -238,26 +266,6 @@ export type Prefs = {
    */
   readonly hiddenProjects: Readonly<Record<string, readonly string[]>>;
   /**
-   * Source id → the ROW ids (`session.id`, i.e. `<sessionId>#<pid>` -- see
-   * `agents.ts`) of sessions the operator DISMISSED from the sidebar.
-   *
-   * THE SAME TWO-LEVEL SHAPE AND REASONING AS `hiddenProjects`, one level
-   * down: a session row is unique only within its source, and this list is
-   * what makes a dismissal stick, reversibly, without deleting anything a
-   * source could report. It exists for a case `hiddenProjects` cannot cover:
-   * a BACKGROUND row the source itself already reports `done` or `failed`
-   * (`stop.ts`'s `already-finished` refusal) has no running job left to
-   * close, so `closeSession` correctly refuses it forever -- and absent a
-   * way to dismiss the ROW, that refusal repeats on every attempt for up to
-   * `BACKGROUND_WINDOW_MS` (`agents.ts`: 14 days). Dismissing removes the
-   * row from view; it never ends a session, and never removes the project it
-   * belongs to. Exempt from the icon TTL for `hiddenProjects`'s reason: it
-   * records a decision the operator made, not a session that stopped
-   * existing -- and, unlike an icon, there is nothing here worth restoring
-   * to a default once forgotten.
-   */
-  readonly dismissedSessions: Readonly<Record<string, readonly string[]>>;
-  /**
    * Source id → the groups the operator made in that source, in the order
    * they were made. UI "project"; see the vocabulary table in
    * `domain/model.ts` for why the code's word for it is `Group`.
@@ -396,7 +404,6 @@ export const EMPTY_PREFS: Prefs = {
   filters: DEFAULT_SESSION_FILTERS,
   collapsedProjects: {},
   hiddenProjects: {},
-  dismissedSessions: {},
   groups: {},
   collapsedGroups: {},
   renames: {},
@@ -478,7 +485,6 @@ function parsePrefs(
     filters?: unknown;
     collapsedProjects?: unknown;
     hiddenProjects?: unknown;
-    dismissedSessions?: unknown;
     groups?: unknown;
     collapsedGroups?: unknown;
     renames?: unknown;
@@ -549,17 +555,6 @@ function parsePrefs(
     // that predates removal has no key, and reads back as "nothing removed".
     hiddenProjects: migrateSourceKey(
       readIdsBySource(record.hiddenProjects),
-      LEGACY_HTTP_SOURCE_ID,
-      migrateSource,
-      mergeIdLists,
-    ),
-    // Same shape and same reasoning as `hiddenProjects` immediately above,
-    // one level down: a payload from a vam that predates dismissal has no
-    // key at all, and reads back as "nothing dismissed" -- the state the
-    // whole app already renders. Old-id migrated the same way, for the same
-    // reason: a row dismissed under the old source id is still dismissed.
-    dismissedSessions: migrateSourceKey(
-      readIdsBySource(record.dismissedSessions),
       LEGACY_HTTP_SOURCE_ID,
       migrateSource,
       mergeIdLists,
@@ -658,13 +653,6 @@ export function isProjectCollapsed(prefs: Prefs, source: string, projectId: stri
 }
 
 /**
- * Fold or unfold one project.
- *
- * Unfolding REMOVES the id, and removing the last id removes the source's
- * bucket: the stored shape then matches a fresh install exactly, which is
- * what makes "expand everything" leave no residue behind to read back.
- */
-/**
  * Add or remove one id from one source's bucket.
  *
  * Removing the last id removes the SOURCE'S BUCKET, so the stored shape then
@@ -722,35 +710,6 @@ export function setProjectHidden(
   return {
     ...prefs,
     hiddenProjects: withIdBySource(prefs.hiddenProjects, source, projectId, hidden),
-  };
-}
-
-/** Has this source's session row been dismissed from the sidebar? */
-export function isSessionDismissed(prefs: Prefs, source: string, sessionRowId: string): boolean {
-  return prefs.dismissedSessions[source]?.includes(sessionRowId) === true;
-}
-
-/**
- * Dismiss one session row, or bring it back -- `setProjectHidden`, one level
- * down.
- *
- * ROW, NOT SESSION, NOT PROCESS: this changes only what the sidebar draws.
- * Nothing here calls `closeSession` and nothing here can -- a row worth
- * dismissing is, by construction, one `closeSession` already has nothing left
- * to do to (see `dismissedSessions`'s own doc). Keyed by `session.id`
- * (`<sessionId>#<pid>`), exactly as `icons` and `renames` already are, so two
- * different processes that resumed the same underlying session id are two
- * different rows to dismiss.
- */
-export function setSessionDismissed(
-  prefs: Prefs,
-  source: string,
-  sessionRowId: string,
-  dismissed: boolean,
-): Prefs {
-  return {
-    ...prefs,
-    dismissedSessions: withIdBySource(prefs.dismissedSessions, source, sessionRowId, dismissed),
   };
 }
 
@@ -1359,44 +1318,6 @@ export function applyIcons(
           const choice = bucket[session.id];
           return choice === undefined ? session : { ...session, icon: choice.icon };
         }),
-      };
-    }),
-  };
-}
-
-/**
- * Drop a project's DISMISSED session rows before anything reads the model --
- * one further step than `applyIcons`/`applyRenames`, which annotate a row
- * rather than remove it. This is the row half of `setSessionDismissed`'s
- * doc: a dismissal is local and reversible (undo it and the row reappears on
- * the next poll that still reports it), and it ends nothing -- the session
- * itself, if it is still running, is untouched.
- *
- * Same defensive shape as `applyIcons`: a project with no source has no
- * bucket to look one up in, and an empty `dismissedSessions` returns the
- * SAME model object rather than a shallow copy, so a canvas with nothing
- * dismissed costs nothing extra on every poll.
- */
-export function applySessionDismissals(
-  model: CanvasModel,
-  dismissedSessions: Prefs['dismissedSessions'],
-): CanvasModel {
-  if (Object.keys(dismissedSessions).length === 0) {
-    return model;
-  }
-  return {
-    ...model,
-    projects: model.projects.map((project) => {
-      if (project.source === undefined) {
-        return project;
-      }
-      const bucket = dismissedSessions[project.source];
-      if (bucket === undefined || bucket.length === 0) {
-        return project;
-      }
-      return {
-        ...project,
-        sessions: project.sessions.filter((session) => !bucket.includes(session.id)),
       };
     }),
   };
