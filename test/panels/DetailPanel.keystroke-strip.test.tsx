@@ -127,8 +127,12 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
     expect(escapeKey?.textContent).not.toBe('Esc');
     expect(enterKey?.textContent).toContain('agent');
     expect(enterKey?.textContent).not.toBe('Enter');
-    // The textarea's own Escape hint stays exactly what it already means.
-    expect(document.querySelector('[data-prompt-escape]')?.textContent).toBe('Esc → sidebar');
+    // The textarea's own row names the keys that operate IT, and the strip's
+    // keys go to the agent: `Esc → agent` on the strip beside `Esc →
+    // interrupt` in the box are two spellings of one destination now, which is
+    // why the strip's label says "agent" at all.
+    expect(document.querySelector('[data-prompt-keys]')?.textContent).toContain('Esc');
+    expect(document.querySelector('[data-prompt-escape]')).toBeNull();
   });
 
   it('disappears with the composer while a QuestionCard is open', () => {

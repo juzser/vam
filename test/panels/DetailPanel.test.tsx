@@ -1437,7 +1437,7 @@ describe('the mode control is drawn only where a mode can actually be chosen', (
 });
 
 describe('there is a way out of the prompt box without a mouse', () => {
-  it('Escape gives the keyboard back, and does not leave DOM focus behind', () => {
+  it('Mod-[ gives the keyboard back, and does not leave DOM focus behind', () => {
     let left = 0;
     draw({
       composing: true,
@@ -1453,8 +1453,20 @@ describe('there is a way out of the prompt box without a mouse', () => {
     // key, so no navigation key reaches the sidebar at all.
     expect(document.activeElement).toBe(box);
 
+    // `Mod-[` since Escape in this box became the agent's interrupt. `Mod`
+    // folds Ctrl and Cmd, and `cancelable` is what makes the handler's
+    // `preventDefault()` mean anything at all -- without it a hand-built event
+    // reports `defaultPrevented: false` whatever the handler does.
     act(() => {
-      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      box.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: '[',
+          code: 'BracketLeft',
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
     });
     expect(left).toBe(1);
     // Clearing `composing` alone is not enough: it only makes the box
@@ -1463,14 +1475,19 @@ describe('there is a way out of the prompt box without a mouse', () => {
   });
 
   it('says how to get out, in the box, while you are in it', () => {
+    // The caption used to read `Esc → sidebar` and now names `Mod-[`, because
+    // Escape does something else. A hint that outlives the behaviour it
+    // described is worse than no hint: it sends the operator to press a key
+    // that now interrupts their agent.
     draw({ composing: true });
-    expect(q<HTMLElement>('[data-prompt-escape]')?.textContent).toContain('Esc');
-    expect(q<HTMLElement>('[data-prompt-escape]')?.textContent).toContain('sidebar');
+    expect(q<HTMLElement>('[data-prompt-keys]')?.textContent).toContain('Mod-[');
+    expect(q<HTMLElement>('[data-prompt-keys]')?.textContent).not.toContain('sidebar');
+    expect(q<HTMLElement>('[data-prompt-escape]')).toBeNull();
     // Not clutter the rest of the time: the way out only matters once you are
     // in, and this row is already carrying four things at 408px.
     cleanup();
     draw({ composing: false });
-    expect(q<HTMLElement>('[data-prompt-escape]')).toBeNull();
+    expect(q<HTMLElement>('[data-prompt-keys]')).toBeNull();
   });
 });
 

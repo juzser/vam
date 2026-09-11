@@ -3536,6 +3536,60 @@ export function DetailPanel(props: DetailPanelProps) {
    * the newest turn -- is decided per block, against `newestId`.
    */
   const sessionRunning = entry?.session.status === 'running';
+  /**
+   * ESCAPE IN THE COMPOSER, WHICH NOW INTERRUPTS THE AGENT.
+   *
+   * Operator request, and Claude Code's own default: Escape cancels the
+   * running prompt. Nothing new is being built to do it -- `pressPaneKey`
+   * already presses a key into this session's pane for the mode row and for
+   * every button of the phone keystroke strip, with one in-flight guard and
+   * one refusal caption, and `{kind:'escape'}` is a key the strip already
+   * sends (`TerminalTab`: "inside tmux, Escape should do what Escape does").
+   *
+   * THREE OUTCOMES, THREE SENTENCES, and that is the whole of the reasoning
+   * here. "vam pressed Escape in the pane", "there is nothing running to
+   * interrupt" and "vam has no keyboard into this session at all" are
+   * different facts about different things, and folding any two of them into
+   * one line is this pane's oldest defect (`sources/pull-requests.ts`: "'No
+   * PRs' and 'vam could not ask' must never look the same"). NONE of them may
+   * be silence: the operator pressed a key expecting an agent to stop.
+   *
+   * The two halves of `canCycleMode` are separated here rather than reported
+   * together, because they send the operator to different places: a source
+   * with no terminal has nothing to interrupt anywhere, and a session vam did
+   * not start has a terminal that belongs to somebody else.
+   */
+  const interruptRun = () => {
+    if (terminal === false) {
+      setCycleNote({
+        kind: 'refused',
+        text: 'not sent — this source has no session terminal to interrupt',
+      });
+      return;
+    }
+    if (entry === null || entry.session.vamControlled !== true) {
+      setCycleNote({
+        kind: 'refused',
+        text: 'not sent — vam did not start this session, so it has no keyboard into it',
+      });
+      return;
+    }
+    if (!sessionRunning) {
+      setCycleNote({
+        kind: 'refused',
+        text: 'nothing running to interrupt — this session is not working',
+      });
+      return;
+    }
+    // SENT, NOT CANCELLED. vam presses the key and never reads back what the
+    // agent did with it, exactly as the mode cycle never reads the mode back;
+    // claiming the run stopped would be a claim nothing checked.
+    void pressPaneKey(
+      { kind: 'escape' },
+      'Esc sent — vam does not read back what it interrupted',
+      'Esc · sending…',
+    );
+  };
   // biome-ignore lint/correctness/useExhaustiveDependencies: stick again on new output
   useEffect(() => {
     const box = outRef.current;
@@ -5226,7 +5280,31 @@ export function DetailPanel(props: DetailPanelProps) {
                     // `preventDefault()` on that path would hand the operator a
                     // box with no send AND no newline.
                   } else if (event.key === 'Escape') {
+                    // THE INTERRUPT. With both typeahead lists closed (they
+                    // answered Escape above and still do), Escape goes into the
+                    // agent rather than out of the box -- Claude Code's own
+                    // default, at the operator's request. `preventDefault` is
+                    // what keeps `Canvas`'s `cancel` comment true: "an Escape
+                    // typed INSIDE the composer never reaches here".
+                    //
+                    // The draft is NOT cleared and the keyboard is NOT moved.
+                    // Claude does neither, and an interrupt that also cost the
+                    // operator their half-typed prompt would be a worse trade
+                    // than pressing nothing at all.
                     event.preventDefault();
+                    interruptRun();
+                  } else if (normalizeKey(event) === 'Mod-[') {
+                    // AND THE WAY OUT, which Escape used to be. `Ctrl-[` IS
+                    // Escape in vim and in a terminal, and `Mod` folds Ctrl and
+                    // Cmd (`chords.ts`), so this is `Cmd+[` on the keyboard the
+                    // operator has. Bound HERE rather than in the chord tables,
+                    // for the reason Shift+Tab above is and for one more:
+                    // `focusList` already holds `MAX_BINDINGS` chords (`H`,
+                    // `Mod-0`), and a third would be invisible in the shortcut
+                    // editor -- which draws exactly `MAX_BINDINGS` slots -- and
+                    // destroyed by the first rebind of either. It is in
+                    // `RESERVED_KEYS` instead, so nothing else can take it.
+                    //
                     // BLUR, not just `composing = false`. Clearing the flag only
                     // makes this box read-only; while it still holds DOM focus
                     // the window key listener returns early on every keystroke
@@ -5234,6 +5312,7 @@ export function DetailPanel(props: DetailPanelProps) {
                     // `j`/`k` land here and vanish and the sidebar is
                     // unreachable without a mouse. Releasing focus is what hands
                     // the keyboard back.
+                    event.preventDefault();
                     inputRef.current?.blur();
                     onStopComposing();
                   }
@@ -5583,45 +5662,6 @@ export function DetailPanel(props: DetailPanelProps) {
                   {cycleNote.text}
                 </span>
               )}
-              {/* The way OUT, shown only while you are in — the moment it is the
-              thing you need, and no width the rest of the time. It replaces
-              the `i` / `I` notes the operator asked to lose: those advertised
-              the way in, which you have already found by the time you can
-              read them. */}
-              {composing && (
-                <span
-                  data-prompt-escape
-                  className="flex-none whitespace-nowrap font-mono text-meta text-ink-faint"
-                >
-                  Esc → sidebar
-                </span>
-              )}
-              {/* WHICH KEY SENDS, WHERE THE HANDS ARE. Two keystrokes are
-              possible here and only one of them is live, and before this the
-              box knew which and showed nothing -- `grep -rn "Enter to send"
-              src/` found one source comment and no pixel. That is this pane's
-              oldest defect (`sources/pull-requests.ts`: two different answers
-              must never look the same), and a SWAPPABLE key makes silence
-              strictly worse: the operator cannot even fall back on the default
-              they remember.
-
-              In the caption row rather than the placeholder, because a
-              placeholder is gone the moment there is a draft -- which is
-              exactly when the question "what will Enter do to this" is asked.
-              And LAST before the spacer, so the width it gains when the label
-              grows is taken out of that spacer: nothing to its left moves and
-              the send button, which is after the spacer, does not move either.
-
-              The verb is the button's own distinction, not a fixed "send":
-              see `sendVerb`. */}
-              {composing && (
-                <span
-                  data-prompt-send-key={submitKey}
-                  className="flex-none whitespace-nowrap font-mono text-meta text-ink-faint"
-                >
-                  {`${SUBMIT_KEY_LABELS[submitKey]} → ${sendVerb}`}
-                </span>
-              )}
               <span className="min-w-0 flex-1" />
               {/* TWO OUTCOMES, TWO FACES. The mockup draws a send arrow here
               and this drew one for both of them -- for a source that hands the
@@ -5665,6 +5705,43 @@ export function DetailPanel(props: DetailPanelProps) {
                 </button>
               </Note>
             </div>
+            {/* THE KEYS THIS BOX IS OPERATED WITH, on a row of their own.
+
+            IT REPLACES `Esc → sidebar`, whose promise stopped being true the
+            day Escape became the interrupt. A hint that outlives the behaviour
+            it described is worse than no hint at all: an operator reading it
+            would press Escape expecting to leave and stop their agent instead.
+
+            ITS OWN ROW RATHER THAN THE TOOLS ROW ABOVE, which is where both of
+            these captions used to live. Three hints do not fit beside the
+            attach, provider, model and mode controls in a 408px pane, and a
+            caption that truncates hides whichever hint is last. On its own
+            line nothing else can be pushed around by a word changing length,
+            which is the property the send key needs -- it is `Enter` or
+            `Shift-Enter` depending on a preference.
+
+            NO INTERRUPT HINT WHERE THERE IS NO INTERRUPT (`canCycleMode`):
+            promising one for a session vam cannot press a key in would be a
+            control that can only refuse, drawn as one that acts. The way out
+            is named unconditionally, because that one always works. */}
+            {composing && (
+              <p
+                data-prompt-keys
+                className="flex flex-wrap items-center gap-x-3 font-mono text-meta text-ink-faint"
+              >
+                <span data-prompt-send-key={submitKey} className="whitespace-nowrap">
+                  {`${SUBMIT_KEY_LABELS[submitKey]} → ${sendVerb}`}
+                </span>
+                {canCycleMode && (
+                  <span data-prompt-interrupt-key className="whitespace-nowrap">
+                    Esc → interrupt
+                  </span>
+                )}
+                <span data-prompt-leave-key className="whitespace-nowrap">
+                  Mod-[ → leave
+                </span>
+              </p>
+            )}
           </div>
         </div>
       )}

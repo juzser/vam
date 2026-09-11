@@ -104,7 +104,7 @@ describe('a chord that changes the focused session never steals the caret', () =
   });
 });
 
-describe('Escape is still the way out of the box a click put you in', () => {
+describe('there is still a way out of the box a click put you in', () => {
   it('hands the keyboard back after a pointer-composed tab click', () => {
     render(<Canvas model={MODEL} />);
     act(() => {
@@ -112,7 +112,10 @@ describe('Escape is still the way out of the box a click put you in', () => {
     });
     expect(document.activeElement).toBe(promptBox());
     act(() => {
-      fireEvent.keyDown(promptBox() as Element, { key: 'Escape' });
+      // `Mod-[`, not Escape: Escape in the composer is the agent's interrupt
+      // now. A click can still put the keyboard in the box, so a key still has
+      // to take it out.
+      fireEvent.keyDown(promptBox() as Element, { key: '[', code: 'BracketLeft', metaKey: true });
     });
     expect(document.activeElement).not.toBe(promptBox());
   });

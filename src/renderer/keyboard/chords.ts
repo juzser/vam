@@ -746,8 +746,18 @@ export const MAX_BINDINGS = 2;
  * would be unreachable at best and a trap at worst. `g`, `y` and `z` because
  * they are not keys, they are the doors to the chord tables: bound alone, they
  * would shadow every chord behind them.
+ *
+ * `Mod-[` FOR THE SAME SHAPE OF REASON AS `Escape`: another surface already
+ * binds it. It is how the keyboard lets go of the prompt box, bound in
+ * `DetailPanel`'s own `onKeyDown` rather than here -- the same place, and for
+ * the same reason, as that box's `Shift+Tab`. A modified key DOES reach the
+ * window listener from inside a textarea (`Canvas`'s typing guard lets one
+ * through on purpose), so an operator who bound `Mod-[` to `close` would press
+ * it to leave the box and shut a session on the way out. Only the exact token
+ * is reserved: `Mod-Shift-[` and `Mod-Alt-[` are shipped bindings and stay
+ * rebindable.
  */
-export const RESERVED_KEYS: readonly string[] = ['Escape', ...PREFIXES];
+export const RESERVED_KEYS: readonly string[] = ['Escape', 'Mod-[', ...PREFIXES];
 
 export function isReserved(key: string): boolean {
   return RESERVED_KEYS.includes(key);

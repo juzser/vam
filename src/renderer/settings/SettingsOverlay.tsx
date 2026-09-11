@@ -269,7 +269,9 @@ export function SettingsOverlay({
       return;
     }
     if (isReserved(key)) {
-      setMessage(`"${key}" is reserved — Escape cancels this capture, g/y/z open chords`);
+      setMessage(
+        `"${key}" is reserved — Escape cancels this capture, g/y/z open chords, Mod-[ leaves the prompt box`,
+      );
       return;
     }
     // The conflict check that used to stand here asked only about `key`, and

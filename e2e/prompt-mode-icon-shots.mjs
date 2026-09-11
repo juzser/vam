@@ -123,6 +123,12 @@ console.log(`${outDir}/prompt-mode-picker.png`);
 // `factory-sse-1` is exactly the session that used to carry it
 // (`waitingFor: 'permission prompt'`), so its absence here is the change.
 await page.keyboard.press('Escape');
+// AND `Control+[`, WHICH IS THE WAY OUT OF THE COMPOSER NOW. Escape typed in
+// the prompt box is the agent's interrupt since the composer-escape change, so
+// it no longer releases the keyboard. Escape stays first, because it is still
+// what closes an overlay; `Mod-[` folds Ctrl and Cmd, and is a no-op anywhere
+// but in that box.
+await page.keyboard.press('Control+[');
 await page.waitForTimeout(150);
 if ((await page.locator('[data-session-waiting]').count()) !== 0) {
   throw new Error('the waiting notice is still drawn — this PR claims it is gone.');
