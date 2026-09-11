@@ -2002,6 +2002,45 @@ export function paletteValue(
   return COLOUR.test(current) ? current : '';
 }
 
+/**
+ * What the STYLESHEET gives a token, past whatever the operator has in force.
+ *
+ * `paletteValue` answers "what should the picker show for this token" and
+ * consults the cascade -- which, once `applyPalette` has run, is the operator's
+ * own palette: the overrides live on `document.documentElement`'s inline style
+ * and custom properties inherit, so no element on the page computes the
+ * stylesheet's value any more. That is the right answer for a swatch and the
+ * WRONG one for the `default` colour template, whose three preview discs
+ * promise the palette you get by pressing it. Left on `paletteValue`, the chip
+ * would preview `ember` while offering vam.
+ *
+ * LIFT, ASK, PUT BACK -- and the middle step is the only one that reads. The
+ * whole sequence is synchronous, so the browser never gets a frame in which
+ * the operator's colour is off the document, and the restore is in a `finally`
+ * because the alternative failure is not a wrong preview but a palette that
+ * falls off the screen when a settings row asks a question.
+ *
+ * A token with nothing overriding it is the common case and is not touched at
+ * all: a remove/restore pair on an unset property still invalidates style,
+ * once per disc, per render, for an answer that was already correct.
+ */
+export function stylesheetPaletteValue(
+  token: string,
+  root: HTMLElement | null = globalThis.document?.documentElement ?? null,
+  read: (token: string) => string = readComputedToken,
+): string {
+  const inline = root?.style.getPropertyValue(token) ?? '';
+  if (root === null || inline === '') {
+    return paletteValue({}, token, read);
+  }
+  try {
+    root.style.removeProperty(token);
+    return paletteValue({}, token, read);
+  } finally {
+    root.style.setProperty(token, inline);
+  }
+}
+
 function readComputedToken(token: string): string {
   const root = globalThis.document?.documentElement ?? null;
   if (root === null || globalThis.getComputedStyle === undefined) {
