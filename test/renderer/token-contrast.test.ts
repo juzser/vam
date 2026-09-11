@@ -62,9 +62,13 @@ const TEXT_GROUNDS = [
   // when the operator reported black patches a second time. It carries
   // captions, key hints, provider names and every menu row in the sidebar's
   // popovers, so it owes 1.4.3 like the rest -- and it is the ground that
-  // BOUNDS its own value: at #272727 `ink-quiet` measures 4.501:1 and one step
-  // further it fails, which is why `--vam-card` stops where it does instead of
-  // lifting further off the pane.
+  // BOUNDS its own value: at #2f2f2f `ink-quiet` measures 4.526:1 and one step
+  // further (#303030) 4.462:1, which fails — so `--vam-card` stops one rung
+  // under that ceiling rather than lifting further off the pane. The ceiling
+  // is a function of the INK and moves with it: it was #272727 while
+  // `ink-quiet` was #8d8d8d, and the second dark lift carried that ink to
+  // #969696, which is what bought the card a real step off the pane (2.95 ->
+  // 3.30 L*, `dark-lift.test.ts`).
   '--vam-card',
 ] as const;
 
@@ -73,10 +77,10 @@ const TEXT_GROUNDS = [
  * interesting half.
  *
  * It carries exactly one ink -- `--vam-ink-dim`, the prompt's own paragraph in
- * `DetailPanel.tsx` -- which measures 4.750:1 on it in dark and 7.424:1 in
+ * `DetailPanel.tsx` -- which measures 4.775:1 on it in dark and 7.424:1 in
  * light. Listing it above would demand all nine text tokens, and two of them
- * genuinely fail there in dark: `ink-faint`/`ink-quiet` at 3.364:1 and
- * `failed` at 4.036:1. Meeting that would mean a fill so close to the pane
+ * genuinely fail there in dark: `ink-faint`/`ink-quiet` at 3.347:1 and
+ * `failed` at 3.579:1. Meeting that would mean a fill so close to the pane
  * that the bubble goes back to being invisible, which is the complaint that
  * created the token.
  *
