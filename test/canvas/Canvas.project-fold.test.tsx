@@ -115,9 +115,87 @@ describe('a folded project is remembered, the way a folded group already was', (
     expect(storedPrefs().collapsedProjects).toEqual({});
   });
 
+  /**
+   * THE RELOAD, staged the only way happy-dom can stage one: unmount, then
+   * mount again over the same storage. That distinction is the whole defect --
+   * the fold worked across a re-render before this branch and died on a
+   * reload, so an assertion that never unmounts would have passed straight
+   * over the bug.
+   */
+  it('is still folded after the canvas is torn down and built again', () => {
+    const { unmount } = render(<Canvas model={MODEL} />);
+    fold('p1');
+    unmount();
+    render(<Canvas model={MODEL} />);
+    expect(rows()).toBe(1);
+    // The chevron agrees, and says so to a screen reader.
+    expect(
+      document.querySelector('[data-project-collapse="p1"]')?.getAttribute('aria-expanded'),
+    ).toBe('false');
+  });
+
   it('does not let one source’s fold close another source’s project of the same id', () => {
     seed({ collapsedProjects: {'some-other-source': ['p1'] } });
     render(<Canvas model={MODEL} />);
     expect(rows()).toBe(2);
+  });
+});
+
+/**
+ * THE PROJECT WITH NO SOURCE, which is what makes the wiring above a trade
+ * rather than a free win.
+ *
+ * `SessionList.collapsedProjects` is OPTIONAL with a fallback to component
+ * state, and the fallback is all-or-nothing: passing the prop turns it off for
+ * EVERY project at once. `prefs.collapsedProjects` is keyed by SOURCE -- the
+ * two-level shape that stops one source's fold from closing another source's
+ * project of the same id -- so a project carrying no source has no bucket to
+ * key a fold under, and a canvas that passed only the keyed folds would leave
+ * it holding a chevron that does nothing. THAT IS WORSE THAN WHAT WAS WRONG
+ * BEFORE: a fold that cannot be MADE, rather than one that is not remembered.
+ *
+ * So it is kept for the run in `Canvas`'s own `collapsedSourceless` -- the
+ * answer `setProjectRemoved` already gives the identical shape one gesture
+ * over (`Canvas.remove-project.test.tsx`), for the reason stated there: three
+ * options, and remembering it for the run is the weakest of them and the only
+ * honest one.
+ *
+ * The model is hand-built rather than taken from `fixtures/demo.ts`, for that
+ * file's own third rule -- nothing is invented that the sources cannot
+ * produce, and every real source stamps a source on every project. A
+ * sourceless project is the hand-built case, which is exactly where
+ * `Canvas.remove-project.test.tsx` renders its own.
+ */
+describe('a project with no source keeps its fold for the run, instead of losing the control', () => {
+  const NO_SOURCE: CanvasModel = {
+    projects: [
+      { id: 'p9', name: 'unsourced', sessions: [session('n1')] },
+      { id: 'p2', name: 'beta', source: 'factory', sessions: [session('b1')] },
+    ],
+  };
+
+  it('folds for real, stores nothing under a key that does not exist, and lets go on reload', () => {
+    const { unmount } = render(<Canvas model={NO_SOURCE} />);
+    expect(rows()).toBe(2);
+    fold('p9');
+    // THE CONTROL IS REAL. This is the assertion that goes red if the canvas
+    // passes the keyed folds and drops the sourceless holder.
+    expect(rows()).toBe(1);
+    // And nothing was written under a key invented to hold it.
+    expect(storedPrefs().collapsedProjects ?? {}).toEqual({});
+    unmount();
+    render(<Canvas model={NO_SOURCE} />);
+    // Open again -- the documented outcome, not a leak.
+    expect(rows()).toBe(2);
+  });
+
+  it('does not take its sourced neighbour\u2019s stored fold down with it', () => {
+    render(<Canvas model={NO_SOURCE} />);
+    fold('p9');
+    fold('p2');
+    expect(rows()).toBe(0);
+    // One fold in state, one on disk, and the disk half is keyed exactly as it
+    // would have been if the sourceless one had never been made.
+    expect(storedPrefs().collapsedProjects).toEqual({ factory: ['p2'] });
   });
 });
