@@ -325,8 +325,22 @@ describe('an IME composition Enter commits the candidate, it does not send', () 
  * whole feature reverted.
  */
 describe('the composer names its send key, and follows the pref', () => {
+  /**
+   * ON A PHONE, WHICH IS WHERE THIS CAPTION LIVES NOW.
+   *
+   * Operator: "of Enter-to-send and Mod-[-to-leave, only the leave one needs
+   * showing." On a desktop the send key is named twice over already -- the
+   * submit button above the row carries the verb and a `Note` -- so the row
+   * keeps only the key nothing else on screen performs. The phone has no
+   * leave hint to make room for and a return key that really is a preference,
+   * so the caption stays there, and every claim below is still a claim about
+   * it. `DetailPanel.test.tsx` holds the desktop half: no send caption there,
+   * and a leave caption that is still drawn.
+   */
+  const ON_A_PHONE = { phone: true } as const;
+
   it('changes the visible caption when the pref changes', () => {
-    composer('enter');
+    composer('enter', ON_A_PHONE);
     const shipped = hint()?.textContent ?? '';
     expect(shipped).toContain('Enter');
     expect(shipped).not.toContain('Shift');
@@ -340,7 +354,7 @@ describe('the composer names its send key, and follows the pref', () => {
   });
 
   it('carries the mode as a fact a guard can read, beside the words', () => {
-    composer('shift-enter');
+    composer('shift-enter', ON_A_PHONE);
     expect(hint()?.getAttribute('data-prompt-send-key')).toBe('shift-enter');
     act(() => setActivePromptSubmitKey('enter'));
     expect(hint()?.getAttribute('data-prompt-send-key')).toBe('enter');
@@ -350,12 +364,12 @@ describe('the composer names its send key, and follows the pref', () => {
     // The button's word is already per-source (`composerClaim`). A caption
     // promising "send" over a source that only appends to a log would be the
     // same lie one line lower.
-    composer('enter', { delivers: false });
+    composer('enter', { ...ON_A_PHONE, delivers: false });
     expect(hint(), 'no caption at all — the box says nothing about its key').not.toBeNull();
     expect(hint()?.textContent).toContain('record');
     expect(hint()?.textContent).not.toContain('send');
     cleanup();
-    composer('enter', { delivers: true });
+    composer('enter', { ...ON_A_PHONE, delivers: true });
     expect(hint()?.textContent).toContain('send');
   });
 
