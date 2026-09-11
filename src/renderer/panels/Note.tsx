@@ -27,10 +27,17 @@ export function Note({ text, children }: { readonly text: string; readonly child
           {children}
         </Tooltip.Trigger>
         <Tooltip.Portal>
+          {/* NO BORDER, because the fill is the boundary now. `bg-tip` is the
+              theme turned inside out -- light in dark, dark in light -- and it
+              clears WCAG 1.4.11's 3:1 against every surface in the palette by
+              10.02:1 at worst, where the old `bg-raised` fill managed 1.07:1
+              and had to buy its edge with `--vam-line-tip`. The argument is
+              written out at `--vam-tip` in `styles.css`; the paint is measured
+              by `e2e/tooltip-shots.mjs`. */}
           <Tooltip.Content
             side="top"
             sideOffset={6}
-            className="z-50 max-w-[260px] rounded-[7px] border border-line-tip bg-raised px-2 py-1.5 text-control text-ink-dim shadow-tip"
+            className="z-50 max-w-[260px] rounded-[7px] bg-tip px-2 py-1.5 text-control text-on-tip-dim shadow-tip"
           >
             {text}
           </Tooltip.Content>

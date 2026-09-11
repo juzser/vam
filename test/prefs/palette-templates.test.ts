@@ -95,12 +95,71 @@ const MEANING_TOKENS = [
 
 const THEMES = ['dark', 'light'] as const;
 
+/**
+ * THE TEMPLATES THAT ACTUALLY CARRY COLOURS, which is every entry except the
+ * one that carries none on purpose.
+ *
+ * `default` sets no tokens: pressing it DELETES the bucket so the cascade
+ * falls through to `styles.css` (see `PaletteTemplateKind`). Every measurement
+ * below asks "is this table of colours safe", and a table with no colours in
+ * it answers that question vacuously -- so the sweeps run over the tinted ones
+ * and `default`'s behaviour is asserted separately, and directly, further
+ * down. Splitting rather than skipping, because a `continue` inside each loop
+ * would let a SECOND empty template ship unnoticed.
+ */
+const TINTED = PALETTE_TEMPLATES.filter((t) => t.kind === 'values');
+
 describe('palette templates', () => {
+  it('offers exactly one way back, and puts it first', () => {
+    // The row's shape is load-bearing: `reset <theme> colours` only appears
+    // once a colour is overridden, so without a "default" entry the row is a
+    // one-way door -- an operator who pressed `ember` and wants vam back has
+    // to find a different control, in a different block, that is not shaped
+    // like the thing they just pressed.
+    const stylesheet = PALETTE_TEMPLATES.filter((t) => t.kind === 'stylesheet');
+    expect(stylesheet.map((t) => t.id)).toEqual(['default']);
+    expect(PALETTE_TEMPLATES[0]?.id).toBe('default');
+    // And it is genuinely empty in BOTH themes. An entry that clears the
+    // bucket and also carries values is a contradiction the UI would render
+    // as a preview of colours that never get applied.
+    for (const theme of THEMES) {
+      expect(templatePalette('default', theme)).toEqual({});
+    }
+  });
+
+  it('puts the palette back exactly as the stylesheet left it', () => {
+    // Not "writes vam's current hexes back" -- CLEARS. Writing today's values
+    // would look identical on screen and would freeze that palette against
+    // every later stylesheet, which is the argument `clearPaletteColor` makes
+    // for one token and this makes for thirteen.
+    const tinted = TINTED[0]?.id as PaletteTemplateId;
+    const painted = applyPaletteTemplate(EMPTY_PREFS, 'dark', tinted);
+    expect(Object.keys(paletteFor(painted.palette, 'dark')).length).toBeGreaterThan(0);
+
+    const back = applyPaletteTemplate(painted, 'dark', 'default');
+    expect(paletteFor(back.palette, 'dark')).toEqual({});
+  });
+
+  it('clears only the theme on screen', () => {
+    // Same argument the apply path makes: the other theme was chosen on a
+    // screen this one cannot see.
+    const both = applyPaletteTemplate(
+      applyPaletteTemplate(EMPTY_PREFS, 'dark', TINTED[0]?.id as PaletteTemplateId),
+      'light',
+      TINTED[1]?.id as PaletteTemplateId,
+    );
+    const cleared = applyPaletteTemplate(both, 'dark', 'default');
+    expect(paletteFor(cleared.palette, 'dark')).toEqual({});
+    expect(paletteFor(cleared.palette, 'light')).toEqual(
+      templatePalette(TINTED[1]?.id as PaletteTemplateId, 'light'),
+    );
+  });
+
   it('offers a real corpus of them, each with both themes filled in', () => {
     // A sweep over an empty table passes every assertion below. Four guards in
     // this repo have gone green having examined zero of anything.
-    expect(PALETTE_TEMPLATES.length).toBeGreaterThanOrEqual(3);
-    const broken = PALETTE_TEMPLATES.filter(
+    expect(TINTED.length).toBeGreaterThanOrEqual(3);
+    const broken = TINTED.filter(
       (t) =>
         t.id.length === 0 ||
         t.label.length === 0 ||
@@ -119,7 +178,7 @@ describe('palette templates', () => {
     // tokens on the floor anyway -- so the write would silently not happen.
     const offered = new Set(PALETTE_TOKENS.map((entry) => entry.token));
     const stray: string[] = [];
-    for (const t of PALETTE_TEMPLATES) {
+    for (const t of TINTED) {
       for (const theme of THEMES) {
         for (const token of Object.keys(templatePalette(t.id, theme))) {
           if (!offered.has(token)) stray.push(`${t.id}/${theme}: ${token}`);
@@ -131,7 +190,7 @@ describe('palette templates', () => {
 
   it('changes the room and never the signals', () => {
     const touched: string[] = [];
-    for (const t of PALETTE_TEMPLATES) {
+    for (const t of TINTED) {
       for (const theme of THEMES) {
         const values = templatePalette(t.id, theme);
         for (const token of MEANING_TOKENS) {
@@ -148,7 +207,7 @@ describe('palette templates', () => {
     // the two.
     const failing: string[] = [];
     let pairs = 0;
-    for (const t of PALETTE_TEMPLATES) {
+    for (const t of TINTED) {
       for (const theme of THEMES) {
         const values = templatePalette(t.id, theme);
         const inks: Record<string, string> = {
@@ -179,7 +238,7 @@ describe('palette templates', () => {
     // preset could reorder these, clicking one would undo a release of work
     // and nothing would say so.
     const wrong: string[] = [];
-    for (const t of PALETTE_TEMPLATES) {
+    for (const t of TINTED) {
       const dark = templatePalette(t.id, 'dark');
       const rungs = ['--vam-panel', '--vam-sidebar', '--vam-raised', '--vam-card'];
       for (let i = 1; i < rungs.length; i += 1) {
@@ -206,7 +265,7 @@ describe('palette templates', () => {
     // inherits the lightness ladder -- asserted rather than assumed, because
     // adding chroma moves luminance and could in principle close one.
     const narrow: string[] = [];
-    for (const t of PALETTE_TEMPLATES) {
+    for (const t of TINTED) {
       const v = templatePalette(t.id, 'dark');
       const pane = v['--vam-pane'] as string;
       for (const [token, floor] of [
@@ -226,7 +285,7 @@ describe('palette templates', () => {
     // the light bubble uses to clear its floor, so each template's bubble is
     // measured against ITS OWN pane rather than against the stylesheet's.
     const invisible: string[] = [];
-    for (const t of PALETTE_TEMPLATES) {
+    for (const t of TINTED) {
       for (const theme of THEMES) {
         const v = templatePalette(t.id, theme);
         const bubble = v['--vam-in-bubble'] as string;
@@ -253,16 +312,14 @@ describe('palette templates', () => {
     // nothing. Each one must differ from the others AND be a visible step from
     // the default, measured as ΔE on the pane -- the surface with the most
     // screen area.
-    const panes = PALETTE_TEMPLATES.map(
-      (t) => templatePalette(t.id, 'dark')['--vam-pane'] as string,
-    );
-    expect(new Set(panes).size).toBe(PALETTE_TEMPLATES.length);
+    const panes = TINTED.map((t) => templatePalette(t.id, 'dark')['--vam-pane'] as string);
+    expect(new Set(panes).size).toBe(TINTED.length);
     const flat = panes.filter((p) => deltaE(p, '#272727') < 2.3);
     expect(flat).toEqual([]);
   });
 
   it('applies into the theme on screen and leaves the other one alone', () => {
-    const id = PALETTE_TEMPLATES[0]?.id as PaletteTemplateId;
+    const id = TINTED[0]?.id as PaletteTemplateId;
     const next = applyPaletteTemplate(EMPTY_PREFS, 'dark', id);
     expect(paletteFor(next.palette, 'dark')).toEqual(templatePalette(id, 'dark'));
     // The other theme was chosen on a screen this one cannot see -- the same
@@ -274,7 +331,7 @@ describe('palette templates', () => {
     // Two templates applied in a row must not leave half of the first behind:
     // a palette that is two presets blended is a palette nobody designed and
     // nobody measured.
-    const [first, second] = PALETTE_TEMPLATES;
+    const [first, second] = TINTED;
     const once = applyPaletteTemplate(EMPTY_PREFS, 'dark', first?.id as PaletteTemplateId);
     const twice = applyPaletteTemplate(once, 'dark', second?.id as PaletteTemplateId);
     expect(paletteFor(twice.palette, 'dark')).toEqual(

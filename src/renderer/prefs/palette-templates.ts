@@ -61,13 +61,32 @@
  */
 
 import type { EffectiveTheme, PaletteOverrides, Prefs } from './prefs.js';
-import { PALETTE_TOKENS, setPaletteColor } from './prefs.js';
+import { clearPalette, PALETTE_TOKENS, setPaletteColor } from './prefs.js';
 
 /** The id of a shipped template. */
-export type PaletteTemplateId = 'slate' | 'nordic' | 'ember' | 'plum';
+export type PaletteTemplateId = 'default' | 'slate' | 'nordic' | 'ember' | 'plum';
+
+/**
+ * WHAT A TEMPLATE DOES WHEN PRESSED, and there are exactly two answers.
+ *
+ *  - `values`: write this table's colours into the theme on screen.
+ *  - `stylesheet`: write NOTHING and delete what is there, so every token falls
+ *    back through the cascade to `styles.css`.
+ *
+ * THE SECOND IS NOT "a template whose values happen to be vam's". Writing
+ * today's stylesheet values into the bucket would look identical on screen and
+ * would FREEZE that palette against every later stylesheet -- the operator
+ * would stop receiving the theme's own changes and nothing would tell them.
+ * `clearPaletteColor` in `prefs.ts` makes the same argument for one token; this
+ * is it for thirteen. The distinction is a discriminator rather than an empty
+ * table so that a reader cannot mistake "sets nothing" for "was never filled
+ * in", and so the measurement tests can say which entries they cover.
+ */
+export type PaletteTemplateKind = 'values' | 'stylesheet';
 
 export interface PaletteTemplate {
   readonly id: PaletteTemplateId;
+  readonly kind: PaletteTemplateKind;
   /** What the button says. Lower case, like every other label in Settings. */
   readonly label: string;
   /** One line under the row, for the template under the pointer. */
@@ -86,7 +105,27 @@ export interface PaletteTemplate {
  */
 export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
   {
+    /**
+     * VAM'S OWN, AND THE WAY BACK. First in the row because it is the state
+     * every other entry is a departure from, and because without it the row
+     * was a one-way door: `reset <theme> colours` only appears once something
+     * is overridden, which is exactly when an operator is least likely to be
+     * looking for it -- they pressed a template, they want the old one back,
+     * and the control that does that is somewhere else and shaped differently.
+     *
+     * It CLEARS rather than writes. See `PaletteTemplateKind`.
+     */
+    id: 'default',
+    kind: 'stylesheet',
+    label: 'default',
+    hint: "vam's own palette — clears every colour back to the stylesheet",
+    studied: 'the ADE session-canvas mockup, artboards 1a and 1b',
+    dark: {},
+    light: {},
+  },
+  {
     id: 'slate',
+    kind: 'values',
     label: 'slate',
     hint: 'a cool blue-grey room — the quietest of the four',
     studied: 'GitHub Dark Dimmed, One Dark Pro',
@@ -112,6 +151,7 @@ export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
   },
   {
     id: 'nordic',
+    kind: 'values',
     label: 'nordic',
     hint: 'the same blue, taken further — cold and low-contrast',
     studied: 'Nord',
@@ -137,6 +177,7 @@ export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
   },
   {
     id: 'ember',
+    kind: 'values',
     label: 'ember',
     hint: 'warm brown-grey, for a screen that is on after dark',
     studied: 'Monokai, Solarized Dark',
@@ -162,6 +203,7 @@ export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
   },
   {
     id: 'plum',
+    kind: 'values',
     label: 'plum',
     hint: 'a violet cast, the warmest of the cool three',
     studied: 'Dracula, Tokyo Night',
@@ -233,6 +275,9 @@ export function applyPaletteTemplate(
   const template = BY_ID.get(id);
   if (template === undefined) {
     return prefs;
+  }
+  if (template.kind === 'stylesheet') {
+    return clearPalette(prefs, theme);
   }
   const values = template[theme];
   let next: Prefs = { ...prefs, palette: { ...prefs.palette, [theme]: {} } };

@@ -1350,6 +1350,109 @@ if (templateIds.length >= 3) {
   );
   await page.screenshot({ path: `${outDir}/palette-template-${picked}.png` });
   console.log(`${outDir}/palette-template-${picked}.png`);
+
+  // ------------------------------------- THE WAY BACK, AND WHAT IT PROMISES
+  //
+  // Operator: "add the default colour scheme as a template too."
+  //
+  // `default` carries no colours: pressing it DELETES the bucket so every
+  // token falls back through the cascade to `styles.css`. That makes its three
+  // preview discs a different kind of claim from every other chip's -- they
+  // cannot be read off a table, they have to be read off the stylesheet -- and
+  // it walks into a trap no unit test can see paint through: the overrides
+  // live on the root's INLINE style and custom properties inherit, so by the
+  // time this row is on screen the cascade IS the operator's palette. The
+  // obvious read hands the chip `slate`'s colours and it previews the very
+  // thing it is offering to leave.
+  //
+  // So this is measured with `slate` IN FORCE, in a real browser, against the
+  // surfaces it repaints afterwards. The discs promise; the press pays.
+  await page.locator('button[aria-label="settings"]').click();
+  await page.waitForSelector('[data-settings-overlay]');
+  await page.waitForTimeout(300);
+  // EVERY CHIP DRAWS ITS OWN PALETTE, and this is the assertion that keeps the
+  // fix above from over-applying. `default` has to ask the cascade; the four
+  // tinted chips must NOT, or all five previews collapse onto one colour --
+  // the failure that looks most like working software, since the row still
+  // renders, still has discs, and still applies the right palette when pressed.
+  const firstDiscs = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-palette-template]')].map((button) => {
+      const disc = button.querySelector('[data-template-disc]');
+      return {
+        id: button.getAttribute('data-palette-template'),
+        fill: disc === null ? null : getComputedStyle(disc).backgroundColor,
+      };
+    }),
+  );
+  console.log(`  every chip's pane disc: ${JSON.stringify(firstDiscs)}`);
+  check(
+    'every template chip previews a pane of its own, rather than all five sharing one',
+    firstDiscs.length >= 3 &&
+      new Set(firstDiscs.map((d) => d.fill)).size === firstDiscs.length &&
+      firstDiscs.every((d) => d.fill !== null),
+    JSON.stringify(firstDiscs),
+  );
+
+  const promised = await page.evaluate(() => {
+    const button = document.querySelector('[data-palette-template="default"]');
+    if (button === null) return null;
+    return [...button.querySelectorAll('[data-template-disc]')].map((disc) => ({
+      token: disc.getAttribute('data-template-disc'),
+      fill: getComputedStyle(disc).backgroundColor,
+    }));
+  });
+  console.log(`  the default chip promises: ${JSON.stringify(promised)}`);
+  check(
+    'the row offers a way back to the stylesheet, previewed with three discs',
+    promised !== null && promised.length === 3 && promised.every((d) => /^rgb\(/.test(d.fill)),
+    JSON.stringify(promised),
+  );
+  if (promised !== null && promised.length === 3) {
+    // THE ASSERTION THE TRAP IS ABOUT. `slate` is in force on the root; if the
+    // discs were read through the cascade they would BE `slate`.
+    check(
+      'and previews it with vam’s own colours rather than with the palette in force',
+      promised[0].fill !== painted.pane &&
+        promised[1].fill !== painted.card &&
+        promised[2].fill !== painted.bubble,
+      `discs ${promised.map((d) => d.fill).join(' / ')} vs in force ${painted.pane} / ${painted.card} / ${painted.bubble}`,
+    );
+
+    await page.locator('[data-palette-template="default"]').click();
+    await page.waitForTimeout(350);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    const back = await page.evaluate(() => {
+      const read = (sel) => {
+        const el = document.querySelector(sel);
+        return el === null ? null : getComputedStyle(el).backgroundColor;
+      };
+      return {
+        '--vam-pane': read('[data-action-pane]'),
+        '--vam-card': read('[data-question]'),
+        '--vam-in-bubble': read('[data-detail-scroll=\"in\"]'),
+      };
+    });
+    console.log(`  after "default": ${JSON.stringify(back)}`);
+    // A PRESS THAT PAYS WHAT THE DISCS PROMISED. Not "the pane changed" -- the
+    // three surfaces have to land on the three colours the chip drew, or the
+    // preview was decoration.
+    const broken = promised.filter((d) => back[d.token] !== d.fill);
+    check(
+      'pressing "default" repaints every previewed surface with the colour it previewed',
+      broken.length === 0,
+      broken.map((d) => `${d.token}: promised ${d.fill}, painted ${back[d.token]}`).join('; '),
+    );
+    // AND IT LEFT THE TEMPLATE BEHIND. Landing on the stylesheet is only the
+    // way back if it is not also where `slate` was.
+    check(
+      'and it is a different palette from the template that was in force',
+      back['--vam-pane'] !== painted.pane,
+      `${painted.pane} -> ${back['--vam-pane']}`,
+    );
+    await page.screenshot({ path: `${outDir}/palette-template-default.png` });
+    console.log(`${outDir}/palette-template-default.png`);
+  }
 }
 
 await browser.close();

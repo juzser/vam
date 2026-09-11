@@ -55,6 +55,7 @@ import {
   setPromptSubmitKey,
   setTheme,
   setTurnProgress,
+  stylesheetPaletteValue,
   type Theme,
 } from '../prefs/prefs.js';
 import type { TurnProgress } from '../prefs/progress.js';
@@ -447,7 +448,17 @@ export function SettingsOverlay({
               >
                 <div className="flex flex-wrap gap-1.5">
                   {PALETTE_TEMPLATES.map((template) => {
-                    const preview = templatePalette(template.id, theme);
+                    const values = templatePalette(template.id, theme);
+                    // THE `default` CHIP HAS NO COLOURS OF ITS OWN -- pressing
+                    // it deletes the bucket so the cascade falls back to
+                    // `styles.css` -- so its discs have to ASK the stylesheet.
+                    // Not `paletteValue`: by the time this row is on screen
+                    // the cascade is the operator's own palette, and the chip
+                    // would preview `ember` while promising vam.
+                    const preview = (token: string): string | undefined =>
+                      template.kind === 'stylesheet'
+                        ? stylesheetPaletteValue(token)
+                        : values[token];
                     return (
                       <button
                         key={template.id}
@@ -472,7 +483,7 @@ export function SettingsOverlay({
                                 // panel behind this row still has one.
                                 className="h-[13px] w-[13px] rounded-full ring-1 ring-line-loud"
                                 style={{
-                                  backgroundColor: preview[token],
+                                  backgroundColor: preview(token),
                                   marginLeft: i === 0 ? 0 : -4,
                                 }}
                               />
