@@ -230,6 +230,34 @@ Chord prefixes — press the first key, then the second:
 | `zc` | Close the focused split — the session keeps running |
 | `zw` / `zW` | Move the keyboard to the next / previous split |
 
+#### In a browser tab
+
+vam ships one keyboard two ways, and only one of them has the keyboard to
+itself. In the **desktop app** nothing competes: vam builds its own Electron
+menu and leaves out the four items whose key equivalents it wanted, so every
+chord above reaches the page. Over **Tailscale Serve** the page is a tab in
+Chrome or Safari, and fifteen of these are chords the browser keeps for
+itself — zoom, tab selection, and the tab and window lifecycle:
+
+`Mod-0` `Mod-1` `Mod-2` `Mod-3` `Mod-4` `Mod-5` `Mod-6` `Mod-7` `Mod-8`
+`Mod-9` `Mod-n` `Mod-t` `Mod-w` `Mod-Shift-[` `Mod-Shift-]`
+
+vam claims every keystroke it acts on, which is everything a page is allowed
+to do; a browser is free to act anyway on these, and for zoom and tab
+switching it does. Where one of them matters there is another way in: `H`
+reaches the session list as well as `Mod-0`, `x` closes a session as well as
+`Mod-w`, `o` starts one as well as `Mod-n`, and the tab ring is walkable with
+`zw` / `zW`. Leaving the prompt box is `Ctrl-[` — vim's own Escape, and no
+browser binds it.
+
+This list is held against the grammar by
+`test/keyboard/browser-contested-chords.test.ts`, so a new binding that lands
+on one of these reddens rather than reaching an operator. Which chords a
+browser really swallows is the one thing no test here can measure — keys
+injected by Playwright go straight to the renderer and never through the
+browser's own accelerators — so the right-hand side of that file is Chrome's
+and Apple's documentation, not a measurement.
+
 ## Development
 
 ```bash

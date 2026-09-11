@@ -1122,6 +1122,120 @@ for (const chord of ['Meta+BracketLeft', 'Control+BracketLeft']) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// `Mod-0`, AND WHAT AN INJECTED KEY CANNOT MEASURE.
+//
+// The README promises "`H` / `Mod-0` — Move keyboard control back to the
+// session list", unconditionally. `chords.ts` argues the binding is safe, and
+// argues it ONLY about Electron: vam owns its application menu and that menu
+// has no `viewMenu`, so nothing native answers `CommandOrControl+0`. True, and
+// about one of the two ways this renderer ships. In a browser tab -- the
+// Tailscale Serve deployment -- `Cmd/Ctrl+0` is the browser's zoom reset, and
+// zoom shortcuts are not cancellable by a page.
+//
+// SO THIS SECTION MEASURES WHAT IT CAN AND REFUSES TO IMPLY THE REST. What it
+// can see: whether vam's handler runs, whether vam CLAIMS the keystroke
+// (`defaultPrevented` on a real cancelable event), and whether the page's zoom
+// moved. What it cannot see, and the reason is structural rather than a gap in
+// this file:
+//
+//   PLAYWRIGHT DISPATCHES KEYS INTO THE RENDERER, over CDP's
+//   `Input.dispatchKeyEvent`. They never pass through the browser's own
+//   accelerator table, so a chord the browser reserves arrives at the page
+//   here exactly like one it does not. Headed or headless makes no difference.
+//   NO GUARD IN THIS REPO CAN ANSWER "does Chrome swallow this" -- only a
+//   person pressing the key in a real window can.
+//
+// The zoom reading below is the control that proves that claim rather than
+// asserting it: if injected keys reached the chrome, `Mod-0` would move the
+// zoom, and it does not. Every label in this section carries that fact, so a
+// green tick here can never be quoted as "the browser stands down".
+console.log('\n=== Mod-0, and the half a web guard cannot see');
+await reset();
+await page.locator(`[data-session-row="${QUIET_SESSION}"]`).click();
+await page.keyboard.press('i');
+const inBox = await settle(
+  () => document.activeElement?.tagName === 'TEXTAREA',
+  undefined,
+  'the caret is in the prompt box before Mod-0',
+);
+if (inBox) {
+  const zoomBefore = await page.evaluate(() => ({
+    scale: globalThis.visualViewport?.scale ?? null,
+    ratio: globalThis.devicePixelRatio,
+    width: document.documentElement.clientWidth,
+  }));
+  // The keystroke, and whether vam claimed it, read off the real event.
+  //
+  // ARMED BEFORE THE PRESS AND READ AFTER IT, in two evaluates rather than one
+  // awaited promise: `page.evaluate` waits for a returned promise to settle,
+  // so a listener that resolves on the keydown would be awaited BEFORE the
+  // keydown is sent and would only ever report its own timeout. (Measured --
+  // it did, and reported `{cancelable: null}` on a key vam demonstrably
+  // claims.) The read is one tick late, so `defaultPrevented` has its final
+  // value: a listener on `window` in the bubble phase sees the event after the
+  // composer's own handler, but only a macrotask later is dispatch over.
+  await page.evaluate(() => {
+    globalThis.__vamKeyProbe = null;
+    const onKey = (event) => {
+      // THE MODIFIER'S OWN KEYDOWN IS NOT THE CHORD. `keyboard.press('Control+
+      // Digit0')` sends a keydown for Control first, and a probe that took the
+      // first event it saw reported `prevented: false` for a key vam visibly
+      // acts on -- measured, and it is the same fact `normalizeKey` encodes by
+      // returning null for `MODIFIER_KEYS`.
+      if (['Control', 'Meta', 'Shift', 'Alt'].includes(event.key)) return;
+      globalThis.removeEventListener('keydown', onKey, false);
+      setTimeout(() => {
+        globalThis.__vamKeyProbe = {
+          key: event.key,
+          cancelable: event.cancelable,
+          prevented: event.defaultPrevented,
+        };
+      }, 0);
+    };
+    globalThis.addEventListener('keydown', onKey, false);
+  });
+  await page.keyboard.press('Control+Digit0');
+  await page.waitForTimeout(150);
+  const answer = await page.evaluate(
+    () => globalThis.__vamKeyProbe ?? { key: null, cancelable: null, prevented: null },
+  );
+  await settle(
+    () => document.activeElement?.tagName !== 'TEXTAREA',
+    undefined,
+    'Mod-0 releases the composer',
+  );
+  const zoomAfter = await page.evaluate(() => ({
+    scale: globalThis.visualViewport?.scale ?? null,
+    ratio: globalThis.devicePixelRatio,
+    width: document.documentElement.clientWidth,
+  }));
+  const zoomed = JSON.stringify(zoomBefore) !== JSON.stringify(zoomAfter);
+  console.log(`  the event: ${JSON.stringify(answer)}`);
+  console.log(`  zoom before ${JSON.stringify(zoomBefore)} after ${JSON.stringify(zoomAfter)}`);
+  console.log(`  an injected Mod-0 reaches this browser's chrome: ${zoomed}`);
+
+  // THE CONTROL, ASSERTED RATHER THAN ONLY PRINTED. If a future Playwright
+  // did route injected keys through the chrome, every label below would start
+  // lying in the other direction -- and the tick would not move.
+  check(
+    'an injected Mod-0 does not reach the browser chrome, so nothing here is about interception',
+    !zoomed,
+    `zoom moved: ${JSON.stringify(zoomBefore)} -> ${JSON.stringify(zoomAfter)}`,
+  );
+  check(
+    'vam claims Mod-0 on a cancelable event (which is all a page can do; the browser may still act)',
+    answer.cancelable === true && answer.prevented === true,
+    JSON.stringify(answer),
+  );
+  const landed = await keyboardAt();
+  check(
+    'and Mod-0 does what the README says — IN THIS DEPLOYMENT, where nothing competes for it',
+    landed.tag !== 'TEXTAREA' && landed.mode === 'Select',
+    JSON.stringify(landed),
+  );
+}
+
 await browser.close();
 
 if (failures.length > 0) {
