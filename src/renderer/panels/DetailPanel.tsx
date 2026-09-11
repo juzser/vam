@@ -113,6 +113,12 @@ import {
   subscribeTurnProgress,
   type TurnProgress,
 } from '../prefs/progress.js';
+import {
+  activePromptSubmitKey,
+  SUBMIT_KEY_LABELS,
+  submitsPrompt,
+  subscribePromptSubmitKey,
+} from '../prefs/submit-key.js';
 import { useHistoryReader } from '../sources/history-reader.js';
 import { describeFailure } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
@@ -3975,6 +3981,18 @@ export function DetailPanel(props: DetailPanelProps) {
     activeTurnProgress,
   );
   /**
+   * WHICH KEY SENDS THE DRAFT, read the same way and for the same reason: the
+   * canvas mounts one of these per split leaf and the phone mounts another, so
+   * a prop would have to be threaded through every one of them. Not a paint
+   * either -- it decides what a keystroke DOES -- so CSS could not carry it
+   * the way `--vam-out-font-size` carries the out text size.
+   */
+  const submitKey = useSyncExternalStore(
+    subscribePromptSubmitKey,
+    activePromptSubmitKey,
+    activePromptSubmitKey,
+  );
+  /**
    * WHAT THE BOUNDARY BLOCK OFFERS AT THE TOP OF THE COLUMN, or `null` when it
    * offers nothing. Decided in `transcript-history.ts` so that the four answers
    * are folded in ONE place rather than in a JSX conditional that a later
@@ -4101,6 +4119,18 @@ export function DetailPanel(props: DetailPanelProps) {
    * containment on the painted button rather than trusting this note.
    */
   const ComposerGlyph = composerClaim.Glyph;
+  /**
+   * The verb the send-key caption uses: the same distinction the button's word
+   * carries, off the same fact (`delivers`), because a caption promising
+   * "send" over a source that only appends to a log is that lie one line
+   * lower.
+   *
+   * Read from `delivers` rather than from `composerClaim.word`, which becomes
+   * `Sending`/`Recording` while a write is in flight -- the caption would then
+   * read "Enter → sending", which is not what the key does, it is what the app
+   * is doing.
+   */
+  const sendVerb = delivers === true ? 'send' : 'record';
   return (
     <aside
       data-action-pane={active ? 'active' : 'idle'}
@@ -5119,6 +5149,14 @@ export function DetailPanel(props: DetailPanelProps) {
                       setPick(Math.min(Math.max(0, picked + delta), matches.length - 1));
                       return;
                     }
+                    // ENTER, IN BOTH MODES, AND DELIBERATELY NOT `submitsPrompt`.
+                    // The send key is the operator's to swap (`prefs/submit-key.ts`);
+                    // this is not the send. Accepting a completion does not
+                    // deliver anything, Enter-accepts is the idiom every
+                    // typeahead an operator has ever used follows, and a list
+                    // that followed the pref would have NO accept key at all in
+                    // `shift-enter` mode -- Shift+Enter would be the send there.
+                    // `test/panels/DetailPanel.submit-key.test.tsx` holds this.
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();
                       acceptSuggestion(suggestion);
@@ -5141,6 +5179,8 @@ export function DetailPanel(props: DetailPanelProps) {
                       setPick(Math.min(Math.max(0, slashPicked + delta), slashMatches.length - 1));
                       return;
                     }
+                    // Enter accepts here in both modes too, for the three
+                    // reasons spelled out over the `!` branch above.
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();
                       acceptSlashSuggestion(slashSuggestion);
@@ -5153,8 +5193,10 @@ export function DetailPanel(props: DetailPanelProps) {
                     }
                   }
                   // The window listener ignores keys typed in a textarea, so this
-                  // box binds the ones it needs itself. Shift+Enter is left alone
-                  // — it is the newline the box became multiline to allow.
+                  // box binds the ones it needs itself. WHICH of Enter and
+                  // Shift+Enter sends is the operator's (`prefs/submit-key.ts`);
+                  // whichever one does not is left alone, because it is the
+                  // newline the box became multiline to allow.
                   //
                   // Shift+Tab is bound HERE, and deliberately not in the chord
                   // tables (`keyboard/chords.ts`), for two reasons that both
@@ -5175,9 +5217,14 @@ export function DetailPanel(props: DetailPanelProps) {
                   if (event.key === 'Tab' && event.shiftKey && canCycleMode) {
                     event.preventDefault();
                     void cycleMode();
-                  } else if (event.key === 'Enter' && !event.shiftKey) {
+                  } else if (submitsPrompt(submitKey, event)) {
                     event.preventDefault();
                     onSubmit();
+                    // NOTE WHAT HAS NO BRANCH: the Enter that does NOT send.
+                    // It has to fall out of this chain untouched so the
+                    // textarea inserts the newline itself -- a
+                    // `preventDefault()` on that path would hand the operator a
+                    // box with no send AND no newline.
                   } else if (event.key === 'Escape') {
                     event.preventDefault();
                     // BLUR, not just `composing = false`. Clearing the flag only
@@ -5547,6 +5594,32 @@ export function DetailPanel(props: DetailPanelProps) {
                   className="flex-none whitespace-nowrap font-mono text-meta text-ink-faint"
                 >
                   Esc → sidebar
+                </span>
+              )}
+              {/* WHICH KEY SENDS, WHERE THE HANDS ARE. Two keystrokes are
+              possible here and only one of them is live, and before this the
+              box knew which and showed nothing -- `grep -rn "Enter to send"
+              src/` found one source comment and no pixel. That is this pane's
+              oldest defect (`sources/pull-requests.ts`: two different answers
+              must never look the same), and a SWAPPABLE key makes silence
+              strictly worse: the operator cannot even fall back on the default
+              they remember.
+
+              In the caption row rather than the placeholder, because a
+              placeholder is gone the moment there is a draft -- which is
+              exactly when the question "what will Enter do to this" is asked.
+              And LAST before the spacer, so the width it gains when the label
+              grows is taken out of that spacer: nothing to its left moves and
+              the send button, which is after the spacer, does not move either.
+
+              The verb is the button's own distinction, not a fixed "send":
+              see `sendVerb`. */}
+              {composing && (
+                <span
+                  data-prompt-send-key={submitKey}
+                  className="flex-none whitespace-nowrap font-mono text-meta text-ink-faint"
+                >
+                  {`${SUBMIT_KEY_LABELS[submitKey]} → ${sendVerb}`}
                 </span>
               )}
               <span className="min-w-0 flex-1" />
