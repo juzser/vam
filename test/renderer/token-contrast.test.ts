@@ -137,10 +137,10 @@ const TEXT_GROUNDS = [
  * interesting half.
  *
  * It carries exactly one ink -- `--vam-ink-dim`, the prompt's own paragraph in
- * `DetailPanel.tsx` -- which measures 4.775:1 on it in dark and 7.424:1 in
+ * `DetailPanel.tsx` -- which measures 4.787:1 on it in dark and 7.490:1 in
  * light. Listing it above would demand all nine text tokens, and two of them
- * genuinely fail there in dark: `ink-faint`/`ink-quiet` at 3.347:1 and
- * `failed` at 3.579:1. Meeting that would mean a fill so close to the pane
+ * genuinely fail there in dark: `ink-faint`/`ink-quiet` at 3.355:1 and
+ * `failed` at 3.588:1. Meeting that would mean a fill so close to the pane
  * that the bubble goes back to being invisible, which is the complaint that
  * created the token.
  *

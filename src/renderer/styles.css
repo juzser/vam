@@ -112,13 +112,19 @@
      they are what the bubble's own floors are calibrated against.)
 
      It takes the In region's OWN hue -- `--vam-rule-in`'s teal, already the
-     colour of that region's rule and its announced label -- at fill strength,
-     which is the move `--vam-waiting-tint` and `--vam-done-tint` already make
-     for their statuses. A hue rather than a lighter grey because "a different
-     colour" is what was asked for, and because in the light theme hue is the
-     only channel with room left: that theme's pane sits at 86% relative
-     luminance, so the WCAG ratio of ANYTHING lighter than it is capped at
-     1.159:1 -- pure white. The values carry the numbers reached. */
+     colour of that region's rule and its announced label -- carried down to
+     fill strength, which is the move `--vam-waiting-tint` and `--vam-done-tint`
+     already make for their statuses. A hue rather than a plain lighter grey
+     because "a different colour" is what was asked for, and because in the
+     light theme hue is the only channel with room left: that theme's pane sits
+     at 86% relative luminance, so the WCAG ratio of ANYTHING lighter than it
+     is capped at 1.159:1 -- pure white.
+
+     HOW MUCH OF THAT HUE IS A SEPARATE QUESTION, and the operator has since
+     answered it: "pick the option leaning towards grey". Both halves keep the
+     teal and drop most of its chroma (dark 16.65 -> 7.07, light 7.92 -> 4.49)
+     at an unchanged lightness. The token still says "this is the In region";
+     it now says it quietly. The values carry the numbers reached. */
   --color-in-bubble: var(--vam-in-bubble);
 
   /* The selected pill inside a segmented control's well. Read off the mode
@@ -458,27 +464,52 @@
      not a preference -- and `token-contrast` is what says so. */
   --vam-card: #2e2e2e;
 
-  /* The In bubble, dark: `--vam-rule-in`'s teal (#2dd4bf) carried down to fill
-     strength. 1.509:1 against the pane and ΔE 20.98, against the 1.030:1 / ΔE
-     1.5 it replaces -- and deliberately inside the band this palette's own
-     tinted grounds already occupy (`waiting-tint` 1.446:1, `done-tint`
-     1.510:1), so the bubble is as loud as a status tint and no louder.
+  /* THE IN BUBBLE, DARK, AND THE ONE VALUE IN THIS BLOCK THAT IS NOT A
+     LIGHTNESS DECISION. Operator, on the lifted palette: "for the In bubble,
+     pick the option leaning towards grey."
+
+     It is still `--vam-rule-in`'s teal, and the bubble still wears its own
+     region's hue -- the argument at `--color-in-bubble` is untouched. What
+     changed is HOW MUCH of that hue: chroma 16.65 -> 7.07, a 58% drain, at a
+     lightness that did not move (L* 28.40 -> 28.33). So the bubble keeps its
+     exact rung on the elevation ladder and reads as a cool grey with the In
+     region's hue left in it rather than as a teal fill. ΔE 9.99 from the fill
+     it replaces -- four just-noticeable differences, so this is a change an
+     operator can see rather than a nudge.
+
+     THE FLOORS DID NOT MOVE AND ARE STILL MET. 1.505:1 against the pane and
+     ΔE 14.52, against the 1.030:1 / ΔE 1.5 the bubble wore before it had a
+     fill of its own -- and still inside the band this palette's own tinted
+     grounds occupy (`waiting-tint` 1.446:1, `done-tint` 1.510:1), so the
+     bubble is as loud as a status tint and no louder. It sits a hair BELOW
+     `done-tint` now where it used to sit a hair above: inside the band is the
+     specification, and which end of it never was.
+
+     DRAINING CHROMA COSTS SEPARATION, AND THAT IS THE TRADE THIS MAKES.
+     Against `done-tint` it reads ΔE 15.8 where the saturated teal read 22.9 --
+     still two and a half times the 6.24 this repo uses for "as distinct as a
+     card", and the largest clearance available to any grey-leaning fill that
+     clears every floor in BOTH themes. Six were solved and measured; a near
+     neutral graphite came within ΔE 4.4 of `--vam-line-loud`, which would have
+     made the bubble read as one more grey surface -- the exact complaint that
+     created the token.
 
      RE-DERIVED BY EACH LIFT, not carried through one. It was #0f3b35 against a
      #171717 pane and #17423c against a #1d1d1d one; on THIS pane that second
      teal reads 1.338:1 -- quieter than both status tints, which is the one
-     thing the bubble may not be. So it takes the rule the whole block's tinted
-     grounds take: keep the reading you had on the pane. It lands a hair above
-     `done-tint` again, exactly as it did before (1.509 against 1.510, where it
-     was 1.510 against 1.507).
+     thing the bubble may not be. The lift rule for a tinted ground is "keep
+     the reading you had on the pane", and this value still obeys it: the
+     chroma drain is a separate, later decision layered on top of a lift that
+     moved lightness only.
 
      IT STOPS HERE BECAUSE OF THE TEXT ON IT. The prompt inside the bubble is
-     `--vam-ink-dim`, which measures 4.775:1 on this fill; one rung deeper
-     (#224f47) it is 4.447 and fails 1.4.3. `--vam-ink-faint` measures 3.347:1
-     here and MUST NOT be painted in the bubble -- the e2e guard reads the
-     ink the bubble is really drawn with, so an edit that reaches for a
-     quieter grey fails there rather than shipping. */
-  --vam-in-bubble: #1f4a44;
+     `--vam-ink-dim`, which measures 4.787:1 on this fill; one rung stronger
+     (#2f4b4b) it is 4.544 and one rung lighter (#3a4b4b) 4.427, which fails
+     1.4.3. `--vam-ink-faint` measures 3.355:1 here and MUST NOT be painted in
+     the bubble -- the e2e guard reads the ink the bubble is really drawn with,
+     so an edit that reaches for a quieter grey fails there rather than
+     shipping. */
+  --vam-in-bubble: #354646;
 
   --vam-segment-on: #383838;
 
@@ -733,14 +764,30 @@ html.light {
      THE CEILING IS REAL AND IT IS LOW. The pane sits at 86% relative
      luminance, so pure white -- the lightest colour there is -- measures
      1.159:1 against it, and no fill lighter than the pane can do better. This
-     one measures 1.113:1, 96% of that ceiling, and buys the rest of the step
-     in the channel that has room: ΔE 9.09 against the pane, where the theme's
+     one measures 1.123:1, 97% of that ceiling, and buys the rest of the step
+     in the channel that has room: ΔE 7.20 against the pane, where the theme's
      own white card measures 6.24. So it is further from the pane than a card
      is, while still being lighter than it -- raised, not sunken.
 
-     Ink is not the constraint it is in dark: `--vam-ink-dim` reads 7.42:1
+     IT DRAINED WITH ITS DARK HALF, from #eafff9 to this, when the operator
+     asked for a bubble "leaning towards grey": chroma 7.92 -> 4.49. The pair
+     has to move together or the two themes stop being the same design, and
+     the light half has the less room of the two -- ΔE off the pane goes 9.09
+     -> 7.20, still over the card's own 6.24 and still over four times the
+     1.38 that `raised` (the fill this replaced) manages. It also has to stay
+     off #ffffff, which is this theme's CARD: at ΔE 4.66 the bubble and a card
+     remain two colours, which `surface-elevation.test.ts` asserts directly.
+
+     THAT CEILING IS ALSO WHY THE DARK HALF'S HUE WAS NOT FREE TO CHANGE. The
+     grey-leaning options that looked best in dark -- a plum and a warm slate
+     -- have NO reachable value here at all: this pane is warm and near-white,
+     so a warm tint lighter than it cannot reach ΔE 6.24 in any lightness. A
+     cool grey can, because it differs from the warm pane in hue as well as in
+     lightness. The dark value is cool for a reason that lives in this block.
+
+     Ink is not the constraint it is in dark: `--vam-ink-dim` reads 7.49:1
      here. */
-  --vam-in-bubble: #eafff9;
+  --vam-in-bubble: #f1fefe;
 
   --vam-segment-on: #e2e0da;
 

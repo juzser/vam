@@ -279,7 +279,8 @@ const fillOf = (selector) =>
  * For scale, the fill this replaced -- `raised` -- measured 1.030:1 / ΔE 1.52
  * in dark and 1.015:1 / ΔE 1.38 in light. Dark's `raised` has since been
  * stretched to 1.070:1 / ΔE 2.36 so a hover fill can be seen at all; the
- * bubble is nine times further from the pane than that.
+ * bubble is six times further from the pane than that (ΔE 14.52 against
+ * 2.36) -- it was nine before the fill was drained towards grey.
  */
 const BUBBLE_FLOORS = {
   dark: { ratio: 1.4, distance: 6.24 },
@@ -1246,6 +1247,110 @@ check(
   movedBand === after.pane,
   `${movedBand} vs ${after.pane}`,
 );
+
+// ------------------------------------------- THE COLOUR TEMPLATES, DRIVEN
+//
+// Operator: "add a few colour templates at the top of the appearance settings."
+//
+// `test/prefs/palette-templates.test.ts` measures the VALUES -- every ink the
+// stylesheet keeps against every surface a template sets, 360 pairs -- and
+// `test/settings/palette-template-row.test.tsx` proves the buttons exist and
+// call the right function. Neither can answer the question this file is for:
+// does pressing one REPAINT THE APP. A template is a `Prefs` write, and every
+// hop between that write and a painted pixel (`savePrefs`, `applyPalette`, the
+// custom properties on the root, the utilities that read them) is somewhere it
+// can be dropped in silence.
+//
+// AND THE LADDER IS RE-MEASURED ON THE PAINT AFTERWARDS, which is the half
+// that matters most. The whole safety argument for shipping presets is that a
+// template re-tints vam's own lightness ladder rather than replacing it -- so
+// the separations the operator complained about twice have to survive a press.
+// Measured here, on the painted nodes, against the same JND the rest of this
+// file uses.
+console.log('\n=== the colour templates, driven');
+await page.evaluate(() => document.querySelector('[data-settings-overlay]') ?? null);
+await page.locator('button[aria-label="settings"]').click();
+await page.waitForSelector('[data-settings-overlay]');
+await page.waitForTimeout(300);
+const templateIds = await page.evaluate(() =>
+  [...document.querySelectorAll('[data-palette-template]')].map((el) =>
+    el.getAttribute('data-palette-template'),
+  ),
+);
+console.log(`  templates offered: ${templateIds.join(', ')}`);
+// A ROW THAT RENDERED NOTHING passes every comparison below by having nothing
+// to compare. Four guards in this repo have gone green on an empty corpus.
+check(
+  'the appearance section offers colour templates',
+  templateIds.length >= 3,
+  JSON.stringify(templateIds),
+);
+
+if (templateIds.length >= 3) {
+  // The pane is still wearing the `--vam-pane` swatch driven further up, so
+  // this reads the value the TEMPLATE lands on rather than the stylesheet's --
+  // which makes "the press changed something" a real comparison.
+  const beforeTemplate = await page.evaluate(() => ({
+    pane: getComputedStyle(document.querySelector('[data-action-pane]')).backgroundColor,
+    sidebar: getComputedStyle(document.querySelector('[data-sidebar-pane]')).backgroundColor,
+  }));
+  const picked = templateIds[1];
+  await page.locator(`[data-palette-template="${picked}"]`).click();
+  await page.waitForTimeout(350);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+
+  const painted = await page.evaluate(() => {
+    const { opaque, lightness, ratio } = window.vamColour;
+    const read = (sel) => {
+      const el = document.querySelector(sel);
+      return el === null ? null : getComputedStyle(el).backgroundColor;
+    };
+    const pane = read('[data-action-pane]');
+    const card = read('[data-question]');
+    const sidebar = read('[data-sidebar-pane]');
+    const bubble = read('[data-detail-scroll="in"]');
+    const all = [pane, card, sidebar, bubble];
+    const both = all.every((c) => c !== null && opaque(c));
+    return {
+      pane,
+      card,
+      sidebar,
+      bubble,
+      allOpaque: both,
+      cardOverPane: both ? Number((lightness(card) - lightness(pane)).toFixed(2)) : null,
+      bubbleOverPane: both ? Number((lightness(bubble) - lightness(pane)).toFixed(2)) : null,
+      bubbleRatio: both ? Number(ratio(bubble, pane).toFixed(3)) : null,
+    };
+  });
+  console.log(`  after "${picked}": ${JSON.stringify(painted)}`);
+
+  check(
+    `pressing "${picked}" repaints the pane and the sidebar`,
+    painted.allOpaque &&
+      painted.pane !== beforeTemplate.pane &&
+      painted.sidebar !== beforeTemplate.sidebar,
+    `${JSON.stringify(beforeTemplate)} -> ${JSON.stringify(painted)}`,
+  );
+  // THE LADDER SURVIVED THE PRESS. A template keeps vam's own lightnesses and
+  // moves only a* and b*, so the card must still clear the pane by the JND the
+  // dark lift bought -- if a preset could flatten this, clicking one would undo
+  // a release of work and nothing would say so.
+  check(
+    `and "${picked}" keeps the card a visible step above the pane`,
+    painted.cardOverPane !== null && painted.cardOverPane >= LIFT_BAND.floor,
+    `card is ${painted.cardOverPane} L* over the pane`,
+  );
+  check(
+    `and "${picked}" still draws an In bubble`,
+    painted.bubbleOverPane !== null &&
+      painted.bubbleOverPane > 0 &&
+      painted.bubbleRatio >= BUBBLE_FLOORS.dark.ratio,
+    `bubble ${painted.bubbleOverPane} L* over the pane at ${painted.bubbleRatio}:1`,
+  );
+  await page.screenshot({ path: `${outDir}/palette-template-${picked}.png` });
+  console.log(`${outDir}/palette-template-${picked}.png`);
+}
 
 await browser.close();
 
