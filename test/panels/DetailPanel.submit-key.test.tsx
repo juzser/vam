@@ -231,6 +231,88 @@ describe('the typeahead lists keep Enter in both modes', () => {
 });
 
 /**
+ * AN ENTER THAT ONLY COMMITS AN IME CANDIDATE IS NOT A SEND.
+ *
+ * MEASURED IN CHROMIUM, the engine vam ships on, through CDP
+ * `Input.imeSetComposition` and a real key event -- not reasoned about from the
+ * spec. With a composition live, the commit key arrives as:
+ *
+ *   { type: 'keydown', key: 'Enter', keyCode: 13, isComposing: true }
+ *
+ * which is indistinguishable from a send to any handler that reads `key` alone.
+ * The operator types Vietnamese; every accented syllable ends in that keystroke,
+ * and each one filed a half-typed prompt into a running agent.
+ *
+ * THE PROPERTY LIVES ON THE NATIVE EVENT AND NOWHERE ELSE. React's
+ * `KeyboardEventInterface` (react-dom) lists key, code, location, ctrlKey,
+ * shiftKey, altKey, metaKey, repeat, locale, getModifierState, charCode,
+ * keyCode, which -- no `isComposing` -- and `@types/react` omits it too. So
+ * `event.isComposing` is `undefined` at runtime and a guard written against it
+ * is dead on arrival while looking exactly like a live one. These tests drive
+ * `nativeEvent.isComposing`, which is what the DOM event really carries.
+ *
+ * IT GUARDS THE SEND AND NOTHING ELSE. A composition Enter must not submit; it
+ * must also not be swallowed, or the IME cannot commit the candidate the
+ * operator is in the middle of typing.
+ */
+describe('an IME composition Enter commits the candidate, it does not send', () => {
+  it('does not send on a composing Enter, in either mode', () => {
+    for (const mode of ['enter', 'shift-enter'] as PromptSubmitKey[]) {
+      cleanup();
+      const sent = composer(mode);
+      type('tieng');
+      fireEvent.keyDown(box(), {
+        key: 'Enter',
+        shiftKey: mode === 'shift-enter',
+        isComposing: true,
+      });
+      expect(sent, mode).toEqual([]);
+    }
+  });
+
+  it('leaves the keystroke to the IME rather than swallowing it', () => {
+    // NOT PREVENTED. The composition is mid-flight and this key is what
+    // commits it; claiming the event would leave the operator unable to finish
+    // the syllable they are typing.
+    composer('enter');
+    type('tieng');
+    expect(fireEvent.keyDown(box(), { key: 'Enter', isComposing: true })).toBe(true);
+  });
+
+  it('still sends the moment the composition is over', () => {
+    // The guard is about ONE keystroke, not about a session with an IME. A
+    // second Enter, with nothing composing, is the send it always was.
+    const sent = composer('enter');
+    type('tiếng');
+    fireEvent.keyDown(box(), { key: 'Enter', isComposing: true });
+    expect(sent).toEqual([]);
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(sent).toEqual(['sent']);
+  });
+
+  it('does not take the typeahead’s accept key away from an IME', () => {
+    // The `!` list accepts on Enter in both modes. A composing Enter there is
+    // still the IME's -- the operator is typing a word, not choosing a row.
+    const sent = composer('enter');
+    type('!pr');
+    expect(fireEvent.keyDown(box(), { key: 'Enter', isComposing: true })).toBe(true);
+    expect(box().value).toBe('!pr');
+    expect(sent).toEqual([]);
+  });
+
+  it('leaves every other key alone while composing', () => {
+    // Escape and Tab are not the send, and an IME does not own them: a guard
+    // that returned early for the whole handler would take the way out of the
+    // box away from anyone typing a non-Latin script.
+    const sent = composer('enter');
+    type('!pr');
+    expect(fireEvent.keyDown(box(), { key: 'Escape', isComposing: true })).toBe(false);
+    expect(q('[data-bang-suggest]')).toBeNull();
+    expect(sent).toEqual([]);
+  });
+});
+
+/**
  * THE BOX SAYS WHICH KEY SENDS.
  *
  * Before this, `grep -rn "Enter to send\|Shift+Enter" src/` found nothing but a

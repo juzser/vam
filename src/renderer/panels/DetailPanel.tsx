@@ -5225,6 +5225,34 @@ export function DetailPanel(props: DetailPanelProps) {
                   setImages([...images, ...outcome.images]);
                 }}
                 onKeyDown={(event) => {
+                  // AN ENTER THAT ONLY COMMITS AN IME CANDIDATE IS NOT A SEND,
+                  // and this is the first thing the box asks because EVERY
+                  // Enter branch below would otherwise answer it -- the send,
+                  // and both typeahead accepts.
+                  //
+                  // MEASURED in Chromium, the engine vam ships on, by driving
+                  // a real composition through CDP `Input.imeSetComposition`:
+                  // the commit key arrives as `{ key: 'Enter', keyCode: 13,
+                  // isComposing: true }`, which no handler reading `key` alone
+                  // can tell from a send. The operator types Vietnamese; every
+                  // accented syllable ends in that keystroke, and each one was
+                  // filing a half-typed prompt into a running agent.
+                  //
+                  // `event.nativeEvent.isComposing`, NOT `event.isComposing`.
+                  // React's synthetic keyboard event does not carry the
+                  // property at all -- its `KeyboardEventInterface` lists key,
+                  // code, location, the four modifiers, repeat, locale,
+                  // getModifierState, charCode, keyCode, which -- and
+                  // `@types/react` omits it, so the plain spelling is
+                  // `undefined` at runtime and the guard would be dead while
+                  // looking exactly like a live one.
+                  //
+                  // RETURN, NOT `preventDefault`: the composition is mid-flight
+                  // and this keystroke is what commits it. Claiming the event
+                  // would leave the operator unable to finish the syllable.
+                  // Scoped to Enter, so Escape and Tab still work for someone
+                  // typing a non-Latin script.
+                  if (event.key === 'Enter' && event.nativeEvent.isComposing) return;
                   // THE ENTER COLLISION, decided here. With the suggestion list
                   // open Enter ACCEPTS and sends nothing; only a closed list
                   // lets Enter through to `onSubmit`. Since the reply PR a send
