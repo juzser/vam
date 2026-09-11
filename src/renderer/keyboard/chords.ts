@@ -282,6 +282,31 @@ export type KeyAction =
   /** `z0` — the shipped layout back: both panes at their default width and
       both drawn again. */
   | { readonly kind: 'resetPanes' }
+  /**
+   * `zf` -- FOLD, and the key is chosen rather than settled for.
+   *
+   * `z` IS ALREADY THE DISPLAY PREFIX here (`z0` widths, `zs`/`zv` split,
+   * `zc` close, `zw`/`zW` panes) and it is vim's own fold namespace, where
+   * `zf` creates one. So the mnemonic costs nothing to learn and the act lands
+   * in the table it belongs to.
+   *
+   * NOT `Alt-f`, WHICH WAS THE OBVIOUS PICK AND FAILS TWICE. On macOS `Alt` is
+   * Option and Option-F produces `ƒ`: `normalizeKey` would spell the chord
+   * `Alt-ƒ` and the binding would simply never match. That is the reason
+   * `POSITION_CODES` exists at all -- "a modifier CHANGES the character these
+   * keys produce" -- and it covers the digit row and the brackets, not
+   * letters, which is why every `Alt-` binding vam has is a DIGIT and there is
+   * not one `Alt-<letter>` in this file. Worse, no guard here could have
+   * caught it: Playwright's injected `Alt+f` carries `key: 'f'`, so it would
+   * have gone green on a chord that is dead on the operator's own machine.
+   *
+   * AND NOT A `Mod-` CHORD, for the reason the census in
+   * `test/keyboard/browser-contested-chords.test.ts` records: fifteen of vam's
+   * twenty-one are already contested by the browser, and adding a sixteenth
+   * for a brand-new binding would be choosing a known problem. A bare chord
+   * after a bare prefix is contested by nothing at all.
+   */
+  | { readonly kind: 'toggleFocusView' }
   /** `Mod-1` … `Mod-9` — the SESSION TAB at that position, 1-based, counted
       ACROSS EVERY PANE ON SCREEN in the order the strips draw them. One fixed
       meaning in either cursor mode: the operator asked for the gesture every
@@ -694,6 +719,7 @@ const AFTER_Z: Readonly<Record<string, KeyAction>> = {
   c: { kind: 'closeSplit' },
   w: { kind: 'stepSplit', delta: 1 },
   W: { kind: 'stepSplit', delta: -1 },
+  f: { kind: 'toggleFocusView' },
 };
 
 function isPrefix(key: string): key is Prefix {

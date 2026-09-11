@@ -21,9 +21,9 @@ import {
   EMPTY_PREFS,
   readPrefs,
   type StorageLike,
+  setFocusView,
   setPromptSubmitKey,
   setTheme,
-  setTurnProgress,
   writePrefs,
 } from '../../src/renderer/prefs/prefs.js';
 import {
@@ -97,9 +97,9 @@ describe('the submit-key choice round-trips', () => {
   });
 
   it('leaves the neighbouring preferences alone', () => {
-    const both = setTurnProgress(setPromptSubmitKey(EMPTY_PREFS, 'shift-enter'), 'collapsed');
+    const both = setFocusView(setPromptSubmitKey(EMPTY_PREFS, 'shift-enter'), true);
     expect(both.promptSubmitKey).toBe('shift-enter');
-    expect(both.turnProgress).toBe('collapsed');
+    expect(both.focusView).toBe(true);
   });
 });
 

@@ -27,12 +27,7 @@ import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-
 import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/chords.js';
 import { setActiveProvider } from '../sources/provider.js';
 import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
-import {
-  DEFAULT_TURN_PROGRESS,
-  readTurnProgress,
-  setActiveTurnProgress,
-  type TurnProgress,
-} from './progress.js';
+import { DEFAULT_FOCUS_VIEW, readFocusView, setActiveFocusView } from './progress.js';
 import {
   DEFAULT_PROMPT_SUBMIT_KEY,
   type PromptSubmitKey,
@@ -398,13 +393,13 @@ export type Prefs = {
    * Exempt from the icon TTL for the reason `theme` is: it describes the
    * person, not a session that stopped existing.
    */
-  readonly turnProgress: TurnProgress;
+  readonly focusView: boolean;
   /**
    * Which key in the prompt box sends the draft — `enter` or `shift-enter`.
    * The other one takes a newline; see `submit-key.ts` for why the two swap
    * together and why this is a named pair rather than a boolean.
    *
-   * GLOBAL, for the reason `turnProgress` is: there is one composer idiom and
+   * GLOBAL, for the reason `focusView` is: there is one composer idiom and
    * an operator's hands do not change between panes. Per pane it would be an
    * arrangement they had to re-make on every split; per session it would key a
    * habit to an id the TTL prunes.
@@ -433,7 +428,7 @@ export const EMPTY_PREFS: Prefs = {
   defaultProvider: DEFAULT_PROVIDER_ID,
   lastFocus: null,
   detailTab: null,
-  turnProgress: DEFAULT_TURN_PROGRESS,
+  focusView: DEFAULT_FOCUS_VIEW,
   promptSubmitKey: DEFAULT_PROMPT_SUBMIT_KEY,
 };
 
@@ -639,10 +634,14 @@ function parsePrefs(
     // payload from a vam predating this field already says by having no key.
     detailTab: readDetailTab((parsed as { detailTab?: unknown }).detailTab),
     // Per field like every line above it, and normalised rather than merely
-    // defaulted: a word this vam does not have a mode for must read back as
-    // the mode that hides nothing. `readTurnProgress` is where that direction
-    // is argued.
-    turnProgress: readTurnProgress((parsed as { turnProgress?: unknown }).turnProgress),
+    // defaulted: a value this vam cannot read must come back as the mode that
+    // hides nothing. `readFocusView` is where that direction is argued -- and
+    // where the retired `turnProgress` word is carried across, which is why
+    // BOTH keys are handed to it rather than only the new one.
+    focusView: readFocusView(
+      (parsed as { focusView?: unknown }).focusView,
+      (parsed as { turnProgress?: unknown }).turnProgress,
+    ),
     // Per field like every line above it, and normalised rather than merely
     // defaulted, in the one safe direction: a word this vam has no mode for
     // must read back as the key the box has always sent on. `readPromptSubmitKey`
@@ -1032,10 +1031,10 @@ export function setDefaultProvider(prefs: Prefs, id: unknown): Prefs {
 }
 
 /** Normalised on the way in as well as on the way out, for the same reason and
- *  in the same direction: a caller that stored an unknown word would take the
- *  column's progress lines away on the strength of it. */
-export function setTurnProgress(prefs: Prefs, mode: unknown): Prefs {
-  return { ...prefs, turnProgress: readTurnProgress(mode) };
+ *  in the same direction: a caller that stored something unreadable would take
+ *  the column's progress lines away on the strength of it. */
+export function setFocusView(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, focusView: readFocusView(on, undefined) };
 }
 
 /** Normalised on the way in as well as on the way out, for the same reason and
@@ -1975,7 +1974,7 @@ export function activatePrefs(prefs: Prefs): Prefs {
   applyOutFontSize(prefs.outFontSize);
   setActiveBindings(prefs.keyBindings);
   setActiveProvider(prefs.defaultProvider);
-  setActiveTurnProgress(prefs.turnProgress);
+  setActiveFocusView(prefs.focusView);
   setActivePromptSubmitKey(prefs.promptSubmitKey);
   return prefs;
 }

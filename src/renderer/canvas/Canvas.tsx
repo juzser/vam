@@ -126,6 +126,7 @@ import {
   renameGroup,
   setDefaultProvider,
   setDetailTab,
+  setFocusView,
   setGroupCollapsed,
   setGroupIcon,
   setIcon,
@@ -4504,6 +4505,27 @@ function CanvasInner({
             ),
           );
           return;
+        case 'toggleFocusView': {
+          // THE SAME WRITE THE SETTINGS SWITCH MAKES, through `savePrefs` --
+          // not a second path that sets the module store directly. A keystroke
+          // that changed the screen without storing the choice would come back
+          // undone on the next reload, and one that stored it without going
+          // through `activatePrefs` would not reach the mounted columns at
+          // all; `setFocusView` plus `savePrefs` is the one seam both surfaces
+          // already share.
+          const next = !prefs.focusView;
+          savePrefs(setFocusView(prefs, next));
+          // SAID OUT LOUD, because this is the one surface where the change is
+          // invisible until you look at a turn: the settings row draws its own
+          // state, the keystroke draws nothing. `zf` on a column of failing
+          // turns would otherwise look like a key that did nothing.
+          setStatus(
+            next
+              ? 'focus view on — each turn’s working is folded, ··· brings one back'
+              : 'focus view off — every turn draws its working again',
+          );
+          return;
+        }
         case 'splitPane':
           splitFocused(action.orientation);
           return;

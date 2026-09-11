@@ -49,16 +49,15 @@ import {
   paletteFor,
   paletteValue,
   setDefaultProvider,
+  setFocusView,
   setKeyBindings,
   setOutFontSize,
   setPaletteColor,
   setPromptSubmitKey,
   setTheme,
-  setTurnProgress,
   stylesheetPaletteValue,
   type Theme,
 } from '../prefs/prefs.js';
-import type { TurnProgress } from '../prefs/progress.js';
 import { type PromptSubmitKey, SUBMIT_KEY_LABELS } from '../prefs/submit-key.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
 import { SECTIONS, type SectionId, shortcutSections } from './sections.js';
@@ -94,11 +93,10 @@ const THEMES: readonly Theme[] = ['dark', 'light', 'system'];
  * then what it folds. Hard-coded here beside the row that draws them, the way
  * `THEMES` is -- three words in a union are not a table.
  */
-const TURN_PROGRESS_MODES: readonly TurnProgress[] = ['shown', 'collapsed'];
 
 /**
  * The two keys, shipped default first. Hard-coded beside the row that draws
- * them, like `THEMES` and `TURN_PROGRESS_MODES` above -- two words in a union
+ * them, like `THEMES` above -- two words in a union
  * are not a table. What each one is CALLED is not decided here: that is
  * `SUBMIT_KEY_LABELS`, which the composer's own caption reads as well, so the
  * picker and the box cannot come to spell one key two ways.
@@ -607,7 +605,7 @@ export function SettingsOverlay({
                   size above it are in. Nothing it changes reaches a session.
 
                   GLOBAL, so it belongs in a dialog rather than on a pane. See
-                  `Prefs.turnProgress` for why it is not per pane (an
+                  `Prefs.focusView` for why it is not per pane (an
                   arrangement the operator would re-make on every split) and
                   not per session (a display choice keyed to an id the store
                   prunes).
@@ -616,38 +614,44 @@ export function SettingsOverlay({
                   is contested and every free key is worth more to an action
                   than to a preference you set once and leave. If the operator
                   turns out to flip this often, it earns a key then. */}
+              {/* THE LABEL AND THE HINT ARE THE WHOLE DOCUMENTATION. This row
+                  is the only place an operator learns what focus view does,
+                  and the two facts they need are what it FOLDS and that the
+                  folded thing COMES BACK. The retired "turn progress / shown /
+                  collapsed" wording carried neither: it named a quantity
+                  ("how much of each turn's working") and two words that could
+                  be read as "deleted" and "kept". */}
               <Block
-                label="turn progress"
-                hint="how much of each turn's working the transcript column draws"
+                label="focus view"
+                hint="fold each turn's working away, leaving your prompts and the agent's answers"
               >
-                <div className="flex gap-1">
-                  {TURN_PROGRESS_MODES.map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      data-turn-progress-option={mode}
-                      aria-pressed={prefs.turnProgress === mode}
-                      onClick={() => onChange(setTurnProgress(prefs, mode))}
-                      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
-                        prefs.turnProgress === mode
-                          ? 'border-line-loudest bg-raised text-ink'
-                          : 'border-line text-ink-dim'
-                      }`}
-                    >
-                      {mode}
-                    </button>
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  data-focus-view-toggle
+                  role="switch"
+                  aria-checked={prefs.focusView}
+                  onClick={() => onChange(setFocusView(prefs, !prefs.focusView))}
+                  className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
+                    prefs.focusView
+                      ? 'border-line-loudest bg-raised text-ink'
+                      : 'border-line text-ink-dim'
+                  }`}
+                >
+                  {prefs.focusView ? 'on' : 'off'}
+                </button>
                 {/* THE PROMISE, ON SCREEN. This row asks the operator to give
                     up detail, and what it must never cost them is the alarm
-                    (`Decision.errorCount`). A guarantee kept only in the source
-                    is one the person making the choice cannot read -- so the
-                    three things `drawsProgressLine` holds back are named here,
-                    in the words the column draws them in. */}
-                <p data-turn-progress-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
-                  collapsed drops the line from turns with nothing to report. A turn whose tools
-                  failed keeps its line and its <code className="text-ink">· N failed</code> count,
-                  and so does the newest turn while the session is working or waiting.
+                    (`Decision.errorCount`) or the way back. A guarantee kept
+                    only in the source is one the person making the choice
+                    cannot read -- so what `drawsProgressLine` holds back, and
+                    what `drawsUnfoldControl` restores, are both named here, in
+                    the words the column draws them in. */}
+                <p data-focus-view-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
+                  A folded turn keeps <code className="text-ink">···</code> where its working was —
+                  press it and that turn comes back, on its own. Nothing is folded from a turn whose
+                  tools failed: it keeps its line and its{' '}
+                  <code className="text-ink">· N failed</code> count, and so does the newest turn
+                  while the session is working or waiting.
                 </p>
               </Block>
             </Panel>

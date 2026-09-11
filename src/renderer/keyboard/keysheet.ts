@@ -285,6 +285,13 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
     }),
   },
   resetPanes: { group: 'panes', label: () => 'reset both pane widths' },
+  // Named by what it FOLDS and by the fact that it comes back, because the
+  // sheet is the second place an operator meets this and the first is a
+  // settings row they may never open.
+  toggleFocusView: {
+    group: 'panes',
+    label: () => 'focus view — fold each turn’s working away, ··· brings it back',
+  },
   splitPane: {
     group: 'panes',
     label: (a) =>

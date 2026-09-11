@@ -81,6 +81,7 @@ import {
   memo,
   type ReactNode,
   type RefObject,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -108,10 +109,10 @@ import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
 import { ShortcutTip } from '../keyboard/ShortcutTip.js';
 import {
-  activeTurnProgress,
+  activeFocusView,
   drawsProgressLine,
-  subscribeTurnProgress,
-  type TurnProgress,
+  drawsUnfoldControl,
+  subscribeFocusView,
 } from '../prefs/progress.js';
 import {
   activePromptSubmitKey,
@@ -2573,7 +2574,9 @@ const TurnBlock = memo(function TurnBlock({
   age,
   status,
   reserveCorner,
-  progress,
+  focusView,
+  unfolded,
+  onUnfold,
 }: {
   readonly decision: Decision;
   /** Is this the turn the picker (or the canvas) has landed on? */
@@ -2587,8 +2590,13 @@ const TurnBlock = memo(function TurnBlock({
   readonly age: string | null;
   readonly status: SessionStatus | null;
   readonly reserveCorner: boolean;
-  /** Concise mode, as the operator set it -- see `prefs/progress.ts`. */
-  readonly progress: TurnProgress;
+  /** Focus view, as the operator set it -- see `prefs/progress.ts`. */
+  readonly focusView: boolean;
+  /** Has the operator pressed this turn's way back? */
+  readonly unfolded: boolean;
+  /** Ask for this turn's working. Given the turn's id, never a closure per
+   *  turn: the column can hold hundreds of these. */
+  readonly onUnfold: (id: string) => void;
 }) {
   const failed = decision.errorCount ?? 0;
   /**
@@ -2600,12 +2608,22 @@ const TurnBlock = memo(function TurnBlock({
    * about that -- which is how the two come to disagree. Everything it needs
    * is on this block already, so nothing is computed for it.
    */
-  const showProgress = drawsProgressLine(progress, {
+  const turnFacts = {
     errorCount: decision.errorCount,
     newest,
     activity,
     waitingCause,
-  });
+    unfolded,
+  };
+  const showProgress = drawsProgressLine(focusView, turnFacts);
+  /**
+   * AND THE WAY BACK, FROM THE SAME PAIR OF PREDICATES. Not `!showProgress`:
+   * that would draw one on every turn while focus view is off, where nothing
+   * is folded and there is nothing to restore. `drawsUnfoldControl` is the
+   * complement of the line WITHIN focus view, written once so the two cannot
+   * drift into a turn that has neither.
+   */
+  const showUnfold = drawsUnfoldControl(focusView, turnFacts);
   return (
     <article
       data-column-turn={decision.id}
@@ -2759,6 +2777,60 @@ const TurnBlock = memo(function TurnBlock({
           reason this is a React condition and not CSS -- the first being that
           a hidden element is still an element, and a guard that reads the DOM
           could not tell the two modes apart at all. */}
+      {/* THE WAY BACK, WHERE THE WORKING WAS.
+
+          "Folded activity stays one click away" -- and the setting this
+          replaces had no such clause, which is why it was a deletion with a
+          preference in front of it rather than a fold. So a folded turn is
+          never left with nothing: it draws this instead, in the same place,
+          and pressing it puts that turn's line back.
+
+          A BUTTON, NAMED IN WORDS. A control that cannot be found is the same
+          defect as one that cannot act, so this is not a hover affordance and
+          not a bare glyph: it takes a tab stop and its accessible name says
+          what pressing it produces. The drawn part is deliberately almost
+          nothing -- an ellipsis at the progress line's own size and ink -- so
+          that folding still BUYS the operator the quiet page they asked for.
+          A chip as loud as the line it replaced would be the setting doing
+          nothing at all.
+
+          ONE TURN, NOT THE COLUMN. The name says "this turn" because there is
+          one per turn and they are otherwise identical, and because a control
+          that unfolded everything would be a second copy of the setting
+          reached from a place that promised something smaller. */}
+      {showUnfold && (
+        <button
+          type="button"
+          data-turn-unfold={decision.id}
+          onClick={() => onUnfold(decision.id)}
+          aria-label={`show this turn's working — ${decision.label}`}
+          /* OUT OF FLOW, AND THAT IS THE WHOLE DESIGN RATHER THAN A DETAIL.
+             vam folds ONE line per turn, so a way back that takes a row of its
+             own gives the row straight back and the setting buys nothing --
+             measured, and `e2e/transcript-column-shots.mjs` caught exactly
+             that: "collapsed 959px vs shown 959px". So it is absolutely
+             positioned in the turn's own top-right corner (the `article` is
+             already `relative` for the sticky block) and costs no height at
+             all. Right rather than left: the prompt bubble and the answer both
+             start at the left edge, and `reserveCorner` only applies to the
+             newest turn, which focus view never folds.
+
+             A REAL 24x24 BOX RATHER THAN `vam-hit-24`, and the difference is
+             load-bearing here: that utility sets `position: relative` on the
+             element it grows, and being an unlayered rule it beats Tailwind's
+             layered `absolute` -- measured, the button came back
+             `position: relative` and the fold saved nothing. Out of flow, the
+             box costs no height anyway, so the hit area can simply BE the
+             element and the drawn mark stays small inside it.
+
+             `ink-quiet`, not `ink-ghost` -- issue 201 ruled `ghost` out of
+             anything that has to be READ, and on a folded turn this is the
+             only thing there is to read. */
+          className={`-top-1 absolute right-0 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded font-mono text-ink-quiet text-meta leading-none hover:text-ink ${FOCUS_RING}`}
+        >
+          <span aria-hidden="true">···</span>
+        </button>
+      )}
       {showProgress && (
         <section data-detail-block="progress" className="flex flex-none flex-col gap-1">
           {/* Announced, not drawn. */}
@@ -4113,11 +4185,40 @@ export function DetailPanel(props: DetailPanelProps) {
    * set of lines and then another. The same getter, because the mode is a
    * module value with no request behind it.
    */
-  const turnProgress = useSyncExternalStore(
-    subscribeTurnProgress,
-    activeTurnProgress,
-    activeTurnProgress,
-  );
+  const focusView = useSyncExternalStore(subscribeFocusView, activeFocusView, activeFocusView);
+  /**
+   * THE TURNS THE OPERATOR HAS ASKED BACK, and why this is React state rather
+   * than a stored field.
+   *
+   * "Folded activity stays one click away" is a READING GESTURE about one
+   * turn -- show me this one, now -- not a preference. Persisting it would
+   * answer a question nobody asked twice and accumulate turn ids for sessions
+   * the store has since pruned, which is the shape `dismissedSessions` was
+   * retired for. Keyed by `Decision.id` rather than by index: the column pages
+   * earlier turns IN at its top, so an index is a different turn one scroll
+   * later.
+   */
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set());
+  /**
+   * LEAVING FOCUS VIEW FORGETS THEM, and that is the gesture keeping its own
+   * meaning rather than a cleanup. Each entry says "this folded turn, open" --
+   * with nothing folded there is no such turn, so carrying the set across
+   * would leave the column holding answers to a question that stopped being
+   * asked. Coming back in, every turn is folded again, which is what the
+   * operator just asked for by coming back in.
+   */
+  const wasFocusView = useRef(focusView);
+  if (wasFocusView.current !== focusView) {
+    wasFocusView.current = focusView;
+    if (unfolded.size > 0) setUnfolded(new Set());
+  }
+  const unfold = useCallback((id: string) => {
+    setUnfolded((open) => {
+      const next = new Set(open);
+      next.add(id);
+      return next;
+    });
+  }, []);
   /**
    * WHICH KEY SENDS THE DRAFT, read the same way and for the same reason: the
    * canvas mounts one of these per split leaf and the phone mounts another, so
@@ -4773,7 +4874,7 @@ export function DetailPanel(props: DetailPanelProps) {
                     could not see, not a report that something went wrong.
                     Painting it as an alarm would make every source without the
                     surface look like a source on fire. */}
-                  {turnProgress === 'collapsed' && failedRead === null && (
+                  {focusView && failedRead === null && (
                     <span data-column-unreadable className="text-ink-dim">
                       · failures not reported by this source
                     </span>
@@ -4892,7 +4993,9 @@ export function DetailPanel(props: DetailPanelProps) {
                   age={d.id === newestId ? liveAge : null}
                   status={entry?.session.status ?? null}
                   reserveCorner={cornerOverlay}
-                  progress={turnProgress}
+                  focusView={focusView}
+                  unfolded={unfolded.has(d.id)}
+                  onUnfold={unfold}
                 />
               ))}
             </div>
