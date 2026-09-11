@@ -77,6 +77,7 @@ import {
   type ChordState,
   chordText,
   EMPTY_CHORD,
+  isSelectOnly,
   normalizeKey,
   resolveChord,
 } from '../keyboard/chords.js';
@@ -98,6 +99,7 @@ import type { RemovalPlan } from '../panels/remove-project.js';
 import { NEW_PROJECT_PENDING, SessionList } from '../panels/SessionList.js';
 import { SplitResizer } from '../panels/SplitResizer.js';
 import { resolveSessionGlyph } from '../panels/session-icon.js';
+import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
@@ -432,6 +434,24 @@ function drawnPaneTabs(
  */
 function paneElement(paneId: string): Element | null {
   return document.querySelector(`[data-split-pane="${CSS.escape(paneId)}"]`);
+}
+
+/**
+ * ONE PANE's transcript column — the region `Mod-d` / `Mod-u` scroll.
+ *
+ * SCOPED TO THE PANE, the same way `focusInsertStop` is and for the same
+ * reason: every pane draws a column of its own, and a document-wide
+ * `querySelector` would scroll whichever one happens to be first in the tree
+ * — the pane the operator is not looking at, half the time.
+ *
+ * `null` is a real answer and covers three different absences at once: a pane
+ * showing one of the other views, a session whose transcript has no turns yet
+ * (the column is replaced by a sentence), and a pane holding no session at
+ * all. The caller refuses once, in words true of all three — the column is
+ * what the key acts on, and there isn't one.
+ */
+function paneColumn(paneId: string): HTMLElement | null {
+  return paneElement(paneId)?.querySelector<HTMLElement>('[data-detail-column]') ?? null;
 }
 
 /**
@@ -3881,9 +3901,6 @@ function CanvasInner({
         }
         return;
       }
-      event.preventDefault();
-      setStatus(null);
-
       /**
        * WHICH MODE THIS KEYSTROKE IS IN — asked of the DOM, at the moment it
        * arrives, and never of React state.
@@ -3894,8 +3911,44 @@ function CanvasInner({
        * effect, so a `mode` variable in scope is whatever the last render put
        * there — and the whole class of bug being removed is a mode that had
        * stopped being true. `document.activeElement` cannot be stale.
+       *
+       * READ BEFORE `preventDefault`, not after, and that ordering is the
+       * whole of the stand-down below: a chord this grammar declines has to be
+       * declined BEFORE the default is cancelled, or the key is dead in the
+       * text box either way — swallowed silently instead of acted on, which is
+       * the worse of the two.
        */
       const cursorMode = cursorModeAt(document.activeElement);
+
+      /**
+       * A CHORD THE SURFACE UNDER THE CARET ALREADY OWNS IS NOT THIS
+       * GRAMMAR'S — the typing guard's own argument, one step further on.
+       *
+       * That guard lets `Mod-` chords past a focused INPUT|TEXTAREA because "a
+       * Cmd/Ctrl chord is never text entry — no layout produces a character
+       * from one", which is true OF CHARACTERS and says nothing about editing
+       * commands. `Ctrl-D` is delete-forward in every macOS text view,
+       * `Ctrl-U` deletes to the start of the line, and `Ctrl-D` is EOF in a
+       * shell. Taking those globally would break editing in the composer to
+       * add a scroll gesture (`isSelectOnly`, `keyboard/chords.ts`).
+       *
+       * ASKED OF THE CURSOR MODE, NOT OF THE TAG NAME, which is also what
+       * reaches the TERMINAL PANE: it is a `section` carrying
+       * `data-insert-scope`, invisible to any INPUT|TEXTAREA test, and the one
+       * surface where `Ctrl-D` means most. It already hands every Ctrl chord
+       * back to this listener untouched, so this is the only thing standing
+       * between a terminal and a scroll gesture it never asked for.
+       *
+       * NO REFUSAL IS SPOKEN. The key was not declined, it was never claimed —
+       * a status line here would answer a keystroke the operator aimed at the
+       * box they are typing in.
+       */
+      if (cursorMode === 'insert' && isSelectOnly(action)) {
+        return;
+      }
+
+      event.preventDefault();
+      setStatus(null);
 
       switch (action.kind) {
         case 'move': {
@@ -4184,6 +4237,59 @@ function CanvasInner({
           }
           setViewNote(null);
           setTabRequest({ tab: view });
+          return;
+        }
+        case 'scrollHalf': {
+          /**
+           * HALF A SCREEN OF TRANSCRIPT, vim's `Ctrl-D` / `Ctrl-U`.
+           *
+           * THE FOCUSED PANE'S COLUMN, and nothing else on screen —
+           * `paneColumn` says why it is scoped rather than found by a
+           * document-wide query.
+           *
+           * INSTANT, NOT SMOOTH, and that is a decision rather than the
+           * absence of one. `scrollTo({ behavior: 'smooth' })` animates over
+           * ~300ms, and a second press landing mid-animation is measured from
+           * wherever the animation has got to — so holding the key travels an
+           * unpredictable distance and stopping is a guess. Vim's own is
+           * instant for the same reason: a repeated motion key has to be
+           * composable with itself.
+           *
+           * AND IT ASKS THE PAGER FOR NOTHING. Writing `scrollTop` fires the
+           * column's own `scroll` event, and the column already reads earlier
+           * turns in when that event arrives near the top
+           * (`askIfNearTop`/`readOlder` in `DetailPanel.tsx`) — the operator's
+           * own "load more when scrolling up", which is a rule about the
+           * SCROLL and not about the mouse. So `Mod-u` gets the paging for
+           * free and, more to the point, gets the paging's own refusals for
+           * free: a source that cannot page, a proven start and a read that
+           * just failed all fall through there rather than being re-decided
+           * here. A `readOlder()` call of its own would be a second trigger to
+           * keep in step with that one, and would fire a fetch on every press
+           * at the top — including the one press that is only a retry loop
+           * nobody asked for.
+           */
+          const box = paneColumn(focusedPaneId);
+          if (box === null) {
+            setStatus('nothing to scroll — this pane is not showing a transcript');
+            return;
+          }
+          const target = halfPageTarget(box, action.delta);
+          // NOT SILENTLY. The scroller is already resting against that end, so
+          // there is nothing to do and no control to withdraw — a key cannot be
+          // taken off the screen — which leaves saying so. The top's sentence
+          // deliberately claims nothing about the SESSION: there may well be
+          // more of it, and the column's own head is the one surface allowed to
+          // say whether there is.
+          if (target === null) {
+            setStatus(
+              action.delta === 1
+                ? 'already at the bottom — that is the newest turn'
+                : 'already at the top — the column’s head says if there is more',
+            );
+            return;
+          }
+          box.scrollTop = target;
           return;
         }
         case 'project':

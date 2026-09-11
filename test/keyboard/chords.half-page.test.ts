@@ -119,7 +119,10 @@ describe('they belong to Select alone', () => {
     const standDown = defaultBindings()
       .map((binding) => binding.action)
       .filter(isSelectOnly);
-    expect(standDown).toEqual([{ kind: 'scrollHalf', delta: 1 }, { kind: 'scrollHalf', delta: -1 }]);
+    expect(standDown).toEqual([
+      { kind: 'scrollHalf', delta: 1 },
+      { kind: 'scrollHalf', delta: -1 },
+    ]);
   });
 });
 

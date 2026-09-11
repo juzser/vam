@@ -49,7 +49,9 @@ describe('halfPageTarget', () => {
   it('lands exactly on the bottom rather than overshooting it', () => {
     // 1100 + 300 would be 1400, past the 1200 this column can reach. Vim
     // clamps here too: `Ctrl-D` near the end scrolls to the end.
-    expect(halfPageTarget({ scrollTop: 1100, scrollHeight: 1800, clientHeight: 600 }, 1)).toBe(1200);
+    expect(halfPageTarget({ scrollTop: 1100, scrollHeight: 1800, clientHeight: 600 }, 1)).toBe(
+      1200,
+    );
   });
 
   it('lands exactly on the top rather than undershooting it', () => {
