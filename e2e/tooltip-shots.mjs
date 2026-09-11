@@ -15,11 +15,22 @@
  *  - ITEM 3 (S2). A `Note` hung on a `<span>` with no tab stop opens on hover
  *    and nothing else, which is the `title` it exists to replace. Asserted by
  *    walking Tab with no mouse and requiring the element to be reached.
- *  - ITEM 4 (S3). The tip is filled with `--vam-raised` and floats over
+ *  - ITEM 4 (S3). The tip was filled with `--vam-raised` and floated over
  *    `--vam-sidebar`: measured 1.02:1 (light) and 1.03:1 (dark), with a
  *    border at 1.26:1 / 1.18:1 and no shadow at all. WCAG 1.4.11 asks 3:1 of
  *    a boundary that identifies a component. Asserted as a computed ratio in
  *    BOTH themes, against the surface actually behind the tip.
+ *
+ *    THE BOUNDARY IS THE FILL NOW. The operator asked for a light tip with no
+ *    border, and those are one change rather than two: the line was only ever
+ *    there because no fill on vam's ladder could identify the box (every
+ *    surface sits within 1.33:1 of `panel` in dark). A fill OFF the ladder --
+ *    the theme's own ink, light in dark and dark in light -- pays 1.4.11 by
+ *    itself. So this item now asserts a border WIDTH of zero, the fill's own
+ *    ratio against whatever is behind it, and, because the tip stopped being
+ *    a page surface, that every ink painted inside it still clears 4.5:1 on
+ *    it. `test/renderer/tip-surface.test.ts` holds the same floors over the
+ *    stylesheet's values; only this file can see what is painted.
  *
  * Run by hand, or by `e2e/run-web-guards.mjs`:
  *   node e2e/tooltip-shots.mjs http://localhost:5527 docs/ui
@@ -182,52 +193,121 @@ async function measureTip() {
       backdrop = getComputedStyle(behind).backgroundColor;
       behind = behind.parentElement;
     }
+    // EVERY INK PAINTED INSIDE THE TIP, which is a different question from
+    // "the class says text-on-tip". Elements with no box (the `sr-only`
+    // duplicate of each chord) are skipped: they are announced, never drawn,
+    // so a contrast floor over them would be a floor over nothing.
+    const inks = [el, ...el.querySelectorAll('*')]
+      .filter((node) => {
+        const box = node.getBoundingClientRect();
+        if (box.width < 4 || box.height < 4) return false;
+        return [...node.childNodes].some(
+          (child) => child.nodeType === 3 && child.textContent.trim() !== '',
+        );
+      })
+      .map((node) => ({
+        text: node.textContent.trim().slice(0, 24),
+        colour: parse(getComputedStyle(node).color),
+      }));
     return {
       border: parse(cs.borderTopColor),
+      borderWidth: Number.parseFloat(cs.borderTopWidth),
       fill: parse(cs.backgroundColor),
       behind: parse(backdrop),
       shadow: cs.boxShadow,
+      inks,
     };
   });
 }
+
+/**
+ * BOTH KINDS OF TIP, because there are two components and they were caught
+ * drifting apart by this very check.
+ *
+ * `ShortcutTip` (the settings button) and `Note` (the status bar's usage cell)
+ * are separate files with separate class strings, and the first falsification
+ * run of the border assertion below PASSED while `Note.tsx` carried a border
+ * again -- the guard was only ever opening the shortcut tip. A component this
+ * file cannot open is a component this file does not cover.
+ */
+const TIPS = [
+  { kind: 'shortcut', selector: settings },
+  { kind: 'note', selector: '[data-usage]' },
+];
 
 const themes = {};
 for (const theme of ['dark', 'light']) {
   await page.evaluate((t) => {
     document.documentElement.classList.toggle('light', t === 'light');
   }, theme);
-  await page.locator(settings).focus();
-  await page.waitForSelector('[role="tooltip"]');
-  const m = await measureTip();
-  const borderVsBehind = ratio(m.border, m.behind);
-  const borderVsFill = ratio(m.border, m.fill);
-  const fillVsBehind = ratio(m.fill, m.behind);
-  themes[theme] = { ...m, borderVsBehind, borderVsFill, fillVsBehind };
-  console.log(
-    `${theme}: fill vs behind ${fillVsBehind.toFixed(2)}:1, border vs behind ${borderVsBehind.toFixed(2)}:1, border vs fill ${borderVsFill.toFixed(2)}:1`,
-  );
-  console.log(`${theme}: box-shadow ${m.shadow}`);
-
-  if (m.shadow === 'none') {
-    throw new Error(`${theme}: the tip has no elevation over a surface of its own colour`);
-  }
-  // The boundary has to identify the component from BOTH sides: against the
-  // surface it floats over, and against its own fill.
-  if (borderVsBehind < 3) {
-    throw new Error(
-      `${theme}: the tip's border is ${borderVsBehind.toFixed(2)}:1 against what is behind it, under the 3:1 of WCAG 1.4.11`,
+  for (const { kind, selector } of TIPS) {
+    await closeTip().catch(() => {});
+    await page.locator(selector).focus();
+    await page.waitForSelector('[role="tooltip"]');
+    const m = await measureTip();
+    const fillVsBehind = ratio(m.fill, m.behind);
+    themes[`${theme}/${kind}`] = { ...m, fillVsBehind };
+    console.log(
+      `${theme}/${kind}: fill ${m.fill} over ${m.behind} = ${fillVsBehind.toFixed(2)}:1, border-width ${m.borderWidth}px`,
     );
-  }
-  if (borderVsFill < 3) {
-    throw new Error(
-      `${theme}: the tip's border is ${borderVsFill.toFixed(2)}:1 against its own fill, under 3:1`,
-    );
+    console.log(`${theme}/${kind}: box-shadow ${m.shadow}`);
+    for (const ink of m.inks) {
+      console.log(
+        `${theme}/${kind}:   "${ink.text}" ${ink.colour} = ${ratio(ink.colour, m.fill).toFixed(2)}:1`,
+      );
   }
 
-  await page.screenshot({
-    path: `${outDir}/tooltip-elevation-${theme}.png`,
-    clip: { x: 0, y: 0, width: 520, height: 300 },
-  });
+    if (m.shadow === 'none') {
+      throw new Error(`${theme}/${kind}: the tip has no elevation over what it floats above`);
+    }
+    // THE OPERATOR ASKED FOR NO BORDER, and this is the only place that can say
+    // whether there is one. A class name removed from a component is not a
+    // border removed from a box: a `border` utility somewhere else in the
+    // string, or a UA default, both paint a line this would catch.
+    if (m.borderWidth !== 0) {
+      throw new Error(`${theme}/${kind}: the tip still draws a ${m.borderWidth}px border`);
+    }
+    // WHICH MOVES 1.4.11 ONTO THE FILL. With no line, the fill is the boundary
+    // that identifies the component, measured against the surface actually
+    // behind the tip rather than against a guess at it.
+    if (fillVsBehind < 3) {
+      throw new Error(
+        `${theme}/${kind}: the tip's fill is ${fillVsBehind.toFixed(2)}:1 against what is behind it, under the 3:1 of WCAG 1.4.11`,
+      );
+    }
+    // A CORPUS, then the floor. A tip whose text this failed to find would clear
+    // "every ink is readable" by having no inks -- the shape of four guards in
+    // this repo that went green having examined nothing.
+    if (m.inks.length === 0) {
+      throw new Error(`${theme}/${kind}: no painted text found inside the tip`);
+    }
+    for (const ink of m.inks) {
+      const r = ratio(ink.colour, m.fill);
+      if (r < 4.5) {
+        throw new Error(
+          `${theme}/${kind}: "${ink.text}" reads ${r.toFixed(2)}:1 on the tip's own fill, under 4.5:1`,
+        );
+      }
+    }
+    // AND THE TIP IS THE THEME INSIDE OUT. A ratio does not say which way, and a
+    // dark tip in the dark theme would read as a hole rather than as something
+    // floating -- passing every number above while being the opposite of what
+    // was asked for.
+    const inverted =
+      theme === 'dark'
+        ? luminance(m.fill) > luminance(m.behind)
+        : luminance(m.fill) < luminance(m.behind);
+    if (!inverted) {
+      throw new Error(
+        `${theme}/${kind}: the tip's fill is on the wrong side of what is behind it (${m.fill} over ${m.behind})`,
+      );
+    }
+
+    await page.screenshot({
+      path: `${outDir}/tooltip-elevation-${theme}-${kind}.png`,
+      clip: { x: 0, y: 0, width: 520, height: 300 },
+    });
+  }
 }
 await page.evaluate(() => document.documentElement.classList.remove('light'));
 await closeTip();
