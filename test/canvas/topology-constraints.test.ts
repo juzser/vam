@@ -36,8 +36,39 @@ function listSrcFiles(dir: string): string[] {
 }
 
 const allSrcFiles = listSrcFiles(SRC_DIR);
+
+/**
+ * THE TWO FILES WHERE A HEX IS THE POINT, and why they are not holes in 13.1.
+ *
+ * The rule is "every colour must come from a token". What it really catches is
+ * a COMPONENT that paints `#fff` instead of reaching for one -- a call site
+ * with a colour baked into it. A file whose whole job is to DEFINE colour
+ * values sits at the other end of that relationship, and scanning it would be
+ * asking the definitions to come from themselves.
+ *
+ *  - `styles.css` is where the palette lives; it was always excluded, and the
+ *    rule's own comment says why.
+ *  - `renderer/prefs/palette-templates.ts` is where the colour TEMPLATES live.
+ *    A template is a whole palette the operator applies in one press, and it is
+ *    values by definition: there is no token for it to reach for, because its
+ *    entire content is the alternative set of values a token can take.
+ *
+ * THE EXCLUSION IS PAID FOR RATHER THAN ASSERTED, which is the half that
+ * matters. `test/prefs/palette-templates.test.ts` measures every value in that
+ * file against every ink the stylesheet keeps -- 360 contrast pairs, plus the
+ * elevation ladder, the two JND separations and the In bubble's floors, per
+ * template, per theme. That is strictly stronger than "contains no hex", so
+ * the file is not leaving cover; it is moving to better cover.
+ *
+ * NARROW, AND CHECKED TO STILL EXIST. An exclusion by path widens silently the
+ * moment somebody renames the file, so both names are asserted present below.
+ */
+const COLOUR_DEFINITION_FILES = ['styles.css', 'renderer/prefs/palette-templates.ts'];
+
 const cssAndTsFiles = allSrcFiles.filter(
-  (f) => !f.endsWith('styles.css') && ['.ts', '.tsx', '.css'].includes(extname(f)),
+  (f) =>
+    !COLOUR_DEFINITION_FILES.some((skip) => f === skip || f.endsWith(`/${skip}`)) &&
+    ['.ts', '.tsx', '.css'].includes(extname(f)),
 );
 
 const at = (f: string, i: number, l: string) => `src/${f}:${i + 1}: ${l.trim()}`;
@@ -85,6 +116,20 @@ describe('epic.md section 13: standing constraints, made permanent and checkable
         });
     }
     expect(violations, [rule, ...violations].join('\n')).toEqual([]);
+  });
+
+  it('excludes only files that still exist, so a rename cannot widen 13.1 in silence', () => {
+    // An exclusion list is a hole with a name on it. The moment one of these
+    // files moves, the name stops matching, the exclusion stops excluding --
+    // and the DANGEROUS half is the other direction: a file renamed INTO one
+    // of these paths would be excluded without anyone deciding that. Both are
+    // caught by requiring each entry to name a real file.
+    const missing = COLOUR_DEFINITION_FILES.filter(
+      (skip) => !allSrcFiles.some((f) => f === skip || f.endsWith(`/${skip}`)),
+    );
+    expect(missing, 'a 13.1 exclusion names a file that is no longer there').toEqual([]);
+    // And the exclusion actually removed something, or it is decoration.
+    expect(allSrcFiles.length).toBeGreaterThan(cssAndTsFiles.length);
   });
 
   it('this file documents its own blind spot, so a future editor cannot silently strip it', () => {
