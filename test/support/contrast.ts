@@ -52,6 +52,20 @@ export function deltaE(a: string, b: string): number {
   return Math.hypot(l1 - l2, a1 - a2, b1 - b2);
 }
 
+/**
+ * The CIE L* of a six-digit hex colour: 0 is black, 100 is white, and a
+ * difference of ~2.3 is the point at which a person reliably sees one.
+ *
+ * Exported for the question relative luminance answers badly at the dark end.
+ * "Is this surface visibly lighter than the one it replaced" is about
+ * PERCEIVED lightness, and luminance is not that: #0a0a0a and #131313 differ
+ * by 0.002 in Y and by 3.1 in L*. `dark-lift.test.ts` holds the dark palette's
+ * step to a number in these units for exactly that reason.
+ */
+export function lightness(hex: string): number {
+  return lab(hex)[0] as number;
+}
+
 /** The relative luminance of a six-digit hex colour, 0 to 1. */
 export function relativeLuminance(hex: string): number {
   return luminance(hex);

@@ -13,6 +13,11 @@
  *   dark   --vam-raised #1a1a1a   on pane         #171717   1.030:1 lighter
  *   light  --vam-panel  #ffffff   on pane/sidebar #f0eeea   1.159:1 lighter
  *
+ * (The dark hexes in that table are what those tokens held at the time. Every
+ * grey in the dark theme has since come up +3 L* -- `dark-lift.test.ts` -- and
+ * what the lift had to carry across is the RATIOS, not the values: panel is
+ * still below the pane and raised still a hair above it, at 1.032 and 1.035.)
+ *
  * So a `bg-panel` card sitting on the detail pane or the sidebar was painting
  * a fill from BELOW its own ground in dark, and from above it in light. That
  * is not a card, it is a hole punched in the surface -- and it is what the
@@ -70,14 +75,26 @@ const GROUNDS = ['--vam-pane', '--vam-sidebar'] as const;
 /**
  * The floor the In bubble owes, per theme, in each unit.
  *
- * The RATIO floors are the reachable ones. Dark's 1.35 sits just under the
- * band the palette's own tinted grounds already occupy (`--vam-waiting-tint`
- * 1.389:1, `--vam-done-tint` 1.444:1 against the pane), so the bubble is held
+ * The RATIO floors are the reachable ones. Dark's sits just under the band the
+ * palette's own tinted grounds occupy against the pane, so the bubble is held
  * to the standard the design set for a tinted fill rather than to a number
  * invented here. Light's 1.10 is 95% of the 1.159 ceiling that pure white
  * imposes on anything lighter than that theme's pane -- there is no room above
  * it, and pretending otherwise would be asking for a colour that does not
  * exist.
+ *
+ * DARK'S FLOOR MOVED WITH THE BAND, 1.35 -> 1.40, AND THAT IS NOT A
+ * RE-BASELINE. The derivation is untouched -- "just under `--vam-waiting-tint`,
+ * the quieter of the two tinted grounds" -- and the band is what moved: the
+ * dark lift (+3 L*, see `dark-lift.test.ts`) carried the pane and both tints
+ * up together, so waiting-tint went 1.389 -> 1.446 and done-tint 1.444 ->
+ * 1.507. 1.35 was 0.039 under the old band; 1.40 is 0.046 under the new one.
+ *
+ * LEAVING IT AT 1.35 WOULD HAVE MADE THIS GUARD MISS THE ONE BUG THE LIFT CAN
+ * CAUSE, which is what settles it: the pre-lift teal (#0f3b35) reads 1.362:1
+ * against the lifted pane -- quieter than BOTH tints, which is the one thing
+ * the bubble may not be -- and 1.362 clears 1.35. A pane lifted while the
+ * bubble stayed put would have passed. It does not pass 1.40.
  *
  * The DISTANCE floor is the same in both themes and is the one that carries
  * the operator's complaint: 6.24 is what the light theme's own card step
@@ -86,7 +103,7 @@ const GROUNDS = ['--vam-pane', '--vam-sidebar'] as const;
  * it cannot add luminance.
  */
 const IN_FLOORS = {
-  dark: { ratio: 1.35, distance: 6.24 },
+  dark: { ratio: 1.4, distance: 6.24 },
   light: { ratio: 1.1, distance: 6.24 },
 } as const;
 
@@ -163,8 +180,10 @@ describe('surfaces are ordered by elevation, in both themes', () => {
        *
        * That PR moved every card from `panel` to `card` and left the question
        * card's own options on `hover:bg-raised`. `raised` is above the PANE
-       * (#1a1a1a on #171717) and below the CARD (#1d1d1d), so an option under
-       * the pointer sank 1.032:1 into the surface it was drawn on. The fix
+       * and below the CARD (#1a1a1a on #171717 on #1d1d1d at the time; the
+       * three have since come up +3 L* together and still read in that
+       * order), so an option under the pointer sank 1.032:1 into the surface
+       * it was drawn on. The fix
        * points them at `line-strong`, which this file's sibling components
        * already use for exactly this object (`bg-card hover:bg-line-strong`
        * on every tap skin in the composer).
@@ -196,7 +215,7 @@ describe('surfaces are ordered by elevation, in both themes', () => {
         // number and the preview off `ink-faint` exactly while they are on it,
         // because a card is already at the ceiling `ink-faint` allows
         // (`--vam-card` in `styles.css` says so) and one rung above it the
-        // faint grey measures 4.10:1 in dark and 3.69:1 in light. The lift is
+        // faint grey measures 4.21:1 in dark and 3.69:1 in light. The lift is
         // half of the fix, not a decoration -- the e2e guard reads the colour
         // each word is REALLY painted with and holds every one of them to 4.5.
         const fill = hex('--vam-line-strong');
@@ -210,7 +229,7 @@ describe('surfaces are ordered by elevation, in both themes', () => {
         // `--vam-ink-dim` is the ONLY text colour inside the bubble
         // (`DetailPanel.tsx`, the prompt's own `<p>`), and it is the reason
         // the fill stops where it does rather than going a rung further: at
-        // this depth `ink-faint` measures 3.35:1 and could not be used there.
+        // this depth `ink-faint` measures 3.36:1 and could not be used there.
         // That constraint is recorded in `styles.css` beside the value; the
         // e2e guard measures the ink the bubble is REALLY painted with, which
         // is the half a token list cannot check.

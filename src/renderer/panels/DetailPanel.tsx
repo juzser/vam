@@ -1595,8 +1595,8 @@ const NUMBERED_OPTIONS: readonly (string | undefined)[] = Array.from({ length: 9
  * `SettingsOverlay.tsx`, `PairingPanel.tsx` and `phone/PhoneShell.tsx` each
  * declare this exact string, with the reasoning written out in the first of
  * them: the renderer's other `focus-visible` (`TerminalTab.tsx`) draws
- * `line-strong`, which is 1.36:1 on `panel` in dark and therefore invisible in
- * the default theme, while `ink` measures 15.7 / 17.7 and clears every fill
+ * `line-strong`, which is 1.25:1 on `panel` in dark and therefore invisible in
+ * the default theme, while `ink` measures 14.9 / 17.7 and clears every fill
  * this pane paints. The offset is load-bearing too -- flush against a
  * control's own border an outline reads as a thicker border rather than as a
  * cursor.
@@ -1629,8 +1629,8 @@ const FOCUS_RING =
  * one decision.
  *
  * DIRECTION IS PER THEME AND THAT IS NOT A DODGE. Dark climbs
- * pane < card < control, so this fill is lighter than the card: 1.114:1, ΔE
- * 4.39, against the card's own step off the pane of ΔE 3.03. Light's card is
+ * pane < card < control, so this fill is lighter than the card: 1.125:1, ΔE
+ * 4.29, against the card's own step off the pane of ΔE 2.95. Light's card is
  * the theme's white -- there is nothing above it -- so its controls darken
  * instead, as `segment-on`, every tap skin here and the artboard's own answer
  * pills already do: ΔE 14.63 against a card step of 6.24.
@@ -1643,13 +1643,13 @@ const OPTION_FILL = 'bg-line-strong';
  * THE OTHER HALF OF THE SAME DECISION, and it cannot be dropped.
  *
  * A card is already at the ceiling its own captions allow -- `styles.css` says
- * so where it fixes `--vam-card`: `ink-quiet`/`ink-faint` measure 4.568:1
+ * so where it fixes `--vam-card`: `ink-quiet`/`ink-faint` measure 4.735:1
  * there and fail one step lighter. So ANY fill a rung above the card puts an
  * option's quietest greys under WCAG 1.4.3, and measurement agrees: on
- * `line-strong` the faint grey reads 4.101:1 in dark and 3.691:1 in light.
+ * `line-strong` the faint grey reads 4.208:1 in dark and 3.691:1 in light.
  *
  * The fill and the ink therefore move TOGETHER. The number and the preview
- * lift to `ink-dim` (5.857:1 dark, 5.304:1 light) exactly while the fill is
+ * lift to `ink-dim` (5.942:1 dark, 5.304:1 light) exactly while the fill is
  * under them, which keeps the resting hierarchy -- label, then description,
  * then the number and the preview -- that painting them `ink-dim` outright
  * would collapse. Both halves are held separately by the e2e guard: the fill
@@ -2287,8 +2287,8 @@ function QuestionCard({
                 {picked.join(', ')}
                 {/* `ink-dim`, not `ink-faint`: this row RESTS on the fill,
                     so there is no hover state to lift its ink and
-                    `OPTION_QUIET_INK` would never fire. 4.10:1 at faint,
-                    5.86:1 here. */}
+                    `OPTION_QUIET_INK` would never fire. 4.21:1 at faint,
+                    5.94:1 here. */}
                 <span className="text-meta text-ink-dim"> — marked, not sent</span>
               </span>
               <button
@@ -2642,12 +2642,12 @@ const TurnBlock = memo(function TurnBlock({
              per channel, which is under the step at which a person reliably
              sees an edge: the bubble was in the DOM and not on the screen. Its
              own token carries the In region's teal at fill strength --
-             1.449:1 / ΔE 21.8 dark, 1.113:1 / ΔE 9.09 light, both measured as
+             1.510:1 / ΔE 21.8 dark, 1.113:1 / ΔE 9.09 light, both measured as
              paint by `e2e/pane-colour-shots.mjs` and as tokens by
              `test/renderer/surface-elevation.test.ts`.
 
-             THE INK BELOW IS PART OF THE CHOICE. `text-ink-dim` reads 4.789:1
-             on the dark fill; `text-ink-faint` would read 3.353:1 and must not
+             THE INK BELOW IS PART OF THE CHOICE. `text-ink-dim` reads 4.750:1
+             on the dark fill; `text-ink-faint` would read 3.364:1 and must not
              be used here. The guard measures the ink this element is really
              painted with, so that constraint is enforced rather than noted. */
           className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-in-bubble px-2.5 py-2"
@@ -5429,7 +5429,7 @@ export function DetailPanel(props: DetailPanelProps) {
                      nothing more.
 
                      `FOCUS_RING` is the app's own, in `ink`: measured on the
-                     painted node it is 14.4:1 in dark and 17.7:1 in light
+                     painted node it is 13.4:1 in dark and 17.7:1 in light
                      against the card behind it, well past the 3:1 WCAG 1.4.11
                      asks, and it is a different colour from the composer box's
                      armed border (`waiting`) so the two signals cannot be read

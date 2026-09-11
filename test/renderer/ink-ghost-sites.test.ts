@@ -14,7 +14,7 @@
  * file's shape as an instance of that lesson; it is the case the lesson
  * itself does not cover.
  *
- * `ink-ghost` measures 1.75:1 dark / 2.39:1 light against `--vam-panel`
+ * `ink-ghost` measures 1.84:1 dark / 2.39:1 light against `--vam-panel`
  * (issue 201) and is decorative-only after the token split: it may carry a
  * scrollbar thumb or a list bullet, never text or a border. A new site
  * outside the allowlist below is exactly the regression issue 201 fixed,
@@ -89,7 +89,7 @@ describe('ink-ghost call sites (issue 201)', () => {
     const unexpected = found.filter((use) => !isAllowed(use));
     expect(
       unexpected.map((u) => `${u.file}:${u.line}: ${u.needle}`),
-      'ink-ghost is decorative-only (1.75:1 dark / 2.39:1 light on --vam-panel) -- ' +
+      'ink-ghost is decorative-only (1.84:1 dark / 2.39:1 light on --vam-panel) -- ' +
         'text or a border belongs on --vam-ink-quiet',
     ).toEqual([]);
 

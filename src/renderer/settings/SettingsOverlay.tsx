@@ -103,8 +103,8 @@ type Capturing = { readonly id: string; readonly slot: number; readonly scope: s
 
 /**
  * vam has no focus-ring idiom, and the one `focus-visible` in the renderer
- * (`TerminalTab.tsx`) draws `line-strong`, which is 1.36:1 on `panel` in dark —
- * invisible in the default theme. `ink` is 15.7 / 17.7 there and clears on
+ * (`TerminalTab.tsx`) draws `line-strong`, which is 1.25:1 on `panel` in dark —
+ * invisible in the default theme. `ink` is 14.9 / 17.7 there and clears on
  * every fill this dialog uses. The offset matters: flush against a tile's own
  * border, an outline reads as a thicker border rather than as a cursor.
  */
@@ -800,8 +800,8 @@ function SectionRail(props: NavProps) {
             <button
               key={id}
               {...tabProps(props, id)}
-              // `segment-on` on `sidebar` is 1.36:1 — below the 3:1 an
-              // author-drawn state needs — so a 2px rail in `ink` (15.3:1)
+              // `segment-on` on `sidebar` is 1.21:1 — below the 3:1 an
+              // author-drawn state needs — so a 2px rail in `ink` (14.4:1)
               // carries the selection. The unselected items reserve the same
               // 2px in `transparent`, or the label jumps when selection moves.
               className={`flex h-[28px] w-full cursor-pointer items-center gap-2 rounded-[7px] border-l-2 pr-2 pl-[6px] text-left text-control ${FOCUS_RING} ${
@@ -1207,13 +1207,14 @@ const STEP_BUTTON =
  *
  * The pill's border is `ink-faint` rather than a `line-*` token because `well`
  * on `panel` is 1.03:1 — the fill does not draw the control at all, so the
- * border is its sole identifier and owes 1.4.11 its 3:1. `line-loudest` is 2.08
- * in dark and fails that; `ink-faint` is the one kit token that clears it in
- * both themes. THE GROUND IS `well`, the fill this border encloses, not the
+ * border is its sole identifier and owes 1.4.11 its 3:1. `line-loudest` is
+ * 2.26 on `well` in dark and fails that; `ink-faint` is the one kit token
+ * that clears it in both themes. THE GROUND IS `well`, the fill this border
+ * encloses, not the
  * `panel` an earlier version of this note measured against: at 3.46 / 3.44 on
  * `panel` it read as a pass while measuring 3.57 / 2.91 on `well`, and the
  * light figure was under 3:1 the whole time. `ink-faint` was raised for that
- * and for the text it carries, and the border now measures 5.16 / 4.56 on the
+ * and for the text it carries, and the border now measures 5.40 / 4.56 on the
  * ground it actually has (issue 188). See the refinement spec before
  * substituting.
  */
