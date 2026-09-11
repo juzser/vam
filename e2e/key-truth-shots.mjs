@@ -1048,6 +1048,80 @@ if (editorOpen) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// THE WAY OUT, MEASURED AGAINST THE BROWSER ITSELF.
+//
+// vam ships the same renderer two ways: an Electron app, where the only thing
+// that can steal a keystroke is the application menu (`src/main/menu.ts` owns
+// it, and `test/electron/launch.test.ts` walks the BUILT menu), and a PAGE
+// served over Tailscale Serve, where the competitor is the browser. Nothing in
+// this repo measured the second one.
+//
+// `Mod-[` LEAVES INSERT MODE, and on macOS `Cmd+[` is the browser's BACK.
+// `normalizeKey` folds Ctrl and Meta into one `Mod`, so both spellings reach
+// the handler -- which means in a browser tab the Cmd spelling is asking the
+// page and the chrome for two different things at once. The composer calls
+// `preventDefault()` before it blurs, and back-navigation (unlike zoom) is
+// cancellable, so the page should win. Should. That is the claim.
+//
+// AND A PLATFORM THAT DOES NOT BIND THE KEY WOULD PASS THIS FOR FREE. On Linux
+// Chrome, Back is Alt+Left and the Meta spelling is nothing at all -- so the
+// assertion would be green having tested nothing, which is how a guard in this
+// repo came to be dead on macOS for a release. The control run below presses
+// the same chord with the keyboard OUTSIDE the box and reports whether this
+// browser navigates. A green pass with `navigates: false` is a pass about
+// nothing, and says so on the line above it.
+console.log('\n=== the way out, against the browser');
+await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
+await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-session-row]');
+const atDemo = page.url();
+
+// The control: does this browser bind the chord at all, with nothing of vam's
+// in the way?
+await page.evaluate(() => document.activeElement?.blur());
+await page.keyboard.press('Meta+BracketLeft');
+await page.waitForTimeout(600);
+const platformNavigates = page.url() !== atDemo;
+console.log(`  this browser treats Meta+[ as Back: ${platformNavigates}`);
+if (platformNavigates) {
+  await page.goForward({ waitUntil: 'networkidle' });
+  await page.waitForSelector('[data-session-row]');
+}
+
+for (const chord of ['Meta+BracketLeft', 'Control+BracketLeft']) {
+  await reset();
+  await page.locator(`[data-session-row="${QUIET_SESSION}"]`).click();
+  await page.keyboard.press('i');
+  const inTheBox = await settle(
+    () => document.activeElement?.tagName === 'TEXTAREA',
+    undefined,
+    `${chord}: the caret is in the prompt box first`,
+  );
+  if (!inTheBox) continue;
+  const was = page.url();
+  await page.keyboard.press(chord);
+  await settle(
+    () => document.activeElement?.tagName !== 'TEXTAREA',
+    undefined,
+    `${chord} releases the composer`,
+  );
+  const now = page.url();
+  console.log(`  ${chord}: url ${was === now ? 'held' : `MOVED to ${now}`}`);
+  check(
+    `${chord} leaves Insert mode${chord.startsWith('Meta') && !platformNavigates ? ' (this browser does not bind it, so the cancellation is untested)' : ''}`,
+    (await keyboardAt()).tag !== 'TEXTAREA',
+    'the box still holds the keyboard',
+  );
+  // THE HALF THE BROWSER OWNS. A composer that let this through would take the
+  // operator off the page entirely -- with their draft on it.
+  check(
+    `and ${chord} does not navigate the page out from under the draft`,
+    now === was,
+    `${was} -> ${now}`,
+  );
+}
+
 await browser.close();
 
 if (failures.length > 0) {
