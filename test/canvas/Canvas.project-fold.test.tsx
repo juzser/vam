@@ -135,7 +135,7 @@ describe('a folded project is remembered, the way a folded group already was', (
   });
 
   it('does not let one source’s fold close another source’s project of the same id', () => {
-    seed({ collapsedProjects: {'some-other-source': ['p1'] } });
+    seed({ collapsedProjects: { 'some-other-source': ['p1'] } });
     render(<Canvas model={MODEL} />);
     expect(rows()).toBe(2);
   });
