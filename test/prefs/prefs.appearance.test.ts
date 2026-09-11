@@ -20,6 +20,7 @@ import {
   type StorageLike,
   setKeyBindings,
   setPaletteColor,
+  stylesheetPaletteValue,
   writePrefs,
 } from '../../src/renderer/prefs/prefs.js';
 
@@ -57,6 +58,23 @@ function fakeRoot() {
 
 const TOKEN = PALETTE_TOKENS[0]?.token ?? '';
 const BLUE = `#${'2f6feb'}`;
+const GREEN = `#${'3fb950'}`;
+
+/**
+ * A root whose inline custom properties can be read back, which the `fakeRoot`
+ * above deliberately cannot -- it records what `applyPalette` WROTE, and the
+ * question here is what a later reader SEES. Same cast, different question.
+ */
+function inlineRoot(initial: Record<string, string>): HTMLElement {
+  const set = new Map<string, string>(Object.entries(initial));
+  return {
+    style: {
+      getPropertyValue: (name: string) => set.get(name) ?? '',
+      setProperty: (name: string, value: string) => void set.set(name, value),
+      removeProperty: (name: string) => void set.delete(name),
+    },
+  } as unknown as HTMLElement;
+}
 
 describe('the palette override layer', () => {
   it('exposes a named, non-empty set of tokens', () => {
@@ -188,6 +206,65 @@ describe('what the picker shows', () => {
     expect(paletteValue({}, TOKEN, () => ` ${BLUE} `)).toBe(BLUE);
     expect(paletteValue({}, TOKEN, () => 'oklch(0.2 0 0)')).toBe('');
     expect(paletteValue({}, TOKEN, () => '')).toBe('');
+  });
+
+  /**
+   * THE DEFAULT TEMPLATE'S PREVIEW, and the trap it walks into.
+   *
+   * `applyPalette` writes every override onto `document.documentElement`'s
+   * INLINE style, and custom properties inherit -- so once an operator has a
+   * palette in force there is no element anywhere on the page whose computed
+   * `--vam-pane` is the stylesheet's. `getComputedStyle` would hand the
+   * `default` chip the very palette it exists to leave, and the chip would
+   * preview `ember` while promising vam. The read therefore lifts the inline
+   * property, asks, and puts it back -- synchronously, so no frame is drawn in
+   * between and the restore cannot be skipped by an early return.
+   */
+  it('reads a token past whatever is currently overriding it, and puts it back', () => {
+    const root = inlineRoot({ [TOKEN]: BLUE });
+    const seen: string[] = [];
+    const value = stylesheetPaletteValue(TOKEN, root, () => {
+      seen.push(root.style.getPropertyValue(TOKEN));
+      return GREEN;
+    });
+    // The stylesheet's answer, taken while the override was lifted...
+    expect({ value, whileReading: seen }).toEqual({ value: GREEN, whileReading: [''] });
+    // ...and the operator's colour is back on the document afterwards.
+    expect(root.style.getPropertyValue(TOKEN)).toBe(BLUE);
+  });
+
+  it('restores the override even when the read throws', () => {
+    // A `finally`, not a trailing statement. The failure mode of getting this
+    // wrong is not a wrong preview -- it is an operator's palette silently
+    // falling off the screen because a settings row asked a question.
+    const root = inlineRoot({ [TOKEN]: BLUE });
+    expect(() =>
+      stylesheetPaletteValue(TOKEN, root, () => {
+        throw new Error('no cascade here');
+      }),
+    ).toThrow('no cascade here');
+    expect(root.style.getPropertyValue(TOKEN)).toBe(BLUE);
+  });
+
+  it('leaves the document alone when nothing is overriding the token', () => {
+    // The common case by far, and it must not touch the DOM at all: a
+    // remove/restore pair on a property that was never set still invalidates
+    // style, once per disc, per render.
+    const root = inlineRoot({});
+    const touched: string[] = [];
+    root.style.removeProperty = (token: string) => {
+      touched.push(`remove ${token}`);
+      return '';
+    };
+    root.style.setProperty = (token: string, value: string) => {
+      touched.push(`set ${token}=${value}`);
+    };
+    expect(stylesheetPaletteValue(TOKEN, root, () => GREEN)).toBe(GREEN);
+    expect(touched).toEqual([]);
+  });
+
+  it('costs an empty string where there is no document, like the picker does', () => {
+    expect(stylesheetPaletteValue(TOKEN, null, () => '')).toBe('');
   });
 });
 
