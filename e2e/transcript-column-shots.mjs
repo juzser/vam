@@ -1275,7 +1275,13 @@ async function conciseIn(mode, viewport = { width: 1100, height: 620 }, panes = 
     ([key, payload]) => window.localStorage.setItem(key, payload),
     [
       CONCISE_PREFS,
-      JSON.stringify(panes === undefined ? { turnProgress: mode } : { turnProgress: mode, panes }),
+      // THE RETIRED FIELD ON PURPOSE, in one of the two seedings below: this
+      // is the payload an operator who chose `collapsed` really has in their
+      // browser, and seeding the new boolean here would make the migration
+      // untested at the only place it can be seen working.
+      JSON.stringify(
+        panes === undefined ? { turnProgress: mode } : { turnProgress: mode, panes },
+      ),
     ],
   );
   await page.goto(`${origin}/?demo=1&history=off`, { waitUntil: 'networkidle' });
@@ -1480,29 +1486,35 @@ await openSession(foldedPage, 'factory-sse-1');
 await foldedPage.locator('button[aria-label="settings"]').first().click();
 await foldedPage.waitForSelector('[data-settings-nav]');
 const promised = await foldedPage
-  .locator('[data-turn-progress-note]')
+  .locator('[data-focus-view-note]')
   .innerText()
   .catch(() => null);
 console.log('the row promises:', JSON.stringify(promised));
 check(
-  'the row states what collapsing keeps, where the person choosing can read it',
+  'the row states what folding keeps, where the person choosing can read it',
   promised !== null && /failed/.test(promised) && /waiting/.test(promised),
   String(promised),
 );
+// AND THAT IT COMES BACK. The row is the only place an operator learns that
+// folding is reversible; without this the setting reads as a delete.
 check(
-  'and the mode in force reads as pressed',
-  (await foldedPage
-    .locator('[data-turn-progress-option="collapsed"]')
-    .getAttribute('aria-pressed')) === 'true',
+  'and that the folded working comes back',
+  promised !== null && /···/.test(promised) && /comes back/i.test(promised),
+  String(promised),
+);
+check(
+  'and the switch in force reads as on',
+  (await foldedPage.locator('[data-focus-view-toggle]').getAttribute('aria-checked')) === 'true',
+  'the migrated `collapsed` payload did not arrive as focus view',
 );
 // Scrolled to, because the row is the last block of a panel taller than the
 // dialog: a picture of the panel's top says nothing about the control it is
 // meant to show.
-await foldedPage.locator('[data-turn-progress-note]').scrollIntoViewIfNeeded();
+await foldedPage.locator('[data-focus-view-note]').scrollIntoViewIfNeeded();
 await foldedPage.waitForTimeout(150);
 await foldedPage.screenshot({ path: `${outDir}/concise-settings-row.png` });
 console.log(`${outDir}/concise-settings-row.png`);
-await foldedPage.locator('[data-turn-progress-option="shown"]').click();
+await foldedPage.locator('[data-focus-view-toggle]').click();
 // Escape rather than the backdrop button: the backdrop is `inset-0` UNDER the
 // panel, so a click at its centre lands on the panel instead, and Escape is
 // how an operator closes this dialog anyway.

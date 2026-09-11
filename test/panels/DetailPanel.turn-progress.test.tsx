@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 /**
- * CONCISE MODE, AS THE COLUMN DRAWS IT.
+ * FOCUS VIEW, AS THE COLUMN DRAWS IT.
  *
  * The operator asked for a control over how much of a turn's working the
  * transcript shows -- "show the progress, or collapse it, like the Claude Code
@@ -15,16 +15,12 @@
  * a fold that costs the operator the ALARM -- is a fact vam holds and does not
  * draw, and only the drawn thing can catch it.
  */
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
-import {
-  DEFAULT_TURN_PROGRESS,
-  setActiveTurnProgress,
-  type TurnProgress,
-} from '../../src/renderer/prefs/progress.js';
+import { DEFAULT_FOCUS_VIEW, setActiveFocusView } from '../../src/renderer/prefs/progress.js';
 
 function turn(id: string, over: Partial<Decision> = {}): Decision {
   return {
@@ -97,17 +93,21 @@ const answers = () =>
     (el) => el.textContent ?? '',
   );
 
-function inMode(mode: TurnProgress, body: () => void) {
-  setActiveTurnProgress(mode);
+/** The unfold each folded turn offers -- "folded activity stays one click
+ *  away", which is the half the retired setting did not have. */
+const unfolds = () => [...document.querySelectorAll<HTMLElement>('[data-turn-unfold]')];
+
+function inMode(mode: 'shown' | 'collapsed', body: () => void) {
+  setActiveFocusView(mode === 'collapsed');
   body();
 }
 
 afterEach(() => {
   cleanup();
-  setActiveTurnProgress(DEFAULT_TURN_PROGRESS);
+  setActiveFocusView(DEFAULT_FOCUS_VIEW);
 });
 
-describe('shown is the screen the column already had', () => {
+describe('focus view off is the screen the column already had', () => {
   it('draws one condensed line per turn', () => {
     inMode('shown', () => {
       draw([turn('a'), turn('b'), turn('c')]);
@@ -120,13 +120,14 @@ describe('shown is the screen the column already had', () => {
     // The default is not merely a value in a module: it is the mode a fresh
     // store puts in force, and a default that hid lines would ship a change
     // to everybody who did not ask for one.
-    expect(DEFAULT_TURN_PROGRESS).toBe('shown');
+    expect(DEFAULT_FOCUS_VIEW).toBe(false);
     draw([turn('a'), turn('b')]);
     expect(lines()).toHaveLength(2);
+    expect(unfolds()).toHaveLength(0);
   });
 });
 
-describe('collapsed withdraws the working of turns that have nothing to report', () => {
+describe('focus view withdraws the working of turns that have nothing to report', () => {
   it('draws no line at all on quiet, finished turns', () => {
     inMode('collapsed', () => {
       draw([turn('a'), turn('b'), turn('c')]);
@@ -277,6 +278,88 @@ describe('two different unknowns do not become one', () => {
     inMode('shown', () => {
       draw([turn('a'), turn('b')]);
       expect(unreadable()).toBeNull();
+    });
+  });
+});
+
+describe('folded activity stays one click away', () => {
+  // THE HALF THE RETIRED SETTING DID NOT HAVE, and the reason this is a task
+  // rather than a rename. `collapsed` withdrew the line and offered nothing to
+  // bring it back, so the setting cost the operator that turn's working
+  // permanently -- a deletion with a preference in front of it. The plugin
+  // this is modelled on is explicit: "Folded activity stays one click away."
+  it('offers a way back on every turn it folded, and on no other', () => {
+    inMode('collapsed', () => {
+      draw([turn('a'), turn('b', { errorCount: 2 }), turn('c')]);
+      // Two quiet turns folded, one failure kept -- so two ways back, not
+      // three, and not one per turn regardless.
+      expect(lines()).toHaveLength(1);
+      expect(unfolds()).toHaveLength(2);
+    });
+  });
+
+  it('draws none at all while focus view is off', () => {
+    inMode('shown', () => {
+      draw([turn('a'), turn('b')]);
+      expect(unfolds()).toHaveLength(0);
+    });
+  });
+
+  it('restores that turn’s working in place, and only that turn’s', () => {
+    inMode('collapsed', () => {
+      draw([turn('a'), turn('b'), turn('c')]);
+      expect(lines()).toHaveLength(0);
+      fireEvent.click(unfolds()[0] as HTMLElement);
+      // ONE turn came back. A control that unfolded the column would be a
+      // second copy of the setting, reachable from a place that promised
+      // something smaller.
+      expect(lines()).toHaveLength(1);
+      expect(unfolds()).toHaveLength(2);
+      expect(labels().map((l) => l.label)).toEqual(['turn-c']);
+    });
+  });
+
+  it('takes its own control away once the working is back', () => {
+    // A control offering to restore something already on screen is a control
+    // that does nothing -- the same defect as one that cannot act.
+    inMode('collapsed', () => {
+      draw([turn('a')]);
+      const control = unfolds()[0];
+      fireEvent.click(control as HTMLElement);
+      expect(lines()).toHaveLength(1);
+      expect(unfolds()).toHaveLength(0);
+    });
+  });
+
+  it('says what it will do, in words, for a keyboard and a screen reader', () => {
+    // A CONTROL THAT CANNOT BE FOUND IS THE SAME DEFECT AS ONE THAT CANNOT
+    // ACT. It is a real button: reachable by Tab, named by what pressing it
+    // produces rather than by a glyph, and the name says "this turn" because
+    // there is one per turn and they are otherwise identical.
+    inMode('collapsed', () => {
+      draw([turn('a')]);
+      const control = unfolds()[0];
+      expect(control?.tagName).toBe('BUTTON');
+      expect(control?.getAttribute('type')).toBe('button');
+      expect((control?.getAttribute('aria-label') ?? '').toLowerCase()).toContain('working');
+      expect(control?.tabIndex).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  it('folds again when focus view is turned off and back on', () => {
+    // The unfold is a reading gesture about one turn, not a stored preference.
+    // It does not survive the operator leaving focus view, because the turn it
+    // was about is no longer folded and the gesture has nothing left to say.
+    inMode('collapsed', () => {
+      draw([turn('a')]);
+      fireEvent.click(unfolds()[0] as HTMLElement);
+      expect(lines()).toHaveLength(1);
+    });
+    cleanup();
+    inMode('collapsed', () => {
+      draw([turn('a')]);
+      expect(lines()).toHaveLength(0);
+      expect(unfolds()).toHaveLength(1);
     });
   });
 });

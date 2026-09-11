@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 /**
- * THE CONTROL FOR CONCISE MODE, at the surface the operator touches.
+ * THE CONTROL FOR FOCUS VIEW, at the surface the operator touches.
  *
  * Two halves, and the second is the one that matters. A settings row that
  * writes a value into `prefs` and a settings row that changes the screen are
@@ -15,7 +15,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
 import { EMPTY_PREFS, type Prefs } from '../../src/renderer/prefs/prefs.js';
-import { DEFAULT_TURN_PROGRESS, setActiveTurnProgress } from '../../src/renderer/prefs/progress.js';
+import { DEFAULT_FOCUS_VIEW, setActiveFocusView } from '../../src/renderer/prefs/progress.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 
 function turn(id: string, over: Partial<Decision> = {}): Decision {
@@ -78,7 +78,7 @@ afterEach(() => {
   cleanup();
   localStorage.clear();
   document.documentElement.style.cssText = '';
-  setActiveTurnProgress(DEFAULT_TURN_PROGRESS);
+  setActiveFocusView(DEFAULT_FOCUS_VIEW);
 });
 
 function open(prefs: Prefs = EMPTY_PREFS) {
@@ -88,11 +88,11 @@ function open(prefs: Prefs = EMPTY_PREFS) {
   return { onChange, onClose };
 }
 
-const option = (mode: string) =>
-  document.querySelector<HTMLButtonElement>(`[data-turn-progress-option="${mode}"]`);
+const toggle = () => document.querySelector<HTMLButtonElement>('[data-focus-view-toggle]');
 const promise = () =>
-  document.querySelector<HTMLElement>('[data-turn-progress-note]')?.textContent ?? '';
+  document.querySelector<HTMLElement>('[data-focus-view-note]')?.textContent ?? '';
 const lines = () => document.querySelectorAll('[data-progress-line]');
+const unfolds = () => document.querySelectorAll('[data-turn-unfold]');
 
 function changed(onChange: { mock: { calls: unknown[][] } }, index = 0): Prefs {
   const call = onChange.mock.calls[index];
@@ -100,47 +100,66 @@ function changed(onChange: { mock: { calls: unknown[][] } }, index = 0): Prefs {
   return (call ?? [])[0] as Prefs;
 }
 
-describe('the appearance section offers the two modes', () => {
-  it('draws both, with the one in force pressed', () => {
+describe('the appearance section offers focus view', () => {
+  it('is a switch, and says which way it is thrown', () => {
+    // A SWITCH RATHER THAN TWO BUTTONS, because there is one thing being
+    // turned on now instead of two words to choose between -- and `role` plus
+    // `aria-checked` is how that reaches a screen reader as a state rather
+    // than as a pressed button whose label happens to read "on".
     open();
-    expect(option('shown')?.getAttribute('aria-pressed')).toBe('true');
-    expect(option('collapsed')?.getAttribute('aria-pressed')).toBe('false');
+    expect(toggle()?.getAttribute('role')).toBe('switch');
+    expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+    expect(toggle()?.textContent).toBe('off');
   });
 
   it('follows a stored choice rather than the default', () => {
-    open({ ...EMPTY_PREFS, turnProgress: 'collapsed' });
-    expect(option('collapsed')?.getAttribute('aria-pressed')).toBe('true');
-    expect(option('shown')?.getAttribute('aria-pressed')).toBe('false');
+    open({ ...EMPTY_PREFS, focusView: true });
+    expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+    expect(toggle()?.textContent).toBe('on');
   });
 
-  it('writes the picked mode, disturbing no neighbour', () => {
+  it('writes the choice, disturbing no neighbour', () => {
     const { onChange } = open({ ...EMPTY_PREFS, outFontSize: 15, theme: 'light' });
-    fireEvent.click(option('collapsed') as HTMLElement);
+    fireEvent.click(toggle() as HTMLElement);
     const next = changed(onChange, 0);
-    expect(next.turnProgress).toBe('collapsed');
+    expect(next.focusView).toBe(true);
     expect(next.outFontSize).toBe(15);
     expect(next.theme).toBe('light');
   });
 
   it('writes it back', () => {
-    const { onChange } = open({ ...EMPTY_PREFS, turnProgress: 'collapsed' });
-    fireEvent.click(option('shown') as HTMLElement);
-    expect(changed(onChange, 0).turnProgress).toBe('shown');
+    const { onChange } = open({ ...EMPTY_PREFS, focusView: true });
+    fireEvent.click(toggle() as HTMLElement);
+    expect(changed(onChange, 0).focusView).toBe(false);
   });
 
-  it('says on screen what collapsing keeps, not only in a comment', () => {
-    // The row is asking the operator to give up detail. What it must never
-    // cost them is the alarm, and a promise kept only in the source is a
-    // promise the person making the choice cannot read. The three things
-    // `drawsProgressLine` holds back are named here, in the operator's words.
+  it('says on screen what folding keeps, and that it comes back', () => {
+    // The row is asking the operator to give up detail, and it is the only
+    // place they learn what happens. Two promises, not one: what folding may
+    // never cost them (the alarm), and that the folded thing is one press
+    // away. A guarantee kept only in the source is one the person making the
+    // choice cannot read.
     open();
     expect(promise()).toContain('failed');
     expect(promise()).toContain('waiting');
     expect(promise().toLowerCase()).toContain('working');
+    // The way back, named where the choice is made.
+    expect(promise()).toContain('···');
+    expect(promise().toLowerCase()).toContain('comes back');
+  });
+
+  it('says what it folds in its own label, not only in the note under it', () => {
+    // "turn progress / shown / collapsed" named a QUANTITY and two words that
+    // could be read as deleted and kept. The label and hint are what an
+    // operator skims; they have to carry the two facts on their own.
+    open();
+    const block = toggle()?.closest('section, div')?.parentElement?.textContent ?? '';
+    expect(block.toLowerCase()).toContain('focus view');
+    expect(block.toLowerCase()).toContain('fold');
   });
 });
 
-describe('picking a mode changes the screen, not only the store', () => {
+describe('throwing the switch changes the screen, not only the store', () => {
   it('takes the quiet turns’ lines off the column, and puts them back', () => {
     // END TO END through the seam the mode really travels: overlay → prefs →
     // `writePrefs` → `activatePrefs` → the module store → the column's
@@ -155,14 +174,19 @@ describe('picking a mode changes the screen, not only the store', () => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
       });
     settings();
-    fireEvent.click(option('collapsed') as HTMLElement);
+    fireEvent.click(toggle() as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
     expect(lines().length, 'every turn here is quiet and finished').toBe(0);
+    // AND THE FOLD LEFT A WAY BACK ON EVERY ONE OF THEM, through the same
+    // seam. A column with no lines and no ways back is what the retired
+    // setting produced, and it is indistinguishable from a deletion.
+    expect(unfolds().length, 'folded, not deleted').toBe(3);
 
     settings();
-    fireEvent.click(option('shown') as HTMLElement);
+    fireEvent.click(toggle() as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
     expect(lines().length, 'and the choice is reversible').toBe(3);
+    expect(unfolds().length, 'with nothing folded, nothing offers to unfold').toBe(0);
   });
 
   it('does not fold away the turn that failed', () => {
@@ -182,7 +206,7 @@ describe('picking a mode changes the screen, not only the store', () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
     });
-    fireEvent.click(option('collapsed') as HTMLElement);
+    fireEvent.click(toggle() as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
     expect(lines().length).toBe(1);
     expect(document.querySelector('[data-progress-failed]')?.textContent).toBe('· 2 failed');
