@@ -41,7 +41,7 @@ import {
   normalizeKey,
   resolveChord,
 } from '../../src/renderer/keyboard/chords.js';
-import { buildKeySheet } from '../../src/renderer/keyboard/keysheet.js';
+import { buildBindingSheet, buildKeySheet } from '../../src/renderer/keyboard/keysheet.js';
 
 /** A real `Ctrl+D` keydown — the chord the operator named, and a shell's EOF. */
 const CTRL_D: KeyEventLike = { key: 'd', code: 'KeyD', ctrlKey: true };
@@ -143,6 +143,26 @@ describe('the generated key sheet names both, and names the scope', () => {
     // And they are live: a row the sheet marks dead is a key that does nothing.
     expect(down?.dead).toBeNull();
     expect(up?.dead).toBeNull();
+  });
+
+  /**
+   * THE FOLD, PRINTED WHERE IT IS FOUND OUT. `Mod-` means Ctrl OR Cmd for
+   * every binding in the grammar, and this is the one family where that fold
+   * arrives as a surprise: the operator asked for vim's `Ctrl-D`, and `Cmd+D`
+   * — bookmark, in the browser build — now scrolls with it. The sheet is
+   * where that should be read, not discovered by pressing the key.
+   *
+   * Asserted over the GENERATED rows, both in the sheet's own captions and in
+   * the plain label the settings editor shows, so it cannot fall out of one
+   * of the two and stay in the other.
+   */
+  it('names the Cmd alias, because Mod-d IS Cmd+D', () => {
+    expect(rowFor('Mod-d', 'select')?.label).toMatch(/cmd\+d/i);
+    expect(rowFor('Mod-u', 'select')?.label).toMatch(/cmd\+u/i);
+    const editorRows = buildBindingSheet().flatMap((group) => group.rows);
+    expect(editorRows.length).toBeGreaterThan(30);
+    expect(editorRows.find((row) => row.id === 'scrollHalf:1')?.label).toMatch(/cmd\+d/i);
+    expect(editorRows.find((row) => row.id === 'scrollHalf:-1')?.label).toMatch(/cmd\+u/i);
   });
 
   it('and prints an Insert row that promises no scroll at all', () => {

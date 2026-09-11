@@ -313,19 +313,28 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
    * gets anywhere inside one. It is the one member that moves the READER
    * rather than the cursor, which is why the group's own note above now says
    * so.
+   *
+   * AND THE CAPTION NAMES `Cmd` OUT LOUD, which no other row has needed to.
+   * `normalizeKey` folds Ctrl and Cmd into one `Mod-` token for every binding
+   * in the grammar, so `Mod-d` IS `Cmd+D` — and this is the one family where
+   * an operator meets that fold as a surprise rather than as a convenience:
+   * they asked for vim's `Ctrl-D`, and `Cmd+D` (bookmark, in the browser
+   * build) now scrolls too. The sheet is where that is found out, or it is
+   * found out by pressing the key. `test/keyboard/chords.half-page.test.ts`
+   * asserts the word is here, so the alias cannot quietly leave the caption.
    */
   scrollHalf: {
     group: 'navigation',
     label: (a) =>
       a.delta === 1
-        ? 'half a screen down this pane’s transcript'
-        : 'half a screen up this pane’s transcript',
+        ? 'half a screen down this pane’s transcript — Cmd+D does it too'
+        : 'half a screen up this pane’s transcript — Cmd+U does it too',
     byMode: (a) => ({
       select:
         a.delta === 1
-          ? 'half a screen down this pane’s transcript'
-          : 'half a screen up this pane’s transcript — its head reads further back',
-      insert: 'nothing here — whatever you are typing in keeps Ctrl-D and Ctrl-U',
+          ? 'half a screen down this pane’s transcript — Cmd+D does it too'
+          : 'half a screen up this pane’s transcript (Cmd+U too) — its head reads further back',
+      insert: 'nothing here — whatever you are typing in keeps Ctrl-D, Cmd+D and Ctrl-U',
     }),
   },
   copy: { group: 'review', label: () => 'copy this step’s commands' },

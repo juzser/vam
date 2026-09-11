@@ -30,7 +30,12 @@
  * whether a jump label is PAINTED on the row it addresses and lands on top of
  * it rather than behind its title, and whether a mode change actually runs an
  * animation, which is `Element.getAnimations()` and exists in no unit
- * environment at all. This
+ * environment at all, and -- since the half-page keys -- how far half a
+ * viewport IS once a browser has laid the column out (`clientHeight` is 0 in
+ * happy-dom, so the distance is unmeasurable there) and whether writing
+ * `scrollTop` reaches the column's own pager, which it does here and does not
+ * in any unit environment, where assigning it fires no scroll event at all.
+ * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
  * soon as any assertion throws — so CI can hold them.
@@ -68,6 +73,7 @@ const GUARDS = [
   'favicon-shots',
   'key-truth-shots',
   'mode-truth-shots',
+  'half-page-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);
