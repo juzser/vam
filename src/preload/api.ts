@@ -92,6 +92,23 @@ export async function unwrapPage(pending: Promise<unknown>): Promise<TranscriptP
   }
 }
 
+/**
+ * The per-project pull-request directories, pushed into main.
+ *
+ * ITS OWN FACTORY, AND NOT PART OF `DesktopSourceApi`, which is the whole
+ * point. `DesktopSourceApi` is `PreloadSourceApi` minus one member -- the
+ * shape a paired phone also implements over HTTP -- and adding this there
+ * would put "a directory this machine spawns a process in" on the remote
+ * routes. It is a preference main happens to need, not a thing the source can
+ * do, so it sits beside `clipboard` and `dialog` as its own desktop-only
+ * member. See `main/sources/claude-code/pr-repos.ts` for the argument.
+ */
+export function createPrefsBridge(ipc: InvokerLike) {
+  return {
+    setPrRepos: (map: unknown) => unwrap<void>(ipc.invoke(CHANNELS.setPrRepos, map)),
+  };
+}
+
 export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
   const reads = {
     describe: () => unwrap<SourceDescriptor>(ipc.invoke(CHANNELS.describe)),

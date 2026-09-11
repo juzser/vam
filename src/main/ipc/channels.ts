@@ -57,6 +57,18 @@ export const CHANNELS = {
   /** Preload-internal only, the other half of `streamSubscribe`'s ref count. */
   streamUnsubscribe: 'vam:stream:unsubscribe',
   /**
+   * DESKTOP-ONLY, and never a member of `PreloadSourceApi` -- the same
+   * standing as `streamSubscribe` above and for a sharper reason.
+   *
+   * It carries the operator's per-project pull-request directory overrides
+   * from the renderer's prefs into main, where the `gh` read happens. Putting
+   * it on `PreloadSourceApi` instead would put it on the routes
+   * `remote/server.ts` registers for a paired phone, which would make "a
+   * directory this machine spawns a process in" something a remote device
+   * names. See `sources/claude-code/pr-repos.ts` for the whole argument.
+   */
+  setPrRepos: 'vam:source:set-pr-repos',
+  /**
    * The usage channel. Unlike every channel above, it answers with a bare
    * `UsageSnapshot`, never an `IpcResult` -- see `src/main/usage/ipc.ts`.
    */

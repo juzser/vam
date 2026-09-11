@@ -15,6 +15,7 @@
  */
 
 import type { HistoryCursor, TranscriptPage } from '../../shared/history.js';
+import { setPrRepoOverrides } from '../sources/claude-code/pr-repos.js';
 import type { MainSource } from '../sources/source.js';
 import { CHANNELS, type IpcResult, type SourceError } from './channels.js';
 
@@ -180,6 +181,25 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
     CHANNELS.load,
     answer(() => source.load()),
   );
+
+  /**
+   * The operator's per-project pull-request directories, pushed from the
+   * renderer's prefs on every write.
+   *
+   * ANSWERS THROUGH THE SAME ENVELOPE as everything above, so a caller has one
+   * shape to read -- but it takes no capability gate, because it does not ask
+   * the SOURCE for anything. It sets a preference main consults later, and a
+   * source that cannot read pull requests simply never consults it.
+   *
+   * `setPrRepoOverrides` is total: anything that is not the expected shape
+   * lands as "no overrides", which is what vam did before this existed. The
+   * renderer is the least trusted process here, so the validation is on this
+   * side of the bridge rather than trusted from the other.
+   */
+  ipcMain.handle(CHANNELS.setPrRepos, async (_event, ...args): Promise<IpcResult<void>> => {
+    setPrRepoOverrides(args[0]);
+    return { ok: true, value: undefined };
+  });
 
   /**
    * Scrolling back through one session.

@@ -66,6 +66,15 @@ declare global {
        * through `bridgeMainErrors`.
        */
       readonly mainErrors: MainErrorsApi;
+      /**
+       * PREFERENCES MAIN NEEDS A COPY OF -- one today: where to ask GitHub
+       * from, per project. Desktop-only, and OPTIONAL in this type rather than
+       * merely absent at runtime, because `activatePrefs` runs in the browser
+       * build too and must be able to see that it is not there.
+       */
+      readonly prefs?: {
+        setPrRepos(map: unknown): Promise<void>;
+      };
     };
   }
 }
