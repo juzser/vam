@@ -154,7 +154,7 @@ function Chip({ keys }: { readonly keys: string }) {
       <span
         data-tip-keys
         aria-hidden="true"
-        className="shrink-0 rounded-[4px] border border-line-strong px-1 py-px font-mono text-meta text-ink-dim"
+        className="shrink-0 rounded-[4px] border border-on-tip-line px-1 py-px font-mono text-meta text-on-tip-dim"
       >
         {keys}
       </span>
@@ -194,22 +194,27 @@ export function ShortcutTip({
           side="top"
           sideOffset={6}
           collisionPadding={8}
-          className="z-50 flex max-w-[280px] flex-col gap-1 rounded-[7px] border border-line-tip bg-raised px-2 py-1.5 text-control shadow-tip"
+          className="z-50 flex max-w-[280px] flex-col gap-1 rounded-[7px] bg-tip px-2 py-1.5 text-control shadow-tip"
         >
-          {/* ink on raised (13.9:1 dark, 15.5:1 light) and ink-dim (6.9:1 dark,
-              6.8:1 light), never ink-faint. */}
+          {/* THE TIP IS ITS OWN SURFACE and carries its own inks. `on-tip`
+              (13.92:1 dark, 15.55:1 light) and `on-tip-dim` (6.89 / 6.78) --
+              the readings `ink` and `ink-dim` had on the `raised` fill this
+              used to have, re-solved against it. A page ink in here would be
+              tuned for the surface BEHIND the tip, which the tip is now the
+              inverse of, so `text-ink-dim` would land a pale grey on a pale
+              fill. There is no third ink: nothing in a tip is decoration. */}
           {merge ? (
             <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-              <span className="min-w-0 flex-1 text-ink">{label}</span>
+              <span className="min-w-0 flex-1 text-on-tip">{label}</span>
               {lines[0] === undefined ? null : <Chip keys={lines[0].keys} />}
             </span>
           ) : (
             <>
-              <span className="text-ink">{label}</span>
+              <span className="text-on-tip">{label}</span>
               {lines.map((line) => (
                 <span key={line.caption ?? line.keys} className="flex items-baseline gap-1.5">
                   {line.caption === null ? null : (
-                    <span className="min-w-0 flex-1 text-ink-dim">{line.caption}</span>
+                    <span className="min-w-0 flex-1 text-on-tip-dim">{line.caption}</span>
                   )}
                   <Chip keys={line.keys} />
                 </span>

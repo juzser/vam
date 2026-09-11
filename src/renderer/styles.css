@@ -163,6 +163,18 @@
   --color-line-loudest: var(--vam-line-loudest);
   --color-line-tip: var(--vam-line-tip);
 
+  /* THE TOOLTIP'S OWN SURFACE, four tokens and one idea: a tip is the theme
+     turned inside out. It is filled with the colour the theme WRITES with and
+     written on with colours near the one the theme is MADE of, which is what
+     lets it drop its border -- see `--vam-tip` below for why those two are one
+     change rather than two. `on-tip-line` is the key chip's edge inside a tip;
+     it is not a `line-*` token because every one of those is tuned for a
+     surface from the ladder, and the tip is not on the ladder. */
+  --color-tip: var(--vam-tip);
+  --color-on-tip: var(--vam-on-tip);
+  --color-on-tip-dim: var(--vam-on-tip-dim);
+  --color-on-tip-line: var(--vam-on-tip-line);
+
   --color-ink: var(--vam-ink);
   --color-ink-dim: var(--vam-ink-dim);
   --color-ink-faint: var(--vam-ink-faint);
@@ -541,28 +553,66 @@
      because every surface token vam owns sits within 1.33:1 of `panel` in
      dark, so anything that owes WCAG 1.4.11's 3:1 has to buy it with a LINE
      -- and `line-loud` is 1.43:1 there while `line-loudest` reaches only
-     2.22:1. The tooltip hit that wall first (the measurement below);
-     `PairingPanel.tsx`'s action buttons hit it next, at 3.77:1 dark and
-     3.62:1 light against the panel behind them. Anything else that has to
-     draw its own edge belongs here too, and the name says so.
+     2.22:1. The tooltip hit that wall first; `PairingPanel.tsx`'s action
+     buttons hit it next, at 3.77:1 dark and 3.62:1 light against the panel
+     behind them. Anything else that has to draw its own edge belongs here
+     too, and the name says so.
 
-     WCAG 1.4.11 asks 3:1 of a boundary that identifies a component, and a tip
-     floats over `--vam-sidebar` (#272727) while being filled with
-     `--vam-raised` (#2c2c2c): measured, that fill is 1.07:1 against what is
-     behind it and `line-strong` is 1.27:1, so the box had no edge at all.
-     `line-loudest`, the loudest line vam owns, still only reaches 2.22:1.
-     Hence a value of its own — the artboard's own third-rung dark grey
-     (#6b6b6b), carried up to wherever its FLOOR puts it rather than to
-     wherever a uniform step would: 3.63:1 against the sidebar behind and
-     3.39:1 against the tip's own fill, so the edge is identifiable from both
-     sides and keeps the margin it had (3.50 / 3.39 before this lift).
+     AND THE TOOLTIP HAS NOW LEFT, which is the second time this token has had
+     to be re-read against its own call sites. The operator asked for a light
+     tip with no border, and a fill off the ladder pays 1.4.11 by itself --
+     see `--vam-tip` below. So the rule stands and the name stops being
+     literal: what remains here is `PairingPanel.tsx`'s action buttons, which
+     are still filled from the ladder and still owe an edge, and anything that
+     ever joins them. Nothing about the value changed; the tooltip's departure
+     does not make 3.77:1 any less needed by the buttons.
 
-     IT HAD TO MOVE, AND FURTHER THAN LAST TIME. Left at #727272 it would read
-     2.90:1 on the lifted `raised` fill -- UNDER 1.4.11's floor, where the
-     first lift only brought it within six hundredths of it. This is the
-     second token in the block that is derived from a floor instead of from
-     its reading on the pane; `--vam-line-strong` is the other. */
+     THE VALUE IS DERIVED FROM THE FLOOR, not from a place in the ladder: the
+     artboard's own third-rung dark grey (#6b6b6b), carried up to wherever its
+     FLOOR puts it rather than to wherever a uniform step would. Left at
+     #727272 it would read 2.90:1 on the lifted `raised` fill it sits on --
+     UNDER 1.4.11 -- where the first lift only brought it within six
+     hundredths of the floor. This is the second token in the block derived
+     that way; `--vam-line-strong` is the other. */
   --vam-line-tip: #7d7d7d;
+
+  /* THE TOOLTIP'S FILL. Operator: "change the tooltip background to a light
+     colour. remove the border."
+
+     THOSE ARE ONE CHANGE. Read `--vam-line-tip` above: that token exists
+     because every surface vam owns sits within 1.33:1 of `panel` here, so a
+     tip filled from the ladder had no edge of its own and had to buy one with
+     a line. Taking the line away does not cancel that debt -- it moves it onto
+     the FILL, which now has to clear WCAG 1.4.11's 3:1 against whatever the
+     tip is floating over, by itself. Nothing on the ladder can; a light fill
+     clears it against all ten by 10.02:1 at worst (`segment-on`, the lightest
+     surface here), and against the pane it is actually over by 12.76:1.
+
+     THE VALUE IS THE THEME'S OWN INK, #ededed, and that is the whole choice
+     made in this block -- the tip is the theme inside out, so it is filled
+     with the colour the theme writes with. A literal rather than
+     `var(--vam-ink)` because `--vam-ink` is operator-settable: a palette that
+     recoloured the text would otherwise recolour the tooltip's FILL, and the
+     three inks below -- solved against this exact value -- would be left
+     measuring against something else. Frozen here, the tip stays neutral
+     under every template and every swatch.
+
+     THE OTHER THREE ARE DERIVED, not picked: each keeps the reading it had on
+     `raised` before the fill moved out from under it, re-solved against
+     #ededed. `test/renderer/tip-surface.test.ts` holds that rule, the 3:1
+     floor over all ten surfaces, and the direction; `e2e/tooltip-shots.mjs`
+     measures the painted border-width and the painted fill. */
+  --vam-tip: #ededed;
+  /* `text-ink` on `raised` read 13.9:1. On the new fill, 13.92:1. */
+  --vam-on-tip: #202020;
+  /* `text-ink-dim` on `raised` read 6.9:1 -- Note's whole body and every
+     caption in a shortcut tip. On the new fill, 6.89:1. */
+  --vam-on-tip-dim: #505050;
+  /* The key chip's edge, which `line-strong` drew at 1.27:1 on `raised`. It
+     is decoration, not a component boundary -- the keys themselves carry the
+     meaning -- so it keeps its weight rather than being raised to 3:1: on the
+     new fill, 1.27:1. */
+  --vam-on-tip-line: #d4d4d4;
 
   --vam-ink: #ededed;
   --vam-ink-dim: #b4b4b4;
@@ -800,13 +850,31 @@ html.light {
      both wear. */
   --vam-line-loud: #c9c7c1;
   --vam-line-loudest: #8f8f8a;
-  /* The same boundary in light — see the dark block for the measurement and
-     the reason, and for why this is not the tooltip's token alone. The artboard's own third-rung grey is #8a8a8f and it lands at
-     2.96:1, four hundredths under the floor, so this is that value carried
-     four units darker on the same hue rather than a colour from elsewhere:
-     3.13:1 against `--vam-sidebar` (#f0eeea) and 3.17:1 against the
-     `--vam-raised` fill. The old `line-strong` measured 1.26:1. */
+  /* The same boundary in light — see the dark block for the measurement, the
+     reason, and the note that the tooltip has left this token to
+     `PairingPanel.tsx`'s buttons. The artboard's own third-rung grey is
+     #8a8a8f and it lands at 2.96:1, four hundredths under the floor, so this
+     is that value carried four units darker on the same hue rather than a
+     colour from elsewhere: 3.13:1 against `--vam-sidebar` (#f0eeea) and
+     3.17:1 against the `--vam-raised` fill it is drawn on. The old
+     `line-strong` measured 1.26:1. */
   --vam-line-tip: #86868b;
+
+  /* THE TIP INVERTS HERE, and it is forced rather than chosen. `ground`,
+     `panel` and `card` are all #ffffff in this theme: NOTHING is lighter, so
+     a light borderless tip cannot reach 1.4.11's 3:1 against them at any
+     value whatsoever. The same rule that makes the tip light in dark makes it
+     dark here -- filled with this theme's own ink, #18181b, which clears
+     13.42:1 at worst (`segment-on`) and 15.29:1 over the pane. Dark tip on a
+     light UI is also what every inverted tooltip on the web does.
+
+     The three inks keep their readings, as in dark: `ink` on `raised` was
+     15.5:1 and is 15.55:1 here, `ink-dim` was 6.8:1 and is 6.78:1, the chip's
+     edge was 1.26:1 and is 1.27:1. */
+  --vam-tip: #18181b;
+  --vam-on-tip: #f0f0f0;
+  --vam-on-tip-dim: #a0a0a0;
+  --vam-on-tip-line: #2c2c2c;
 
   --vam-ink: #18181b;
   --vam-ink-dim: #52525b;
