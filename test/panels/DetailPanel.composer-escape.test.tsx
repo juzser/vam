@@ -373,6 +373,44 @@ describe('Mod-[ is the way out of the box', () => {
 });
 
 /**
+ * THE BOX CLAIMS ONLY ITS OWN KEYS -- the boundary between this handler and
+ * the two that sit above it.
+ *
+ * Written when the half-page scroll (`Mod-d` / `Mod-u`, `isSelectOnly`) and
+ * this composer's Escape/`Mod-[` work landed on the same keydown path from two
+ * branches. Each was correct alone; what neither could see is whether the box
+ * swallows a chord the other side is standing down for. `Mod-d` is
+ * delete-forward in every macOS text view, so a box that claimed it would
+ * break editing to serve a scroll gesture that deliberately refuses to run
+ * here -- and the refusal would be invisible, because the canvas returns
+ * BEFORE `preventDefault` and says nothing.
+ */
+describe('the box does not claim the chords that belong above or below it', () => {
+  it('leaves Mod-d and Mod-u alone, so the textarea keeps its editing keys', () => {
+    draw();
+    for (const key of ['d', 'u']) {
+      expect(fireEvent.keyDown(box(), { key, metaKey: true }), `Mod-${key}`).toBe(true);
+      expect(fireEvent.keyDown(box(), { key, ctrlKey: true }), `Ctrl-${key}`).toBe(true);
+    }
+  });
+
+  it('leaves Mod-0 alone, which is how the canvas chord gets out of the box', () => {
+    // `focusList` is a CANVAS chord and reaches this box through the window
+    // listener. Claiming it here would stop it dead -- the listener returns on
+    // `event.defaultPrevented`.
+    draw();
+    expect(fireEvent.keyDown(box(), { key: '0', code: 'Digit0', metaKey: true })).toBe(true);
+  });
+
+  it('claims Mod-[ and Escape, which ARE its own', () => {
+    bridge();
+    draw();
+    expect(fireEvent.keyDown(box(), { key: '[', code: 'BracketLeft', metaKey: true })).toBe(false);
+    expect(fireEvent.keyDown(box(), { key: 'Escape' })).toBe(false);
+  });
+});
+
+/**
  * THE KEYS THE BOX CAN BE OPERATED WITH, ON ONE ROW.
  *
  * Escape used to be the only way out of the composer, and the only place that
