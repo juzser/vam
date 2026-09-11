@@ -821,6 +821,110 @@ const fenceClass = await page.evaluate(() => {
 });
 console.log(`  fence in this fixture: ${fenceClass ?? 'none drawn (demo writes no fenced code)'}`);
 
+// ------------------------------------- THE LIST MARKERS, AS PAINTED GLYPHS
+//
+// Operator: "the bullets and numbers in the response lists are too faint."
+// They were on `ink-ghost` -- 1.79:1 on the pane, beside body text at 7.21:1
+// -- under a comment in `DetailPanel.tsx` calling them "genuinely decorative".
+//
+// THIS IS THE LOAD-BEARING GUARD FOR THAT FIX, and the unit one is not. A
+// source scan can tell you a class was TYPED; it cannot tell you the rule
+// matched an element, and `token-contrast.test.ts` is honest that its own scan
+// reads a comment and a JSX attribute identically -- put the class string in a
+// comment and delete the real one and it still passes. `::marker` makes that
+// worse than usual, because it is a pseudo-element with its own tiny list of
+// honoured properties and its own inheritance rules: a selector that is one
+// character off still compiles, still ships, and paints nothing. So what is
+// asserted here is `getComputedStyle(li, '::marker').color` on a real item of
+// a real list, rendered by the real markdown component from the real fixture.
+//
+// TWO FLOORS, BECAUSE THEY ARE TWO KINDS OF MARK. The ordered list's "1." is
+// CONTENT -- it is how a reader refers to a step -- so it owes WCAG 1.4.3's
+// 4.5:1 and takes `ink-dim`, the same ink as the words it numbers. The
+// unordered list's disc carries no meaning of its own, so it owes 1.4.11's
+// 3:1 rather than 4.5, and takes `ink-quiet`. `DetailPanel.tsx` argues both.
+//
+// AND THE BULLET MUST STAY UNDER THE BODY TEXT. "Readable next to the item's
+// words without out-shouting them" is half the request and it is the half a
+// floor cannot express, so it is asserted separately: quieter than `ink-dim`,
+// and not by accident -- if a future edit puts the bullet on the body's own
+// ink, that is a different design and this says so.
+const MARKER_FLOORS = [
+  { what: 'an ordered list marker', selector: '[data-action-pane] ol > li', floor: 4.5 },
+  { what: 'an unordered list marker', selector: '[data-action-pane] ul > li', floor: 3 },
+];
+
+console.log('\n=== the list markers, on the painted ::marker');
+const markers = await page.evaluate((rows) => {
+  const { opaque, ratio, lum } = window.vamColour;
+  const pane = getComputedStyle(document.querySelector('[data-action-pane]')).backgroundColor;
+  return rows.map((row) => {
+    const li = document.querySelector(row.selector);
+    if (li === null) return { ...row, drawn: false };
+    // THE PSEUDO-ELEMENT, not the item. `getComputedStyle(li).color` would
+    // report the item's text and pass whatever the marker actually does --
+    // which is the measurement this guard exists to avoid making.
+    const marker = getComputedStyle(li, '::marker').color;
+    const body = getComputedStyle(li).color;
+    const both = opaque(marker) && opaque(pane);
+    return {
+      ...row,
+      drawn: true,
+      text: (li.textContent ?? '').trim().slice(0, 34),
+      marker,
+      body,
+      pane,
+      bothOpaque: both,
+      ratio: both ? Number(ratio(marker, pane).toFixed(3)) : null,
+      // Louder than the ground it is on, quieter than the words beside it.
+      underTheBody: both && opaque(body) ? lum(marker) < lum(body) : null,
+      sameAsTheBody: marker === body,
+    };
+  });
+}, MARKER_FLOORS);
+for (const m of markers) {
+  console.log(`  ${m.what}: ${JSON.stringify(m)}`);
+}
+// A LIST HAS TO BE ON SCREEN AT ALL. No fixture in this repo wrote one until
+// this change, which is the reason the defect was never visible to a guard or
+// to a screenshot -- so "the demo draws both kinds of list" is asserted before
+// anything is read off them.
+check(
+  'the demo renders an ordered AND an unordered list in the pane',
+  markers.length === 2 && markers.every((m) => m.drawn),
+  JSON.stringify(markers),
+);
+if (markers.every((m) => m.drawn)) {
+  check(
+    'both markers paint an opaque colour of their own',
+    markers.every((m) => m.bothOpaque),
+    JSON.stringify(markers.map((m) => `${m.what} ${m.marker}`)),
+  );
+  const short = markers.filter((m) => m.bothOpaque && m.ratio < m.floor);
+  check(
+    'each marker clears the floor its own kind of mark owes (4.5:1 content, 3:1 a mark)',
+    short.length === 0,
+    short.map((m) => `${m.what}: ${m.ratio}:1 on ${m.pane}, floor ${m.floor}`).join(' ; '),
+  );
+  // THE NUMBER READS AS ITS OWN SENTENCE and the BULLET does not, which is the
+  // whole reason the two were decided apart rather than bumped together.
+  const [ordered, unordered] = markers;
+  check(
+    'the number is painted in the same ink as the words it numbers',
+    ordered.sameAsTheBody,
+    `${ordered.marker} vs body ${ordered.body}`,
+  );
+  check(
+    'and the bullet stays quieter than the item text beside it',
+    unordered.underTheBody === true && !unordered.sameAsTheBody,
+    `${unordered.marker} vs body ${unordered.body}`,
+  );
+}
+await page.locator('[data-action-pane]').last().screenshot({
+  path: `${outDir}/list-markers-dark.png`,
+});
+console.log(`${outDir}/list-markers-dark.png`);
+
 // ----------------------------------------------- THE DARK LIFT, AS PAINT
 //
 // Operator, twice in the same words: "make the dark UI a bit lighter".

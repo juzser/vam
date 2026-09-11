@@ -167,11 +167,24 @@
      ladder into `ink-faint`; ruling it out of text left the border still
      failing. So there are two tokens where there was one:
      `ink-quiet` for anything that has to be READ -- text, a control border, an
-     icon glyph standing in for one -- and `ink-ghost`, unchanged, for marks
-     that carry no meaning of their own: a scrollbar thumb, a list bullet next
-     to text that already says the same thing. Nothing routes text through
-     `ghost` anymore; `test/renderer/token-contrast.test.ts` is what stops the
-     next one from trying. */
+     icon glyph standing in for one -- and `ink-ghost` for marks that carry no
+     meaning of their own.
+
+     THAT SECOND LIST SAID "a scrollbar thumb, a list bullet next to text that
+     already says the same thing", AND THE SECOND HALF WAS WRONG. A `::marker`
+     is a painted glyph: an ordered list's "1." is how a reader refers to a
+     step, and even a disc is the mark that says where an item begins. Both
+     moved to `ink-quiet` and `ink-dim` when the operator reported them as too
+     faint (`DetailPanel.tsx` argues each). What is left on `ghost` is the
+     scrollbar thumb and nothing else -- it reports a position the content
+     already shows, and it is not read.
+
+     Nothing routes text OR A GLYPH through `ghost` anymore.
+     `test/renderer/ink-ghost-sites.test.ts` holds the call sites,
+     `token-contrast.test.ts` holds the inks a marker may name, and
+     `e2e/pane-colour-shots.mjs` reads what a real `li::marker` actually
+     paints -- which is the only one of the three that can see a rule that
+     matched nothing. */
   --color-ink-quiet: var(--vam-ink-quiet);
   --color-ink-ghost: var(--vam-ink-ghost);
 
@@ -530,10 +543,11 @@
      under another name, and this file says so rather than pretending a third
      grey exists that does not. */
   --vam-ink-quiet: #969696;
-  /* Decorative only (issue 201): a scrollbar thumb, a list bullet. It keeps
-     the reading it had on the pane like the other quiet greys -- 1.87:1 on
-     `panel`, where it was 1.84:1 and, left where it was, would have sunk to
-     1.65:1. */
+  /* Decorative only (issue 201), and a shorter list than it used to be: a
+     scrollbar thumb, and nothing else since the list markers left for inks
+     that can be read. It keeps the reading it had on the pane like the other
+     quiet greys -- 1.87:1 on `panel`, where it was 1.84:1 and, left where it
+     was, would have sunk to 1.65:1. */
   --vam-ink-ghost: #4e4e4e;
 
   /* The terminal palette, dark. Drawn on `panel` (#242424), so ANSI black is

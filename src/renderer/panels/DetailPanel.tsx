@@ -1428,21 +1428,63 @@ export const OUT_MARKDOWN: Components = {
   h3: ({ children }) => (
     <h3 className="font-medium text-[1em] text-ink tracking-[0.01em]">{children}</h3>
   ),
+  /*
+   * THE MARKERS, DECIDED SEPARATELY, because a bullet and a number are not the
+   * same kind of thing and one rule for both is what made them both too faint.
+   *
+   * Operator: "the bullets and numbers in the response lists are too faint".
+   * Both were routed through `ink-ghost` by one rule on the shared `<li>`,
+   * under a comment calling them "genuinely decorative" -- 1.79:1 on the pane,
+   * beside body text at 7.21:1. That claim is defensible for one of them and
+   * was never true of the other.
+   *
+   * (The token is named here and the utility class is not, deliberately:
+   * `test/renderer/ink-ghost-sites.test.ts` greps `src/` for the class string
+   * itself, so spelling it in prose would hand that guard a call site that is
+   * a sentence and let the real one be deleted without it noticing.)
+   *
+   * A BULLET IS DECORATION and keeps that reasoning: `list-disc`, the indent
+   * and the gap between items already carry the list's structure, and nobody
+   * refers to "the third bullet" by its glyph. So it does not owe WCAG 1.4.3's
+   * 4.5:1. What it does owe is 1.4.11's 3:1 -- it is a non-text mark a reader
+   * uses to find where each item begins -- and `ink-ghost` never met that.
+   * `ink-quiet` is the quietest ink in this palette that does (5.05:1 on the
+   * pane); `styles.css` says at `--vam-ink-quiet` that there is no rung
+   * between `ghost` and `quiet`, and inventing a third grey to land just over
+   * the complaint would be answering it as quietly as possible. It stays one
+   * weight under the `ink-dim` body text, so it marks without leading.
+   *
+   * A NUMBER IS CONTENT, and this is the half the old comment got wrong. "1."
+   * "2." "3." is how a reader REFERS to an item: an agent's numbered steps are
+   * exactly the thing an operator counts, and "step 3 failed" is a sentence
+   * about the numeral. It owes 4.5:1 like any other text and takes `ink-dim`,
+   * the same ink as the words it numbers -- which is also `::marker`'s own
+   * initial value, `currentColor`. So the fix here is to STOP overriding it
+   * rather than to pick a colour: a numeral quieter than its own sentence is
+   * one the reader has to hunt for.
+   *
+   * `[&>li::marker]`, NOT Tailwind's `marker:` variant, and the difference is
+   * load-bearing. `marker:` compiles to `&::marker, & *::marker`, so putting
+   * it on a `<ul>` would also claim every marker in a list NESTED inside it --
+   * an `<ol>` inside a `<ul>` would take its numbers from whichever of two
+   * equal-specificity rules Tailwind happened to emit last. The direct-child
+   * form reaches this list's own items and stops, so a nested list is coloured
+   * by its own element. `test/renderer/token-contrast.test.ts` holds both
+   * tokens to their floors and `e2e/pane-colour-shots.mjs` reads the colour a
+   * real `li::marker` is PAINTED with, because a rule that matched nothing
+   * would pass a scan of this file.
+   */
   ul: ({ children }) => (
-    <ul className="flex list-disc flex-col gap-1 pl-4 text-[1em] text-ink-dim leading-[1.6]">
+    <ul className="flex list-disc flex-col gap-1 pl-4 text-[1em] text-ink-dim leading-[1.6] [&>li::marker]:text-ink-quiet">
       {children}
     </ul>
   ),
   ol: ({ children }) => (
-    <ol className="flex list-decimal flex-col gap-1 pl-4 text-[1em] text-ink-dim leading-[1.6]">
+    <ol className="flex list-decimal flex-col gap-1 pl-4 text-[1em] text-ink-dim leading-[1.6] [&>li::marker]:text-ink-dim">
       {children}
     </ol>
   ),
-  // The bullet, not the item: `list-disc` and the item spacing already carry
-  // the list's structure, so a barely-visible marker loses nothing the
-  // `text-ink-dim` item text and the semantic `<ul>` do not already say.
-  // Genuinely decorative -- stays on `ink-ghost` (issue 201).
-  li: ({ children }) => <li className="marker:text-ink-ghost">{children}</li>,
+  li: ({ children }) => <li>{children}</li>,
   strong: ({ children }) => <strong className="font-medium text-ink">{children}</strong>,
   em: ({ children }) => <em className="text-ink-dim italic">{children}</em>,
   del: ({ children }) => <del className="text-ink-faint">{children}</del>,
