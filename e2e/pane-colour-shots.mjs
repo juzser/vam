@@ -279,7 +279,8 @@ const fillOf = (selector) =>
  * For scale, the fill this replaced -- `raised` -- measured 1.030:1 / ΔE 1.52
  * in dark and 1.015:1 / ΔE 1.38 in light. Dark's `raised` has since been
  * stretched to 1.070:1 / ΔE 2.36 so a hover fill can be seen at all; the
- * bubble is nine times further from the pane than that.
+ * bubble is six times further from the pane than that (ΔE 14.52 against
+ * 2.36) -- it was nine before the fill was drained towards grey.
  */
 const BUBBLE_FLOORS = {
   dark: { ratio: 1.4, distance: 6.24 },
