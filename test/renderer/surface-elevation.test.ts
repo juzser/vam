@@ -186,7 +186,9 @@ describe('surfaces are ordered by elevation, in both themes', () => {
         // NOTE THAT `raised` IS A MOVING TARGET NOW, which only makes this
         // stricter: the second dark lift widened it from ΔE 1.48 to 2.36 off
         // the pane, so the multiple below asks the bubble for ΔE 9.46 where it
-        // used to ask for 5.92. It measures 20.98 in dark and 9.09 in light.
+        // used to ask for 5.92. It measures 14.52 in dark and 7.20 in light
+        // since the bubble was drained towards grey -- draining chroma spends
+        // ΔE, and this is the number that says how much was left.
         const pane = hex('--vam-pane');
         expect(deltaE(hex('--vam-in-bubble'), pane)).toBeGreaterThan(
           deltaE(hex('--vam-raised'), pane) * 4,
@@ -248,7 +250,7 @@ describe('surfaces are ordered by elevation, in both themes', () => {
         // `--vam-ink-dim` is the ONLY text colour inside the bubble
         // (`DetailPanel.tsx`, the prompt's own `<p>`), and it is the reason
         // the fill stops where it does rather than going a rung further: at
-        // this depth `ink-faint` measures 3.35:1 and could not be used there.
+        // this depth `ink-faint` measures 3.36:1 and could not be used there.
         // That constraint is recorded in `styles.css` beside the value; the
         // e2e guard measures the ink the bubble is REALLY painted with, which
         // is the half a token list cannot check.

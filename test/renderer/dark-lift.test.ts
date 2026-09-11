@@ -36,9 +36,16 @@
  *     below is the assertion, not the prose.
  *
  * WHAT IS STILL TRUE OF BOTH PASSES: lightness only. a* and b* are carried
- * across untouched, so the teal bubble is the same teal and the amber tint the
- * same amber; 8-bit rounding leaves at most 0.5 of chroma drift anywhere in
- * the block. And every step is still inside the band the first pass set --
+ * across untouched, so the amber tint is the same amber; 8-bit rounding leaves
+ * at most 0.5 of chroma drift anywhere in the block.
+ *
+ * ONE TOKEN HAS SINCE LEFT THAT RULE, deliberately and with its own guard:
+ * `--vam-in-bubble` was drained towards grey at the operator's ask, AFTER the
+ * lift and on top of it. See `CHROMA_MOVED` -- the lift decided the bubble's
+ * rung, the drain decided its colour, and the test below the exemption holds
+ * the drain to not having touched the rung.
+ *
+ * And every step is still inside the band the first pass set --
  * `[JND, CEILING]`, 2.3 to 6.0 -- which did NOT have to be widened to let this
  * through: the largest step here is 5.75 L* on `--vam-raised`. "A bit lighter"
  * is answered twice without ever being answered twice over.
@@ -60,7 +67,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { contrast, deltaE, lightness } from '../support/contrast.js';
+import { chroma, contrast, deltaE, lightness } from '../support/contrast.js';
 import { ruleBody, tokens } from '../support/css-tokens.js';
 
 const CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
@@ -178,6 +185,32 @@ const JND = 2.3;
 const CEILING = 6;
 
 /**
+ * THE ONE TOKEN ALLOWED TO MOVE ITS CHROMA, and the only exemption in this
+ * file.
+ *
+ * Operator, after the lift landed: "for the In bubble, pick the option leaning
+ * towards grey." That is a request about CHROMA, which the lift's own rule --
+ * lightness only, a* and b* carried across untouched -- forbids by design. The
+ * two are not in conflict; they are two decisions stacked in order. The lift
+ * put the bubble on its rung (L* 24.97 -> 28.40) and the drain took the colour
+ * out of it at that rung (chroma 16.65 -> 7.07, L* 28.40 -> 28.33).
+ *
+ * So `moves lightness only` skips this one name, and the test underneath it
+ * pays for the skip: the chroma must have actually fallen, it must not have
+ * fallen to neutral, and the lightness must NOT have moved. An exemption that
+ * asserted nothing would be the hole this file exists to prevent.
+ */
+const CHROMA_MOVED = '--vam-in-bubble';
+
+/**
+ * What the lift left the bubble at, before the drain — the rung the drain was
+ * not allowed to move it off. Recorded here rather than read from the file for
+ * the reason the table above is: a guard that reads today's value cannot
+ * notice tomorrow's.
+ */
+const LIFTED_BUBBLE = '#1f4a44';
+
+/**
  * The surface ladder `styles.css` documents, deepest first, with the one pair
  * that is deliberately equal. Order is the thing a lift most easily breaks:
  * every surface's relationship to the surfaces above and below it has to
@@ -289,18 +322,49 @@ describe('the dark palette sits one visible step above the palette it replaced',
   it('moves lightness only — no hue, no chroma', () => {
     // ΔE is the whole distance travelled; the L* step is the part that was
     // asked for. Whatever is left is hue and chroma drift, and it may only be
-    // 8-bit rounding: the teal bubble must still be that teal, the amber tint
-    // still that amber. sqrt(ΔE² - ΔL²) is that residue.
-    const drift = Object.entries(BEFORE_THE_LIFT).map(([name, was]) => {
-      const now = hex(dark, name);
-      const dl = lightness(now) - lightness(was);
-      const de = deltaE(was, now);
-      return { name, drift: Number(Math.sqrt(Math.max(0, de * de - dl * dl)).toFixed(2)) };
-    });
+    // 8-bit rounding: the amber tint must still be that amber. sqrt(ΔE² - ΔL²)
+    // is that residue.
+    const drift = Object.entries(BEFORE_THE_LIFT)
+      .filter(([name]) => name !== CHROMA_MOVED)
+      .map(([name, was]) => {
+        const now = hex(dark, name);
+        const dl = lightness(now) - lightness(was);
+        const de = deltaE(was, now);
+        return { name, drift: Number(Math.sqrt(Math.max(0, de * de - dl * dl)).toFixed(2)) };
+      });
     expect({
       measured: drift.length,
       drifted: drift.filter((d) => d.drift > 1),
-    }).toEqual({ measured: 24, drifted: [] });
+    }).toEqual({ measured: 23, drifted: [] });
+  });
+
+  it('drains the one token the operator asked to lean grey, and only that one', () => {
+    // THE EXEMPTION ABOVE, PAID FOR. Dropping a token out of a guard is how a
+    // guard quietly stops covering the thing it was written for, so the
+    // exclusion buys an assertion rather than a hole: the chroma this token is
+    // allowed to move must actually have moved, and DOWN, and its lightness
+    // must not have moved with it -- the elevation ladder is the lift's
+    // business and a colour decision is not allowed to touch it.
+    const was = BEFORE_THE_LIFT[CHROMA_MOVED];
+    const now = hex(dark, CHROMA_MOVED);
+    expect({
+      chromaFell: chroma(now) < chroma(was) * 0.75,
+      // STILL A HUE, NOT A NEUTRAL. A bubble drained all the way to grey is
+      // the "in practice, not drawn" complaint that created the token, arriving
+      // again a release later -- and a near-neutral fill measured ΔE 4.4 from
+      // `--vam-line-loud`, which is what that would look like.
+      stillCarriesItsHue: chroma(now) >= 4,
+      // The rung it sits on is the LIFT's decision. This change moved L* by
+      // 0.07; anything that moves it by a JND is a different change wearing
+      // this one's name.
+      stayedOnItsRung: Math.abs(lightness(now) - lightness(LIFTED_BUBBLE)) < JND,
+      inTheBand: contrast(now, hex(dark, '--vam-pane')) >= 1.446,
+    }).toEqual({
+      chromaFell: true,
+      stillCarriesItsHue: true,
+      stayedOnItsRung: true,
+      inTheBand: true,
+    });
   });
 
   it('separates every pair of surfaces a person sees at once', () => {
@@ -386,7 +450,7 @@ describe('the dark palette sits one visible step above the palette it replaced',
         '--vam-ink-quiet': '#6a6a6f',
         '--vam-ink-ghost': '#a8a8a3',
         '--vam-ansi-black': '#3f3f46',
-        '--vam-in-bubble': '#eafff9',
+        '--vam-in-bubble': '#f1fefe',
         '--vam-waiting-tint': '#f6dcae',
         '--vam-waiting-wash': '#fdf6e8',
         '--vam-done-tint': '#c0d3f4',

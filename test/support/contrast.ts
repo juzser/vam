@@ -66,6 +66,20 @@ export function lightness(hex: string): number {
   return lab(hex)[0] as number;
 }
 
+/**
+ * CIE C*ab: how much COLOUR a value carries, independently of how light it is.
+ *
+ * The question the other two units cannot ask between them. "Lean it towards
+ * grey" is a request about this number and nothing else -- the In bubble's
+ * drain is 16.65 -> 7.07 at a lightness that moved 0.07 -- and a guard holding
+ * only ΔE would have reported it as a colour change indistinguishable from a
+ * hue rotation, which is a different decision with different consequences.
+ */
+export function chroma(hex: string): number {
+  const [, a, b] = lab(hex);
+  return Math.hypot(a as number, b as number);
+}
+
 /** The relative luminance of a six-digit hex colour, 0 to 1. */
 export function relativeLuminance(hex: string): number {
   return luminance(hex);
