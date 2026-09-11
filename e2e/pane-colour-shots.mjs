@@ -13,7 +13,7 @@
  * `ground`, the question and composer blocks on `header` -- and left the cards
  * sitting inside them on `panel`, on the argument that a card inset by the
  * pane's padding is a card and not a band. That argument was wrong by a
- * number: `panel` is #141414 and the pane is #171717, so every one of those
+ * number: `panel` was #141414 and the pane #171717, so every one of those
  * cards was 1.028:1 DARKER than the surface it sat on. An element darker than
  * its own ground does not read as a card. It reads as a hole, which is what
  * the operator kept pointing at, and it is why the sweep below is now
@@ -100,7 +100,13 @@ await page.evaluate(() => {
     const c = v / 255;
     return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   };
-  const parts = (colour) => colour.match(/[\d.]+/g).map(Number);
+  // Accepts what `getComputedStyle` returns AND a six-digit hex, so a
+  // measured paint and a value recorded in this file can be compared without
+  // two parsers disagreeing about what #131313 means.
+  const parts = (colour) =>
+    /^#/.test(colour)
+      ? [1, 3, 5].map((i) => Number.parseInt(colour.slice(i, i + 2), 16))
+      : colour.match(/[\d.]+/g).map(Number);
   const opaque = (colour) => /^rgb\(\s*\d/.test(colour);
   const lum = (colour) => {
     const [r, g, b] = parts(colour);
@@ -123,7 +129,12 @@ await page.evaluate(() => {
     const [p, q] = [lab(a), lab(b)];
     return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
   };
-  window.vamColour = { opaque, lum, ratio, deltaE };
+  // CIE L*, the unit the dark lift is specified in: "is this visibly lighter
+  // than the colour it replaced" is a question about perceived lightness, and
+  // luminance answers it badly down here -- #0a0a0a and #131313 are 0.002
+  // apart in Y and 3.1 apart in L*.
+  const lightness = (colour) => lab(colour)[0];
+  window.vamColour = { opaque, lum, ratio, deltaE, lightness };
 });
 
 /**
@@ -233,12 +244,24 @@ const fillOf = (selector) =>
 /**
  * THE IN BUBBLE'S FLOORS, per theme, in both units.
  *
- * The RATIO floors are the reachable ones. Dark's 1.35 is just under the band
- * this palette's own tinted grounds already sit in (`waiting-tint` 1.389:1,
- * `done-tint` 1.444:1 against the pane), so the bubble is held to the standard
- * the design set rather than to a number invented here. Light's 1.10 is 95% of
- * the 1.159 ceiling that pure white imposes on anything lighter than that
- * theme's pane -- there is no room above it.
+ * The RATIO floors are the reachable ones. Dark's is just under the band this
+ * palette's own tinted grounds sit in against the pane, so the bubble is held
+ * to the standard the design set rather than to a number invented here.
+ * Light's 1.10 is 95% of the 1.159 ceiling that pure white imposes on
+ * anything lighter than that theme's pane -- there is no room above it.
+ *
+ * DARK'S FLOOR MOVED WITH THE BAND, 1.35 -> 1.40, WHICH IS NOT A RE-BASELINE:
+ * the derivation is unchanged and the band is what moved. The dark lift (+3
+ * L*, `test/renderer/dark-lift.test.ts`) carried the pane and both tints up
+ * together, so `waiting-tint` went 1.389 -> 1.446 and `done-tint` 1.444 ->
+ * 1.507 against the pane. The old floor sat 0.039 under the old band; this
+ * one sits 0.046 under the new one.
+ *
+ * It has to move, or this guard stops covering the one bug the lift can
+ * cause: the PRE-LIFT teal (#0f3b35) reads 1.362:1 against the LIFTED pane --
+ * quieter than both tints, the one thing the bubble may not be -- and 1.362
+ * clears 1.35. A pane lifted while the bubble stayed put would have passed
+ * here and on the painted node.
  *
  * The DISTANCE floor is the same in both themes because it is the one that
  * carries the complaint: 6.24 is what the light theme's own card step (white
@@ -248,7 +271,7 @@ const fillOf = (selector) =>
  * in dark and 1.015:1 / ΔE 1.38 in light.
  */
 const BUBBLE_FLOORS = {
-  dark: { ratio: 1.35, distance: 6.24 },
+  dark: { ratio: 1.4, distance: 6.24 },
   light: { ratio: 1.1, distance: 6.24 },
 };
 
@@ -371,7 +394,7 @@ for (const theme of ['dark', 'light']) {
   );
   // AND THE TEXT ON IT. The fill is chosen against the one ink the bubble
   // paints, so the ink is measured HERE rather than trusted: `ink-dim` reads
-  // 4.789:1 on the dark fill and `ink-faint` would read 3.353:1, so an edit
+  // 4.750:1 on the dark fill and `ink-faint` would read 3.364:1, so an edit
   // that reaches for a quieter grey has to fail somewhere, and this is where.
   const bubbleText = await page.evaluate(() => {
     const { opaque, ratio } = window.vamColour;
@@ -404,11 +427,11 @@ for (const theme of ['dark', 'light']) {
 //
 // The regression PR #288 left behind, and the one flow where it costs the
 // most: a question card is what an operator uses to unblock a waiting agent.
-// #288 repointed the card from `panel` to `card` (#1d1d1d in dark) and moved
-// most hover fills with it, but the options kept `hover:bg-raised` /
-// `border-running bg-raised` -- and `--vam-raised` is #1a1a1a, DARKER than
-// the card it sits inside. Measured here before the fix: 1.032:1 below its
-// own ground. So touching an answer punched it below the card, which is the
+// #288 repointed the card from `panel` to `card` (#1d1d1d in dark at the
+// time, #232323 since the dark lift) and moved most hover fills with it, but
+// the options kept `hover:bg-raised` / `border-running bg-raised` -- and
+// `raised` is a rung BELOW the card, DARKER than the card it sits inside.
+// Measured here before the fix: 1.032:1 below its own ground. So touching an answer punched it below the card, which is the
 // exact hole #288 existed to remove, one level further in.
 //
 // THE SWEEP ABOVE CANNOT SEE THIS and that is why this block exists. It
@@ -420,8 +443,8 @@ for (const theme of ['dark', 'light']) {
 // AND THE INK IS MEASURED WITH IT, because the fill cannot be chosen without
 // it. A card is already at the ceiling `--vam-ink-quiet` allows (styles.css
 // says so at `--vam-card`), so any fill a rung above it puts the option's
-// quietest greys under 4.5:1 -- `ink-faint` measures 4.10:1 on #262626. The
-// fix is a fill AND the inks that read on it, so both halves are held here:
+// quietest greys under 4.5:1 -- `ink-faint` measures 4.21:1 on `line-strong`.
+// The fix is a fill AND the inks that read on it, so both halves are held here:
 // a fill that moves without the ink following reddens the ink checks, and an
 // ink lift without the fill reddens the elevation checks.
 const OPTION_SESSION = 'vam-build-1';
@@ -786,6 +809,110 @@ const fenceClass = await page.evaluate(() => {
   return pre === null ? null : pre.className;
 });
 console.log(`  fence in this fixture: ${fenceClass ?? 'none drawn (demo writes no fenced code)'}`);
+
+// ----------------------------------------------- THE DARK LIFT, AS PAINT
+//
+// Operator: "make the dark UI a bit lighter". `test/renderer/dark-lift.test.ts`
+// holds the stylesheet to +3 L* per token; this holds the SCREEN to it, which
+// is a different claim and the one that can fail on its own. A palette can be
+// lifted in `styles.css` and never reach a surface -- a utility whose token
+// does not exist emits no class, breaks no build and fails no assertion that
+// reads text, and this repo has already shipped a rule that was TYPED while
+// its selector matched nothing.
+//
+// EACH NODE IS MEASURED AGAINST THE COLOUR IT USED TO PAINT, recorded here
+// from the pre-lift stylesheet, so what is asserted is the DISTANCE TRAVELLED
+// rather than the value found. A guard that expects what the code now does
+// passes on whatever the code does next.
+//
+// THE BAND IS THE SAME ONE THE UNIT GUARD USES: at least one JND (2.3 L*), at
+// most "a bit" (6.0). Under the floor means somebody walked a surface back;
+// over the ceiling means the theme is drifting up a patch at a time.
+const LIFT_BAND = { floor: 2.3, ceiling: 6 };
+const LIFTED_LADDER = [
+  { what: 'the page behind the panes', selector: 'body', was: '#0a0a0a' },
+  { what: 'the sidebar', selector: '[data-sidebar-pane]', was: '#171717' },
+  { what: 'the detail pane', selector: '[data-action-pane]', was: '#171717' },
+  { what: 'a card on the pane', selector: '[data-question]', was: '#1d1d1d' },
+];
+/** What the LIGHT theme paints on the same four nodes, and must still paint. */
+const LIGHT_UNMOVED = ['rgb(255, 255, 255)', 'rgb(240, 238, 234)', 'rgb(240, 238, 234)', 'rgb(255, 255, 255)'];
+
+const liftSeen = async () =>
+  page.evaluate(
+    (ladder) => {
+      const { opaque, lightness } = window.vamColour;
+      return ladder.map((rung) => {
+        const el = document.querySelector(rung.selector);
+        const fill = el === null ? null : getComputedStyle(el).backgroundColor;
+        // BOTH SIDES OPAQUE FIRST. `rgba(0, 0, 0, 0)` has a lightness of 0 and
+        // would compare against a recorded near-black as a lift of ~2.7 -- a
+        // deleted token would read as a small pass. The whole file exists
+        // because two absences compare equal.
+        const painted = fill !== null && opaque(fill);
+        return {
+          ...rung,
+          fill,
+          painted,
+          step: painted ? Number((lightness(fill) - lightness(rung.was)).toFixed(2)) : null,
+          light: painted ? Number(lightness(fill).toFixed(2)) : null,
+        };
+      });
+    },
+    LIFTED_LADDER,
+  );
+
+console.log('\n=== the dark lift, on the painted node');
+const lifted = await liftSeen();
+for (const rung of lifted) {
+  console.log(`  ${rung.what}: ${rung.was} -> ${rung.fill} (L* ${rung.light}, step ${rung.step})`);
+}
+check(
+  'every surface the lift covers is drawn, and paints an opaque fill',
+  lifted.length === 4 && lifted.every((r) => r.painted),
+  JSON.stringify(lifted),
+);
+if (lifted.every((r) => r.painted)) {
+  const outside = lifted.filter(
+    (r) => r.step < LIFT_BAND.floor || r.step > LIFT_BAND.ceiling,
+  );
+  check(
+    `each one sits ${LIFT_BAND.floor}-${LIFT_BAND.ceiling} L* above the colour it used to paint`,
+    outside.length === 0,
+    outside.map((r) => `${r.what} ${r.was} -> ${r.fill}, ${r.step} L*`).join(' ; '),
+  );
+  // AND THE ORDER SURVIVED IT. The ladder is ground < sidebar = pane < card,
+  // and a lift that moved one rung past another would be a new design rather
+  // than a lighter one. Measured on the paint, not on the token list.
+  const [ground, sidebar_, pane, card] = lifted.map((r) => r.light);
+  check(
+    'and the ladder still climbs ground < sidebar = pane < card',
+    ground < sidebar_ && sidebar_ === pane && pane < card,
+    lifted.map((r) => `${r.what} ${r.light}`).join(' ; '),
+  );
+}
+
+// THE OTHER THEME DID NOT MOVE, and this is the half a dark-only measurement
+// cannot see. The operator asked about dark; light is pinned as paint here and
+// as tokens in `dark-lift.test.ts`.
+await page.evaluate(() => document.documentElement.classList.add('light'));
+await page.waitForTimeout(200);
+const lightNow = await page.evaluate(
+  (ladder) =>
+    ladder.map(({ selector }) => {
+      const el = document.querySelector(selector);
+      return el === null ? null : getComputedStyle(el).backgroundColor;
+    }),
+  LIFTED_LADDER,
+);
+console.log(`  light theme still paints: ${JSON.stringify(lightNow)}`);
+check(
+  'the light theme paints exactly the fills it painted before the dark lift',
+  lightNow.every((fill, i) => fill === LIGHT_UNMOVED[i]),
+  `${JSON.stringify(lightNow)} vs ${JSON.stringify(LIGHT_UNMOVED)}`,
+);
+await page.evaluate(() => document.documentElement.classList.remove('light'));
+await page.waitForTimeout(200);
 
 // ------------------------------------------------- THE SWATCHES, DRIVEN
 //
