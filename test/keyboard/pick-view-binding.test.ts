@@ -124,8 +124,15 @@ describe('what promotion had to leave true', () => {
     }
   });
 
-  it('reserves nothing new — the chord doors are still the only protected keys', () => {
-    expect([...RESERVED_KEYS]).toEqual(['Escape', 'g', 'y', 'z']);
+  it('reserves nothing new — the chord doors and the two bound elsewhere', () => {
+    // STILL AN EXACT LIST, so a key reserved in passing is still caught. It
+    // grew by one since: `Mod-[` is how the keyboard lets go of the prompt
+    // box, bound in `DetailPanel`'s own handler rather than in these tables,
+    // and a modified key DOES reach the window listener from inside a textarea
+    // -- so an operator who bound it to `close` would leave the box and shut a
+    // session in one press. That is the reason `Escape` is here, one surface
+    // over. Nothing about the Alt+digit promotion this file is about added it.
+    expect([...RESERVED_KEYS]).toEqual(['Escape', 'Mod-[', 'g', 'y', 'z']);
   });
 
   it('never names a registry that does not exist', () => {

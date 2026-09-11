@@ -287,10 +287,14 @@ describe('i puts the caret in the box, and the mode follows the caret', () => {
     expect(mode()).toBe('Insert');
   });
 
-  it('and Escape from there returns the keyboard AND the mode together', () => {
+  it('and Mod-[ from there returns the keyboard AND the mode together', () => {
+    // `Mod-[` is the way out since Escape in the composer became the agent's
+    // interrupt. The property under test is unchanged: whatever the key, it
+    // has to move DOM FOCUS, because the mode is derived from focus and a
+    // mode that said Select over a focused textarea was this file's own bug.
     render(<Canvas model={QUIET} />);
     press('i');
-    pressFocused('Escape');
+    pressFocused('[', { code: 'BracketLeft', metaKey: true });
     expect(mode()).toBe('Select');
     expect(document.activeElement).not.toBe(composer());
     pressFocused('j');

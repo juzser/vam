@@ -333,6 +333,12 @@ for (const theme of ['dark', 'light']) {
   console.log(`${outDir}/mode-truth-chip-${theme}.png`);
 
   await page.keyboard.press('Escape');
+  // AND `Control+[`, WHICH IS THE WAY OUT OF THE COMPOSER NOW. Escape typed in
+  // the prompt box is the agent's interrupt since the composer-escape change, so
+  // it no longer releases the keyboard. Escape stays first, because it is still
+  // what closes an overlay; `Mod-[` folds Ctrl and Cmd, and is a no-op anywhere
+  // but in that box.
+  await page.keyboard.press('Control+[');
   await page.waitForFunction(
     () => (document.querySelector('[data-mode]')?.textContent ?? '') === 'Select',
     null,
@@ -380,6 +386,12 @@ await page.screenshot({ path: `${outDir}/mode-truth-change.png` });
 console.log(`${outDir}/mode-truth-change.png`);
 
 await page.keyboard.press('Escape');
+// AND `Control+[`, WHICH IS THE WAY OUT OF THE COMPOSER NOW. Escape typed in
+// the prompt box is the agent's interrupt since the composer-escape change, so
+// it no longer releases the keyboard. Escape stays first, because it is still
+// what closes an overlay; `Mod-[` folds Ctrl and Cmd, and is a no-op anywhere
+// but in that box.
+await page.keyboard.press('Control+[');
 await page.waitForTimeout(900);
 
 // AND IT IS OPT-OUT. A moving indicator is a liability for anyone it makes
