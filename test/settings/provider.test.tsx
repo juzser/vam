@@ -34,7 +34,7 @@
  * day they must still be read.
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_PREFS, type Prefs } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
@@ -96,7 +96,12 @@ describe('the sessions section, while vam can start exactly one agent', () => {
     // The command is the whole of what the choice does; showing it is what
     // makes a one-provider section an answer rather than a stub.
     expect(panel()?.textContent).toContain(PROVIDERS[0]?.command.join(' '));
-    expect(screen.getByText('sessions')).toBeTruthy();
+    // The panel heading is the section's LABEL now, matching the nav tab --
+    // so it is queried as the heading rather than by text, which would find
+    // both and fail on the agreement this change is for.
+    expect(document.querySelector('[data-settings-panel="sessions"] h3')?.textContent).toBe(
+      'Sessions',
+    );
   });
 
   it('writes nothing at all: there is no act left in this row', () => {
