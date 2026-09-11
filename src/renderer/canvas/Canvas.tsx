@@ -115,6 +115,7 @@ import {
   type EffectiveTheme,
   type FocusChoice,
   isGroupCollapsed,
+  isProjectCollapsed,
   isProjectHidden,
   type Prefs,
   paletteFor,
@@ -128,6 +129,7 @@ import {
   setIcon,
   setLastFocus,
   setPaneWidth,
+  setProjectCollapsed,
   setProjectHidden,
   setProjectIcon,
   setProjectRename,
@@ -1827,6 +1829,18 @@ function CanvasInner({
   /** Removals that cannot be stored, because the project has no source to key
    *  them under. See `hiddenProjects`. */
   const [hiddenSourceless, setHiddenSourceless] = useState<readonly string[]>([]);
+  /**
+   * Folds that cannot be stored, because the project has no source to key them
+   * under. `hiddenSourceless` one gesture over, and it exists for that reason
+   * and one more: `SessionList.collapsedProjects` is OPTIONAL with a fallback
+   * to component state, and passing it turns that fallback off for EVERY
+   * project — so a canvas that passed only the keyed folds would leave a
+   * sourceless project with a fold control that did nothing. Kept for the
+   * session rather than persisted: there is no bucket to write it under, and a
+   * fold forgotten on reload is a far smaller thing than one that cannot be
+   * made at all.
+   */
+  const [collapsedSourceless, setCollapsedSourceless] = useState<readonly string[]>([]);
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
 
@@ -1877,6 +1891,38 @@ function CanvasInner({
     }
     return ids;
   }, [allEntries, prefs, hiddenSourceless]);
+
+  /**
+   * The projects folded shut, as the ids the sidebar draws from.
+   *
+   * `hiddenProjects` above, one gesture over, and derived the same way for the
+   * same reason: `prefs.collapsedProjects` is keyed by SOURCE, so an id counts
+   * as folded only under ITS OWN source's bucket. A project with no source has
+   * no bucket to read, so its fold is kept for the run in `collapsedSourceless`
+   * instead.
+   *
+   * NOT FLATTENED, unlike `collapsedGroups` below, and that is the one place
+   * the two folds are allowed to differ: a group id is minted locally and
+   * collides with nothing, while a project id is a cwd digest unique only
+   * within its source. `Object.values(...).flat()` here would let one source's
+   * fold close another source's project of the same id -- the collision the
+   * two-level shape exists to prevent, and a test holds it.
+   */
+  const collapsedProjects = useMemo(() => {
+    const ids: string[] = [];
+    for (const entry of allEntries) {
+      const { id, source: projectSource } = entry.project;
+      if (ids.includes(id)) continue;
+      if (
+        projectSource === undefined
+          ? collapsedSourceless.includes(id)
+          : isProjectCollapsed(prefs, projectSource, id)
+      ) {
+        ids.push(id);
+      }
+    }
+    return ids;
+  }, [allEntries, prefs, collapsedSourceless]);
 
   /**
    * The groups folded shut, flattened across sources for the sidebar.
@@ -2028,6 +2074,46 @@ function CanvasInner({
       current: group.projects.includes(projectId),
     }));
   }, [prefs.groups, pickingGroupFor]);
+
+  /**
+   * Fold one project, and remember it -- `toggleGroupCollapse` below, one
+   * level down, and deliberately the same gesture with the same outcome.
+   *
+   * It was NOT the same outcome until this was written. `prefs.collapsedProjects`
+   * shipped with a reader, a writer, a source-key migration and a TTL
+   * exemption, and nothing in this file passed any of it, so `SessionList` took
+   * its documented fallback and kept the project fold in component state: fold
+   * a GROUP and reload, still folded; fold a PROJECT and reload, open again,
+   * with nothing on screen to say which is which.
+   *
+   * The sourceless branch is `setProjectRemoved`'s, for its reason. Passing
+   * `collapsedProjects` at all turns `SessionList`'s local fallback off for
+   * EVERY project, so a canvas that wired only the keyed folds would leave a
+   * project with no source holding a chevron that does nothing -- trading a
+   * fold that is forgotten on reload for one that cannot be made at all.
+   */
+  const toggleProjectCollapse = useCallback(
+    (project: Project) => {
+      const projectSource = project.source;
+      if (projectSource === undefined) {
+        setCollapsedSourceless((current) =>
+          current.includes(project.id)
+            ? current.filter((id) => id !== project.id)
+            : [...current, project.id],
+        );
+        return;
+      }
+      savePrefs(
+        setProjectCollapsed(
+          prefs,
+          projectSource,
+          project.id,
+          !isProjectCollapsed(prefs, projectSource, project.id),
+        ),
+      );
+    },
+    [prefs, savePrefs],
+  );
 
   const toggleGroupCollapse = useCallback(
     (group: Group) => {
@@ -4674,6 +4760,13 @@ function CanvasInner({
     onAdd: onSidebarAdd,
     onAddInProject: onSidebarAddInProject,
     pendingAction: pendingAction,
+    // The project fold, stored -- the pair whose absence was the defect. Both
+    // or neither: `SessionList` falls back to its own state per prop, so
+    // passing the list without the handler would draw a fold nothing could
+    // change, and the handler without the list would change a fold nothing
+    // drew.
+    collapsedProjects: collapsedProjects,
+    onToggleCollapse: toggleProjectCollapse,
     // The group layer. `model.groups` rather than the filtered model's,
     // because the only thing this prop is for is a group holding no live
     // project -- see the prop -- and a filter cannot narrow one further.
