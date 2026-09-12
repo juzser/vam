@@ -53,4 +53,39 @@ describe('buildMenuTemplate', () => {
     expect(rolesOn('linux')).not.toContain('front');
     expect(rolesOn('darwin')).toContain('front');
   });
+
+  it.each(['darwin', 'win32', 'linux'] as const)(
+    'offers a reload, on %s, because vam had no way to refresh itself at all',
+    (platform) => {
+      // Operator: "Cmd+R to refresh vam."
+      //
+      // IT HAS TO BE A MENU ITEM, and that is the whole argument. Owning the
+      // template removed Electron's default menu, and with it the `reload`
+      // role -- so Cmd+R did nothing in the packaged app. A renderer binding
+      // would have answered the key but not the REASON: the moment worth
+      // reloading for is the one where the page is wedged, and a wedged page
+      // does not answer keydowns. A native key equivalent is matched before
+      // the page sees it, which is the same property this file's header
+      // treats as a hazard everywhere else and is the point here.
+      const found = rolesOn(platform);
+      expect(found).toContain('reload');
+      // And it does NOT arrive via `viewMenu`, which would bring the three
+      // zoom roles back with it.
+      expect(found).not.toContain('viewMenu');
+    },
+  );
+
+  it('spells the accelerator out rather than inheriting it', () => {
+    // `role: 'reload'` carries CmdOrCtrl+R on every platform today. Written
+    // down, it is a promise this repo keeps rather than one Electron's
+    // defaults keep for it -- and `test/electron/launch.test.ts` reads the
+    // same string back off the BUILT menu.
+    type Item = { accelerator?: string; role?: string; submenu?: readonly Item[] };
+    const flat = (nodes: readonly Item[]): Item[] =>
+      nodes.flatMap((node) => [node, ...flat(node.submenu ?? [])]);
+    const reload = flat(buildMenuTemplate('darwin') as readonly Item[]).find(
+      (item) => item.role === 'reload',
+    );
+    expect(reload?.accelerator).toBe('CommandOrControl+R');
+  });
 });

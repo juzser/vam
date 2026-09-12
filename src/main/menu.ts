@@ -18,6 +18,11 @@
  * admitted it could not assert. Owning the template removes the question:
  * the item is not there, so there is nothing to match.
  *
+ * ADDED SINCE: a View menu with ONE item, `reload` (Cmd+R). vam had no
+ * refresh at all once the default menu went, and the operator asked for one.
+ * It is built by hand rather than taken from `viewMenu`, which would bring the
+ * three zoom roles back with it -- see `reloadItem` below.
+ *
  * KEPT DELIBERATELY: on macOS the clipboard works THROUGH the menu, so
  * dropping the Edit roles kills Cmd+C/V/X/A app-wide with no error anywhere.
  * `appMenu`/`editMenu`/`fileMenu` are taken as Electron's own roles rather
@@ -42,6 +47,34 @@ function windowSubmenu(isMac: boolean): MenuItemConstructorOptions[] {
   return [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }];
 }
 
+/**
+ * Reload, and the reason it is a MENU ITEM rather than a chord.
+ *
+ * Operator: "Cmd+R to refresh vam." Owning the template above removed
+ * Electron's default menu, and the `reload` role went with it -- so Cmd+R did
+ * nothing at all in the packaged app.
+ *
+ * A binding in `chords.ts` would have answered the KEY without answering the
+ * REASON: the moment worth reloading for is the one where the renderer is
+ * wedged, and a wedged renderer does not answer keydowns. A native key
+ * equivalent is matched BEFORE the page sees it -- the property this file's
+ * header treats as a hazard for every other key, and the whole point for this
+ * one.
+ *
+ * BY HAND, NOT `role: 'viewMenu'`: that role carries `resetZoom`, `zoomIn` and
+ * `zoomOut`, which are exactly the three key equivalents this file exists to
+ * keep out of the menu. One item, named, with its accelerator written down
+ * rather than inherited from Electron's defaults.
+ *
+ * `reload` and not `forceReload`: a soft reload re-runs the renderer from the
+ * files it already has, which is what "refresh vam" means. `forceReload`
+ * bypasses the cache, which matters to a browser and not to an app whose
+ * renderer is loaded off disk.
+ */
+function reloadItem(): MenuItemConstructorOptions {
+  return { role: 'reload', label: 'Reload', accelerator: 'CommandOrControl+R' };
+}
+
 /** The template as a value, so the non-darwin branch is reachable in a test. */
 export function buildMenuTemplate(platform: NodeJS.Platform): MenuItemConstructorOptions[] {
   const isMac = platform === 'darwin';
@@ -50,6 +83,7 @@ export function buildMenuTemplate(platform: NodeJS.Platform): MenuItemConstructo
     // Quit lives -- the only way out once the default menu is gone.
     isMac ? { role: 'appMenu' } : { role: 'fileMenu' },
     { role: 'editMenu' },
+    { label: 'View', submenu: [reloadItem()] },
     { label: 'Window', role: 'window', submenu: windowSubmenu(isMac) },
   ];
 }

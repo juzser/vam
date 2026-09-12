@@ -510,6 +510,20 @@ describe('the Electron shell launches', () => {
     expect(withRole(smoke().menu, role)).toHaveLength(1);
   });
 
+  // REFRESH, off the built menu rather than off the template.
+  //
+  // Operator: "Cmd+R to refresh vam." Owning the menu had removed Electron's
+  // default `reload` with everything else, so the packaged app answered that
+  // key with nothing. It is a menu item and not a chord for the reason the
+  // rest of this file treats as a hazard: a native key equivalent is matched
+  // BEFORE the page sees it -- which is exactly what a wedged renderer needs,
+  // since it cannot answer a keydown at all.
+  it('offers a reload, with the accelerator written down rather than inherited', () => {
+    const reload = withRole(smoke().menu, 'reload');
+    expect(reload.map((row) => row.path)).toHaveLength(1);
+    expect(reload[0]?.accelerator).toBe('CommandOrControl+R');
+  });
+
   // Zoom, route by route.
   it('rests at zoom factor 1 and zoom level 0', () => {
     expect(smoke().zoomFactorAtRest).toBe(1);
