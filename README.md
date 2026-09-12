@@ -169,10 +169,23 @@ and links the download; it does not offer a plaintext fallback over the
 local network, because a bare `http://` origin is not a secure context and
 would quietly disqualify browser notifications later.
 
+Once phone access is on, the panel draws that `ts.net` address **as a QR
+code** beside it, so the phone opens the link with its camera instead of
+having a MagicDNS name typed into it. The encoder is ~250 lines in
+`src/renderer/settings/qr.ts` rather than a dependency, and it is deliberately
+narrow: byte mode, error-correction level M, versions 1-7 (122 bytes), which
+is one address and nothing else. Over that ceiling it draws nothing and the
+address stays in text — a blank square where a symbol should be is worse than
+no square. The QR is not drawn on the phone itself, which is the device that
+would be scanning it.
+
 Pairing is by a short code shown on the desktop (Settings → Remote), typed
 into the phone once; each paired device can be revoked individually, or all
-at once. The phone client itself ships **inside** the packaged desktop
-app — nothing extra to build or serve.
+at once. The code is **not** in the QR, on purpose: the address is not a
+secret and pairing is what authorises a device, so putting a live credential
+into a picture on a screen would trade that distinction for two seconds of
+typing. The phone client itself ships **inside** the packaged desktop app —
+nothing extra to build or serve.
 
 ## Keyboard reference
 
@@ -295,6 +308,18 @@ pnpm run test:e2e:reconnect  # the SSE drop/reconnect suite
 pnpm run test:e2e:phone      # the phone shell suite
 pnpm run test:e2e:electron   # the packaged-app launch suite
 ```
+
+One more hand-run check, which needs no Playwright and only macOS:
+
+```bash
+node e2e/qr-decode-check.mjs  # the pairing QR, read back by macOS Vision
+```
+
+It renders the encoder's own output at both a comfortable size and the 3px a
+module the panel actually draws, and asks the system barcode detector to read
+the payload back. It is the only check that can fail the way a QR fails: a
+symbol with the wrong format bits or a mis-ordered data walk looks exactly
+like a working one and decodes to nothing.
 
 None of these run in CI — they are hand-run only, by design: `e2e/` is
 excluded from every automated gate, and `.github/workflows/ci.yml` says so in

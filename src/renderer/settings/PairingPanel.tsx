@@ -23,6 +23,8 @@
  */
 
 import { Copy, Trash2 } from 'lucide-react';
+import { usePhoneViewport } from '../phone/viewport.js';
+import { QrAddress } from './QrAddress.js';
 
 /** Mirrors main's `PairedDevice`, minus the token, which never leaves main. */
 export type PairedDeviceView = {
@@ -201,6 +203,8 @@ export function PairingPanel(props: PairingPanelProps) {
   // hatch belongs -- never for a failed enable, where there is nothing yet to
   // reset.
   const failedToDisable = serve.enabled && (serve.lastError !== null || serve.timedOut);
+  /** Phone width, read for ONE decision: whether to draw the QR (see below). */
+  const phone = usePhoneViewport();
 
   return (
     <section data-testid="pairing-panel" className="flex flex-col gap-4 text-ink">
@@ -237,14 +241,32 @@ export function PairingPanel(props: PairingPanelProps) {
         ) : serve.enabled ? (
           <>
             {props.url === null ? null : (
-              <p className="mt-1">
-                <span data-testid="pairing-url" className="font-mono text-body text-ink">
-                  {props.url}
-                </span>{' '}
-                <button type="button" onClick={props.onCopyUrl} className={`mt-2 ${ACTION_BUTTON}`}>
-                  <Copy aria-hidden="true" size={14} /> Copy address
-                </button>
-              </p>
+              <div className="mt-1 flex items-start gap-3">
+                <p className="min-w-0 flex-1">
+                  <span data-testid="pairing-url" className="font-mono text-body text-ink">
+                    {props.url}
+                  </span>{' '}
+                  <button
+                    type="button"
+                    onClick={props.onCopyUrl}
+                    className={`mt-2 ${ACTION_BUTTON}`}
+                  >
+                    <Copy aria-hidden="true" size={14} /> Copy address
+                  </button>
+                </p>
+                {/* THE ADDRESS, DRAWN FOR A CAMERA (operator: "put a QR on the
+                    desktop so the remote link opens straight from the phone").
+                    A MagicDNS name is up to a hundred characters of hostname
+                    that somebody would otherwise type into a phone keyboard,
+                    and a mistyped one does not read as a typo -- it reads as
+                    "vam's phone access does not work".
+
+                    NOT ON A PHONE. This panel is reachable from the phone
+                    shell too, and a phone showing itself a QR of its own
+                    address is a picture of the thing already holding it. The
+                    address, the copy button and everything else stay. */}
+                {phone ? null : <QrAddress url={props.url} />}
+              </div>
             )}
             <p data-testid="serve-on" className={`mt-1 ${HINT}`}>
               Phone access is on. Your whole tailnet — every laptop, phone, tablet, server, CI

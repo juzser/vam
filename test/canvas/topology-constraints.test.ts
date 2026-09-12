@@ -65,9 +65,32 @@ const allSrcFiles = listSrcFiles(SRC_DIR);
  */
 const COLOUR_DEFINITION_FILES = ['styles.css', 'renderer/prefs/palette-templates.ts'];
 
+/**
+ * THE OTHER KIND OF EXEMPTION: a colour that is not a colour.
+ *
+ * 13.1 says every colour must come from a token, and the thing it catches is a
+ * component painting `#fff` where it should have reached for one. `QrAddress`
+ * paints `#000000` on `#ffffff` and neither is a design decision: a QR symbol
+ * is a MACHINE-READABLE OBJECT, and dark-modules-on-light-field is part of how
+ * it is read, not of how it looks. Tokenised, it would follow the palette --
+ * which the operator can repaint in one press from Settings -- and in the dark
+ * theme it would become the photographic negative of a QR code.
+ *
+ * PAID FOR, like the two above. `test/settings/qr-address.test.tsx` asserts
+ * those exact two literals, so changing them reddens a test rather than
+ * slipping through a hole; `test/settings/qr.test.ts` holds the symbol's
+ * structure; and `e2e/qr-decode-check.mjs` hands the rendered symbol to macOS's
+ * own Vision barcode detector, which is a stronger statement about those
+ * colours than "they came from a token" could ever be.
+ */
+const MACHINE_READABLE_FILES = ['renderer/settings/QrAddress.tsx'];
+
+/** Every path 13.1 does not scan, and each one is named and checked below. */
+const HEX_EXEMPT = [...COLOUR_DEFINITION_FILES, ...MACHINE_READABLE_FILES];
+
 const cssAndTsFiles = allSrcFiles.filter(
   (f) =>
-    !COLOUR_DEFINITION_FILES.some((skip) => f === skip || f.endsWith(`/${skip}`)) &&
+    !HEX_EXEMPT.some((skip) => f === skip || f.endsWith(`/${skip}`)) &&
     ['.ts', '.tsx', '.css'].includes(extname(f)),
 );
 
@@ -124,7 +147,7 @@ describe('epic.md section 13: standing constraints, made permanent and checkable
     // and the DANGEROUS half is the other direction: a file renamed INTO one
     // of these paths would be excluded without anyone deciding that. Both are
     // caught by requiring each entry to name a real file.
-    const missing = COLOUR_DEFINITION_FILES.filter(
+    const missing = HEX_EXEMPT.filter(
       (skip) => !allSrcFiles.some((f) => f === skip || f.endsWith(`/${skip}`)),
     );
     expect(missing, 'a 13.1 exclusion names a file that is no longer there').toEqual([]);
