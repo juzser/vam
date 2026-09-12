@@ -328,12 +328,18 @@ function SourceCanvas({
         </p>
       )}
       <div className="min-h-0 flex-1">
-        {/* The canvas is where the throw actually comes from, and the banner
-            above it is usually the sentence that explains why -- so the
-            boundary goes HERE, under the banner, rather than at the root
-            where it would take the explanation down with the canvas. It also
-            covers the phone shell, which `Canvas` renders. */}
-        <ErrorBoundary surface="the canvas">
+        {/* The session view is where the throw actually comes from, and the
+            banner above it is usually the sentence that explains why -- so the
+            boundary goes HERE, under the banner, rather than at the root where
+            it would take the explanation down with the view. It also covers
+            the phone shell, which `Canvas` renders.
+
+            THE NAME IS THE OPERATOR'S, NOT THE MODULE'S. It reads back as
+            "the session view stopped rendering", and 0.2 removed the canvas
+            this used to be called after -- a card naming a surface that no
+            longer exists sends a person looking for a view that is gone, at
+            the moment something already failed. */}
+        <ErrorBoundary surface="the session view">
           {/* THE SOURCE'S BACKWARD PAGER, published to every pane below.
               `source.history ?? null`, and both halves of that are deliberate:
               the member is optional on the port (`sources/port.ts` says why),

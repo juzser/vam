@@ -221,7 +221,7 @@ export async function replyToSession(input: {
     return {
       kind: 'refused',
       code: 'unknown-session',
-      message: `vam has no live session ${rowId}; it may have exited since the canvas was drawn`,
+      message: `vam has no live session ${rowId}; it may have exited since the session list was drawn`,
     };
   }
 

@@ -75,5 +75,5 @@ export type CanvasSource =
  */
 export const READ_ONLY_SOURCE: CanvasSource = {
   kind: 'demo',
-  note: 'no write route — this canvas is read-only',
+  note: 'no write route — the demo is read-only',
 };

@@ -275,7 +275,7 @@ export async function deliverToSession(
     return {
       kind: 'refused',
       code: 'unknown-session',
-      message: `vam has no live session ${rowId}; it may have exited since the canvas was drawn`,
+      message: `vam has no live session ${rowId}; it may have exited since the session list was drawn`,
     };
   }
   return deliver({ sessionId: row.sessionId, prompt, cwd: row.cwd });

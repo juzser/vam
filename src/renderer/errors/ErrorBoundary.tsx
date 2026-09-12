@@ -53,7 +53,7 @@ import { type LoggedEvent, recordFailure } from './log.js';
 import { composeReport, type Report } from './report.js';
 
 export type ErrorBoundaryProps = {
-  /** The surface in the operator's words: `the canvas`, `vam`. */
+  /** The surface in the operator's words: `the session view`, `vam`. */
   readonly surface: string;
   readonly children: ReactNode;
 };
