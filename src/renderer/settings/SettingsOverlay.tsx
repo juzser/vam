@@ -34,6 +34,7 @@ import {
   normalizeKey,
 } from '../keyboard/chords.js';
 import { type BindingRow, buildBindingSheet } from '../keyboard/keysheet.js';
+import { usePhoneViewport } from '../phone/viewport.js';
 import {
   applyPaletteTemplate,
   PALETTE_TEMPLATES,
@@ -210,6 +211,10 @@ export function SettingsOverlay({
   const [capturing, setCapturing] = useState<Capturing>(null);
   const [message, setMessage] = useState('');
   const wide = useWideNav();
+  /** Is this the phone shell's width? Read for COPY, never for layout — the
+   *  dialog's own breakpoint is `useWideNav` above, and a second reader of one
+   *  fact is how two of them disagree. */
+  const phone = usePhoneViewport();
   /** Read off the map on screen, not remembered from a write: the overlay can
    *  be OPENED over a contested map, which is the case no write path sees. */
   const clashes = bindingClashes(prefs.keyBindings);
@@ -396,13 +401,23 @@ export function SettingsOverlay({
               : 'waiting for a key — Esc cancels, Esc again closes'}
           </span>
           <span className="flex-1" />
+          {/* THE KEY ON THE DESKTOP, THE ACT ON A PHONE.
+              This button's entire accessible name was `Esc`. It closes when
+              tapped, which is what made it worse than a dead control: it reads
+              as a keyboard HINT, so a finger looks past it for a real close and
+              finds none -- the scrim closes too and says nothing either. The
+              chord is real on a desktop and stays printed there; at phone width
+              the glyph is the session bar's own `×`, and the NAME comes from
+              the catalogue on both, so a screen reader stops being handed a
+              keystroke where it asked what the button does. */}
           <button
             ref={closeButton}
             type="button"
             onClick={onClose}
-            className={`rounded border border-line px-2 py-0.5 text-ink-dim text-control ${FOCUS_RING}`}
+            aria-label={t('settings.close')}
+            className={`vam-tap rounded border border-line px-2 py-0.5 text-ink-dim text-control ${FOCUS_RING}`}
           >
-            Esc
+            {phone ? '×' : 'Esc'}
           </button>
         </div>
 
@@ -478,7 +493,7 @@ export function SettingsOverlay({
                         title={`${template.hint} — studied from ${template.studied}`}
                         aria-label={`apply the ${template.label} colour template to ${theme}`}
                         onClick={() => onChange(applyPaletteTemplate(prefs, theme, template.id))}
-                        className={`flex h-[28px] cursor-pointer items-center gap-2 rounded border border-line px-2.5 text-control text-ink-dim capitalize hover:border-line-loud hover:text-ink ${FOCUS_RING}`}
+                        className={`vam-tap flex h-[28px] cursor-pointer items-center gap-2 rounded border border-line px-2.5 text-control text-ink-dim capitalize hover:border-line-loud hover:text-ink ${FOCUS_RING}`}
                       >
                         <span aria-hidden="true" className="flex items-center">
                           {(['--vam-pane', '--vam-card', '--vam-in-bubble'] as const).map(
@@ -560,7 +575,7 @@ export function SettingsOverlay({
                           onChange={(event) =>
                             onChange(setPaletteColor(prefs, theme, token, event.target.value))
                           }
-                          className={`vam-swatch h-[24px] w-[24px] cursor-pointer rounded-full border-none bg-transparent p-0 ${FOCUS_RING} ${
+                          className={`vam-swatch vam-tap h-[24px] w-[24px] cursor-pointer rounded-full border-none bg-transparent p-0 ${FOCUS_RING} ${
                             overridden ? 'ring-2 ring-ink' : 'ring-1 ring-ink-faint'
                           }`}
                         />
@@ -646,7 +661,7 @@ export function SettingsOverlay({
                   role="switch"
                   aria-checked={prefs.focusView}
                   onClick={() => onChange(setFocusView(prefs, !prefs.focusView))}
-                  className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
+                  className={`vam-tap flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
                     prefs.focusView
                       ? 'border-line-loudest bg-raised text-ink'
                       : 'border-line text-ink-dim'
@@ -686,7 +701,7 @@ export function SettingsOverlay({
                         data-provider-option={provider.id}
                         aria-pressed={prefs.defaultProvider === provider.id}
                         onClick={() => onChange(setDefaultProvider(prefs, provider.id))}
-                        className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
+                        className={`vam-tap flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
                           prefs.defaultProvider === provider.id
                             ? 'border-line-loudest bg-raised text-ink'
                             : 'border-line text-ink-dim'
@@ -754,7 +769,7 @@ export function SettingsOverlay({
                       // nothing it is applied to -- which is the point: one
                       // rule with no exceptions beats a rule plus a list of
                       // strings that are allowed to break it.
-                      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
+                      className={`vam-tap flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
                         prefs.promptSubmitKey === key
                           ? 'border-line-loudest bg-raised text-ink'
                           : 'border-line text-ink-dim'
@@ -1012,7 +1027,7 @@ function SectionStrip(props: NavProps) {
         <button
           key={id}
           {...tabProps(props, id)}
-          className={`flex h-[26px] cursor-pointer items-center justify-center gap-[5px] rounded-[7px] text-control ${FOCUS_RING} ${
+          className={`vam-tap flex h-[26px] cursor-pointer items-center justify-center gap-[5px] rounded-[7px] text-control ${FOCUS_RING} ${
             props.section === id
               ? 'bg-segment-on font-medium text-ink'
               : 'text-ink-dim hover:text-ink'
@@ -1120,7 +1135,7 @@ function Choice({
       // Capitalised like every other control name on this surface -- as CSS,
       // so `label` keeps one canonical spelling for the tests and the
       // accessible name.
-      className={`flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
+      className={`vam-tap flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
         selected ? 'border-line-loudest bg-raised text-ink' : 'border-line text-ink-dim'
       }`}
     >
@@ -1194,7 +1209,7 @@ function labelFor(overrides: KeyBindings, id: string): string {
  *  the whole of what it does, and `e2e/settings-chrome-shots.mjs` plants a
  *  long chord at 320px so that deleting it goes red. */
 const SLOT_BOX =
-  'h-[26px] min-w-[104px] whitespace-nowrap rounded-[6px] border px-2 text-center font-mono text-control';
+  'vam-tap h-[26px] min-w-[104px] whitespace-nowrap rounded-[6px] border px-2 text-center font-mono text-control';
 
 /** One action: its name, its slots, and a way back to the shipped keys. */
 function BindingLine({
@@ -1396,7 +1411,7 @@ function SmallButton({ label, onPick }: { readonly label: string; readonly onPic
     <button
       type="button"
       onClick={onPick}
-      className={`cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-control ${FOCUS_RING}`}
+      className={`vam-tap cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-control ${FOCUS_RING}`}
     >
       {label}
     </button>
@@ -1404,7 +1419,7 @@ function SmallButton({ label, onPick }: { readonly label: string; readonly onPic
 }
 
 const STEP_BUTTON =
-  'flex h-[24px] w-[24px] cursor-pointer items-center justify-center rounded-[6px] text-ink-dim hover:bg-segment-on hover:text-ink disabled:cursor-default disabled:text-ink-faint disabled:hover:bg-transparent disabled:hover:text-ink-faint';
+  'vam-tap flex h-[24px] w-[24px] cursor-pointer items-center justify-center rounded-[6px] text-ink-dim hover:bg-segment-on hover:text-ink disabled:cursor-default disabled:text-ink-faint disabled:hover:bg-transparent disabled:hover:text-ink-faint';
 
 /**
  * A native `type="number"` between two token-drawn buttons.
@@ -1504,7 +1519,7 @@ function Stepper({
             event.preventDefault();
             nudge(to);
           }}
-          className="h-[24px] w-[52px] bg-transparent text-center font-mono text-control text-ink outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="vam-tap h-[24px] w-[52px] bg-transparent text-center font-mono text-control text-ink outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
         <button
           type="button"

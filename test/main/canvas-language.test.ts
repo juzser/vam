@@ -75,6 +75,26 @@ function literals(source: string): string[] {
 }
 
 describe('the copy vam shows', () => {
+  it('never names the canvas in the README either', () => {
+    // THE FRONT PAGE IS COPY TOO, and the first sweep did not reach it: it
+    // scanned `src/` only, so the README went on opening with "vam is a
+    // keyboard-first CANVAS ADE ... lays out every running session as a NODE"
+    // one commit after the refusals were fixed. That is the first paragraph a
+    // person reads about a UI that no longer exists.
+    //
+    // `docs/` is NOT scanned: `docs/ade-redesign.md` is a design record of the
+    // layout that was replaced, and a history that edits itself is not a
+    // history. The README describes what ships.
+    const readme = readFileSync(resolve(process.cwd(), 'README.md'), 'utf8');
+    expect(readme.length, 'a README to scan').toBeGreaterThan(2000);
+    const stale = readme
+      .split('\n')
+      .map((line, i) => ({ line, n: i + 1 }))
+      .filter(({ line }) => /\b(the|this|single) canvas\b/i.test(line))
+      .map(({ line, n }) => `README.md:${n}: ${line.trim().slice(0, 70)}`);
+    expect(stale).toEqual([]);
+  });
+
   it('never names the canvas, which 0.2 removed', () => {
     const files = sources(ROOT);
     // THE CORPUS, INSIDE THE ASSERTION. A sweep that walked an empty tree

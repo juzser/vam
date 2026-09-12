@@ -1580,6 +1580,22 @@ body {
   width: auto;
 }
 
+/* A COLOUR SWATCH CANNOT HOLD A `[data-tap-skin]`, so its paint comes inward
+ * from the other side. `input[type=color]` has no children to mark, and the
+ * disc it paints fills the control -- so at the 44 the phone floor asks for, a
+ * 24px disc becomes a 44px one, which is the "too big on mobile" complaint the
+ * skin rule exists to answer.
+ *
+ * ON THE INPUT, NOT ON `::-webkit-color-swatch-wrapper`. The pseudo-element
+ * route was written first and does NOTHING: at `padding: 16px` -- enough to
+ * shrink a 44px disc to 12 -- the screenshot came back unchanged. The
+ * element's own padding is what the swatch is laid out inside, and at 7px the
+ * disc measures the same 30 every other phone skin paints, verified against a
+ * swatch with a colour in it rather than against dark-on-dark. */
+.vam-phone .vam-swatch.vam-tap {
+  padding: 7px;
+}
+
 /* A phone has no hover, so every hover-only affordance is dead there and the
    press is the only feedback a finger gets. Drawn on the skin, like
    everything else visible. */
@@ -1659,9 +1675,26 @@ body {
   opacity: 1;
 }
 
-/* Without `viewport-fit=cover` in index.html this resolves to 0 and the
-   record button sits under the iOS home indicator. */
-[data-phone-shell] [data-composer-bar] {
+/* THE THREE ELEMENTS THAT CAN END A PHONE SCREEN, and there were three all
+ * along -- the rule only ever named one.
+ *
+ * `viewport-fit=cover` is in `index.html`, so this resolves to the real
+ * indicator; without it, it resolves to 0 and the last row sits under the bar.
+ * Measured with CDP's `Emulation.setSafeAreaInsetsOverride` at the iPhone's
+ * 34px (`e2e/phone-shell.pw.ts`), which is the only way to tell a flat `12px`
+ * from this `max()`: at the 0 inset every headless browser reports, the two
+ * are the same number.
+ *
+ *  - the composer, whose record button this rule was written for;
+ *  - the QUESTION CARD, which is the bottom of the screen whenever the
+ *    composer is withdrawn -- and its last row is an option to tap, wearing a
+ *    flat 12px that a 34px indicator eats;
+ *  - the LIST's status bar, which sat flush at the screen's edge with no
+ *    padding at all, and which is where the failures button lives: "the
+ *    surface most wanted at the worst moment". */
+[data-phone-shell] [data-composer-bar],
+[data-phone-shell] [data-question-bar],
+[data-phone-shell] [data-phone-status-bar] {
   padding-bottom: max(12px, env(safe-area-inset-bottom));
 }
 
