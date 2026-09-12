@@ -2906,9 +2906,26 @@ const TurnBlock = memo(function TurnBlock({
              `ink-quiet`, not `ink-ghost` -- issue 201 ruled `ghost` out of
              anything that has to be READ, and on a folded turn this is the
              only thing there is to read. */
-          className={`-top-1 absolute right-0 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded font-mono text-ink-quiet text-meta leading-none hover:text-ink ${FOCUS_RING}`}
+          /* `vam-tap` grows this to the phone's 44 (`styles.css`), which is a
+             floor 24 does not meet -- five of these draw on one folded
+             screen, and this is the ONLY route back to a folded turn's
+             working. Out of flow, so the extra box costs no height.
+
+             IT GROWS INWARD, AND THAT IS THE POINT. Anchored at `right-0`,
+             the 44 box ends where the 24 one did -- flush against the
+             `data-out-to-top` chevron's own 44px column at x=346, with no
+             overlap. Re-anchoring it outward to keep the mark still was
+             tried and measured: x=312..356 against a chevron at 346..390, so
+             two different actions shared 10px of hit area. A mark that moves
+             10px is a smaller cost than a tap that does the wrong thing. */
+          className={`vam-tap -top-1 absolute right-0 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded font-mono text-ink-quiet text-meta leading-none hover:text-ink ${FOCUS_RING}`}
         >
-          <span aria-hidden="true">···</span>
+          {/* The phone's other half: hit 44, PAINT 30, the pattern the view
+              icons and the keystroke strip already use. On the desktop this
+              span is unstyled and the box stays 24. */}
+          <span data-tap-skin aria-hidden="true">
+            ···
+          </span>
         </button>
       )}
       {showProgress && (
@@ -5014,7 +5031,13 @@ export function DetailPanel(props: DetailPanelProps) {
                           type="button"
                           data-column-more-ask
                           onClick={readOlder}
-                          className="cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
+                          /* `vam-tap` FOR THE PHONE'S FLOOR, and it is opt-in
+                             by design (`styles.css`): the stylesheet sizes a
+                             tap target, the component decides what one is.
+                             Measured without it at 390px this link was
+                             119.2x16.5 -- half a touch target, and the only
+                             way to reach anything older than the last page. */
+                          className="vam-tap cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
                         >
                           {columnMore === 'unavailable' ? 'Try again' : 'Read earlier turns'}
                         </button>

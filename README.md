@@ -1,24 +1,24 @@
 # vam — VIM Agent Management
 
-vam is a keyboard-first canvas ADE (agent development environment) for
-watching and steering coding-agent sessions: one screen that lays out every
-running session as a node, colours it by whether it needs you, and lets you
-navigate and act on it with vim-style keys instead of a mouse. vam runs on
+vam is a keyboard-first ADE (agent development environment) for watching and
+steering coding-agent sessions: one screen that lists every running session,
+colours it by whether it needs you, and lets you navigate and act on it with
+vim-style keys instead of a mouse. vam runs on
 its own — it ships with a real, built-in source (your own Claude Code
 sessions) and does not require any other project to be installed or running.
 
-![vam canvas, dark theme](docs/images/canvas-dark.png)
+![vam, dark theme](docs/images/canvas-dark.png)
 
 ## What this is
 
 Running several agents at once turns into a stream of terminals to babysit
 for the one moment each of them stalls and needs a person. vam's job is to
-collapse that into a single canvas — one node per session, grouped by
+collapse that into a single screen — one row per session, grouped by
 project, coloured `running` / `waiting` / `done` / `failed` — and to make the
 `waiting` state impossible to miss, so getting from "something needs me" to
 looking at it and answering it takes as few keystrokes as possible.
 
-vam is source-agnostic by design: the canvas, the keyboard layer and the
+vam is source-agnostic by design: the shell, the keyboard layer and the
 domain model (`src/renderer/domain/model.ts`) know nothing about any one
 backend. What a source can do — read live, deliver a prompt, open a
 terminal, and so on — travels as data (`SourceCapabilities`,
@@ -84,7 +84,7 @@ pnpm run dev
 
 Demo mode renders a fixed fixture (`src/renderer/fixtures/demo.ts`) — fictional
 sessions, not a connection to anything. Every write is refused before it
-reaches any server, and the canvas shows a banner saying so. This is for
+reaches any server, and the shell shows a banner saying so. This is for
 looking at the interaction model, not for recording anything real.
 
 ### Desktop mode — against your own Claude Code sessions
@@ -151,7 +151,7 @@ which source it is looking at.
 
 ## Mobile
 
-The desktop app can serve the same canvas to a phone. The server
+The desktop app can serve the same sessions to a phone. The server
 (`src/main/remote/server.ts`) binds **loopback only** — it is never directly
 reachable from another machine. Settings → Remote has an **Enable phone
 access** button that runs `tailscale serve` for you; that proxies the
@@ -290,7 +290,7 @@ layout is this way.
 Once the harness exists:
 
 ```bash
-pnpm run test:e2e            # the canvas suite
+pnpm run test:e2e            # the shell suite (sidebar, panes, SSE drop)
 pnpm run test:e2e:reconnect  # the SSE drop/reconnect suite
 pnpm run test:e2e:phone      # the phone shell suite
 pnpm run test:e2e:electron   # the packaged-app launch suite

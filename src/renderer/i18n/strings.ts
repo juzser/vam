@@ -75,6 +75,16 @@ const EN = {
   'settings.title': 'settings',
   'settings.status.stored': 'stored in this browser, not in a session',
   'settings.nav.heading': 'Sections',
+  // The accessible name of the close control, which the i18n pass walked past
+  // because the button's whole label was the hard-coded string `Esc` -- a key
+  // a phone does not have. Lower, like every other name on this surface.
+  //
+  // `close`, NOT `close settings`: the scrim behind the dialog already carries
+  // that exact name, and two buttons answering to one name is a dialog where
+  // "press close settings" is ambiguous to anything that resolves controls by
+  // name -- a screen reader, and this repo's own tests, which found the scrim
+  // by it. Inside a dialog whose heading reads SETTINGS, `close` says the rest.
+  'settings.close': 'close',
 
   // ── Appearance ───────────────────────────────────────────────────────────
   'settings.appearance.hint':
