@@ -78,6 +78,7 @@ function draw(over: Partial<DetailPanelProps> = {}) {
 }
 
 const row = () => document.querySelector<HTMLElement>('[data-prs-repo]');
+const name = () => document.querySelector<HTMLElement>('[data-prs-repo-name]');
 const choose = () => document.querySelector<HTMLElement>('[data-prs-repo-choose]');
 const clear = () => document.querySelector<HTMLElement>('[data-prs-repo-clear]');
 
@@ -104,27 +105,40 @@ describe('the PRs pane says where it is asking from', () => {
     expect(clear()).toBeNull();
   });
 
-  it('does not name a directory nobody chose', () => {
-    // A row on every session spelling out the session's own path is a sentence
-    // restating the default, on a narrow pane, forever.
+  it('is the first thing in the pane, not the last', () => {
+    // Operator: "on the PRs screen, put a heading section at the top -- the
+    // current repo on the left, and choose-another on the right, as a button."
+    //
+    // It shipped as a FOOTER, under the list, on the argument that the way to
+    // change something belongs beside the answer it changes. That was the
+    // wrong way round: the repository is what the whole pane is ABOUT, and a
+    // reader who has to reach the bottom to learn which one they are looking
+    // at has already read the list under the wrong assumption.
     draw({ prRepo: { directory: null, choose: () => {}, clear: () => {} } });
-    // BOUND TO THE CATALOGUE, not to a copy of the sentence. A test carrying
-    // its own literal passes while the two drift, which is the bug a catalogue
-    // exists to make impossible.
-    expect(row()?.textContent).toContain(t('prs.repo.own'));
+    expect(row()?.parentElement?.firstElementChild).toBe(row());
+  });
+
+  it('names the repository rather than restating a path', () => {
+    // A HEADING IS A NAME, not a sentence. The session's own project is named
+    // by its own name -- the one the sidebar groups it under -- and there is
+    // no path to read, because nobody chose one.
+    draw({
+      prRepo: { directory: null, projectName: 'factory', choose: () => {}, clear: () => {} },
+    });
+    expect(name()?.textContent).toBe('factory');
     expect(row()?.getAttribute('data-prs-repo-overridden')).toBeNull();
   });
 
-  it('names the directory once the project is pointed at one', () => {
+  it('names the chosen repository, and keeps its whole path within reach', () => {
     // FROM HERE ON THE PANE IS ANSWERING ABOUT A REPOSITORY THE SESSION IS NOT
     // IN, and that may never be silent -- it is the whole reason the answer
-    // looked wrong rather than aimed wrong before this existed.
-    draw({ prRepo: { directory: DIR, choose: () => {}, clear: () => {} } });
-    expect(row()?.textContent).toContain(DIR);
-    expect(row()?.textContent).toContain(t('prs.repo.overridden', { directory: DIR }));
+    // looked wrong rather than aimed wrong before this existed. The heading
+    // carries the last segment, which is what a repository is called; the path
+    // that tells two checkouts of it apart is on `title`.
+    draw({ prRepo: { directory: DIR, projectName: 'factory', choose: () => {}, clear: () => {} } });
+    expect(name()?.textContent).toBe('other-repo');
+    expect(name()?.getAttribute('title')).toBe(DIR);
     expect(row()?.getAttribute('data-prs-repo-overridden')).toBe('true');
-    // The whole path stays readable even when the column truncates it.
-    expect(row()?.querySelector('[title]')?.getAttribute('title')).toBe(DIR);
   });
 
   it('labels both acts from the catalogue, in the case they paint', () => {
@@ -139,7 +153,7 @@ describe('the PRs pane says where it is asking from', () => {
     expect(choose()?.textContent).toBe(t('prs.repo.choose'));
     cleanup();
     draw({ prRepo: { directory: DIR, choose: () => {}, clear: () => {} } });
-    expect(choose()?.textContent).toBe(t('prs.repo.change'));
+    expect(choose()?.textContent).toBe(t('prs.repo.choose'));
     expect(clear()?.textContent).toBe(t('prs.repo.clear'));
   });
 
@@ -195,6 +209,6 @@ describe('the PRs pane says where it is asking from', () => {
     });
     // With no entry there is no project, so `Canvas` would hand no control --
     // this renders the prop directly, which is the case the pane must handle.
-    expect(screen.queryByText(t('prs.repo.overridden', { directory: DIR }))).not.toBeNull();
+    expect(screen.queryByText('other-repo')).not.toBeNull();
   });
 });

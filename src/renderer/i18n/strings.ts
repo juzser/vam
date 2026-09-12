@@ -125,10 +125,13 @@ const EN = {
   // above. Settings is capitalised by the stylesheet because a browser guard
   // measures the painted result; this footer is drawn only where a directory
   // picker exists, which is the desktop, and no web guard can reach it.
-  'prs.repo.own': "Asking in this session's own directory",
-  'prs.repo.overridden': 'Asking in {directory}',
-  'prs.repo.choose': 'Choose another…',
-  'prs.repo.change': 'Change…',
+  // A HEADING IS A NAME, NOT A SENTENCE. These read as labels because the row
+  // moved from under the list to above it: "Asking in this session's own
+  // directory" was a line of prose restating the default forever, where
+  // `factory` is the same fact in one word. `prs.repo.session` is the fallback
+  // for a caller that hands no project name -- never a blank heading.
+  'prs.repo.session': "This session's repository",
+  'prs.repo.choose': 'Choose another repo',
   'prs.repo.clear': "Use the session's",
 
   // ── Exercised by the catalogue's own tests, and by nothing else ──────────

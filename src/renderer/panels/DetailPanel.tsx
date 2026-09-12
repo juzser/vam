@@ -742,6 +742,14 @@ export type DetailPanelProps = {
   readonly prRepo?: {
     /** The chosen directory, or `null` for the session's own. */
     readonly directory: string | null;
+    /**
+     * What to call the repository when nothing is overridden: the project's
+     * own name, which is the one the sidebar groups this session under.
+     *
+     * Optional because the heading has a truthful fallback without it, and a
+     * caller that has not wired it up should get that rather than a blank.
+     */
+    readonly projectName?: string;
     readonly choose: () => void;
     readonly clear: () => void;
   };
@@ -1035,52 +1043,75 @@ function PullRequestsTab({
    * repository. Nothing on screen said which directory was being asked, so the
    * answer looked wrong rather than aimed wrong.
    *
-   * DRAWN ONLY WHEN POINTED, in the common case. A row on every session saying
-   * "asking in the session's own directory" is a sentence restating the
-   * default, on a narrow pane, forever. What is always reachable is the way to
-   * CHANGE it, which is the small button -- and once a project IS pointed
-   * somewhere, the directory is named, because from then on the pane is
-   * answering about a repository the session is not in and that must never be
-   * silent.
+   * A HEADING, AT THE TOP, ON THE OPERATOR'S SECOND LOOK. It shipped as a
+   * footer under the list, on the argument that the way to change something
+   * belongs beside the answer it changes. That was the wrong way round: the
+   * repository is what this whole pane is ABOUT, and a reader who has to reach
+   * the bottom to learn which one they are looking at has already read the
+   * list under the wrong assumption. "Put a heading section at the top -- the
+   * current repo on the left, choose-another on the right, as a button."
+   *
+   * SO IT IS DRAWN ALWAYS, not only when overridden. A name is not a sentence:
+   * the old row spent a line saying "asking in this session's own directory",
+   * which restated the default forever; a heading reading `factory` is the
+   * same fact as a label, and it is the one the reader needs BEFORE the list
+   * rather than after it.
+   *
+   * The way back out (`prs.repo.clear`) draws only once there is something to
+   * go back from, and sits inboard of the button rather than beside the name:
+   * a control that undoes nothing is not drawn at all, and the choose button
+   * stays in one place whether or not it is there.
    */
-  const footer =
+  /**
+   * THE NAME OF THE REPOSITORY THIS PANE IS ASKING IN.
+   *
+   * The last segment of the chosen directory, which is what a repository is
+   * called, or the project's own name when nobody has chosen one. A heading is
+   * a NAME: the full path is on `title`, where it settles which of two
+   * checkouts this is without spending the row on it.
+   */
+  const repoName =
+    repo?.directory === null || repo?.directory === undefined
+      ? (repo?.projectName ?? t('prs.repo.session'))
+      : (repo.directory.replace(/\/+$/, '').split('/').pop() ?? repo.directory);
+  const heading =
     repo === undefined ? null : (
       <div
         data-prs-repo
         data-prs-repo-overridden={repo.directory === null ? undefined : 'true'}
-        className="flex flex-none items-baseline gap-2 border-line border-t pt-2 text-meta text-ink-faint"
+        className="flex flex-none items-center gap-2 border-line border-b pb-2"
       >
-        {repo.directory === null ? (
-          <span className="min-w-0 flex-1 truncate">{t('prs.repo.own')}</span>
-        ) : (
-          <span className="min-w-0 flex-1 truncate" title={repo.directory}>
-            {t('prs.repo.overridden', { directory: repo.directory })}
-          </span>
-        )}
-        <button
-          type="button"
-          data-prs-repo-choose
-          onClick={repo.choose}
-          className={`vam-hit-24 flex-none cursor-pointer rounded px-1 text-ink-dim hover:text-ink ${FOCUS_RING}`}
+        <span
+          data-prs-repo-name
+          title={repo.directory ?? undefined}
+          className="min-w-0 flex-1 truncate font-medium text-control text-ink"
         >
-          {repo.directory === null ? t('prs.repo.choose') : t('prs.repo.change')}
-        </button>
+          {repoName}
+        </span>
         {repo.directory === null ? null : (
           <button
             type="button"
             data-prs-repo-clear
             onClick={repo.clear}
-            className={`vam-hit-24 flex-none cursor-pointer rounded px-1 text-ink-dim hover:text-ink ${FOCUS_RING}`}
+            className={`vam-hit-24 flex-none cursor-pointer rounded px-1 text-ink-faint text-meta hover:text-ink ${FOCUS_RING}`}
           >
             {t('prs.repo.clear')}
           </button>
         )}
+        <button
+          type="button"
+          data-prs-repo-choose
+          onClick={repo.choose}
+          className={`vam-hit-24 flex-none cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-meta hover:border-line-loud hover:text-ink ${FOCUS_RING}`}
+        >
+          {t('prs.repo.choose')}
+        </button>
       </div>
     );
   const framed = (body: ReactNode) => (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {heading}
       {body}
-      {footer}
     </div>
   );
   if (pullRequests === undefined) {
@@ -4714,7 +4745,14 @@ export function DetailPanel(props: DetailPanelProps) {
         ) : current === 'Agents' ? (
           <AgentsTab agents={entry?.session.agents} />
         ) : current === 'PRs' ? (
-          <PullRequestsTab pullRequests={entry?.session.pullRequests} repo={prRepo} />
+          <PullRequestsTab
+            pullRequests={entry?.session.pullRequests}
+            repo={
+              prRepo === undefined
+                ? undefined
+                : { ...prRepo, projectName: prRepo.projectName ?? entry?.project.name }
+            }
+          />
         ) : orderedTurns.length === 0 ? (
           entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip
           // above it, and an empty strip already says "no sessions open —
