@@ -16,9 +16,11 @@
  *  1. NOT THERE. `dictationAvailable` is false and the button is not drawn --
  *    absent, not dimmed, the same rule the directory picker and the attach
  *    button follow in `DetailPanel`.
- *  2. THERE AND REFUSED. Permission denied, no microphone, or -- the one a
- *    packaged build meets -- a recogniser that needs a cloud service this
- *    browser has no key for. Every one of those gets its own sentence.
+ *  2. THERE AND REFUSED. Permission denied by the browser, no microphone, or a
+ *    recogniser whose service cannot be reached. Every one gets its own
+ *    sentence. The packaged app is no longer among these cases: vam denies its
+ *    own microphone there, so the button is not drawn at all -- see
+ *    `dictationAvailable`.
  *  3. RUNNING. Final transcripts arrive as text; interim ones are dropped,
  *    because an interim result is a guess that will be REPLACED, and appending
  *    guesses to a draft writes every phrase twice.
@@ -50,6 +52,12 @@ export type SpeechScope = {
   readonly SpeechRecognition?: RecognitionCtor;
   readonly webkitSpeechRecognition?: RecognitionCtor;
   readonly navigator?: { readonly language?: string };
+  /**
+   * The preload bridge, and here it is read as ONE FACT ONLY: that this page
+   * is the packaged Electron app, whose main process denies every Chromium
+   * permission. Nothing on it is called.
+   */
+  readonly api?: unknown;
 };
 
 export type DictationEvents = {
@@ -66,8 +74,36 @@ export type DictationHandle = { stop(): void };
 const ctorFrom = (scope: SpeechScope): RecognitionCtor | null =>
   scope.SpeechRecognition ?? scope.webkitSpeechRecognition ?? null;
 
-/** Is there a recogniser on this platform at all? */
+/**
+ * Can dictation actually run here?
+ *
+ * TWO QUESTIONS, AND THE SECOND ONE WAS MISSING. Feature detection answers
+ * "is there a recogniser", and the answer in the packaged app is YES -- it is
+ * Chromium, `webkitSpeechRecognition` is defined, and a button was drawn on
+ * the strength of it. What that button could never do is LISTEN:
+ * `src/main/index.ts` registers a deny-all permission policy (`callback(false)`
+ * on every request, `setPermissionCheckHandler(() => false)` on every check),
+ * so vam refuses its own microphone before Chromium's missing speech-service
+ * key is even reached.
+ *
+ * THE POLICY IS NOT THE BUG, THE BUTTON WAS. Deny-by-default is a deliberate
+ * security decision and widening it for one convenience would be the wrong
+ * trade; the repo's own rule is that a control which cannot act is not drawn.
+ * So dictation is absent in this build and present where it works: a browser
+ * tab, and the paired phone -- which is the surface it was asked for, where a
+ * soft keyboard is the reason a phone is slower than the desktop beside it.
+ *
+ * `api` IS THE DISCRIMINATOR, the same one `App.tsx` uses to send a browser to
+ * `DemoCanvas`: it is a preload export, so it exists in Electron and nowhere
+ * else. Reading the permission itself (`navigator.permissions.query`) would be
+ * more direct and is not better here -- it is asynchronous, so the button
+ * would paint and then vanish, and Safari, which is what the paired phone
+ * runs, does not implement the `microphone` name at all.
+ *
+ * THE DAY THE POLICY CHANGES, THIS LINE CHANGES WITH IT. Both files say so.
+ */
 export function dictationAvailable(scope: SpeechScope = globalThis as SpeechScope): boolean {
+  if (scope.api !== undefined && scope.api !== null) return false;
   return ctorFrom(scope) !== null;
 }
 
@@ -90,7 +126,7 @@ function sentenceFor(code: string): string {
     case 'audio-capture':
       return 'no microphone answered — check that one is connected and selected.';
     case 'network':
-      return 'this build reaches a speech service over the network and could not — dictation works in a browser tab and on a paired phone.';
+      return 'the speech recogniser is a network service and could not be reached — check the connection and try again.';
     case 'aborted':
       return 'dictation stopped before anything was transcribed.';
     default:

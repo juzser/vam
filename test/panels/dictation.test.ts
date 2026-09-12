@@ -61,6 +61,11 @@ class FakeRecognition {
 const scopeWith = (ctor: unknown, language = 'vi-VN') =>
   ({ SpeechRecognition: ctor, navigator: { language } }) as never;
 
+/** The same scope, plus the preload bridge — which is what "this is the
+ *  packaged Electron app" looks like from the renderer. */
+const electronScope = (ctor: unknown) =>
+  ({ SpeechRecognition: ctor, navigator: { language: 'en-US' }, api: {} }) as never;
+
 describe('whether dictation can run at all', () => {
   it('is false where the browser has no recogniser', () => {
     expect(dictationAvailable({} as never)).toBe(false);
@@ -69,6 +74,24 @@ describe('whether dictation can run at all', () => {
   it('is true on the standard name and on the webkit one', () => {
     expect(dictationAvailable(scopeWith(FakeRecognition))).toBe(true);
     expect(dictationAvailable({ webkitSpeechRecognition: FakeRecognition } as never)).toBe(true);
+  });
+
+  it('is false in the Electron build, where vam refuses its own microphone', () => {
+    // NOT A CAPABILITY QUESTION, A POLICY ONE, and it is vam's own policy.
+    // `src/main/index.ts` registers a deny-all permission handler --
+    // `callback(false)` for every request, `setPermissionCheckHandler(() =>
+    // false)` for every check -- so the microphone is refused before
+    // Chromium's absent speech-service key is ever reached. A recogniser
+    // constructor still EXISTS there, which is exactly why feature detection
+    // alone drew a button that could only ever fail.
+    //
+    // THE DISCRIMINATOR IS THE BRIDGE, the one `App.tsx` already uses to send
+    // a browser to `DemoCanvas`: `window.api` is a preload export, so it is
+    // present in the packaged app and absent in a browser tab and on the
+    // paired phone -- the two places dictation genuinely works.
+    expect(dictationAvailable(electronScope(FakeRecognition))).toBe(false);
+    // And the same scope without the bridge is a browser, where it does.
+    expect(dictationAvailable(scopeWith(FakeRecognition))).toBe(true);
   });
 
   it('starts nothing where there is nothing to start', () => {
