@@ -198,35 +198,44 @@ describe('the composer submit paints which outcome it will produce', () => {
     // FIRST, THAT THERE IS ANYTHING TO COMPARE. Both halves of every check
     // below are relative, and two nulls are equal to each other forever --
     // which is how a guard passes on an absence.
-    expect(delivering.word).not.toBe('');
-    expect(recording.word).not.toBe('');
     expect(delivering.glyph).not.toBeNull();
     expect(recording.glyph).not.toBeNull();
+    expect(delivering.name).not.toBe('');
+    expect(recording.name).not.toBe('');
 
-    expect(delivering.word).not.toBe(recording.word);
-    // A DIFFERENT GLYPH, not merely a different word: the button is 72px wide
-    // and the icon is what reads first. Which icon is a design choice and is
+    // THE WORD IS GONE AND THE DISTINCTION IS NOT. Operator: "drop the Send
+    // label from the button, the icon is enough." What carried the
+    // delivers/records difference was the word, so with the word gone this is
+    // the assertion that keeps the difference somewhere: a different GLYPH,
+    // and a different accessible NAME. Which icon is a design choice and is
     // not asserted; that the two do not share one is the claim.
+    expect(delivering.word).toBe('');
+    expect(recording.word).toBe('');
     expect(delivering.glyph).not.toBe(recording.glyph);
-    expect({ delivering: delivering.word, recording: recording.word }).toEqual({
-      delivering: 'Send',
-      recording: 'Record',
+    expect(delivering.name).not.toBe(recording.name);
+    expect({ delivering: delivering.name, recording: recording.name }).toEqual({
+      delivering: 'send prompt',
+      recording: 'record prompt',
     });
   });
 
-  it('keeps the visible word inside the accessible name (WCAG 2.5.3)', () => {
-    // A speech user says the word they can see. If the name does not contain
-    // it, "click Record" reaches nothing -- and this is exactly the pairing
-    // that goes wrong first when the in-flight wording is edited, so both
-    // states are read.
+  it('names the act in every state, now that nothing is painted to read', () => {
+    // WCAG 2.5.3 (label in name) STOPS APPLYING when there is no visible
+    // label, and what replaces it is 1.1.1: an icon-only control has to carry
+    // its own name, in every state -- including mid-flight, which is the
+    // pairing that went wrong first when the in-flight wording was last
+    // edited, and the reason both states are still read here.
     for (const delivers of [true, false]) {
       for (const sending of [true, false]) {
         cleanup();
         draw({ draft: 'ship it', delivers, sending });
         const name = submit()?.getAttribute('aria-label') ?? '';
-        expect(name.toLowerCase(), `delivers=${delivers} sending=${sending}`).toContain(
-          word().toLowerCase(),
-        );
+        const where = `delivers=${delivers} sending=${sending}`;
+        expect(name, where).not.toBe('');
+        expect(name.toLowerCase(), where).toContain(delivers ? 'send' : 'record');
+        // And nothing is painted inside it but the glyph.
+        expect(word(), where).toBe('');
+        expect(submit()?.querySelectorAll('svg').length, where).toBe(1);
       }
     }
   });

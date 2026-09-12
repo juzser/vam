@@ -1508,6 +1508,7 @@ body {
 [data-phone-shell] [data-avatar-bar] button,
 [data-phone-shell] [data-remote-limits] summary,
 [data-phone-shell] [data-prompt-record],
+[data-phone-shell] [data-prompt-dictate],
 [data-phone-shell] [data-status-pill] {
   min-height: 44px;
   min-width: 44px;
