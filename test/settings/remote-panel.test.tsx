@@ -140,7 +140,7 @@ describe('RemotePanel', () => {
     const api = fakeApi({ writesPreference: false });
     render(<RemotePanel api={api} active />);
 
-    await userEvent.click(await screen.findByRole('button', { name: /turn writes on/i }));
+    await userEvent.click(await screen.findByRole('switch', { name: /writes/i }));
 
     expect(api.setWrites).toHaveBeenCalledWith(true);
   });

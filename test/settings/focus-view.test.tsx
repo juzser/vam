@@ -88,7 +88,10 @@ function open(prefs: Prefs = EMPTY_PREFS) {
   return { onChange, onClose };
 }
 
-const toggle = () => document.querySelector<HTMLButtonElement>('[data-focus-view-toggle]');
+const toggle = () => document.querySelector<HTMLButtonElement>('[data-switch="focus-view"]');
+/** The two parts that make a switch LOOK like one rather than read like one. */
+const track = () => toggle()?.querySelector('[data-switch-track]') ?? null;
+const knob = () => toggle()?.querySelector('[data-switch-knob]') ?? null;
 const promise = () =>
   document.querySelector<HTMLElement>('[data-focus-view-note]')?.textContent ?? '';
 const lines = () => document.querySelectorAll('[data-progress-line]');
@@ -110,6 +113,38 @@ describe('the appearance section offers focus view', () => {
     expect(toggle()?.getAttribute('role')).toBe('switch');
     expect(toggle()?.getAttribute('aria-checked')).toBe('false');
     expect(toggle()?.textContent).toBe('off');
+  });
+
+  it('looks like a switch, not only like a button that says "off"', () => {
+    // OPERATOR: "turn some of the settings buttons into a toggle UI." The
+    // control already WAS a switch to a screen reader and a bordered word to
+    // everybody else, which is the half that was missing: a state is read off
+    // a track and a knob at a glance, where a word has to be read.
+    //
+    // STRUCTURE HERE, TRAVEL IN THE BROWSER. Whether the knob actually moves
+    // and whether the two states are distinguishable are questions about
+    // paint, and `e2e/settings-chrome-shots.mjs` measures them. What this can
+    // hold is that the parts exist at all, on both states.
+    open();
+    expect(track(), 'the track is drawn').not.toBeNull();
+    expect(knob(), 'the knob is drawn').not.toBeNull();
+    expect(knob()?.getAttribute('aria-hidden'), 'the paint is decorative').toBe('true');
+    cleanup();
+    open({ ...EMPTY_PREFS, focusView: true });
+    expect(track()).not.toBeNull();
+    expect(knob()).not.toBeNull();
+  });
+
+  it('is named for what it controls, never for the state it is in', () => {
+    // An accessible name that flips with the value ("turn focus view on")
+    // makes the control a different control on every press, and a screen
+    // reader then reads the state twice and the purpose never.
+    open();
+    const off = toggle()?.getAttribute('aria-label') ?? '';
+    cleanup();
+    open({ ...EMPTY_PREFS, focusView: true });
+    expect(toggle()?.getAttribute('aria-label')).toBe(off);
+    expect(off.toLowerCase()).toContain('focus view');
   });
 
   it('follows a stored choice rather than the default', () => {

@@ -181,18 +181,45 @@ describe('the pairing screen', () => {
     expect(screen.getByTestId('pairing-writes').textContent).toMatch(/close sessions|write/i);
   });
 
-  it('offers a writes-preference toggle, off by default, for the next launch', () => {
+  it('offers a writes-preference switch, off by default, for the next launch', () => {
+    // A SWITCH, NOT A VERB. Operator: "turn some of the settings buttons into
+    // a toggle UI." This one is a stored boolean and nothing else -- it runs
+    // nothing, reaches nothing outside vam, and the sentence above it already
+    // says what each state means -- so a control whose own name changed with
+    // its value ("turn writes on" / "turn writes off") was saying the state
+    // twice and the purpose never.
     const props = draw({ writesPreference: false });
-    const toggle = screen.getByRole('button', { name: /turn writes on/i });
+    const toggle = screen.getByRole('switch', { name: /writes/i });
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
     fireEvent.click(toggle);
     expect(props.onSetWritesPreference).toHaveBeenCalledWith(true);
   });
 
   it('offers to turn a persisted writes preference back off', () => {
     const props = draw({ writesPreference: true });
-    const toggle = screen.getByRole('button', { name: /turn writes off/i });
+    const toggle = screen.getByRole('switch', { name: /writes/i });
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
     fireEvent.click(toggle);
     expect(props.onSetWritesPreference).toHaveBeenCalledWith(false);
+  });
+
+  it('keeps the switch named for what it controls in both states', () => {
+    draw({ writesPreference: false });
+    const off = screen.getByRole('switch', { name: /writes/i }).getAttribute('aria-label');
+    cleanup();
+    draw({ writesPreference: true });
+    expect(screen.getByRole('switch', { name: /writes/i }).getAttribute('aria-label')).toBe(off);
+  });
+
+  it('leaves the act that reaches outside vam as a button, deliberately', () => {
+    // PHONE ACCESS IS NOT A PREFERENCE. It runs `tailscale serve`, a standing
+    // configuration change on this machine that outlives vam, takes time, and
+    // can fail -- and the panel's own prose treats it as an act. A switch says
+    // "this is a setting, flick it"; the difference is the whole argument for
+    // not converting this one alongside the two that are settings.
+    draw({ serve: { enabled: false } });
+    expect(screen.queryByRole('switch', { name: /phone access/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /phone access/i })).not.toBeNull();
   });
 
   it('says a changed writes preference applies on the next launch, not this one', () => {

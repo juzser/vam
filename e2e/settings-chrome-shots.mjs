@@ -805,5 +805,120 @@ console.log('\n=== the settings case ladder');
   await page.close();
 }
 
+// ---------------------------------------------------------------- ITEM 5.
+// A SWITCH THAT LOOKS LIKE ONE.
+//
+// Operator: "turn some of the settings buttons into a toggle UI." Focus view
+// was already `role="switch"` with an `aria-checked` -- a switch to a screen
+// reader and a bordered word to everybody else -- so the whole of this change
+// is PAINT, and paint is the one thing a unit test cannot see. A `.tsx` file
+// reading `left-[17px]` proves somebody typed it; this asks the browser where
+// the knob actually is, in both states.
+//
+// AND WCAG 1.4.11, which is what a switch has instead of text contrast: the
+// parts that carry the state -- the track's boundary against the panel, and
+// the knob against its track -- have to clear 3:1, or the state is legible
+// only to someone who already knows where to look.
+console.log('\n=== the appearance switch');
+{
+  const page = await openSettings(1100, 800);
+  await page.evaluate(() => {
+    const chan = (v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    const parts = (colour) => colour.match(/[\d.]+/g).map(Number);
+    const opaque = (colour) => /^rgb\(\s*\d/.test(colour);
+    const lum = (colour) => {
+      const [r, g, b] = parts(colour);
+      return 0.2126 * chan(r) + 0.7152 * chan(g) + 0.0722 * chan(b);
+    };
+    const ratio = (a, b) => {
+      const [x, y] = [lum(a), lum(b)];
+      const [hi, lo] = x > y ? [x, y] : [y, x];
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    const ground = (el) => {
+      let node = el?.parentElement ?? null;
+      while (node !== null) {
+        const colour = getComputedStyle(node).backgroundColor;
+        if (opaque(colour)) return colour;
+        node = node.parentElement;
+      }
+      return null;
+    };
+    window.vamSwitch = { opaque, ratio, ground };
+  });
+
+  const readSwitch = () =>
+    page.evaluate(() => {
+      const { opaque, ratio, ground } = window.vamSwitch;
+      const control = document.querySelector('[data-switch="focus-view"]');
+      if (control === null) return null;
+      const track = control.querySelector('[data-switch-track]');
+      const knob = control.querySelector('[data-switch-knob]');
+      const box = control.getBoundingClientRect();
+      const trackBox = track.getBoundingClientRect();
+      const knobBox = knob.getBoundingClientRect();
+      const trackFill = getComputedStyle(track).backgroundColor;
+      const trackEdge = getComputedStyle(track).borderTopColor;
+      const knobFill = getComputedStyle(knob).backgroundColor;
+      return {
+        checked: control.getAttribute('aria-checked'),
+        word: (control.textContent ?? '').trim(),
+        hit: { w: box.width, h: box.height },
+        track: { w: trackBox.width, h: trackBox.height },
+        knob: { w: knobBox.width, h: knobBox.height, at: knobBox.left - trackBox.left },
+        opaque: opaque(trackFill) && opaque(trackEdge) && opaque(knobFill),
+        edgeVsPanel: ratio(trackEdge, ground(track)),
+        knobVsTrack: ratio(knobFill, trackFill),
+      };
+    });
+
+  const off = await readSwitch();
+  if (off === null) throw new Error('the appearance section draws no switch at all');
+  await page.locator('[data-switch="focus-view"]').click();
+  await page.waitForTimeout(250);
+  const on = await readSwitch();
+  console.log(`  off: ${JSON.stringify(off)}`);
+  console.log(`  on:  ${JSON.stringify(on)}`);
+
+  if (off.checked !== 'false' || on.checked !== 'true') {
+    throw new Error(`the switch did not change state: ${off.checked} -> ${on.checked}`);
+  }
+  // THE TRAVEL IS THE STATE. A knob that moved a pixel or two would satisfy
+  // "it moved" while reading identical at arm's length, so the floor is a
+  // whole knob's width.
+  const travel = on.knob.at - off.knob.at;
+  console.log(`  the knob travels ${Math.round(travel)}px in a ${Math.round(off.track.w)}px track`);
+  if (travel < off.knob.w) {
+    throw new Error(`the knob moved ${travel}px, less than its own ${off.knob.w}px width`);
+  }
+  if (off.track.w < 28 || off.track.h < 16 || off.knob.w < 10) {
+    throw new Error(`the switch is drawn too small to read: ${JSON.stringify(off)}`);
+  }
+  // 24px is the desktop target floor this repo already holds elsewhere.
+  if (off.hit.h < 24 || off.hit.w < 24) {
+    throw new Error(`the switch answers across ${off.hit.w}x${off.hit.h}`);
+  }
+  for (const state of [off, on]) {
+    if (!state.opaque) {
+      throw new Error('a part of the switch paints nothing, so its contrast is unmeasured');
+    }
+    if (state.edgeVsPanel < 3) {
+      throw new Error(`the track's edge is ${state.edgeVsPanel.toFixed(2)}:1 against the panel`);
+    }
+    if (state.knobVsTrack < 3) {
+      throw new Error(`the knob is ${state.knobVsTrack.toFixed(2)}:1 against its track`);
+    }
+  }
+  if (off.word === on.word) {
+    throw new Error(`both states read "${off.word}", so the word says nothing`);
+  }
+  await page.screenshot({ path: `${outDir}/settings-switch.png` });
+  console.log(`${outDir}/settings-switch.png`);
+  await page.close();
+}
+
 await browser.close();
-console.log('settings chrome: the narrow nav is named at every width, the Remote button paints, and the case ladder holds.');
+console.log('settings chrome: the narrow nav is named at every width, the Remote button paints, the case ladder holds, and the switch reads as one.');

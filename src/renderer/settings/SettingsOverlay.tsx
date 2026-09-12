@@ -62,6 +62,7 @@ import {
 } from '../prefs/prefs.js';
 import { type PromptSubmitKey, SUBMIT_KEY_LABELS } from '../prefs/submit-key.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
+import { Switch } from './Switch.js';
 import { SECTIONS, type SectionId, shortcutSections } from './sections.js';
 
 export type SettingsOverlayProps = {
@@ -655,24 +656,14 @@ export function SettingsOverlay({
                 label={t('settings.appearance.focusView.label')}
                 hint={t('settings.appearance.focusView.hint')}
               >
-                <button
-                  type="button"
-                  data-focus-view-toggle
-                  role="switch"
-                  aria-checked={prefs.focusView}
-                  onClick={() => onChange(setFocusView(prefs, !prefs.focusView))}
-                  className={`vam-tap flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
-                    prefs.focusView
-                      ? 'border-line-loudest bg-raised text-ink'
-                      : 'border-line text-ink-dim'
-                  }`}
-                >
-                  {t(
-                    prefs.focusView
-                      ? 'settings.appearance.focusView.on'
-                      : 'settings.appearance.focusView.off',
-                  )}
-                </button>
+                <Switch
+                  name="focus-view"
+                  label={t('settings.appearance.focusView.label')}
+                  checked={prefs.focusView}
+                  onChange={(next) => onChange(setFocusView(prefs, next))}
+                  on={t('settings.appearance.focusView.on')}
+                  off={t('settings.appearance.focusView.off')}
+                />
                 {/* THE PROMISE, ON SCREEN. This row asks the operator to give
                     up detail, and what it must never cost them is the alarm
                     (`Decision.errorCount`) or the way back. A guarantee kept
