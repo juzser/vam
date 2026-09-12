@@ -1061,7 +1061,7 @@ function PullRequestsTab({
           type="button"
           data-prs-repo-choose
           onClick={repo.choose}
-          className={`flex-none cursor-pointer rounded px-1 text-ink-dim hover:text-ink ${FOCUS_RING}`}
+          className={`vam-hit-24 flex-none cursor-pointer rounded px-1 text-ink-dim hover:text-ink ${FOCUS_RING}`}
         >
           {repo.directory === null ? t('prs.repo.choose') : t('prs.repo.change')}
         </button>
@@ -1070,7 +1070,7 @@ function PullRequestsTab({
             type="button"
             data-prs-repo-clear
             onClick={repo.clear}
-            className={`flex-none cursor-pointer rounded px-1 text-ink-dim hover:text-ink ${FOCUS_RING}`}
+            className={`vam-hit-24 flex-none cursor-pointer rounded px-1 text-ink-dim hover:text-ink ${FOCUS_RING}`}
           >
             {t('prs.repo.clear')}
           </button>

@@ -157,6 +157,22 @@ describe('the PRs pane says where it is asking from', () => {
     expect(back).toHaveBeenCalledTimes(1);
   });
 
+  it('gives both buttons a pointer target, not just a line of text', () => {
+    // WCAG 2.2 SC 2.5.8 asks 24x24 CSS px. These two are `text-meta` with
+    // horizontal padding only -- roughly 15px tall -- so the box the operator
+    // has to hit is the text itself. `vam-hit-24` is this repo's answer to
+    // exactly that (`test/renderer/target-size.test.ts`), and
+    // `e2e/target-size-shots.mjs` is what proves the class still paints a hit
+    // area rather than merely appearing in a class list.
+    //
+    // They also cannot claim SC 2.5.8's undersized exception: they sit 8px
+    // apart in one row, and the exception wants clear space around each.
+    draw({ prRepo: { directory: DIR, choose: () => {}, clear: () => {} } });
+    for (const button of [choose(), clear()]) {
+      expect(button?.classList.contains('vam-hit-24'), button?.textContent ?? '').toBe(true);
+    }
+  });
+
   it('is reachable by a keyboard, both of them', () => {
     // The pane is driven from the keyboard; a control only a pointer can reach
     // is a control half this app's operators do not have.
