@@ -6202,11 +6202,16 @@ export function DetailPanel(props: DetailPanelProps) {
               operator asked for it and because it belongs to the same act:
               these two are what a finished prompt is handed to.
 
-              DRAWN ONLY WHERE A RECOGNISER EXISTS. `dictationAvailable` is
-              read once at mount; where it is false there is no button at all,
-              which is this file's own rule for the directory picker and the
-              attachment input -- a control that cannot act is not drawn dimmed,
-              it is not drawn.
+              DRAWN ONLY WHERE IT CAN LISTEN, which is not the same as where a
+              recogniser exists -- and the difference is the packaged app.
+              Chromium has `webkitSpeechRecognition` there, and vam's own main
+              process denies every permission it could ask for, so the button
+              shipped able to do nothing but apologise. `dictationAvailable`
+              answers both questions now (`dictation.ts`), is read once at
+              mount, and where it is false there is no button at all: this
+              file's own rule for the directory picker and the attachment
+              input -- a control that cannot act is not drawn dimmed, it is not
+              drawn.
 
               `aria-pressed` rather than a second icon: this is one control in
               two states, and a screen reader is told which by the state rather

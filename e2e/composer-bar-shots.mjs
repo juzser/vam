@@ -285,6 +285,43 @@ for (const theme of ['dark', 'light']) {
 }
 await page.evaluate(() => document.documentElement.classList.remove('light'));
 
+// ------------------------- N. THE MICROPHONE IS HERE, BECAUSE HERE IT WORKS
+//
+// The other half of a withholding, and the half no Electron probe can reach.
+// `dictationAvailable` answers false wherever the preload bridge exists --
+// vam's main process denies every Chromium permission, so the packaged app
+// refuses its own microphone and a button there could only apologise. This is
+// a BROWSER, which is one of the two surfaces the control is for (the other
+// is the paired phone, the same bundle over Tailscale Serve), and a change
+// that withheld it everywhere would look exactly like a change that withheld
+// it correctly unless something measured this side.
+const dictation = await page.evaluate(() => {
+  const mic = document.querySelector('[data-prompt-dictate]');
+  const send = document.querySelector('[data-prompt-record]');
+  const row = mic?.closest('[data-prompt-tools]') ?? null;
+  return {
+    drawn: mic !== null,
+    bridge: typeof window.api,
+    recogniser: typeof (window.SpeechRecognition ?? window.webkitSpeechRecognition),
+    besideSend: row !== null && send !== null && row.contains(send),
+    pressed: mic?.getAttribute('aria-pressed') ?? null,
+  };
+});
+console.log(`  dictation: ${JSON.stringify(dictation)}`);
+check(
+  'this build really is the browser one, or the check below is about nothing',
+  dictation.bridge === 'undefined',
+  `window.api is ${dictation.bridge}`,
+);
+check(
+  'and the browser really has a recogniser to offer',
+  dictation.recogniser === 'function',
+  `typeof SpeechRecognition is ${dictation.recogniser}`,
+);
+check('so the microphone is drawn here', dictation.drawn, JSON.stringify(dictation));
+check('beside the send control, where the operator was told it is', dictation.besideSend);
+check('and it starts idle', dictation.pressed === 'false', `aria-pressed ${dictation.pressed}`);
+
 await browser.close();
 
 if (failures.length > 0) {

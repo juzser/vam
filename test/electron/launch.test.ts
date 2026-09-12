@@ -44,6 +44,10 @@ interface SmokeResult {
   streamSubscribeErrors: string[];
   mainEventSource: string;
   notificationPermission: string;
+  speechRecognitionType: string;
+  micPermissionState: string;
+  dictateControls: number;
+  sendControls: number;
   offOriginRedirectPrevented: boolean;
   sameOriginRedirectPrevented: boolean;
   secondWindowCountAfterOpen: number;
@@ -422,6 +426,27 @@ describe('the Electron shell launches', () => {
   // and actually denies.
   it('denies a permission request by default (no permission handler means Electron auto-approves)', () => {
     expect(smoke().notificationPermission).toBe('denied');
+  });
+
+  it('denies its own microphone, and therefore draws no button to use it', () => {
+    // THE DEFECT THIS PINS, in the order it has to be read.
+    //
+    // 1. THE RECOGNISER IS HERE. This is Chromium, so feature detection --
+    //    "is there a SpeechRecognition constructor" -- says yes, which is why
+    //    a microphone button shipped in the packaged app at all.
+    expect(smoke().speechRecognitionType).toBe('function');
+    // 2. AND IT MAY NOT LISTEN. `registerPermissionPolicy` in
+    //    `src/main/index.ts` denies every request and every check, so vam
+    //    refuses its own microphone before Chromium's absent speech-service
+    //    key is ever reached. Not `toBe('denied')`: what matters is that it
+    //    is not GRANTED, and a policy that answers a check with `false` may
+    //    reasonably surface as either 'denied' or 'prompt'.
+    expect(smoke().micPermissionState).not.toBe('granted');
+    // 3. SO THE CONTROL IS NOT DRAWN -- and the send button beside it is, or
+    //    this count is zero for the uninteresting reason that no composer is
+    //    on screen. The corpus first, exactly as everywhere else in this repo.
+    expect(smoke().sendControls).toBeGreaterThan(0);
+    expect(smoke().dictateControls).toBe(0);
   });
 
   // Followup security gap 3: a same-origin URL that then 302s off-origin never

@@ -165,8 +165,36 @@ app.on('web-contents-created', (_event, contents) => {
 /**
  * Deny by default: with no permission handler registered at all, Electron's
  * own default is to APPROVE every request (microphone, camera,
- * notifications, ...), silently, regardless of `sandbox: true`. Nothing this
- * app renders needs any of these, so nothing is allowlisted back in.
+ * notifications, ...), silently, regardless of `sandbox: true`. Nothing is
+ * allowlisted back in, and nothing ever has been.
+ *
+ * ── WHAT THAT COSTS, NAMED, BECAUSE IT IS NO LONGER NOTHING ───────────────
+ * This comment used to say "nothing this app renders needs any of these". It
+ * was true when it was written and it stopped being true twice, while staying
+ * on screen directly above the policy a later reader would consult before
+ * widening it. Both capabilities are listed here now, and
+ * `test/main/permission-census.test.ts` scans the renderer so a third cannot
+ * arrive in silence.
+ *
+ *  1. THE CLIPBOARD. `navigator.clipboard.writeText` rejects with
+ *     `NotAllowedError` under this policy -- measured, not assumed -- so the
+ *     write goes over the bridge to main's own `clipboard` module instead
+ *     (`src/renderer/panels/clipboard.ts`). Allowlisting
+ *     `clipboard-sanitized-write` was tried and does NOT fix it. A PASTE is a
+ *     different thing and needs no permission: the event carries its own
+ *     `DataTransfer` because the operator pressed the keys.
+ *
+ *  2. DICTATION. Speaking a prompt needs the microphone, and this policy
+ *     refuses it -- before Chromium's own missing speech-service key is ever
+ *     reached, so the refusal is vam's and not the platform's. The answer is
+ *     NOT to widen the policy for it: the control is withheld in this build
+ *     instead, on the rule that a control which cannot act is not drawn
+ *     (`dictationAvailable` in `src/renderer/panels/dictation.ts` answers
+ *     false wherever the preload bridge exists). Dictation stays on the paired
+ *     phone and in a browser tab, which is where it works.
+ *
+ * The rule for the next one is in that census file: route it through main,
+ * withhold the control, or argue the policy -- in that order.
  */
 function registerPermissionPolicy(): void {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => {
