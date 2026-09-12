@@ -175,7 +175,7 @@ describe('the overlay draws a focus indicator', () => {
     // three canvas presets, and the `[data-pane-toggle]` tiles that replaced
     // them went with the whole Layout section. The nav items and the close
     // button are the corpus this panel has left.
-    const ringed = [...nav, screen.getByRole('button', { name: 'Esc' })];
+    const ringed = [...nav, screen.getByRole('button', { name: 'close' })];
     // Derived, not counted: this guard exists to prove it examined a real
     // corpus, and a hard-coded floor turns into a false red the moment a
     // section is added or retired — which is exactly what it just did.

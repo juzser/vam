@@ -317,10 +317,19 @@ function SessionTabStrip({
           +
         </span>
       </button>
+      {/* THE WAY OUT, named for where it goes.
+          It said `sessions in <project>` -- byte-identical to the `<nav>`'s own
+          label above, so a screen reader read the same phrase twice: once as
+          the region it had just entered, once as a button, with nothing to say
+          the second one LEAVES. And `›` at the end of a strip that scrolls
+          horizontally is the universal promise of MORE TABS, which is not what
+          this does: it unwinds to the list, pre-scrolled to this project. The
+          glyph is the `‹` the header's back control already uses, because this
+          is the same journey with a better landing. */}
       <button
         type="button"
         data-phone-session-expand
-        aria-label={`sessions in ${project.name}`}
+        aria-label={`all sessions in ${project.name}`}
         onClick={onExpand}
         className={`${TOUCH} ${FOCUS_RING} flex-none`}
       >
@@ -328,7 +337,7 @@ function SessionTabStrip({
           data-tap-skin
           className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] text-ink-dim active:bg-raised"
         >
-          ›
+          ‹
         </span>
       </button>
     </nav>
@@ -449,6 +458,19 @@ export function PhoneShell({
     // Every push opens on the newest step, because that is the only step this
     // screen has: arriving at a session is arriving at what it just did.
     setOpen(true);
+    // AND ON THE NEWEST OUTPUT, for the same reason. `view` is state that
+    // outlives the session it was chosen in, so Agents tapped on one session
+    // used to greet the NEXT one -- "this source does not report which agents
+    // a session is running", about a session that was waiting for an answer.
+    // A remembered tab is cheap on a desktop, where every view is one click
+    // away in a labelled strip; here they are four unlabelled glyphs and the
+    // recovery costs a tap on the screen whose whole budget is taps.
+    //
+    // Both halves, because they say different things (see `view` above): the
+    // row draws its own selection, and the pane is ASKED to move -- a fresh
+    // object per open, so a second ask stays an ask.
+    setView('Response');
+    setViewRequest({ tab: 'Response' });
   };
   const back = () => {
     // The chevron unwinds the entry it pushed rather than setting state

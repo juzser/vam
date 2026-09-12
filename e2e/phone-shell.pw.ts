@@ -395,7 +395,245 @@ test.describe('the phone shell at 390px', () => {
       'measured bounding boxes under 44x44 on the session screen',
     ).toEqual([]);
   });
+
+  /**
+   * THE SAME SCREEN IN THE OTHER STATE, because a fixture is a state and a
+   * guard only ever measures the one it opens.
+   *
+   * Focus view (`prefs.focusView`) folds each turn's working away and draws a
+   * `···` control to bring it back. It is OFF by default, so the test above --
+   * which is otherwise a complete census of the session screen -- has never
+   * seen that control at all. Measured here for the first time, five of them
+   * came back 24x24: the desktop's floor, on the surface with a 44px one.
+   *
+   * The corpus is asserted BEFORE the filter. Turning focus view on through
+   * `localStorage` and having the turns not fold is the failure mode that
+   * would make this test pass while measuring nothing.
+   */
+  /**
+   * THE HOME INDICATOR, EMULATED RATHER THAN ASSUMED.
+   *
+   * `styles.css` pads `[data-composer-bar]` with
+   * `max(12px, env(safe-area-inset-bottom))` and says in its own comment that
+   * without `viewport-fit=cover` the rule resolves to 0. Nothing has ever
+   * checked either half, because headless Chromium reports every inset as 0 --
+   * which is also why the two OTHER elements that end a phone screen were
+   * missed: the list's status bar sat flush at y=844 with `padding-bottom: 0`,
+   * and the question card carried a flat 12px that a 34px indicator eats.
+   *
+   * CDP's `Emulation.setSafeAreaInsetsOverride` gives the page a real inset,
+   * so this is a MEASUREMENT and not a source scan: a flat `12px` and a
+   * `max(12px, env(...))` are indistinguishable at an inset of 0 and differ by
+   * 22px here. 34px is the iPhone portrait figure, used the way
+   * `IOS_KEYBOARD_CSS_PX` is -- stated, and reported in every failure.
+   */
+  test('what ends a phone screen clears the home indicator', async ({ page }) => {
+    const INSET = 34;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { bottom: INSET } });
+    await openDemo(page);
+
+    // THE CORPUS: the emulation actually reached the page. Without this the
+    // assertions below pass on a build with no safe-area handling at all.
+    const resolved = await page.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.style.paddingBottom = 'env(safe-area-inset-bottom)';
+      document.body.append(probe);
+      const read = getComputedStyle(probe).paddingBottom;
+      probe.remove();
+      return read;
+    });
+    expect(resolved, 'the emulated inset the page can see').toBe(`${INSET}px`);
+
+    const pad = async (selector: string) =>
+      page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (el === null) return null;
+        return Math.round(Number.parseFloat(getComputedStyle(el).paddingBottom));
+      }, selector);
+
+    expect(
+      await pad('[data-phone-shell] [data-phone-status-bar]'),
+      'the list screen ends in the status bar, and it is the failures button that lives there',
+    ).toBeGreaterThanOrEqual(INSET);
+
+    await openFirstSession(page);
+    expect(
+      await pad('[data-phone-shell] [data-question-bar]'),
+      'with a question open the card is the bottom of the screen, and its last row is an option',
+    ).toBeGreaterThanOrEqual(INSET);
+
+    await page.locator('[data-phone-shell] [data-question-chat]').first().tap();
+    expect(
+      await pad('[data-phone-shell] [data-composer-bar]'),
+      'the composer, whose rule has been here all along and was never measured',
+    ).toBeGreaterThanOrEqual(INSET);
+  });
+
+  /**
+   * ARRIVING AT A SESSION IS ARRIVING AT WHAT IT JUST DID.
+   *
+   * `show()` already says that about the STEP -- "every push opens on the
+   * newest step, because that is the only step this screen has" -- and the
+   * view was not held to it. `view` is component state that outlives the
+   * session it was chosen in, so tapping Agents on one session and then
+   * opening another lands on Agents, reading "this source does not report
+   * which agents a session is running" about a session that was waiting for
+   * an answer. On a desktop a remembered tab is cheap: every view is one
+   * click away in a labelled strip. Here they are four unlabelled glyphs and
+   * the recovery costs a tap on the screen whose whole budget is taps.
+   */
+  test('opening another session lands on Response, not on the last view used', async ({ page }) => {
+    await openDemo(page);
+    await openFirstSession(page);
+    await page.locator('[data-phone-shell] [data-phone-view="agents"]').tap();
+    await expect(page.locator('[data-phone-shell] [data-phone-view="agents"]')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await page.locator('[data-phone-shell] [data-phone-back]').tap();
+    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'list');
+
+    const rows = page.locator('[data-phone-shell] [data-session-row]');
+    const second = await rows.nth(1).boundingBox();
+    if (second === null) throw new Error('the fixture has no second session');
+    await page.touchscreen.tap(second.x + 60, second.y + second.height / 2);
+    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
+    await expect(
+      page.locator('[data-phone-shell] [data-phone-view="response"]'),
+      'the view a session opens on',
+    ).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('every control on the SESSION screen is 44x44 with focus view on too', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('vam.prefs.v1', JSON.stringify({ focusView: true }));
+    });
+    await openDemo(page);
+    await openFirstSession(page);
+    const unfolds = await page.locator('[data-phone-shell] [data-turn-unfold]').count();
+    expect(unfolds, 'folded turns offering their working back').toBeGreaterThanOrEqual(2);
+    const boxes = await controls(page);
+    expect(
+      undersized(boxes),
+      'measured bounding boxes under 44x44 with focus view on',
+    ).toEqual([]);
+  });
 });
+
+/**
+ * SETTINGS, WHICH THIS FILE HAS NEVER MEASURED.
+ *
+ * `controls()` above is scoped to `[data-phone-shell]`, and that scope is
+ * correct for the shell -- but the settings dialog is NOT inside it. It is a
+ * sibling, mounted beside the shell under the common `.vam-phone` root
+ * (`Canvas.tsx`, which says so in its own comment), which means the phone's
+ * 44px rule can REACH it while this suite's census cannot SEE it.
+ *
+ * Measured for the first time: 175 controls, not one of them wearing
+ * `vam-tap`. That is not the stylesheet failing -- `.vam-phone .vam-tap` is
+ * opt-in BY DESIGN, so that "a control added tomorrow is silently NOT sized,
+ * which the Playwright pass at 390px reports as a measured box, by name"
+ * (styles.css). The pass never reported them because it never looked here.
+ */
+test.describe('settings at 390px', () => {
+  async function openSettings(page: Page): Promise<void> {
+    await openDemo(page);
+    await page.locator('[data-phone-shell] button[aria-label="settings"]').first().tap();
+    await expect(page.locator('[data-settings-overlay]')).toBeVisible();
+  }
+
+  /** The same census as `controls`, over the dialog rather than the shell. */
+  async function settingsControls(page: Page): Promise<Box[]> {
+    return page.$$eval(
+      '[data-settings-overlay] button, [data-settings-overlay] summary,' +
+        ' [data-settings-overlay] a[href], [data-settings-overlay] input,' +
+        ' [data-settings-overlay] textarea, [data-settings-overlay] [role="button"],' +
+        ' [data-settings-overlay] [role="switch"]',
+      (els) =>
+        els
+          .map((el) => {
+            const r = el.getBoundingClientRect();
+            return {
+              label: (
+                el.getAttribute('aria-label') ||
+                el.textContent ||
+                el.getAttribute('placeholder') ||
+                ''
+              )
+                .trim()
+                .replace(/\s+/g, ' ')
+                .slice(0, 44),
+              tag: el.tagName,
+              hooks: [...el.attributes]
+                .map((a) => a.name)
+                .filter((n) => n.startsWith('data-') && n !== 'data-state')
+                .join(','),
+              w: Math.round(r.width * 10) / 10,
+              h: Math.round(r.height * 10) / 10,
+              y: Math.round(r.y),
+            };
+          })
+          .filter((b) => b.w > 0 && b.h > 0),
+    );
+  }
+
+  /**
+   * NO CONTROL ON A PHONE IS NAMED AFTER A KEY THE PHONE DOES NOT HAVE.
+   *
+   * The dialog's close button's entire accessible name was the string `Esc`.
+   * It is not a dead control -- it closes when tapped -- and that is what makes
+   * it worse than a broken one: it reads as a keyboard HINT, so a finger looks
+   * past it for the real close and finds none. The scrim closes too and says
+   * nothing either.
+   *
+   * Scoped to accessible NAMES rather than to visible text, because the name
+   * is what a screen reader is handed and what a tap is aimed at. The capture
+   * prompt still says "Esc cancels" and still should: rebinding a chord needs
+   * a hardware keyboard, which at 390px is a real thing to have.
+   *
+   * AND SCOPED TO A NAME THAT IS NOTHING BUT A KEY. The first version of this
+   * test asked for a name STARTING with one and caught 26 controls -- every
+   * chord slot in the Keyboard section, whose whole purpose is to be named
+   * after a key it then explains ("Mod-d, half a screen down this pane's
+   * transcript"). A guard that fires on the surface doing its job is a guard
+   * that gets deleted. `Esc` alone explains nothing; that is the defect.
+   */
+  test('no control in the dialog is named after a key', async ({ page }) => {
+    await openSettings(page);
+    const named = await page.$$eval(
+      '[data-settings-overlay] button, [data-settings-overlay] [role="button"]',
+      (els) =>
+        els
+          .map((el) => (el.getAttribute('aria-label') ?? el.textContent ?? '').trim())
+          .filter((name) => /^(esc|escape|ctrl|cmd|⌘|⌥|⇧|mod[+-]\S*)$/i.test(name)),
+    );
+    expect(named, 'controls whose name is a keystroke').toEqual([]);
+  });
+
+  test('every control in the settings dialog is at least 44x44', async ({ page }) => {
+    await openSettings(page);
+    const boxes = await settingsControls(page);
+    expect(boxes.length, 'controls measured in the dialog').toBeGreaterThan(10);
+    expect(undersized(boxes), 'settings controls under 44x44 on a phone').toEqual([]);
+  });
+
+  test('and in every section of it, not only the one it opens on', async ({ page }) => {
+    await openSettings(page);
+    const sections = page.locator('[data-settings-overlay] [data-settings-nav-item]');
+    const count = await sections.count();
+    expect(count, 'sections offered').toBeGreaterThanOrEqual(3);
+    const bad: string[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const name = (await sections.nth(i).getAttribute('data-settings-nav-item')) ?? String(i);
+      await sections.nth(i).tap();
+      for (const row of undersized(await settingsControls(page))) bad.push(`${name}: ${row}`);
+    }
+    expect(bad, 'settings controls under 44x44, by section').toEqual([]);
+  });
+});
+
+/**
 
 /**
  * The overlay sheets.
@@ -1202,6 +1440,28 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     await expect(page.locator('[data-key-strip]')).toHaveCount(0);
     // One session in this project -- the tab strip is 0px too.
     await expect(page.locator('[data-phone-session-tabs]')).toHaveCount(0);
+  });
+
+  test('the strip\'s way out is named for where it goes, not for its container', async ({
+    page,
+  }) => {
+    // Its `aria-label` was byte-identical to the `<nav>`'s own -- a screen
+    // reader read "sessions in factory" twice, once as the region it had just
+    // entered and once as a button, with no way to tell that the second one
+    // LEAVES. And `›` at the end of a strip that scrolls horizontally is the
+    // universal promise of more tabs, which is not what it does.
+    await openDemo(page);
+    await openFirstAlphaSession(page);
+    const strip = page.locator('[data-phone-session-tabs]');
+    const out = page.locator('[data-phone-session-expand]');
+    const region = await strip.getAttribute('aria-label');
+    const button = await out.getAttribute('aria-label');
+    expect(region, 'the region names itself').not.toBeNull();
+    expect(button, 'and the way out does not say the same thing').not.toBe(region);
+    expect(
+      (await out.textContent())?.trim(),
+      'a forward chevron at the end of a scrolling strip promises more tabs',
+    ).not.toBe('›');
   });
 
   test('the › control returns to the list, scrolled to this project’s heading', async ({
