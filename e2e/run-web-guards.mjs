@@ -74,6 +74,7 @@ const GUARDS = [
   'key-truth-shots',
   'mode-truth-shots',
   'half-page-shots',
+  'target-size-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

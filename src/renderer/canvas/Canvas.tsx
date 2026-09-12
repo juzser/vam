@@ -121,6 +121,7 @@ import {
   isProjectHidden,
   type Prefs,
   paletteFor,
+  prRepoFor,
   readPrefs,
   removeProjectFromGroup,
   renameGroup,
@@ -135,6 +136,7 @@ import {
   setProjectCollapsed,
   setProjectHidden,
   setProjectIcon,
+  setProjectPrRepo,
   setProjectRename,
   setRename,
   setSessionFilters,
@@ -4962,8 +4964,36 @@ function CanvasInner({
       const paneComposing = sessionId === null ? false : (composingBySession[sessionId] ?? false);
       const paneWriting = sessionId === null ? false : (writingBySession[sessionId] ?? false);
       const paneActionIndex = sessionId === null ? 0 : (actionIndexBySession[sessionId] ?? 0);
+      /**
+       * WHERE THIS PROJECT'S PULL REQUESTS ARE READ FROM, and the two acts
+       * that change it -- built HERE because this is where `prefs` and
+       * `savePrefs` live, and a pane that wrote prefs behind this component's
+       * back would leave its React state stale.
+       *
+       * ABSENT WITHOUT A PROJECT OR A DIRECTORY PICKER, which is the browser
+       * build and the phone: `dialog` is a desktop bridge, and a control that
+       * cannot open a picker is a control that cannot act.
+       */
+      const projectSource = entry?.project.source;
+      const projectId = entry?.project.id;
+      const choose = globalThis.window?.api?.dialog?.chooseDirectory;
+      const prRepo =
+        projectSource === undefined || projectId === undefined || choose === undefined
+          ? undefined
+          : {
+              directory: prRepoFor(prefs, projectSource, projectId),
+              choose: async () => {
+                const picked = await choose();
+                if (picked === null) return;
+                savePrefs(setProjectPrRepo(prefs, projectSource, projectId, picked));
+              },
+              clear: () => {
+                savePrefs(setProjectPrRepo(prefs, projectSource, projectId, ''));
+              },
+            };
       return {
         entry,
+        prRepo,
         decision: entry?.session.decisions[0] ?? null,
         // See `detailProps`'s own long-standing comment on this prop, still
         // true per pane: it is "which session THIS pane's cursor sits on".

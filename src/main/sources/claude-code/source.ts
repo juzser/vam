@@ -45,6 +45,7 @@ import { type BuiltinCommandList, createBuiltinCommandReader } from './builtin-c
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
 import { deliverPromptViaCli } from './deliver.js';
 import { readTranscriptHistory } from './history.js';
+import { prRepoOverride } from './pr-repos.js';
 import { projectIdOf } from './project-id.js';
 import {
   createPullRequestReader,
@@ -302,9 +303,35 @@ export async function loadClaudeCodeProjects(
     // is already read. `.git/HEAD` only stands in when there is no transcript
     // yet, or an older one that never wrote `gitBranch`.
     const branch = read.facts.branch ?? (await branchOf(agent.cwd));
-    // One question per session, asked in the session's own directory, and
-    // throttled by the reader rather than by this loop.
-    const prs = readPrs === null ? null : await readPrs({ cwd: agent.cwd, branch });
+    /**
+     * One question per session, and the directory it is asked in is the
+     * session's own UNLESS the operator pointed this project somewhere else.
+     *
+     * WHY THE OVERRIDE EXISTS: a session started from an orchestrator or a
+     * factory runs in that factory's directory, so asking there reports the
+     * factory's pull requests while the work is in another repository. Keyed
+     * by PROJECT because a project already is a cwd grouping -- see
+     * `Prefs.prRepos`.
+     *
+     * STILL NO `--repo`. The override moves where vam STANDS; `gh` resolves
+     * the remote itself from there, so this file's own invariant holds: the
+     * pane describes the repository vam is actually in, never one it was told
+     * to claim. `overridden` travels with it so a failure can name the
+     * directory rather than saying "this session's", which would be false.
+     *
+     * Throttled by the reader rather than by this loop, and the reader keys
+     * its cache on the cwd -- so pointing a project elsewhere invalidates
+     * nothing and re-asks once, in the new place.
+     */
+    const override = prRepoOverride('claude-code', projectIdOf(agent.cwd));
+    const prs =
+      readPrs === null
+        ? null
+        : await readPrs({
+            cwd: override ?? agent.cwd,
+            branch,
+            overridden: override !== null,
+          });
     const session: Session = {
       id: agent.key,
       // The CLI's name is the operator's own; the generated title is only a

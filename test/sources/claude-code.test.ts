@@ -17,6 +17,10 @@ import {
   listLiveAgents,
   parseAgentRows,
 } from '../../src/main/sources/claude-code/agents.js';
+import {
+  clearPrRepoOverrides,
+  setPrRepoOverrides,
+} from '../../src/main/sources/claude-code/pr-repos.js';
 import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
 import {
   createProjectCommandLookup,
@@ -1018,7 +1022,7 @@ describe('loadClaudeCodeProjects', () => {
    */
   describe('pull requests on the session branch', () => {
     it("asks about each session branch, in that session's own directory", async () => {
-      const asked: { cwd: string; branch: string | null }[] = [];
+      const asked: { cwd: string; branch: string | null; overridden?: boolean }[] = [];
       await loadClaudeCodeProjects(
         root,
         [agent({ key: 'a#1', sessionId: 'a', cwd: '/w/atlas' })],
@@ -1030,7 +1034,62 @@ describe('loadClaudeCodeProjects', () => {
           return { kind: 'ok', prs: [] };
         },
       );
-      expect(asked).toEqual([{ cwd: '/w/atlas', branch: 'topic/rework' }]);
+      // `overridden: false` travels with every read now, so a FAILURE can say
+      // which directory it happened in -- see `pull-requests.ts`. False here
+      // is the claim: nothing was overridden, so the session's own directory
+      // is what was asked, which is what this test has always been about.
+      expect(asked).toEqual([{ cwd: '/w/atlas', branch: 'topic/rework', overridden: false }]);
+    });
+
+    it('asks in the directory the operator pointed the PROJECT at', async () => {
+      // THE WHOLE FEATURE, at the one place it changes behaviour. A session
+      // started from an orchestrator runs in the orchestrator's directory, so
+      // asking there reports the orchestrator's pull requests while the work
+      // is in another repository. The override moves where vam STANDS -- `gh`
+      // still resolves the remote from there, so no `--repo` is ever passed
+      // and the pane still describes the repository vam is actually in.
+      const asked: { cwd: string; branch: string | null; overridden?: boolean }[] = [];
+      setPrRepoOverrides({ 'claude-code': { [projectIdOf('/w/factory')]: '/w/atlas' } });
+      try {
+        await loadClaudeCodeProjects(
+          root,
+          [agent({ key: 'a#1', sessionId: 'a', cwd: '/w/factory' })],
+          NOW,
+          async () => 'topic/rework',
+          sessionsRoot,
+          async (input) => {
+            asked.push(input);
+            return { kind: 'ok', prs: [] };
+          },
+        );
+      } finally {
+        clearPrRepoOverrides();
+      }
+      expect(asked).toEqual([{ cwd: '/w/atlas', branch: 'topic/rework', overridden: true }]);
+    });
+
+    it('asks in the session’s own directory for a project nobody pointed', async () => {
+      // The other project is overridden; this one is not, and must be
+      // untouched. An override keyed by project that leaked to its neighbours
+      // would be worse than none.
+      const asked: { cwd: string; overridden?: boolean }[] = [];
+      setPrRepoOverrides({ 'claude-code': { [projectIdOf('/w/factory')]: '/w/atlas' } });
+      try {
+        await loadClaudeCodeProjects(
+          root,
+          [agent({ key: 'b#1', sessionId: 'b', cwd: '/w/other' })],
+          NOW,
+          async () => 'topic/rework',
+          sessionsRoot,
+          async (input) => {
+            asked.push({ cwd: input.cwd, overridden: input.overridden });
+            return { kind: 'ok', prs: [] };
+          },
+        );
+      } finally {
+        clearPrRepoOverrides();
+      }
+      expect(asked).toEqual([{ cwd: '/w/other', overridden: false }]);
     });
 
     it('carries the answer onto the session, empty list and all', async () => {

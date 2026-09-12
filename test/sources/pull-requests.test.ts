@@ -53,11 +53,19 @@ describe('the argv vam hands to gh', () => {
 });
 
 describe('every way asking can fail gets its own answer', () => {
+  // `cwd` and `overridden` travel with every classification now, so a failure
+  // can name the directory it happened in -- which matters the moment the
+  // operator points a project somewhere other than the session's own (see
+  // `pull-requests-repo.test.ts`). Not overridden here: these cases are all
+  // about the session's own directory, and the sentences they assert are the
+  // ones that wording produces.
   const fail = (stderr: string, extra: Record<string, unknown> = {}) =>
     classifyGhFailure({
       failure: { message: 'spawn failed', ...extra },
       stderr,
       branch: 'feature/x',
+      cwd: '/w/atlas',
+      overridden: false,
     });
 
   it('says the gh command is missing, in deliver.ts vocabulary', () => {

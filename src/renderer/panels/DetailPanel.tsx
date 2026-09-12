@@ -104,6 +104,7 @@ import type {
   SlashCommand,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import { t } from '../i18n/strings.js';
 import { normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
@@ -728,6 +729,22 @@ export type DetailPanelProps = {
    * that hook carries -- SOMETHING on screen names the session about to be
    * written to -- is kept rather than dropped with the block.
    */
+  /**
+   * WHERE THIS PROJECT'S PULL REQUESTS ARE READ FROM, and the two acts that
+   * change it. Built by `Canvas`, which owns `prefs` and `savePrefs`.
+   *
+   * ABSENT is the browser build and the phone: `dialog` is a desktop bridge,
+   * and a control that cannot open a directory picker is a control that cannot
+   * act. The PRs list itself still draws -- main applies the override for both
+   * surfaces, since one `DESKTOP_SOURCE` serves the IPC and the remote server
+   * alike -- so what is missing here is the way to CHANGE it, not the effect.
+   */
+  readonly prRepo?: {
+    /** The chosen directory, or `null` for the session's own. */
+    readonly directory: string | null;
+    readonly choose: () => void;
+    readonly clear: () => void;
+  };
   readonly phone?: boolean;
   readonly resizeHandle: ReactNode;
   /**
@@ -1002,16 +1019,79 @@ const PR_STATE_INK: Record<PullRequest['state'], string> = {
  * to look at, on the strength of never having looked. That is the failure
  * this component is shaped to make impossible.
  */
-function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestList | undefined }) {
+function PullRequestsTab({
+  pullRequests,
+  repo,
+}: {
+  readonly pullRequests: PullRequestList | undefined;
+  readonly repo?: DetailPanelProps['prRepo'];
+}) {
+  /**
+   * WHICH DIRECTORY THIS PANE IS ASKING FROM, and how to point it elsewhere.
+   *
+   * THE PROBLEM, IN THE OPERATOR'S WORDS: a session started from an
+   * orchestrator or a factory runs in that factory's directory, so the pane
+   * reports the factory's pull requests while the work is in another
+   * repository. Nothing on screen said which directory was being asked, so the
+   * answer looked wrong rather than aimed wrong.
+   *
+   * DRAWN ONLY WHEN POINTED, in the common case. A row on every session saying
+   * "asking in the session's own directory" is a sentence restating the
+   * default, on a narrow pane, forever. What is always reachable is the way to
+   * CHANGE it, which is the small button -- and once a project IS pointed
+   * somewhere, the directory is named, because from then on the pane is
+   * answering about a repository the session is not in and that must never be
+   * silent.
+   */
+  const footer =
+    repo === undefined ? null : (
+      <div
+        data-prs-repo
+        data-prs-repo-overridden={repo.directory === null ? undefined : 'true'}
+        className="flex flex-none items-baseline gap-2 border-line border-t pt-2 text-meta text-ink-faint"
+      >
+        {repo.directory === null ? (
+          <span className="min-w-0 flex-1 truncate">{t('prs.repo.own')}</span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate" title={repo.directory}>
+            {t('prs.repo.overridden', { directory: repo.directory })}
+          </span>
+        )}
+        <button
+          type="button"
+          data-prs-repo-choose
+          onClick={repo.choose}
+          className={`vam-hit-24 flex-none cursor-pointer rounded px-1 text-ink-dim hover:text-ink ${FOCUS_RING}`}
+        >
+          {repo.directory === null ? t('prs.repo.choose') : t('prs.repo.change')}
+        </button>
+        {repo.directory === null ? null : (
+          <button
+            type="button"
+            data-prs-repo-clear
+            onClick={repo.clear}
+            className={`vam-hit-24 flex-none cursor-pointer rounded px-1 text-ink-dim hover:text-ink ${FOCUS_RING}`}
+          >
+            {t('prs.repo.clear')}
+          </button>
+        )}
+      </div>
+    );
+  const framed = (body: ReactNode) => (
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {body}
+      {footer}
+    </div>
+  );
   if (pullRequests === undefined) {
-    return (
+    return framed(
       <p data-prs data-prs-absent className="text-control text-ink-faint">
         This source does not report pull requests for a session.
-      </p>
+      </p>,
     );
   }
   if (pullRequests.kind === 'unavailable') {
-    return (
+    return framed(
       <p
         data-prs
         data-prs-unavailable
@@ -1020,17 +1100,17 @@ function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestL
       >
         {/* vam could not ask. Not "there are none". */}
         {pullRequests.message}
-      </p>
+      </p>,
     );
   }
   if (pullRequests.prs.length === 0) {
-    return (
+    return framed(
       <p data-prs data-prs-empty className="text-control text-ink-faint">
         This branch has no pull request on GitHub.
-      </p>
+      </p>,
     );
   }
-  return (
+  return framed(
     <ul data-prs className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
       {pullRequests.prs.map((pr) => (
         <li
@@ -1063,7 +1143,7 @@ function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestL
           </span>
         </li>
       ))}
-    </ul>
+    </ul>,
   );
 }
 
@@ -2991,6 +3071,7 @@ export function DetailPanel(props: DetailPanelProps) {
     width,
     resizeHandle,
     records,
+    prRepo,
     phone = false,
     defaultProvider,
     onSetDefaultProvider,
@@ -4616,7 +4697,7 @@ export function DetailPanel(props: DetailPanelProps) {
         ) : current === 'Agents' ? (
           <AgentsTab agents={entry?.session.agents} />
         ) : current === 'PRs' ? (
-          <PullRequestsTab pullRequests={entry?.session.pullRequests} />
+          <PullRequestsTab pullRequests={entry?.session.pullRequests} repo={prRepo} />
         ) : orderedTurns.length === 0 ? (
           entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip
           // above it, and an empty strip already says "no sessions open —

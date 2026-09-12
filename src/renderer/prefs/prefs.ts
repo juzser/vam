@@ -236,6 +236,35 @@ export type Prefs = {
    */
   readonly projectNames: Readonly<Record<string, Readonly<Record<string, RenameChoice>>>>;
   /**
+   * Source id → project id → the DIRECTORY vam asks GitHub from for that
+   * project's sessions. Absent everywhere by default.
+   *
+   * THE PROBLEM IT SOLVES. A session started from an orchestrator or a factory
+   * runs in that factory's directory, so `pull-requests.ts` -- which asks `gh`
+   * from the session's own cwd, deliberately and with no `--repo` -- reports
+   * the factory's pull requests while the work is in another repository
+   * entirely. The operator asked for a way to point it.
+   *
+   * PER PROJECT, BECAUSE A PROJECT IS A CWD. The README states it: "there is
+   * no stored project in vam: a project is live sessions grouped by their
+   * cwd." The thing being corrected here IS that cwd, so the correction
+   * belongs at the same grain. Per session it would let two sessions with an
+   * identical cwd disagree about which repository that cwd is, which is not
+   * inconvenient but incoherent.
+   *
+   * A DIRECTORY, NEVER AN `owner/name`. `pull-requests.ts` runs `gh` with no
+   * `--repo` on purpose: "naming a repository here would let a session's pane
+   * describe a repository the session is not in." A directory keeps that true
+   * -- `gh` still resolves the remote itself -- and only moves where vam
+   * stands to ask.
+   *
+   * TWO LEVELS for `projectNames`' reason: a project id is unique only within
+   * its source. Exempt from the icon TTL like `projectNames` is not: an
+   * override is about a directory on this machine, and the project it names
+   * can go quiet for a month without the operator's choice becoming wrong.
+   */
+  readonly prRepos: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /**
    * The filter popover's two origin toggles. Exempt from the icon TTL for the
    * same reason `theme` and `panes` are: it describes the person, not a
    * session that may have stopped existing.
@@ -416,6 +445,7 @@ export const EMPTY_PREFS: Prefs = {
   panes: DEFAULT_PANES,
   projectIcons: {},
   projectNames: {},
+  prRepos: {},
   filters: DEFAULT_SESSION_FILTERS,
   collapsedProjects: {},
   hiddenProjects: {},
@@ -498,6 +528,7 @@ function parsePrefs(
     panes?: unknown;
     projectIcons?: unknown;
     projectNames?: unknown;
+    prRepos?: unknown;
     filters?: unknown;
     collapsedProjects?: unknown;
     hiddenProjects?: unknown;
@@ -555,6 +586,13 @@ function parsePrefs(
       ),
       cutoff,
     ),
+    // NOT PRUNED, unlike `projectNames` directly above, and the difference is
+    // the field's meaning rather than an oversight: the icon TTL exists to
+    // stop the store keeping rows for sessions that stopped existing, and an
+    // override is a fact about a DIRECTORY on this machine. A project that
+    // goes quiet for a month has not made the operator's choice wrong, and
+    // expiring it would silently point the pane back at the factory.
+    prRepos: readBuckets(record.prRepos, readRepoPath),
     // Same argument again: not pruned, and per-field defensive so one garbage
     // toggle cannot drag the other back to its default with it.
     filters: readFilters(record.filters),
@@ -1260,6 +1298,50 @@ export function setProjectRename(
       ? withEntry(prefs.projectNames, sourceId, nextBucket)
       : withoutEntry(prefs.projectNames, sourceId);
   return { ...prefs, projectNames };
+}
+
+/**
+ * A stored override, or nothing. Total, and in the one safe direction: a value
+ * that is not a non-empty string is an ABSENCE, which is the session's own
+ * directory -- never `''`, which `execFile` would read as "wherever the app
+ * was launched from".
+ */
+function readRepoPath(entry: unknown): string | null {
+  if (typeof entry !== 'string') return null;
+  const trimmed = entry.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+/**
+ * Point one project's pull-request reads at a directory, or clear it.
+ *
+ * An empty (or blank) value CLEARS, exactly as `setProjectRename`'s empty
+ * title does, and for a sharper reason: an empty string handed to `execFile`
+ * as a `cwd` is the process's own working directory, so storing one would
+ * answer about a repository nobody chose. Clearing is the only reading of ""
+ * that cannot lie.
+ */
+export function setProjectPrRepo(
+  prefs: Prefs,
+  sourceId: SourceId,
+  projectId: string,
+  directory: string,
+): Prefs {
+  const bucket = prefs.prRepos[sourceId] ?? emptyMap<string>();
+  const trimmed = directory.trim();
+  const nextBucket =
+    trimmed === '' ? withoutEntry(bucket, projectId) : withEntry(bucket, projectId, trimmed);
+  const prRepos =
+    Object.keys(nextBucket).length > 0
+      ? withEntry(prefs.prRepos, sourceId, nextBucket)
+      : withoutEntry(prefs.prRepos, sourceId);
+  return { ...prefs, prRepos };
+}
+
+/** The directory this project's pull requests are read from, or `null` for
+ *  "the session's own", which is what vam did before this existed. */
+export function prRepoFor(prefs: Prefs, sourceId: SourceId, projectId: string): string | null {
+  return readRepoPath(prefs.prRepos[sourceId]?.[projectId]);
 }
 
 /**
@@ -1976,6 +2058,26 @@ export function activatePrefs(prefs: Prefs): Prefs {
   setActiveProvider(prefs.defaultProvider);
   setActiveFocusView(prefs.focusView);
   setActivePromptSubmitKey(prefs.promptSubmitKey);
+  /**
+   * AND ONE PREFERENCE CROSSES INTO MAIN, because the read it changes happens
+   * there: `gh` is spawned by `main/sources/claude-code/source.ts`, which has
+   * no access to this store.
+   *
+   * HERE RATHER THAN AT THE PICKER, for the reason every line above it is
+   * here: `activatePrefs` runs on every read AND every write, so a reload arms
+   * main as surely as a click does. A push wired to the control alone would
+   * leave main holding an empty map until the operator happened to open
+   * settings, and the pane would report the factory's pull requests until they
+   * did.
+   *
+   * FIRE AND FORGET, DELIBERATELY. `activatePrefs` is synchronous and every
+   * other side effect here is too; awaiting an IPC round-trip would make every
+   * prefs write async for a projection whose staleness costs one poll. A
+   * rejection is swallowed for the same reason it is in `createStreamSubscribe`
+   * -- the desktop bridge is absent in the browser build, where `window.api`
+   * has no `prefs` at all and this must simply not happen.
+   */
+  globalThis.window?.api?.prefs?.setPrRepos?.(prefs.prRepos)?.catch?.(() => {});
   return prefs;
 }
 

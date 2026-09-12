@@ -16,6 +16,7 @@ import {
   createClipboardApi,
   createDialogApi,
   createMainErrorsApi,
+  createPrefsBridge,
   createPreloadApi,
   createRemoteApi,
   createStreamSubscribe,
@@ -41,4 +42,8 @@ contextBridge.exposeInMainWorld('api', {
   // Main's own failure buffer (`src/main/errors/log.ts`), read side. See
   // `src/renderer/errors/main-errors-bridge.ts` for the one caller.
   mainErrors: createMainErrorsApi(ipcRenderer),
+  // Preferences main needs a copy of. Exactly one today: where to ask GitHub
+  // from, per project. Desktop-only by construction -- it is not a member of
+  // the source API a phone implements over HTTP.
+  prefs: createPrefsBridge(ipcRenderer),
 });
