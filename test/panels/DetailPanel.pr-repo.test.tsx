@@ -23,6 +23,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
+import { t } from '../../src/renderer/i18n/strings.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
 
 const DIR = '/Users/someone/code/other-repo';
@@ -107,7 +108,10 @@ describe('the PRs pane says where it is asking from', () => {
     // A row on every session spelling out the session's own path is a sentence
     // restating the default, on a narrow pane, forever.
     draw({ prRepo: { directory: null, choose: () => {}, clear: () => {} } });
-    expect(row()?.textContent).toContain("this session's own directory");
+    // BOUND TO THE CATALOGUE, not to a copy of the sentence. A test carrying
+    // its own literal passes while the two drift, which is the bug a catalogue
+    // exists to make impossible.
+    expect(row()?.textContent).toContain(t('prs.repo.own'));
     expect(row()?.getAttribute('data-prs-repo-overridden')).toBeNull();
   });
 
@@ -117,9 +121,26 @@ describe('the PRs pane says where it is asking from', () => {
     // looked wrong rather than aimed wrong before this existed.
     draw({ prRepo: { directory: DIR, choose: () => {}, clear: () => {} } });
     expect(row()?.textContent).toContain(DIR);
+    expect(row()?.textContent).toContain(t('prs.repo.overridden', { directory: DIR }));
     expect(row()?.getAttribute('data-prs-repo-overridden')).toBe('true');
     // The whole path stays readable even when the column truncates it.
     expect(row()?.querySelector('[title]')?.getAttribute('title')).toBe(DIR);
+  });
+
+  it('labels both acts from the catalogue, in the case they paint', () => {
+    // The copy is the operator's only clue about which of the two buttons
+    // undoes the override, and this surface stores its own case: no stylesheet
+    // capitalises it, and -- being drawn only where a directory picker exists
+    // -- no browser guard can reach it to check that one did.
+    // TWO LABELS FOR ONE BUTTON, because the act is not the same act: with
+    // nothing overridden it offers another directory, and once one is chosen
+    // it changes the one named beside it.
+    draw({ prRepo: { directory: null, choose: () => {}, clear: () => {} } });
+    expect(choose()?.textContent).toBe(t('prs.repo.choose'));
+    cleanup();
+    draw({ prRepo: { directory: DIR, choose: () => {}, clear: () => {} } });
+    expect(choose()?.textContent).toBe(t('prs.repo.change'));
+    expect(clear()?.textContent).toBe(t('prs.repo.clear'));
   });
 
   it('asks for a directory when the operator presses it', () => {
@@ -158,6 +179,6 @@ describe('the PRs pane says where it is asking from', () => {
     });
     // With no entry there is no project, so `Canvas` would hand no control --
     // this renders the prop directly, which is the case the pane must handle.
-    expect(screen.queryByText(/asking in/)).not.toBeNull();
+    expect(screen.queryByText(t('prs.repo.overridden', { directory: DIR }))).not.toBeNull();
   });
 });

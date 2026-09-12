@@ -142,3 +142,53 @@ describe('the settings surface reads the catalogue rather than its own literals'
     expect(stray).toEqual([]);
   });
 });
+
+/**
+ * THE SECOND SURFACE, and the first one added since the catalogue landed.
+ *
+ * The catalogue shipped carrying Settings and said so: "everything else still
+ * holds its own text and is added here as it is touched". The PRs pane's
+ * repository footer is text written AFTER that sentence -- so if it had stayed
+ * a literal, the rule would have been broken by the very next commit, and a
+ * catalogue that grows slower than the app is a catalogue a second language
+ * never catches up with.
+ *
+ * AND IT STORES ITS OWN CASE, WHICH SETTINGS DOES NOT. That is not an
+ * inconsistency, it is the case rule applied honestly to a surface with
+ * different evidence available:
+ *
+ *  - Settings is capitalised by the STYLESHEET (`.vam-sentence`, `capitalize`),
+ *    and `e2e/settings-chrome-shots.mjs` MEASURES the painted result in a real
+ *    browser. A rule that stops matching is caught.
+ *  - This footer is drawn only when a directory picker exists -- desktop only,
+ *    since `window.api.dialog` is a preload bridge -- so `App.tsx` routes a
+ *    browser to `DemoCanvas` and NO web guard can reach it. `::first-letter`
+ *    silently did nothing once already in this repo, on a `<span>` that was
+ *    not a block container, and only a screenshot found it.
+ *
+ * Case that no gate can see does not belong in a stylesheet. Here it is in the
+ * string, where the test below can hold it.
+ */
+describe('the PRs pane’s repository footer', () => {
+  const KEYS = ['prs.repo.own', 'prs.repo.overridden', 'prs.repo.choose', 'prs.repo.clear'];
+
+  it('keeps its copy in the catalogue', () => {
+    for (const key of KEYS) expect(Object.keys(STRINGS.en)).toContain(key);
+  });
+
+  it('names the directory through a NAMED slot, like every other sentence here', () => {
+    const filled = t('prs.repo.overridden', { directory: '/Users/someone/code/other-repo' });
+    expect(filled).toContain('/Users/someone/code/other-repo');
+    expect(filled).not.toContain('{directory}');
+  });
+
+  it('stores the case it paints, because no stylesheet and no guard can', () => {
+    // THE CORPUS IS ASSERTED INSIDE THE LOOP EXPRESSION, not beside it: four
+    // guards in this repo have passed having examined nothing at all.
+    const prose = Object.entries(STRINGS.en).filter(([key]) => key.startsWith('prs.'));
+    expect(prose.length).toBeGreaterThanOrEqual(4);
+    for (const [key, value] of prose) {
+      expect(value.slice(0, 1), key).toBe(value.slice(0, 1).toUpperCase());
+    }
+  });
+});

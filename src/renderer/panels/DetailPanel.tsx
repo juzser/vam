@@ -104,6 +104,7 @@ import type {
   SlashCommand,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import { t } from '../i18n/strings.js';
 import { normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
@@ -1050,10 +1051,10 @@ function PullRequestsTab({
         className="flex flex-none items-baseline gap-2 border-line border-t pt-2 text-meta text-ink-faint"
       >
         {repo.directory === null ? (
-          <span className="min-w-0 flex-1 truncate">asking in this session's own directory</span>
+          <span className="min-w-0 flex-1 truncate">{t('prs.repo.own')}</span>
         ) : (
           <span className="min-w-0 flex-1 truncate" title={repo.directory}>
-            asking in {repo.directory}
+            {t('prs.repo.overridden', { directory: repo.directory })}
           </span>
         )}
         <button
@@ -1062,7 +1063,7 @@ function PullRequestsTab({
           onClick={repo.choose}
           className={`flex-none cursor-pointer rounded px-1 text-ink-dim hover:text-ink ${FOCUS_RING}`}
         >
-          {repo.directory === null ? 'Choose another…' : 'Change…'}
+          {repo.directory === null ? t('prs.repo.choose') : t('prs.repo.change')}
         </button>
         {repo.directory === null ? null : (
           <button
@@ -1071,7 +1072,7 @@ function PullRequestsTab({
             onClick={repo.clear}
             className={`flex-none cursor-pointer rounded px-1 text-ink-dim hover:text-ink ${FOCUS_RING}`}
           >
-            Use the session's
+            {t('prs.repo.clear')}
           </button>
         )}
       </div>

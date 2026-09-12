@@ -36,15 +36,26 @@
  *     bug. A slot nobody filled is left VISIBLE -- see `fill`.
  *
  * ── ON CASE ───────────────────────────────────────────────────────────────
- * The strings here are stored in ONE canonical case, lower, and the settings
- * surface capitalises them with CSS (`styles.css`, `.vam-sentence` and the
- * `capitalize` utilities). That is not laziness about the catalogue: it keeps
- * `textContent` stable for the tests, keeps the accessible name a normal word
- * rather than capitals a screen reader may spell out, and -- the reason that
- * matters here -- keeps CASE A PROPERTY OF THE SURFACE rather than of the
- * translation. A language whose script has no case (or whose conventions
- * differ, as German's do for nouns) is then a catalogue entry, not a fight
- * with a stylesheet.
+ * Case is A PROPERTY OF THE SURFACE, not of the translation. A language whose
+ * script has no case, or whose conventions differ as German's do for nouns, is
+ * then a catalogue entry rather than a fight with a stylesheet.
+ *
+ * The settings strings are therefore stored in one canonical case, lower, and
+ * that surface capitalises them with CSS (`styles.css`, `.vam-sentence` and
+ * the `capitalize` utilities). It also keeps `textContent` stable for the
+ * tests and keeps an accessible name a normal word rather than capitals a
+ * screen reader may spell out.
+ *
+ * THE RULE HAS A SECOND HALF, AND THE PRs FOOTER IS WHERE IT FIRST BIT. A
+ * stylesheet may own the case only where something can SEE the result:
+ * `e2e/settings-chrome-shots.mjs` opens Settings in a real browser and
+ * measures it. The PRs pane's repository footer is drawn only when a directory
+ * picker exists -- `window.api.dialog` is a preload bridge, so `App.tsx` sends
+ * a browser to `DemoCanvas` instead -- and no web guard can reach it. In this
+ * repo `::first-letter` has already matched nothing in silence once, on a
+ * `<span>` that was not a block container, and only a screenshot found it.
+ * Case that no gate can see does not belong in a stylesheet: those keys carry
+ * their own capitals, and `test/i18n/strings.test.ts` holds them there.
  */
 
 /** The locales that ship. One, today, and the type is what the rest defends. */
@@ -98,6 +109,17 @@ const EN = {
   'settings.keyboard.hint': 'click a key and press the one you want — Escape cancels',
   'settings.keyboard.reset': 'reset shortcuts',
   'settings.keyboard.capture': 'press a key… Esc to cancel',
+
+  // ── The PRs pane's repository footer ─────────────────────────────────────
+  // THE SECOND SURFACE, and it stores the case it paints -- see "ON CASE"
+  // above. Settings is capitalised by the stylesheet because a browser guard
+  // measures the painted result; this footer is drawn only where a directory
+  // picker exists, which is the desktop, and no web guard can reach it.
+  'prs.repo.own': "Asking in this session's own directory",
+  'prs.repo.overridden': 'Asking in {directory}',
+  'prs.repo.choose': 'Choose another…',
+  'prs.repo.change': 'Change…',
+  'prs.repo.clear': "Use the session's",
 
   // ── Exercised by the catalogue's own tests, and by nothing else ──────────
   // Kept HERE rather than in the test file so that the shape a test asserts
