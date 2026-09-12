@@ -198,35 +198,44 @@ describe('the composer submit paints which outcome it will produce', () => {
     // FIRST, THAT THERE IS ANYTHING TO COMPARE. Both halves of every check
     // below are relative, and two nulls are equal to each other forever --
     // which is how a guard passes on an absence.
-    expect(delivering.word).not.toBe('');
-    expect(recording.word).not.toBe('');
     expect(delivering.glyph).not.toBeNull();
     expect(recording.glyph).not.toBeNull();
+    expect(delivering.name).not.toBe('');
+    expect(recording.name).not.toBe('');
 
-    expect(delivering.word).not.toBe(recording.word);
-    // A DIFFERENT GLYPH, not merely a different word: the button is 72px wide
-    // and the icon is what reads first. Which icon is a design choice and is
+    // THE WORD IS GONE AND THE DISTINCTION IS NOT. Operator: "drop the Send
+    // label from the button, the icon is enough." What carried the
+    // delivers/records difference was the word, so with the word gone this is
+    // the assertion that keeps the difference somewhere: a different GLYPH,
+    // and a different accessible NAME. Which icon is a design choice and is
     // not asserted; that the two do not share one is the claim.
+    expect(delivering.word).toBe('');
+    expect(recording.word).toBe('');
     expect(delivering.glyph).not.toBe(recording.glyph);
-    expect({ delivering: delivering.word, recording: recording.word }).toEqual({
-      delivering: 'Send',
-      recording: 'Record',
+    expect(delivering.name).not.toBe(recording.name);
+    expect({ delivering: delivering.name, recording: recording.name }).toEqual({
+      delivering: 'send prompt',
+      recording: 'record prompt',
     });
   });
 
-  it('keeps the visible word inside the accessible name (WCAG 2.5.3)', () => {
-    // A speech user says the word they can see. If the name does not contain
-    // it, "click Record" reaches nothing -- and this is exactly the pairing
-    // that goes wrong first when the in-flight wording is edited, so both
-    // states are read.
+  it('names the act in every state, now that nothing is painted to read', () => {
+    // WCAG 2.5.3 (label in name) STOPS APPLYING when there is no visible
+    // label, and what replaces it is 1.1.1: an icon-only control has to carry
+    // its own name, in every state -- including mid-flight, which is the
+    // pairing that went wrong first when the in-flight wording was last
+    // edited, and the reason both states are still read here.
     for (const delivers of [true, false]) {
       for (const sending of [true, false]) {
         cleanup();
         draw({ draft: 'ship it', delivers, sending });
         const name = submit()?.getAttribute('aria-label') ?? '';
-        expect(name.toLowerCase(), `delivers=${delivers} sending=${sending}`).toContain(
-          word().toLowerCase(),
-        );
+        const where = `delivers=${delivers} sending=${sending}`;
+        expect(name, where).not.toBe('');
+        expect(name.toLowerCase(), where).toContain(delivers ? 'send' : 'record');
+        // And nothing is painted inside it but the glyph.
+        expect(word(), where).toBe('');
+        expect(submit()?.querySelectorAll('svg').length, where).toBe(1);
       }
     }
   });
@@ -1478,41 +1487,39 @@ describe('there is a way out of the prompt box without a mouse', () => {
     expect(document.activeElement).not.toBe(box);
   });
 
-  it('says how to get out, in the box, while you are in it', () => {
-    // The caption used to read `Esc → sidebar` and now names `Mod-[`, because
-    // Escape does something else. A hint that outlives the behaviour it
-    // described is worse than no hint: it sends the operator to press a key
-    // that now interrupts their agent.
+  it('retires the caption that promised Escape went to the sidebar', () => {
+    // It no longer does -- Escape interrupts the agent from in here -- and a
+    // hint that outlives the behaviour it described is worse than no hint: it
+    // sends the operator to press a key expecting to leave and stops their
+    // agent instead. The replacement caption (`Mod-[ → leave`) is gone too,
+    // at the operator's later ask; `DetailPanel.composer-escape.test.tsx`
+    // holds the key still working.
     draw({ composing: true });
-    expect(q<HTMLElement>('[data-prompt-keys]')?.textContent).toContain('Mod-[');
     expect(q<HTMLElement>('[data-prompt-keys]')?.textContent).not.toContain('sidebar');
     expect(q<HTMLElement>('[data-prompt-escape]')).toBeNull();
-    // Not clutter the rest of the time: the way out only matters once you are
-    // in, and this row is already carrying four things at 408px.
+    // The row itself is still only drawn while the box is open for typing --
+    // it costs no width the rest of the time.
     cleanup();
     draw({ composing: false });
     expect(q<HTMLElement>('[data-prompt-keys]')).toBeNull();
   });
 
-  it('names the way OUT and leaves the send key to the button beside it', () => {
-    // Operator: "of Enter-to-send and Mod-[-to-leave, only the leave one needs
-    // showing."
+  it("names no leave key at all, on the operator's second look", () => {
+    // Operator, first: "of Enter-to-send and Mod-[-to-leave, only the leave
+    // one needs showing." Then, having lived with it: "drop the leave shortcut
+    // from under the prompt box."
     //
-    // THE TWO HINTS ARE NOT WORTH THE SAME. The send key is named twice over
-    // already -- there is a submit BUTTON directly above this row carrying the
-    // verb it performs, with a `Note` on it -- and pressing Return in a text
-    // box is the most guessed-at gesture there is. The way out is neither: no
-    // control on screen performs it, and the key that an operator WOULD guess
-    // (Escape) now interrupts their agent instead. A row that spends half its
-    // width on the obvious one buries the one that has to be taught.
+    // THE KEY STILL WORKS. `Mod-[` is bound in the composer's own `onKeyDown`
+    // and reserved in `chords.ts`, `Mod-0` still gets out from here, and the
+    // `?` sheet still names both. What is gone is the CAPTION, which is the
+    // operator's call to make: they are the one reading this row on every
+    // prompt they type.
     draw({ composing: true });
-    const row = q<HTMLElement>('[data-prompt-keys]');
-    expect(row?.textContent).toContain('Mod-[');
+    expect(q<HTMLElement>('[data-prompt-leave-key]')).toBeNull();
+    expect(q<HTMLElement>('[data-prompt-keys]')?.textContent ?? '').not.toContain('leave');
+    // And the send key stays where it was left -- silent on the shipped key,
+    // which is what makes the row EMPTY here rather than merely shorter.
     expect(q<HTMLElement>('[data-prompt-send-key]')).toBeNull();
-    // NOT "the row lost a span": the row still has to say something, or this
-    // assertion would pass just as well over a composer that stopped drawing
-    // the caption at all.
-    expect(q<HTMLElement>('[data-prompt-leave-key]')).not.toBeNull();
   });
 
   it('brings the send caption back when the operator is not on the shipped key', () => {

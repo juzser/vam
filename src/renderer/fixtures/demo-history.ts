@@ -75,6 +75,30 @@ const OLDER: readonly Decision[] = [
       'Endpoint up, heartbeat every 15s, one test that kills the process and asserts the drop.',
     commands: [],
     errorCount: 1,
+    // THE TURN THAT OVERRUNS THE COLUMN'S CAP, and it is in the PAGED history
+    // rather than in the live tail because that is where a turn like this
+    // really lives: measured over the operator's transcripts, a turn small
+    // enough to fit one 128 KiB window made at most 20 calls, while a turn big
+    // enough to span one -- the case this pager exists to model -- ran to a
+    // median of 30 and a largest of 2,144. The column draws 20 and says how
+    // many it held back, and without a turn of this size here that sentence
+    // would be unreachable from the one session a guard may drive.
+    steps: Array.from({ length: 26 }, (_, i) => ({
+      id: `demo-old-3:s${i}`,
+      label:
+        i === 11
+          ? 'Bash: run the heartbeat test'
+          : i % 4 === 0
+            ? 'Read'
+            : i % 4 === 1
+              ? 'Edit'
+              : i % 4 === 2
+                ? 'Grep'
+                : 'Bash: run the endpoint suite',
+      // One failure, matching the count above: the two are read off the same
+      // parts and a fixture where they disagreed would make one look broken.
+      failed: i === 11,
+    })),
   },
   {
     id: 'demo-old-4',

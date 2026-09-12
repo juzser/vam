@@ -1152,7 +1152,7 @@ describe('handing the keyboard to the right pane', () => {
     press('I');
     expect(actionPane()).toBe('active');
     expect(mode()).toBe('Insert');
-    press('H');
+    press('H', { metaKey: true, shiftKey: true });
     expect(actionPane()).toBe('idle');
     expect(mode()).toBe('Select');
   });

@@ -68,6 +68,7 @@ import {
   Image as ImageIcon,
   ListChecks,
   MessageSquare,
+  Mic,
   NotepadText,
   Paperclip,
   Sparkles,
@@ -102,6 +103,7 @@ import type {
   SessionAgent,
   SessionStatus,
   SlashCommand,
+  TurnStep,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { t } from '../i18n/strings.js';
@@ -112,6 +114,7 @@ import { ShortcutTip } from '../keyboard/ShortcutTip.js';
 import {
   activeFocusView,
   drawsProgressLine,
+  drawsTurnSteps,
   drawsUnfoldControl,
   subscribeFocusView,
 } from '../prefs/progress.js';
@@ -127,6 +130,7 @@ import { describeFailure } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
+import { type DictationHandle, dictationAvailable, startDictation } from './dictation.js';
 import {
   type DiffKind,
   diffLineKind,
@@ -742,6 +746,14 @@ export type DetailPanelProps = {
   readonly prRepo?: {
     /** The chosen directory, or `null` for the session's own. */
     readonly directory: string | null;
+    /**
+     * What to call the repository when nothing is overridden: the project's
+     * own name, which is the one the sidebar groups this session under.
+     *
+     * Optional because the heading has a truthful fallback without it, and a
+     * caller that has not wired it up should get that rather than a blank.
+     */
+    readonly projectName?: string;
     readonly choose: () => void;
     readonly clear: () => void;
   };
@@ -1035,52 +1047,75 @@ function PullRequestsTab({
    * repository. Nothing on screen said which directory was being asked, so the
    * answer looked wrong rather than aimed wrong.
    *
-   * DRAWN ONLY WHEN POINTED, in the common case. A row on every session saying
-   * "asking in the session's own directory" is a sentence restating the
-   * default, on a narrow pane, forever. What is always reachable is the way to
-   * CHANGE it, which is the small button -- and once a project IS pointed
-   * somewhere, the directory is named, because from then on the pane is
-   * answering about a repository the session is not in and that must never be
-   * silent.
+   * A HEADING, AT THE TOP, ON THE OPERATOR'S SECOND LOOK. It shipped as a
+   * footer under the list, on the argument that the way to change something
+   * belongs beside the answer it changes. That was the wrong way round: the
+   * repository is what this whole pane is ABOUT, and a reader who has to reach
+   * the bottom to learn which one they are looking at has already read the
+   * list under the wrong assumption. "Put a heading section at the top -- the
+   * current repo on the left, choose-another on the right, as a button."
+   *
+   * SO IT IS DRAWN ALWAYS, not only when overridden. A name is not a sentence:
+   * the old row spent a line saying "asking in this session's own directory",
+   * which restated the default forever; a heading reading `factory` is the
+   * same fact as a label, and it is the one the reader needs BEFORE the list
+   * rather than after it.
+   *
+   * The way back out (`prs.repo.clear`) draws only once there is something to
+   * go back from, and sits inboard of the button rather than beside the name:
+   * a control that undoes nothing is not drawn at all, and the choose button
+   * stays in one place whether or not it is there.
    */
-  const footer =
+  /**
+   * THE NAME OF THE REPOSITORY THIS PANE IS ASKING IN.
+   *
+   * The last segment of the chosen directory, which is what a repository is
+   * called, or the project's own name when nobody has chosen one. A heading is
+   * a NAME: the full path is on `title`, where it settles which of two
+   * checkouts this is without spending the row on it.
+   */
+  const repoName =
+    repo?.directory === null || repo?.directory === undefined
+      ? (repo?.projectName ?? t('prs.repo.session'))
+      : (repo.directory.replace(/\/+$/, '').split('/').pop() ?? repo.directory);
+  const heading =
     repo === undefined ? null : (
       <div
         data-prs-repo
         data-prs-repo-overridden={repo.directory === null ? undefined : 'true'}
-        className="flex flex-none items-baseline gap-2 border-line border-t pt-2 text-meta text-ink-faint"
+        className="flex flex-none items-center gap-2 border-line border-b pb-2"
       >
-        {repo.directory === null ? (
-          <span className="min-w-0 flex-1 truncate">{t('prs.repo.own')}</span>
-        ) : (
-          <span className="min-w-0 flex-1 truncate" title={repo.directory}>
-            {t('prs.repo.overridden', { directory: repo.directory })}
-          </span>
-        )}
-        <button
-          type="button"
-          data-prs-repo-choose
-          onClick={repo.choose}
-          className={`vam-hit-24 flex-none cursor-pointer rounded px-1 text-ink-dim hover:text-ink ${FOCUS_RING}`}
+        <span
+          data-prs-repo-name
+          title={repo.directory ?? undefined}
+          className="min-w-0 flex-1 truncate font-medium text-control text-ink"
         >
-          {repo.directory === null ? t('prs.repo.choose') : t('prs.repo.change')}
-        </button>
+          {repoName}
+        </span>
         {repo.directory === null ? null : (
           <button
             type="button"
             data-prs-repo-clear
             onClick={repo.clear}
-            className={`vam-hit-24 flex-none cursor-pointer rounded px-1 text-ink-dim hover:text-ink ${FOCUS_RING}`}
+            className={`vam-hit-24 flex-none cursor-pointer rounded px-1 text-ink-faint text-meta hover:text-ink ${FOCUS_RING}`}
           >
             {t('prs.repo.clear')}
           </button>
         )}
+        <button
+          type="button"
+          data-prs-repo-choose
+          onClick={repo.choose}
+          className={`vam-hit-24 flex-none cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-meta hover:border-line-loud hover:text-ink ${FOCUS_RING}`}
+        >
+          {t('prs.repo.choose')}
+        </button>
       </div>
     );
   const framed = (body: ReactNode) => (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {heading}
       {body}
-      {footer}
     </div>
   );
   if (pullRequests === undefined) {
@@ -2619,6 +2654,52 @@ function turnMark(d: Decision): string {
 }
 
 /**
+ * HOW MANY OF A TURN'S CALLS THE COLUMN DRAWS, and the number is measured
+ * rather than chosen.
+ *
+ * Over the 77 real session transcripts on this machine: a turn that fits
+ * inside one 128 KiB window -- which is every turn a live poll reads, because
+ * that window IS the poll -- made a median of 3 calls, a p90 of 8, and at most
+ * 20, across 387 such turns. So at 20 nothing a running session shows is ever
+ * cut, and this is not a fold on the working the operator just asked to see.
+ *
+ * IT EXISTS FOR THE OTHER HALF OF THAT CORPUS. A turn whose bytes SPAN the
+ * window -- the case `history.ts` widens the read for, up to 4 MiB, so that a
+ * scrolled-back page carries whole turns -- ran to a median of 30 calls and a
+ * largest of 2,144 (785 turns). Two thousand rows under one prompt is that
+ * turn's answer pushed off the screen by its own working, on a column the
+ * operator is scrolling through history in.
+ *
+ * AND WHAT IS CUT IS SAID, IN A NUMBER VAM HELD. `steps` is already a list of
+ * what was READ; a cap that would not name its own remainder would be the
+ * second, silent fold on a surface built to refuse exactly that.
+ */
+const MAX_STEP_ROWS = 20;
+
+/**
+ * ONE CALL, AS A ROW. The mark is a glyph and a colour, and a failure may
+ * depend on neither: the word rides in `sr-only` beside it, because the count
+ * on the line above says something failed and only this says which one.
+ */
+function StepRow({ step }: { readonly step: TurnStep }) {
+  return (
+    <li
+      data-progress-step={step.id}
+      data-progress-step-failed={step.failed ? 'true' : undefined}
+      className="flex min-w-0 items-center gap-1.5"
+    >
+      <span aria-hidden="true" className={step.failed ? 'text-failed' : undefined}>
+        {step.failed ? '!' : '·'}
+      </span>
+      {step.failed && <span className="sr-only">{t('steps.failed')}</span>}
+      <span data-progress-step-label className="min-w-0 truncate">
+        {step.label}
+      </span>
+    </li>
+  );
+}
+
+/**
  * ONE TURN OF THE TRANSCRIPT, as a block of the column.
  *
  * The pane used to draw exactly one of these -- whichever turn `selectedId`
@@ -2704,6 +2785,20 @@ const TurnBlock = memo(function TurnBlock({
    * drift into a turn that has neither.
    */
   const showUnfold = drawsUnfoldControl(focusView, turnFacts);
+  /**
+   * AND THE WORKING ITSELF -- the calls the turn made, which is the thing
+   * "hide tool calls" was always about. Same file, same reason: three
+   * predicates written in one place, where the invariant that binds them (a
+   * step is never drawn where the line is not) can be swept.
+   *
+   * CAPPED HERE AND NOT AT THE SOURCE. `steps` is a list of what vam READ, and
+   * the reader's budget is the window, exactly as it is for `MAX_DECISIONS`;
+   * how many rows a COLUMN can spend is a different question with a different
+   * answer, and `dropped` below is what makes the cap say its own size.
+   */
+  const steps = decision.steps ?? [];
+  const showSteps = drawsTurnSteps(focusView, turnFacts) && steps.length > 0;
+  const dropped = Math.max(0, steps.length - MAX_STEP_ROWS);
   return (
     <article
       data-column-turn={decision.id}
@@ -2987,6 +3082,40 @@ const TurnBlock = memo(function TurnBlock({
               </>
             )}
           </div>
+          {/* THE CALLS THE TURN MADE, which is what "show the whole progress"
+              asked for. Before this the line above was the whole of a turn's
+              working on screen -- its mark and the agent's name -- while the
+              reader had parsed every `tool_use` part and kept one.
+
+              INSIDE THIS SECTION, NOT BESIDE IT. That is what keeps focus view
+              folding ONE thing: `drawsTurnSteps` is a strict subset of
+              `drawsProgressLine` (swept in `prefs.focus-view.test.ts`), so
+              there is no state where a row outlives the line it belongs to.
+
+              AN ORDERED LIST, because the order is the content: this is what
+              the turn did and then did next. `list-none` is explicit rather
+              than left to the preflight -- a marker column here would indent
+              every row past the line it sits under. */}
+          {showSteps && (
+            <ol
+              data-progress-steps
+              className="flex min-w-0 list-none flex-col gap-0.5 pl-3 font-mono text-ink-faint text-meta"
+            >
+              {steps.slice(0, MAX_STEP_ROWS).map((step) => (
+                <StepRow key={step.id} step={step} />
+              ))}
+              {/* WHAT THE CAP LEFT OUT, as a number vam read. A list that is a
+                  count of what was READ cannot then quietly draw fewer than it
+                  holds: that is the silent fold this surface exists against,
+                  and it is the same qualifier `turns read` carries one level
+                  up. */}
+              {dropped > 0 && (
+                <li data-progress-steps-more className="text-ink-quiet">
+                  {t('steps.more', { count: String(dropped) })}
+                </li>
+              )}
+            </ol>
+          )}
         </section>
       )}
 
@@ -3616,6 +3745,61 @@ export function DetailPanel(props: DetailPanelProps) {
   /** The file waiting in the draft, and the last refusal, if there was one. */
   const fileRef = useRef<HTMLInputElement>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
+  /**
+   * SPEAKING A PROMPT INSTEAD OF TYPING IT (operator: "add a record feature so
+   * a prompt can be spoken, with the icon next to Send").
+   *
+   * `dictation.ts` wraps the platform's own recogniser -- vam records no audio
+   * and sends none; what comes back is text. Three pieces of state, because
+   * they answer three different questions: is a recogniser THERE at all (read
+   * once, at mount, since a platform does not grow one), is it LISTENING now,
+   * and what did it say when it refused.
+   */
+  const [canDictate] = useState(() => dictationAvailable());
+  const [listening, setListening] = useState(false);
+  const [dictateError, setDictateError] = useState<string | null>(null);
+  const dictation = useRef<DictationHandle | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const toggleDictation = useCallback(() => {
+    if (dictation.current !== null) {
+      dictation.current.stop();
+      dictation.current = null;
+      setListening(false);
+      return;
+    }
+    // The last refusal goes when a new attempt starts: a message about a
+    // microphone that was denied five minutes ago, sitting under a
+    // microphone that is listening now, is the stalest kind of lie.
+    setDictateError(null);
+    const handle = startDictation({
+      onText: (text) => {
+        // APPENDED, NEVER SUBSTITUTED. The operator may have typed half a
+        // prompt already, and a microphone that clears it is worse than one
+        // that does nothing. Read through a ref because the recogniser
+        // outlives the render that started it.
+        const current = draftRef.current;
+        onDraftChange(current === '' ? text : `${current} ${text}`);
+      },
+      onError: (message) => setDictateError(message),
+      onEnd: () => {
+        dictation.current = null;
+        setListening(false);
+      },
+    });
+    if (handle === null) return;
+    dictation.current = handle;
+    setListening(true);
+  }, [onDraftChange]);
+  useEffect(
+    () => () => {
+      // A pane that unmounts mid-sentence leaves a recogniser holding the
+      // microphone otherwise, with nothing left to stop it.
+      dictation.current?.stop();
+      dictation.current = null;
+    },
+    [],
+  );
   const attachedName = readAttachedName(draft);
   const takeFile = async (input: HTMLInputElement) => {
     const file = input.files?.[0];
@@ -4423,37 +4607,43 @@ export function DetailPanel(props: DetailPanelProps) {
       // watching.
       delivers === true
       ? {
-          word: 'Sending',
           Glyph: ArrowUp,
           label: 'sending prompt…',
           title: 'handing the prompt to the running agent session — this can take a while',
         }
       : {
-          word: 'Recording',
           Glyph: NotepadText,
           label: 'recording prompt…',
           title: 'appending the prompt to this session\u2019s log',
         }
     : delivers === true
       ? {
-          word: 'Send',
           Glyph: ArrowUp,
           label: 'send prompt',
           title: 'sends the prompt into the running agent session — it is delivered, not filed',
         }
       : {
-          word: 'Record',
           Glyph: NotepadText,
           label: 'record prompt',
           title:
             'appends the prompt to this session\u2019s log — vam cannot hand it to a running agent',
         };
   /**
-   * EVERY `word` IS A PREFIX OF ITS OWN `label`, and that is a requirement
-   * rather than a coincidence: WCAG 2.5.3 asks that the accessible name
-   * contain the visible one, or a speech user saying the word they can see
-   * does not reach the control. `e2e/composer-bar-shots.mjs` asserts the
-   * containment on the painted button rather than trusting this note.
+   * THE `word` IS GONE FROM THIS CLAIM, with the label it painted.
+   *
+   * Operator: "drop the Send label from the button, the icon is enough." Every
+   * `word` used to be a prefix of its own `label` because WCAG 2.5.3 asks that
+   * an accessible name contain the VISIBLE one -- and that criterion applies
+   * only where a visible label exists. With none, 1.1.1 takes over and the
+   * `label` is the whole of the name.
+   *
+   * The field is deleted rather than left unread: a claim carrying a word
+   * nothing paints is the same defect as a preference nothing reads, which
+   * this repo already has a test for. What still says which outcome this
+   * button produces is the GLYPH (two of them), the `label`, and the `title`
+   * that `Note` opens on focus -- all three asserted in
+   * `test/panels/DetailPanel.test.tsx` and on the painted control in
+   * `e2e/composer-bar-shots.mjs`.
    */
   const ComposerGlyph = composerClaim.Glyph;
   /**
@@ -4462,8 +4652,8 @@ export function DetailPanel(props: DetailPanelProps) {
    * "send" over a source that only appends to a log is that lie one line
    * lower.
    *
-   * Read from `delivers` rather than from `composerClaim.word`, which becomes
-   * `Sending`/`Recording` while a write is in flight -- the caption would then
+   * Read from `delivers` rather than from the claim, which swaps to its
+   * in-flight wording while a write is going out -- the caption would then
    * read "Enter → sending", which is not what the key does, it is what the app
    * is doing.
    */
@@ -4714,7 +4904,14 @@ export function DetailPanel(props: DetailPanelProps) {
         ) : current === 'Agents' ? (
           <AgentsTab agents={entry?.session.agents} />
         ) : current === 'PRs' ? (
-          <PullRequestsTab pullRequests={entry?.session.pullRequests} repo={prRepo} />
+          <PullRequestsTab
+            pullRequests={entry?.session.pullRequests}
+            repo={
+              prRepo === undefined
+                ? undefined
+                : { ...prRepo, projectName: prRepo.projectName ?? entry?.project.name }
+            }
+          />
         ) : orderedTurns.length === 0 ? (
           entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip
           // above it, and an empty strip already says "no sessions open —
@@ -5622,8 +5819,8 @@ export function DetailPanel(props: DetailPanelProps) {
                     // Cmd (`chords.ts`), so this is `Cmd+[` on the keyboard the
                     // operator has. Bound HERE rather than in the chord tables,
                     // for the reason Shift+Tab above is and for one more:
-                    // `focusList` already holds `MAX_BINDINGS` chords (`H`,
-                    // `Mod-0`), and a third would be invisible in the shortcut
+                    // `focusList` already holds `MAX_BINDINGS` chords
+                    // (`Mod-Shift-h`, `Mod-0`), and a third would be invisible in the shortcut
                     // editor -- which draws exactly `MAX_BINDINGS` slots -- and
                     // destroyed by the first rebind of either. It is in
                     // `RESERVED_KEYS` instead, so nothing else can take it.
@@ -5666,6 +5863,17 @@ export function DetailPanel(props: DetailPanelProps) {
             {attachError !== null && (
               <p data-attach-error className="text-control text-waiting">
                 {attachError}
+              </p>
+            )}
+
+            {/* ITS OWN LINE, NOT THE ATTACHMENT'S. Both are "the composer could
+              not do the thing you asked", and they are still different acts
+              with different fixes -- a hook named `attach-error` carrying a
+              microphone permission refusal is the kind of reuse that reads
+              fine until somebody greps for it. */}
+            {dictateError !== null && (
+              <p data-dictate-error className="text-control text-waiting">
+                {dictateError}
               </p>
             )}
 
@@ -5990,6 +6198,52 @@ export function DetailPanel(props: DetailPanelProps) {
                 </span>
               )}
               <span className="min-w-0 flex-1" />
+              {/* THE MICROPHONE, next to Send because that is where the
+              operator asked for it and because it belongs to the same act:
+              these two are what a finished prompt is handed to.
+
+              DRAWN ONLY WHERE A RECOGNISER EXISTS. `dictationAvailable` is
+              read once at mount; where it is false there is no button at all,
+              which is this file's own rule for the directory picker and the
+              attachment input -- a control that cannot act is not drawn dimmed,
+              it is not drawn.
+
+              `aria-pressed` rather than a second icon: this is one control in
+              two states, and a screen reader is told which by the state rather
+              than by the picture. The label changes with it, because the
+              button paints no word. */}
+              {canDictate && (
+                <Note
+                  text={
+                    listening
+                      ? 'listening — press again to stop; what is heard is appended to the prompt'
+                      : "dictates into the prompt using this device's own speech recognition — vam records no audio and uploads none"
+                  }
+                >
+                  <button
+                    type="button"
+                    data-prompt-dictate
+                    data-prompt-dictate-on={listening ? 'true' : undefined}
+                    aria-pressed={listening}
+                    aria-label={listening ? 'stop dictating' : 'dictate the prompt'}
+                    onClick={toggleDictation}
+                    className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
+                  >
+                    <span
+                      aria-hidden="true"
+                      data-tap-skin
+                      className={[
+                        'flex h-6 w-6 items-center justify-center rounded-[6px] border',
+                        listening
+                          ? 'border-running bg-running/15 text-running'
+                          : 'border-line-strong bg-card hover:bg-line-strong',
+                      ].join(' ')}
+                    >
+                      <Mic size={12} strokeWidth={1.7} className={listening ? 'vam-breathe' : ''} />
+                    </span>
+                  </button>
+                </Note>
+              )}
               {/* TWO OUTCOMES, TWO FACES. The mockup draws a send arrow here
               and this drew one for both of them -- for a source that hands the
               prompt to a running `claude --resume` and for a source that
@@ -6018,17 +6272,31 @@ export function DetailPanel(props: DetailPanelProps) {
                   aria-busy={sending}
                   aria-label={composerClaim.label}
                   className={[
-                    `flex h-7 flex-none items-center justify-center gap-1 rounded-[7px] bg-line-strong px-2 text-control text-ink ${FOCUS_RING}`,
+                    `flex h-7 w-7 flex-none items-center justify-center rounded-[7px] bg-line-strong text-control text-ink ${FOCUS_RING}`,
                     sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
                   ].join(' ')}
                 >
+                  {/* THE GLYPH ALONE. Operator: "drop the Send label from the
+                      button, the icon is enough."
+
+                      WHAT THE WORD WAS CARRYING has to go somewhere, and it
+                      does: the delivers/records distinction is two different
+                      GLYPHS (`ArrowUp` against `NotepadText`), the
+                      `aria-label` above says which act in words, and `Note`
+                      carries the whole sentence on focus and hover. WCAG 2.5.3
+                      (label in name) stops applying the moment there is no
+                      visible label; 1.1.1 takes over, and the name is what
+                      satisfies it.
+
+                      The claim's `word` went with the label: see
+                      `composerClaim` above for why a field nothing paints is
+                      deleted rather than left computed. */}
                   <ComposerGlyph
-                    size={13}
+                    size={14}
                     strokeWidth={1.7}
                     aria-hidden="true"
                     className={sending ? 'vam-breathe' : ''}
                   />
-                  {composerClaim.word}
                 </button>
               </Note>
             </div>
@@ -6052,16 +6320,23 @@ export function DetailPanel(props: DetailPanelProps) {
             control that can only refuse, drawn as one that acts. The way out
             is named unconditionally, because that one always works.
 
-            `Mod-[` IS THE ONE NAMED, out of the three keys that would work.
-            It is what Claude Code itself binds for this -- "`Esc` or `Ctrl+[`
-            — Enter NORMAL mode" -- which is the grammar the operator is
-            already in, and it is the reason this key was chosen over a second
-            spelling of something vam had. `Mod-0` (`focusList`) also gets out
-            from here, and is the one the `?` sheet can name; a caption listing
-            both would spend a third of its width teaching a synonym.
+            THE LEAVE HINT IS GONE, ON THE OPERATOR'S SECOND LOOK. It read
+            `Mod-[ → leave` and it was, for one round, the only caption here:
+            "of Enter-to-send and Mod-[-to-leave, only the leave one needs
+            showing." Then, having lived with it: "drop the leave shortcut from
+            under the prompt box."
+
+            WHAT WENT IS THE CAPTION, NOT THE KEY. `Mod-[` is still bound in
+            this box's own `onKeyDown` below and still reserved in `chords.ts`
+            so nothing can take it; `Mod-0` (`focusList`) still gets out from
+            here too; and the `?` sheet still names them. The argument for
+            printing it -- that the way out is neither guessable nor drawn
+            anywhere -- was a real argument, and it lost to the one thing it
+            could not answer: this row is read on every prompt the operator
+            types, and they are the one reading it.
 
             AND ON A PHONE ONLY THE SEND KEY IS NAMED. A soft keyboard has no
-            Esc and no Ctrl, so two of the three would be naming keys the
+            Esc and no Ctrl, so the interrupt caption would be naming a key the
             device does not have -- and the interrupt has a REAL control there
             already, the keystroke strip's `Esc → agent` button, pressing the
             same key over the same bridge. A caption pointing at an absent key
@@ -6087,11 +6362,16 @@ export function DetailPanel(props: DetailPanelProps) {
             That is the state they chose deliberately and the one where Return
             does something they did not ask for.
 
-            ON A PHONE IT IS UNCONDITIONAL. There is no leave hint there to
-            make room for, so withdrawing the send hint would not shorten the
-            row, it would empty it -- and a soft keyboard's return key is the
-            least conventional of all. `test/panels/DetailPanel.test.tsx`
-            holds all three cases.
+            ON A PHONE IT IS UNCONDITIONAL. There is nothing else on the row
+            there, so withdrawing the send hint would not shorten it, it would
+            empty it -- and a soft keyboard's return key is the least
+            conventional of all. `test/panels/DetailPanel.test.tsx` holds all
+            three cases.
+
+            SO THE ROW IS OFTEN EMPTY NOW, on a desktop with the shipped send
+            key and a session vam cannot interrupt, and that is drawn rather
+            than reserved: `flex-wrap` with no fixed height, so an empty `<p>`
+            takes no room and nothing below it moves when a hint appears.
 
             `H` IS DELIBERATELY NOT NAMED, and this is the trap it avoids. `H`
             is `focusList`'s other binding, so it is the same act everywhere
@@ -6112,11 +6392,6 @@ export function DetailPanel(props: DetailPanelProps) {
                 {!phone && canCycleMode && (
                   <span data-prompt-interrupt-key className="whitespace-nowrap">
                     Esc → interrupt
-                  </span>
-                )}
-                {!phone && (
-                  <span data-prompt-leave-key className="whitespace-nowrap">
-                    Mod-[ → leave
                   </span>
                 )}
               </p>

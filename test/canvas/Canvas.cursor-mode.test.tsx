@@ -192,7 +192,7 @@ describe('the status bar names the mode the operator named', () => {
   it('is back in Select when the keyboard is handed back', () => {
     render(<Canvas model={QUIET} />);
     press('I');
-    press('H');
+    press('H', { metaKey: true, shiftKey: true });
     expect(mode()).toBe('Select');
   });
 });
@@ -253,7 +253,7 @@ describe('Insert: hjkl chooses an option when one is being asked', () => {
     render(<Canvas model={ASKING} />);
     press('I');
     expect(cursorOption()).toBe('Crimson');
-    press('H');
+    press('H', { metaKey: true, shiftKey: true });
     expect(mode()).toBe('Select');
     expect(cursorOption()).toBe('');
     press('j');

@@ -25,6 +25,7 @@
 import { Copy, Trash2 } from 'lucide-react';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { QrAddress } from './QrAddress.js';
+import { Switch } from './Switch.js';
 
 /** Mirrors main's `PairedDevice`, minus the token, which never leaves main. */
 export type PairedDeviceView = {
@@ -342,13 +343,20 @@ export function PairingPanel(props: PairingPanelProps) {
             ? 'This server accepts writes: a paired device can close sessions and type into a running agent.'
             : 'This server is read-only: the write routes are not registered at all.'}
         </p>
-        <button
-          type="button"
-          onClick={() => props.onSetWritesPreference(!props.writesPreference)}
-          className={`mt-2 ${ACTION_BUTTON}`}
-        >
-          {props.writesPreference ? 'Turn writes off' : 'Turn writes on'}
-        </button>
+        {/* A SWITCH, BECAUSE THIS ONE IS A SETTING. It stores a boolean and
+            does nothing else -- it runs nothing, reaches nothing outside vam,
+            and the sentence above already says what each state means, so the
+            control does not have to be a verb as well. `Switch.tsx` argues
+            the line: phone access, a few lines up, keeps its button because
+            turning it on runs `tailscale serve` on this machine. */}
+        <div className="mt-2">
+          <Switch
+            name="writes-preference"
+            label="allow writes from a paired device"
+            checked={props.writesPreference}
+            onChange={(next) => props.onSetWritesPreference(next)}
+          />
+        </div>
         {props.writesPreference === props.allowWrites ? null : (
           <p data-testid="pairing-writes-preference" className={`mt-1 ${HINT}`}>
             {props.writesPreference

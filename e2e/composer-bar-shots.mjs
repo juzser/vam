@@ -146,27 +146,33 @@ if (submit !== null) {
     submit.title === null,
     `title=${JSON.stringify(submit.title)}`,
   );
+  // THE WORD IS GONE, AT THE OPERATOR'S ASK ("drop the Send label from the
+  // button, the icon is enough"), and these three checks turned over with it.
+  //
+  // What they were protecting was that the button says WHICH OUTCOME it
+  // produces. A painted word said it; with none, the glyph and the accessible
+  // name have to -- so the assertion is that nothing is painted BUT a glyph,
+  // and that the name still names the act. WCAG 2.5.3 (label in name) applies
+  // only where a visible label exists; with none it is 1.1.1, and the name is
+  // the whole of it.
   const painted = submit.runs.filter((r) => r.width >= 12 && r.height >= 6);
   check(
-    'it PAINTS a word for the outcome, not a bare arrow',
-    painted.length > 0,
-    JSON.stringify(submit.runs),
+    'it paints no word, only its glyph',
+    painted.length === 0 && submit.glyphs === 1,
+    `runs=${JSON.stringify(submit.runs)} glyphs=${submit.glyphs}`,
   );
-  // WCAG 2.5.3: the accessible name has to contain the visible label, or a
-  // speech user saying what they can see does not reach the control.
-  const word = painted[0]?.text ?? '';
   check(
-    'and its accessible name contains that word (WCAG 2.5.3)',
-    word !== '' && submit.name.toLowerCase().includes(word.toLowerCase()),
-    `${JSON.stringify(submit.name)} vs ${JSON.stringify(word)}`,
+    'and its accessible name still says which act it performs (WCAG 1.1.1)',
+    /record|send/i.test(submit.name),
+    JSON.stringify(submit.name),
   );
   // THE FIXTURE IS THE RECORDING KIND, and saying so is what keeps the check
-  // above from being read as "any word will do": `?demo=1` cannot deliver, so
-  // the word it paints must not claim delivery.
+  // above from being read as "any name will do": `?demo=1` cannot deliver, so
+  // the name it carries must not claim delivery.
   check(
-    'the word matches what this source can actually do',
-    submit.delivers === null && !/send|deliver/i.test(word),
-    `delivers=${submit.delivers}, word=${JSON.stringify(word)}`,
+    'the name matches what this source can actually do',
+    submit.delivers === null && !/send|deliver/i.test(submit.name),
+    `delivers=${submit.delivers}, name=${JSON.stringify(submit.name)}`,
   );
   check(
     'and it still draws a glyph beside it',

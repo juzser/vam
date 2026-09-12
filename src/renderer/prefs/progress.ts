@@ -9,19 +9,20 @@
  *    your prompts and Claude's responses. Folded activity stays one click
  *    away, and a live indicator names the tool currently running."
  *
- * WHAT VAM FOLDS IS THE TURN'S PROGRESS LINE, NOT A LIST OF TOOL CALLS -- and
- * that is the faithful reading of the sentence above, not a compromise with
- * it. `Decision` carries `label`, `input`, `output`, the agent-proposed
- * `commands` (commands for a PERSON to run, not the calls the turn made) and
- * `errorCount`, a COUNT. There is no list of calls in this model to hide, so a
- * mode claiming to hide them would have to invent its rows, and an invented
- * row on the one surface that reports failure is the false badge `errorCount`
- * refuses. What vam draws for a turn's working is ONE condensed line
- * (`data-progress-line`), and that line is the whole of the working on screen:
- * fold it and the page reads as prompts and responses, which is the reading
- * the plugin's text is about. The granularity is a property of vam's model,
- * not an oversight here, and itemised tool calls are a transcript-reader
- * change that this deliberately does not build toward.
+ * WHAT VAM FOLDS IS THE TURN'S PROGRESS LINE AND THE CALLS UNDER IT --
+ * `data-progress-line` and `data-progress-steps`, both inside the turn's one
+ * `progress` section, which is what lets a fold fold ONE thing.
+ *
+ * THE LIST ARRIVED SECOND, and the paragraph it replaced is worth keeping in
+ * mind. It said there was no list of tool calls in this model to hide, so a
+ * mode claiming to hide them would have to invent its rows. That was true of
+ * the MODEL and false of the DATA: the transcript reader parsed every
+ * `tool_use` part and kept exactly one of them -- the newest in the whole
+ * window -- as `Session.activity`. So focus view OFF, the default, drew one
+ * line per turn reading the turn's mark and the agent's name, which is what
+ * the operator saw before saying "show the whole progress when focus view is
+ * off". Nothing is invented: `Decision.steps` is read off the same parts
+ * `errorCount` is, and a row appears only where a call was read.
  *
  * AND THE OTHER HALF OF THE PLUGIN'S SENTENCE IS THE PART THAT IS NEW.
  * "Folded activity stays one click away." The setting this replaces withdrew
@@ -127,8 +128,10 @@ export type TurnProgressFacts = {
  *    would answer "what is this session doing" with silence, which is the
  *    question vam exists for.
  *
- * WHAT IT COSTS, named rather than discovered: the mark and the label of every
- * quiet turn. That is the detail the operator asked to be rid of.
+ * WHAT IT COSTS, named rather than discovered: the mark, the label and the
+ * itemised calls of every quiet turn. That is the detail the operator asked to
+ * be rid of -- and `drawsTurnSteps` below withholds the calls from every turn
+ * this one keeps, too, because the calls are the bulk of it.
  *
  * ABSENT AND ZERO ARE THE SAME HERE, ON PURPOSE. `errorCount` absent means the
  * source cannot report tool failures and zero means vam looked and found none
@@ -162,6 +165,41 @@ export function drawsProgressLine(focusView: boolean, turn: TurnProgressFacts): 
  */
 export function drawsUnfoldControl(focusView: boolean, turn: TurnProgressFacts): boolean {
   return focusView && !drawsProgressLine(focusView, turn);
+}
+
+/**
+ * Does this turn itemise the calls it made?
+ *
+ * THE THIRD PREDICATE, and the one the mode is actually named for. The plugin
+ * sentence this feature is built from says "hide TOOL CALLS and other
+ * in-progress activity", and for a long time vam had no calls to hide: the
+ * transcript reader parsed every `tool_use` part and kept exactly one of them
+ * -- the newest in the whole window -- as `Session.activity`. So focus view
+ * OFF, the default, drew one line per turn reading the turn's mark and the
+ * agent's name, and the operator said what that was worth: "show the whole
+ * progress when focus view is off". `Decision.steps` is the list now.
+ *
+ * TWO ANSWERS, NOT THREE. Off, or unfolded: the list. Folded: nothing. There
+ * is deliberately no case where this says "some of them" -- how many ROWS fit
+ * is the column's question, and it answers that with a cap and an honest count
+ * of what it left out.
+ *
+ * A FAILURE DOES NOT OPEN THE LIST, and that is the one line here worth
+ * arguing. `drawsProgressLine` holds a failing turn's line open under focus
+ * view because alarm may never be folded -- but the alarm is `errorCount`, a
+ * number ON that line, and it is on screen either way. Itemising the calls of
+ * a failing turn would put the mode's whole cost back onto the turn most
+ * likely to be long, and the way back is one press away on every folded turn.
+ *
+ * IT IMPLIES `drawsProgressLine`, which is what makes it safe to read as the
+ * CONTENTS of that section rather than a section of its own: both branches
+ * here -- focus view off, and unfolded -- are branches the line already
+ * returns true on. `prefs.focus-view.test.ts` sweeps all 96 combinations to
+ * hold that, because a step drawn where no line is would be a row in a section
+ * nobody drew.
+ */
+export function drawsTurnSteps(focusView: boolean, turn: TurnProgressFacts): boolean {
+  return !focusView || turn.unfolded;
 }
 
 /**

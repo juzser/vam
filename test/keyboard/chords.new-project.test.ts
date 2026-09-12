@@ -8,32 +8,28 @@
  * that the generated sheet can name it.
  *
  * ─────────────────────────────────────────────────────────────────────────
- * WHY THE BINDING IS SPELLED `Mod-p` AND NOT `Mod-Shift-p`, measured rather
- * than assumed.
+ * WHY THE BINDING IS SPELLED `Mod-Shift-p`, AND WHY IT WAS NOT.
  *
- * `normalizeKey` folds Shift away for CHARACTERS — "Shift deliberately gets
- * no token *for characters*", and under a modifier the letter is lower-cased
- * "so Cmd-K and Cmd-Shift-K do not become two different bindings for one
- * gesture" (`chords.ts`; `test/keyboard/normalize.test.ts` pins both). The
- * `Shift-` token exists only for the POSITIONAL keys — the digit row and the
- * bracket pair — where a modifier changes which character arrives.
+ * It shipped as `Mod-p`, and this paragraph used to argue at length that
+ * `Mod-Shift-p` was a string NO KEYSTROKE COULD PRODUCE: `normalizeKey`
+ * lower-cased a letter under a modifier "so Cmd-K and Cmd-Shift-K do not
+ * become two different bindings for one gesture", so a real `Cmd+Shift+P`
+ * arrived spelled `Mod-p` and a table entry with the token would have been a
+ * dead row in the key sheet. That was true of the grammar as it stood, and it
+ * quoted its own price: `Cmd+P` reached the same act, because it was the same
+ * folded gesture.
  *
- * So a real `Cmd+Shift+P` keydown normalizes to `Mod-p`, and a table entry
- * written `Mod-Shift-p` would be a string no keystroke on any layout can
- * produce: a DEAD binding printed in the key sheet, which is the one defect
- * `keysheet.ts` exists to make impossible. `bindingClashes` would not catch
- * it either — it finds two actions on one chord, not a chord with no
- * keystroke behind it. The first assertion below is what makes that spelling
- * a test failure rather than a silent dead row.
+ * THE GRAMMAR CHANGED UNDER IT, for a reason `Cmd+Shift+P` could never have
+ * produced on its own. The operator asked for `Cmd+Shift+H` — "so it does not
+ * collide with the OS shortcut" — and Cmd+H IS an OS shortcut: macOS's Hide,
+ * claimed by `role: 'appMenu'` before the page sees the keydown. Under the
+ * fold there was no way to SAY Cmd+Shift+H: it normalized to `Mod-h`, the
+ * gesture macOS had already taken. So the token now covers letters as well as
+ * positions, the base stays lower-cased, and `shiftKey` — not the case the
+ * browser hands back, which CapsLock also changes — is what carries it.
  *
- * ITS PRICE, QUOTED: `Cmd+P` reaches the same action, because it is the same
- * folded gesture. Nothing native answers it in the desktop app — vam owns its
- * application menu and it is appMenu/editMenu/Window, none of which carries a
- * Cmd+P (`src/main/menu.ts`) — and in the browser build the handler's own
- * `preventDefault` keeps it away from print. Both spellings landing on one
- * action is exactly what the folding rule is FOR; the alternative was giving
- * one gesture two spellings, which is the failure that rule was written
- * against.
+ * Which makes this spelling the one the operator always asked for, and gives
+ * `Cmd+P` back to the browser's print dialog.
  * ─────────────────────────────────────────────────────────────────────────
  *
  * Everything here is asserted through `normalizeKey` + `resolveChord` and the
@@ -77,17 +73,18 @@ describe('Cmd+Shift+P starts a new project', () => {
     expect(actionFor(CTRL_SHIFT_P)).toEqual({ kind: 'newProject' });
   });
 
-  it('is spelled `Mod-p`, because a modified letter folds its Shift away', () => {
-    // The spelling itself, so a table entry written `Mod-Shift-p` — a string
-    // no keystroke produces — reddens here rather than shipping as a dead
-    // row in the key sheet.
-    expect(normalizeKey(CMD_SHIFT_P)).toBe('Mod-p');
-    expect(normalizeKey(CTRL_SHIFT_P)).toBe('Mod-p');
+  it('is spelled `Mod-Shift-p`, which is now a string a keystroke produces', () => {
+    // THE SPELLING ITSELF, and it is the assertion that used to say the
+    // opposite. A row in the key sheet naming a chord no keydown can make is
+    // the one defect `keysheet.ts` exists to prevent, and `bindingClashes`
+    // cannot catch it — it finds two actions on one chord, not a chord with
+    // nothing behind it.
+    expect(normalizeKey(CMD_SHIFT_P)).toBe('Mod-Shift-p');
+    expect(normalizeKey(CTRL_SHIFT_P)).toBe('Mod-Shift-p');
+    // And Cmd+P is a DIFFERENT gesture again, bound to nothing. Pinned, so
+    // that a later fold cannot quietly hand vam the browser's print key back.
     expect(normalizeKey(CMD_P)).toBe('Mod-p');
-    // And therefore Cmd+P is the same act. Asserted rather than left to be
-    // discovered: it is the price of the folding rule, and pinning it means a
-    // later attempt to separate the two cannot pass unnoticed.
-    expect(actionFor(CMD_P)).toEqual({ kind: 'newProject' });
+    expect(actionFor(CMD_P)).toBeNull();
   });
 
   it('leaves bare `p` alone — it still reveals the focused session’s project', () => {
@@ -109,8 +106,8 @@ describe('the generated key sheet names it', () => {
     const rows = sheetRows();
     // The corpus first: every assertion below is vacuous over an empty sheet.
     expect(rows.length).toBeGreaterThan(30);
-    const row = rows.find((each) => each.keys === 'Mod-p');
-    expect(row, 'no sheet row for Mod-p').toBeDefined();
+    const row = rows.find((each) => each.keys === 'Mod-Shift-p');
+    expect(row, 'no sheet row for Mod-Shift-p').toBeDefined();
     // The caption names the ACT — a directory chosen, a session started —
     // rather than repeating a chord or borrowing `newSession`'s sentence.
     expect(row?.label).toMatch(/directory/i);
@@ -121,7 +118,7 @@ describe('the generated key sheet names it', () => {
 
   it('does not read as a second spelling of `o` / `Mod-n`', () => {
     const rows = sheetRows();
-    const newProject = rows.find((each) => each.keys === 'Mod-p');
+    const newProject = rows.find((each) => each.keys === 'Mod-Shift-p');
     const newSession = rows.find((each) => each.keys === 'o');
     expect(newSession, 'no sheet row for o').toBeDefined();
     expect(newProject?.label).not.toBe(newSession?.label);
@@ -138,12 +135,12 @@ describe('nothing shipped loses a key to it', () => {
 
   it('and PR #297’s machinery sees the new binding when something takes it', () => {
     // Falsifies the guard above rather than trusting it: move `revealProject`
-    // onto `Mod-p` and the whole-map check must name the newcomer as the one
+    // onto `Mod-Shift-p` and the whole-map check must name the newcomer as the one
     // left advertising a dead key. If `newProject` were invisible to
     // `bindingClashes`, this would come back empty.
-    const contested = bindKey(NO_BINDINGS, 'revealProject', 0, 'Mod-p');
+    const contested = bindKey(NO_BINDINGS, 'revealProject', 0, 'Mod-Shift-p');
     expect(newClashes(NO_BINDINGS, contested)).toEqual([
-      { chord: 'Mod-p', winner: 'revealProject', shadowed: ['newProject'] },
+      { chord: 'Mod-Shift-p', winner: 'revealProject', shadowed: ['newProject'] },
     ]);
   });
 });

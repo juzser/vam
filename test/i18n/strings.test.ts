@@ -170,23 +170,28 @@ describe('the settings surface reads the catalogue rather than its own literals'
  * string, where the test below can hold it.
  */
 describe('the PRs pane’s repository footer', () => {
-  const KEYS = ['prs.repo.own', 'prs.repo.overridden', 'prs.repo.choose', 'prs.repo.clear'];
+  const KEYS = ['prs.repo.session', 'prs.repo.choose', 'prs.repo.clear'];
 
   it('keeps its copy in the catalogue', () => {
     for (const key of KEYS) expect(Object.keys(STRINGS.en)).toContain(key);
   });
 
-  it('names the directory through a NAMED slot, like every other sentence here', () => {
-    const filled = t('prs.repo.overridden', { directory: '/Users/someone/code/other-repo' });
-    expect(filled).toContain('/Users/someone/code/other-repo');
-    expect(filled).not.toContain('{directory}');
+  it('carries no slot at all any more, because a heading is a name', () => {
+    // `prs.repo.overridden` was "Asking in {directory}" and interpolated the
+    // path into a sentence. The row is a heading now: the directory's last
+    // segment IS the label, and the whole path is a `title`. A catalogue entry
+    // with a slot nobody fills is a sentence waiting to be half-translated.
+    for (const [key, value] of Object.entries(STRINGS.en)) {
+      if (!key.startsWith('prs.')) continue;
+      expect(value, key).not.toMatch(/\{[a-zA-Z]/);
+    }
   });
 
   it('stores the case it paints, because no stylesheet and no guard can', () => {
     // THE CORPUS IS ASSERTED INSIDE THE LOOP EXPRESSION, not beside it: four
     // guards in this repo have passed having examined nothing at all.
     const prose = Object.entries(STRINGS.en).filter(([key]) => key.startsWith('prs.'));
-    expect(prose.length).toBeGreaterThanOrEqual(4);
+    expect(prose.length).toBeGreaterThanOrEqual(3);
     for (const [key, value] of prose) {
       expect(value.slice(0, 1), key).toBe(value.slice(0, 1).toUpperCase());
     }

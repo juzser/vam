@@ -1504,7 +1504,7 @@ check(
 );
 check(
   'and the switch in force reads as on',
-  (await foldedPage.locator('[data-focus-view-toggle]').getAttribute('aria-checked')) === 'true',
+  (await foldedPage.locator('[data-switch="focus-view"]').getAttribute('aria-checked')) === 'true',
   'the migrated `collapsed` payload did not arrive as focus view',
 );
 // Scrolled to, because the row is the last block of a panel taller than the
@@ -1514,7 +1514,7 @@ await foldedPage.locator('[data-focus-view-note]').scrollIntoViewIfNeeded();
 await foldedPage.waitForTimeout(150);
 await foldedPage.screenshot({ path: `${outDir}/concise-settings-row.png` });
 console.log(`${outDir}/concise-settings-row.png`);
-await foldedPage.locator('[data-focus-view-toggle]').click();
+await foldedPage.locator('[data-switch="focus-view"]').click();
 // Escape rather than the backdrop button: the backdrop is `inset-0` UNDER the
 // panel, so a click at its centre lands on the panel instead, and Escape is
 // how an operator closes this dialog anyway.

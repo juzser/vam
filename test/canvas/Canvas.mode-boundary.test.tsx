@@ -213,17 +213,21 @@ describe('F4 — Mod-0 hands the keyboard back rather than only saying it did', 
     expect(focusedSession()).toBe('a2');
   });
 
-  it('and H, the other spelling of the same action, is no different', () => {
+  it('and Mod-Shift-h, the other spelling of the same action, is no different', () => {
     render(<Canvas model={QUIET} />);
     const box = composer() as HTMLTextAreaElement;
     act(() => {
       box.focus();
       fireEvent.focusIn(box);
     });
-    // `H` is a bare letter, so it cannot come from inside the box — a real
-    // operator presses `Mod-0` there. It arrives here from the shell, which
-    // is the state after clicking a tab strip: composing, focus elsewhere.
-    press('H');
+    // IT USED TO BE A BARE `H`, and the comment here said that a bare letter
+    // could not come from inside the box, so this arrived from the shell —
+    // the state after clicking a tab strip: composing, focus elsewhere. The
+    // operator moved it to `Cmd+Shift+H` (Cmd+H is macOS's Hide), which is a
+    // chord and therefore CAN come from inside the box. The case being
+    // driven is unchanged: whichever spelling reaches it, the mode has to
+    // follow the keyboard rather than only report on it.
+    press('H', { metaKey: true, shiftKey: true });
     expect(mode()).toBe('Select');
     expect(document.activeElement).not.toBe(box);
   });

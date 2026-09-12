@@ -415,21 +415,28 @@ describe('the box does not claim the chords that belong above or below it', () =
  *
  * Escape used to be the only way out of the composer, and the only place that
  * was written down was a caption saying `Esc → sidebar`. Both halves of that
- * are now false, so the row says the three things that are true — and it must
- * follow the preference and the session, not read as a fixed string that
- * happens to be right today.
+ * are now false.
+ *
+ * The row has been cut twice since, by the person who reads it on every prompt
+ * they type: the send key went first ("only the leave one needs showing"), and
+ * then the leave key went too ("drop the leave shortcut from under the prompt
+ * box"). What is left has to follow the preference and the session rather than
+ * read as a fixed string that happens to be right today -- and the keys that
+ * stopped being PRINTED still have to WORK, which is the pair of assertions
+ * this file exists to keep together.
  */
 describe('the composer names the keys that operate it', () => {
-  it('names the interrupt and the way out, and leaves the send key alone', () => {
-    // It named all three until the operator asked for one: "of Enter-to-send
-    // and Mod-[-to-leave, only the leave one needs showing." The send key is
-    // the one thing here a control on screen already performs -- the submit
-    // button, with its own `Note` -- and Return in a text box is the most
-    // guessed-at gesture there is. These two are neither.
+  it('names the interrupt, and nothing else that is a convention', () => {
+    // THE ROW HAS BEEN CUT TWICE, BY THE SAME PERSON READING IT. First: "of
+    // Enter-to-send and Mod-[-to-leave, only the leave one needs showing."
+    // Then, having lived with that: "drop the leave shortcut from under the
+    // prompt box." What is left is the one caption that is neither a
+    // convention nor printed anywhere else -- Escape, which in this box
+    // interrupts the agent rather than doing what Escape does everywhere else.
     bridge();
     draw();
     expect(keys()).toContain('Esc');
-    expect(keys()).toContain('Mod-[');
+    expect(keys()).not.toContain('Mod-[');
     expect(keys()).not.toContain('Enter');
   });
 
@@ -447,11 +454,14 @@ describe('the composer names the keys that operate it', () => {
 
   it('does not offer an interrupt for a session vam cannot press a key in', () => {
     // A CONTROL THAT CANNOT ACT IS NOT DRAWN AS ONE, in its caption form: the
-    // hint would be promising an interrupt that can only ever be refused. The
-    // way out is still named, because that one always works.
+    // hint would be promising an interrupt that can only ever be refused.
+    //
+    // With the leave caption gone this is now the case where the row draws
+    // NOTHING -- an empty `<p>` rather than a reserved band, which is the
+    // second half of the assertion: no stray separator, no residue.
     draw({ vamControlled: false });
     expect(keys()).not.toContain('Esc');
-    expect(keys()).toContain('Mod-[');
+    expect(keys().trim()).toBe('');
   });
 
   it('retires the caption that promised Escape went to the sidebar', () => {
@@ -478,11 +488,15 @@ describe('the composer names the keys that operate it', () => {
     expect(q('[data-key-strip-key="escape"]')).not.toBeNull();
   });
 
-  it('names all three on a desktop, where all three keys exist', () => {
+  it('still lets the box go on the key it stopped printing', () => {
+    // THE CAPTION WENT; THE KEY DID NOT. This is the assertion that keeps the
+    // two apart -- delete the binding and the removal of a hint quietly
+    // becomes the removal of the only way out of the box without a mouse.
+    // `Mod-0` gets out from here too, and the `?` sheet names them both.
     bridge();
     draw();
-    expect(keys()).toContain('Esc');
-    expect(keys()).toContain('Mod-[');
+    expect(keys()).not.toContain('Mod-[');
+    expect(fireEvent.keyDown(box(), { key: '[', code: 'BracketLeft', metaKey: true })).toBe(false);
   });
 
   it('costs no width while the box is not open for typing', () => {

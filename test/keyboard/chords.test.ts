@@ -192,7 +192,9 @@ describe('every old binding still resolves the same way (AC-5b)', () => {
     // single keys
     expect(type(['i']).actions).toEqual([{ kind: 'prompt' }]);
     expect(type(['I']).actions).toEqual([{ kind: 'focusAction' }]);
-    expect(type(['H']).actions).toEqual([{ kind: 'focusList' }]);
+    // `H` moved to `Mod-Shift-h` at the operator's request -- see the block
+    // further down. The rest of this sweep is unchanged.
+    expect(type(['Mod-Shift-h']).actions).toEqual([{ kind: 'focusList' }]);
     expect(type(['r']).actions).toEqual([{ kind: 'rename' }]);
     expect(type(['s']).actions).toEqual([{ kind: 'icon' }]);
     expect(type(['x']).actions).toEqual([{ kind: 'close' }]);
@@ -377,6 +379,59 @@ describe('Mod-t is its own action, beside Mod-n', () => {
   });
 });
 
+describe('the way back to the session list is a chord the OS does not own', () => {
+  /**
+   * Operator: "move `H` (back to the session list) to Cmd+Shift+H, so it does
+   * not collide with the OS shortcut."
+   *
+   * THE COLLISION IS REAL AND IT IS ON THE OTHER SIDE OF THE MODIFIER. Cmd+H
+   * is macOS's Hide, claimed by `role: 'appMenu'` in `src/main/menu.ts`, and a
+   * native accelerator matches BEFORE the page sees the keydown -- so a vam
+   * binding there would be dead rather than merely contested. Cmd+Shift+H is
+   * free: nothing in vam's menu carries it, and macOS's own Cmd+Shift+H is
+   * Finder's Home folder, which is Finder's and not the system's.
+   *
+   * `Mod-0` is untouched. It is the head of the digit row -- the digits pick a
+   * tab, zero is the way out of the tabs -- and it answers the same act.
+   */
+  it('answers Cmd+Shift+H, spelled the way a real keydown arrives', () => {
+    const key = normalizeKey({ key: 'H', code: 'KeyH', metaKey: true, shiftKey: true });
+    expect(key).toBe('Mod-Shift-h');
+    expect(type([key as string]).actions).toEqual([{ kind: 'focusList' }]);
+  });
+
+  it('does not answer Cmd+H, which is the keystroke the operator is avoiding', () => {
+    expect(type(['Mod-h']).actions).toEqual([]);
+  });
+
+  it('no longer answers a bare H, which is what "change it" means', () => {
+    // The operator said CHANGE, not ADD. A bare letter left behind would keep
+    // the chord sheet advertising two ways to do one thing, one of which was
+    // the thing being moved away from.
+    expect(type(['H']).actions).toEqual([]);
+  });
+
+  it('keeps Mod-0 on the same act', () => {
+    expect(type(['Mod-0']).actions).toEqual([{ kind: 'focusList' }]);
+  });
+});
+
+describe('a new project is the keystroke it was always documented as', () => {
+  it('answers Cmd+Shift+P, now that the grammar can say so', () => {
+    // It always WAS Cmd+Shift+P to the operator: the table said `Mod-p` and
+    // the README explained that a modified letter folded its Shift away, so
+    // the two gestures were one. With the fold gone the spelling has to say
+    // which one it means, and it means the one that was asked for.
+    const key = normalizeKey({ key: 'P', code: 'KeyP', metaKey: true, shiftKey: true });
+    expect(key).toBe('Mod-Shift-p');
+    expect(type([key as string]).actions).toEqual([{ kind: 'newProject' }]);
+  });
+
+  it('leaves Cmd+P alone, which the browser build wants for printing', () => {
+    expect(type(['Mod-p']).actions).toEqual([]);
+  });
+});
+
 describe('? opens the shortcut sheet', () => {
   it('resolves the string a real Shift+/ keydown normalizes to', () => {
     // Verified rather than assumed: on most layouts `?` arrives as Shift+`/`,
@@ -442,10 +497,47 @@ describe('normalizeKey — the digit row is a position, not a character', () => 
     );
   });
 
-  it('leaves shifted LETTERS folded, as the table comment requires', () => {
-    // Cmd-K and Cmd-Shift-K stay one gesture: `palette` is bound once.
-    expect(normalizeKey({ key: 'K', code: 'KeyK', metaKey: true, shiftKey: true })).toBe('Mod-k');
+  it('spells a shifted LETTER apart from the unshifted one, since the operator asked for one', () => {
+    // THIS USED TO GO THE OTHER WAY, and the reason it changed is an operator
+    // request: "move `back to session list` to Cmd+Shift+H, so it does not
+    // collide with the OS shortcut". Cmd+H IS an OS shortcut -- macOS's Hide,
+    // which `role: 'appMenu'` claims before the page ever sees the keydown --
+    // so a grammar that folded Shift away for letters could not express the
+    // one keystroke that avoids it: Cmd+Shift+H arrived spelled `Mod-h`,
+    // indistinguishable from the gesture macOS had already eaten.
+    //
+    // WHY THE TOKEN AND NOT THE CASE. The browser hands back `H`, so the case
+    // is already there -- and `shiftKey` is the more honest source: CapsLock
+    // also upper-cases a letter, and nobody means Cmd+Shift+H by pressing
+    // CapsLock and Cmd+H. The base stays lower-cased so one gesture still has
+    // exactly one spelling.
+    expect(normalizeKey({ key: 'H', code: 'KeyH', metaKey: true, shiftKey: true })).toBe(
+      'Mod-Shift-h',
+    );
+    expect(normalizeKey({ key: 'h', code: 'KeyH', metaKey: true })).toBe('Mod-h');
+    expect(normalizeKey({ key: 'K', code: 'KeyK', metaKey: true, shiftKey: true })).toBe(
+      'Mod-Shift-k',
+    );
     expect(normalizeKey({ key: 'k', code: 'KeyK', metaKey: true })).toBe('Mod-k');
+  });
+
+  it('still gives a shifted CHARACTER no token, because the browser already applied it', () => {
+    // The half that does NOT change, and the distinction the whole rule turns
+    // on: `?` arrives as `?` whether or not you hold Shift to make it, so a
+    // token there would give one keystroke two spellings and only one of them
+    // would ever match. A LETTER is the other case -- the browser folds Shift
+    // into the CASE, and lower-casing it (which this still does) throws that
+    // information away unless the token carries it.
+    expect(normalizeKey({ key: '?', metaKey: true, shiftKey: true })).toBe('Mod-?');
+    expect(normalizeKey({ key: '<', metaKey: true, shiftKey: true })).toBe('Mod-<');
+  });
+
+  it('leaves a letter with no modifier exactly as the browser typed it', () => {
+    // `H`, `F` and the rest of the bare shifted letters are their own
+    // bindings and are matched by character; nothing above this line touches
+    // the unmodified path.
+    expect(normalizeKey({ key: 'H', code: 'KeyH', shiftKey: true })).toBe('H');
+    expect(normalizeKey({ key: 'h', code: 'KeyH' })).toBe('h');
   });
 
   it('is unchanged for a digit typed with no modifier at all', () => {
