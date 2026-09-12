@@ -85,6 +85,63 @@ function draw(
   return props;
 }
 
+/**
+ * THE QR, which is the address drawn for a camera.
+ *
+ * Operator: "put a QR on the desktop so the remote link opens straight from
+ * the phone." `test/settings/qr-address.test.tsx` holds the component and
+ * `e2e/qr-decode-check.mjs` proves a real barcode detector reads the symbol;
+ * this is about WHEN the panel draws one.
+ */
+describe('the address as a QR', () => {
+  const qr = () => screen.queryByTestId('pairing-qr');
+
+  it('draws one beside the address, for the address', () => {
+    draw();
+    expect(qr()).not.toBeNull();
+    expect(qr()?.getAttribute('aria-label')).toContain(
+      'https://example-machine.example-tailnet.ts.net',
+    );
+  });
+
+  it('draws none when there is no address to draw', () => {
+    // Reading the address needs the Tailscale CLI, and `null` is ordinary.
+    draw({ url: null });
+    expect(qr()).toBeNull();
+  });
+
+  it('draws none while phone access is off', () => {
+    // There is nothing to reach yet: a QR here would encode an address that
+    // answers nothing, which is worse than no QR at all.
+    draw({ serve: { enabled: false } });
+    expect(qr()).toBeNull();
+  });
+
+  it('draws none on a phone, which is the thing that would be scanning it', () => {
+    const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (media: string) => ({
+        media,
+        // Every query matches: this is the phone width, and `usePhoneViewport`
+        // is the only reader in this component.
+        matches: true,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }),
+    });
+    try {
+      draw();
+      expect(qr(), 'a phone showing itself a QR of its own address').toBeNull();
+      // And the address is still there to read and copy.
+      expect(screen.getByTestId('pairing-url').textContent).toMatch(/^https:\/\//);
+    } finally {
+      if (original === undefined) Reflect.deleteProperty(window, 'matchMedia');
+      else Object.defineProperty(window, 'matchMedia', original);
+    }
+  });
+});
+
 describe('the pairing screen', () => {
   it('says what being on the tailnet does and does not buy', () => {
     draw();
