@@ -5819,8 +5819,8 @@ export function DetailPanel(props: DetailPanelProps) {
                     // Cmd (`chords.ts`), so this is `Cmd+[` on the keyboard the
                     // operator has. Bound HERE rather than in the chord tables,
                     // for the reason Shift+Tab above is and for one more:
-                    // `focusList` already holds `MAX_BINDINGS` chords (`H`,
-                    // `Mod-0`), and a third would be invisible in the shortcut
+                    // `focusList` already holds `MAX_BINDINGS` chords
+                    // (`Mod-Shift-h`, `Mod-0`), and a third would be invisible in the shortcut
                     // editor -- which draws exactly `MAX_BINDINGS` slots -- and
                     // destroyed by the first rebind of either. It is in
                     // `RESERVED_KEYS` instead, so nothing else can take it.

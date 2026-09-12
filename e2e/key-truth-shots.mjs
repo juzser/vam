@@ -620,10 +620,12 @@ if (splitOk) {
 // browser coverage of them would be claiming a guard that ran in front of
 // nothing — the fixture rule `src/renderer/fixtures/demo.ts` states.
 //
-// WHAT IT CAN, and only it: that the keystroke ARRIVES. `Mod-p` is what a real
-// `Cmd+Shift+P` normalizes to — a modified letter folds its Shift away — and
-// no hand-built event can prove that, because a synthesised keydown is spelled
-// by whoever synthesised it. Here the browser spells it. Then that the refusal
+// WHAT IT CAN, and only it: that the keystroke ARRIVES. `Mod-Shift-p` is what
+// a real `Cmd+Shift+P` normalizes to, and no hand-built event can prove that,
+// because a synthesised keydown is spelled by whoever synthesised it. Here the
+// browser spells it. (It read `Mod-p` until the letter fold was lifted so that
+// `Cmd+Shift+H` could be said at all — this guard is exactly what would have
+// caught a table re-spelled without the normaliser under it.) Then that the refusal
 // is the ROUTE's own sentence, and that it is recorded under `new project` as
 // a REFUSAL and not a failure: only `newProject` records one, so this is what
 // tells "the key reached this flow" apart from "the key reached something that
@@ -712,7 +714,7 @@ const sheetHasIt = await settle(
 if (sheetHasIt) {
   const row = await page.evaluate(() => {
     const li = [...document.querySelectorAll('[data-key-sheet] li')].find(
-      (each) => (each.querySelector('[data-key-sheet-keys]')?.textContent ?? '') === 'Mod-p',
+      (each) => (each.querySelector('[data-key-sheet-keys]')?.textContent ?? '') === 'Mod-Shift-p',
     );
     if (li === undefined) return null;
     const box = li.getBoundingClientRect();
@@ -724,8 +726,8 @@ if (sheetHasIt) {
       struck: chip === null ? '' : getComputedStyle(chip).textDecorationLine,
     };
   });
-  console.log('sheet row for Mod-p:', JSON.stringify(row));
-  check('the sheet lists Mod-p', row !== null, 'no row carries that chord');
+  console.log('sheet row for Mod-Shift-p:', JSON.stringify(row));
+  check('the sheet lists Mod-Shift-p', row !== null, 'no row carries that chord');
   check(
     'and captions it by the act rather than by the chord',
     row?.label.toLowerCase().includes('directory') === true,

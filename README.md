@@ -202,13 +202,13 @@ whichever your platform uses.
 | `h` `j` `k` `l` | Move focus left / down / up / right |
 | `i` | Put the caret in the prompt box, aimed at the focused session |
 | `I` | Move keyboard control into the right-hand action pane |
-| `H` / `Mod-0` | Move keyboard control back to the session list |
+| `Mod-Shift-h` / `Mod-0` | Move keyboard control back to the session list. `Cmd+Shift+H` rather than `Cmd+H`, which is macOS's own Hide and is claimed by the application menu before the page ever sees it |
 | `r` | Rename the focused session |
 | `s` | Pick the focused session's icon |
 | `x` / `Mod-w` | Close the focused session |
 | `o` / `Mod-n` | Start a new session, in the focused session's project |
 | `Mod-t` | Start a new session as a tab of the FOCUSED PANE — the pane's own `+`, and it names the project on screen when that pane is empty |
-| `Mod-p` | New project — choose a directory, and start a session in it. There is no stored project in vam: a project is live sessions grouped by their cwd, so this is the only thing creating one can mean. It is the keystroke `Cmd+Shift+P` produces — a modified letter folds its Shift away, so `Cmd+P` is the same gesture and reaches the same act |
+| `Mod-Shift-p` | New project — choose a directory, and start a session in it. There is no stored project in vam: a project is live sessions grouped by their cwd, so this is the only thing creating one can mean. `Cmd+P` is a different gesture and is bound to nothing, so the browser build keeps its print dialog |
 | `,` | Open settings |
 | `.` | Open Remote — pair a phone, approve or deny it, unpair one, or revoke every device |
 | `E` | Open the error log and the report vam can compose from it |

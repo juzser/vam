@@ -154,10 +154,22 @@ export function normalizeKey(event: KeyEventLike): string | null {
   if (position !== null) {
     return `${mod ? 'Mod-' : ''}${alt ? 'Alt-' : ''}${event.shiftKey === true ? 'Shift-' : ''}${position}`;
   }
-  // Under a modifier the letter is lower-cased so Cmd-K and Cmd-Shift-K do not
-  // become two different bindings for one gesture.
+  // A LETTER KEEPS ITS SHIFT, AS A TOKEN, AND LOSES IT AS CASE.
+  //
+  // The base is still lower-cased, so one gesture still has exactly one
+  // spelling; what the token adds is the distinction the lower-casing used to
+  // destroy. `shiftKey` rather than the case the browser handed back, because
+  // CapsLock upper-cases a letter too and nobody means Cmd+Shift+H by holding
+  // CapsLock and pressing Cmd+H.
+  //
+  // ONLY LETTERS. A shifted CHARACTER is already itself -- `?` arrives as `?`
+  // -- so a token there would give one keystroke two spellings and only one of
+  // them would ever match. That is the rule the paragraph above states, and
+  // this is the case it did not cover: for a letter the browser folds Shift
+  // into the CASE, and a normaliser that lower-cases has thrown it away.
   const base = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-  return `${mod ? 'Mod-' : ''}${alt ? 'Alt-' : ''}${base}`;
+  const shifted = event.shiftKey === true && /^[a-z]$/.test(base);
+  return `${mod ? 'Mod-' : ''}${alt ? 'Alt-' : ''}${shifted ? 'Shift-' : ''}${base}`;
 }
 
 /** Keys that open a chord instead of doing something on their own. */
@@ -473,7 +485,6 @@ const MOVES: Readonly<Record<string, KeyAction>> = {
 const SINGLE: Readonly<Record<string, KeyAction>> = {
   i: { kind: 'prompt' },
   I: { kind: 'focusAction' },
-  H: { kind: 'focusList' },
   r: { kind: 'rename' },
   s: { kind: 'icon' },
   x: { kind: 'close' },
@@ -491,6 +502,11 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   n: { kind: 'searchNext' },
   N: { kind: 'searchPrev' },
   Enter: { kind: 'open' },
+  // Cmd+Shift+H -- the operator's own choice, and the modifier matters: Cmd+H
+  // is macOS's Hide, claimed by `role: 'appMenu'` in `src/main/menu.ts`, and a
+  // native accelerator matches before the page sees the keydown. This replaces
+  // a bare `H`; `Mod-0` still answers the same act from the digit row.
+  'Mod-Shift-h': { kind: 'focusList' },
   'Mod-k': { kind: 'palette' },
   // Cmd/Ctrl + a digit is THE SESSION TAB AT THAT POSITION, counted across
   // every pane on screen. One meaning, in both cursor modes, whatever has the
@@ -654,7 +670,7 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // action's own doc comment above argues that, the family it joins, and the
   // `Cmd+P` this also answers. Free: nothing in any table held `Mod-p`, and
   // bare `p` (`revealProject`) keeps its own spelling.
-  'Mod-p': { kind: 'newProject' },
+  'Mod-Shift-p': { kind: 'newProject' },
   // HALF A SCREEN OF TRANSCRIPT, vim's own `Ctrl-D` / `Ctrl-U`, which is the
   // gesture the operator asked for by name.
   //
