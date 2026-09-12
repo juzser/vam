@@ -6052,16 +6052,23 @@ export function DetailPanel(props: DetailPanelProps) {
             control that can only refuse, drawn as one that acts. The way out
             is named unconditionally, because that one always works.
 
-            `Mod-[` IS THE ONE NAMED, out of the three keys that would work.
-            It is what Claude Code itself binds for this -- "`Esc` or `Ctrl+[`
-            — Enter NORMAL mode" -- which is the grammar the operator is
-            already in, and it is the reason this key was chosen over a second
-            spelling of something vam had. `Mod-0` (`focusList`) also gets out
-            from here, and is the one the `?` sheet can name; a caption listing
-            both would spend a third of its width teaching a synonym.
+            THE LEAVE HINT IS GONE, ON THE OPERATOR'S SECOND LOOK. It read
+            `Mod-[ → leave` and it was, for one round, the only caption here:
+            "of Enter-to-send and Mod-[-to-leave, only the leave one needs
+            showing." Then, having lived with it: "drop the leave shortcut from
+            under the prompt box."
+
+            WHAT WENT IS THE CAPTION, NOT THE KEY. `Mod-[` is still bound in
+            this box's own `onKeyDown` below and still reserved in `chords.ts`
+            so nothing can take it; `Mod-0` (`focusList`) still gets out from
+            here too; and the `?` sheet still names them. The argument for
+            printing it -- that the way out is neither guessable nor drawn
+            anywhere -- was a real argument, and it lost to the one thing it
+            could not answer: this row is read on every prompt the operator
+            types, and they are the one reading it.
 
             AND ON A PHONE ONLY THE SEND KEY IS NAMED. A soft keyboard has no
-            Esc and no Ctrl, so two of the three would be naming keys the
+            Esc and no Ctrl, so the interrupt caption would be naming a key the
             device does not have -- and the interrupt has a REAL control there
             already, the keystroke strip's `Esc → agent` button, pressing the
             same key over the same bridge. A caption pointing at an absent key
@@ -6087,11 +6094,16 @@ export function DetailPanel(props: DetailPanelProps) {
             That is the state they chose deliberately and the one where Return
             does something they did not ask for.
 
-            ON A PHONE IT IS UNCONDITIONAL. There is no leave hint there to
-            make room for, so withdrawing the send hint would not shorten the
-            row, it would empty it -- and a soft keyboard's return key is the
-            least conventional of all. `test/panels/DetailPanel.test.tsx`
-            holds all three cases.
+            ON A PHONE IT IS UNCONDITIONAL. There is nothing else on the row
+            there, so withdrawing the send hint would not shorten it, it would
+            empty it -- and a soft keyboard's return key is the least
+            conventional of all. `test/panels/DetailPanel.test.tsx` holds all
+            three cases.
+
+            SO THE ROW IS OFTEN EMPTY NOW, on a desktop with the shipped send
+            key and a session vam cannot interrupt, and that is drawn rather
+            than reserved: `flex-wrap` with no fixed height, so an empty `<p>`
+            takes no room and nothing below it moves when a hint appears.
 
             `H` IS DELIBERATELY NOT NAMED, and this is the trap it avoids. `H`
             is `focusList`'s other binding, so it is the same act everywhere
@@ -6112,11 +6124,6 @@ export function DetailPanel(props: DetailPanelProps) {
                 {!phone && canCycleMode && (
                   <span data-prompt-interrupt-key className="whitespace-nowrap">
                     Esc → interrupt
-                  </span>
-                )}
-                {!phone && (
-                  <span data-prompt-leave-key className="whitespace-nowrap">
-                    Mod-[ → leave
                   </span>
                 )}
               </p>

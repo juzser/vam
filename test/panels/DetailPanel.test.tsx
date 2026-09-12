@@ -1478,41 +1478,39 @@ describe('there is a way out of the prompt box without a mouse', () => {
     expect(document.activeElement).not.toBe(box);
   });
 
-  it('says how to get out, in the box, while you are in it', () => {
-    // The caption used to read `Esc → sidebar` and now names `Mod-[`, because
-    // Escape does something else. A hint that outlives the behaviour it
-    // described is worse than no hint: it sends the operator to press a key
-    // that now interrupts their agent.
+  it('retires the caption that promised Escape went to the sidebar', () => {
+    // It no longer does -- Escape interrupts the agent from in here -- and a
+    // hint that outlives the behaviour it described is worse than no hint: it
+    // sends the operator to press a key expecting to leave and stops their
+    // agent instead. The replacement caption (`Mod-[ → leave`) is gone too,
+    // at the operator's later ask; `DetailPanel.composer-escape.test.tsx`
+    // holds the key still working.
     draw({ composing: true });
-    expect(q<HTMLElement>('[data-prompt-keys]')?.textContent).toContain('Mod-[');
     expect(q<HTMLElement>('[data-prompt-keys]')?.textContent).not.toContain('sidebar');
     expect(q<HTMLElement>('[data-prompt-escape]')).toBeNull();
-    // Not clutter the rest of the time: the way out only matters once you are
-    // in, and this row is already carrying four things at 408px.
+    // The row itself is still only drawn while the box is open for typing --
+    // it costs no width the rest of the time.
     cleanup();
     draw({ composing: false });
     expect(q<HTMLElement>('[data-prompt-keys]')).toBeNull();
   });
 
-  it('names the way OUT and leaves the send key to the button beside it', () => {
-    // Operator: "of Enter-to-send and Mod-[-to-leave, only the leave one needs
-    // showing."
+  it("names no leave key at all, on the operator's second look", () => {
+    // Operator, first: "of Enter-to-send and Mod-[-to-leave, only the leave
+    // one needs showing." Then, having lived with it: "drop the leave shortcut
+    // from under the prompt box."
     //
-    // THE TWO HINTS ARE NOT WORTH THE SAME. The send key is named twice over
-    // already -- there is a submit BUTTON directly above this row carrying the
-    // verb it performs, with a `Note` on it -- and pressing Return in a text
-    // box is the most guessed-at gesture there is. The way out is neither: no
-    // control on screen performs it, and the key that an operator WOULD guess
-    // (Escape) now interrupts their agent instead. A row that spends half its
-    // width on the obvious one buries the one that has to be taught.
+    // THE KEY STILL WORKS. `Mod-[` is bound in the composer's own `onKeyDown`
+    // and reserved in `chords.ts`, `Mod-0` still gets out from here, and the
+    // `?` sheet still names both. What is gone is the CAPTION, which is the
+    // operator's call to make: they are the one reading this row on every
+    // prompt they type.
     draw({ composing: true });
-    const row = q<HTMLElement>('[data-prompt-keys]');
-    expect(row?.textContent).toContain('Mod-[');
+    expect(q<HTMLElement>('[data-prompt-leave-key]')).toBeNull();
+    expect(q<HTMLElement>('[data-prompt-keys]')?.textContent ?? '').not.toContain('leave');
+    // And the send key stays where it was left -- silent on the shipped key,
+    // which is what makes the row EMPTY here rather than merely shorter.
     expect(q<HTMLElement>('[data-prompt-send-key]')).toBeNull();
-    // NOT "the row lost a span": the row still has to say something, or this
-    // assertion would pass just as well over a composer that stopped drawing
-    // the caption at all.
-    expect(q<HTMLElement>('[data-prompt-leave-key]')).not.toBeNull();
   });
 
   it('brings the send caption back when the operator is not on the shipped key', () => {
