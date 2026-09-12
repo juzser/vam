@@ -116,6 +116,24 @@ export const DEMO_MODEL: CanvasModel = {
                     'smith findings raise --evidence state/results/f-ui-server-sse.json --found-by reviewer --session factory-sse-1',
                 },
               ],
+              // THE TURN'S OWN WORKING, drawn as rows under its progress line
+              // whenever focus view is off -- which is the default, so this is
+              // the list in every screenshot of this session. Without one here
+              // the whole feature would be outside the reach of every gate but
+              // the unit tests, which is the fourth rule in this file's header
+              // and the reason `errorCount: 0` a few sessions down exists.
+              //
+              // SHAPED LIKE THE REAL RECORD: a bare tool name where the tool
+              // writes no description of its own, `name: description` where it
+              // does (Bash is the one that does, which is why it is the one
+              // that reads as a sentence).
+              steps: [
+                { id: 'd-r5:s0', label: 'Read', failed: false },
+                { id: 'd-r5:s1', label: 'Grep', failed: false },
+                { id: 'd-r5:s2', label: 'Bash: serve the page on 127.0.0.1', failed: false },
+                { id: 'd-r5:s3', label: 'Bash: measure the cross-origin cut-off', failed: false },
+                { id: 'd-r5:s4', label: 'Read', failed: false },
+              ],
             },
             {
               id: 'd-signoff',
@@ -160,6 +178,22 @@ export const DEMO_MODEL: CanvasModel = {
               // and the `· N failed` count ship unseen -- the same reason the
               // elided turns below are here.
               errorCount: 3,
+              // THE LIST BESIDE THE COUNT, and the pair is the point: `· 3
+              // failed` says something blew up in this turn, and only these
+              // rows say WHICH calls. Three of them are marked, so the count
+              // and the list agree -- a fixture where they disagreed would
+              // make either one look broken in a screenshot.
+              steps: [
+                { id: 'd-task4:s0', label: 'Read', failed: false },
+                { id: 'd-task4:s1', label: 'Write', failed: false },
+                { id: 'd-task4:s2', label: 'Bash: run the new test, expecting red', failed: true },
+                { id: 'd-task4:s3', label: 'Edit', failed: false },
+                { id: 'd-task4:s4', label: 'Bash: run the queue suite', failed: true },
+                { id: 'd-task4:s5', label: 'Edit', failed: false },
+                { id: 'd-task4:s6', label: 'Bash: run the queue suite', failed: false },
+                { id: 'd-task4:s7', label: 'Bash: check the diff with biome', failed: true },
+                { id: 'd-task4:s8', label: 'Edit', failed: false },
+              ],
             },
             // Everything below here is older than the three the canvas draws. It
             // is in the fixture precisely so the elided link has something to
@@ -172,6 +206,20 @@ export const DEMO_MODEL: CanvasModel = {
               output:
                 "plan-v2: 5 tasks, 41 ACs, 3 waves. task-2 holds task-1's claims via claim-order.",
               commands: [],
+              // A QUIET, FINISHED, OLDER TURN THAT MADE CALLS, and it is here
+              // because the one state the two turns above cannot produce is
+              // the one the unfold exists for. Focus view keeps the newest
+              // turn's line (it has a present to report) and the failing
+              // turn's (alarm is never folded), so NEITHER of them ever draws
+              // a `···` -- and without a turn like this, "press the way back
+              // and the calls return" was unreachable from the only session a
+              // guard may drive. `e2e/turn-steps-shots.mjs` found that by
+              // failing on it.
+              steps: [
+                { id: 'd-plan:s0', label: 'Read', failed: false },
+                { id: 'd-plan:s1', label: 'Grep', failed: false },
+                { id: 'd-plan:s2', label: 'Write', failed: false },
+              ],
             },
             {
               id: 'd-scope',

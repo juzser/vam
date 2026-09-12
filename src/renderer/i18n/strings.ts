@@ -102,7 +102,7 @@ const EN = {
     "how large the agent's answer is drawn, in every response pane",
   'settings.appearance.focusView.label': 'focus view',
   'settings.appearance.focusView.hint':
-    "fold each turn's working away, leaving your prompts and the agent's answers",
+    "fold each turn's tool calls away, leaving your prompts and the agent's answers",
   'settings.appearance.focusView.on': 'on',
   'settings.appearance.focusView.off': 'off',
 
@@ -133,6 +133,21 @@ const EN = {
   'prs.repo.session': "This session's repository",
   'prs.repo.choose': 'Choose another repo',
   'prs.repo.clear': "Use the session's",
+
+  // ── A turn's tool calls, under its progress line ─────────────────────────
+  // THE TRANSCRIPT COLUMN'S FIRST TWO KEYS, and they are here because these
+  // two are prose rather than data: everything else on that line is a turn
+  // label, a tool name or a number the reader read. Lower, like the rest of
+  // the catalogue -- these are drawn in the column's own quiet mono, which
+  // capitalises nothing.
+  //
+  // `steps.failed` is read and never seen: the row's mark is a glyph and a
+  // colour, and neither reaches a screen reader. `steps.more` carries a
+  // number vam HELD and did not draw, so it says the number rather than
+  // "more" -- the column caps the rows it draws, and a cap that will not say
+  // its own size is the fold this whole surface exists to refuse.
+  'steps.failed': 'failed',
+  'steps.more': '+{count} more, not shown',
 
   // ── Exercised by the catalogue's own tests, and by nothing else ──────────
   // Kept HERE rather than in the test file so that the shape a test asserts

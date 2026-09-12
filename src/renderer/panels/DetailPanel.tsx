@@ -103,6 +103,7 @@ import type {
   SessionAgent,
   SessionStatus,
   SlashCommand,
+  TurnStep,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { t } from '../i18n/strings.js';
@@ -113,6 +114,7 @@ import { ShortcutTip } from '../keyboard/ShortcutTip.js';
 import {
   activeFocusView,
   drawsProgressLine,
+  drawsTurnSteps,
   drawsUnfoldControl,
   subscribeFocusView,
 } from '../prefs/progress.js';
@@ -2652,6 +2654,52 @@ function turnMark(d: Decision): string {
 }
 
 /**
+ * HOW MANY OF A TURN'S CALLS THE COLUMN DRAWS, and the number is measured
+ * rather than chosen.
+ *
+ * Over the 77 real session transcripts on this machine: a turn that fits
+ * inside one 128 KiB window -- which is every turn a live poll reads, because
+ * that window IS the poll -- made a median of 3 calls, a p90 of 8, and at most
+ * 20, across 387 such turns. So at 20 nothing a running session shows is ever
+ * cut, and this is not a fold on the working the operator just asked to see.
+ *
+ * IT EXISTS FOR THE OTHER HALF OF THAT CORPUS. A turn whose bytes SPAN the
+ * window -- the case `history.ts` widens the read for, up to 4 MiB, so that a
+ * scrolled-back page carries whole turns -- ran to a median of 30 calls and a
+ * largest of 2,144 (785 turns). Two thousand rows under one prompt is that
+ * turn's answer pushed off the screen by its own working, on a column the
+ * operator is scrolling through history in.
+ *
+ * AND WHAT IS CUT IS SAID, IN A NUMBER VAM HELD. `steps` is already a list of
+ * what was READ; a cap that would not name its own remainder would be the
+ * second, silent fold on a surface built to refuse exactly that.
+ */
+const MAX_STEP_ROWS = 20;
+
+/**
+ * ONE CALL, AS A ROW. The mark is a glyph and a colour, and a failure may
+ * depend on neither: the word rides in `sr-only` beside it, because the count
+ * on the line above says something failed and only this says which one.
+ */
+function StepRow({ step }: { readonly step: TurnStep }) {
+  return (
+    <li
+      data-progress-step={step.id}
+      data-progress-step-failed={step.failed ? 'true' : undefined}
+      className="flex min-w-0 items-center gap-1.5"
+    >
+      <span aria-hidden="true" className={step.failed ? 'text-failed' : undefined}>
+        {step.failed ? '!' : '·'}
+      </span>
+      {step.failed && <span className="sr-only">{t('steps.failed')}</span>}
+      <span data-progress-step-label className="min-w-0 truncate">
+        {step.label}
+      </span>
+    </li>
+  );
+}
+
+/**
  * ONE TURN OF THE TRANSCRIPT, as a block of the column.
  *
  * The pane used to draw exactly one of these -- whichever turn `selectedId`
@@ -2737,6 +2785,20 @@ const TurnBlock = memo(function TurnBlock({
    * drift into a turn that has neither.
    */
   const showUnfold = drawsUnfoldControl(focusView, turnFacts);
+  /**
+   * AND THE WORKING ITSELF -- the calls the turn made, which is the thing
+   * "hide tool calls" was always about. Same file, same reason: three
+   * predicates written in one place, where the invariant that binds them (a
+   * step is never drawn where the line is not) can be swept.
+   *
+   * CAPPED HERE AND NOT AT THE SOURCE. `steps` is a list of what vam READ, and
+   * the reader's budget is the window, exactly as it is for `MAX_DECISIONS`;
+   * how many rows a COLUMN can spend is a different question with a different
+   * answer, and `dropped` below is what makes the cap say its own size.
+   */
+  const steps = decision.steps ?? [];
+  const showSteps = drawsTurnSteps(focusView, turnFacts) && steps.length > 0;
+  const dropped = Math.max(0, steps.length - MAX_STEP_ROWS);
   return (
     <article
       data-column-turn={decision.id}
@@ -3020,6 +3082,40 @@ const TurnBlock = memo(function TurnBlock({
               </>
             )}
           </div>
+          {/* THE CALLS THE TURN MADE, which is what "show the whole progress"
+              asked for. Before this the line above was the whole of a turn's
+              working on screen -- its mark and the agent's name -- while the
+              reader had parsed every `tool_use` part and kept one.
+
+              INSIDE THIS SECTION, NOT BESIDE IT. That is what keeps focus view
+              folding ONE thing: `drawsTurnSteps` is a strict subset of
+              `drawsProgressLine` (swept in `prefs.focus-view.test.ts`), so
+              there is no state where a row outlives the line it belongs to.
+
+              AN ORDERED LIST, because the order is the content: this is what
+              the turn did and then did next. `list-none` is explicit rather
+              than left to the preflight -- a marker column here would indent
+              every row past the line it sits under. */}
+          {showSteps && (
+            <ol
+              data-progress-steps
+              className="flex min-w-0 list-none flex-col gap-0.5 pl-3 font-mono text-ink-faint text-meta"
+            >
+              {steps.slice(0, MAX_STEP_ROWS).map((step) => (
+                <StepRow key={step.id} step={step} />
+              ))}
+              {/* WHAT THE CAP LEFT OUT, as a number vam read. A list that is a
+                  count of what was READ cannot then quietly draw fewer than it
+                  holds: that is the silent fold this surface exists against,
+                  and it is the same qualifier `turns read` carries one level
+                  up. */}
+              {dropped > 0 && (
+                <li data-progress-steps-more className="text-ink-quiet">
+                  {t('steps.more', { count: String(dropped) })}
+                </li>
+              )}
+            </ol>
+          )}
         </section>
       )}
 

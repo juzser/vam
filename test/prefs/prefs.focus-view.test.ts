@@ -11,16 +11,20 @@
  *    your prompts and Claude's responses. Folded activity stays one click
  *    away, and a live indicator names the tool currently running."
  *
- * WHAT VAM FOLDS IS THE TURN'S PROGRESS LINE, NOT A LIST OF TOOL CALLS, and
- * that is the faithful reading rather than a compromise. `Decision` carries a
- * label, an input, an output, the agent-proposed `commands` and an
- * `errorCount` -- a COUNT. There is no list of calls in the model to hide, so
- * a mode that claimed to hide them would have to invent its rows. What vam
- * draws for a turn's working is one condensed line, and that line IS the whole
- * of the working on screen: fold it and the page reads as prompts and
- * responses, which is the reading the plugin's text describes. Itemised tool
- * calls are a transcript-reader change and are deliberately not built toward
- * here.
+ * WHAT VAM FOLDS IS THE TURN'S PROGRESS LINE AND ITS LIST OF TOOL CALLS.
+ *
+ * The list is new, and it is why this paragraph was rewritten rather than
+ * kept. It used to say there was no list of calls in the model to hide, and
+ * that was true of the MODEL and false of the DATA: the reader parsed every
+ * `tool_use` part of the transcript and kept exactly one of them -- the newest
+ * in the whole window -- as `Session.activity`. So the operator turned focus
+ * view off, which promises the working, and got `✓ claude-code` per turn.
+ * "Show the whole progress when focus view is off" is what they said about it,
+ * and `Decision.steps` is what a turn carries now.
+ *
+ * The pairing below is unchanged by that and is the reason it is safe: the
+ * calls are drawn INSIDE the progress section, so folding still folds one
+ * thing, and the way back still restores one thing.
  *
  * THE PART THAT IS NEW IS THE WAY BACK. The setting this replaces withdrew the
  * line and offered nothing to bring it back, which is not a fold -- it is a
@@ -36,6 +40,7 @@ import {
   activeFocusView,
   DEFAULT_FOCUS_VIEW,
   drawsProgressLine,
+  drawsTurnSteps,
   drawsUnfoldControl,
   readFocusView,
   setActiveFocusView,
@@ -125,6 +130,64 @@ describe('what focus view folds, and what it may never fold', () => {
     // but NEITHER is a failure, so neither may hold a line open on failure
     // grounds. Where they differ is at the column, once, beside the count.
     expect(drawsProgressLine(true, { ...QUIET, errorCount: undefined })).toBe(false);
+  });
+});
+
+describe('the working itself, which is the thing the mode is named for', () => {
+  it('draws every call of every turn while focus view is off', () => {
+    // The operator's sentence: "show the whole progress when focus view is
+    // off". Off is the DEFAULT, so this is what an operator who never opened
+    // the picker sees -- and what they saw before was the turn's mark and the
+    // agent's name.
+    expect(drawsTurnSteps(false, QUIET)).toBe(true);
+    expect(drawsTurnSteps(false, { ...QUIET, newest: true, activity: 'editing' })).toBe(true);
+  });
+
+  it('withholds them under focus view, which is the whole of what it promises', () => {
+    // "hide tool calls and other in-progress activity". A turn kept on screen
+    // by a failure still keeps its line -- alarm is never folded -- but the
+    // list is the itemised working the mode exists to put away.
+    expect(drawsTurnSteps(true, QUIET)).toBe(false);
+    expect(drawsTurnSteps(true, { ...QUIET, errorCount: 3 })).toBe(false);
+    expect(drawsTurnSteps(true, { ...QUIET, newest: true, activity: 'editing' })).toBe(false);
+  });
+
+  it('gives them back to the turn the operator unfolded, and to no other', () => {
+    // The control says "show this turn's working". The working is the calls:
+    // a way back that restored only the mark and the label would be a control
+    // that does almost nothing, which is the defect the unfold exists against.
+    expect(drawsTurnSteps(true, { ...QUIET, unfolded: true })).toBe(true);
+    expect(drawsTurnSteps(true, QUIET)).toBe(false);
+  });
+
+  it('never draws a call where no progress section exists to hold it', () => {
+    // THE CONTAINMENT INVARIANT, swept rather than sampled: the list lives
+    // inside `data-detail-block="progress"`, so steps without a line would be
+    // rows in a section that is not drawn -- or, worse, a second section the
+    // fold does not know about.
+    const bools = [true, false];
+    const counts = [undefined, 0, 1];
+    const strings = [null, 'editing'];
+    let checked = 0;
+    const orphaned: string[] = [];
+    for (const focus of bools) {
+      for (const errorCount of counts) {
+        for (const newest of bools) {
+          for (const activity of strings) {
+            for (const waitingCause of strings) {
+              for (const unfolded of bools) {
+                const turn = { errorCount, newest, activity, waitingCause, unfolded };
+                checked += 1;
+                if (drawsTurnSteps(focus, turn) && !drawsProgressLine(focus, turn)) {
+                  orphaned.push(`${focus ? 'focus' : 'full'} ${JSON.stringify(turn)}`);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    expect({ checked, orphaned }).toEqual({ checked: 96, orphaned: [] });
   });
 });
 

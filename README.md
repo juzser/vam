@@ -242,7 +242,7 @@ Chord prefixes — press the first key, then the second:
 | `zs` / `zv` | Split the focused tab — `zs` horizontally (stacked), `zv` vertically (side by side); dragging a tab onto the detail pane does the same, and only within one project |
 | `zc` | Close the focused split — the session keeps running |
 | `zw` / `zW` | Move the keyboard to the next / previous split |
-| `zf` | Focus view on or off — fold every turn's working away, leaving your prompts and the agent's answers. A folded turn keeps `···` where its working was; press that and the turn comes back on its own. Nothing is folded from a turn whose tools failed, or from the newest turn while the session is working or waiting. `z` is vim's fold prefix and vam's display prefix, and a bare chord is contested by no browser — see *In a browser tab* below |
+| `zf` | Focus view on or off — fold every turn's working away (the tool calls it made, listed under its progress line), leaving your prompts and the agent's answers. A folded turn keeps `···` where its working was; press that and the turn comes back on its own. Nothing is folded from a turn whose tools failed, or from the newest turn while the session is working or waiting. `z` is vim's fold prefix and vam's display prefix, and a bare chord is contested by no browser — see *In a browser tab* below |
 
 #### In a browser tab
 

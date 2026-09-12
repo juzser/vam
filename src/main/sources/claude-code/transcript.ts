@@ -142,23 +142,48 @@ function messageText(line: Line): string | null {
   return text === '' ? null : text;
 }
 
-/** The first `{type:'tool_use'}` part of an assistant message, if any. */
-function toolUse(line: Line): string | null {
+/**
+ * One `{type:'tool_use'}` part, as the name a person reads.
+ *
+ * The tool's own `description` where it wrote one, because `Bash` alone says
+ * nothing and `Bash: run the tests` is the whole of what a progress row is
+ * for. Cut at `ACTIVITY_LIMIT`: 228 labels in the measured corpus run past 80
+ * characters and the longest is 1,057, and neither the activity line nor a
+ * progress row draws more than one line of it anyway.
+ */
+function toolUseLabel(part: Line): string {
+  const input = part['input'];
+  const description =
+    typeof input === 'object' && input !== null ? str((input as Line)['description']) : null;
+  const name = str(part['name']) ?? 'tool';
+  return `${name}${description === null ? '' : `: ${description}`}`.slice(0, ACTIVITY_LIMIT);
+}
+
+/** Every `{type:'tool_use'}` part of an assistant message, in order. */
+function toolUses(line: Line): readonly Line[] {
   const message = line['message'];
-  if (typeof message !== 'object' || message === null) return null;
+  if (typeof message !== 'object' || message === null) return [];
   const content = (message as Line)['content'];
-  if (!Array.isArray(content)) return null;
+  if (!Array.isArray(content)) return [];
+  const parts: Line[] = [];
   for (const part of content) {
     if (typeof part !== 'object' || part === null) continue;
     const p = part as Line;
-    if (p['type'] !== 'tool_use') continue;
-    const input = p['input'];
-    const description =
-      typeof input === 'object' && input !== null ? str((input as Line)['description']) : null;
-    const name = str(p['name']) ?? 'tool';
-    return `${name}${description === null ? '' : `: ${description}`}`.slice(0, ACTIVITY_LIMIT);
+    if (p['type'] === 'tool_use') parts.push(p);
   }
-  return null;
+  return parts;
+}
+
+/**
+ * The FIRST tool call of an assistant message, if any -- the activity line.
+ *
+ * First, not last, and unchanged now that a turn keeps all of them: `activity`
+ * is one phrase for "what is it doing", and a line carrying three parallel
+ * calls has no single answer. The turn's `steps` is where all three are.
+ */
+function toolUse(line: Line): string | null {
+  const first = toolUses(line)[0];
+  return first === undefined ? null : toolUseLabel(first);
 }
 
 /**
@@ -189,6 +214,46 @@ function toolErrors(line: Line): number {
   }
   return failed;
 }
+
+/**
+ * WHICH calls this line reports as failed, by `tool_use_id`.
+ *
+ * The other half of `toolErrors`, and deliberately a second reading of the
+ * same parts rather than one function returning both: the COUNT must keep
+ * counting failures that name a call vam never read (a window that opened
+ * between a call and its result), and a function that returned only matched
+ * ids would quietly shrink it.
+ *
+ * Matching by id is a reading and not a heuristic -- measured over the 77 real
+ * session transcripts, all 1,221 `is_error:true` results named a
+ * `tool_use_id` that matches a call in the same file.
+ */
+function failedToolUseIds(line: Line): readonly string[] {
+  const message = line['message'];
+  if (typeof message !== 'object' || message === null) return [];
+  const content = (message as Line)['content'];
+  if (!Array.isArray(content)) return [];
+  const ids: string[] = [];
+  for (const part of content) {
+    if (typeof part !== 'object' || part === null) continue;
+    const p = part as Line;
+    if (p['type'] !== 'tool_result' || p['is_error'] !== true) continue;
+    const id = str(p['tool_use_id']);
+    if (id !== null) ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * One tool call while it is still being read, before it becomes a `TurnStep`.
+ *
+ * It carries the PROVIDER's `tool_use.id` because that is what a result names
+ * itself against; the id the renderer sees is vam's own, minted from the turn
+ * and the call's position once the turn has an id at all (see `idOf` below).
+ * A list keyed on a value vam does not mint collapses two rows the day one
+ * repeats.
+ */
+type ReadCall = { readonly toolUseId: string | null; readonly label: string; failed: boolean };
 
 /** `2m`, `6h`, `3d` -- the compact form the sidebar right-aligns. */
 export function compactAge(ms: number): string {
@@ -310,8 +375,20 @@ export function summarizeTranscript(
   // that turn, which is what `Decision.output` is defined to be. vam cannot
   // tell an interim narration from a final answer inside a turn still in
   // flight; it shows the newest text and lets `status` carry "still working".
-  const turns: { input: string; output: string | null; errors: number; start: number | null }[] =
-    [];
+  //
+  // `calls` is the turn's working, oldest first. It is a MUTABLE array held by
+  // reference: the record itself is replaced by a spread every time the answer
+  // grows, and a list rebuilt on each of those would be quadratic in a turn
+  // that made 2,144 calls -- the largest in the measured corpus. The spread
+  // copies the reference, so a push reaches whichever record is current.
+  // `failed` is likewise set in place when the result arrives.
+  const turns: {
+    input: string;
+    output: string | null;
+    errors: number;
+    start: number | null;
+    calls: ReadCall[];
+  }[] = [];
 
   for (const { line, start } of located) {
     branch = str(line['gitBranch']) ?? branch;
@@ -325,7 +402,7 @@ export function summarizeTranscript(
       // measured across the whole corpus, 21,604 of 22,668 `last-prompt` lines
       // repeat the turn that is already open.
       if (prompt !== null && turns.at(-1)?.input !== prompt) {
-        turns.push({ input: prompt, output: null, errors: 0, start });
+        turns.push({ input: prompt, output: null, errors: 0, start, calls: [] });
       }
     } else if (type === 'assistant') {
       const text = messageText(line);
@@ -334,6 +411,21 @@ export function summarizeTranscript(
         if (open !== undefined) turns[turns.length - 1] = { ...open, output: text };
       }
       activity = toolUse(line) ?? activity;
+      // THE TURN'S WORKING, on the same attribution rule the count below
+      // keeps: a call belongs to the turn that was open when it was made, and
+      // a call made before any prompt in the window is charged to nothing --
+      // putting it under the NEXT prompt would draw working under a turn that
+      // had not started.
+      const working = turns.at(-1);
+      if (working !== undefined) {
+        for (const part of toolUses(line)) {
+          working.calls.push({
+            toolUseId: str(part['id']),
+            label: toolUseLabel(part),
+            failed: false,
+          });
+        }
+      }
     } else if (type === 'user') {
       // A tool result belongs to the turn that was OPEN when it arrived: it
       // comes after the prompt that opened that turn and before the next one.
@@ -346,6 +438,14 @@ export function summarizeTranscript(
       const open = turns.at(-1);
       if (failed > 0 && open !== undefined) {
         turns[turns.length - 1] = { ...open, errors: open.errors + failed };
+      }
+      // AND WHICH CALL IT WAS, where vam read the call. A result naming a call
+      // outside the window marks nothing and still counts above -- which is
+      // why the count is not derived from this list.
+      if (open !== undefined) {
+        for (const id of failedToolUseIds(line)) {
+          for (const call of open.calls) if (call.toolUseId === id) call.failed = true;
+        }
       }
     }
   }
@@ -419,6 +519,16 @@ export function summarizeTranscript(
       // so zero here is a reading and not a shrug. Absent is reserved for a
       // source that cannot look (`Decision.errorCount` in `model.ts`).
       errorCount: turn.errors,
+      // The turn's working, on the same rule: always a list, empty included.
+      // Ids are the TURN's plus the call's position, so they are unique within
+      // the turn by construction whatever the provider wrote. Nothing caps the
+      // length here -- the window is the budget, as it is for `MAX_DECISIONS`
+      // -- and the column decides how many rows it draws.
+      steps: turn.calls.map((call, index) => ({
+        id: `${turn.id}:s${index}`,
+        label: call.label,
+        failed: call.failed,
+      })),
     }));
 
   // Read off the SAME parsed lines: the questions are a second reading of one

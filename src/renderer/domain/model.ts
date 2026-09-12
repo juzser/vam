@@ -134,6 +134,65 @@ export type Decision = {
    * and found none.
    */
   readonly errorCount?: number;
+  /**
+   * The tool calls vam read inside this turn, oldest first — the turn's
+   * working, which the column draws when focus view is off.
+   *
+   * WHY IT EXISTS. Focus view's whole promise is "hide tool calls and other
+   * in-progress activity"; turned off it drew one line per turn carrying the
+   * turn's mark and the agent's name, because that is all a turn held. The
+   * calls were in the transcript all along and the reader discarded them: it
+   * read every `tool_use` part and kept only the newest one in the whole
+   * window, as `Session.activity`. A mode that hides working has to have
+   * working to hide.
+   *
+   * IT DOES NOT REPLACE `errorCount`, and the two answer different questions.
+   * This is a LIST, which a folded line cannot draw; that is a COUNT, which
+   * says "something blew up in here" in one glyph and also counts failures vam
+   * could not attribute to any call it read — a window that opened between a
+   * call and its result. Neither is derived from the other.
+   *
+   * A LIST OF WHAT WAS READ, like `decisions` and like `errorCount`: the window
+   * is the newest `TAIL_BYTES` of the transcript, so a call older than that
+   * window is not in here, and this is never a claim about the run.
+   *
+   * OPTIONAL, on the same rule as `errorCount`: ABSENT is "this source cannot
+   * report tool calls" and EMPTY is a reading — vam looked, and the turn called
+   * nothing.
+   */
+  readonly steps?: readonly TurnStep[];
+};
+
+/**
+ * One tool call, as a row of a turn's working.
+ *
+ * A NAME, NOT A TRANSCRIPT. The call's input is not carried — a file's whole
+ * contents rides in there — nor its result, nor any timing. What a progress row
+ * answers is "what did it do next", and the answer is the tool's name plus the
+ * description the tool itself wrote, where it wrote one.
+ */
+export type TurnStep = {
+  /**
+   * Vam's own, minted from the turn's id and the call's position in it.
+   *
+   * NOT THE PROVIDER'S `tool_use.id`, though all 63,622 calls in the measured
+   * corpus carried one: a list keyed on a value vam does not mint collapses two
+   * rows the day one repeats, and nothing here needs the id to mean anything
+   * outside its own turn.
+   */
+  readonly id: string;
+  /** `Bash`, or `Bash: run the tests` — cut at the activity line's own limit. */
+  readonly label: string;
+  /**
+   * Did the call's result come back `is_error: true`?
+   *
+   * READ, NOT INFERRED, and `=== true` rather than truthy — the same rule
+   * `errorCount` keeps, for the same reason: a false failure badge is worse
+   * than none. FALSE therefore also covers "no result was read", which is the
+   * state of every call still running and of one whose result fell outside the
+   * window. A row is marked only on the evidence of a failure.
+   */
+  readonly failed: boolean;
 };
 
 /**
