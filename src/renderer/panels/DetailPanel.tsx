@@ -129,6 +129,8 @@ import { useHistoryReader } from '../sources/history-reader.js';
 import { describeFailure } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
+import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
+import { copyText } from './clipboard.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import { type DictationHandle, dictationAvailable, startDictation } from './dictation.js';
 import {
@@ -2767,6 +2769,8 @@ const TurnBlock = memo(function TurnBlock({
   focusView,
   unfolded,
   onUnfold,
+  onPromptMenu,
+  onAnswerMenu,
 }: {
   readonly decision: Decision;
   /** Is this the turn the picker (or the canvas) has landed on? */
@@ -2787,6 +2791,12 @@ const TurnBlock = memo(function TurnBlock({
   /** Ask for this turn's working. Given the turn's id, never a closure per
    *  turn: the column can hold hundreds of these. */
   readonly onUnfold: (id: string) => void;
+  /** Right-click on this turn's In bubble. Given the turn's id and the
+   *  pointer, on the same rule as `onUnfold`: one stable callback for a column
+   *  that can hold 3,276 of these, not a closure per turn. */
+  readonly onPromptMenu: (id: string, at: { readonly x: number; readonly y: number }) => void;
+  /** The same, for its answer. */
+  readonly onAnswerMenu: (id: string, at: { readonly x: number; readonly y: number }) => void;
 }) {
   const failed = decision.errorCount ?? 0;
   /**
@@ -2884,8 +2894,29 @@ const TurnBlock = memo(function TurnBlock({
           painting itself darker than the surface it sits in. The
           band's job is to be invisible and the BUBBLE is the thing meant to be
           seen; opacity is what it needs, not depth. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the rule is RIGHT
+          about this one and the answer is still a suppression, so the reason
+          is written out. A transcript block has no focusable child, so the
+          Menu key -- which fires `contextmenu` on the FOCUSED element -- cannot
+          open this menu, and unlike the session row and the tab there is no
+          button here to move the handler onto. Making one would mean a tab
+          stop per turn, and the column draws up to 3,276 of them.
+          WHAT MAKES IT SOUND: neither ACT is pointer-only. Copy is `yy` and
+          cancel is Escape in the composer, both bound, both in the key sheet.
+          This menu is a shortcut to acts the keyboard already has -- which is
+          what the rule exists to guarantee -- rather than the only route to
+          them. If an act is ever added here that has no chord, this comment
+          stops being true and the suppression has to go. */}
       <section
         data-detail-block="in"
+        /* THE BAND, not just the bubble: the operator aiming at a prompt aims
+           at the block it sits in, and the tinted bubble is inset from it.
+           `preventDefault` is what stops Electron opening the SHELL's menu --
+           Reload, Inspect Element -- over a transcript. */
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onPromptMenu(decision.id, { x: event.clientX, y: event.clientY });
+        }}
         className="-ml-3.5 -mr-11 sticky top-0 z-10 flex max-h-[45cqh] min-h-0 flex-none flex-col gap-1 bg-pane pt-1.5 pr-11 pb-1.5 pl-3.5"
       >
         {/* The region's name, announced and not drawn. */}
@@ -3148,7 +3179,29 @@ const TurnBlock = memo(function TurnBlock({
         </section>
       )}
 
-      <section data-detail-block="out" className="flex flex-none flex-col gap-1.5">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the rule is RIGHT
+          about this one and the answer is still a suppression, so the reason
+          is written out. A transcript block has no focusable child, so the
+          Menu key -- which fires `contextmenu` on the FOCUSED element -- cannot
+          open this menu, and unlike the session row and the tab there is no
+          button here to move the handler onto. Making one would mean a tab
+          stop per turn, and the column draws up to 3,276 of them.
+          WHAT MAKES IT SOUND: neither ACT is pointer-only. Copy is `yy`, which copies
+          this turn's commands, and the answer itself is selectable text.
+          This menu is a shortcut to acts the keyboard already has -- which is
+          what the rule exists to guarantee -- rather than the only route to
+          them. If an act is ever added here that has no chord, this comment
+          stops being true and the suppression has to go. */}
+      <section
+        data-detail-block="out"
+        /* The "detail pane" half of the same request. One item, so the handler
+           is the same one the bubble uses with a different `kind`. */
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onAnswerMenu(decision.id, { x: event.clientX, y: event.clientY });
+        }}
+        className="flex flex-none flex-col gap-1.5"
+      >
         <span className="sr-only">out</span>
         <div
           data-detail-scroll="out"
@@ -4026,26 +4079,29 @@ export function DetailPanel(props: DetailPanelProps) {
     event.preventDefault();
     event.stopPropagation();
   };
+  /**
+   * WHY AN INTERRUPT WOULD BE REFUSED, or `null` when it would not.
+   *
+   * The three refusals were inline in `interruptRun` until the right-click
+   * menu needed them BEFORE the click: a menu item can say "vam did not start
+   * this session" while it is still disabled, which is the one thing a
+   * keystroke cannot do. Derived here so both routes read the same three
+   * conditions in the same order -- two copies of this would be two answers to
+   * "can vam stop it", and the pane's oldest defect is two different facts
+   * that look the same.
+   */
+  const interruptRefusal: string | null =
+    terminal === false
+      ? 'not sent — this source has no session terminal to interrupt'
+      : entry === null || entry.session.vamControlled !== true
+        ? 'not sent — vam did not start this session, so it has no keyboard into it'
+        : !sessionRunning
+          ? 'nothing running to interrupt — this session is not working'
+          : null;
+
   const interruptRun = () => {
-    if (terminal === false) {
-      setCycleNote({
-        kind: 'refused',
-        text: 'not sent — this source has no session terminal to interrupt',
-      });
-      return;
-    }
-    if (entry === null || entry.session.vamControlled !== true) {
-      setCycleNote({
-        kind: 'refused',
-        text: 'not sent — vam did not start this session, so it has no keyboard into it',
-      });
-      return;
-    }
-    if (!sessionRunning) {
-      setCycleNote({
-        kind: 'refused',
-        text: 'nothing running to interrupt — this session is not working',
-      });
+    if (interruptRefusal !== null) {
+      setCycleNote({ kind: 'refused', text: interruptRefusal });
       return;
     }
     // SENT, NOT CANCELLED. vam presses the key and never reads back what the
@@ -4523,6 +4579,27 @@ export function DetailPanel(props: DetailPanelProps) {
     wasFocusView.current = focusView;
     if (unfolded.size > 0) setUnfolded(new Set());
   }
+  /**
+   * THE IN BUBBLE'S RIGHT-CLICK MENU -- which turn, and where the pointer was.
+   *
+   * Held by turn ID rather than by the turn object: the column re-reads the
+   * transcript on every poll, so a held object would go stale while the menu
+   * is open, and the two items are resolved against the live list at draw
+   * time instead.
+   */
+  const [promptMenu, setPromptMenu] = useState<{
+    /** Which block was right-clicked: the prompt, or the answer under it. */
+    readonly kind: 'prompt' | 'answer';
+    readonly id: string;
+    readonly at: { readonly x: number; readonly y: number };
+  } | null>(null);
+  const openPromptMenu = useCallback((id: string, at: { x: number; y: number }) => {
+    setPromptMenu({ kind: 'prompt', id, at });
+  }, []);
+  const openAnswerMenu = useCallback((id: string, at: { x: number; y: number }) => {
+    setPromptMenu({ kind: 'answer', id, at });
+  }, []);
+
   const unfold = useCallback((id: string) => {
     setUnfolded((open) => {
       const next = new Set(open);
@@ -5326,6 +5403,8 @@ export function DetailPanel(props: DetailPanelProps) {
                   focusView={focusView}
                   unfolded={unfolded.has(d.id)}
                   onUnfold={unfold}
+                  onPromptMenu={openPromptMenu}
+                  onAnswerMenu={openAnswerMenu}
                 />
               ))}
             </div>
@@ -6433,6 +6512,121 @@ export function DetailPanel(props: DetailPanelProps) {
           </div>
         </div>
       )}
+
+      {/* THE IN BUBBLE'S MENU. Drawn once for the pane, `position: fixed`, so
+          the column's own `overflow` cannot clip it and the sticky band it was
+          opened on cannot trap it. */}
+      {promptMenu !== null &&
+        (() => {
+          const turn = orderedTurns.find((candidate) => candidate.id === promptMenu.id);
+          if (turn === undefined) {
+            // The poll dropped the turn out from under an open menu. Drawing a
+            // menu for a turn that is gone would be two wrongs: acting on the
+            // wrong turn, or acting on nothing while looking live.
+            return null;
+          }
+          // READ BACK, never assumed: in the packaged app every Chromium
+          // permission is denied and the renderer's own `navigator.clipboard`
+          // refuses, so a caller that prints "copied" without looking is
+          // telling the operator a lie. One closure for both menus.
+          const copy = (what: string, name: string) => () => {
+            void copyText(what).then((landed) => {
+              setCycleNote({
+                kind: landed ? 'sent' : 'refused',
+                text: landed
+                  ? `${name} copied to the clipboard`
+                  : 'not copied — the clipboard refused the write',
+              });
+            });
+          };
+          return (
+            <ContextMenu
+              label={promptMenu.kind === 'prompt' ? 'prompt actions' : 'answer actions'}
+              at={promptMenu.at}
+              onClose={() => setPromptMenu(null)}
+              items={
+                promptMenu.kind === 'prompt'
+                  ? promptMenuItems(turn, {
+                      live: turn.id === newestId,
+                      interruptRefusal,
+                      onCopy: copy(turn.input, 'prompt'),
+                      onCancel: interruptRun,
+                    })
+                  : answerMenuItems(turn, { onCopy: copy(turn.output ?? '', 'answer') })
+              }
+            />
+          );
+        })()}
     </aside>
   );
+}
+
+/**
+ * What a right-click on an In bubble offers.
+ *
+ * TWO ITEMS, BECAUSE THE OPERATOR SAID THEY ARE TWO THINGS: "In bubble, copy,
+ * cancel are different functions." Copy acts on the turn under the pointer;
+ * cancel acts on the SESSION, and only while the turn under the pointer is the
+ * one it is still working on.
+ *
+ * THE REFUSALS ARE SHOWN BEFORE THE CLICK, which is the only thing this menu
+ * adds that Escape-in-the-composer does not. `interruptRefusal` carries the
+ * three the pane already knows -- no terminal, not vam's session, nothing
+ * running -- and the fourth is about the TURN rather than the session: an
+ * older turn has already finished, whatever the session is doing now.
+ *
+ * Module scope, so the whole item set can be asserted without a pane.
+ */
+/**
+ * What a right-click on the ANSWER block offers.
+ *
+ * ONE ITEM, and the restraint is the design. Copy is the only thing vam can
+ * honestly do to an answer: cancelling belongs to the prompt -- it stops the
+ * turn that is producing this answer, so offering it here would be the same
+ * act named twice -- and there is no third capability to expose. A menu padded
+ * out to match the bubble's length would be inventing items.
+ */
+export function answerMenuItems(
+  turn: Decision,
+  how: { readonly onCopy: () => void },
+): ContextMenuItem[] {
+  return [
+    {
+      id: 'copy',
+      label: 'Copy answer',
+      // THE BLOCK DRAWS A SENTENCE WHERE THERE IS NO ANSWER ("this turn ended
+      // without an answer", and three more in `noAnswerNote`). Copying that
+      // would put vam's own prose on the clipboard as if the agent had
+      // written it -- which is a forgery, not an empty copy.
+      unavailable:
+        turn.output === null || turn.output === '' ? 'this turn has no answer to copy' : null,
+      onPick: how.onCopy,
+    },
+  ];
+}
+
+export function promptMenuItems(
+  turn: Decision,
+  how: {
+    readonly live: boolean;
+    readonly interruptRefusal: string | null;
+    readonly onCopy: () => void;
+    readonly onCancel: () => void;
+  },
+): ContextMenuItem[] {
+  return [
+    { id: 'copy', label: 'Copy prompt', onPick: how.onCopy },
+    {
+      id: 'cancel',
+      label: 'Cancel this turn',
+      danger: true,
+      // THE TURN'S OWN TEST FIRST. A finished turn cannot be interrupted even
+      // in a session that is busy on a later one, and reporting the session's
+      // reason there would answer a question nobody asked.
+      unavailable: how.live
+        ? how.interruptRefusal
+        : 'this turn has already finished — only the newest can be interrupted',
+      onPick: how.onCancel,
+    },
+  ];
 }

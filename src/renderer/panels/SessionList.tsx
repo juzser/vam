@@ -55,6 +55,7 @@ import type { KeyAction } from '../keyboard/chords.js';
 import { InlineChord, ShortcutTip } from '../keyboard/ShortcutTip.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
+import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { type RemovalPlan, removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
@@ -231,6 +232,66 @@ const FILTER_POPOVER_FOOT = 8;
  * Returns `null` while closed, so the popover renders exactly as it does
  * today until it has been measured once.
  */
+/**
+ * What a right-click on a session row offers, and why each item is there.
+ *
+ * THE SAME THREE THE CHORD TABLE ALREADY OFFERS for the focused row -- `r`,
+ * `s`, `x` -- and nothing invented for the occasion. The operator asked for
+ * "rename, remove"; `remove` for a session IS `x`. A session is a live process
+ * on a cwd rather than a stored record, so ending it is the whole of removing
+ * it, and the only surface with a separate "Remove" is the PROJECT heading one
+ * level up, where it hides the project and ends what vam started, behind a
+ * confirm.
+ *
+ * EVERY ITEM IS ALWAYS DRAWN. An unavailable one is disabled and carries its
+ * reason; it is never dropped. A menu whose shape changed with the row under
+ * the pointer would make the operator read it every time instead of learning
+ * where the third item is -- and the two reasons below are facts worth
+ * saying, not states worth hiding.
+ *
+ * Module scope rather than a closure inside the component, so the whole item
+ * set can be asserted without rendering a sidebar.
+ */
+export function rowMenuItems(
+  sessionId: string,
+  how: {
+    /** `pendingAction` for this row: closing can take the full stop timeout. */
+    readonly closing: boolean;
+    readonly onRenameSession?: ((sessionId: string) => void) | undefined;
+    readonly onPickSessionIcon?: ((sessionId: string) => void) | undefined;
+    readonly onClose: (sessionId: string) => void;
+  },
+): ContextMenuItem[] {
+  // A row on its way out takes no orders -- the same fact the row button and
+  // the `x` already wear. A rename issued into those fifteen seconds would be
+  // a rename of something that is leaving.
+  const stopping = how.closing ? 'this session is already closing' : null;
+  // The phone shell draws this list with no rename flow to offer. Saying so is
+  // the honest half of keeping the item on screen.
+  const noRoute = 'not available here';
+  return [
+    {
+      id: 'rename',
+      label: 'Rename session',
+      unavailable: stopping ?? (how.onRenameSession === undefined ? noRoute : null),
+      onPick: () => how.onRenameSession?.(sessionId),
+    },
+    {
+      id: 'icon',
+      label: 'Change session icon',
+      unavailable: stopping ?? (how.onPickSessionIcon === undefined ? noRoute : null),
+      onPick: () => how.onPickSessionIcon?.(sessionId),
+    },
+    {
+      id: 'close',
+      label: 'Close session',
+      danger: true,
+      unavailable: stopping,
+      onPick: () => how.onClose(sessionId),
+    },
+  ];
+}
+
 function useFilterPopoverCap(
   open: boolean,
   menuRef: RefObject<HTMLDivElement | null>,
@@ -353,6 +414,22 @@ export type SessionListProps = {
   readonly onRenameCancel: () => void;
   readonly onPick: (sessionId: string) => void;
   readonly onClose: (sessionId: string) => void;
+  /**
+   * THE RIGHT-CLICK MENU'S TWO NEW ROUTES, and the reason they are new.
+   *
+   * Renaming a session was `r` and changing its icon was `s`, both
+   * KEYBOARD-ONLY: there was no pointer route to either, on any surface. The
+   * chords act on the FOCUSED row; these act on the row the pointer named, so
+   * a right-click does not have to move the cursor first.
+   *
+   * OPTIONAL, and the menu says so rather than hiding the item. The phone
+   * shell draws this list too and has no rename flow to offer -- a menu that
+   * silently dropped an item would change shape between two surfaces showing
+   * the same row, which is the failure `hiddenCounts` exists to avoid one
+   * level up.
+   */
+  readonly onRenameSession?: (sessionId: string) => void;
+  readonly onPickSessionIcon?: (sessionId: string) => void;
   readonly onAdd: () => void;
   /**
    * The `+` in a project's heading. Separate from `onAdd` because it can say
@@ -557,6 +634,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     onRenameCancel,
     onPick,
     onClose,
+    onRenameSession,
+    onPickSessionIcon,
     onAdd,
     onAddInProject,
     onNewProject,
@@ -708,6 +787,19 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     { readonly kind: 'new' } | { readonly kind: 'rename'; readonly group: Group } | null
   >(null);
   const [groupDraftName, setGroupDraftName] = useState('');
+  /**
+   * THE RIGHT-CLICKED ROW, and where the pointer was when it happened.
+   *
+   * One piece of state for the whole list rather than one per row: only one
+   * menu can be open, and a right-click on a second row must MOVE it rather
+   * than open a second. Holding the session id (not the row element) is what
+   * makes that a replacement instead of a stack.
+   */
+  const [rowMenu, setRowMenu] = useState<{
+    readonly sessionId: string;
+    readonly title: string;
+    readonly at: { readonly x: number; readonly y: number };
+  } | null>(null);
   const [openGroupMenu, setOpenGroupMenu] = useState<string | null>(null);
   /** Never `entries`. See `allEntries` on the props for what reads this. */
   const allEntries = unfiltered ?? entries;
@@ -732,6 +824,19 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   const groupPanelRef = useRef<HTMLDivElement>(null);
   const openMenuWas = useRef<string | null>(null);
   const openGroupMenuWas = useRef<string | null>(null);
+
+  /**
+   * One right-click handler per session, for the two buttons that make up a
+   * row. Curried rather than inlined twice so the two cannot drift, and so
+   * the wrapper -- a static `<div>` -- never has to carry a pointer handler
+   * it could only answer with a mouse.
+   */
+  const onRowMenu =
+    (sessionId: string, title: string) =>
+    (event: { preventDefault: () => void; clientX: number; clientY: number }) => {
+      event.preventDefault();
+      setRowMenu({ sessionId, title, at: { x: event.clientX, y: event.clientY } });
+    };
 
   const toggleCollapse = useCallback(
     (project: Project) => {
@@ -2215,6 +2320,19 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                 }}
                                 data-session-row={session.id}
                                 onClick={() => onPick(session.id)}
+                                /* ON THE BUTTON, not on the wrapper around it.
+                                   The button IS the row -- `w-full`, the whole
+                                   box -- so the target is the same, and it is
+                                   the element the keyboard focuses, which is
+                                   where the Menu key and Shift+F10 fire their
+                                   `contextmenu`. A handler on the static
+                                   wrapper would have been a pointer-only
+                                   affordance in everything but name.
+                                   `preventDefault` is not optional: without it
+                                   Electron opens the SHELL's menu over the
+                                   app's, offering Reload and Inspect Element
+                                   over a session list. */
+                                onContextMenu={onRowMenu(session.id, session.title)}
                                 // Not actionable and not a tab stop -- but still
                                 // drawn, and still the row for THIS session: the
                                 // operator has to be able to see which one is
@@ -2546,6 +2664,10 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                 <button
                                   type="button"
                                   onClick={() => onClose(session.id)}
+                                  /* The `x` sits OUTSIDE the row button, so a
+                                     right-click on it would otherwise reach
+                                     nothing. Same menu, same session. */
+                                  onContextMenu={onRowMenu(session.id, session.title)}
                                   aria-label={`close ${session.title}`}
                                   {...pending(session.id, `Stopping ${session.title}…`)}
                                   className={[
@@ -2682,6 +2804,24 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             onRemoveProject(confirming, planFor(confirming));
             setConfirming(null);
           }}
+        />
+      )}
+
+      {/* THE ROW'S RIGHT-CLICK MENU, drawn once for the whole list.
+          `position: fixed` (see `ContextMenu.tsx`), so it does not matter that
+          this is outside the scroll container the row lives in -- and it has
+          to be outside, or the container's `overflow` would clip it. */}
+      {rowMenu !== null && (
+        <ContextMenu
+          label={`actions for ${rowMenu.title}`}
+          at={rowMenu.at}
+          onClose={() => setRowMenu(null)}
+          items={rowMenuItems(rowMenu.sessionId, {
+            closing: pendingAction === rowMenu.sessionId,
+            onRenameSession,
+            onPickSessionIcon,
+            onClose,
+          })}
         />
       )}
 
