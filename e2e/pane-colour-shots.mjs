@@ -926,37 +926,64 @@ await page.locator('[data-action-pane]').last().screenshot({
 });
 console.log(`${outDir}/list-markers-dark.png`);
 
-// ----------------------------------------------- THE DARK LIFT, AS PAINT
+// ----------------------------------------------- THE DARK LADDER, AS PAINT
 //
-// Operator, twice in the same words: "make the dark UI a bit lighter".
-// `test/renderer/dark-lift.test.ts` holds the stylesheet to a band per token;
-// this holds the SCREEN to it, which is a different claim and the one that can
-// fail on its own. A palette can be lifted in `styles.css` and never reach a
-// surface -- a utility whose token does not exist emits no class, breaks no
-// build and fails no assertion that reads text, and this repo has already
-// shipped a rule that was TYPED while its selector matched nothing.
+// Operator, a third time: "make the dark UI a bit lighter, and you may
+// re-pick the default colours." `test/renderer/dark-ladder.test.ts` holds
+// the stylesheet to the new shape (ground pinned, every gap a JND); this
+// holds the SCREEN to it, which is a different claim and the one that can
+// fail on its own. A palette can be widened in `styles.css` and never reach
+// a surface -- a utility whose token does not exist emits no class, breaks
+// no build and fails no assertion that reads text, and this repo has
+// already shipped a rule that was TYPED while its selector matched nothing.
+// SALVAGED from `smith/vam/dark-lift` (165baa2, an abandoned branch that
+// never reached the palette that actually merged): the technique of reading
+// `getComputedStyle` rather than the token, rebaselined against THIS
+// palette rather than that branch's, which would have made the app darker.
 //
 // EACH NODE IS MEASURED AGAINST THE COLOUR IT USED TO PAINT, recorded here
-// from the stylesheet as it stood before this pass, so what is asserted is the
-// DISTANCE TRAVELLED rather than the value found. A guard that expects what the
-// code now does passes on whatever the code does next.
+// from the stylesheet as the SECOND pass left it (not the first, and not
+// today's) -- so what is asserted is the distance travelled BY THIS PASS,
+// and a guard that expects what the code now does passes on whatever the
+// code does next.
 //
-// THE BAND IS THE SAME ONE THE UNIT GUARD USES: at least one JND (2.3 L*), at
-// most "a bit" (6.0). Under the floor means somebody walked a surface back;
-// over the ceiling means the theme is drifting up a patch at a time. Neither
-// number moved for the second lift -- what moved is the SEPARATION block
-// below, which is the half a per-token band cannot express.
-const LIFT_BAND = { floor: 2.3, ceiling: 6 };
-const LIFTED_LADDER = [
-  { what: 'the page behind the panes', selector: 'body', was: '#131313' },
-  { what: 'the sidebar', selector: '[data-sidebar-pane]', was: '#1d1d1d' },
-  { what: 'the detail pane', selector: '[data-action-pane]', was: '#1d1d1d' },
-  { what: 'a card on the pane', selector: '[data-question]', was: '#232323' },
+// THE CLAIM IS DIFFERENT THIS TIME, not just the numbers. The first two
+// passes were uniform-then-widened lifts and asked "did every rung move by
+// a bit". This pass pins `--vam-ground` and asks two things instead:
+// GROUND DID NOT MOVE (a uniform lift is now structurally unable to reach
+// through this file, because moving the anchor is what a uniform lift does
+// first) and EVERY SURFACE ABOVE IT WIDENED BY MORE THAN A JND, which is
+// the separation the operator's complaint was actually about.
+const GROUND_WAS = '#1c1c1c';
+const GROUND_TOLERANCE = 1; // pinned to the pixel; this is rounding room, not a floor.
+const WIDENED_LADDER = [
+  { what: 'the sidebar', selector: '[data-sidebar-pane]', was: '#272727' },
+  { what: 'the detail pane', selector: '[data-action-pane]', was: '#272727' },
+  { what: 'a card on the pane', selector: '[data-question]', was: '#2e2e2e' },
 ];
-/** What the LIGHT theme paints on the same four nodes, and must still paint. */
-const LIGHT_UNMOVED = ['rgb(255, 255, 255)', 'rgb(240, 238, 234)', 'rgb(240, 238, 234)', 'rgb(255, 255, 255)'];
+/** What the LIGHT theme paints on ground plus these three nodes, unmoved. */
+const LIGHT_UNMOVED = [
+  'rgb(255, 255, 255)',
+  'rgb(240, 238, 234)',
+  'rgb(240, 238, 234)',
+  'rgb(255, 255, 255)',
+];
+const ALL_FOUR_SELECTORS = ['body', ...WIDENED_LADDER.map((r) => r.selector)];
 
-const liftSeen = async () =>
+const groundSeen = async () =>
+  page.evaluate(({ was }) => {
+    const { opaque, lightness } = window.vamColour;
+    const fill = getComputedStyle(document.body).backgroundColor;
+    const painted = opaque(fill);
+    return {
+      fill,
+      painted,
+      step: painted ? Number((lightness(fill) - lightness(was)).toFixed(2)) : null,
+      light: painted ? Number(lightness(fill).toFixed(2)) : null,
+    };
+  }, { was: GROUND_WAS });
+
+const widenedSeen = async () =>
   page.evaluate(
     (ladder) => {
       const { opaque, lightness } = window.vamColour;
@@ -977,88 +1004,93 @@ const liftSeen = async () =>
         };
       });
     },
-    LIFTED_LADDER,
+    WIDENED_LADDER,
   );
 
-console.log('\n=== the dark lift, on the painted node');
-const lifted = await liftSeen();
-for (const rung of lifted) {
+console.log('\n=== the dark ladder, on the painted node');
+const ground = await groundSeen();
+const widened = await widenedSeen();
+console.log(`  the page behind the panes: ${GROUND_WAS} -> ${ground.fill} (L* ${ground.light}, step ${ground.step})`);
+for (const rung of widened) {
   console.log(`  ${rung.what}: ${rung.was} -> ${rung.fill} (L* ${rung.light}, step ${rung.step})`);
 }
 check(
-  'every surface the lift covers is drawn, and paints an opaque fill',
-  lifted.length === 4 && lifted.every((r) => r.painted),
-  JSON.stringify(lifted),
+  'every surface the ladder covers is drawn, and paints an opaque fill',
+  ground.painted && widened.length === 3 && widened.every((r) => r.painted),
+  JSON.stringify({ ground, widened }),
 );
-if (lifted.every((r) => r.painted)) {
-  const outside = lifted.filter(
-    (r) => r.step < LIFT_BAND.floor || r.step > LIFT_BAND.ceiling,
-  );
+if (ground.painted && widened.every((r) => r.painted)) {
   check(
-    `each one sits ${LIFT_BAND.floor}-${LIFT_BAND.ceiling} L* above the colour it used to paint`,
-    outside.length === 0,
-    outside.map((r) => `${r.what} ${r.was} -> ${r.fill}, ${r.step} L*`).join(' ; '),
+    'the page behind the panes did NOT move -- pinned, this pass, for the first time',
+    Math.abs(ground.step) <= GROUND_TOLERANCE,
+    `step ${ground.step} L*`,
+  );
+  const notWidened = widened.filter((r) => r.step < 2.3);
+  check(
+    'and every surface above it widened by more than a JND from the second pass',
+    notWidened.length === 0,
+    notWidened.map((r) => `${r.what}: ${r.was} -> ${r.fill}, ${r.step} L*`).join(' ; '),
   );
   // AND THE ORDER SURVIVED IT. The ladder is ground < sidebar = pane < card,
   // and a lift that moved one rung past another would be a new design rather
   // than a lighter one. Measured on the paint, not on the token list.
-  const [ground, sidebar_, pane, card] = lifted.map((r) => r.light);
+  const [sidebar_, pane, card] = widened.map((r) => r.light);
   check(
     'and the ladder still climbs ground < sidebar = pane < card',
-    ground < sidebar_ && sidebar_ === pane && pane < card,
-    lifted.map((r) => `${r.what} ${r.light}`).join(' ; '),
+    ground.light < sidebar_ && sidebar_ === pane && pane < card,
+    `ground ${ground.light} ; ${widened.map((r) => `${r.what} ${r.light}`).join(' ; ')}`,
   );
 }
 
 // ------------------------------------------- THE SEPARATION, AS PAINT
 //
-// THE HALF THAT MADE THE OPERATOR ASK TWICE. The first lift added a constant
-// to every grey, and a constant in L* preserves every pairwise L* difference
-// exactly -- so it could raise the floor and could not, by construction, put
-// any daylight between one surface and the next. Before this pass, three of
-// the pairs that actually touch on screen were under the 2.3 L* just-noticeable
-// difference, and the loudest of them was a hover fill: a pointer that did not
-// light the row it was on.
+// THE HALF THAT MADE THE OPERATOR ASK THREE TIMES. A uniform shift in L*
+// preserves every pairwise L* difference exactly -- so it could raise the
+// floor and could not, by construction, put any daylight between one
+// surface and the next. Both earlier passes were exactly this kind of
+// shift for at least part of their move, which is why the flatness came
+// through untouched twice. Before THIS pass, the widest of these four gaps
+// (the card off the pane, 3.30 L*) was still only 43% over the JND floor --
+// comfortable for one pair, not for eight surfaces sharing one ramp.
 //
 // MEASURED ON PAINTED NODES, NOT ON TOKENS, for the reason the whole file
-// exists -- and the hover case in particular cannot be read from a stylesheet
-// at all, because `hover:bg-raised` only resolves once a real pointer is over a
-// real element. `[data-view]` is the pane's own tab bar, which is where
-// `styles.css` says `raised` belongs ("this bar sits on `bg-pane`, where
-// `raised` is already the rung above the ground"), and it is an unselected tab
-// that is hovered, because the selected one wears `line-strong` instead.
+// exists -- and the hover case in particular cannot be read from a
+// stylesheet at all, because `hover:bg-raised` only resolves once a real
+// pointer is over a real element. `[data-view]` is the pane's own tab bar,
+// and it is an unselected tab that is hovered, because the selected one
+// wears `line-strong` instead.
 //
-// `was` IS THE POINT, as it is above: asserting only "clears a JND today" would
-// pass on a palette that was already fine. Each row also has to be WIDER than
-// the distance recorded from the palette this pass replaced.
+// `was` IS THE POINT, as it is above: asserting only "clears a JND today"
+// would pass on a palette that was already fine. Each row also has to be
+// WIDER than the distance recorded from the SECOND pass, which is the
+// palette this pass actually replaced.
 //
-// AND THE DIRECTION IS ASSERTED, NOT JUST THE DISTANCE, which is the mistake
-// the first version of this block made. `Math.abs` treats a fill that sank
+// AND THE DIRECTION IS ASSERTED, NOT JUST THE DISTANCE, the mistake the
+// first version of this block made. `Math.abs` treats a fill that sank
 // BELOW its own ground as a separation like any other -- so reverting
-// `--vam-raised` to the value this pass replaced would have left the hover
-// 3.39 L* from the pane, on the wrong side of it, and passed. That is the
-// exact defect `--vam-card` was created for ("a hole punched in the surface"),
-// measured here one level down. `a` is always the node that must read as
-// RAISED off `b`, and falsifying the block is what found this.
+// `--vam-raised` far enough would pass this check on the wrong side of the
+// pane. That is the exact defect `--vam-card` was created for ("a hole
+// punched in the surface"), measured here one level down. `a` is always
+// the node that must read as RAISED off `b`.
 const SEPARATION = [
   {
     what: 'the sidebar against the page behind it',
     a: '[data-sidebar-pane]',
     b: 'body',
-    was: 4.88,
+    was: 5.37,
   },
-  { what: 'the detail pane against that page', a: '[data-action-pane]', b: 'body', was: 4.88 },
+  { what: 'the detail pane against that page', a: '[data-action-pane]', b: 'body', was: 5.37 },
   {
     what: 'a card against the pane it sits on',
     a: '[data-question]',
     b: '[data-action-pane]',
-    was: 2.95,
+    was: 3.3,
   },
   {
     what: 'a HOVERED tab against the pane it sits on',
     a: '[data-view][aria-pressed="false"]',
     b: '[data-action-pane]',
-    was: 1.48,
+    was: 2.36,
     hover: true,
   },
 ];
@@ -1113,15 +1145,15 @@ if (separations.every((s) => s.bothOpaque)) {
     sunk.length === 0,
     sunk.map((s) => `${s.what}: ${s.a} under ${s.b}`).join(' ; '),
   );
-  const invisible = separations.filter((s) => s.now < LIFT_BAND.floor);
+  const invisible = separations.filter((s) => s.now < 2.3);
   check(
-    `each one is at least ${LIFT_BAND.floor} L* apart — a step a person can see`,
+    'each one is at least 2.3 L* apart — a step a person can see',
     invisible.length === 0,
     invisible.map((s) => `${s.what}: ${s.now} L*`).join(' ; '),
   );
   const narrowed = separations.filter((s) => s.now <= s.was);
   check(
-    'and every one of them is wider than it was before this lift',
+    'and every one of them is wider than it was before this pass',
     narrowed.length === 0,
     narrowed.map((s) => `${s.what}: ${s.was} -> ${s.now} L*`).join(' ; '),
   );
@@ -1129,20 +1161,20 @@ if (separations.every((s) => s.bothOpaque)) {
 
 // THE OTHER THEME DID NOT MOVE, and this is the half a dark-only measurement
 // cannot see. The operator asked about dark; light is pinned as paint here and
-// as tokens in `dark-lift.test.ts`.
+// as tokens in `dark-ladder.test.ts`.
 await page.evaluate(() => document.documentElement.classList.add('light'));
 await page.waitForTimeout(200);
 const lightNow = await page.evaluate(
-  (ladder) =>
-    ladder.map(({ selector }) => {
+  (selectors) =>
+    selectors.map((selector) => {
       const el = document.querySelector(selector);
       return el === null ? null : getComputedStyle(el).backgroundColor;
     }),
-  LIFTED_LADDER,
+  ALL_FOUR_SELECTORS,
 );
 console.log(`  light theme still paints: ${JSON.stringify(lightNow)}`);
 check(
-  'the light theme paints exactly the fills it painted before the dark lift',
+  'the light theme paints exactly the fills it painted before this pass',
   lightNow.every((fill, i) => fill === LIGHT_UNMOVED[i]),
   `${JSON.stringify(lightNow)} vs ${JSON.stringify(LIGHT_UNMOVED)}`,
 );
@@ -1338,7 +1370,7 @@ if (templateIds.length >= 3) {
   // a release of work and nothing would say so.
   check(
     `and "${picked}" keeps the card a visible step above the pane`,
-    painted.cardOverPane !== null && painted.cardOverPane >= LIFT_BAND.floor,
+    painted.cardOverPane !== null && painted.cardOverPane >= 2.3,
     `card is ${painted.cardOverPane} L* over the pane`,
   );
   check(
