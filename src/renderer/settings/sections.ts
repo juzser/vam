@@ -15,7 +15,7 @@
  * people from. `PaneVisibility` went with them (`prefs/panes.ts`).
  */
 
-import { Bot, Keyboard, type LucideIcon, Palette, Smartphone } from 'lucide-react';
+import { Bot, Keyboard, type LucideIcon, Palette, RefreshCw, Smartphone } from 'lucide-react';
 import {
   type BindingGroup,
   type BindingRow,
@@ -24,7 +24,7 @@ import {
   MODE_TITLES,
 } from '../keyboard/keysheet.js';
 
-export type SectionId = 'appearance' | 'sessions' | 'remote' | 'keyboard';
+export type SectionId = 'appearance' | 'sessions' | 'remote' | 'keyboard' | 'update';
 
 /**
  * The order is hard-coded and never sorted: a nav that reorders under the
@@ -47,6 +47,11 @@ export const SECTIONS: readonly {
   // stays before Keyboard for the reason above.
   { id: 'remote', label: 'Remote', Icon: Smartphone },
   { id: 'keyboard', label: 'Keyboard', Icon: Keyboard },
+  // LAST, and it is the one section whose position is an argument rather than
+  // a shrug: it is opened rarely, on purpose, to read a version or ask a
+  // question -- and the note above about not ending on a reference is about
+  // the two rows a reader SKIMS past, not about a destination they came for.
+  { id: 'update', label: 'Update', Icon: RefreshCw },
 ];
 
 /**

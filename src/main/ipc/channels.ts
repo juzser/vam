@@ -87,6 +87,20 @@ export const CHANNELS = {
    */
   updateCheck: 'vam:update:check',
   /**
+   * The same question, asked AGAIN, because a person pressed a button.
+   *
+   * `updateCheck` answers from the one check made at launch and never makes
+   * another -- which is right for a notice that reads it on mount and wrong
+   * for the Settings row the operator asked for, where a cached reply from
+   * whenever the app was started is a button that lies about having checked.
+   * This one really goes out, and its answer REPLACES the stored one, so that
+   * `updateOpen` can act on what the operator is looking at.
+   *
+   * The rate limit is a hand: GitHub allows 60 unauthenticated requests an
+   * hour per IP, and `rate-limited` is already a quiet outcome of its own.
+   */
+  updateRecheck: 'vam:update:recheck',
+  /**
    * "Take me to the release." Answers a bare boolean -- did the operator's
    * browser open -- and takes NO argument: the URL opened is the one main's
    * own launch check found, never one the renderer supplies. That is what

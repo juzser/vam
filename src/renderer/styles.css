@@ -1439,9 +1439,29 @@ body {
  * the sweep in `e2e/settings-chrome-shots.mjs`, which is also why the rule is
  * structural now. A panel added next week gets it without being told.
  */
-[data-settings-rows] p::first-letter {
+[data-settings-rows] p:not([data-verbatim])::first-letter {
   text-transform: uppercase;
 }
+
+/*
+ * `data-verbatim`: THE CASE IN THIS STRING IS ITS OWN.
+ *
+ * The structural rule above is right about sentences and wrong about one
+ * thing: the product is called `vam`, lower case, everywhere it appears -- the
+ * window title, the README, the status bar. The Update section is the first
+ * copy on this surface to START with the name, and the rule rendered it `Vam
+ * 0.1.0` and `Vam checks for updates…`. Found in a screenshot, which is the
+ * only place it was ever going to be found: every case assertion in
+ * `e2e/settings-chrome-shots.mjs` was green, because the transform WAS applied
+ * -- correctly, to the wrong string.
+ *
+ * So the exception is explicit and narrow. Not "this paragraph is not prose"
+ * -- the browser note is prose -- but "somebody chose these letters", which is
+ * what a proper noun and a version number have in common. The guard measures
+ * the PAINTED first letter of these, not the rule, for the reason this repo
+ * has learned twice: a selector that matches nothing reads exactly like a
+ * selector that works.
+ */
 
 .vam-hit-24 {
   position: relative;

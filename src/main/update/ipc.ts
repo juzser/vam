@@ -45,10 +45,27 @@ export function registerUpdateIpc(
   // `checkForUpdate` turns every ordinary failure into a value, so a rejection
   // here is the case neither it nor this module anticipated. It is still not
   // an error the operator must act on, and the surface stays silent for it.
-  const status: Promise<UpdateStatus> = check().catch(
-    (): UpdateStatus => ({ kind: 'unknown', reason: 'network' }),
-  );
+  const answer = (): Promise<UpdateStatus> =>
+    check().catch((): UpdateStatus => ({ kind: 'unknown', reason: 'network' }));
+
+  // THE STORED ANSWER, AND THE ONE PLACE IT IS WRITTEN. `let` rather than
+  // `const` because the operator can ask again (`updateRecheck` below), and
+  // everything that reads the status -- the notice, and `updateOpen`'s refusal
+  // -- has to be reading what they are looking at rather than what launch
+  // found. One holder, replaced; never two answers in flight to compare.
+  let status: Promise<UpdateStatus> = answer();
   ipcMain.handle(CHANNELS.updateCheck, () => status);
+
+  // ASKED AGAIN, BY A PERSON. Every argument this file makes against polling
+  // is about vam asking on its own initiative: no timer, no interval, launch
+  // as the rate limit. A button is not that. The bound here is the hand
+  // pressing it -- GitHub allows 60 unauthenticated requests an hour per IP,
+  // and `rate-limited` is already its own quiet outcome -- so there is no
+  // time-based throttle, for the same reason there is none above.
+  ipcMain.handle(CHANNELS.updateRecheck, () => {
+    status = answer();
+    return status;
+  });
 
   ipcMain.handle(CHANNELS.updateOpen, async (): Promise<boolean> => {
     const current = await status;

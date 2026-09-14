@@ -64,6 +64,7 @@ import { type PromptSubmitKey, SUBMIT_KEY_LABELS } from '../prefs/submit-key.js'
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
 import { Switch } from './Switch.js';
 import { SECTIONS, type SectionId, shortcutSections } from './sections.js';
+import { desktopUpdateApi, UpdatePanel } from './UpdatePanel.js';
 
 export type SettingsOverlayProps = {
   readonly prefs: Prefs;
@@ -884,6 +885,17 @@ export function SettingsOverlay({
                   </section>
                 ))}
               </div>
+            </Panel>
+
+            {/* THE VERSION, AND A WAY TO ASK. The check itself is not new --
+                one request at launch, and a popover that draws only when
+                there is something to do about it. What was missing is a place
+                to ASK, where "you are current", "nothing has been published",
+                "GitHub is rate-limiting you" and "it never got out" can be
+                four different sentences instead of one silence.
+                `UpdatePanel.tsx` carries the argument. */}
+            <Panel id="update" active={section === 'update'} hint={t('settings.update.hint')}>
+              <UpdatePanel api={desktopUpdateApi()} />
             </Panel>
           </div>
         </div>
