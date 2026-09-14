@@ -2135,11 +2135,15 @@ function QuestionCard({
   const [foldedStep, setFoldedStep] = useState<string | null>(null);
   const [landing, setLanding] = useState<number | null>(null);
   const stepTabRef = useRef<HTMLButtonElement>(null);
-  const walk = (by: number) => {
+  /** Whether it moved. The caller needs the answer: a step that clamped is a
+   *  keystroke the card did not use, and `h` means something else when it is
+   *  not walking (see `onKeys`). */
+  const walk = (by: number): boolean => {
     const next = Math.min(Math.max(showing + by, 0), questions.length - 1);
-    if (next === showing) return;
+    if (next === showing) return false;
     setShowing(next);
     setLanding(next);
+    return true;
   };
 
   /**
@@ -2297,16 +2301,41 @@ function QuestionCard({
      * wrong thing" failure the mode naming exists to end. It is still stopped
      * from reaching the canvas; a set of questions simply gives it the meaning
      * the vertical pair always had — down the options, across the questions.
-     * `H` (capital, a different key) is still the way back to Select, and
-     * Escape still leaves.
+     * THE WAYS BACK TO SELECT, named correctly: Escape (which peels the
+     * keyboard itself -- `case 'cancel'` in `Canvas.tsx`), `Cmd/Ctrl+Shift+H`,
+     * and `h` itself once there is no step left to walk back to. This comment
+     * used to name a bare `H`; that binding is gone -- the operator moved it
+     * to `Mod-Shift-h` because macOS claims `Cmd+H` for Hide -- and a bare `H`
+     * now reaches no table at all.
      *
      * BEFORE the option-cursor check below, because a step whose question is
      * already answered draws no options at all: gating the step walk on a
      * focused option would strand the keyboard on that step.
      */
     if (action.kind === 'walkStep') {
-      event.preventDefault();
-      walk(action.delta);
+      const walked = walk(action.delta);
+      /**
+       * A CLAMPED `h` IS NOT THIS CARD'S KEY -- and that one line is the
+       * difference between the sheet telling the truth and not.
+       *
+       * `h` carries a second meaning the card does not own: everywhere else in
+       * Insert it hands the keyboard back to Select, which is what the sheet
+       * promises ("previous step of a question with several, else back to
+       * Select"). Claiming the key unconditionally made the `else` unreachable
+       * -- `preventDefault` fired whether or not the walk moved, the canvas
+       * listener stood down at `event.defaultPrevented`, and a clamp at step 0
+       * ate the keystroke in silence. A single question has only step 0, so
+       * that was every ordinary question vam draws.
+       *
+       * `l` is NOT symmetric here, and the asymmetry is the point rather than
+       * an oversight: `l` has no second meaning to fall through to, so letting
+       * it pass would buy one refusal sentence on the status bar for an
+       * ordinary press inside a widget the operator is reading. `Canvas.
+       * cursor-mode.test.tsx` pins that silence deliberately ("a refusal on an
+       * ordinary walk would be exactly the noise that teaches an operator to
+       * stop reading the bar"), and nothing here disturbs it.
+       */
+      if (walked || action.delta > 0) event.preventDefault();
       return;
     }
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
