@@ -2799,6 +2799,7 @@ const TurnBlock = memo(function TurnBlock({
   readonly onAnswerMenu: (id: string, at: { readonly x: number; readonly y: number }) => void;
 }) {
   const failed = decision.errorCount ?? 0;
+  const ageNote = promptAgeNote(decision);
   /**
    * DOES THIS TURN SPEND A ROW ON ITS OWN WORKING?
    *
@@ -2921,6 +2922,16 @@ const TurnBlock = memo(function TurnBlock({
       >
         {/* The region's name, announced and not drawn. */}
         <span className="sr-only">in</span>
+        {/* HOW OLD THE PIN IS -- see `promptAgeNote`. Above the bubble rather
+            than inside it: the bubble is the operator's own words and nothing
+            vam writes belongs in there. `text-ink-dim` and `text-meta`, the
+            same dim the branch and the age already use, because a long turn is
+            ORDINARY and an error colour would be a claim of its own. */}
+        {ageNote !== null && (
+          <span data-prompt-age className="flex-none font-mono text-ink-dim text-meta">
+            {ageNote}
+          </span>
+        )}
         {/* THE BUBBLE (operator: "the IN prompt should have a different colour
             so it stands out, and sit in a bubble"). A tinted, rounded ground
             INSIDE the one continuous column, not the bordered band PR 266
@@ -6603,6 +6614,68 @@ export function answerMenuItems(
       onPick: how.onCopy,
     },
   ];
+}
+
+/**
+ * How much older a turn's prompt is than its newest step, as a sentence -- or
+ * `null` when there is nothing honest to say.
+ *
+ * ── WHY THE LINE EXISTS ───────────────────────────────────────────────────
+ * The In bubble PINS the prompt to the top of the column while the activity
+ * line under it stays live. On a long turn those two are hours apart, and
+ * nothing said so, so an hours-old prompt read as the current question. Two
+ * different things looking the same, which is this pane's oldest defect
+ * (`sources/pull-requests.ts`: "'No PRs' and 'vam could not ask' must never
+ * look the same").
+ *
+ * ── WHAT IT CLAIMS, AND THE THREE THINGS IT MUST NOT ──────────────────────
+ * It claims exactly this: the prompt was recorded at one time, the newest step
+ * under it at another, and here is the distance. Both halves are timestamps
+ * vam READ off the transcript.
+ *
+ * It does NOT say the session is stalled -- the activity line beside it says
+ * otherwise and would contradict it. It does NOT say the operator has been
+ * quiet: messages sent mid-turn reach the agent's context and are never
+ * written to the transcript, so vam draws what WAS written and cannot speak
+ * for what was not. And it does NOT say anything is wrong, because nothing is:
+ * measured over the corpus, the median turn takes 9.3 minutes, p75 28, p90 77.
+ *
+ * ── A GAP, NOT AN AGE ─────────────────────────────────────────────────────
+ * Between the two RECORDED times, never against `now`. A "3h ago" would need a
+ * third clock, would drift against a transcript that has stopped being
+ * written, and would change while the operator looked at it. This does not
+ * move once the turn's newest step has landed.
+ *
+ * ── THE THRESHOLD IS MEASURED ─────────────────────────────────────────────
+ * 30 minutes sits just past p75 (28), so the line stays away from three turns
+ * in four and speaks for the quarter long enough for the pin to mislead. A
+ * line on every turn would be noise, and noise is how an operator learns to
+ * stop reading a pane.
+ */
+export const PROMPT_AGE_FLOOR_MS = 30 * 60 * 1000;
+
+export function promptAgeNote(turn: Decision): string | null {
+  const asked = turn.promptedAt;
+  const latest = turn.latestAt;
+  // ABSENT IS ITS OWN ANSWER, not zero. `last-prompt` carries no timestamp at
+  // all (0 of 25,259 measured), so a turn whose prompt line is above the top
+  // of the read window has no recorded time -- and most sources carry neither
+  // field. Saying nothing is the honest output; "0m older" would be a claim.
+  if (typeof asked !== 'string' || typeof latest !== 'string') return null;
+  const from = Date.parse(asked);
+  const to = Date.parse(latest);
+  if (Number.isNaN(from) || Number.isNaN(to)) return null;
+  const gap = to - from;
+  if (gap <= PROMPT_AGE_FLOOR_MS) return null;
+  return `this prompt is ${gapLabel(gap)} older than the newest step below it`;
+}
+
+/** Coarse on purpose: the gap is a scale, not a duration to be counted. */
+function gapLabel(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
 }
 
 export function promptMenuItems(

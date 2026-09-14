@@ -537,6 +537,20 @@ export function summarizeTranscript(
      * two, the second captioned with the precis of the first.
      */
     named: string | null;
+    /**
+     * WHEN THE OPERATOR ASKED, and when the turn last did anything -- the two
+     * facts the In bubble needs to stop an hours-old prompt reading as the
+     * current one.
+     *
+     * BOTH ARE READ, NEITHER IS INFERRED. Measured across the corpus: 100% of
+     * 1,236 operator prompt lines carry a `timestamp` and 100% of 124,404
+     * `assistant` lines do. `type:'last-prompt'` carries NONE -- 0 of 25,259
+     * -- so `promptedAt` is null for a turn a marker opened alone, and the
+     * pane says nothing rather than reporting the time of the first thing
+     * that happened after the question as the time of the question.
+     */
+    promptedAt: string | null;
+    latestAt: string | null;
     output: string | null;
     errors: number;
     start: number | null;
@@ -577,6 +591,9 @@ export function summarizeTranscript(
             input: prompt,
             full: null,
             named: prompt,
+            // A marker carries no clock -- see `promptedAt` above.
+            promptedAt: null,
+            latestAt: null,
             output: null,
             errors: 0,
             start,
@@ -590,6 +607,13 @@ export function summarizeTranscript(
         const open = turns.at(-1);
         if (open !== undefined) turns[turns.length - 1] = { ...open, output: text };
       }
+      // WHEN THE TURN LAST DID ANYTHING. Every assistant line counts, an
+      // answer as much as a tool call: both are the session doing something,
+      // and a turn that finished by speaking has that moment as its newest.
+      // Set in place, like `calls` below, so the spread above cannot drop it.
+      const stamp = str(line['timestamp']);
+      const ticking = turns.at(-1);
+      if (stamp !== null && ticking !== undefined) ticking.latestAt = stamp;
       activity = toolUse(line) ?? activity;
       // THE TURN'S WORKING, on the same attribution rule the count below
       // keeps: a call belongs to the turn that was open when it was made, and
@@ -619,6 +643,8 @@ export function summarizeTranscript(
           input: null,
           full: prompt,
           named: null,
+          promptedAt: str(line['timestamp']),
+          latestAt: null,
           output: null,
           errors: 0,
           start: null,
@@ -723,6 +749,9 @@ export function summarizeTranscript(
       // so zero here is a reading and not a shrug. Absent is reserved for a
       // source that cannot look (`Decision.errorCount` in `model.ts`).
       errorCount: turn.errors,
+      // The two clocks, forwarded as read -- see `promptedAt` on the turn.
+      promptedAt: turn.promptedAt,
+      latestAt: turn.latestAt,
       // The turn's working, on the same rule: always a list, empty included.
       // Ids are the TURN's plus the call's position, so they are unique within
       // the turn by construction whatever the provider wrote. Nothing caps the
