@@ -9,6 +9,10 @@
  *    your prompts and Claude's responses. Folded activity stays one click
  *    away, and a live indicator names the tool currently running."
  *
+ * That quote is not from memory: the operator's own screenshot of the setting
+ * is checked in at `docs/ui/focus-mode.png`, so the sentence this whole
+ * feature is derived from can be read rather than trusted.
+ *
  * WHAT VAM FOLDS IS THE TURN'S PROGRESS LINE AND THE CALLS UNDER IT --
  * `data-progress-line` and `data-progress-steps`, both inside the turn's one
  * `progress` section, which is what lets a fold fold ONE thing.

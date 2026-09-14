@@ -184,10 +184,26 @@ const FOCUS_RING =
  * busy button would return it to the very state this comment exists about.
  * `e2e/settings-chrome-shots.mjs` measures all of it on the painted node.
  */
-const ACTION_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-line-tip bg-raised px-4 text-control text-ink hover:bg-segment-on disabled:cursor-default disabled:opacity-60 disabled:hover:bg-raised ${FOCUS_RING}`;
+/*
+ * `h-[28px]` PLUS `vam-tap`, NOT `min-h-[44px]`, and the difference is which
+ * device is being sized for.
+ *
+ * These buttons carried an unconditional 44 -- the phone's touch floor -- so
+ * they were 44px tall on the DESKTOP too, beside a dialog where every other
+ * control is 28: the theme choices, the palette chips, the send-key pair, the
+ * focus-view switch and the update button. Measured, not guessed: the button
+ * census in `e2e/settings-chrome-shots.mjs` reports every rank on this
+ * surface, and this was the only one on its own.
+ *
+ * `vam-tap` is how the rest of the app says "this is a touch target": the rule
+ * is `.vam-phone .vam-tap { min-height: 44px }` (`styles.css`), so the floor
+ * applies where a finger is and nowhere else. Same 44 on the phone, same 28 as
+ * its neighbours here.
+ */
+const ACTION_BUTTON = `vam-tap flex h-[28px] w-fit cursor-pointer items-center gap-1.5 rounded border border-line-tip bg-raised px-4 text-control text-ink hover:bg-segment-on disabled:cursor-default disabled:opacity-60 disabled:hover:bg-raised ${FOCUS_RING}`;
 
 /** The same shape, for an act that revokes access rather than merely toggling a setting. */
-const DANGER_BUTTON = `flex min-h-[44px] w-fit cursor-pointer items-center gap-1.5 rounded border border-danger px-4 text-control text-danger hover:bg-danger hover:text-ground ${FOCUS_RING}`;
+const DANGER_BUTTON = `vam-tap flex h-[28px] w-fit cursor-pointer items-center gap-1.5 rounded border border-danger px-4 text-control text-danger hover:bg-danger hover:text-ground ${FOCUS_RING}`;
 
 /** The alert-box recipe `ErrorBoundary.tsx` already uses for a refusal in the operator's face. */
 const ALERT_BOX = 'rounded-md border border-danger bg-panel p-3 text-control text-danger';
@@ -195,6 +211,46 @@ const ALERT_BOX = 'rounded-md border border-danger bg-panel p-3 text-control tex
 const HINT = 'max-w-[52ch] text-control text-ink-dim';
 const SECTION = 'border-line-loud border-t pt-4';
 const HEADING = 'font-medium text-body text-ink';
+
+/**
+ * One step of the connect-a-phone list.
+ *
+ * `done` is OPTIONAL and absent means "vam cannot tell", which is a different
+ * thing from false -- the same distinction `Decision.errorCount` draws between
+ * a source that cannot look and a source that looked and found none. An absent
+ * mark draws the step's number; a false one draws an empty box, because "not
+ * yet" is a state worth seeing on a list you are working down.
+ */
+function Step({
+  id,
+  done,
+  children,
+}: {
+  readonly id: string;
+  readonly done?: boolean;
+  readonly children: React.ReactNode;
+}) {
+  return (
+    <li
+      data-pairing-step={id}
+      data-done={done === true ? 'true' : undefined}
+      className={`flex gap-2 ${HINT}`}
+    >
+      {/* `text-ink`, NOT `text-running`. The four session-state tokens mean a
+          session is running, waiting, done or failed, and a test in this
+          file's own suite refuses them as decoration anywhere else -- it
+          caught this line. The state is carried by the glyph and by the word
+          beside it, so the colour was never the channel. */}
+      <span aria-hidden="true" className={done === true ? 'text-ink' : 'text-ink-faint'}>
+        {done === undefined ? '·' : done ? '✓' : '○'}
+      </span>
+      {/* Announced, because the glyph is decorative and "done" is the whole
+          point of drawing one. */}
+      {done !== undefined && <span className="sr-only">{done ? 'done' : 'not yet'}</span>}
+      <span className="min-w-0 flex-1">{children}</span>
+    </li>
+  );
+}
 
 export function PairingPanel(props: PairingPanelProps) {
   const { view, nowMs, serve } = props;
@@ -215,6 +271,46 @@ export function PairingPanel(props: PairingPanelProps) {
           Everyone on your tailnet reaches this address — every laptop, phone, server and shared-in
           guest. Being on the tailnet does not authorise a device to drive your agents; pairing it
           here is what does.
+        </p>
+      </div>
+
+      {/* THE SEQUENCE, ON THE SCREEN WHERE IT HAPPENS. The README explains all
+          of this; what it cannot do is be in front of somebody standing there
+          with a phone in one hand. Five steps, in order, and the three vam can
+          SEE the state of say so.
+          
+          THE TICKS ARE READINGS. Two of the five happen on the other device --
+          a camera pointed at a QR, eight characters typed in -- and vam has no
+          way to know either. They are drawn plainly rather than guessed at,
+          and the note below says what a tick means, because a checklist that
+          invents its own ticks is worse than one with none. */}
+      <div className={SECTION}>
+        <h4 className={HEADING}>Connecting a phone</h4>
+        <ol data-testid="pairing-steps" className="mt-2 flex list-none flex-col gap-1.5">
+          <Step id="tailscale" done={!serve.cliMissing}>
+            Install Tailscale on this machine and on the phone, and sign both into the same tailnet.
+          </Step>
+          <Step id="serve" done={serve.enabled}>
+            Turn on phone access below. It runs <code>tailscale serve</code>, which puts this
+            machine's loopback server behind an <code>https://…ts.net</code> address.
+          </Step>
+          <Step id="open">
+            On the phone, scan the QR code beside that address with the camera — or open the address
+            by hand.
+          </Step>
+          <Step id="code">
+            Press “Regenerate” here for a pairing code, and type those characters into the phone.
+            The code is short-lived and is not in the QR: the address is not a secret, and pairing
+            is what authorises a device.
+          </Step>
+          <Step id="allow" done={props.devices.length > 0}>
+            Allow the device when it appears here. You can revoke it later, one at a time or all at
+            once.
+          </Step>
+        </ol>
+        <p data-testid="pairing-steps-note" className={`mt-2 ${HINT}`}>
+          A tick is what vam can see from here. The two steps on the phone have none, because this
+          machine has no way to know a camera was pointed at anything.
         </p>
       </div>
 
