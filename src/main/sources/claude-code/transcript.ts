@@ -126,6 +126,87 @@ function parseLines(tail: string, windowStart: number | null): Located[] {
   return out;
 }
 
+/**
+ * The prompt sources the CLI attributes to a PERSON.
+ *
+ * Measured over the 68,697 `type:'user'` lines in the 82 real transcripts on
+ * this machine: every line carrying one of these four is prose the operator
+ * (or an SDK caller acting as one) put in, and every line carrying any OTHER
+ * value -- `system`, 1,287 of them -- is a task notification the CLI posts to
+ * itself.
+ */
+const OPERATOR_PROMPTS: ReadonlySet<string> = new Set([
+  'typed',
+  'suggestion_accepted',
+  'queued',
+  'sdk',
+]);
+
+/**
+ * The CLI's own envelope, on the lines that predate `promptSource`.
+ *
+ * 276 `user` lines in the corpus carry no `promptSource` and are not the
+ * operator: `<bash-input>` and `<bash-stdout>` (235), `<command-name>` and
+ * `<command-message>` (29), `<local-command-stderr>`/`<local-command-stdout>`
+ * (11), `<bash-stderr>` (1). ALL 276 lack the field, and ALL 1,224 lines that
+ * carry a real `promptSource` are prose -- so this test is applied ONLY where
+ * the field is missing, and an operator who opens a prompt with `<div>` is
+ * believed on every CLI that writes the field.
+ */
+const CLI_ENVELOPE = /^\s*<[a-z0-9-]{1,40}>/;
+
+/**
+ * The interruption notice, which is not a prompt either.
+ *
+ * `[Request interrupted by user]` and `[Request interrupted by user for tool
+ * use]` -- what the CLI writes into the conversation when the operator presses
+ * Escape. 24 in the corpus, none carrying a `promptSource`, and the newest was
+ * written by CLI 2.1.267, so this is not a legacy shape that will age out.
+ * Read as a prompt it opened a SECOND turn on the text the marker was already
+ * on, and the pane drew the newer, empty one instead of the answered one.
+ *
+ * Anchored at both ends: the whole line is one bracketed phrase. A prompt that
+ * merely BEGINS with a bracket -- `[1] does this still fail?` -- is the
+ * operator's, and is kept.
+ */
+const INTERRUPTION = /^\s*\[[^\]]{1,80}\]\s*$/;
+
+/**
+ * The operator's own prompt text, or `null` for every other `user` line.
+ *
+ * THIS IS THE TURN BOUNDARY, and `type:'last-prompt'` is not -- see the turn
+ * loop below. Four exclusions, each one measured rather than guessed:
+ *
+ *   - a `tool_result` part: the session's own working, 64,293 lines;
+ *   - `isCompactSummary`: the "this session is being continued" text that
+ *     auto-compaction injects MID-TURN, 1,501 lines. One long session wrote
+ *     four of them while the operator typed nothing;
+ *   - `isMeta`: 89 lines the CLI addresses to itself;
+ *   - a `promptSource` outside `OPERATOR_PROMPTS`, or the CLI envelope above
+ *     where there is no `promptSource` to read.
+ *
+ * What survives is 1,253 lines across the corpus, against 1,529 for the naive
+ * "any `user` line with text" -- and the 276 it drops are exactly the ones
+ * that would have cut a turn in half.
+ */
+function operatorPrompt(line: Line): string | null {
+  if (line['isCompactSummary'] === true || line['isMeta'] === true) return null;
+  const message = line['message'];
+  if (typeof message !== 'object' || message === null) return null;
+  const content = (message as Line)['content'];
+  if (Array.isArray(content)) {
+    for (const part of content) {
+      if (typeof part !== 'object' || part === null) continue;
+      if ((part as Line)['type'] === 'tool_result') return null;
+    }
+  }
+  const text = messageText(line);
+  if (text === null) return null;
+  const source = line['promptSource'];
+  if (typeof source === 'string') return OPERATOR_PROMPTS.has(source) ? text : null;
+  return CLI_ENVELOPE.test(text) || INTERRUPTION.test(text) ? null : text;
+}
+
 /** The `{type:'text'}` parts of a message, joined; `null` if it has none. */
 function messageText(line: Line): string | null {
   const message = line['message'];
@@ -369,12 +450,35 @@ export function summarizeTranscript(
   let agentName: string | null = null;
   let activity: string | null = null;
 
-  // Turns, oldest first. A prompt opens one; every later assistant text
-  // overwrites that turn's answer, so what survives is the LAST thing the
-  // session said before the operator spoke again -- its final response for
-  // that turn, which is what `Decision.output` is defined to be. vam cannot
-  // tell an interim narration from a final answer inside a turn still in
-  // flight; it shows the newest text and lets `status` carry "still working".
+  // Turns, oldest first. THE OPERATOR'S OWN `user` LINE OPENS ONE; every later
+  // assistant text overwrites that turn's answer, so what survives is the LAST
+  // thing the session said before the operator spoke again -- its final
+  // response for that turn, which is what `Decision.output` is defined to be.
+  // vam cannot tell an interim narration from a final answer inside a turn
+  // still in flight; it shows the newest text and lets `status` carry "still
+  // working".
+  //
+  // ── WHY `last-prompt` IS NOT THE BOUNDARY, though it used to be the only
+  // thing that opened a turn here. It is a STATE SNAPSHOT -- "the prompt this
+  // session is currently on" -- and the CLI flushes it on its own schedule,
+  // which is sometimes BEFORE the answer and sometimes after. Measured over
+  // the 546 real transcripts written since 2026-09-01: the newest turn showed
+  // no answer at all in 16 of the 41 sessions that had a turn, and one of them
+  // was a 12-line file reading `user` / `assistant` / `last-prompt` in that
+  // order. Worse than the missing answer was where it went instead -- an
+  // answer written before the marker landed on the turn BEFORE it, so every
+  // turn in the pane showed the next prompt's reply.
+  //
+  // So a turn is opened UNNAMED by the operator's line and NAMED by the first
+  // marker that follows it. That keeps ids exactly where they were -- minted
+  // from the marker's byte offset, the scheme argued for below -- while the
+  // attribution of answers, calls and errors follows the line that actually
+  // marks the boundary. A turn the marker never names is dropped rather than
+  // shown half-identified, which is what `input: null` means below.
+  //
+  // `last-prompt` keeps one real job: naming a turn whose `user` line is above
+  // the top of the window. It re-emits the prompt in full, so a window that
+  // opens mid-turn still learns what the turn was about.
   //
   // `calls` is the turn's working, oldest first. It is a MUTABLE array held by
   // reference: the record itself is replaced by a spread every time the answer
@@ -382,13 +486,15 @@ export function summarizeTranscript(
   // that made 2,144 calls -- the largest in the measured corpus. The spread
   // copies the reference, so a push reaches whichever record is current.
   // `failed` is likewise set in place when the result arrives.
-  const turns: {
-    input: string;
+  type OpenTurn = {
+    /** `null` until a marker names it -- see above. */
+    input: string | null;
     output: string | null;
     errors: number;
     start: number | null;
     calls: ReadCall[];
-  }[] = [];
+  };
+  const turns: OpenTurn[] = [];
 
   for (const { line, start } of located) {
     branch = str(line['gitBranch']) ?? branch;
@@ -398,11 +504,24 @@ export function summarizeTranscript(
     else if (type === 'agent-name') agentName = str(line['agentName']) ?? agentName;
     else if (type === 'last-prompt') {
       const prompt = str(line['lastPrompt']);
-      // Re-emitted constantly, and an unchanged value is the same turn:
-      // measured across the whole corpus, 21,604 of 22,668 `last-prompt` lines
-      // repeat the turn that is already open.
-      if (prompt !== null && turns.at(-1)?.input !== prompt) {
-        turns.push({ input: prompt, output: null, errors: 0, start, calls: [] });
+      if (prompt !== null) {
+        const open = turns.at(-1);
+        if (open !== undefined && open.input === null) {
+          // THE TURN THE OPERATOR ALREADY OPENED, finally named -- and given
+          // the marker's own offset, so its id is the one every window size
+          // agrees on. When two prompts are waiting to be named the newest
+          // takes the name: across the corpus the following marker named the
+          // NEWEST pending prompt 24 times and an older one 0 times.
+          turns[turns.length - 1] = { ...open, input: prompt, start };
+        } else if (open?.input !== prompt) {
+          // No operator line in the window -- it is above the top -- so the
+          // marker opens the turn itself, as it always did.
+          //
+          // Re-emitted constantly, and an unchanged value is the same turn:
+          // measured across the whole corpus, 21,604 of 22,668 `last-prompt`
+          // lines repeat the turn that is already open.
+          turns.push({ input: prompt, output: null, errors: 0, start, calls: [] });
+        }
       }
     } else if (type === 'assistant') {
       const text = messageText(line);
@@ -427,6 +546,15 @@ export function summarizeTranscript(
         }
       }
     } else if (type === 'user') {
+      // THE BOUNDARY. Unnamed, because the text here is the prompt in full
+      // while `lastPrompt` is a 200-character precis of it -- and the id
+      // scheme argued for below is keyed on the marker's offset, so the marker
+      // must still be the line that fixes both. `operatorPrompt` is what keeps
+      // a compaction summary, a task notification or a `<bash-input>` echo
+      // from cutting a turn in half.
+      if (operatorPrompt(line) !== null) {
+        turns.push({ input: null, output: null, errors: 0, start: null, calls: [] });
+      }
       // A tool result belongs to the turn that was OPEN when it arrived: it
       // comes after the prompt that opened that turn and before the next one.
       // With no open turn -- the window began mid-turn, its prompt off the top
@@ -501,6 +629,12 @@ export function summarizeTranscript(
     return `${decisionIdPrefix}:${fp}:${n}`;
   };
   const decisions: readonly Decision[] = turns
+    // A turn no marker ever named. The commonest one is the live turn of a
+    // session whose marker has not flushed yet -- it was invisible before this
+    // change too, because nothing opened it at all -- and dropping it is the
+    // same honesty `turns read` already carries: vam does not print a turn it
+    // cannot name.
+    .filter((turn): turn is OpenTurn & { input: string } => turn.input !== null)
     .map((turn) => ({ ...turn, id: idOf(turn) }))
     .slice(-MAX_DECISIONS)
     .reverse()
