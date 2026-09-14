@@ -258,3 +258,104 @@ describe('a window that opens in the middle of a turn', () => {
     expect(outputs(text)).toEqual(['the answer']);
   });
 });
+
+/**
+ * THE PROMPT IN FULL, not the CLI's precis of it.
+ *
+ * Operator: "show full prompt In bubble."
+ *
+ * `lastPrompt` is a SUMMARY. Measured over the corpus, the CLI flattens every
+ * run of whitespace to one space and cuts at 200 characters plus an ellipsis
+ * -- so the In bubble was drawing `…` on every prompt longer than that, and
+ * drawing a paragraph that had lost its line breaks on every prompt with any.
+ * The operator's own `user` line carries the text verbatim, and the turn loop
+ * already reads that line: it is the boundary. What it did not do was KEEP the
+ * text.
+ *
+ * THE MARKER STILL NAMES THE TURN. Its byte offset is the turn's id, which is
+ * what makes a turn the same turn across window sizes, and none of that moves.
+ * What changes is only which of the two strings is shown.
+ *
+ * THE PAIRING IS CHECKED, NOT ASSUMED. `marksPrompt` asks whether the marker
+ * really is the precis of the line it is about to name -- normalise the
+ * whitespace, drop a trailing ellipsis, and the rest must be a PREFIX. Across
+ * the corpus that holds for 1,212 of 1,216 pairs; the four it rejects are
+ * cases where the marker had moved on to something the classifier filtered
+ * out (a `!` bash line, a background-agent notification), and there the
+ * marker's own text is the right answer and is what is used.
+ */
+describe('the turn shows the prompt the operator actually typed', () => {
+  const LONG = `${'x'.repeat(200)} and this tail is past the cut`;
+  /** What the CLI writes into `lastPrompt` for a prompt that long. */
+  const precis = (text: string): string => {
+    const flat = text.replace(/\s+/g, ' ').trim();
+    return flat.length > 200 ? `${flat.slice(0, 200)}…` : flat;
+  };
+
+  const inputs = (text: string): string[] =>
+    summarizeTranscript(text, 's').decisions.map((decision) => decision.input);
+
+  it('keeps the whole prompt where the marker keeps 200 characters', () => {
+    const text = jsonl(typed(LONG), reply('done'), marker(precis(LONG)));
+
+    expect(inputs(text)).toEqual([LONG]);
+    expect(inputs(text)[0]).not.toContain('…');
+  });
+
+  it('keeps the line breaks the marker flattens', () => {
+    const multi = 'first line\n\nthird line';
+    const text = jsonl(typed(multi), reply('done'), marker(precis(multi)));
+
+    expect(inputs(text)).toEqual([multi]);
+  });
+
+  it('uses the marker when the marker is not about that line at all', () => {
+    // Measured, and real: the marker moves on to a `!` bash line or a
+    // background-agent notice, both of which `operatorPrompt` filters out, so
+    // the pending line is an OLDER prompt. Naming the turn with it would
+    // caption the turn with something the operator typed minutes ago.
+    const text = jsonl(typed('ok'), reply('done'), marker('! gh pr merge 14'));
+
+    expect(inputs(text)).toEqual(['! gh pr merge 14']);
+  });
+
+  it('still uses the marker when the window opened past the operator’s line', () => {
+    const text = jsonl(marker('a long turn'), reply('the answer'));
+
+    expect(inputs(text)).toEqual(['a long turn']);
+  });
+
+  /**
+   * THE RE-EMISSION STILL DEDUPES, and this is the regression the full-text
+   * change introduced before it was caught by measurement rather than by the
+   * suite. The marker repeats constantly -- 21,604 of 22,668 in the corpus --
+   * and the dedup compared it against the turn's `input`. Once `input` became
+   * the operator's FULL text, a 201-character marker stopped matching a
+   * 287-character input and every re-emission opened a turn of its own: one
+   * real session went from one turn to two, the second captioned with the
+   * precis of the first. So the dedup compares MARKER TO MARKER, which is
+   * what it always meant, and `input` is free to show something longer.
+   */
+  it('does not open a second turn each time the marker repeats', () => {
+    const text = jsonl(
+      typed(LONG),
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1' }] } },
+      marker(precis(LONG)),
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't2' }] } },
+      marker(precis(LONG)),
+      marker(precis(LONG)),
+    );
+
+    expect(inputs(text)).toEqual([LONG]);
+  });
+
+  it('does not mistake a shorter prompt for a precis of a longer one', () => {
+    // `ship` is a prefix of `ship it`, and if the pairing rule were "either is
+    // a prefix of the other" this would silently caption the turn with a
+    // DIFFERENT prompt. The marker is the precis, so only one direction is
+    // legal.
+    const text = jsonl(typed('ship'), reply('done'), marker('ship it'));
+
+    expect(inputs(text)).toEqual(['ship it']);
+  });
+});
