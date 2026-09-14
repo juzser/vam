@@ -360,188 +360,215 @@
  * Dark — artboard 1a, and the default, so a document that never gets a class
  * still renders the theme vam was designed in.
  *
- * ## THE LIFT, SECOND PASS: the floor rises AND the ladder stretches
+ * ## THE THIRD PASS: not a lift. A ladder.
  *
- * Operator, twice, in the same words: "make the dark UI a bit lighter". The
- * first pass turned A BIT into a number — +3 CIE lightness on every grey this
- * block owns, one visible step — and shipped it. The ask came back unchanged,
- * so before anything moved a second time the palette was measured rather than
- * nudged again, and it turned out to be saying two things at once:
+ * Operator, a third time: "make the dark UI a bit lighter, and you may re-pick
+ * the default colours." The first two passes both answered "too dark" — the
+ * first with +3 L* on every grey, the second by raising the reading surface
+ * (`--vam-pane`) to L* 15.64, level with GitHub dark-dimmed's canvas and above
+ * VS Code Dark Modern's editor. The complaint came back a third time anyway,
+ * which means it was never fully "too dark" — it was measured before this pass
+ * touched anything, and it was FLAT:
  *
- *   TOO DARK.  The reading surface, `--vam-pane`, sat at L* 10.77 — below VS
- *   Code Dark Modern's editor (#1f1f1f, L* 11.76) and well below GitHub
- *   dark-dimmed's canvas (#212830, L* 15.77). The app's deepest surface, the
- *   ground behind the columns, sat at 5.88, which is darker than the darkest
- *   chrome either of those ships.
+ *     ground #1c1c1c 10.27 · sunken #1e1e1e 11.26 (+1.00) · well #1f1f1f 11.76
+ *     (+0.49) · header #202020 12.25 (+0.49) · panel #242424 14.20 (+1.95) ·
+ *     sidebar/pane #272727 15.64 (+1.44 / +0.00, same by design) · raised
+ *     #2c2c2c 18.00 (+2.36) · card #2e2e2e 18.94 (+0.93)
  *
- *   TOO FLAT, and this is the half a repeat of the first fix could never have
- *   reached. Of the eight adjacent rungs in the elevation ladder, SEVEN were
- *   under the 2.3 L* just-noticeable difference: 0.49, 0.51, 1.02, 1.36, 1.46,
- *   1.48, 1.50. Narrowed to the pairs that really touch on screen, three were
- *   invisible — a hover fill or a tooltip on the pane (1.48), a recess inside
- *   a dialog (1.52), a selected option inset in one (2.02). A pointer that
- *   does not light the row under it is the loudest of those.
+ * SEVEN OF THE EIGHT GAPS SIT UNDER THE 2.3 L* JUST-NOTICEABLE DIFFERENCE —
+ * only `pane → raised` cleared it, at +2.36 — and the whole ground → card
+ * ramp spanned 8.67 L*. Both earlier passes moved every grey by the SAME
+ * amount, and a constant added in L* preserves every pairwise L* difference
+ * exactly (the first pass's own comment said so, as a virtue). That is a
+ * mathematical guarantee that a uniform lift cannot touch flatness at all —
+ * ground rose, the reading surface rose, and the eight rungs stayed exactly as
+ * mushed together as they always were. "A bit lighter" was being asked a third
+ * time because the first two answers, however large, could not have been the
+ * fix.
  *
- * A UNIFORM LIFT CANNOT FIX THE SECOND ONE, BY CONSTRUCTION, and the first
- * pass's own comment said so while treating it as a virtue: "a constant in L*
- * preserves every pairwise L* difference in the palette exactly." It does.
- * That is why the flatness came through untouched and why the operator was
- * looking at the same screen a second time.
+ * SO THIS PASS DOES NOT LIFT THE ANCHOR AGAIN. `--vam-ground` does not move —
+ * #1c1c1c, to the pixel, both passes' own fix to "too dark" left standing.
+ * What moves is the SPACING: every one of the seven gaps between the eight
+ * distinct dark surfaces (`sidebar` and `pane` still share one value, by
+ * design — see `--color-pane` below) is re-derived so it clears the JND with
+ * real margin, 2.33 to 2.75 L*, not the bare minimum. `test/renderer/
+ * dark-ladder.test.ts` asserts every one of those seven gaps directly, sorted
+ * by lightness rather than by "the pairs a previous pass happened to check" —
+ * the guard a flat ladder cannot pass, however a future edit tries to shrink
+ * it back down.
  *
- * So this pass moves the ANCHOR and the SPACING together. `--vam-pane` /
- * `--vam-sidebar` #1d1d1d → #272727 (L* 10.77 → 15.64, level with GitHub
- * dark-dimmed and above VS Code's editor); `--vam-ground` #131313 → #1c1c1c;
- * `--vam-card` #232323 → #2e2e2e. Every other rung is then derived rather than
- * shifted, against one of three rules, and each value below says which one it
- * took:
+ * THE ARITHMETIC FORCES THE REST OF THE STACK UP, and that is not a second
+ * brightening wearing a separation costume — it is what five rungs (`sunken`,
+ * `well`, `header`, `panel`, then `pane`) each needing their own JND from a
+ * PINNED ground actually costs: five gaps of at least 2.3 L* put a floor of
+ * 11.5 L* under `pane` alone. `pane`/`sidebar` land at #363636 (L* 22.62,
+ * +6.98 from the second pass); `card` at #424242 (L* 27.97, +9.03). The ramp
+ * now spans 17.71 L*, ground to card — inside the 16–18 region a ladder with
+ * eight genuinely distinct rungs needs, and confirmed by exhausting the
+ * quantised 8-bit greys for the tightest sequence a pinned ground allows: even
+ * the bare-minimum-gap sequence does not come in under 17.7.
  *
- *   A SURFACE is placed so that every surface it MEETS on screen sits at least
- *     one JND away from it. All twelve such pairs clear 2.3 L* now and all
- *     twelve are wider than they were; `dark-lift.test.ts` holds the list.
+ * EVERY OTHER RUNG IS THEN DERIVED, against one of three rules, and each value
+ * below says which one it took:
+ *
+ *   A SURFACE clears the JND from its neighbour in the SORTED ladder — not
+ *     only the pairs that happen to touch on screen, which is the narrower
+ *     claim the second pass made and the one a flat-but-untested rung could
+ *     hide behind. `dark-ladder.test.ts` holds the full ladder.
  *   ANYTHING READ AGAINST A SURFACE — the quiet inks, the lines, the tinted
- *     grounds, the bubble — keeps the READING it had on the pane. A lighter
- *     ground costs light-on-dark text contrast, and "lighter UI" was the ask,
- *     not "dimmer text": `ink-dim` reads 7.205:1 where it read 7.173, and
- *     `ink-faint` 5.050 where it read 5.079.
+ *     grounds, the bubble — keeps the READING it had on the pane, or improves
+ *     it. A lighter ground costs light-on-dark text contrast, and "lighter
+ *     not "dimmer text": `ink-dim` reads 7.223:1 where it read 7.205, and
+ *     `ink-faint` 5.572 where it read 5.050 — both IMPROVED, not merely held,
+ *     because the widened `pane` needed more than an exact reading-match could
+ *     give `--vam-card` (see below).
  *   A TOKEN THAT EXISTS TO CLEAR A FLOOR is derived from that floor instead,
  *     because its reading against the pane was never what it was for. Three
  *     do: `--vam-line-strong`, `--vam-line-tip` and `--vam-line`.
  *
- * LIGHTNESS ONLY, as before. a* and b* are carried across untouched, so the
+ * LIGHTNESS ONLY, as before, for every token that is a genuine relift of a
+ * value the theme already had. a* and b* are carried across untouched, so the
  * teal bubble is the same teal and the amber tint the same amber; 8-bit
- * rounding leaves at most 0.5 of chroma drift anywhere in the block.
+ * rounding leaves at most 0.7 of chroma drift anywhere in that set.
  *
  * NOT "+N on every channel", which is the obvious way to do this and is wrong
  * down here: equal steps in 8-bit sRGB are not equal steps to the eye at the
- * bottom of the ramp. +6 lifts `ground` by 1.94 L* and `pane` by 3.03, so the
- * deepest surfaces would move least and the ladder would compress exactly
- * where this theme has the least room.
+ * bottom of the ramp. A fixed hex step lifts the deepest surfaces LEAST and
+ * would compress the ladder exactly where this theme has the least room —
+ * which is the whole defect this pass exists to remove, so every rung below
+ * is chosen directly in L*, not stepped in sRGB and hoped about.
  *
  * WHAT DID NOT MOVE, each a decision rather than an omission:
- *   - the LIGHT block. The operator asked about dark; `dark-lift.test.ts`
+ *   - the LIGHT block. The operator asked about dark; `dark-ladder.test.ts`
  *     pins all 24 light values so "light did not move" is a measurement.
- *   - `--vam-ink`, the brightest text: it owes nothing to a floor (11.60:1 on
- *     the lifted card) and keeping its reading on the pane would have taken it
- *     to #fcfcfc. Near-white ink on a dark theme is glare, not lift. The three
- *     QUIET greys did move, because they are the ones with a floor to hold:
- *     `ink-faint` measured 4.735:1 on the old card and would read 4.091:1 on
- *     the lifted one, under WCAG 1.4.3. Carried with its grounds it reads
- *     4.591:1.
- *   - the HUES: status, syntax, diff, the section rules, and fifteen of the
- *     sixteen ANSI tones. They are measured AGAINST the surfaces rather than
- *     being surfaces, so each reading was re-derived against its lifted ground
- *     instead — every one is recorded below beside the value it belongs to.
- *     The sixteenth, `--vam-ansi-black`, is vam's own substitute for the black
- *     the agent actually named, and it moves; its comment says why.
+ *   - `--vam-ground` ITSELF, for the first time across three passes — see
+ *     above. Both previous fixes to "too dark" stand; this one is not a
+ *     fourth application of the same fix.
+ *   - `--vam-ink`, the brightest text: it owes nothing to a floor (8.32:1 on
+ *     the widened card) and keeping its reading on the pane would have taken
+ *     it past #f6f6f6. Near-white ink on a dark theme is glare, not lift.
  *
- * `dark-lift.test.ts` holds the step to [2.3, 6.0] L* against a table of the
- * pre-lift values — the band the FIRST pass set, which did not have to be
- * widened for this one — so walking a token back is red and doubling it is
- * red, and it holds the twelve meeting pairs to a JND besides.
+ * THE QUIET INKS AND FOUR STATUS HUES MOVED, because they are the tokens with
+ * a floor to hold and the floor is what the widened ladder actually spends.
+ * `--vam-ink-faint` (and `--vam-ink-quiet`, which shares its value) measured
+ * 4.591:1 on the second pass's card and would read 3.398:1 on this one's,
+ * UNCHANGED — under WCAG 1.4.3. Brightened to #b0b0b0 it reads 4.634:1, with
+ * room, rather than scraping the floor the way an exact reading-match
+ * (#aaaaaa, 4.53:1) would have. `--vam-failed`, `--vam-idle`, `--vam-done` and
+ * `--vam-danger` are FIXED hues the theme reads text with, not surfaces, and
+ * none of the first two passes had to touch them — this one does, because
+ * `--vam-card` climbed 9.03 L* and a fixed red, grey or blue held against a
+ * brighter card is a red, grey or blue with less contrast left. Each is
+ * lightened, hue held, to clear 4.5:1 on the card with room (4.5–4.7:1, where
+ * a bare-floor match would have been indistinguishable from a future
+ * regression); every other status hue (`--vam-running`, `--vam-waiting`) still
+ * cleared on the numbers it already had.
+ *
+ * THE REST OF THE HUES: syntax, diff and fifteen of the sixteen ANSI tones are
+ * measured against `--vam-ground`, which did not move — so NONE of those
+ * readings changed, and neither did the values. `--vam-rule-progress` and
+ * `--vam-rule-out` are measured against `--vam-panel`/`--vam-pane`, which DID
+ * move, and needed a one-hex nudge each to keep clearing 4.5:1 on the harder
+ * of the two (`--vam-rule-in` already cleared both with room). `--vam-ansi-
+ * black` is vam's own substitute for the black the agent actually named, read
+ * against `--vam-panel` like the first two passes; its comment says why it
+ * moves again. `--vam-waiting-tint` also moved off the "keep the pane
+ * reading" rule the other tinted grounds use — see its own comment for why.
+ *
+ * `dark-ladder.test.ts` replaces `dark-lift.test.ts`: this is not one more
+ * application of the same [2.3, 6.0] per-token lift band — it is a different
+ * claim (every SORTED, not just meeting, pair of the eight surfaces clears a
+ * JND, ground pinned exactly) that the old file's framing could not state.
  * `e2e/pane-colour-shots.mjs` re-measures the ladder, and the separation, as
  * PAINT.
  */
 :root {
+  /* PINNED — see the block header. Both earlier fixes to "too dark" stand;
+     this pass does not touch the deepest surface a third time. Everything
+     below is placed relative to THIS value, unmoved, not to a floor that
+     rises with it. */
   --vam-ground: #1c1c1c;
-  --vam-sunken: #1e1e1e;
+  --vam-sunken: #212121;
   /* A dialog's own floor, and the fill the modal scrim is judged against:
-     3.93 L* above `ground`, where it was 3.38. It is also the rung a settings
-     option recesses out of (`sunken`, 2.93 L* below it, where it was 2.02 and
-     invisible). */
-  --vam-panel: #242424;
-  /* 2.36 L* above the pane and the sidebar, where it was 1.48 -- under the
-     just-noticeable difference, which is the same as saying a hovered row, a
-     tooltip and an inline code chip were not drawn. This is the widest single
-     step in the lift (5.75 L*) for exactly that reason. */
-  --vam-raised: #2c2c2c;
-  --vam-header: #202020;
-  --vam-well: #1f1f1f;
-  --vam-sidebar: #272727;
+     9.60 L* above `ground`, where it was 3.93. It is also the rung a settings
+     option recesses out of (`sunken`, 7.13 L* below it, where it was 2.93). */
+  --vam-panel: #303030;
+  /* 2.70 L* above the pane and the sidebar, where it was 2.36 -- clearing the
+     just-noticeable difference with more room than before, which is the same
+     as saying a hovered row, a tooltip and an inline code chip stay visibly
+     raised rather than only barely so. */
+  --vam-raised: #3c3c3c;
+  --vam-header: #2b2b2b;
+  --vam-well: #262626;
+  --vam-sidebar: #363636;
   /* The same value as `sidebar`, deliberately: see `--color-pane` above. */
-  --vam-pane: #272727;
+  --vam-pane: #363636;
 
-  /* 1.100:1 and 3.30 L* above the pane and the sidebar, where `panel` used to
-     paint 1.028:1 BELOW them. #2f2f2f IS THE CEILING and the reason this is
-     not lighter still: `--vam-ink-quiet` / `--vam-ink-faint` measure 4.526:1
-     there and 4.462:1 one step further, so a brighter card fill would put
-     every caption drawn on one under WCAG 1.4.3. At this value they read
-     4.591:1, checked by `test/renderer/token-contrast.test.ts`, which counts
-     `card` among its text grounds.
+  /* 1.202:1 and 5.36 L* above the pane and the sidebar, where `panel` used to
+     paint 1.028:1 BELOW them before the first lift. #424242 IS THE CEILING and
+     the reason this is not lighter still: `--vam-ink-quiet` / `--vam-ink-faint`
+     measure 4.634:1 there and would drop under 4.5 one step further, so a
+     brighter card fill would put every caption drawn on one under WCAG 1.4.3.
+     Checked by `test/renderer/token-contrast.test.ts`, which counts `card`
+     among its text grounds.
 
      THE CEILING MOVES WITH THE INK, WHICH IS THE ONLY REASON THIS FILL CAN.
-     It was #232323 while the ink reading it was #8d8d8d, whose own ceiling was
-     #272727. That ink is now #969696 (see the block header: the quiet inks
-     keep the reading they had on the pane), which bought the whole step back.
-     A card lifted without its ink would have been 4.091:1 -- a WCAG failure,
-     not a preference -- and `token-contrast` is what says so. */
-  --vam-card: #2e2e2e;
+     Held at the second pass's `--vam-ink-faint` (#969696) the widened card
+     would read 3.398:1 -- a WCAG failure, not a preference. Brightening the
+     ink to #b0b0b0 (see the block header) is what buys the step, with margin
+     rather than by exactly matching the old reading: an exact match
+     (#aaaaaa) would have cleared this fill by 0.03, indistinguishable from a
+     future regression. */
+  --vam-card: #424242;
 
-  /* THE IN BUBBLE, DARK, AND THE ONE VALUE IN THIS BLOCK THAT IS NOT A
-     LIGHTNESS DECISION. Operator, on the lifted palette: "for the In bubble,
-     pick the option leaning towards grey."
+  /* THE IN BUBBLE, DARK. RE-DERIVED BY EACH LIFT, not carried through one --
+     `--color-in-bubble` argues the hue (still `--vam-rule-in`'s teal, still
+     drained towards grey at the operator's own later ask: chroma 16.65 -> 7.07
+     -> 7.38 across the two moves since, within 8-bit rounding of "did not
+     move again"). What moves HERE is lightness only, by the same "keep the
+     reading you had on the pane" rule the tints below use: L* 28.33 -> 34.24,
+     and the ratio against the pane holds at 1.510:1 where it read 1.505 --
+     over the palette's 1.4 floor (`surface-elevation.test.ts`), and ΔE 13.77
+     from the pane, over its 6.24 floor.
 
-     It is still `--vam-rule-in`'s teal, and the bubble still wears its own
-     region's hue -- the argument at `--color-in-bubble` is untouched. What
-     changed is HOW MUCH of that hue: chroma 16.65 -> 7.07, a 58% drain, at a
-     lightness that did not move (L* 28.40 -> 28.33). So the bubble keeps its
-     exact rung on the elevation ladder and reads as a cool grey with the In
-     region's hue left in it rather than as a teal fill. ΔE 9.99 from the fill
-     it replaces -- four just-noticeable differences, so this is a change an
-     operator can see rather than a nudge.
+     THE BAND IT USED TO SIT INSIDE HAS SINCE MOVED, and that is worth stating
+     rather than leaving the old claim standing: `--vam-waiting-tint` had to
+     give up part of its own pane-reading this pass to keep the (unmoved)
+     amber legible on it -- see its own comment -- so the bubble (1.510) now
+     reads louder than both tints (`waiting-tint` 1.211, `done-tint` 1.502)
+     rather than sitting between them. It is still "as loud as this palette's
+     tinted grounds get", which is the property the operator's ask was about;
+     it is no longer pinned to a band that no longer exists as it did.
 
-     THE FLOORS DID NOT MOVE AND ARE STILL MET. 1.505:1 against the pane and
-     ΔE 14.52, against the 1.030:1 / ΔE 1.5 the bubble wore before it had a
-     fill of its own -- and still inside the band this palette's own tinted
-     grounds occupy (`waiting-tint` 1.446:1, `done-tint` 1.510:1), so the
-     bubble is as loud as a status tint and no louder. It sits a hair BELOW
-     `done-tint` now where it used to sit a hair above: inside the band is the
-     specification, and which end of it never was.
+     THE TEXT ON IT IS WHAT BOUNDS IT. `--vam-ink-dim` measures 4.782:1 on this
+     fill; `--vam-ink-faint` measures 3.689:1 and MUST NOT be painted in the
+     bubble -- `e2e/pane-colour-shots.mjs` reads the ink the bubble is really
+     drawn with, so an edit that reaches for a quieter grey fails there. */
+  --vam-in-bubble: #425453;
 
-     DRAINING CHROMA COSTS SEPARATION, AND THAT IS THE TRADE THIS MAKES.
-     Against `done-tint` it reads ΔE 15.8 where the saturated teal read 22.9 --
-     still two and a half times the 6.24 this repo uses for "as distinct as a
-     card", and the largest clearance available to any grey-leaning fill that
-     clears every floor in BOTH themes. Six were solved and measured; a near
-     neutral graphite came within ΔE 4.4 of `--vam-line-loud`, which would have
-     made the bubble read as one more grey surface -- the exact complaint that
-     created the token.
-
-     RE-DERIVED BY EACH LIFT, not carried through one. It was #0f3b35 against a
-     #171717 pane and #17423c against a #1d1d1d one; on THIS pane that second
-     teal reads 1.338:1 -- quieter than both status tints, which is the one
-     thing the bubble may not be. The lift rule for a tinted ground is "keep
-     the reading you had on the pane", and this value still obeys it: the
-     chroma drain is a separate, later decision layered on top of a lift that
-     moved lightness only.
-
-     IT STOPS HERE BECAUSE OF THE TEXT ON IT. The prompt inside the bubble is
-     `--vam-ink-dim`, which measures 4.787:1 on this fill; one rung stronger
-     (#2f4b4b) it is 4.544 and one rung lighter (#3a4b4b) 4.427, which fails
-     1.4.3. `--vam-ink-faint` measures 3.355:1 here and MUST NOT be painted in
-     the bubble -- the e2e guard reads the ink the bubble is really drawn with,
-     so an edit that reaches for a quieter grey fails there rather than
-     shipping. */
-  --vam-in-bubble: #354646;
-
-  --vam-segment-on: #383838;
+  /* 3.48 L* above `--vam-card`, where it was 4.58 -- narrower than before in
+     absolute terms but still comfortably clear of the JND, and still the
+     lightest surface on the ladder: nothing that reads `--vam-card` as a
+     ceiling reads this one. */
+  --vam-segment-on: #4a4a4a;
 
   /* DERIVED FROM THE STACK'S TOP, not from its reading on the pane, and it is
-     the one line weight where those two answers differ. At the pane's reading
-     (1.100:1) this lands on #2e2e2e -- which is `--vam-card`'s own new value,
-     and a hairline the same colour as the card it divides is not a hairline.
-     It is placed one step above `card` instead, which is the same whisper it
-     has always been there (0.93 L*, where it was 0.97), and reads 1.132:1 on
-     the pane where it read 1.100. */
-  --vam-line: #303030;
+     the one line weight where those two answers differ -- see `--vam-card`
+     above for why lining up with the pane's reading would land this token ON
+     `--vam-card`'s own new value. It is placed one step above `card` instead,
+     the same whisper it has always been there (0.88 L*, where it was 0.93),
+     and reads 1.241:1 on the pane where it read 1.132. */
+  --vam-line: #444444;
   /* DERIVED FROM ITS FLOOR: this is the fill a touched option takes inside a
      card, and `surface-elevation.test.ts` holds it to "at least as visible a
-     step as the card makes over the pane". That step grew with the lift (ΔE
-     2.95 -> 3.30), so a value that merely kept its reading on the pane (#343434)
-     would have left only 0.40 of margin. At #383838 the option clears its card
-     by 4.58 L*, where it cleared it by 4.29. */
-  --vam-line-strong: #383838;
-  --vam-line-loud: #3d3d3d;
-  --vam-line-loudest: #595959;
+     step as the card makes over the pane". That step grew again with this
+     pass (ΔE 3.30 -> 5.36), so a value that merely kept its reading on the
+     pane would have shrunk the option's own margin against its floor. At
+     #525252 the option clears its card by 6.90 L*, where it cleared it by
+     4.58 -- proportionally similar room, ~29% over the floor both times. */
+  --vam-line-strong: #525252;
+  --vam-line-loud: #595959;
+  --vam-line-loudest: #7a7a7a;
   /* THE BOUNDARY OF A COMPONENT THAT HAS TO IDENTIFY ITSELF, and the only
      line token that exists to clear a contrast floor rather than to sit at a
      place in the visual order.
@@ -550,12 +577,15 @@
      the one call site it happened to have been written for rather than the
      rule it states. The rule is the second clause, and it is what a third
      consumer arrived on: no fill in this palette can identify a component,
-     because every surface token vam owns sits within 1.33:1 of `panel` in
+     because every surface token vam owns sits within 1.49:1 of `panel` in
      dark, so anything that owes WCAG 1.4.11's 3:1 has to buy it with a LINE
-     -- and `line-loud` is 1.43:1 there while `line-loudest` reaches only
-     2.22:1. The tooltip hit that wall first; `PairingPanel.tsx`'s action
-     buttons hit it next, at 3.77:1 dark and 3.62:1 light against the panel
-     behind them. Anything else that has to draw its own edge belongs here
+     -- and `line-loud` is 1.88:1 there while `line-loudest` reaches 3.08:1,
+     just over the floor (this pass's wider ladder happens to put it there;
+     it was 2.22:1 before, still short). The tooltip hit the wall first;
+     `PairingPanel.tsx`'s action buttons hit it next, at 4.24:1 dark and
+     3.62:1 light against the panel behind them -- still the one call site
+     that needs `line-tip`'s full margin rather than `line-loudest`'s
+     narrower one. Anything else that has to draw its own edge belongs here
      too, and the name says so.
 
      AND THE TOOLTIP HAS NOW LEFT, which is the second time this token has had
@@ -564,29 +594,31 @@
      see `--vam-tip` below. So the rule stands and the name stops being
      literal: what remains here is `PairingPanel.tsx`'s action buttons, which
      are still filled from the ladder and still owe an edge, and anything that
-     ever joins them. Nothing about the value changed; the tooltip's departure
-     does not make 3.77:1 any less needed by the buttons.
+     ever joins them. The value moves with `--vam-raised` because the floor
+     does -- see below -- but the reason it exists has not changed.
 
-     THE VALUE IS DERIVED FROM THE FLOOR, not from a place in the ladder: the
-     artboard's own third-rung dark grey (#6b6b6b), carried up to wherever its
-     FLOOR puts it rather than to wherever a uniform step would. Left at
-     #727272 it would read 2.90:1 on the lifted `raised` fill it sits on --
-     UNDER 1.4.11 -- where the first lift only brought it within six
-     hundredths of the floor. This is the second token in the block derived
-     that way; `--vam-line-strong` is the other. */
-  --vam-line-tip: #7d7d7d;
+     THE VALUE IS DERIVED FROM THE FLOOR, not from a place in the ladder,
+     RE-DERIVED AGAIN THIS PASS because `--vam-raised` climbed with the rest of
+     the ladder. Held at the second pass's own #7d7d7d it would read 2.83:1 on
+     the widened `raised` fill it sits on -- UNDER 1.4.11 -- so it is carried
+     up to #929292, which reads 3.55:1 there and 4.24:1 against `--vam-panel`,
+     the other surface `PairingPanel.tsx`'s buttons actually sit on. This is
+     the second token in the block derived that way; `--vam-line-strong` is
+     the other. */
+  --vam-line-tip: #929292;
 
   /* THE TOOLTIP'S FILL. Operator: "change the tooltip background to a light
      colour. remove the border."
 
      THOSE ARE ONE CHANGE. Read `--vam-line-tip` above: that token exists
-     because every surface vam owns sits within 1.33:1 of `panel` here, so a
+     because every surface vam owns sits within 1.49:1 of `panel` here, so a
      tip filled from the ladder had no edge of its own and had to buy one with
      a line. Taking the line away does not cancel that debt -- it moves it onto
      the FILL, which now has to clear WCAG 1.4.11's 3:1 against whatever the
      tip is floating over, by itself. Nothing on the ladder can; a light fill
-     clears it against all ten by 10.02:1 at worst (`segment-on`, the lightest
-     surface here), and against the pane it is actually over by 12.76:1.
+     clears it against all ten by 7.57:1 at worst (`segment-on`, the lightest
+     surface here, even after this pass raised it), and against the pane it is
+     actually over by 10.32:1.
 
      THE VALUE IS THE THEME'S OWN INK, #ededed, and that is the whole choice
      made in this block -- the tip is the theme inside out, so it is filled
@@ -615,23 +647,36 @@
   --vam-on-tip-line: #d4d4d4;
 
   --vam-ink: #ededed;
-  --vam-ink-dim: #b4b4b4;
-  --vam-ink-faint: #969696;
+  /* Keeps the reading it had on the pane: 7.223:1, where it read 7.205 --
+     `--vam-ink` owes nothing to a floor and stayed put (see the block
+     header), but this one has one, and the widened pane is what it is
+     re-solved against. 6.007:1 on the card besides, well clear of 4.5. */
+  --vam-ink-dim: #c8c8c8;
+  /* THE TOKEN THE WIDENED `--vam-card` IS ACTUALLY BOUNDED BY -- see the
+     ceiling note at `--vam-card` above. Read against the pane alone, "keep
+     the old reading" lands on #aaaaaa (5.05:1, unchanged), which clears the
+     card by 0.03 -- indistinguishable from a future rounding regression.
+     #b0b0b0 is chosen instead: still well inside "quiet", still clearly under
+     `--vam-ink-dim`, and it reads 5.572:1 on the pane (louder than before,
+     not merely as loud) and 4.634:1 on the card, with margin. */
+  --vam-ink-faint: #b0b0b0;
   /* Matches `ink-faint` rather than given its own number: `ink-faint` itself
      is the quietest grey this theme can paint text with (worst case `card`,
-     4.591:1 -- see `--vam-card`, which is the ground that bounds it). A value
+     4.634:1 -- see `--vam-card`, which is the ground that bounds it). A value
      quieter than that fails somewhere; a value at it is just `ink-faint`
      under another name, and this file says so rather than pretending a third
      grey exists that does not. */
-  --vam-ink-quiet: #969696;
+  --vam-ink-quiet: #b0b0b0;
   /* Decorative only (issue 201), and a shorter list than it used to be: a
      scrollbar thumb, and nothing else since the list markers left for inks
-     that can be read. It keeps the reading it had on the pane like the other
-     quiet greys -- 1.87:1 on `panel`, where it was 1.84:1 and, left where it
-     was, would have sunk to 1.65:1. */
-  --vam-ink-ghost: #4e4e4e;
+     that can be read. It keeps the reading it had on the panel like the other
+     quiet greys -- 1.83:1, where it read 1.87. (Not an exact match: a value
+     with no text or border sitting on it owes nothing more precise than "in
+     the neighbourhood", and this one stays clear of `--vam-line-loud`, which
+     a nearer match would have landed on.) */
+  --vam-ink-ghost: #575757;
 
-  /* The terminal palette, dark. Drawn on `panel` (#242424), so ANSI black is
+  /* The terminal palette, dark. Drawn on `panel` (#303030), so ANSI black is
      a grey that can be seen rather than the void it names -- a terminal that
      renders black-on-black is a terminal with invisible text, which is why
      every emulator does this. The rest are the mid-brightness ramp, one step
@@ -639,20 +684,23 @@
 
      FIFTEEN OF THEM ARE NOT LIFTED, and are re-measured instead: they are what
      the AGENT said, not vam's choice, so they are read against their ground
-     rather than moved with it. Against the lifted panel the ramp now runs
-     3.27:1 to 14.87:1, where before it ran 3.27 to 16.68. The fifteen tones
-     that carry ordinary output all sit above 5.6:1.
+     rather than moved with it. Against this pass's panel the ramp now runs
+     4.77:1 to 12.64:1, where before it ran 3.27 to 14.87. The fifteen tones
+     that carry ordinary output all sit above 4.7:1.
 
-     THE SIXTEENTH IS LIFTED, and the previous pass got this one wrong on its
-     own premise. `--vam-ansi-black` is not what the agent said -- the agent
-     said #000000 -- it is a grey vam substituted so the terminal stays
-     legible, which makes it a value invented to be read on a surface. That
-     surface moved. Held at #6b6b6b it reads 2.913:1 on the lifted panel,
-     under the 3:1 a mark that carries meaning owes and under the 3.266:1 it
-     was given; carried to #737373 it reads 3.274:1 and the reason it exists
-     survives. This is one rule inside one family, not two: the agent's hues
-     are read against their ground, and vam's own greys move with it. */
-  --vam-ansi-black: #737373;
+     THE SIXTEENTH IS LIFTED AGAIN, for the same reason it was lifted last
+     time. `--vam-ansi-black` is not what the agent said -- the agent said
+     #000000 -- it is a grey vam substituted so the terminal stays legible,
+     which makes it a value invented to be read on a surface. That surface
+     moved again. Held at the second pass's #737373 it reads 2.783:1 on this
+     pass's panel, under the 3:1 a mark that carries meaning owes; carried to
+     #808080 it reads 3.342:1, close to the margin it carried before (3.274),
+     and the reason it exists survives. Still well under `--vam-ansi-bright-
+     black` (#a3a3a3, L* 66.99 against this one's L* 53.59), so the ramp's own
+     dim/bright distinction is untouched. This is one rule inside one family,
+     not two: the agent's hues are read against their ground, and vam's own
+     grey moves with it. */
+  --vam-ansi-black: #808080;
   --vam-ansi-red: #f87171;
   --vam-ansi-green: #4ade80;
   --vam-ansi-yellow: #fbbf24;
@@ -682,13 +730,26 @@
      had no complaint. It is 11.36:1 through both lifts -- the green under it
      never moved. */
   --vam-on-running: #0a0a0a;
+  /* Unchanged -- 4.679:1 at worst against the widened `--vam-card`, which
+     already cleared 4.5 without moving. Not every status hue needed lifting;
+     this is the one that did not. */
   --vam-waiting: #f59e0b;
-  /* Neutral zinc, 5.30:1 at worst against the seven text grounds in this
-     theme (6.13 before this lift, 6.99 before the first). Deliberately not a
-     hue: see `--color-idle`. */
-  --vam-idle: #a1a1aa;
-  --vam-done: #60a5fa;
-  --vam-failed: #f87171;
+  /* Neutral zinc, LIGHTENED, hue held: this pass's `--vam-card` (L* 27.97)
+     put the second pass's own value (#a1a1aa) at 3.80:1 there -- under 4.5,
+     where it used to clear with room. Brightened to #b2b1bb it reads 4.737:1
+     at worst (still `card`), with margin rather than a bare scrape.
+     Deliberately not a hue: see `--color-idle`. */
+  --vam-idle: #b2b1bb;
+  /* LIGHTENED, hue held, for the same reason as `--vam-idle`: the second
+     pass's #60a5fa read 3.95:1 on this pass's card. #75b7ff reads 4.773:1 at
+     worst. */
+  --vam-done: #75b7ff;
+  /* LIGHTENED, hue held: the second pass's #f87171 read 3.63:1 on this
+     pass's card -- the tightest of the four status hues, since red is
+     already the darkest-reading of them at a given lightness. #ff9592 reads
+     4.769:1 at worst, chroma down from 57.6 to 46.9 (an unavoidable cost of
+     lightening a saturated red this far without leaving the sRGB gamut). */
+  --vam-failed: #ff9592;
 
   /* Deliberately the SAME value as `--vam-waiting` in this theme, and taken
      under its own name rather than borrowed: the filter badge is decoration,
@@ -698,20 +759,31 @@
 
   /* Hotter than `--vam-failed` on purpose: the two appear a few pixels apart
      in the sidebar, and an action must not be mistakable for the status of
-     the row beside it. */
-  --vam-danger: #fb7185;
+     the row beside it. LIGHTENED this pass for the same reason `--vam-failed`
+     was: the second pass's #fb7185 read 3.73:1 on the widened card. #ff8ea0
+     reads 4.608:1 at worst, and stays hotter (more chroma at a given
+     lightness, drifted the same direction as `--vam-failed` rather than
+     towards it) than the failed red beside it. */
+  --vam-danger: #ff8ea0;
 
-  /* The tinted grounds, carried with the pane at the reading they had on it:
-     the In bubble's whole specification is "as loud as a status tint and no
-     louder", so these and `--vam-in-bubble` travel together or that sentence
-     stops being true of anything. Against the lifted pane they read 1.446:1
-     and 1.510:1 -- the same pair of numbers they read against the last one
-     (1.446 and 1.507), which is the point of deriving them from the reading
-     rather than from a step. The amber painted ON the tint reads 4.81:1, over
-     1.4.3's 4.5, where it read 5.43:1; `token-contrast.test.ts` is what holds
-     that pair and what stops the tint going a rung further. */
-  --vam-waiting-tint: #4e3e1f;
-  --vam-waiting-wash: #27231c;
+  /* The tinted grounds. `--vam-done-tint` still carries the "keep the reading
+     you had on the pane" rule the In bubble uses -- 1.502:1, where it read
+     1.510. `--vam-waiting-tint` does NOT, this pass, and that is a real
+     change of rule rather than a rounding difference: see its own comment. */
+  --vam-waiting-tint: #514021;
+  /* THE ONE TINTED GROUND THAT DOES NOT KEEP ITS PANE READING, because
+     something else bounds it harder. `--vam-waiting` (the amber painted ON
+     this fill, unchanged) has to clear WCAG 1.4.3's 4.5:1 against it, and
+     that is a ceiling on how LIGHT this tint may get -- the second pass's own
+     rule ("keep the reading on the pane") would land it at #5d4b2c, where the
+     amber reads 3.898:1, a real failure `token-contrast.test.ts` catches. At
+     #514021 the amber reads 4.645:1, and the tint's own reading against the
+     pane falls to 1.211:1 from 1.446 -- quieter than `--vam-done-tint`
+     (1.502) now, where the two used to sit close together. That is the
+     trade: the floor against the FIXED amber text wins over preserving how
+     loud the fill reads against the pane, because the text has no other
+     surface to move to and the fill does. */
+  --vam-waiting-wash: #36322a;
 
   /* The cursor halo's amber. It was the SAME value in both themes, read
      straight off the artboards: the light artboard keeps the identical amber
@@ -729,8 +801,11 @@
      a rung further (see issue 188), so the two are no longer the same colour
      in either theme. */
   --vam-cursor-ring: #f59e0b;
-  /* Carried with the other tinted grounds -- see `--vam-waiting-tint`. */
-  --vam-done-tint: #33445c;
+  /* Keeps the reading it had on the pane -- 1.502:1, where it read 1.510 --
+     because nothing painted on it needed the extra floor `--vam-waiting-tint`
+     had to buy this pass. See that token's own comment for the one that
+     doesn't follow this rule any more. */
+  --vam-done-tint: #41516a;
 
   --vam-shadow-node: 0 8px 28px rgb(0 0 0 / 0.4);
 
@@ -756,10 +831,13 @@
        chip        9.54 → 8.75    quote       10.32 → 9.47
 
      The floor is `syn-comment` at 5.54:1, still a fifth above 1.4.3's 4.5, so
-     the fence keeps its palette. The fence also stays DEEPER than the pane it
-     sits in (1.14:1 below it, where it was 1.10:1 below the last one) -- it is
-     one of the two fills `e2e/pane-colour-shots.mjs` names as deeper on
-     purpose, and this lift widened that gap rather than closing it. */
+     the fence keeps its palette -- these ten readings did not move again this
+     pass, because `--vam-ground` did not move. The fence also stays DEEPER
+     than the pane it sits in, and THAT ratio moved even though the fence's
+     own colour did not: 1.41:1 below it, where it was 1.14:1 below the second
+     pass's pane -- it is one of the two fills `e2e/pane-colour-shots.mjs`
+     names as deeper on purpose, and this pass widened that gap again, from
+     the ground's side rather than the fence's. */
   --vam-diff-add: #3fb950;
   --vam-diff-del: #ff7b72;
   --vam-diff-hunk: #58a6ff;
@@ -773,18 +851,26 @@
   --vam-chip: #d2a8ff;
   --vam-quote: #56d4ca;
 
-  /* Section rules, dark. Measured against `--vam-panel` (#242424): teal
-     8.34:1, violet 5.70:1, pink 5.86:1 -- 9.35, 6.40 and 6.57 before this
-     lift -- and 8.03 / 5.49 / 5.64 on `--vam-pane`'s own fill, which is the
-     surface they are actually drawn on. All six clear 1.4.3's 4.5 with the
-     narrowest, violet on the pane, a fifth above it. The hues are ordered
-     the way the pane is -- in, progress, out -- so the two the operator reads
-     against each other, `in` and `out`, land furthest apart on the wheel and
-     `progress` sits between them there as well as on screen. None of the four
-     status hues (green, amber, blue, red) appears. */
+  /* Section rules, dark. Measured against `--vam-panel` (#303030): teal
+     7.09:1, violet 4.99:1, pink 5.03:1 -- and 6.49 / 4.57 / 4.61 on
+     `--vam-pane`'s own fill (#363636), which is the surface they are actually
+     drawn on and, since the widened pane reads lighter relative to these
+     fixed hues than the widened panel does, the harder of the two.
+     `--vam-rule-in`'s teal cleared both without moving; violet and pink did
+     not -- the second pass's own `--vam-rule-progress` read 4.44:1 on the
+     pane, under 4.5, and `--vam-rule-out` 4.56:1, thin enough that this
+     pass's wider pane pushed it under too. Both are nudged one hex towards
+     white, hue held (ΔE 1.00 and 0.60 -- essentially a rounding-sized move):
+     `--vam-rule-progress` now #aa8dfd, `--vam-rule-out` #f573b6. All six
+     clear 1.4.3's 4.5 again, narrowest violet on the pane at a twentieth
+     above it. The hues are still ordered the way the pane is -- in, progress,
+     out -- so the two the operator reads against each other, `in` and `out`,
+     land furthest apart on the wheel and `progress` sits between them there
+     as well as on screen. None of the four status hues (green, amber, blue,
+     red) appears. */
   --vam-rule-in: #2dd4bf;
-  --vam-rule-progress: #a78bfa;
-  --vam-rule-out: #f472b6;
+  --vam-rule-progress: #aa8dfd;
+  --vam-rule-out: #f573b6;
 
   color-scheme: dark;
 }

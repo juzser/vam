@@ -7,7 +7,7 @@
  * A TEMPLATE IS A HUE AND A CHROMA ON VAM'S OWN LIGHTNESS LADDER, which is the
  * whole reason this is safe to offer at all. The dark lift spent a release
  * establishing that the surfaces a person sees at once sit at least one
- * just-noticeable difference apart (`dark-lift.test.ts`), and a template that
+ * just-noticeable difference apart (`dark-ladder.test.ts`), and a template that
  * picked its own lightnesses would throw that away silently -- the operator
  * would click "nordic" and get back the flat palette the lift was written to
  * fix. So every surface in every template keeps the L* the stylesheet gives
@@ -49,18 +49,18 @@ import { contrast, deltaE, lightness } from '../support/contrast.js';
  * make this file agree with whatever the stylesheet says next, and the claim
  * is that these templates were chosen against THESE inks. A stylesheet change
  * that moves one of them should redden here and be re-derived, which is the
- * same argument `dark-lift.test.ts` makes about its own baseline table.
+ * same argument `dark-ladder.test.ts` makes about its own baseline table.
  */
 const UNSETTABLE_INK = {
   dark: {
-    '--vam-ink-dim': '#b4b4b4',
-    '--vam-ink-faint': '#969696',
-    '--vam-ink-quiet': '#969696',
+    '--vam-ink-dim': '#c8c8c8',
+    '--vam-ink-faint': '#b0b0b0',
+    '--vam-ink-quiet': '#b0b0b0',
     '--vam-running': '#4ade80',
     '--vam-waiting': '#f59e0b',
-    '--vam-idle': '#a1a1aa',
-    '--vam-done': '#60a5fa',
-    '--vam-failed': '#f87171',
+    '--vam-idle': '#b2b1bb',
+    '--vam-done': '#75b7ff',
+    '--vam-failed': '#ff9592',
   },
   light: {
     '--vam-ink-dim': '#52525b',
@@ -314,7 +314,7 @@ describe('palette templates', () => {
     // screen area.
     const panes = TINTED.map((t) => templatePalette(t.id, 'dark')['--vam-pane'] as string);
     expect(new Set(panes).size).toBe(TINTED.length);
-    const flat = panes.filter((p) => deltaE(p, '#272727') < 2.3);
+    const flat = panes.filter((p) => deltaE(p, '#363636') < 2.3);
     expect(flat).toEqual([]);
   });
 
