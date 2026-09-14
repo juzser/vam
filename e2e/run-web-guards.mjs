@@ -76,6 +76,7 @@ const GUARDS = [
   'half-page-shots',
   'target-size-shots',
   'turn-steps-shots',
+  'agents-navigator-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);
