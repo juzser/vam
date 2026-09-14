@@ -3270,24 +3270,43 @@ const TurnBlock = memo(function TurnBlock({
              sides -- 10x8, held to a 7-12px band measured AS PAINT by
              `e2e/long-prompt-shots.mjs`, because a padding rule that matches
              nothing has passed review in this project before. */
-          /* `bg-in-bubble`, NOT `bg-raised`. The operator asked for this bubble
-             twice: once for it to exist, and then -- having got it -- "the In
-             bubble needs more contrast within the pane". `raised` on a `pane`
-             band measures 1.030:1 in dark and 1.015:1 in light, three units
-             per channel, which is under the step at which a person reliably
-             sees an edge: the bubble was in the DOM and not on the screen. Its
-             own token carries the In region's teal at fill strength --
-             1.510:1 / ΔE 21.8 dark, 1.113:1 / ΔE 9.09 light, both measured as
-             paint by `e2e/pane-colour-shots.mjs` and as tokens by
-             `test/renderer/surface-elevation.test.ts`.
+          /* `bg-in-bubble`, NOT `bg-raised`. The operator has asked about this
+             bubble four times: once for it to exist, then -- having got it --
+             "the In bubble needs more contrast within the pane", then "lean
+             it towards grey", and now, having seen the teal on screen again:
+             "drop it for a plain grey that contrasts with the panel
+             background". `raised` on a `pane` band measures 1.030:1 in dark
+             and 1.015:1 in light, three units per channel, which is under the
+             step at which a person reliably sees an edge: the bubble was in
+             the DOM and not on the screen.
 
-             THE INK BELOW IS PART OF THE CHOICE. `text-ink-dim` reads 4.750:1
-             on the dark fill; `text-ink-faint` would read 3.364:1 and must not
-             be used here. The guard measures the ink this element is really
-             painted with, so that constraint is enforced rather than noted. */
+             "THE PANEL BACKGROUND" IS THIS ELEMENT'S OWN GROUND, `bg-pane`
+             (the `data-detail-block="in"` band two levels up), NOT
+             `--vam-panel` -- a separate, lower token. Named here because the
+             two are easy to conflate and only one of them is what this
+             bubble is actually drawn on.
+
+             THE FILL IS NOW A STRAIGHT GREY IN DARK -- `--vam-in-bubble`'s
+             own value is in `styles.css`, not restated here: `a*`/`b*`
+             zeroed, `L*` carried across unchanged, so the
+             ratio against the pane holds where it read as a teal -- 1.499:1,
+             over the palette's 1.4 floor -- and ΔE now reads 11.41 off pure
+             lightness, over the 6.24 floor and over four times `--vam-raised`'s
+             own step off the pane, both measured as paint by
+             `e2e/pane-colour-shots.mjs` and as tokens by
+             `test/renderer/surface-elevation.test.ts`. Light is not part of
+             this ask and keeps its own cool-leaning fill.
+
+             THE INK BELOW IS PART OF THE CHOICE, AND IT MOVED TOO -- the
+             operator's separate ask for a lighter prompt. `text-ink`, not
+             `text-ink-dim`: 6.887:1 on the dark fill, up from 4.782; 17.17:1
+             in light. `text-ink-faint` still reads under floor on the dark
+             fill (3.718:1) and must not be used here. The guard measures the
+             ink this element is really painted with, so that constraint is
+             enforced rather than noted. */
           className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-in-bubble px-2.5 py-2"
         >
-          <p className="whitespace-pre-wrap break-words text-body text-ink-dim">
+          <p className="whitespace-pre-wrap break-words text-body text-ink">
             {/* THE RESERVED CORNER, audit F1's obligation. A float rather than
                 padding because only the FIRST LINE meets the pill: padding
                 would indent all 300 lines of a long prompt to clear something

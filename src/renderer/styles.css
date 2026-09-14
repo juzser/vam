@@ -99,32 +99,34 @@
      still moves two surfaces. */
   --color-card: var(--vam-card);
 
-  /* THE IN BUBBLE'S OWN FILL. Operator, twice: "the IN prompt should have a
-     different colour so it stands out, and sit in a bubble", then -- after
-     getting the bubble -- "the In bubble needs more contrast within the pane".
+  /* THE IN BUBBLE'S OWN FILL. Operator, four times now: "the IN prompt should
+     have a different colour so it stands out, and sit in a bubble", then --
+     having got a bubble filled with `raised` -- "the In bubble needs more
+     contrast within the pane", then "pick the option leaning towards grey",
+     and now, looking at dark specifically: "drop the teal for a grey that
+     contrasts with the panel background".
 
-     The second report is the measurement of the first fix. The bubble wore
-     `raised` on a `pane` band: 1.030:1 in dark, 1.015:1 in light, ΔE 1.5 and
-     1.4. Three units per channel is below the step at which a person reliably
-     sees an edge, so the bubble that had been asked for was, in practice, not
-     drawn. (`raised` reads 1.070:1 / ΔE 2.36 on the dark pane since the second
-     lift stretched it; those are the numbers from when this was written, and
-     they are what the bubble's own floors are calibrated against.)
+     THE FIRST TWO REPORTS ARE THE FILL'S FLOOR. `raised` on a `pane` band
+     measured 1.030:1 in dark and 1.015:1 in light, ΔE 1.5 and 1.4 -- under the
+     step at which a person reliably sees an edge, so the bubble asked for was,
+     in practice, not drawn.
 
-     It takes the In region's OWN hue -- `--vam-rule-in`'s teal, already the
-     colour of that region's rule and its announced label -- carried down to
-     fill strength, which is the move `--vam-waiting-tint` and `--vam-done-tint`
-     already make for their statuses. A hue rather than a plain lighter grey
-     because "a different colour" is what was asked for, and because in the
-     light theme hue is the only channel with room left: that theme's pane sits
-     at 86% relative luminance, so the WCAG ratio of ANYTHING lighter than it
-     is capped at 1.159:1 -- pure white.
+     "THE PANEL BACKGROUND" IS READ AS THIS ELEMENT'S OWN GROUND. What the
+     bubble is actually drawn on is `--vam-pane` (`DetailPanel.tsx`'s
+     `data-detail-block="in"` band paints `bg-pane`), NOT `--vam-panel` -- a
+     different, lower token (#303030 against this one's #363636 in dark).
+     Named here so the two stay distinct: every reading below is against
+     `--vam-pane`.
 
-     HOW MUCH OF THAT HUE IS A SEPARATE QUESTION, and the operator has since
-     answered it: "pick the option leaning towards grey". Both halves keep the
-     teal and drop most of its chroma (dark 16.65 -> 7.07, light 7.92 -> 4.49)
-     at an unchanged lightness. The token still says "this is the In region";
-     it now says it quietly. The values carry the numbers reached. */
+     THE THIRD REPORT DRAINED THE TEAL TOWARDS GREY WITHOUT REMOVING IT: it
+     kept `--vam-rule-in`'s hue and cut most of its chroma (dark 16.65 -> 7.07
+     -> 7.38 across the two moves since). THE FOURTH TAKES THE HUE OUT
+     ENTIRELY, IN DARK. `--color-rule-in` still carries the In region's teal
+     for the section rule and its own label; the bubble no longer borrows it
+     -- see the dark block below for the value and what stayed the same
+     moving to it. Light is not part of this ask and keeps its own
+     cool-leaning fill; see that block for why its hue is still not free to
+     drop the way dark's just did. */
   --color-in-bubble: var(--vam-in-bubble);
 
   /* The selected pill inside a segmented control's well. Read off the mode
@@ -521,30 +523,31 @@
      future regression. */
   --vam-card: #424242;
 
-  /* THE IN BUBBLE, DARK. RE-DERIVED BY EACH LIFT, not carried through one --
-     `--color-in-bubble` argues the hue (still `--vam-rule-in`'s teal, still
-     drained towards grey at the operator's own later ask: chroma 16.65 -> 7.07
-     -> 7.38 across the two moves since, within 8-bit rounding of "did not
-     move again"). What moves HERE is lightness only, by the same "keep the
-     reading you had on the pane" rule the tints below use: L* 28.33 -> 34.24,
-     and the ratio against the pane holds at 1.510:1 where it read 1.505 --
-     over the palette's 1.4 floor (`surface-elevation.test.ts`), and ΔE 13.77
-     from the pane, over its 6.24 floor.
+  /* THE IN BUBBLE, DARK. RE-DERIVED AGAIN, not carried through -- and this
+     round drops what every earlier one kept: the hue. Operator: "drop the
+     teal for a grey that contrasts with the panel background", read as
+     `--vam-pane` (#363636), the surface this bubble is actually drawn on --
+     see `--color-in-bubble` above for why that is not `--vam-panel`, a
+     different, lower token.
 
-     THE BAND IT USED TO SIT INSIDE HAS SINCE MOVED, and that is worth stating
-     rather than leaving the old claim standing: `--vam-waiting-tint` had to
-     give up part of its own pane-reading this pass to keep the (unmoved)
-     amber legible on it -- see its own comment -- so the bubble (1.510) now
-     reads louder than both tints (`waiting-tint` 1.211, `done-tint` 1.502)
-     rather than sitting between them. It is still "as loud as this palette's
-     tinted grounds get", which is the property the operator's ask was about;
-     it is no longer pinned to a band that no longer exists as it did.
+     LIGHTNESS ONLY, ONE MORE TIME, but onto a straight grey rather than onto
+     the teal: `a*`/`b*` go to zero, `L*` is untouched (34.24 -> 34.03, an
+     8-bit rounding difference, not a move). The ratio against the pane holds
+     inside rounding of what it read as a teal -- 1.499:1, where it was
+     1.510 -- still clear of the palette's 1.4 floor, and ΔE now reads as a
+     pure lightness step, 11.41 against a 6.24 floor and against the "further
+     from the pane than the fill it replaced" floor `surface-elevation.
+     test.ts` derives from `--vam-raised`'s own ΔE off the pane -- both
+     bought with `L*` alone now instead of with hue.
 
-     THE TEXT ON IT IS WHAT BOUNDS IT. `--vam-ink-dim` measures 4.782:1 on this
-     fill; `--vam-ink-faint` measures 3.689:1 and MUST NOT be painted in the
-     bubble -- `e2e/pane-colour-shots.mjs` reads the ink the bubble is really
-     drawn with, so an edit that reaches for a quieter grey fails there. */
-  --vam-in-bubble: #425453;
+     THE TEXT ON IT MOVED WITH IT (see `DetailPanel.tsx`): the bubble now
+     carries `--vam-ink`, not `--vam-ink-dim`, at the operator's own separate
+     ask for a lighter prompt -- 6.887:1 here, where `--vam-ink-dim` read
+     4.782. `--vam-ink-faint` still measures under floor on this fill
+     (3.718:1) and MUST NOT be painted in the bubble -- `e2e/pane-colour-
+     shots.mjs` reads the ink the bubble is really drawn with, so an edit
+     that reaches for a quieter grey still fails there. */
+  --vam-in-bubble: #505050;
 
   /* 3.48 L* above `--vam-card`, where it was 4.58 -- narrower than before in
      absolute terms but still comfortably clear of the JND, and still the
@@ -907,22 +910,33 @@ html.light {
 
      IT DRAINED WITH ITS DARK HALF, from #eafff9 to this, when the operator
      asked for a bubble "leaning towards grey": chroma 7.92 -> 4.49. The pair
-     has to move together or the two themes stop being the same design, and
-     the light half has the less room of the two -- ΔE off the pane goes 9.09
-     -> 7.20, still over the card's own 6.24 and still over four times the
-     1.38 that `raised` (the fill this replaced) manages. It also has to stay
-     off #ffffff, which is this theme's CARD: at ΔE 4.66 the bubble and a card
-     remain two colours, which `surface-elevation.test.ts` asserts directly.
+     moved together THEN, because both halves were being asked the same
+     question. THEY HAVE SINCE SPLIT: the operator's next ask ("drop the teal
+     for a grey that contrasts with the panel background") named the dark
+     screenshot specifically, and dark's own ceiling had room for a plain
+     grey to clear its floor on `L*` alone -- see `--vam-in-bubble` in the
+     dark block. This theme's ceiling does not, which is exactly the argument
+     two paragraphs below, and is why this value stays put rather than being
+     quietly carried along for a question that was never asked of it. ΔE off
+     the pane is still 9.09 -> 7.20 (the drain already spent), still over the
+     card's own 6.24 and still over four times the 1.38 that `raised` (the
+     fill this replaced) manages. It also has to stay off #ffffff, which is
+     this theme's CARD: at ΔE 4.66 the bubble and a card remain two colours,
+     which `surface-elevation.test.ts` asserts directly.
 
-     THAT CEILING IS ALSO WHY THE DARK HALF'S HUE WAS NOT FREE TO CHANGE. The
-     grey-leaning options that looked best in dark -- a plum and a warm slate
-     -- have NO reachable value here at all: this pane is warm and near-white,
-     so a warm tint lighter than it cannot reach ΔE 6.24 in any lightness. A
-     cool grey can, because it differs from the warm pane in hue as well as in
-     lightness. The dark value is cool for a reason that lives in this block.
+     THAT CEILING IS ALSO WHY THIS HALF'S HUE IS STILL NOT FREE TO CHANGE,
+     even though dark's just did. The grey-leaning options that looked best in
+     dark -- a plum and a warm slate -- have NO reachable value here at all:
+     this pane is warm and near-white, so a warm tint lighter than it cannot
+     reach ΔE 6.24 in any lightness. A cool grey can, because it differs from
+     the warm pane in hue as well as in lightness. Dark could drop to a plain
+     grey because its own ceiling let it; light stays cool for the same
+     reason it always was.
 
-     Ink is not the constraint it is in dark: `--vam-ink-dim` reads 7.49:1
-     here. */
+     THE INK ON IT MOVED WITH DARK'S, since `DetailPanel.tsx` does not fork
+     the class by theme: it carries `--vam-ink`, not `--vam-ink-dim`, and
+     reads 17.17:1 here -- so far over the floor that this theme was never
+     the constraint, before the ink moved or after. */
   --vam-in-bubble: #f1fefe;
 
   --vam-segment-on: #e2e0da;

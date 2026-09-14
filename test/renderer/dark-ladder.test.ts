@@ -263,10 +263,15 @@ describe('the dark ladder: eight surfaces, seven gaps, every one a JND', () => {
     const pane = hex(dark, '--vam-pane');
     expect(contrast(bubble, pane)).toBeGreaterThanOrEqual(1.4);
     expect(deltaE(bubble, pane)).toBeGreaterThanOrEqual(6.24);
-    expect(contrast(hex(dark, '--vam-ink-dim'), bubble)).toBeGreaterThanOrEqual(4.5);
-    // Still carries the In region's own hue rather than reading as a flat
-    // grey -- the exact complaint the token exists to answer.
-    expect(chroma(bubble)).toBeGreaterThanOrEqual(4);
+    expect(contrast(hex(dark, '--vam-ink'), bubble)).toBeGreaterThanOrEqual(4.5);
+    // NO LONGER a hue: the operator's next round dropped the teal for a
+    // plain grey ("a colour that contrasts with the panel background", read
+    // against the surface the bubble is actually drawn on, `--vam-pane`).
+    // What this assertion used to hold -- "still reads as the In region's
+    // own colour" -- is exactly the property that stopped being true, so it
+    // now asserts the opposite: a chroma this close to zero is what "grey"
+    // means, and a future edit that reaches for a hue again fails here.
+    expect(chroma(bubble)).toBeLessThan(1);
   });
 
   it('reads the waiting amber at 4.5:1 or better on its own tint and wash', () => {
