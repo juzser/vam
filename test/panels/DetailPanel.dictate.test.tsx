@@ -127,6 +127,27 @@ describe('dictating a prompt', () => {
     expect(send(), 'and the composer is otherwise intact').not.toBeNull();
   });
 
+  it('is not drawn in the Electron build, where vam denies its own microphone', () => {
+    // THE SAME RULE AS THE LINE ABOVE, on a different reason. There the
+    // platform had no recogniser; here it has one and vam will not let it
+    // listen: `src/main/index.ts` denies every Chromium permission, by
+    // deliberate policy, so a microphone button in the packaged app is a
+    // control that can only ever produce a refusal.
+    //
+    // `window.api` is the discriminator -- a preload export, so present in
+    // Electron and absent in a browser tab and on the paired phone, which are
+    // the surfaces dictation actually works on. The whole composer is
+    // otherwise untouched: this withholds one control, not a feature.
+    Object.defineProperty(globalThis, 'api', { configurable: true, value: {} });
+    try {
+      draw();
+      expect(mic()).toBeNull();
+      expect(send(), 'the composer is otherwise intact').not.toBeNull();
+    } finally {
+      Reflect.deleteProperty(globalThis as object, 'api');
+    }
+  });
+
   it('sits beside the send button, which is where the operator was told it is', () => {
     draw();
     expect(mic()).not.toBeNull();

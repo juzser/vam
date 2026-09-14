@@ -187,6 +187,36 @@ async function main() {
   // own default is to APPROVE, so this resolves 'granted' without the fix.
   result.notificationPermission = await run('Notification.requestPermission()');
 
+  // THE MICROPHONE, AND THE CONTROL THAT USED TO ASK FOR IT.
+  //
+  // Three fields because the defect needed all three to be seen. The
+  // recogniser EXISTS here -- this is Chromium -- so feature detection said
+  // yes and a button was drawn; the permission is refused by vam's own
+  // deny-all policy, so that button could only ever apologise; and the fix is
+  // that the button is now absent in this build alone.
+  //
+  // NOTHING HERE CAN RAISE A PROMPT. `permissions.query` is a check, not a
+  // request, and the policy answers it without a dialog -- which is the whole
+  // reason it is the field to read rather than `getUserMedia`.
+  result.speechRecognitionType = await run(
+    "typeof (window.SpeechRecognition ?? window.webkitSpeechRecognition)",
+  );
+  result.micPermissionState = await run(`(async () => {
+    try {
+      const status = await navigator.permissions.query({ name: 'microphone' });
+      return status.state;
+    } catch (error) {
+      return 'threw: ' + (error && error.name ? error.name : String(error));
+    }
+  })()`);
+  // The DOM answer, with its own corpus beside it: a count of zero means
+  // nothing unless the composer it would sit in is on screen. `send` is the
+  // control it was asked to sit next to.
+  result.dictateControls = await run(
+    "document.querySelectorAll('[data-prompt-dictate]').length",
+  );
+  result.sendControls = await run("document.querySelectorAll('[data-prompt-record]').length");
+
   // `will-redirect`, behaviourally, on the REAL webContents and the REAL
   // listener `app.on('web-contents-created', ...)` attached to it -- fired
   // synthetically here because arranging a genuine same-origin-then-302
