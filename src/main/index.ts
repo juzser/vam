@@ -21,6 +21,7 @@ import { applyLoginShellPath, probeLoginShellPath } from './env/resolve-path.js'
 import { registerMainErrorIpc } from './errors/ipc.js';
 import { recordMainFailure } from './errors/log.js';
 import { registerSourceIpc } from './ipc/handlers.js';
+import { registerIssueIpc } from './issue/ipc.js';
 import { applyApplicationMenu } from './menu.js';
 import { isSameOrigin } from './origin.js';
 import { openDeviceRegistry, registryPath } from './remote/devices.js';
@@ -503,6 +504,14 @@ void app.whenReady().then(async () => {
   // `clipboard-sanitized-write`, so a renderer-side write is refused in the
   // packaged app. See `./clipboard/ipc.ts`.
   registerClipboardIpc(ipcMain, clipboard);
+  // The route to github.com the error log never had. It takes a TITLE and a
+  // BODY and builds the address itself (`src/shared/issue.ts`), so the
+  // renderer names no destination -- the same bargain `remoteOpenLink` makes.
+  // It opens the prefilled form and posts nothing; submitting stays the
+  // operator's own act. See `./issue/ipc.ts`.
+  registerIssueIpc(ipcMain, async (url) => {
+    await shell.openExternal(url);
+  });
   // The Terminal tab's only route to tmux. Registered unconditionally, but it
   // spawns nothing until the renderer asks -- and the renderer asks only while
   // the tab is open, so a closed tab costs a process nothing.

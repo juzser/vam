@@ -244,6 +244,25 @@ export function createClipboardApi(ipc: InvokerLike): ClipboardApi {
   };
 }
 
+/** The bridge's issue member: one prefilled form, answered by whether it opened. */
+export type IssueApi = {
+  open(title: string, body: string): Promise<boolean>;
+};
+
+/**
+ * TEXT, NOT A DESTINATION -- `openLink`'s rule kept through a different door.
+ * The renderer hands over the title and body `errors/report.ts` composed and
+ * main decides where they go (`src/main/issue/ipc.ts`), so this bridge cannot
+ * be asked to navigate anywhere. Forwards straight through: the channel
+ * answers a bare boolean, not an `IpcResult`, like `clipboard.writeText`
+ * above.
+ */
+export function createIssueApi(ipc: InvokerLike): IssueApi {
+  return {
+    open: (title, body) => ipc.invoke(CHANNELS.issueOpen, title, body) as Promise<boolean>,
+  };
+}
+
 /**
  * The bridge's terminal member: one read, answered by a bare `PaneView`.
  *

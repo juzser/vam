@@ -78,10 +78,13 @@ describe('reaching github from a recorded failure', () => {
     const { container } = render(<ErrorLogPanel onClose={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: /report/i }));
     // The panel's own fallback wording, so this test fails for the right
-    // reason if the copy ever starts succeeding here.
-    expect(await screen.findByText(/copy failed/i)).toBeTruthy();
+    // reason if the copy ever starts succeeding here. It read `copy failed`
+    // when this was written; the panel says which side refused now, and what
+    // the two remaining routes are -- the wording changed WITH the routes,
+    // which is the point rather than a rename.
+    expect(await screen.findByText(/clipboard refused/i)).toBeTruthy();
     // Any of the three would do: an anchor, a control that asks main to open
-    // it, or a selectable element holding the URL. None exists.
+    // it, or a selectable element holding the URL.
     const anchor = container.querySelector(`a[href^="${NEW_ISSUE_URL}"]`);
     const opener = screen.queryByRole('button', { name: /open|github|browser/i });
     const selectableUrl = container.querySelector('.select-text');

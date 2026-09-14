@@ -3638,6 +3638,13 @@ function CanvasInner({
       }
       const route = newSessionRoute(source);
       if (!route.ok) {
+        // RECORDED, like the identical refusal the "new project" control
+        // raises one function down -- and it was not. The same sentence left a
+        // trace from one button and vanished from the one beside it, while the
+        // status bar it went to is overwritten by the next act, which on this
+        // path is usually the operator pressing the control again. Never as a
+        // failure: this is vam working, and a report is not what it needs.
+        recordRefusal('new session', route.decline);
         setStatus(route.decline);
         return;
       }

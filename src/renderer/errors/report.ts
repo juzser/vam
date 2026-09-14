@@ -16,6 +16,15 @@
  * workaround for the policy, it is the policy working -- a renderer that
  * could navigate to github.com is a renderer that could exfiltrate to it.
  *
+ * WHAT THAT SENTENCE DID NOT FOLLOW FROM, and was read as implying for one
+ * release too long: that the OPERATOR may not be taken there. Copying a
+ * four-kilobyte URL was the only route, out of a panel whose text could not be
+ * selected, so in practice there was no route -- reported from use as "the
+ * error log cannot create an issue". `CHANNELS.issueOpen` is the answer, and
+ * it keeps the policy exactly: the renderer sends this module's `title` and
+ * `body`, main owns the address, and the operator still presses submit on
+ * github.com themselves.
+ *
  * `scrub` runs over the ASSEMBLED body, not field by field, which is what
  * makes it impossible to add a field later that skips it. It also means the
  * body may not use markdown backticks: the scrubber redacts backticked runs
@@ -23,11 +32,18 @@
  * code along with them. Measured, not predicted -- it did.
  */
 
+import { issueUrl, NEW_ISSUE_URL } from '../../shared/issue.js';
 import type { LoggedEvent } from './log.js';
 import { scrub } from './scrub.js';
 
-/** The public repository this app belongs to. */
-export const NEW_ISSUE_URL = 'https://github.com/juzser/vam/issues/new';
+/**
+ * Re-exported, not declared. The address moved to `src/shared/issue.ts` when
+ * main gained a channel that opens it (`CHANNELS.issueOpen`): two processes
+ * have to agree about the destination, and two copies of a string in two
+ * processes is a pair that drifts silently -- the panel showing one address
+ * while the browser opens another.
+ */
+export { NEW_ISSUE_URL };
 
 export type Report = {
   readonly title: string;
@@ -77,6 +93,5 @@ export function composeReport(event: LoggedEvent, homeDir?: string): Report {
     ].join('\n'),
     homeDir,
   );
-  const url = `${NEW_ISSUE_URL}?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
-  return { title, body, url };
+  return { title, body, url: issueUrl(title, body) };
 }

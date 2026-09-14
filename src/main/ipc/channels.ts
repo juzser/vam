@@ -80,6 +80,23 @@ export const CHANNELS = {
    */
   clipboardWrite: 'vam:clipboard:write',
   /**
+   * "Open a prefilled vam issue in my own browser."
+   *
+   * TEXT, NEVER A LOCATION -- `remoteOpenLink`'s rule, kept, through a
+   * different door. The renderer sends a TITLE and a BODY; main builds the
+   * address from `src/shared/issue.ts` and opens that. A URL sent as a title
+   * arrives as a query parameter of vam's own issues page and goes nowhere.
+   *
+   * It POSTS NOTHING. What opens is the form, prefilled, in the operating
+   * system's browser -- pressing submit there stays the operator's decision
+   * and their last read of the body before it is public (`report.ts`). Before
+   * this channel the only route to github.com was pasting a four-kilobyte URL
+   * by hand, out of a panel whose text could not be selected.
+   *
+   * Answers a bare boolean: did a browser open. Same shape as `updateOpen`.
+   */
+  issueOpen: 'vam:issue:open',
+  /**
    * The update check. Answers bare too -- an `UpdateStatus`, which carries
    * its own four branches (`src/shared/update.ts`). It is the only channel
    * that reaches a host outside this machine, and it does so unauthenticated,
