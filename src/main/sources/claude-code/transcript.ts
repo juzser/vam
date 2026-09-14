@@ -189,6 +189,31 @@ const INTERRUPTION = /^\s*\[[^\]]{1,80}\]\s*$/;
  * "any `user` line with text" -- and the 276 it drops are exactly the ones
  * that would have cut a turn in half.
  */
+/**
+ * Is `marker` the CLI's precis of `full` -- the same prompt, summarised?
+ *
+ * `lastPrompt` is not the prompt: it is a SUMMARY of it, flattened (every run
+ * of whitespace becomes one space) and cut at 200 characters plus an ellipsis.
+ * So the test is a PREFIX test over the flattened forms, with a trailing
+ * ellipsis dropped first.
+ *
+ * ONE DIRECTION ONLY, and that is the whole guard. "Either is a prefix of the
+ * other" would pair a marker reading `ship it` with a pending line reading
+ * `ship` and caption the turn with a prompt the operator did not send. The
+ * marker is the shorter one by construction, or they are equal.
+ *
+ * Measured over the corpus: 1,212 of 1,216 marker/prompt pairs satisfy this.
+ * The four that do not are cases where the marker had moved on to something
+ * `operatorPrompt` filters out -- a `!` bash line, a background-agent notice
+ * -- so the pending line is an older prompt and the MARKER is the right
+ * answer. Which is exactly what a false result here selects.
+ */
+function marksPrompt(marker: string, full: string): boolean {
+  const flat = (text: string): string => text.replace(/\s+/g, ' ').trim();
+  const cut = flat(marker).replace(/…$/, '').trimEnd();
+  return cut !== '' && flat(full).startsWith(cut);
+}
+
 function operatorPrompt(line: Line): string | null {
   if (line['isCompactSummary'] === true || line['isMeta'] === true) return null;
   const message = line['message'];
@@ -489,6 +514,29 @@ export function summarizeTranscript(
   type OpenTurn = {
     /** `null` until a marker names it -- see above. */
     input: string | null;
+    /**
+     * The operator's own line, VERBATIM, when this turn was opened by one.
+     *
+     * `lastPrompt` is a precis -- whitespace flattened, cut at 200 characters
+     * plus an ellipsis -- so naming a turn from it drew `…` on every long
+     * prompt and lost the line breaks in every multi-line one (operator: "show
+     * full prompt In bubble"). The marker still NAMES the turn, because its
+     * byte offset is the turn's id; this is only which of the two strings the
+     * pane is given. `null` for a turn the marker opened alone, where there is
+     * no operator line in the window to read.
+     */
+    full: string | null;
+    /**
+     * THE MARKER TEXT THAT NAMED THIS TURN, which is what the re-emission
+     * dedup below compares against -- marker to marker.
+     *
+     * It cannot compare against `input`: that is now the operator's full text,
+     * and a 201-character precis never equals a 287-character prompt, so every
+     * one of the 21,604 re-emissions in the corpus opened a turn of its own.
+     * Measured rather than imagined -- one real session went from one turn to
+     * two, the second captioned with the precis of the first.
+     */
+    named: string | null;
     output: string | null;
     errors: number;
     start: number | null;
@@ -512,15 +560,28 @@ export function summarizeTranscript(
           // agrees on. When two prompts are waiting to be named the newest
           // takes the name: across the corpus the following marker named the
           // NEWEST pending prompt 24 times and an older one 0 times.
-          turns[turns.length - 1] = { ...open, input: prompt, start };
-        } else if (open?.input !== prompt) {
+          // THE OPERATOR'S TEXT WHERE IT REALLY IS THIS TURN'S, the marker's
+          // otherwise. `marksPrompt` is what keeps a marker that has moved on
+          // to something the classifier filtered out from captioning this turn
+          // with a prompt sent minutes ago.
+          const named = open.full !== null && marksPrompt(prompt, open.full) ? open.full : prompt;
+          turns[turns.length - 1] = { ...open, input: named, named: prompt, start };
+        } else if (open?.named !== prompt) {
           // No operator line in the window -- it is above the top -- so the
           // marker opens the turn itself, as it always did.
           //
           // Re-emitted constantly, and an unchanged value is the same turn:
           // measured across the whole corpus, 21,604 of 22,668 `last-prompt`
           // lines repeat the turn that is already open.
-          turns.push({ input: prompt, output: null, errors: 0, start, calls: [] });
+          turns.push({
+            input: prompt,
+            full: null,
+            named: prompt,
+            output: null,
+            errors: 0,
+            start,
+            calls: [],
+          });
         }
       }
     } else if (type === 'assistant') {
@@ -552,8 +613,17 @@ export function summarizeTranscript(
       // must still be the line that fixes both. `operatorPrompt` is what keeps
       // a compaction summary, a task notification or a `<bash-input>` echo
       // from cutting a turn in half.
-      if (operatorPrompt(line) !== null) {
-        turns.push({ input: null, output: null, errors: 0, start: null, calls: [] });
+      const prompt = operatorPrompt(line);
+      if (prompt !== null) {
+        turns.push({
+          input: null,
+          full: prompt,
+          named: null,
+          output: null,
+          errors: 0,
+          start: null,
+          calls: [],
+        });
       }
       // A tool result belongs to the turn that was OPEN when it arrived: it
       // comes after the prompt that opened that turn and before the next one.
