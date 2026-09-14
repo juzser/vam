@@ -7,7 +7,7 @@ vim-style keys instead of a mouse. vam runs on
 its own — it ships with a real, built-in source (your own Claude Code
 sessions) and does not require any other project to be installed or running.
 
-![vam, dark theme](docs/images/canvas-dark.png)
+![vam, dark theme: sessions as tabs, grouped by project in the sidebar, one session's IN/OUT on the right](docs/images/hero-dark.png)
 
 ## What this is
 
@@ -38,16 +38,26 @@ grouped into "needs you" and "all sessions":
 
 ![Command palette open](docs/images/palette.png)
 
-A session's Terminal tab shows the screen of the tmux pane vam started for
-it — a snapshot with the agent's own colours, not a live stream:
+A session's Agents tab is a navigator: the roster of subagents it is
+running on the left, and on the right the one you picked — its own IN/OUT
+and progress, not just the `●3` badge it collapses to elsewhere. (A session
+started by vam also has a Terminal tab, the screen of the tmux pane vam
+started for it — a snapshot with the agent's own colours, not a live
+stream; see the keyboard reference below.)
 
-![Terminal tab showing a captured pane](docs/images/terminal.png)
+![Agents tab showing one subagent's own IN/OUT](docs/images/agents-tab.png)
 
-The composer can attach a text file (read locally, folded into the prompt)
-or an image (validated against the session's own directory, its path put on
-its own line); vam uploads nothing in either case:
+The composer can attach a text file, read locally and folded straight into
+the prompt — vam uploads nothing:
 
-![Composer with an image attached](docs/images/image-attach.png)
+![Composer with a text file attached](docs/images/composer-attach.png)
+
+The desktop app can also attach an image, opening a native file picker and
+validating the answer against the session's own directory before putting its
+path on its own line in the prompt text; that dialog has no browser
+equivalent, so it is not pictured here — every screenshot in this README is
+`?demo=1`, vam's fictional fixture, and the image picker only exists where a
+real session and a real directory do.
 
 ## Install
 
