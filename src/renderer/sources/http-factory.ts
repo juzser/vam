@@ -23,6 +23,7 @@ import type { Project } from '../domain/model.js';
 import type { SessionSource, SourceError } from './port.js';
 import { createSourceFromPreload } from './preload-factory.js';
 import { activeProviderId } from './provider.js';
+import { readRemoteToken } from './remote-token.js';
 
 /** The server's envelope, the same one the IPC layer sends. */
 type Envelope = { ok: true; value: unknown } | { ok: false; error: SourceError };
@@ -36,7 +37,9 @@ type Envelope = { ok: true; value: unknown } | { ok: false; error: SourceError }
 export type HttpTransport = {
   fetch: (
     url: string,
-    init?: { method: string; headers: Record<string, string>; body: string },
+    // `method` and `body` are optional because a READ now carries an init too:
+    // it has headers to send (the pairing token) and nothing else.
+    init?: { method?: string; headers: Record<string, string>; body?: string },
   ) => Promise<{ status: number; statusText: string; json(): Promise<unknown> }>;
   openStream: (url: string) => {
     addEventListener(type: 'change', listener: () => void): void;
@@ -78,13 +81,28 @@ async function call<T>(
   body?: Record<string, unknown>,
 ): Promise<T> {
   let answer: Awaited<ReturnType<HttpTransport['fetch']>>;
+  /**
+   * THE PAIRING TOKEN, READ PER REQUEST RATHER THAN CAPTURED ONCE.
+   *
+   * A device can be revoked from the desktop mid-session, and a token read at
+   * construction would go on being sent after the operator had withdrawn it.
+   * Reading it here also means the pairing screen does not have to rebuild the
+   * api to make its next request carry what it has just obtained.
+   *
+   * ABSENT IS ABSENT. No header at all before pairing, rather than an empty
+   * `Bearer `: the server counts a malformed credential as a failed attempt,
+   * and an unpaired phone polling a read would spend the lockout budget of a
+   * device that has not even tried yet.
+   */
+  const token = readRemoteToken();
+  const auth: Record<string, string> = token === null ? {} : { authorization: `Bearer ${token}` };
   try {
     answer =
       body === undefined
-        ? await transport.fetch(url)
+        ? await transport.fetch(url, { headers: auth })
         : await transport.fetch(url, {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
+            headers: { ...auth, 'content-type': 'application/json' },
             body: JSON.stringify(body),
           });
   } catch (cause) {
