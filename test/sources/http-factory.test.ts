@@ -11,7 +11,7 @@
  * passed in.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createHttpSourceApi,
   createSourceFromHttp,
@@ -20,6 +20,7 @@ import {
 import type { SourceCapabilities } from '../../src/renderer/sources/port.js';
 import { canSubscribeTo, canWriteTo } from '../../src/renderer/sources/port.js';
 import { createSourceFromPreload } from '../../src/renderer/sources/preload-factory.js';
+import { clearRemoteToken, writeRemoteToken } from '../../src/renderer/sources/remote-token.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../../src/shared/preload-api.js';
 
 const CAPABILITIES: SourceCapabilities = {
@@ -57,14 +58,20 @@ const PROJECTS = [{ id: 'p1', name: 'vam', sessions: [] }] as unknown as Awaited
   ReturnType<PreloadSourceApi['load']>
 >;
 
-type Call = { url: string; init?: { method?: string; body?: string } };
+type Call = {
+  url: string;
+  init?: { method?: string; body?: string; headers?: Record<string, string> };
+};
 
 /** A fetcher answering the server's envelopes, recording what was asked. */
 function fetcher(
   answers: Record<string, unknown> = {},
 ): HttpTransport['fetch'] & { calls: Call[] } {
   const calls: Call[] = [];
-  const fake = (async (url: string, init?: { method?: string; body?: string }) => {
+  const fake = (async (
+    url: string,
+    init?: { method?: string; body?: string; headers?: Record<string, string> },
+  ) => {
     calls.push({ url, init });
     const body = answers[new URL(url, 'http://vam.test').pathname] ?? { ok: true, value: null };
     return {
@@ -100,6 +107,70 @@ function stream() {
   };
   return { open, tick, isClosed: () => closed };
 }
+
+/**
+ * THE CREDENTIAL, ON EVERY REQUEST.
+ *
+ * Nothing in this module sent an `authorization` header, so the browser build
+ * could only ever be refused: it asked `/api/describe`, got vam's 401, and
+ * drew the refusal as a banner over an empty canvas. Pairing had no client
+ * half at all -- nothing in the repository posted to `/api/pair` either.
+ *
+ * READ PER REQUEST, not captured once. A device can be revoked from the
+ * desktop mid-session, and a token read once at construction would keep being
+ * sent after the operator had withdrawn it; reading it each time also means
+ * the pairing screen does not have to rebuild the api to make the next request
+ * carry what it just obtained.
+ */
+describe('the pairing token on the wire', () => {
+  afterEach(() => clearRemoteToken());
+
+  it('sends no authorization header before anything is paired', async () => {
+    clearRemoteToken();
+    const fetch = fetcher(READS);
+    await createHttpSourceApi({ fetch }).describe();
+    expect(fetch.calls[0]?.init?.headers?.['authorization']).toBeUndefined();
+  });
+
+  it('sends the stored token as a bearer credential on a read', async () => {
+    writeRemoteToken('a-token-the-desktop-minted');
+    const fetch = fetcher(READS);
+    await createHttpSourceApi({ fetch }).describe();
+    expect(fetch.calls[0]?.init?.headers?.['authorization']).toBe(
+      'Bearer a-token-the-desktop-minted',
+    );
+  });
+
+  it('sends it on a write too, beside the content type', async () => {
+    writeRemoteToken('t');
+    const fetch = fetcher(READS);
+    await createHttpSourceApi({ fetch }).recordPrompt?.('s1', 'go on');
+    const write = fetch.calls.at(-1);
+    expect(write?.init?.method).toBe('POST');
+    expect(write?.init?.headers?.['authorization']).toBe('Bearer t');
+    expect(write?.init?.headers?.['content-type']).toContain('application/json');
+  });
+
+  it('picks up a token stored AFTER the api was built', async () => {
+    clearRemoteToken();
+    const fetch = fetcher(READS);
+    const api = createHttpSourceApi({ fetch });
+    writeRemoteToken('paired-just-now');
+    await api.describe();
+    expect(fetch.calls[0]?.init?.headers?.['authorization']).toBe('Bearer paired-just-now');
+  });
+
+  it('stops sending one the moment it is cleared', async () => {
+    writeRemoteToken('t');
+    const fetch = fetcher(READS);
+    const api = createHttpSourceApi({ fetch });
+    await api.describe();
+    clearRemoteToken();
+    await api.describe();
+    expect(fetch.calls[0]?.init?.headers?.['authorization']).toBe('Bearer t');
+    expect(fetch.calls[1]?.init?.headers?.['authorization']).toBeUndefined();
+  });
+});
 
 describe('createSourceFromHttp', () => {
   it('builds the same source the preload factory builds from one descriptor', async () => {
