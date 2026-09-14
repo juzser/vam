@@ -21,7 +21,15 @@ const RELEASE_URL = 'https://github.com/juzser/vam/releases/tag/v0.1.0';
 const AVAILABLE: UpdateStatus = { kind: 'available', version: '0.1.0', url: RELEASE_URL };
 
 function api(status: UpdateStatus, opened = true) {
-  return { check: vi.fn(async () => status), open: vi.fn(async () => opened) };
+  // `recheck` is the Settings button's channel and this notice never calls it;
+  // it is here because the bridge type carries it, and a fake that only has
+  // the members its subject happens to use is a fake that stops catching the
+  // day the subject reaches for another.
+  return {
+    check: vi.fn(async () => status),
+    recheck: vi.fn(async () => status),
+    open: vi.fn(async () => opened),
+  };
 }
 
 /** Lets the mount effect's promise settle before anything is asserted. */
@@ -126,6 +134,9 @@ describe('UpdateNotice', () => {
   it('stays silent when the bridge itself rejects', async () => {
     const update = {
       check: vi.fn(async (): Promise<UpdateStatus> => {
+        throw new Error('no handler');
+      }),
+      recheck: vi.fn(async (): Promise<UpdateStatus> => {
         throw new Error('no handler');
       }),
       open: vi.fn(async () => false),

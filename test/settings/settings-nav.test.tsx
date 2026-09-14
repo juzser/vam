@@ -18,6 +18,10 @@ import { EMPTY_PREFS, type Prefs } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 import { SECTIONS } from '../../src/renderer/settings/sections.js';
 
+/** The end of the nav, read off the list rather than spelled: the two
+ *  assertions below are about the ENDS, not about which section is there. */
+const last = SECTIONS[SECTIONS.length - 1]?.id ?? 'appearance';
+
 afterEach(cleanup);
 
 function open(prefs: Prefs = EMPTY_PREFS) {
@@ -88,9 +92,12 @@ describe('the nav is steerable without a mouse', () => {
     expect(nav('sessions').getAttribute('aria-selected')).toBe('true');
     fireEvent.keyDown(nav('sessions'), { key: 'ArrowUp' });
     expect(shown()).toEqual(['appearance']);
-    // Wrapping: up from the first lands on the last.
+    // Wrapping: up from the first lands on the last -- whichever that is.
+    // Named from `SECTIONS` rather than spelled, because this assertion is
+    // about the WRAP and a literal here goes stale every time a section is
+    // added (it did, when Update arrived).
     fireEvent.keyDown(nav('appearance'), { key: 'ArrowUp' });
-    expect(shown()).toEqual(['keyboard']);
+    expect(shown()).toEqual([last]);
   });
 
   it('keeps focus on the nav item it moved to, never inside the panel', () => {
@@ -103,8 +110,8 @@ describe('the nav is steerable without a mouse', () => {
   it('jumps to the ends with Home and End', () => {
     open();
     fireEvent.keyDown(nav('appearance'), { key: 'End' });
-    expect(shown()).toEqual(['keyboard']);
-    fireEvent.keyDown(nav('keyboard'), { key: 'Home' });
+    expect(shown()).toEqual([last]);
+    fireEvent.keyDown(nav(last), { key: 'Home' });
     expect(shown()).toEqual(['appearance']);
   });
 

@@ -1,5 +1,44 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { compareVersions, parseVersion } from '../../src/shared/update.js';
+import { compareVersions, parseVersion, VERSION } from '../../src/shared/update.js';
+
+/**
+ * THE VERSION VAM SHOWS, AND WHY IT IS A CONSTANT WITH A TEST BEHIND IT.
+ *
+ * Operator: "add an update section in settings, show the version and a check
+ * for updates button." The version has to be readable by the RENDERER, and the
+ * renderer has two builds: the Electron shell, where `app.getVersion()` exists
+ * one process away, and a plain page served over HTTP to the paired phone,
+ * where it does not exist at all and there is no bridge to ask across.
+ *
+ * The alternatives were worse. A Vite `define` would have to be added to three
+ * configs (`vite.config.ts`, `vite.web.config.ts`, `electron.vite.config.ts`)
+ * and a fourth for vitest, and the failure of forgetting one is a build that
+ * prints `undefined` at the operator. Importing `package.json` into the
+ * renderer drags a dependency list into a bundle to read one string.
+ *
+ * So: one constant, in the one module both builds already share, and THIS --
+ * a test that fails the moment it disagrees with `package.json`, which is the
+ * file electron-builder stamps into the app. The duplication is real and it is
+ * pinned; a release bump that touches one and not the other is red.
+ */
+describe('the shipped version', () => {
+  const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as {
+    version: string;
+  };
+
+  it('is exactly what package.json ships', () => {
+    expect(VERSION).toBe(pkg.version);
+  });
+
+  it('is a version this app can compare, or the update check is decorative', () => {
+    // `checkForUpdate` returns `up-to-date` when either side does not parse,
+    // so a version like `0.1.0-dev` would make "is there a newer one" answer
+    // no, forever, quietly.
+    expect(parseVersion(VERSION)).not.toBeNull();
+  });
+});
 
 describe('parseVersion', () => {
   it('accepts a bare release version', () => {

@@ -134,14 +134,35 @@ for (const width of STRIP_WIDTHS) {
     }
   }
 
-  // Rows, measured rather than assumed: the strip wraps to two below `sm`
-  // (four labelled tabs need 306px of strip and get 278px at 320px) and sits
-  // on one row from `sm` up.
+  // Rows, measured rather than assumed, AND THE NUMBERS ARE A FUNCTION OF HOW
+  // MANY SECTIONS THERE ARE. With four tabs this read 2 below `sm` and 1
+  // above; the fifth (Update) makes it 3 and 2, because the strip wraps at two
+  // per row narrow and three per row wide. Re-measured here rather than
+  // computed, so that a sixth section reddens this and somebody decides -- a
+  // guard that derived the layout from the layout would assert nothing.
   const rows = new Set(geometry.map((item) => item.top)).size;
-  const expected = width < 640 ? 2 : 1;
+  const expected = width < 640 ? 3 : 2;
   console.log(`${width}px: ${names.join(' ')} rows=${rows}`);
   if (rows !== expected) {
-    throw new Error(`${width}px: the strip laid out on ${rows} row(s), expected ${expected}`);
+    throw new Error(
+      `${width}px: the strip laid out on ${rows} row(s), expected ${expected} for ${SECTIONS.length} sections`,
+    );
+  }
+
+  // AND THE THING THE ROW COUNT WAS ALWAYS A PROXY FOR. A nav that grows a row
+  // per pair of sections eventually owns the screen it is a nav for; at 320px
+  // it is 146px of an 844px viewport today (17%). The ceiling is the real
+  // assertion -- rows are how it happens, this is what it costs.
+  const navHeight = await page.evaluate(() =>
+    Math.round(document.querySelector('[data-settings-nav]')?.getBoundingClientRect().height ?? 0),
+  );
+  const share = navHeight / 844;
+  console.log(`  nav is ${navHeight}px, ${Math.round(share * 100)}% of the viewport`);
+  if (navHeight === 0) {
+    throw new Error(`${width}px: the nav measured 0px, so this budget is about nothing`);
+  }
+  if (share > 0.25) {
+    throw new Error(`${width}px: the section nav takes ${Math.round(share * 100)}% of the screen`);
   }
   if (width === 390) {
     await page.screenshot({ path: `${outDir}/settings-nav-390-after.png` });
@@ -610,6 +631,8 @@ console.log('\n=== the settings case ladder');
     throw new Error(`the nav offers ${sectionIds.length} sections, so this sweep is about nothing`);
   }
   const seen = { headings: 0, labels: 0, hints: 0, controls: 0, descriptions: 0 };
+  /** Paragraphs that BEGIN with the product name, across the whole sweep. */
+  let brandStarts = 0;
   for (const sectionId of sectionIds) {
   await page.locator(`[data-settings-nav-item="${sectionId}"]`).click();
   await page.waitForTimeout(150);
@@ -744,7 +767,7 @@ console.log('\n=== the settings case ladder');
   const sentences = await page.evaluate(() => {
     const panel = document.querySelector('[data-settings-panel]:not([hidden])');
     const own = panel?.querySelector('[data-settings-panel-hint]') ?? null;
-    const rows = [...(panel?.querySelectorAll('[data-settings-rows] p') ?? [])];
+    const all = [...(panel?.querySelectorAll('[data-settings-rows] p') ?? [])];
     const at = (el) =>
       el === null
         ? null
@@ -752,7 +775,18 @@ console.log('\n=== the settings case ladder');
             text: (el.textContent ?? '').trim().slice(0, 28),
             first: getComputedStyle(el, '::first-letter').textTransform,
           };
-    return { own: at(own), rows: rows.map(at) };
+    return {
+      own: at(own),
+      rows: all.filter((el) => !el.hasAttribute('data-verbatim')).map(at),
+      verbatim: all.filter((el) => el.hasAttribute('data-verbatim')).map(at),
+      // Every paragraph, whatever its opt-out, with the FULL text: the brand
+      // check below is about what a line starts with, not about which bucket
+      // somebody put it in.
+      all: all.map((el) => ({
+        text: (el.textContent ?? '').trim(),
+        first: getComputedStyle(el, '::first-letter').textTransform,
+      })),
+    };
   });
   console.log(`  [${sectionId}] panel hint: ${JSON.stringify(sentences.own)}`);
   if (sentences.own === null) {
@@ -764,6 +798,52 @@ console.log('\n=== the settings case ladder');
         `[${sectionId}] ${JSON.stringify(row.text)} starts ${row.first}, not a sentence`,
       );
     }
+  }
+
+  // AND THE ONE EXCEPTION, MEASURED RATHER THAN TRUSTED. `data-verbatim` says
+  // "somebody chose these letters" -- the product is `vam`, lower case, and
+  // the Update section is the first copy here to begin with the name. Without
+  // the opt-out it paints `Vam 0.1.0`, which every case assertion above was
+  // green for: the transform WAS applied, correctly, to the wrong string.
+  //
+  // Both halves are checked. `none` proves the `:not()` reaches the element;
+  // the painted first character proves the rule it is exempt from is the rule
+  // that would otherwise have changed it -- a selector that matches nothing
+  // reads exactly like a selector that works.
+  for (const row of sentences.verbatim) {
+    if (row.first !== 'none') {
+      throw new Error(
+        `[${sectionId}] the verbatim line ${JSON.stringify(row.text)} is still ${row.first}`,
+      );
+    }
+    const head = row.text.slice(0, 1);
+    if (head !== '' && head === head.toUpperCase() && head !== head.toLowerCase()) {
+      throw new Error(
+        `[${sectionId}] the verbatim line ${JSON.stringify(row.text)} starts upper case anyway`,
+      );
+    }
+  }
+  if (sectionId === 'update' && sentences.verbatim.length === 0) {
+    throw new Error('the update section draws no verbatim line, so the exception is untested');
+  }
+
+  // AND THE PROPERTY ALL OF THAT EXISTS FOR: THE PRODUCT IS CALLED `vam`.
+  //
+  // The check above proves the opt-out WORKS where it is applied. It does not
+  // prove it is applied where it is needed -- measured, by deleting
+  // `data-verbatim` from the version line: the paragraph simply moved into the
+  // other bucket, satisfied the uppercase rule there, and the screen went back
+  // to reading `Vam 0.1.0` with every assertion green. So the real invariant
+  // is stated directly, about the string rather than about the markup: a line
+  // that begins with the product name must paint it the way the product is
+  // spelled.
+  const brandLines = sentences.all.filter((row) => /^vam\b/i.test(row.text));
+  brandStarts += brandLines.length;
+  const capitalisedBrand = brandLines.filter((row) => row.first !== 'none');
+  if (capitalisedBrand.length > 0) {
+    throw new Error(
+      `[${sectionId}] the product name is capitalised in ${JSON.stringify(capitalisedBrand.map((r) => r.text.slice(0, 32)))}`,
+    );
   }
 
   // THE HEADING NAMES THE SECTION THE NAV NAMES. Before this the nav said
@@ -788,7 +868,13 @@ console.log('\n=== the settings case ladder');
   await page.screenshot({ path: `${outDir}/settings-case-${sectionId}.png` });
   console.log(`${outDir}/settings-case-${sectionId}.png`);
   }
-  console.log(`  swept: ${JSON.stringify(seen)}`);
+  console.log(`  swept: ${JSON.stringify(seen)}, ${brandStarts} line(s) start with the product name`);
+  // THE CORPUS FOR THE BRAND CHECK. Zero of them and the loop above is a loop
+  // over nothing -- which is precisely how it would read on the day somebody
+  // rewrote the Update copy to avoid the problem instead of fixing it.
+  if (brandStarts === 0) {
+    throw new Error('no settings line starts with the product name, so its case is untested');
+  }
   // ONE HEADING PER SECTION, and enough rows and names across the four that a
   // panel which quietly stopped drawing them cannot pass this by drawing
   // nothing. Literals rather than `> 0`: that is the difference between a

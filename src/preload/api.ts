@@ -199,6 +199,12 @@ export function createUsageApi(ipc: InvokerLike): UsageApi {
  */
 export type UpdateApi = {
   check(): Promise<UpdateStatus>;
+  /**
+   * The same question, asked again because the operator pressed a button.
+   * Unlike `check`, this really goes out -- and its answer replaces the one
+   * `check` and `open` read.
+   */
+  recheck(): Promise<UpdateStatus>;
   /** True when the operator's own browser was opened on the release page. */
   open(): Promise<boolean>;
 };
@@ -208,12 +214,15 @@ export type UpdateApi = {
  * bare values rather than an `IpcResult` (see `src/main/update/ipc.ts`).
  * `check` READS an answer main already has: the request went out once, at
  * launch, so calling this more often does not make vam contact GitHub more
- * often. `open` asks for the release page in the operator's browser; it
+ * often. `recheck` is the opposite and is the Settings button's own channel:
+ * it really asks, and what it gets back becomes the answer `check` and `open`
+ * give from then on. `open` asks for the release page in the operator's browser; it
  * downloads nothing.
  */
 export function createUpdateApi(ipc: InvokerLike): UpdateApi {
   return {
     check: () => ipc.invoke(CHANNELS.updateCheck) as Promise<UpdateStatus>,
+    recheck: () => ipc.invoke(CHANNELS.updateRecheck) as Promise<UpdateStatus>,
     open: () => ipc.invoke(CHANNELS.updateOpen) as Promise<boolean>,
   };
 }
