@@ -423,6 +423,47 @@ export async function stopSession(
       : classifyTmuxFailure({ failure, stderr, action: `closing session ${pane}` });
   }
 
+  /**
+   * TWO REASONS WEARING ONE SENTENCE, AND ONLY ONE OF THEM IS USUALLY TRUE.
+   *
+   * This refusal used to say "more than one live session may share this
+   * project, or it has not published its pane yet" for every unresolved row.
+   * Reported from use, and measured on the reporting machine: there was no
+   * tmux server running at all, 0 of 5 live sessions published a `tmux` field,
+   * and 6 of the 8 live rows were alone in their own directory. So NEITHER
+   * clause was true, and the real reason was the one the sentence never
+   * offered -- vam did not start these sessions and has no pane of its own to
+   * find.
+   *
+   * A WRONG CAUSE IS WORSE THAN AN UNKNOWN ONE -- the rule `classifyTmuxFailure`
+   * states one file over, for the same kind of mistake. It sent the operator
+   * looking for a crowded project and a publishing delay that were not there,
+   * and left "force it closed" as the only way forward for a terminal vam
+   * never owned.
+   *
+   * The split is read off evidence vam already has: if NOTHING on the server
+   * is tagged for this row's project, there is no pane to be ambiguous about.
+   * If something is, the ambiguity sentence is true and is kept.
+   */
+  // No `!== ''` guard on the session's own tag: an unset tmux option reads
+  // back as the empty string, but `projectIdOf` always returns a
+  // `claude-code:`-prefixed value and can never BE the empty string, so the
+  // equality below already excludes it. Mutating that clause away changed no
+  // test and no outcome, which is what a guard that protects nothing looks
+  // like -- and keeping it would imply an untagged session could match here.
+  const taggedHere = listed.sessions.filter((session) => session.project === projectIdOf(row.cwd));
+  if (taggedHere.length === 0) {
+    return unresolvedInteractive({
+      code: 'not-vam-started',
+      kind: 'refused',
+      reason: `vam did not start "${nameOf(row)}", so it owns no terminal to close -- there is no tmux session of its own carrying this project.`,
+      row,
+      force,
+      killPid,
+      verifyPid,
+    });
+  }
+
   return unresolvedInteractive({
     code: 'pane-unresolved',
     kind: 'refused',
