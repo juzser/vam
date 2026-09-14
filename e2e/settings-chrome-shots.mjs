@@ -892,6 +892,87 @@ console.log('\n=== the settings case ladder');
 }
 
 // ---------------------------------------------------------------- ITEM 5.
+// EVERY BUTTON ON THE SURFACE, AND HOW MANY SHAPES THEY COME IN.
+//
+// Operator: "review the UI of the buttons in settings." What a review needs
+// first is a census, and this is it.
+//
+// WHAT THE REVIEW FOUND IS NOT WHAT THIS CAN SEE, and the distinction is worth
+// keeping. The outlier was the Remote panel's actions -- an unconditional
+// `min-h-[44px]`, the PHONE's touch floor, drawing 44px tall in a dialog where
+// every other control is 28. This guard cannot reach them: the Remote panel
+// needs `window.api.remote`, a preload bridge, so a browser draws the "no
+// bridge" state instead. That one is held by a class assertion in
+// `test/settings/pairing-panel.test.tsx`, which says so. What IS below is the
+// rest of the surface -- 155 buttons of it -- pinned so the next stray is
+// loud.
+//
+// THE RANKS ARE PINNED, NOT COUNTED. Three heights and one radius, each with
+// a reason, and a fourth shape has to be argued for rather than merely typed.
+// A "they should all match" assertion would be false -- a 24px stepper icon
+// and a 26px keycap in a list of seventy are deliberate -- and a "count the
+// distinct values" one would pass on any two wrongs.
+console.log('\n=== the settings button census');
+{
+  const page = await openSettings(1100, 800);
+  const sectionIds = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-settings-nav-item]')].map((el) =>
+      el.getAttribute('data-settings-nav-item'),
+    ),
+  );
+  /** height -> what it is for. Anything else is a new rank, and reddens. */
+  const RANKS = {
+    24: 'a stepper icon, inside its own field',
+    26: 'a key slot, in a list of seventy',
+    28: 'everything else on this surface',
+  };
+  const seenRanks = new Map();
+  const strays = [];
+  let counted = 0;
+  for (const sectionId of sectionIds) {
+    await page.locator(`[data-settings-nav-item="${sectionId}"]`).click();
+    await page.waitForTimeout(120);
+    const rows = await page.evaluate(() => {
+      const panel = document.querySelector('[data-settings-panel]:not([hidden])');
+      return [...(panel?.querySelectorAll('button') ?? [])].map((el) => {
+        const box = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        return {
+          text: (el.textContent ?? '').trim().slice(0, 24) || (el.getAttribute('aria-label') ?? '?'),
+          height: Math.round(box.height),
+          radius: cs.borderTopLeftRadius,
+        };
+      });
+    });
+    for (const row of rows) {
+      counted += 1;
+      seenRanks.set(row.height, (seenRanks.get(row.height) ?? 0) + 1);
+      if (RANKS[row.height] === undefined) {
+        strays.push(`[${sectionId}] ${JSON.stringify(row.text)} is ${row.height}px`);
+      }
+      // ONE RADIUS. The surface carried two (4px and 6px) with no argument for
+      // either, so the dominant one won and this is what keeps a third from
+      // arriving unnoticed.
+      if (row.radius !== '4px') {
+        strays.push(`[${sectionId}] ${JSON.stringify(row.text)} has a ${row.radius} radius`);
+      }
+    }
+  }
+  console.log(`  ${counted} buttons, heights: ${JSON.stringify(Object.fromEntries(seenRanks))}`);
+  // THE CORPUS FIRST. The keyboard section alone draws over a hundred, so a
+  // sweep that found a handful found the wrong thing.
+  if (counted < 100) {
+    throw new Error(`the census found ${counted} buttons, so it is about nothing`);
+  }
+  if (strays.length > 0) {
+    throw new Error(
+      `${strays.length} button(s) outside the ranks:\n  - ${strays.slice(0, 8).join('\n  - ')}`,
+    );
+  }
+  await page.close();
+}
+
+// ---------------------------------------------------------------- ITEM 6.
 // A SWITCH THAT LOOKS LIKE ONE.
 //
 // Operator: "turn some of the settings buttons into a toggle UI." Focus view
