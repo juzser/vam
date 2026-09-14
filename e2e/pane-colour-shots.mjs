@@ -405,9 +405,11 @@ for (const theme of ['dark', 'light']) {
     JSON.stringify(bubble),
   );
   // AND THE TEXT ON IT. The fill is chosen against the one ink the bubble
-  // paints, so the ink is measured HERE rather than trusted: `ink-dim` reads
-  // 4.750:1 on the dark fill and `ink-faint` would read 3.364:1, so an edit
-  // that reaches for a quieter grey has to fail somewhere, and this is where.
+  // paints, so the ink is measured HERE rather than trusted: `--vam-ink`
+  // (raised from `--vam-ink-dim` this round, for the prompt's own contrast)
+  // reads 6.887:1 on the dark fill and `--vam-ink-faint` would read 3.718:1,
+  // so an edit that reaches for a quieter grey has to fail somewhere, and
+  // this is where.
   const bubbleText = await page.evaluate(() => {
     const { opaque, ratio } = window.vamColour;
     const box = document.querySelector('[data-detail-scroll="in"]');

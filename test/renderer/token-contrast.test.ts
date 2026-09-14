@@ -136,18 +136,24 @@ const TEXT_GROUNDS = [
  * `--vam-in-bubble` IS DELIBERATELY NOT A TEXT GROUND, and the omission is the
  * interesting half.
  *
- * It carries exactly one ink -- `--vam-ink-dim`, the prompt's own paragraph in
- * `DetailPanel.tsx` -- which measures 4.787:1 on it in dark and 7.490:1 in
- * light. Listing it above would demand all nine text tokens, and two of them
- * genuinely fail there in dark: `ink-faint`/`ink-quiet` at 3.355:1 and
- * `failed` at 3.588:1. Meeting that would mean a fill so close to the pane
- * that the bubble goes back to being invisible, which is the complaint that
- * created the token.
+ * It carries exactly one ink -- `--vam-ink`, the prompt's own paragraph in
+ * `DetailPanel.tsx` (raised from `--vam-ink-dim` at the operator's own
+ * separate ask for a lighter prompt) -- which measures 6.887:1 on it in dark
+ * and 17.167:1 in light. Listing it above would demand all nine text tokens,
+ * and now most of them fail on the dark fill: dropping the bubble's hue this
+ * round moved every status colour's reading on it at once. Only `--vam-ink`
+ * and `--vam-ink-dim` (4.819:1) clear 4.5:1 there; `--vam-running` scrapes
+ * past at 4.627:1; `--vam-ink-faint`/`--vam-ink-quiet` (3.718:1),
+ * `--vam-waiting` (3.754:1), `--vam-idle` (3.801:1), `--vam-done` (3.830:1)
+ * and `--vam-failed` (3.827:1) do not. None of the five failing ones is ever
+ * painted there -- the bubble carries exactly `--vam-ink` and nothing else --
+ * so the omission still costs nothing, and is wider now only because the
+ * fill's own hue is gone, not because the bubble itself changed shape.
  *
- * So the pair that exists is asserted, in `surface-elevation.test.ts`, and the
- * ones that do not exist are PREVENTED rather than measured: the e2e guard
- * reads the colour the bubble's paragraph is really painted with and holds it
- * to 4.5:1, so an edit that reaches for a quieter grey fails there.
+ * So the one ink that exists is asserted, in `surface-elevation.test.ts`, and
+ * the ones that do not exist are PREVENTED rather than measured: the e2e
+ * guard reads the colour the bubble's paragraph is really painted with and
+ * holds it to 4.5:1, so an edit that reaches for a quieter grey fails there.
  */
 
 /** Tokens that carry body text and therefore owe WCAG 1.4.3's 4.5:1. */

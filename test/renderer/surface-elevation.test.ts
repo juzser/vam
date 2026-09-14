@@ -186,9 +186,11 @@ describe('surfaces are ordered by elevation, in both themes', () => {
         // NOTE THAT `raised` IS A MOVING TARGET NOW, which only makes this
         // stricter: the second dark lift widened it from ΔE 1.48 to 2.36 off
         // the pane, so the multiple below asks the bubble for ΔE 9.46 where it
-        // used to ask for 5.92. It measures 14.52 in dark and 7.20 in light
-        // since the bubble was drained towards grey -- draining chroma spends
-        // ΔE, and this is the number that says how much was left.
+        // used to ask for 5.92. It now measures 11.41 in dark, since this
+        // round drained the bubble all the way to a plain grey (`styles.css`
+        // says why) -- lower than the teal ever read, and still clearing the
+        // floor with margin (10.81) rather than by a hair. Light is untouched
+        // and still measures 7.20.
         const pane = hex('--vam-pane');
         expect(deltaE(hex('--vam-in-bubble'), pane)).toBeGreaterThan(
           deltaE(hex('--vam-raised'), pane) * 4,
@@ -247,14 +249,15 @@ describe('surfaces are ordered by elevation, in both themes', () => {
       });
 
       it('keeps the one ink the bubble actually paints readable on it', () => {
-        // `--vam-ink-dim` is the ONLY text colour inside the bubble
-        // (`DetailPanel.tsx`, the prompt's own `<p>`), and it is the reason
-        // the fill stops where it does rather than going a rung further: at
-        // this depth `ink-faint` measures 3.36:1 and could not be used there.
-        // That constraint is recorded in `styles.css` beside the value; the
-        // e2e guard measures the ink the bubble is REALLY painted with, which
-        // is the half a token list cannot check.
-        expect(contrast(hex('--vam-ink-dim'), hex('--vam-in-bubble'))).toBeGreaterThanOrEqual(4.5);
+        // `--vam-ink` is the ONLY text colour inside the bubble now
+        // (`DetailPanel.tsx`, the prompt's own `<p>`) -- raised from
+        // `--vam-ink-dim` at the operator's own separate ask for a lighter
+        // prompt. `--vam-ink-faint` still measures under floor at this depth
+        // (3.72:1 in dark) and still could not be used there. That constraint
+        // is recorded in `styles.css` beside the value; the e2e guard measures
+        // the ink the bubble is REALLY painted with, which is the half a
+        // token list cannot check.
+        expect(contrast(hex('--vam-ink'), hex('--vam-in-bubble'))).toBeGreaterThanOrEqual(4.5);
       });
     });
   }
