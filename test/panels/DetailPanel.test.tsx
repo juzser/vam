@@ -2161,24 +2161,93 @@ describe('the empty tabs carry no tooltip, and the other notes stay', () => {
  * `test/canvas/Canvas.view-icons-focus.test.tsx` still presses it across a
  * real split.
  *
- * What is still THIS file's is reporting the tab back for `prefs`. `prefs`
- * remembers ONE tab and `onTabChange` is a fresh closure every render, so
- * two panes showing two different tabs wrote over each other on every
- * render, forever: measured on the head this fixes, clicking one pane's PRs
- * icon in a split hangs the shell. This case fails FAST rather than hanging,
- * which is the point of pinning it at this level.
+ * What is still THIS file's is reporting the view back. THE LOOP IS WHY IT
+ * IS PINNED HERE. `onTabChange` is a fresh closure every render, so the
+ * report used to fire from an effect on EVERY render -- two panes showing two
+ * views wrote over each other forever, and clicking one pane's PRs icon in a
+ * split hung the shell (measured). The old guard was "only the focused pane
+ * reports"; the guard now is that nothing reports from a render at all. The
+ * report is the operator's ACT, so a mount reports nothing and a background
+ * pane may report the act performed in it.
+ *
+ * These cases fail FAST rather than hanging, which is the point of pinning
+ * them at this level rather than in a mounted shell.
  */
-describe('an unfocused pane does not persist its tab — one pane holds the pen', () => {
-  it('does not write the remembered tab — one pane holds the pen', () => {
+describe('a view is reported when it is PICKED, never from a render', () => {
+  it('reports nothing merely for being drawn — focused', () => {
+    const reported: string[] = [];
+    draw({ paneFocused: true, onTabChange: (next) => reported.push(next) });
+    expect(reported).toEqual([]);
+  });
+
+  it('reports nothing merely for being drawn — unfocused', () => {
     const reported: string[] = [];
     draw({ paneFocused: false, onTabChange: (next) => reported.push(next) });
     expect(reported).toEqual([]);
   });
 
-  it('the focused pane reports its tab, as it always did', () => {
+  it('reports the view the operator clicks, exactly once', () => {
     const reported: string[] = [];
     draw({ paneFocused: true, onTabChange: (next) => reported.push(next) });
-    expect(reported).toEqual(['Response']);
+    const agents = document.querySelector('[data-view="agents"]') as HTMLElement;
+    expect(agents).not.toBeNull();
+    fireEvent.click(agents);
+    expect(reported).toEqual(['Agents']);
+  });
+
+  /**
+   * ONE report per ASK, and the ask is the object. `tabRequest` is how
+   * `PhoneShell`'s icon row moves the pane, and it does not reset to null --
+   * so a report that fired on every render would re-assert a view the
+   * operator picked once onto whatever the pane showed next. That is the
+   * cross-session bleed `Canvas.view-per-session.test.tsx` exists to stop,
+   * arriving through the report instead of through the state.
+   */
+  it('reports a tabRequest once, not once per render', () => {
+    const reported: string[] = [];
+    const request = { tab: 'PRs' } as const;
+    const { rerender } = render(
+      <DetailPanel
+        entry={ENTRY}
+        decision={DECISIONS[0] as Decision}
+        draft=""
+        onDraftChange={() => {}}
+        onSubmit={() => {}}
+        composing={false}
+        onCompose={() => {}}
+        onStopComposing={() => {}}
+        active={false}
+        actionIndex={0}
+        width={408}
+        resizeHandle={null}
+        tabRequest={request}
+        onTabChange={(next) => reported.push(next)}
+      />,
+    );
+    expect(reported).toEqual(['PRs']);
+    // A fresh `onTabChange` closure on every render is the shape that made
+    // this fire forever. Three more renders, same ask, still one report.
+    for (let i = 0; i < 3; i += 1) {
+      rerender(
+        <DetailPanel
+          entry={ENTRY}
+          decision={DECISIONS[0] as Decision}
+          draft=""
+          onDraftChange={() => {}}
+          onSubmit={() => {}}
+          composing={false}
+          onCompose={() => {}}
+          onStopComposing={() => {}}
+          active={false}
+          actionIndex={0}
+          width={408}
+          resizeHandle={null}
+          tabRequest={request}
+          onTabChange={(next) => reported.push(next)}
+        />,
+      );
+    }
+    expect(reported).toEqual(['PRs']);
   });
 });
 

@@ -673,9 +673,14 @@ export function PhoneShell({
           // There is nothing else on screen to be active.
           active={true}
           decision={newest ?? detail.decision}
-          // Fixed, so the icon row and the pane cannot start on different
-          // views: `detail.initialTab` is a remembered DESKTOP choice, and the
-          // row has no way to learn it.
+          // NAMED, so the icon row and the pane cannot disagree at all --
+          // not merely start together. `detail.tab` is the DESKTOP's
+          // per-session view and `detail.initialTab` its remembered opener;
+          // neither is a fact this row can learn, and both would arrive in
+          // the pane without arriving here. `viewRequest` is kept beside it
+          // because the two say different things (see `view` above): the row
+          // draws its own selection, the pane is ASKED to move.
+          tab={view}
           initialTab="Response"
           tabRequest={viewRequest}
           records={records}

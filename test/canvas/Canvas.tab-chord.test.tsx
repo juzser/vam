@@ -194,11 +194,34 @@ describe('the two digit families on one row, told apart by the modifier', () => 
     backToList();
     digitChord(1);
     expect(activeTab()).toBe('a1');
-    // And the view the operator chose is not reset by moving between tabs.
+    // The DIGIT means the same thing from either place. What it lands on is
+    // a separate question, and its answer changed -- see below.
+    viewChord(4);
+    expect(selectedTab()).toBe('agents');
+  });
+
+  /**
+   * A VIEW IS THE SESSION'S, NOT THE PANE'S, and this test asserted the
+   * opposite until the operator overruled it: "when session 1 switches to the
+   * PRs view, the rest of the sessions do not switch". The line that stood
+   * here read `// And the view the operator chose is not reset by moving
+   * between tabs`, which was a true description of one session in one pane
+   * and became a cross-session bleed the moment a pane could show several.
+   *
+   * `Canvas.view-per-session.test.tsx` owns the rule; this is the SESSION-tab
+   * chord's own half of it, kept here because this file is where the two
+   * digit families are told apart -- Cmd moving the session must carry that
+   * session's view with it, not leave the last one's behind.
+   */
+  it('Cmd carries each session to its OWN view', () => {
+    mountFocused();
     viewChord(4);
     expect(selectedTab()).toBe('agents');
     digitChord(2);
     expect(activeTab()).toBe('a2');
+    expect(selectedTab()).toBe('response');
+    digitChord(1);
+    expect(activeTab()).toBe('a1');
     expect(selectedTab()).toBe('agents');
   });
 

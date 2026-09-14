@@ -158,19 +158,23 @@ describe('what a launch that touches nothing costs', () => {
     return seen;
   }
 
-  it('writes twice on the first launch — once per field — and then settles', () => {
+  it('writes ONCE on the first launch, and it is the focus landing', () => {
     const first = writes(() => render(<Canvas model={MODEL} />));
-    // Two, not three: A13.1 retired `openTabs` entirely — the tab strip is
-    // a pure projection of the active project's `entries`, nothing to
-    // persist for it — so only the detail tab settling to its default and
-    // focus landing remain as independent settling effects. Anything more
-    // than two would be an effect re-triggering itself.
-    expect(first).toHaveLength(2);
-    expect(JSON.parse(first[0] ?? '{}').detailTab).toBe('Response');
-    expect(JSON.parse(first[1] ?? '{}').lastFocus).toEqual({
+    // One, and it used to be two. A13.1 retired `openTabs` entirely -- the
+    // tab strip is a pure projection of the active project's `entries` -- and
+    // the second write, `detailTab` settling to its default, is gone with the
+    // effect that made it: a view is reported when the operator PICKS one now,
+    // so a launch nobody touched no longer records a choice nobody made. That
+    // is strictly less than this test used to allow. Focus landing is the one
+    // settling effect left; anything more would be an effect re-triggering
+    // itself.
+    expect(first).toHaveLength(1);
+    expect(JSON.parse(first[0] ?? '{}').lastFocus).toEqual({
       source: 'factory',
       session: 'a1',
     });
+    // And the launch did not invent a view preference on the way past.
+    expect(JSON.parse(first[0] ?? '{}').detailTab ?? null).toBeNull();
   });
 
   it('writes nothing at all on the next launch, having nothing new to say', () => {
