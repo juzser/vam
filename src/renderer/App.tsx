@@ -435,7 +435,18 @@ function SourceCanvas({
   );
 }
 
-function DemoCanvas() {
+/**
+ * The demo shell: no write route, a scripted backward pager, and a scripted
+ * agent-work reader -- everything `?demo=1` can answer, and nothing it
+ * cannot. Exported for the same reason `DesktopCanvas` and `BrowserCanvas`
+ * are: a provider is wiring that can be silently dropped -- nothing stops
+ * compiling when one is deleted, the consumer below simply reads its context
+ * default and draws the sentence reserved for a source with no such surface
+ * -- and the only way to pin that the wiring survives is to mount this
+ * exact component in a test (`test/app/App.agent-work.test.tsx`), the way
+ * `App.history.test.tsx` already does for `DesktopCanvas`'s pager.
+ */
+export function DemoCanvas() {
   // Once per mount: padding 3,276 turns is real work, and doing it on every
   // render would measure the fixture instead of the pane.
   const model = useMemo(() => {
