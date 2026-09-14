@@ -256,3 +256,173 @@ describe('creating a session with `Mod-n`', () => {
     expect(start.map((row) => row.keys).sort()).toEqual(['Mod-n', 'o']);
   });
 });
+
+/**
+ * WHILE THE SESSION IS BEING STARTED, AND IT IS NOT INSTANT.
+ *
+ * Operator: "when creating a new session there needs to be a loading indicator
+ * in the sidebar too, and open the new tab immediately with loading in the
+ * pane."
+ *
+ * The status bar was the only thing that said anything, and it is the one
+ * surface the next act overwrites -- which on this path is usually the
+ * operator pressing the control again, because nothing else moved. Worse, the
+ * wait is real and has TWO parts, and vam only ever hinted at the second:
+ * `tmux new-session -d` returns as soon as the session exists, and the agent
+ * inside registers where vam can see it later, on its own schedule. So the
+ * row can be seconds away from a write that already succeeded.
+ *
+ * NOTHING HERE PUTS A SESSION IN THE MODEL. A placeholder that entered
+ * `allEntries` would become a tab of a pane, a row the keyboard can reach, and
+ * a thing `Close` and `Stop` would offer to act on -- for a session that does
+ * not exist. It is drawn beside the model, never inside it.
+ */
+describe('the wait while a session is starting', () => {
+  /** A creation the test resolves by hand, so the in-flight state can be read. */
+  function gatedSource() {
+    let release: (() => void) | null = null;
+    const built = sourceWith(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    return { ...built, release: () => release?.() };
+  }
+
+  const starting = () => document.querySelector('[data-session-starting]');
+  const startingPane = () => document.querySelector('[data-pane-starting]');
+
+  it('shows nothing before anything is being started', () => {
+    const { source } = sourceWith(async () => {});
+    render(<Canvas model={MODEL} source={source} />);
+    expect(starting()).toBeNull();
+    expect(startingPane()).toBeNull();
+  });
+
+  it('marks the sidebar the moment the creation is accepted', async () => {
+    const { source } = gatedSource();
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('o');
+    expect(starting()).not.toBeNull();
+  });
+
+  /** It says WHERE, because a sidebar holds every project at once. */
+  it('names the project it is starting one in', async () => {
+    const { source } = gatedSource();
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('o');
+    expect(starting()?.textContent).toContain('alpha');
+  });
+
+  it('opens the pane on it immediately, without waiting for the write', async () => {
+    const { source } = gatedSource();
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('o');
+    expect(startingPane()).not.toBeNull();
+  });
+
+  /**
+   * AND IT KEEPS SAYING SO AFTER THE WRITE RESOLVES. This is the half the
+   * status bar only hinted at: the write is done, the row is not there yet,
+   * and an indicator that stopped here would go quiet at exactly the moment
+   * the operator is still waiting.
+   */
+  it('stays up after the write resolves, while the row is still missing', async () => {
+    const { source, release } = gatedSource();
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('o');
+    await act(async () => {
+      release();
+    });
+    expect(starting()).not.toBeNull();
+    expect(startingPane()).not.toBeNull();
+  });
+
+  it('clears once the session it was waiting for arrives', async () => {
+    const { source, release } = gatedSource();
+    const view = render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('o');
+    await act(async () => {
+      release();
+    });
+    const grown: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'claude-code',
+          sessions: [session('a1'), session('a2')],
+        },
+      ],
+    };
+    await act(async () => {
+      view.rerender(<Canvas model={grown} source={source} />);
+    });
+    expect(starting()).toBeNull();
+    expect(startingPane()).toBeNull();
+  });
+
+  /**
+   * A FAILED CREATION LEAVES NOTHING SPINNING. An indicator that outlived its
+   * own failure would be the one state worse than no indicator: it says vam is
+   * still trying when vam has stopped.
+   */
+  it('clears when the creation fails, and the failure is what is said', async () => {
+    const { source } = sourceWith(async () => {
+      throw new Error('tmux said no');
+    });
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('o');
+    expect(starting()).toBeNull();
+    expect(startingPane()).toBeNull();
+    // The SOURCE's own words, which is what a failure is for -- not vam's.
+    expect(statusBar()).toContain('tmux said no');
+  });
+
+  /** A source that cannot create never starts one, so nothing is drawn. */
+  it('draws nothing at all when the source refuses outright', async () => {
+    const { source } = sourceWith(undefined);
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('o');
+    expect(starting()).toBeNull();
+    expect(startingPane()).toBeNull();
+  });
+
+  /**
+   * UNDER THE PROJECT IT IS STARTING IN, AND NOT THE OTHERS.
+   *
+   * The sidebar holds every project at once, so "there is a wait" is only half
+   * a sentence -- and a wait drawn under all of them says vam is starting
+   * several sessions when it is starting one. Found by mutation: with a
+   * one-project fixture the check `starting?.projectId === project.id` could
+   * be weakened to `starting !== null` and every test stayed green.
+   */
+  it('draws the wait under that project alone', async () => {
+    const twoProjects: CanvasModel = {
+      projects: [
+        { id: 'p1', name: 'alpha', source: 'claude-code', sessions: [session('a1')] },
+        { id: 'p2', name: 'beta', source: 'claude-code', sessions: [session('b1')] },
+      ],
+    };
+    const { source } = gatedSource();
+    render(<Canvas model={twoProjects} source={source} />);
+    await pressAsync('o');
+    const marks = [...document.querySelectorAll('[data-session-starting]')];
+    expect(marks).toHaveLength(1);
+    expect(marks[0]?.textContent).toContain('alpha');
+    expect(marks[0]?.textContent).not.toContain('beta');
+  });
+
+  /**
+   * AND IT IS NOT A SESSION. The sidebar's rows are things the operator can
+   * act on -- focus, close, stop, rename -- and this is not one of them yet.
+   */
+  it('is not one of the sidebar’s session rows', async () => {
+    const { source } = gatedSource();
+    render(<Canvas model={MODEL} source={source} />);
+    const before = document.querySelectorAll('[data-session-row]').length;
+    await pressAsync('o');
+    expect(document.querySelectorAll('[data-session-row]').length).toBe(before);
+  });
+});

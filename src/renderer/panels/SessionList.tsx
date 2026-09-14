@@ -459,6 +459,16 @@ export type SessionListProps = {
    * prop rather than one per control, because it is one fact.
    */
   readonly pendingAction: string | null;
+  /**
+   * The project vam is starting a session in, or null.
+   *
+   * SEPARATE FROM `pendingAction` on purpose. That is the serialisation lock
+   * and holds a project id while one is being REMOVED too, so reading it here
+   * would draw "starting a session" over a project being deleted -- two
+   * different things wearing one value, which is the defect this repo keeps
+   * finding rather than one to add.
+   */
+  readonly starting: { readonly projectId: string } | null;
   /** Opens the icon picker for a project's heading — the mouse route; there
    * is no keyboard shortcut for it, unlike the session picker's `s`. */
   readonly onPickIcon: (project: Project) => void;
@@ -641,6 +651,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     onNewProject,
     newSessionDecline,
     pendingAction,
+    starting,
     onPickIcon,
     onRenameProject,
     revealRequest,
@@ -2247,6 +2258,25 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     data-project-rows={section.project.id}
                     className="flex flex-col gap-[5px] pl-1.5"
                   >
+                    {/* A SESSION THAT DOES NOT EXIST YET, and says so.
+                        It is NOT a `data-session-row`: those are things the
+                        operator can focus, close, stop and rename, and this is
+                        none of them. No status pill, no age, no title -- vam
+                        knows none of those yet and a placeholder wearing
+                        invented ones is the content this pane has spent
+                        several rounds having removed. */}
+                    {starting?.projectId === section.project.id && (
+                      <div
+                        data-session-starting
+                        aria-live="polite"
+                        className="flex items-center gap-2 rounded-[9px] border border-line border-dashed px-3 py-2 text-control text-ink-faint"
+                      >
+                        <span className="h-1.5 w-1.5 flex-none rounded-full bg-line-strong vam-breathe" />
+                        <span className="min-w-0 truncate">
+                          starting a session in {section.project.name}…
+                        </span>
+                      </div>
+                    )}
                     {section.items.map(({ session }) => {
                       const isFocused = session.id === focusedSessionId;
                       // The one key that jumps here, or nothing when no jump
