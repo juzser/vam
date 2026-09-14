@@ -1212,7 +1212,7 @@ function labelFor(overrides: KeyBindings, id: string): string {
  *  the whole of what it does, and `e2e/settings-chrome-shots.mjs` plants a
  *  long chord at 320px so that deleting it goes red. */
 const SLOT_BOX =
-  'vam-tap h-[26px] min-w-[104px] whitespace-nowrap rounded-[6px] border px-2 text-center font-mono text-control';
+  'vam-tap h-[26px] min-w-[104px] whitespace-nowrap rounded border px-2 text-center font-mono text-control';
 
 /** One action: its name, its slots, and a way back to the shipped keys. */
 function BindingLine({
@@ -1422,7 +1422,7 @@ function SmallButton({ label, onPick }: { readonly label: string; readonly onPic
 }
 
 const STEP_BUTTON =
-  'vam-tap flex h-[24px] w-[24px] cursor-pointer items-center justify-center rounded-[6px] text-ink-dim hover:bg-segment-on hover:text-ink disabled:cursor-default disabled:text-ink-faint disabled:hover:bg-transparent disabled:hover:text-ink-faint';
+  'vam-tap flex h-[24px] w-[24px] cursor-pointer items-center justify-center rounded text-ink-dim hover:bg-segment-on hover:text-ink disabled:cursor-default disabled:text-ink-faint disabled:hover:bg-transparent disabled:hover:text-ink-faint';
 
 /**
  * A native `type="number"` between two token-drawn buttons.
