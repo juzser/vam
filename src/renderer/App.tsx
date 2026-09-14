@@ -32,10 +32,12 @@ import { ErrorBoundary } from './errors/ErrorBoundary.js';
 import { bridgeMainErrors } from './errors/main-errors-bridge.js';
 import { DEMO_MODEL, demoModelWithTurns } from './fixtures/demo.js';
 import { createDemoHistory } from './fixtures/demo-history.js';
+import { PairingScreen } from './panels/PairingScreen.js';
 import { HistoryReaderProvider } from './sources/history-reader.js';
 import { createSourceFromHttp } from './sources/http-factory.js';
 import { describeFailure, type SessionSource } from './sources/port.js';
 import { createSourceFromPreload } from './sources/preload-factory.js';
+import { writeRemoteToken } from './sources/remote-token.js';
 import { useSourceModel } from './sources/useSourceModel.js';
 import { UpdateNotice } from './update/UpdateNotice.js';
 
@@ -186,7 +188,31 @@ export function BrowserCanvas({ client }: { readonly client: SmithClient }) {
   const [remote, setRemote] = useState<SessionSource | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [asked, setAsked] = useState(false);
+  /**
+   * THE STATE EVERY NEW DEVICE STARTS IN, and it is not a failure.
+   *
+   * A vam endpoint that refuses an unpaired caller answers `unauthenticated`,
+   * and this component used to hand that to `describeFailure` and draw it as a
+   * banner over an empty canvas -- which is how the operator ended up holding
+   * a phone showing "check the pairing screen on the desktop" and no way to
+   * act on it. "This device has not been allowed yet" and "this source broke"
+   * are different facts and now look different.
+   *
+   * The bump is what re-asks after pairing: the api reads the token per
+   * request (`http-factory.ts`), so nothing has to be rebuilt -- the same
+   * effect simply runs again, now with a credential.
+   */
+  const [attempt, setAttempt] = useState(0);
+  const [needsPairing, setNeedsPairing] = useState(false);
 
+  /**
+   * `attempt` is a SIGNAL, not a value this effect reads: bumping it is how
+   * pairing asks the origin again. The api reads the token per request
+   * (`http-factory.ts`), so there is nothing to rebuild and nothing new to
+   * close over -- the same effect simply runs a second time, now with a
+   * credential. Removing it would leave the pairing screen up forever.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` is the re-ask signal, not a value read here — see above
   useEffect(() => {
     let cancelled = false;
     createSourceFromHttp()
@@ -198,6 +224,10 @@ export function BrowserCanvas({ client }: { readonly client: SmithClient }) {
           typeof reason === 'object' && reason !== null && 'code' in reason
             ? String(reason.code)
             : '';
+        if (code === 'unauthenticated') {
+          if (!cancelled) setNeedsPairing(true);
+          return;
+        }
         // Not a vam endpoint at all -- no route, or no envelope behind it.
         if (!(code === 'no-such-route' || code.startsWith('http-'))) {
           if (!cancelled) setFailure(describeFailure(reason));
@@ -209,12 +239,26 @@ export function BrowserCanvas({ client }: { readonly client: SmithClient }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt]);
 
   // Nothing until the origin has answered: a canvas drawn from the wrong
   // source and swapped a tick later is two claims about the operator's work.
   if (!asked) {
     return null;
+  }
+  if (needsPairing) {
+    return (
+      <PairingScreen
+        onPaired={(token) => {
+          // STORED FIRST, then re-asked: the retry below is only worth making
+          // because the next request will carry this.
+          writeRemoteToken(token);
+          setNeedsPairing(false);
+          setAsked(false);
+          setAttempt((n) => n + 1);
+        }}
+      />
+    );
   }
   if (remote === null && failure === null) {
     return <LiveCanvas client={client} />;

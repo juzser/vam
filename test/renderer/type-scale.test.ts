@@ -94,6 +94,19 @@ const EXCEPTIONS: ReadonlyArray<{
       'is on the scale; the screen itself is not.',
   },
   {
+    file: 'panels/PairingScreen.tsx',
+    size: '24',
+    count: 1,
+    why:
+      'The MIRROR of the desktop exception below, and display type for the same ' +
+      'reason. This is the field the code is typed INTO, on a phone, from an ' +
+      'alphabet chosen so that no two glyphs are confusable — and a character ' +
+      'the operator cannot verify as they type it defeats the choice of ' +
+      'alphabet. 24px rather than 40 because it sits in an input on a 320px ' +
+      'column with eight characters and 0.2em of tracking, where 40 would not ' +
+      'fit. The prose around it is on the scale; the code is not.',
+  },
+  {
     file: 'settings/PairingPanel.tsx',
     size: '40',
     count: 1,
