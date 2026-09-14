@@ -191,10 +191,18 @@ test.describe('sidebar branch label never overlaps the session age — real geom
     );
 
     // The resizer's floor, not a comfortable width — the bug lives here.
-    // The same technique `pane-resize.spec.ts` uses to force both panes to
-    // their MIN: shrink the viewport until the resize listener's own
-    // re-render settles at the bound.
-    await page.setViewportSize({ width: 700, height: 800 });
+    // 520px, exactly — not merely "narrow". Two facts pin it there (see
+    // `pane-resize.spec.ts`'s AC-2 test, which names both in full): below
+    // it (`PHONE_MAX_WIDTH = 519`, `phone/viewport.ts`) the whole shell
+    // switches to the phone layout, which draws no sidebar `<aside>` at
+    // all; at or above it, `layoutWidths` (`panes.ts`) only floors the
+    // sidebar at `SIDEBAR_MIN` when `viewportWidth <= SIDEBAR_MIN +
+    // DETAIL_MIN = 520`. 520 is the one width satisfying both. (This test
+    // used 700 until the two-pane migration (#260) lowered that threshold
+    // from 880 — 700 used to floor both panes; today it renders the
+    // sidebar at its unfloored default, 264, which is what a run against
+    // 700 actually measures.)
+    await page.setViewportSize({ width: 520, height: 800 });
     await page.waitForTimeout(150);
 
     const sidebarAside = page

@@ -26,7 +26,14 @@ test('the error log is selectable text', async ({ page }) => {
   // (`src/renderer/keyboard/chords.ts`). The demo records no failures, so the
   // status bar cell is hidden and the key is the only way in -- which is
   // itself the reason the binding exists.
-  await page.keyboard.press('E');
+  // `Shift+E`, not `'E'`. Playwright's `press('E')` dispatches
+  // `{ key: 'E', shiftKey: false }` -- which is precisely the event CapsLock
+  // produces, not a Shift press -- and since the CapsLock fix `normalizeKey`
+  // decides a bare letter's case from `shiftKey` alone. So `press('E')` now
+  // spells `e`, which is bound to nothing, and this spec watched the error log
+  // never open. CI could not see that when the fix merged: this lane was not
+  // wired yet, which is the gap this branch closes.
+  await page.keyboard.press('Shift+E');
   const dialog = page.locator('[data-error-log]');
   await expect(dialog).toBeVisible();
 
