@@ -76,6 +76,8 @@ export function baseProps(entries: readonly SessionEntry[]): SessionListProps {
     entries,
     focusedSessionId: null,
     pendingAction: null,
+    // Nothing is being started in a fixture unless a test says so.
+    starting: null,
     workspace: 'vam',
     // The filter popover's props, added with it in #59. They live in the
     // shared helper rather than at each call site so that the next prop this

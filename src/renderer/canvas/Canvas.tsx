@@ -729,6 +729,43 @@ function TabStripRow({
  * `<button>`, reachable by Tab, with an `aria-label`. A `title` alone is not
  * a name.)
  */
+/**
+ * THE PANE WHILE A SESSION IS BEING STARTED.
+ *
+ * Operator: "open the new tab immediately with loading in the pane." Until
+ * now the pane moved only when the ROW arrived, which is after the write and
+ * after the agent registered itself -- so the one control that had just been
+ * pressed was the one surface that did not react to it.
+ *
+ * ONE SENTENCE AND A DOT, and nothing that pretends to be a session: no
+ * title, no status, no age, no turn, no composer. vam knows none of those yet,
+ * and this pane has spent several rounds having invented content removed from
+ * it. The dot is the same one a running session wears, meaning the same thing
+ * -- something is happening -- and `aria-live` is what says it to a reader who
+ * cannot see it start.
+ *
+ * IT DOES NOT SAY HOW LONG. vam has nothing to wait on and no measured
+ * distribution to promise against: `tmux new-session -d` returns immediately
+ * and the agent registers on its own schedule. A progress bar would be an
+ * invented number, and "a few seconds" would be a guess the operator could
+ * catch vam getting wrong.
+ */
+function StartingSession({ projectName }: { readonly projectName: string }) {
+  return (
+    <div
+      data-pane-starting
+      aria-live="polite"
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center"
+    >
+      <span className="h-2 w-2 flex-none rounded-full bg-running vam-breathe" />
+      <p className="text-control text-ink-faint">starting a session in {projectName}…</p>
+      <p className="text-meta text-ink-quiet">
+        it appears here as soon as the agent inside it registers
+      </p>
+    </div>
+  );
+}
+
 function NewTabButton({
   decline,
   onClick,
@@ -1484,6 +1521,37 @@ function CanvasInner({
    * leaves nothing behind to capture an unrelated session that appears later.
    */
   const pendingNewTab = useRef<{ paneId: string; known: ReadonlySet<string> } | null>(null);
+  /**
+   * A SESSION VAM IS STARTING, which does not exist yet.
+   *
+   * Operator: "when creating a new session there needs to be a loading
+   * indicator in the sidebar too, and open the new tab immediately with
+   * loading in the pane." The status bar was the only surface that said
+   * anything, and it is the one the next act overwrites -- which on this path
+   * is usually the operator pressing the control again, because nothing else
+   * moved.
+   *
+   * THE WAIT HAS TWO PARTS AND VAM ONLY EVER HINTED AT THE SECOND.
+   * `tmux new-session -d` returns as soon as the session EXISTS, and the agent
+   * inside registers where vam can see it later, on its own schedule. So this
+   * outlives the write: it is cleared by a row ARRIVING, not by a promise
+   * resolving.
+   *
+   * STATE, NOT A REF, because it is drawn. And deliberately NOT a `Session` in
+   * the model: a placeholder inside `allEntries` would become a tab of a pane,
+   * a row the keyboard can reach, and a thing `Close` and `Stop` would offer
+   * to act on -- for a session that does not exist. It is drawn beside the
+   * model and nothing may act on it.
+   */
+  const [starting, setStarting] = useState<{
+    readonly projectId: string;
+    readonly projectName: string;
+    /** Which pane should show the wait. Never null: `o` uses the focused one. */
+    readonly paneId: string;
+    /** What existed when the operator pressed, so "which row is new" is measured
+     *  against that moment rather than against whatever is there on arrival. */
+    readonly known: ReadonlySet<string>;
+  } | null>(null);
   /**
    * Two derived values, mirrored into refs during render, so
    * `setFocusedSessionId` below can read them and still be the
@@ -3652,6 +3720,15 @@ function CanvasInner({
       // Captured BEFORE the write, so "which session is new" is measured
       // against what existed when the operator pressed the button.
       const known = new Set(entriesByIdRef.current.keys());
+      // THE WAIT BECOMES VISIBLE HERE, before the write is even issued --
+      // "immediately" in the operator's request is this line. `paneId` is the
+      // pane the `+` was pressed in; `o` has none and means the focused one.
+      setStarting({
+        projectId,
+        projectName,
+        paneId: paneId ?? focusedPaneIdRef.current,
+        known,
+      });
       // The first half of one sentence: this and the success below are a
       // sequence -- "starting…" then "started … it may take a moment to
       // appear" -- rather than two unrelated remarks about the same click.
@@ -3672,6 +3749,10 @@ function CanvasInner({
         setStatus(`started a new session in ${projectName} — it may take a moment to appear`);
         if (source.kind === 'session') source.onWrote();
       } catch (cause) {
+        // NOTHING IS LEFT SPINNING. An indicator that outlived its own failure
+        // is the one state worse than no indicator: it says vam is still
+        // trying when vam has stopped.
+        setStarting(null);
         setStatus(noteFailure('new session', cause));
       } finally {
         setPendingAction(null);
@@ -3679,6 +3760,22 @@ function CanvasInner({
     },
     [source, pendingAction],
   );
+
+  /**
+   * AND IT ENDS WHEN THE ROW ARRIVES -- never when the write resolves.
+   *
+   * Its own effect rather than a branch of `pendingNewTab`'s: that one is
+   * armed only for the pane `+` and only after the write, so the keyboard path
+   * would have had an indicator nothing could clear. Any entry the operator
+   * had not already seen ends the wait; vam cannot know which id the CLI
+   * chose, and the set was captured before the write for exactly that reason.
+   */
+  useEffect(() => {
+    if (starting === null) return;
+    if (allEntries.some((entry) => !starting.known.has(entry.session.id))) {
+      setStarting(null);
+    }
+  }, [allEntries, starting]);
 
   /**
    * New PROJECT: choose a directory, then start a session in it.
@@ -5040,6 +5137,13 @@ function CanvasInner({
     // no other column takes this.
     entries: entries,
     loading: sidebarLoading,
+    /* WHICH PROJECT VAM IS STARTING A SESSION IN, or null. The project id
+       alone, because that is all the sidebar needs to know where to draw the
+       wait -- and deliberately not `pendingAction`, which is the shared
+       serialisation lock and also holds a project id while one is being
+       REMOVED. Two different things wearing one value is how a "starting"
+       indicator comes to appear over a project being deleted. */
+    starting: starting === null ? null : { projectId: starting.projectId },
     // The UNFILTERED set, for the two things about removing a project
     // that must not read a narrowed list -- see `allEntries` on
     // `SessionListProps`. `entries` above has already been through
@@ -5408,7 +5512,23 @@ function CanvasInner({
               onClick={() => newTabInPane(leaf.id, entry, paneTabs)}
             />
           </TabStripRow>
-          <DetailPanel {...buildDetailProps(entry, leaf.sessionId, leaf.id, isFocused)} />
+          {/* THE PANE OPENS ON THE WAIT, NOT ON THE ARRIVAL. "Open the new
+              tab immediately" is this branch: until now the pane kept showing
+              whatever was there before, and moved only once the row appeared
+              -- which is after the write AND after the agent registered
+              itself, so the one control that had just been pressed was the one
+              surface that did not react to it.
+
+              It stands IN PLACE OF the panel rather than over it, because
+              there is nothing to look at underneath: the session it is about
+              does not exist. Nothing is destroyed by that -- the pane's own
+              tab list is untouched, and the panel returns the moment the row
+              lands (or the moment the creation fails). */}
+          {starting !== null && starting.paneId === leaf.id ? (
+            <StartingSession projectName={starting.projectName} />
+          ) : (
+            <DetailPanel {...buildDetailProps(entry, leaf.sessionId, leaf.id, isFocused)} />
+          )}
           {dropTarget !== null && dropTarget.paneId === leaf.id && (
             <DropZoneOverlay zone={dropTarget.zone} />
           )}
@@ -5416,6 +5536,7 @@ function CanvasInner({
       );
     },
     [
+      starting,
       focusedPaneId,
       focusedEntry,
       allEntries,
