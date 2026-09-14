@@ -52,6 +52,17 @@ function resolveExecutablePath(): string {
   }
   const unpackedSuffix = process.platform === 'win32' ? 'win-unpacked' : 'linux-unpacked';
   const binaryName = process.platform === 'win32' ? 'vam.exe' : 'vam';
+  // TWO LAYOUTS, not one. On macOS electron-builder nests its output under an
+  // arch directory (`dist-app/mac-arm64/vam.app`), which is what the loop below
+  // walks. On Linux and Windows it does NOT: the unpacked tree sits directly at
+  // `dist-app/linux-unpacked/vam`. Walking entries there looks for
+  // `dist-app/linux-unpacked/linux-unpacked/vam` and finds nothing -- which is
+  // exactly how this failed the first time it ever ran on Linux, reporting a
+  // missing binary for a package that had built perfectly.
+  const direct = path.join(distAppDir, unpackedSuffix, binaryName);
+  if (fs.existsSync(direct)) {
+    return direct;
+  }
   for (const entry of fs.readdirSync(distAppDir)) {
     const binaryPath = path.join(distAppDir, entry, unpackedSuffix, binaryName);
     if (fs.existsSync(binaryPath)) {
