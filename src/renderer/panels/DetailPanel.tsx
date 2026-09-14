@@ -2096,7 +2096,29 @@ function QuestionCard({
   // rest. The card is drawn while ANY step is open.
   const question = questions[Math.min(showing, questions.length - 1)];
   const openSteps = questions.filter((one) => one.answer === null);
-  const open = openSteps.length > 0;
+  /**
+   * A SET THIS PICKER HAS DELIVERED IN FULL -- the operator's own request:
+   * once an option choice has been picked and submitted, the card has to go.
+   *
+   * `open` was the TRANSCRIPT's opinion and nothing else: a step counts as
+   * open until the source reports an answer for it, so after a successful
+   * Submit the picker sat there, amber, with live options and an enabled
+   * Submit, until a poll came back and the transcript had caught up. On a
+   * phone it was also eating half the viewport while it did that.
+   *
+   * OPTIMISTIC, ON THE SOURCE'S OWN WORD. `kind: 'sent'` is the source saying
+   * it typed the answer into the session -- the same bargain `Canvas.tsx`
+   * makes for a prompt, where the pane reacts to the act rather than to the
+   * round trip. EVERY OTHER OUTCOME KEEPS THE CARD, because every other
+   * outcome means the operator still has something to do, and taking the
+   * picker away would take away the only route to doing it.
+   *
+   * It cannot outlive its set: this component is keyed by `setId` at its call
+   * site, so a different call mounts a fresh card with this back to `false` --
+   * including the case where the agent asks the same question again.
+   */
+  const [delivered, setDelivered] = useState(false);
+  const open = openSteps.length > 0 && !delivered;
   /**
    * Amber IS `open`, nothing narrower. A card with an open step is a live
    * block whether or not vam can type the answer -- `--color-waiting` means
@@ -2234,6 +2256,9 @@ function QuestionCard({
     setSending(true);
     const result = await onAnswer({ steps });
     setOutcome(result);
+    // Delivered in full: the picker stands down and the outcome line below is
+    // what is left. See `delivered`.
+    if (result.kind === 'sent') setDelivered(true);
     // What the picker took in before it stopped is not offered again: those
     // questions are behind the CLI's own cursor now.
     const got = result.kind === 'sent' ? undefined : result.committed;
@@ -2496,12 +2521,18 @@ function QuestionCard({
           {question.question}
         </span>
       </div>
-      {question.answer !== null ? (
+      {question.answer !== null || delivered ? (
         // THIS step is settled while others may not be. It shows what was
         // answered and offers nothing to mark; the set's Submit below is for
         // whatever is still open.
+        //
+        // `delivered` joins it for the reason `open` does: the picker has
+        // typed the whole set into the session, so there is nothing left here
+        // to mark. It is read from the SOURCE's answer where there is one --
+        // the transcript's word outranks this card's memory, so once the poll
+        // catches up the sentence is the session's own rather than ours.
         <span data-question-answer className="text-control text-ink-dim">
-          resolved — {question.answer}
+          resolved — {question.answer ?? (marks[question.id] ?? []).join(', ')}
         </span>
       ) : (
         <>

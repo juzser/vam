@@ -385,6 +385,61 @@ test.describe('the phone shell at 390px', () => {
     expect(undersized(inCard), 'question-card controls under 44x44').toEqual([]);
   });
 
+  /**
+   * THE CARD MAY NOT OWN THE SCREEN.
+   *
+   * Operator report: "on mobile the option choice covers the whole screen, so
+   * I cannot see the out response in order to answer it". That is not a
+   * cosmetic complaint -- the answer to "which option" is usually IN the
+   * output the agent just wrote, so a card that hides the transcript hides the
+   * thing the operator needs to read before they can use the card. The card
+   * and the answer are the same task.
+   *
+   * `data-question-bar` is `flex-none`, so it takes whatever height its
+   * contents want; a two-step call with five options and a note is taller than
+   * a 390x844 phone has to spare. MEASURED here rather than asserted from CSS:
+   * happy-dom lays nothing out, so the unit suite reports every one of these
+   * boxes as zero and would pass a card of any height at all.
+   *
+   * Two assertions, because either alone can be satisfied by the wrong fix:
+   * a card that is merely short could still be pinned over the column, and a
+   * column that merely exists could be one pixel tall.
+   */
+  test('the question card leaves the transcript on screen', async ({ page }) => {
+    await openDemo(page);
+    const asking = page.locator('[data-phone-shell] [data-session-row]', {
+      has: page.locator('text=vam-build-1'),
+    });
+    const box = await asking.first().boundingBox();
+    if (box === null) throw new Error('no session row asking a question');
+    await page.touchscreen.tap(box.x + 60, box.y + box.height / 2);
+    await expect(page.locator('[data-question]')).toBeVisible();
+
+    const bar = await page.locator('[data-phone-shell] [data-question-bar]').boundingBox();
+    if (bar === null) throw new Error('the question bar did not draw');
+    const viewport = page.viewportSize();
+    if (viewport === null) throw new Error('no viewport');
+
+    // HALF THE SCREEN IS THE CEILING. The card is one of four bands on this
+    // screen (app bar, transcript, card, composer); at more than half it is
+    // not sharing the screen with the transcript, it is replacing it.
+    expect(
+      Math.round((bar.height / viewport.height) * 100),
+      `the question card takes ${Math.round(bar.height)}px of a ${viewport.height}px screen`,
+    ).toBeLessThanOrEqual(50);
+
+    // AND THE TRANSCRIPT IS STILL THERE TO READ. Its own visible box, not the
+    // arithmetic of the others: a column pushed off the bottom still has a
+    // height, and this is the number that says whether any of it is on screen.
+    const column = await page.locator('[data-phone-shell] [data-detail-column]').boundingBox();
+    if (column === null) throw new Error('the transcript column did not draw');
+    const visible = Math.max(0, Math.min(column.y + column.height, viewport.height) - Math.max(column.y, 0));
+    expect(
+      Math.round(visible),
+      'the transcript is not visible, so the operator cannot read what they are answering',
+    ).toBeGreaterThanOrEqual(120);
+  });
+
   test('every interactive control on the SESSION screen is at least 44x44', async ({ page }) => {
     await openDemo(page);
     await openFirstSession(page);

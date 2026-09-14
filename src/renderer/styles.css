@@ -1764,6 +1764,40 @@ body {
  * -- a `visualViewport` listener -- is ruled out by the spec for the jitter
  * and double-resize loops it is a known source of.
  */
+/*
+ * THE QUESTION CARD SHARES THE SCREEN, IT DOES NOT REPLACE IT.
+ *
+ * Operator report: "on mobile the option choice covers the whole screen, so I
+ * cannot see the out response in order to answer it". That is not a cosmetic
+ * complaint -- the answer to "which option" is usually IN the output the agent
+ * just wrote, so a card that hides the transcript hides the very thing the
+ * operator has to read before they can use the card. The card and the answer
+ * are one task.
+ *
+ * MEASURED at 390x844 on the demo fixture's two-step call, before this rule:
+ * the bar was 462px, 55% of the screen, and what was left of the transcript
+ * was a sliver. The card is one of four bands here -- app bar, transcript,
+ * card, composer -- and past half the screen it has stopped sharing.
+ *
+ * `45dvh` rather than a pixel figure because the bands around it are already
+ * sized that way, and `dvh` for the reason the sheet rule below gives: it is
+ * the unit that tracks a phone's chrome. `overflow-y: auto` is what makes the
+ * cap a SCROLL rather than a clip -- Submit lives at the bottom of this block,
+ * and a capped card that cut it off would be a worse bug than the one being
+ * fixed. Focus scrolls into view on its own, so the `h`/`l` option walk and
+ * the step tabs still reach every control.
+ *
+ * PHONE ONLY, deliberately. On a desktop this block sits in a pane whose
+ * height is not the viewport's, so a viewport-relative cap there could exceed
+ * the pane it lives in -- and no desktop case has been measured to need one.
+ * `e2e/phone-shell.pw.ts` holds both halves: the card's share, and that the
+ * transcript still has a readable box.
+ */
+.vam-phone [data-question-bar] {
+  max-height: 45dvh;
+  overflow-y: auto;
+}
+
 .vam-phone [data-overlay-host] {
   align-items: flex-end;
   padding-top: 0;
