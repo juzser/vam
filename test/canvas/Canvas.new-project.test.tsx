@@ -545,3 +545,197 @@ describe('new project — the chord', () => {
     });
   });
 });
+
+/**
+ * WHILE A NEW PROJECT IS STARTING, AND IT IS NOT INSTANT -- the gap the
+ * operator reported: "nhưng tạo project thì không có" (but creating a
+ * project has none). `createSession`'s own wait, asserted in the sibling
+ * suite `describe('the wait while a session is starting', ...)` in
+ * `Canvas.new-session.test.tsx`, never applied here: `newProject` never
+ * called `setStarting`, and the sidebar only ever matched an EXISTING
+ * project's section -- which a new project does not have, by definition,
+ * until the session it starts is actually running there.
+ *
+ * Same mechanism as that sibling suite, not a second one: `newProject` arms
+ * the identical `starting` state `createSession` does, with `projectId: null`
+ * standing for "no section exists yet, draw a provisional one instead." This
+ * suite deliberately mirrors that one's cases, case for case, to prove the
+ * same guarantees hold on the path that was missing them.
+ */
+describe('the wait while a new project is starting', () => {
+  /** A promise the test resolves by hand -- the same idea as the sibling
+   *  suite's `deferred` above, redeclared locally because that one is
+   *  function-scoped to `describe('new project — feedback…')`, not exported. */
+  function deferred<T>() {
+    let settle!: (value: T) => void;
+    const promise = new Promise<T>((resolve) => {
+      settle = resolve;
+    });
+    return { promise, settle };
+  }
+
+  /** A source whose `createSessionIn` hangs until the test releases it, so
+   *  "the write is accepted, the row has not arrived" is a real moment. */
+  function gatedSpawn() {
+    const { source } = sourceWith(true);
+    const gate = deferred<void>();
+    const inner = (source as { source: SessionSource }).source as unknown as {
+      write: { createSessionIn: () => Promise<void> };
+    };
+    inner.write.createSessionIn = () => gate.promise;
+    return { source, release: () => gate.settle(undefined) };
+  }
+
+  const starting = () => document.querySelector('[data-session-starting]');
+  const startingPane = () => document.querySelector('[data-pane-starting]');
+  const provisionalSection = () => document.querySelector('[data-project-section-provisional]');
+
+  it('shows nothing before anything is being started', () => {
+    const { source } = sourceWith(true);
+    render(<Canvas model={MODEL} source={source} />);
+    expect(starting()).toBeNull();
+    expect(startingPane()).toBeNull();
+    expect(provisionalSection()).toBeNull();
+  });
+
+  it('marks the sidebar with a provisional section the moment the directory is chosen', async () => {
+    const { source } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(provisionalSection()).not.toBeNull();
+    expect(starting()).not.toBeNull();
+  });
+
+  it('names it from the chosen directory', async () => {
+    const { source } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(provisionalSection()?.textContent).toContain('orchard');
+    expect(starting()?.textContent).toContain('orchard');
+  });
+
+  it('opens the pane on it immediately, without waiting for the write', async () => {
+    const { source } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(startingPane()).not.toBeNull();
+    expect(startingPane()?.textContent).toContain('orchard');
+  });
+
+  /**
+   * AND IT KEEPS SAYING SO AFTER THE WRITE RESOLVES -- the half the status bar
+   * only ever hinted at: `tmux new-session -d` returns before the agent
+   * inside has registered anywhere vam can read, so the write finishing is not
+   * the row arriving.
+   */
+  it('stays up after the write resolves, while the row is still missing', async () => {
+    const { source, release } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    await act(async () => {
+      release();
+    });
+    expect(provisionalSection()).not.toBeNull();
+    expect(startingPane()).not.toBeNull();
+  });
+
+  it('clears once the session it was waiting for arrives, and does not linger', async () => {
+    const { source, release } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    const view = render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    await act(async () => {
+      release();
+    });
+    const grown: CanvasModel = {
+      projects: [
+        ...MODEL.projects,
+        { id: 'p2', name: 'orchard', source: 'claude-code', sessions: [session('o1')] },
+      ],
+    };
+    await act(async () => {
+      view.rerender(<Canvas model={grown} source={source} />);
+    });
+    expect(provisionalSection()).toBeNull();
+    expect(startingPane()).toBeNull();
+    expect(document.querySelectorAll('[data-session-starting]')).toHaveLength(0);
+  });
+
+  it('clears when the picker is cancelled', async () => {
+    const { source } = sourceWith(true);
+    withDialog(async () => null);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(provisionalSection()).toBeNull();
+    expect(startingPane()).toBeNull();
+  });
+
+  it('clears when the picker itself fails', async () => {
+    const { source } = sourceWith(true);
+    withDialog(() => Promise.reject(new Error('dialog crashed')));
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(provisionalSection()).toBeNull();
+    expect(startingPane()).toBeNull();
+  });
+
+  /**
+   * A FAILED SPAWN LEAVES NOTHING SPINNING. An indicator that outlived its own
+   * failure is worse than none: it says vam is still trying when vam has
+   * stopped.
+   */
+  it('clears when the spawn fails, and nothing is left spinning', async () => {
+    const { source } = sourceWith(true);
+    const inner = (source as { source: SessionSource }).source as unknown as {
+      write: { createSessionIn: unknown };
+    };
+    inner.write.createSessionIn = async () => {
+      throw new Error('tmux said no');
+    };
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(provisionalSection()).toBeNull();
+    expect(startingPane()).toBeNull();
+    expect(statusBar()).toContain('tmux said no');
+  });
+
+  /**
+   * NOT MERGED INTO AN EXISTING PROJECT'S SECTION. `Canvas.new-session.test.
+   * tsx` records finding its own equivalent check weakenable to `starting !==
+   * null` against a one-project fixture; this model carries an existing
+   * project (`alpha`) for the same reason -- so a provisional section landing
+   * inside IT, rather than beside it, has somewhere to land wrong.
+   */
+  it('draws its own section, separate from an existing project', async () => {
+    const { source } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    const marks = [...document.querySelectorAll('[data-session-starting]')];
+    expect(marks).toHaveLength(1);
+    expect(marks[0]?.closest('[data-project-rows]')).toBeNull();
+    expect(marks[0]?.closest('[data-project-section-provisional]')).not.toBeNull();
+  });
+
+  /**
+   * AND IT IS NOT A SESSION, exactly as the sibling wait is not: no row the
+   * keyboard can reach, nothing `Close` or `Stop` could act on. The
+   * provisional heading offers no control at all -- no icon picker, no
+   * collapse, no menu, no per-project `+` -- because every one of those would
+   * act on a `Project` this directory does not have yet.
+   */
+  it('is not one of the sidebar’s session rows, and offers no control to act on it', async () => {
+    const { source } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    const before = document.querySelectorAll('[data-session-row]').length;
+    await clickNewProject();
+    expect(document.querySelectorAll('[data-session-row]').length).toBe(before);
+    expect(provisionalSection()?.querySelector('button')).toBeNull();
+  });
+});
