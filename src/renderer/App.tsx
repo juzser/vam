@@ -32,6 +32,7 @@ import { Canvas } from './canvas/Canvas.js';
 import { ErrorBoundary } from './errors/ErrorBoundary.js';
 import { bridgeMainErrors } from './errors/main-errors-bridge.js';
 import { DEMO_MODEL, demoModelWithTurns } from './fixtures/demo.js';
+import { demoAgentWork } from './fixtures/demo-agent-work.js';
 import { createDemoHistory } from './fixtures/demo-history.js';
 import { PairingScreen } from './panels/PairingScreen.js';
 import { AgentWorkReaderProvider } from './sources/agent-work-reader.js';
@@ -454,18 +455,25 @@ function DemoCanvas() {
    */
   const history = useMemo(() => (demoHasHistory() ? createDemoHistory() : null), []);
   return (
-    <HistoryReaderProvider value={history}>
-      <Canvas
-        model={model}
-        source={{
-          kind: 'demo',
-          // Refused here rather than at the server: in demo mode there is no
-          // session to refuse it, and "unknown session" is a confusing way to
-          // learn the rows were never real.
-          note: 'demo data — every write is refused',
-        }}
-      />
-    </HistoryReaderProvider>
+    // THE AGENT READER, BESIDE THE PAGER AND FOR THE SAME REASON: without it
+    // `useAgentWorkReader()` reads the context's own default, `null`, and
+    // picking `coder`/`tester`/`reviewer` in the Agents tab drew the sentence
+    // reserved for a source with no agent surface at all -- untrue of the
+    // demo, which can answer anything (`fixtures/demo-agent-work.ts`).
+    <AgentWorkReaderProvider value={demoAgentWork}>
+      <HistoryReaderProvider value={history}>
+        <Canvas
+          model={model}
+          source={{
+            kind: 'demo',
+            // Refused here rather than at the server: in demo mode there is no
+            // session to refuse it, and "unknown session" is a confusing way to
+            // learn the rows were never real.
+            note: 'demo data — every write is refused',
+          }}
+        />
+      </HistoryReaderProvider>
+    </AgentWorkReaderProvider>
   );
 }
 
