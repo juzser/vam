@@ -71,6 +71,44 @@ pnpm install
 pnpm run dist   # electron-vite build + the web build + electron-builder
 ```
 
+### Signing it yourself
+
+`electron-builder.config.cjs` sets `mac.identity: null` on purpose: left
+unset, electron-builder signs with whatever identity happens to be in the
+building machine's keychain, so the same commit produces a different artifact
+on a different machine. Signing is therefore an explicit, local change rather
+than something that happens by accident.
+
+**macOS** needs two separate things, and only having both stops the warning:
+
+1. **A Developer ID Application certificate** — an Apple Developer Program
+   membership (99 USD/year), then *Certificates → Developer ID Application* in
+   the developer portal, downloaded into the login keychain. `security
+   find-identity -v -p codesigning` should list it.
+2. **Notarisation** — Apple must see the signed app before Gatekeeper stops
+   warning about it. A signed but un-notarised app still gets stopped.
+
+In the config: drop `identity: null` (or set it to the certificate's common
+name), and add `hardenedRuntime: true` with an entitlements file —
+notarisation requires the hardened runtime, and an Electron app under it needs
+`com.apple.security.cs.allow-jit` and
+`com.apple.security.cs.allow-unsigned-executable-memory` for V8, plus
+`com.apple.security.inherit` in the *child* entitlements, because vam spawns
+`tmux`, `claude` and `gh`. Then `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and
+`APPLE_TEAM_ID` in the environment, and `notarize: true` under `mac`;
+electron-builder submits and staples the ticket itself.
+
+**Windows** needs a code-signing certificate from a CA — an OV certificate now
+ships on a hardware token, so CI signing means a cloud service (Azure Trusted
+Signing, SSL.com eSigner) rather than a file on disk. SmartScreen additionally
+warms up by reputation, so the first signed builds may still warn.
+
+**Linux** AppImages have no equivalent step; there is nothing to sign.
+
+None of the above is exercised by this repo — there is no certificate to test
+it with, so treat it as the shape of the work rather than a recipe that has
+been run.
+
 ## Quick start
 
 Requires Node >=22 (`.nvmrc` pins the exact version CI uses).
