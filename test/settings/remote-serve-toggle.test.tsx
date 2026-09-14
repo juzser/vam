@@ -55,6 +55,10 @@ function fakeApi(over: Partial<RemoteState> = {}): RemoteApi {
       ...idle,
       serve: { enabled: false, lastError: null, timedOut: false, tailnetServeDisabledUrl: null },
     })),
+    // The bridge carries it, so the fake does too: a fake with only the
+    // members its subject happens to call stops catching the day it reaches
+    // for another.
+    openLink: vi.fn(async () => true),
     setWrites: vi.fn(async () => idle),
   };
 }

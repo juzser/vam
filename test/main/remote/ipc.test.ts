@@ -64,6 +64,7 @@ async function wire(
     enableServe?: () => Promise<ServeToggleResult>;
     disableServe?: () => Promise<ServeToggleResult>;
     writesPreference?: WritesPreference;
+    openExternal?: (url: string) => Promise<void>;
   } = {},
 ) {
   const path = join(await mkdtemp(join(tmpdir(), 'vam-remote-ipc-')), 'devices.json');
@@ -84,11 +85,90 @@ async function wire(
     enableServe,
     disableServe,
     writesPreference,
+    openExternal: over.openExternal,
   });
   const state = (channel: string, ...args: unknown[]) =>
     ipcMain.invoke(channel, ...args) as Promise<RemoteState>;
-  return { pairing, devices, streams, ipcMain, state, enableServe, disableServe, remote };
+  const invoke = (channel: string, ...args: unknown[]) => ipcMain.invoke(channel, ...args);
+  return { pairing, devices, streams, ipcMain, state, invoke, enableServe, disableServe, remote };
 }
+
+/**
+ * THE TWO LINKS IN THE REMOTE PANEL, AND WHY THEY DID NOTHING.
+ *
+ * Operator: "in settings the tailscale link is not clickable." It was an
+ * ordinary `<a target="_blank">`, which becomes `window.open`, which
+ * `contents.setWindowOpenHandler(() => ({ action: 'deny' }))` in
+ * `src/main/index.ts` refuses -- by design, for the same reason every
+ * off-origin navigation is refused: a renderer that can navigate to
+ * github.com is a renderer that can exfiltrate to it.
+ *
+ * So the policy stays and the link goes through main, exactly as the update
+ * notice's release page does. THE RENDERER NAMES A KEY, NEVER A URL: that is
+ * what keeps this from becoming an open-anything capability behind a
+ * different door. Two keys, because there are two links -- one a constant,
+ * one a URL MAIN ITSELF read out of `tailscale serve`'s stderr, which the
+ * renderer only ever received a copy of.
+ *
+ * The second is re-validated at the moment it is opened rather than trusted
+ * because it came from a subprocess: `checkForUpdate` does the same to a
+ * `html_url` out of GitHub's JSON, for the same reason.
+ */
+describe('opening the panel’s two links, without giving the renderer a URL', () => {
+  it('opens the Tailscale download page from a key alone', async () => {
+    const opened: string[] = [];
+    const { invoke } = await wire({ openExternal: async (url) => void opened.push(url) });
+    expect(await invoke(CHANNELS.remoteOpenLink, 'download')).toBe(true);
+    expect(opened).toEqual(['https://tailscale.com/download']);
+  });
+
+  it('refuses a key it does not know, and opens nothing', async () => {
+    const opened: string[] = [];
+    const { invoke } = await wire({ openExternal: async (url) => void opened.push(url) });
+    expect(await invoke(CHANNELS.remoteOpenLink, 'https://example.com')).toBe(false);
+    expect(await invoke(CHANNELS.remoteOpenLink, 'serve-admin')).toBe(false);
+    expect(await invoke(CHANNELS.remoteOpenLink, '')).toBe(false);
+    expect(opened).toEqual([]);
+  });
+
+  it('opens the tailnet admin page main itself read, once there is one', async () => {
+    const opened: string[] = [];
+    const url = 'https://login.tailscale.com/f/serve?node=abc123';
+    const { invoke } = await wire({
+      openExternal: async (each) => void opened.push(each),
+      enableServe: async () => ({ kind: 'tailnet-serve-disabled', url }) as const,
+    });
+    // Nothing to open until the attempt that produces it has been made.
+    expect(await invoke(CHANNELS.remoteOpenLink, 'serve-admin')).toBe(false);
+    await invoke(CHANNELS.serveEnable);
+    expect(await invoke(CHANNELS.remoteOpenLink, 'serve-admin')).toBe(true);
+    expect(opened).toEqual([url]);
+  });
+
+  it('will not open a tailnet URL that is not one, however it got there', async () => {
+    // The URL arrives from a subprocess's output. `checkForUpdate` re-checks
+    // GitHub's `html_url` for the same reason: a destination read out of
+    // somebody else's bytes is a destination to verify, not to trust.
+    const opened: string[] = [];
+    const { invoke } = await wire({
+      openExternal: async (each) => void opened.push(each),
+      enableServe: async () =>
+        ({ kind: 'tailnet-serve-disabled', url: 'file:///etc/passwd' }) as const,
+    });
+    await invoke(CHANNELS.serveEnable);
+    expect(await invoke(CHANNELS.remoteOpenLink, 'serve-admin')).toBe(false);
+    expect(opened).toEqual([]);
+  });
+
+  it('answers false rather than throwing when the shell refuses', async () => {
+    const { invoke } = await wire({
+      openExternal: async () => {
+        throw new Error('no browser');
+      },
+    });
+    expect(await invoke(CHANNELS.remoteOpenLink, 'download')).toBe(false);
+  });
+});
 
 describe('the pairing channel', () => {
   it('mints a code when the operator opens the screen, and reports the address', async () => {

@@ -118,6 +118,7 @@ describe('unpair and Revoke all are reachable from the surface `.` opens', () =>
 
   function stubRemote(): RemoteApi {
     const api: RemoteApi = {
+      openLink: vi.fn(async () => true),
       state: vi.fn(async () => STATE),
       open: vi.fn(async () => STATE),
       approve: vi.fn(async () => STATE),

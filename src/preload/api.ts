@@ -459,12 +459,26 @@ export type RemoteApi = {
    * every other part of `RemoteConfig`. See `remote/writes-preference.ts`.
    */
   setWrites(next: boolean): Promise<RemoteState>;
+  /**
+   * Opens one of the panel's two links in the operating system's browser.
+   *
+   * A KEY, NOT A URL: every `window.open` in this app is denied, so an
+   * ordinary link in the panel did nothing -- and a channel that took a
+   * destination from the renderer would be the navigate-anywhere capability
+   * that policy exists to refuse. Main owns both destinations. Answers whether
+   * a browser opened.
+   */
+  openLink(key: RemoteLinkKey): Promise<boolean>;
 };
+
+/** The two links the Remote panel draws. Main maps each to a destination. */
+export type RemoteLinkKey = 'download' | 'serve-admin';
 
 export function createRemoteApi(ipc: InvokerLike): RemoteApi {
   const ask = (channel: string, ...args: unknown[]) =>
     ipc.invoke(channel, ...args) as Promise<RemoteState>;
   return {
+    openLink: (key: RemoteLinkKey) => ipc.invoke(CHANNELS.remoteOpenLink, key) as Promise<boolean>,
     state: () => ask(CHANNELS.remoteState),
     open: () => ask(CHANNELS.pairingOpen),
     approve: () => ask(CHANNELS.pairingApprove),

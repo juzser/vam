@@ -42,6 +42,7 @@ const PAIRED: RemoteState = {
 
 function api(over: Partial<RemoteApi> = {}): RemoteApi {
   return {
+    openLink: vi.fn(async () => true),
     state: vi.fn(async () => PAIRED),
     open: vi.fn(async () => PAIRED),
     approve: vi.fn(async () => PAIRED),
