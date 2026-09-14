@@ -39,6 +39,18 @@ export const CHANNELS = {
    * arm so a caller has exactly one shape to draw (`preload/api.ts`).
    */
   sessionHistory: 'vam:session:history',
+  /**
+   * ONE SUBAGENT's work: what it was asked, what it has said, what it has
+   * called. Distinct from `load` for the reason `sessionHistory` is, only more
+   * so -- a session here has up to 460 subagent transcripts beside it, and the
+   * poll reads a 128 KiB tail per SESSION. Nobody pays this until a person
+   * opens the Agents tab and picks a row.
+   *
+   * Like `sessionHistory` it answers through the `IpcResult` envelope AND has
+   * an `unavailable` arm of its own; the preload folds the first into the
+   * second so a caller has one shape to draw.
+   */
+  sessionAgentWork: 'vam:session:agent-work',
   applyWaivers: 'vam:source:apply-waivers',
   transitionLesson: 'vam:source:transition-lesson',
   /**

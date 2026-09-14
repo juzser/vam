@@ -45,6 +45,7 @@ import type {
   SourceDeclines,
   ViewerScope,
 } from '../renderer/sources/port.js';
+import type { AgentWork } from './agent-work.js';
 import type { HistoryCursor, TranscriptPage } from './history.js';
 
 /**
@@ -104,6 +105,8 @@ export type PreloadSourceApi = {
    * confused and a forgotten `catch` would confuse them.
    */
   history(sessionId: string, cursor: HistoryCursor | null): Promise<TranscriptPage>;
+  /** What one of a session's agents was asked and has done -- read on demand. */
+  agentWork(sessionId: string, agentId: string): Promise<AgentWork>;
   applyWaivers(sessionId: string, findingIds: readonly string[]): Promise<void>;
   transitionLesson(sessionId: string, lessonId: string, status: string): Promise<void>;
 };

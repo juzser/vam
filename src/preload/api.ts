@@ -23,6 +23,7 @@ import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
 import type { RemoteState } from '../main/remote/state.js';
 import type { Project } from '../renderer/domain/model.js';
 import type { SourceError } from '../renderer/sources/port.js';
+import type { AgentWork } from '../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.js';
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
@@ -56,18 +57,23 @@ async function unwrap<T>(pending: Promise<unknown>): Promise<T> {
 }
 
 /**
- * `unwrap`, for the one member that must not reject.
+ * `unwrap`, for the members that must not reject.
  *
- * A scroll-back has to tell "vam could not read" apart from "there is nothing
- * older", and `TranscriptPage` already carries both. Rejecting for the first
- * would put that state somewhere a caller has to remember to look, and the
- * caller that forgot would draw the second. So every failure -- a refusal main
- * returned, a channel that is not registered, a bridge that is gone -- lands in
- * the arm the type already has.
+ * An on-demand read has to tell "vam could not read" apart from the ordinary
+ * empty answer -- "there is nothing older", "this agent has done nothing yet"
+ * -- and both `TranscriptPage` and `AgentWork` already carry the distinction
+ * in their own `unavailable` arm. Rejecting for the first would put that state
+ * somewhere a caller has to remember to look, and the caller that forgot would
+ * draw the second. So every failure -- a refusal main returned, a channel that
+ * is not registered, a bridge that is gone -- lands in the arm the type has.
+ *
+ * ONE COPY FOR BOTH READS. The mapping below decides whether a thrown value is
+ * already a `SourceError`, and a second copy of that decision is a second
+ * place for it to drift from `port.ts`'s `describeFailure`.
  */
-export async function unwrapPage(pending: Promise<unknown>): Promise<TranscriptPage> {
+async function unwrapIntoArm(pending: Promise<unknown>): Promise<UnavailableArm | unknown> {
   try {
-    return await unwrap<TranscriptPage>(pending);
+    return await unwrap<unknown>(pending);
   } catch (reason) {
     // A refusal main RETURNED keeps its own `kind`, `code` and message -- the
     // same shape `port.ts`'s `describeFailure` renders. Only something that is
@@ -79,7 +85,7 @@ export async function unwrapPage(pending: Promise<unknown>): Promise<TranscriptP
       'code' in reason &&
       'message' in reason
     ) {
-      return { kind: 'unavailable', error: reason as SourceError };
+      return { kind: 'unavailable', error: reason as SourceError } satisfies UnavailableArm;
     }
     return {
       kind: 'unavailable',
@@ -88,9 +94,27 @@ export async function unwrapPage(pending: Promise<unknown>): Promise<TranscriptP
         code: 'bridge-failed',
         message: reason instanceof Error ? reason.message : String(reason),
       },
-    };
+    } satisfies UnavailableArm;
   }
 }
+
+/** The arm both on-demand reads carry, and the only shape this file adds. */
+type UnavailableArm = { readonly kind: 'unavailable'; readonly error: SourceError };
+
+/**
+ * The assertion here is the one thing worth reading twice: `unwrapIntoArm`
+ * returns either what main sent -- which IS a `TranscriptPage`, because that is
+ * what the channel resolves -- or the `unavailable` arm, which every one of
+ * these types contains. Both are the return type; TypeScript cannot see the
+ * first half of that sentence, so it is stated here rather than duplicated as
+ * two identical catch blocks.
+ */
+export const unwrapPage = (pending: Promise<unknown>): Promise<TranscriptPage> =>
+  unwrapIntoArm(pending) as Promise<TranscriptPage>;
+
+/** The same, for one agent's work. See `unwrapPage`. */
+export const unwrapAgentWork = (pending: Promise<unknown>): Promise<AgentWork> =>
+  unwrapIntoArm(pending) as Promise<AgentWork>;
 
 /**
  * The per-project pull-request directories, pushed into main.
@@ -160,7 +184,10 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
     // newest end", which is the first thing any caller asks for.
     history: (sessionId: string, cursor: HistoryCursor | null) =>
       unwrapPage(ipc.invoke(CHANNELS.sessionHistory, sessionId, cursor)),
-  } satisfies Pick<PreloadSourceApi, 'history'>;
+    // Same envelope, same never-rejects rule: the Agents pane draws one shape.
+    agentWork: (sessionId: string, agentId: string) =>
+      unwrapAgentWork(ipc.invoke(CHANNELS.sessionAgentWork, sessionId, agentId)),
+  } satisfies Pick<PreloadSourceApi, 'history' | 'agentWork'>;
 
   const governance = {
     applyWaivers: (sessionId, findingIds) =>

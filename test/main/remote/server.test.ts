@@ -251,6 +251,59 @@ describe('read-only mode', () => {
   });
 });
 
+/**
+ * ONE AGENT'S WORK, over the wire the phone actually uses. Registered beside
+ * the history route and, like it, a READ that happens to POST -- so a
+ * read-only server still serves it: looking at what a subagent is doing
+ * changes nothing, and the phone is where an operator most often wants to.
+ */
+describe('the agent-work route', () => {
+  const WORK = { kind: 'work' as const, turns: [], brief: null, whole: true };
+
+  it('forwards the row and the agent, and answers the work whole', async () => {
+    const readAgentWork = vi.fn(async () => WORK);
+    const base = await start({ source: makeSource({ readAgentWork }) });
+    const response = await post(base, '/api/agent-work', { sessionId: 's1', agentId: 'agent-a' });
+    expect(await response.json()).toEqual({ ok: true, value: WORK });
+    expect(readAgentWork).toHaveBeenCalledWith('s1', 'agent-a');
+  });
+
+  it('refuses a body it does not trust without reaching the source', async () => {
+    const readAgentWork = vi.fn(async () => WORK);
+    const base = await start({ source: makeSource({ readAgentWork }) });
+    for (const body of [{ sessionId: 42, agentId: 'a' }, { sessionId: 's1' }, { agentId: 'a' }]) {
+      const response = await post(base, '/api/agent-work', body);
+      expect(response.status).toBe(400);
+    }
+    expect(readAgentWork).not.toHaveBeenCalled();
+  });
+
+  it('answers the type’s own unavailable arm when the source has no agents', async () => {
+    const base = await start({ source: makeSource() });
+    const response = await post(base, '/api/agent-work', { sessionId: 's1', agentId: 'a' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      value: {
+        kind: 'unavailable',
+        error: {
+          kind: 'refused',
+          code: 'unsupported:agent-work',
+          message: expect.stringContaining('agents'),
+        },
+      },
+    });
+  });
+
+  it('is served by a read-only server, like the history route beside it', async () => {
+    const readAgentWork = vi.fn(async () => WORK);
+    const base = await start({ allowWrites: false, source: makeSource({ readAgentWork }) });
+    const response = await post(base, '/api/agent-work', { sessionId: 's1', agentId: 'agent-a' });
+    expect(response.status).toBe(200);
+    expect(readAgentWork).toHaveBeenCalledWith('s1', 'agent-a');
+  });
+});
+
 describe('the history route', () => {
   it('forwards a cursor and answers the page whole', async () => {
     const readHistory = vi.fn(async () => PAGE);

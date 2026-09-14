@@ -8,6 +8,7 @@
  * that returned the whole model would be claiming to speak for the others.
  */
 
+import type { AgentWork } from '../../shared/agent-work.js';
 import type { HistoryCursor, TranscriptPage } from '../../shared/history.js';
 import type { Project, SourceId } from '../domain/model.js';
 
@@ -156,6 +157,18 @@ export type SessionSource = {
    * confused, and a forgotten `catch` confuses them.
    */
   readonly history?: (sessionId: string, cursor: HistoryCursor | null) => Promise<TranscriptPage>;
+
+  /**
+   * What ONE of a session's subagents was asked and what it has done -- the
+   * Agents pane's detail side.
+   *
+   * OPTIONAL AND ANSWER-GATED, exactly like `history` above: a source that
+   * cannot see inside an agent says so in `AgentWork`'s own `unavailable`
+   * arm rather than through a capability flag, and it never rejects -- "vam
+   * could not read" and "this agent has done nothing yet" are the two answers
+   * that must not be confused.
+   */
+  readonly agentWork?: (sessionId: string, agentId: string) => Promise<AgentWork>;
   readonly subscribe?: (onChange: () => void) => () => void;
   readonly write?: SourceWrites;
   readonly governance?: SourceGovernance;

@@ -52,12 +52,14 @@ import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { Project, Session, SlashCommand } from '../../../renderer/domain/model.js';
+import type { AgentWork } from '../../../shared/agent-work.js';
 import type { HistoryCursor, TranscriptPage } from '../../../shared/history.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
 import type { MainSource } from '../source.js';
 import { createTmuxRunner, listVamSessions, type TmuxSession } from '../tmux/spawn.js';
 import { type AgentRoster, readAgentRoster, subagentsDirOf } from './agent-roster.js';
+import { readAgentWork } from './agent-work.js';
 import { type AgentsResult, type LiveAgent, listLiveAgents } from './agents.js';
 import { type BuiltinCommandList, createBuiltinCommandReader } from './builtin-commands.js';
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
@@ -220,6 +222,24 @@ async function readTranscript(
  * named, and the session id is what names it. Asking the CLI instead would
  * spawn a subprocess per scroll step.
  */
+/**
+ * Which FILE a row's turns live in, and which session that row is.
+ *
+ * Extracted because two on-demand reads need the same answer -- scrolling back
+ * (`readClaudeCodeHistory`) and opening one of a session's agents
+ * (`readClaudeCodeAgentWork`) -- and the `#` rule above is subtle enough that
+ * a second copy of it would be a second thing to get wrong.
+ */
+async function locateTranscript(
+  root: string,
+  rowId: string,
+): Promise<{ readonly sessionId: string; readonly path: string | undefined }> {
+  const index = await indexTranscripts(root);
+  const hash = rowId.lastIndexOf('#');
+  const sessionId = index.has(rowId) || hash === -1 ? rowId : rowId.slice(0, hash);
+  return { sessionId, path: index.get(sessionId) };
+}
+
 export async function readClaudeCodeHistory(
   root: string,
   rowId: string,
@@ -228,10 +248,7 @@ export async function readClaudeCodeHistory(
   // transcript under a temp directory, never the operator's own.
   sourceOf: (path: string) => TranscriptSource = fileTranscriptSource,
 ): Promise<TranscriptPage> {
-  const index = await indexTranscripts(root);
-  const hash = rowId.lastIndexOf('#');
-  const sessionId = index.has(rowId) || hash === -1 ? rowId : rowId.slice(0, hash);
-  const path = index.get(sessionId);
+  const { sessionId, path } = await locateTranscript(root, rowId);
   if (path === undefined) {
     // vam looked and this session has no transcript -- a refusal naming what
     // it could not find, never an empty page claiming the session is empty.
@@ -245,6 +262,36 @@ export async function readClaudeCodeHistory(
     };
   }
   return await readTranscriptHistory(sourceOf(path), sessionId, cursor);
+}
+
+/**
+ * What ONE of a session's subagents was asked and what it has done.
+ *
+ * ON DEMAND, like the history above and for the same reason said differently:
+ * a session here has up to 460 agent transcripts beside it, and the poll's
+ * 128 KiB-per-session budget exists to refuse exactly that. Nobody pays this
+ * until a person opens the Agents tab and picks a row.
+ *
+ * The agent id is NOT trusted to be a file name -- `agent-work.ts` checks it
+ * before it becomes a path, because it arrives over IPC from a renderer.
+ */
+export async function readClaudeCodeAgentWork(
+  root: string,
+  rowId: string,
+  agentId: string,
+): Promise<AgentWork> {
+  const { sessionId, path } = await locateTranscript(root, rowId);
+  if (path === undefined) {
+    return {
+      kind: 'unavailable',
+      error: {
+        kind: 'refused',
+        code: 'unknown-session',
+        message: `vam found no transcript for ${sessionId}; it may have been removed`,
+      },
+    };
+  }
+  return await readAgentWork(path, agentId);
 }
 
 export async function loadClaudeCodeProjects(
@@ -708,4 +755,6 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    */
   readHistory: async (sessionId, cursor) =>
     readClaudeCodeHistory(defaultTranscriptRoot(), sessionId, cursor),
+  readAgentWork: async (sessionId, agentId) =>
+    readClaudeCodeAgentWork(defaultTranscriptRoot(), sessionId, agentId),
 };

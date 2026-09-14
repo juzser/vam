@@ -11,6 +11,7 @@
  */
 
 import type { Project } from '../../renderer/domain/model.js';
+import type { AgentWork } from '../../shared/agent-work.js';
 import type { HistoryCursor, TranscriptPage } from '../../shared/history.js';
 import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
@@ -73,4 +74,22 @@ export type MainSource = {
    * arrive as `unreachable/source-failed` with that reason rewritten.
    */
   readHistory?(sessionId: string, cursor: HistoryCursor | null): Promise<TranscriptPage>;
+
+  /**
+   * What ONE of a session's subagents was asked and what it has done -- the
+   * Agents pane's detail side.
+   *
+   * ON DEMAND FOR THE SAME REASON `readHistory` IS, said in the other
+   * direction: `load()` reads a fixed tail per SESSION, and a session on this
+   * machine has up to 460 subagent transcripts beside it. Reading them on the
+   * poll is the exact cost that budget exists to refuse, so nobody pays it
+   * until a person opens the tab and picks a row.
+   *
+   * NOT GATED BY A CAPABILITY BOOLEAN, on the rule above: `AgentWork` carries
+   * its own `unavailable` arm, so a source with no agent surface answers with
+   * it rather than with a flag the canvas would have to consult first.
+   *
+   * RESOLVES, never throws.
+   */
+  readAgentWork?(sessionId: string, agentId: string): Promise<AgentWork>;
 };

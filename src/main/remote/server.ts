@@ -487,6 +487,49 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     },
   });
 
+  /**
+   * ONE AGENT'S WORK, beside `/api/history` and a READ like it -- available
+   * even to a server started read-only, because looking at what a subagent is
+   * doing changes nothing.
+   *
+   * It is here rather than left to the desktop for the reason `/api/history`
+   * is: the phone is what this module serves, and an Agents tab that worked
+   * only when the operator was at the machine would be an Agents tab the
+   * operator mostly cannot use.
+   */
+  table.set('/api/agent-work', {
+    method: 'POST',
+    route: async (_request, response, { body }) => {
+      if (!isText(body.sessionId) || !isText(body.agentId)) {
+        send(response, 400, {
+          ok: false,
+          error: { kind: 'refused', code: 'invalid-payload', message: 'agent-work: wrong shape' },
+        });
+        return;
+      }
+      const read = options.source.readAgentWork;
+      if (read === undefined) {
+        send(response, 200, {
+          ok: true,
+          value: {
+            kind: 'unavailable',
+            error: {
+              kind: 'refused',
+              code: 'unsupported:agent-work',
+              message: 'this source cannot report what a session’s agents are doing',
+            },
+          },
+        });
+        return;
+      }
+      send(
+        response,
+        200,
+        await envelope(async () => await read(body.sessionId as string, body.agentId as string)),
+      );
+    },
+  });
+
   table.set('/api/stream', { method: 'GET', route: stream(options) });
 
   if (!options.allowWrites) {

@@ -14,6 +14,7 @@
  * unexpected -- an unhandled rejection must never escape into main.
  */
 
+import type { AgentWork } from '../../shared/agent-work.js';
 import type { HistoryCursor, TranscriptPage } from '../../shared/history.js';
 import { setPrRepoOverrides } from '../sources/claude-code/pr-repos.js';
 import type { MainSource } from '../sources/source.js';
@@ -125,6 +126,7 @@ const ARGUMENTS: Record<string, readonly ((value: unknown) => boolean)[]> = {
   [CHANNELS.createSession]: [isText, isText, isOptionalText],
   [CHANNELS.createSessionIn]: [isDirectoryPath, isText, isOptionalText],
   [CHANNELS.sessionHistory]: [isText, isCursor],
+  [CHANNELS.sessionAgentWork]: [isText, isText],
   [CHANNELS.applyWaivers]: [isText, isTextList],
   [CHANNELS.transitionLesson]: [isText, isText, isText],
 };
@@ -233,6 +235,35 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
       return await answer<TranscriptPage>(() =>
         read(args[0] as string, (args[1] ?? null) as HistoryCursor | null),
       )();
+    },
+  );
+
+  /**
+   * One of a session's agents, read on demand. Registered beside
+   * `sessionHistory` and for its two reasons: it RETURNS A VALUE, and it is
+   * not gated by a capability boolean -- `AgentWork` carries the source's own
+   * words for "this one has no agent surface" in its `unavailable` arm.
+   */
+  ipcMain.handle(
+    CHANNELS.sessionAgentWork,
+    async (_event, ...args): Promise<IpcResult<AgentWork>> => {
+      const invalid = validate(CHANNELS.sessionAgentWork, args);
+      if (invalid !== null) {
+        return { ok: false, error: invalid };
+      }
+      const read = source.readAgentWork;
+      if (read === undefined) {
+        return {
+          ok: false,
+          error: refused(
+            'unsupported:agent-work',
+            'this source cannot report what a session’s agents are doing',
+          ),
+        };
+      }
+      // `answer` wraps only the UNEXPECTED, as above: a source resolving to
+      // the type's own `unavailable` arm HAS answered, so that travels as ok.
+      return await answer<AgentWork>(() => read(args[0] as string, args[1] as string))();
     },
   );
 

@@ -17,6 +17,7 @@
  * politeness, on top of a refusal that does not depend on it.
  */
 
+import type { AgentWork } from '../../shared/agent-work.js';
 import type { TranscriptPage } from '../../shared/history.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../../shared/preload-api.js';
 import type { Project } from '../domain/model.js';
@@ -142,6 +143,8 @@ async function call<T>(
  * session is most of what a phone is for, and the phone is exactly what this
  * module serves, so `remote/server.ts` registers `/api/history` beside
  * `/api/load` -- as a READ, available even to a server started read-only.
+ * `agentWork` joins it on the same reasoning: an Agents tab that worked only
+ * when the operator was at the machine would be one they mostly cannot use.
  */
 export function createHttpSourceApi(options: HttpSourceOptions = {}): PreloadSourceApi {
   const base = options.baseUrl ?? '';
@@ -191,6 +194,21 @@ export function createHttpSourceApi(options: HttpSourceOptions = {}): PreloadSou
           sessionId,
           cursor,
         });
+      } catch (reason) {
+        return {
+          kind: 'unavailable',
+          error:
+            typeof reason === 'object' && reason !== null && 'code' in reason
+              ? (reason as SourceError)
+              : unreachable('transport-failed', 'the remote endpoint did not answer'),
+        };
+      }
+    },
+    // Resolves rather than rejects, like `history` directly above and for the
+    // same reason: `AgentWork` carries the failure in its own arm.
+    agentWork: async (sessionId, agentId) => {
+      try {
+        return await call<AgentWork>(transport, `${base}/api/agent-work`, { sessionId, agentId });
       } catch (reason) {
         return {
           kind: 'unavailable',
