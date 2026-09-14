@@ -623,3 +623,23 @@ node_modules/.bin/vite build --config vite.web.config.ts
 node_modules/.bin/vite preview --config vite.web.config.ts --port 5529
 node e2e/readme-shots.mjs http://localhost:5529 docs/images
 ```
+
+## `e2e/dark-ladder-shots.mjs` — the palette change, judged by eye as well as by number
+
+The third pass at the dark theme widened the elevation ladder so every
+adjacent rung clears the ~2.3 L\* just-noticeable difference. Numbers alone
+could not settle whether that reads as *separation* or merely as *lighter*,
+so this script photographs one build twice — the second time with the old
+values overridden as inline custom properties, so nothing but the palette
+moves between the two frames — and reads each surface back out of
+`getComputedStyle` so the caption states what was actually painted rather
+than what a token claims.
+
+```bash
+node e2e/dark-ladder-shots.mjs
+```
+
+Its output is gitignored like every other shot. The one comparison worth
+keeping is committed at `docs/images/dark-ladder-before-after.png`: pane
+15.64 → 22.62, card 18.94 → 27.97, ground unchanged at 10.27 — the frame
+where the question card stops merging into the surface behind it.
