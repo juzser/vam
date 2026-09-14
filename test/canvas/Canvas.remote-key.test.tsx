@@ -15,7 +15,7 @@
  */
 
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteApi, RemoteState } from '../../src/preload/api.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel } from '../../src/renderer/domain/model.js';
@@ -67,7 +67,17 @@ beforeAll(() => {
   });
 });
 
+beforeEach(() => {
+  // With no bridge, the Remote section reads the paired devices over HTTP
+  // (`PairedDeviceList`). Un-stubbed, this environment resolves `/api/devices`
+  // against a default origin and really opens a socket: a unit test making a
+  // network connection, which showed up only as an `ECONNREFUSED` printed
+  // beside a green run.
+  vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+});
+
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   // biome-ignore lint/suspicious/noExplicitAny: the bridge is not part of the browser build's Window type
   delete (window as any).api;

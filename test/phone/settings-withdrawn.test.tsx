@@ -27,7 +27,7 @@
  */
 
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionList } from '../../src/renderer/panels/SessionList.js';
 import { PHONE_QUERY } from '../../src/renderer/phone/viewport.js';
 import { EMPTY_PREFS } from '../../src/renderer/prefs/prefs.js';
@@ -59,7 +59,22 @@ function atPhoneWidth(): () => void {
   };
 }
 
-afterEach(cleanup);
+/**
+ * NO UNIT TEST MAKES A NETWORK CONNECTION. Remote is the one section a phone
+ * draws, and it reads the paired devices over HTTP (`PairedDeviceList`) -- so
+ * an un-stubbed render here resolves `/api/devices` against this environment's
+ * default origin and really opens a socket. It showed up as an
+ * `ECONNREFUSED` printed beside a green run, which is the shape of this that
+ * gets ignored.
+ */
+beforeEach(() => {
+  vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  cleanup();
+});
 
 describe('the phone’s own chrome', () => {
   it('draws no settings control at all', () => {

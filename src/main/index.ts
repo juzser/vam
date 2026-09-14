@@ -368,6 +368,12 @@ function startRemoteTransport(): void {
       await startRemoteServer({
         ...config,
         devices,
+        // READ-ONLY, ON PURPOSE. The phone has no `window.api` at all, so
+        // `/api/devices` is its only way to see what is paired -- and it is a
+        // LIST function rather than the registry itself, so nothing on the
+        // other end of that route can grant or revoke anything. See
+        // `RemoteServerOptions.pairedDevices`.
+        pairedDevices: () => devices.list(),
         pairing,
         streams,
         webRoot,

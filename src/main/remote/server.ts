@@ -45,6 +45,7 @@ import {
   type Identity,
   streamCookie,
 } from './auth.js';
+import type { PairedDevice } from './devices.js';
 import type { PairOutcome } from './pairing.js';
 
 /** The one address this server may ever bind. */
@@ -71,6 +72,20 @@ export type RemoteServerOptions = {
   readonly pairing?: PairPort;
   /** Where live SSE connections are held, so a revoked device can be dropped. */
   readonly streams?: StreamRegistry;
+  /**
+   * The paired devices, for `/api/devices`.
+   *
+   * A READER, NOT THE REGISTRY. What this route needs is a list; handing the
+   * whole `DeviceRegistry` over would put `grant`, `remove` and `removeAll` on
+   * an object the request path holds, and the one thing that must stay true of
+   * this route is that there is nothing on the other end of it that can change
+   * anything.
+   *
+   * Absent means the route is NOT REGISTERED -- the table has no entry and the
+   * process answers 404, the same shape read-only mode already uses for the
+   * write routes. See `routesFor`.
+   */
+  readonly pairedDevices?: () => readonly PairedDevice[];
   readonly allowWrites: boolean;
   readonly source: MainSource;
   readonly subscribe: (onChange: () => void) => () => void;
@@ -385,6 +400,43 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     servedDescriptor(options.source.descriptor, options.allowWrites),
   );
   read('/api/load', async () => await options.source.load());
+
+  /**
+   * THE PAIRED DEVICES, FOR A PHONE THAT HAS NO BRIDGE TO ASK.
+   *
+   * Operator instruction: on mobile, Remote only needs to show the paired
+   * devices. The desktop reads them over IPC from the registry itself; the
+   * browser build has no `window.api` at all, so without this route the one
+   * control left on a phone opens onto an apology.
+   *
+   * A READ, registered here beside `describe` and `load` -- above the
+   * `allowWrites` return -- so a server started read-only still carries it.
+   * Nothing on the other end of it can change anything: `pairedDevices` is a
+   * reader, and there is deliberately no route that removes a device.
+   * Revocation from a device that can itself be revoked is a fight the
+   * operator cannot referee from either end, and the desktop holds the file.
+   *
+   * The caller's own id travels with the list so the phone can mark "this
+   * device" rather than making the operator match a name they typed weeks ago.
+   * It is not new information: the caller authenticated as it.
+   *
+   * NO CREDENTIAL CAN BE IN THE ANSWER: `PairedDevice` has no token field
+   * (`devices.ts` -- "it is returned once and never again"), so this is a
+   * property of the type rather than a stripping step someone can forget.
+   */
+  if (options.pairedDevices !== undefined) {
+    const pairedDevices = options.pairedDevices;
+    table.set('/api/devices', {
+      method: 'GET',
+      route: async (_request, response, { identity }) => {
+        send(
+          response,
+          200,
+          await envelope(async () => ({ you: identity.deviceId, devices: pairedDevices() })),
+        );
+      },
+    });
+  }
 
   /**
    * SCROLLING BACK, and it is registered as a READ -- before the `allowWrites`

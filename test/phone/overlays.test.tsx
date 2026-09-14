@@ -12,13 +12,21 @@
  */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import { installPhoneGlobals, MODEL, phoneSource, rows } from './harness.js';
 
 beforeAll(installPhoneGlobals);
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  // Remote is the phone's one settings section and it reads the paired
+  // devices over HTTP. Un-stubbed, this environment resolves `/api/devices`
+  // against a default origin and really opens a socket -- an `ECONNREFUSED`
+  // printed beside a green run, which is the shape nobody reads.
+  vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+});
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   localStorage.clear();
 });
