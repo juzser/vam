@@ -11,6 +11,23 @@
  * the release that mattered.
  */
 
+/**
+ * THE VERSION THIS BUILD IS, as the renderer can read it.
+ *
+ * A CONSTANT, AND DUPLICATED FROM `package.json` ON PURPOSE, with
+ * `test/update/version.test.ts` failing the moment the two disagree. The
+ * renderer has two builds: the Electron shell, where `app.getVersion()` is one
+ * process away, and a plain page served to the paired phone, where there is no
+ * bridge to ask across and no main process to ask. A Vite `define` would need
+ * adding to three configs plus vitest, and forgetting one prints `undefined`
+ * at the operator; importing `package.json` drags a dependency list into a
+ * bundle to read one string.
+ *
+ * `package.json` is what electron-builder stamps into the app, so the pinned
+ * constant IS the app's version rather than a second opinion about it.
+ */
+export const VERSION = '0.1.0';
+
 /** A release version. Prereleases are not representable here, on purpose. */
 export type Version = {
   readonly major: number;

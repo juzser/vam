@@ -106,6 +106,34 @@ const EN = {
   'settings.appearance.focusView.on': 'on',
   'settings.appearance.focusView.off': 'off',
 
+  // ── Update ───────────────────────────────────────────────────────────────
+  // THE OPERATOR ASKED A QUESTION, SO EVERY ANSWER IS A SENTENCE. The popover
+  // that already existed draws for one outcome and is silent for the other
+  // three, which is right for a notice nobody asked for and wrong for a room
+  // somebody walked into. `rate-limited` and `malformed` are developer words
+  // for states a person acts on by waiting and by doing nothing; neither
+  // reaches the screen.
+  'settings.update.hint': 'which vam this is, and whether a newer one has been released',
+  'settings.update.check': 'check for updates',
+  'settings.update.checking': 'checking…',
+  'settings.update.current': 'this is the newest release',
+  'settings.update.none': 'no releases have been published yet',
+  // NOT STARTING WITH THE PRODUCT NAME, and that is a constraint the panel's
+  // structural capitalisation puts on this catalogue: `vam` is lower case
+  // everywhere, and a paragraph beginning with it paints `Vam`. The strings
+  // drawn without `data-verbatim` therefore begin with something whose case
+  // is nobody's decision.
+  'settings.update.available': 'a newer vam is out — {version}',
+  'settings.update.open': 'open the release page',
+  'settings.update.offline': 'GitHub could not be reached — check the connection and try again',
+  'settings.update.limited': 'GitHub is rate-limiting this address; try again in a few minutes',
+  'settings.update.malformed': 'GitHub answered something vam could not read as a release',
+  // The browser build has no preload bridge, so there is no channel to check
+  // over. Absent rather than dimmed, with the reason said out loud: a missing
+  // control and no explanation reads as a broken screen.
+  'settings.update.browser':
+    'vam checks for updates from the desktop app. This is a browser tab, which has no way to ask.',
+
   // ── Sessions ─────────────────────────────────────────────────────────────
   'settings.sessions.hint': 'which agent a new session starts, and which key sends a prompt to one',
   'settings.sessions.provider.label': 'default provider',
