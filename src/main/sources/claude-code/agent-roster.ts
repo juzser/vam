@@ -96,8 +96,17 @@ const EMPTY_ROSTER: AgentRoster = { agents: [], running: 0 };
  * are bounded by the cap, so a session with 486 agents behind it costs at most
  * `ROSTER_LIMIT` extra small reads.
  */
+/**
+ * Where a session's subagent transcripts sit, beside its own.
+ *
+ * EXPORTED because `subagent.ts` opens files in this same directory and a
+ * second copy of this derivation is a second place to get it wrong.
+ */
+export const subagentsDirOf = (transcriptPath: string): string =>
+  join(transcriptPath.slice(0, -'.jsonl'.length), 'subagents');
+
 export async function readAgentRoster(transcriptPath: string, nowMs: number): Promise<AgentRoster> {
-  const dir = join(transcriptPath.slice(0, -'.jsonl'.length), 'subagents');
+  const dir = subagentsDirOf(transcriptPath);
   let names: string[];
   try {
     names = (await readdir(dir, { withFileTypes: true }))

@@ -565,6 +565,284 @@ describe('loadClaudeCodeProjects', () => {
   };
 
   /**
+   * WHEN THE OPERATOR IS TALKING TO A SUBAGENT AND THE SESSION FILE NEVER
+   * HEARS IT.
+   *
+   * Reported from use: a live session's row showed an IN from hours earlier.
+   * Measured on the real transcript -- the session's own file had gone quiet
+   * nine minutes before, and of the 43 text-bearing `user` lines in its last
+   * 4 MB, ZERO were operator prompts. The operator's four most recent messages
+   * were all in `<sessionId>/subagents/agent-<id>.jsonl`, which this source
+   * read for a COUNT and never for content.
+   *
+   * The row is still a session. What changed is where its newest turn may come
+   * from: the newest of the session transcript and its LIVE subagents, decided
+   * by when the operator spoke, never by which file was written last.
+   */
+  describe('an operator talking to a live subagent', () => {
+    const HANDOFF = 'The user sent a new message while you were working:';
+    const handoffLine = (words: string, at: string) => ({
+      type: 'user',
+      isMeta: true,
+      isSidechain: true,
+      timestamp: at,
+      message: { role: 'user', content: [{ type: 'text', text: `${HANDOFF}\n${words}` }] },
+    });
+    const agentSaid = (text: string, at: string) => ({
+      type: 'assistant',
+      isSidechain: true,
+      timestamp: at,
+      message: { role: 'assistant', content: [{ type: 'text', text }] },
+    });
+    const agentTool = (name: string, at: string) => ({
+      type: 'assistant',
+      isSidechain: true,
+      timestamp: at,
+      message: { role: 'assistant', content: [{ type: 'tool_use', name, input: {} }] },
+    });
+
+    /** The session's own transcript, carrying a dated prompt of its own. */
+    const sessionSaid = (text: string, at: string) =>
+      jsonl(
+        {
+          type: 'user',
+          promptSource: 'typed',
+          timestamp: at,
+          message: { role: 'user', content: [{ type: 'text', text }] },
+        },
+        userPrompt(text),
+        reply('the session answered that one'),
+      );
+
+    /** A subagent transcript beside a session, aged so the roster calls it running. */
+    const writeAgent = (sessionId: string, id: string, body: string, ageMs = 10_000) => {
+      const dir = join(root, 'proj', `${sessionId}`, 'subagents');
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, `${id}.jsonl`);
+      writeFileSync(file, body);
+      const when = (NOW - ageMs) / 1000;
+      utimesSync(file, when, when);
+    };
+
+    const loaded = async () => {
+      const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+      return project?.sessions[0];
+    };
+
+    it('shows what the operator said to the agent, not the stale session prompt', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('an hour ago', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(
+          { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'a brief' }] } },
+          handoffLine('hide the popover after submit', '2026-09-03T09:00:00.000Z'),
+          agentTool('Bash', '2026-09-03T09:01:00.000Z'),
+          agentSaid('on it now', '2026-09-03T09:02:00.000Z'),
+        ),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('hide the popover after submit');
+    });
+
+    /**
+     * ONE STORY PER ROW. The answer and the activity come from wherever the
+     * prompt came from -- a row showing one file's question over another
+     * file's working would be the defect this repo keeps finding.
+     */
+    it('takes the answer and the activity from the same place as the question', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('an hour ago', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(
+          handoffLine('and the rest of it', '2026-09-03T09:00:00.000Z'),
+          agentTool('Grep', '2026-09-03T09:01:00.000Z'),
+          agentSaid('halfway through', '2026-09-03T09:02:00.000Z'),
+        ),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.output).toBe('halfway through');
+      expect(session?.activity).toBe('Grep');
+    });
+
+    /**
+     * AND IT NEVER COSTS THE SESSION ITS OWN PROMPT. The rule is "the newest
+     * thing the operator said", so a session prompt that came AFTER the
+     * handoff keeps the row.
+     */
+    it('leaves the row alone when the session itself heard something newer', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('just now', '2026-09-03T09:04:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('said before that', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('just now');
+    });
+
+    /**
+     * THE REPORTED SHAPE, WHICH IS THE ONE WITHOUT A CLOCK ON IT.
+     *
+     * A long transcript's newest turn is opened by `last-prompt` alone -- the
+     * operator's own `user` line is above the top of the 128 KiB window -- and
+     * that marker carries no timestamp at all. Measured on this machine: 29 of
+     * the 69 sessions whose tail holds a turn are in exactly this state, and
+     * the one session with a live agent at the moment of measuring was one of
+     * them. A rule that refused to compare here would be a fix that does
+     * nothing for the case that reported it.
+     */
+    it('shows the agent turn for a session whose own prompt carries no clock', async () => {
+      writeTranscript(
+        'proj',
+        'sess-1',
+        jsonl(userPrompt('the stale one'), {
+          type: 'assistant',
+          timestamp: '2026-09-03T08:00:00.000Z',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'answered then' }] },
+        }),
+      );
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('what they actually just asked', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('what they actually just asked');
+    });
+
+    /**
+     * AND THE FALLBACK LEANS THE SAFE WAY. Standing in for the question, the
+     * turn's newest step is an UPPER bound on when it was asked -- so a
+     * session still writing keeps its row, and the only turns the bound costs
+     * are ones where the session is demonstrably still working.
+     */
+    it('keeps the row when an undated session turn is still doing things', async () => {
+      writeTranscript(
+        'proj',
+        'sess-1',
+        jsonl(userPrompt('the stale one'), {
+          type: 'assistant',
+          timestamp: '2026-09-03T09:03:00.000Z',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'still going' }] },
+        }),
+      );
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('said before that step landed', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('the stale one');
+    });
+
+    /**
+     * A SESSION WITH NO LIVE SUBAGENT IS UNTOUCHED -- the same bytes read and
+     * the same row drawn as before any of this existed.
+     */
+    it('changes nothing for a session that has no subagents at all', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('the only prompt', '2026-09-03T08:00:00.000Z'));
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('the only prompt');
+      expect(session?.decisions).toHaveLength(1);
+    });
+
+    it('changes nothing for a live agent the operator never spoke to', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('the only prompt', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(
+          { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'a brief' }] } },
+          agentSaid('working away', '2026-09-03T09:02:00.000Z'),
+        ),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('the only prompt');
+    });
+
+    /**
+     * AN AGENT THAT HAS STOPPED WRITING IS NOT A CONVERSATION. The roster
+     * already calls an agent running only if its transcript was touched in the
+     * last five minutes, and that is the same set the `●N` badge counts -- so
+     * the row and the tab never disagree about which agents are live.
+     */
+    it('ignores an agent that stopped writing long ago', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('the only prompt', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('said to a finished agent', '2026-09-03T09:00:00.000Z')),
+        60 * 60_000,
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('the only prompt');
+    });
+
+    /**
+     * ABSENT, NOT ZERO. `model.ts` reserves absence for "this source cannot
+     * report it" and zero for a reading, and vam does not count an agent
+     * window's tool failures or collect its calls. Saying zero would be a
+     * claim it never checked.
+     */
+    it('reports no failure count and no working for a turn it read from an agent', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('an hour ago', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('the newest ask', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.errorCount).toBeUndefined();
+      expect(session?.decisions[0]?.steps).toBeUndefined();
+    });
+
+    /**
+     * THE SESSION'S OWN TURNS ARE STILL THERE, BENEATH IT. The agent turn is
+     * the newest thing the operator said, not a replacement for the history
+     * under it -- scrolling the pane must still reach what the session did
+     * before they walked over to the agent.
+     */
+    it('keeps the session own turns under the one it read from the agent', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('an hour ago', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('the newest ask', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      expect(session?.decisions.map((d) => d.input)).toEqual(['the newest ask', 'an hour ago']);
+    });
+
+    /** The row is still captioned like the session's own turns -- see the pane. */
+    it('labels it the way the session labels its own turns', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('an hour ago', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('the newest ask', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.label).toBe(session?.decisions[1]?.label);
+    });
+
+    /** Ids have to be unique across the two files, or the pane keys two turns alike. */
+    it('gives it an id no turn of the session transcript can mint', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('an hour ago', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('the newest ask', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      const ids = session?.decisions.map((d) => d.id) ?? [];
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(ids[0]).toContain('agent-aaa');
+    });
+  });
+
+  /**
    * WHAT THE SESSION SAYS IT IS BLOCKED ON. A tool-approval prompt leaves no
    * transcript record at all, so `questions` is empty for it and this is the
    * only surface that can tell the operator the session is stuck.

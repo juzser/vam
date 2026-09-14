@@ -18,12 +18,30 @@
  * it is only walked, to find which file a session id lives in. `cwd` comes
  * from the CLI, which reports the real path.
  *
- * SUBAGENTS ARE NOT SESSIONS. `<sessionId>/subagents/agent-*.jsonl` (486 files
- * here, against 54 transcripts) is work happening *under* a session, and the
+ * SUBAGENTS ARE NOT SESSIONS. `<sessionId>/subagents/agent-*.jsonl` (869 files
+ * here, against 80 transcripts) is work happening *under* a session, and the
  * model is explicit that it surfaces as `runningAgents` and never as a row --
  * rows are things the operator owns. The other half of that decision: inline
  * `isSidechain: true` lines, which older transcripts used for the same
  * purpose, measure zero in every current session file.
+ *
+ * ── WHAT CHANGED UNDERNEATH THAT, AND WHY IT STILL STANDS ────────────────
+ * The paragraph above is kept because its conclusion is still the rule: a
+ * subagent is not a row, and nothing below adds one. What it got wrong was a
+ * premise it never stated -- that a subagent is work nobody TALKS to. An
+ * operator can send a message mid-turn while a subagent is running, and
+ * Claude Code delivers it into the agent's transcript and not into the
+ * session's. Reported from use, then measured on the real file: the session's
+ * own transcript had gone quiet nine minutes earlier, ZERO of the 43
+ * text-bearing `user` lines in its last 4 MB were operator prompts, and all
+ * four of the operator's most recent messages were in the agent's file. vam
+ * was faithful to a file that had stopped being where the conversation was.
+ *
+ * So the row stays a session and its turns stay the session's -- but its
+ * NEWEST turn is the newest of the session transcript and the session's LIVE
+ * subagents, chosen by when the OPERATOR spoke and never by which file was
+ * written last. `subagent.ts` holds that rule, what it costs, and why an
+ * agent's own words can never take the row.
  *
  * THIS MODULE IS MAIN-PROCESS ONLY. It reads the filesystem and spawns a
  * subprocess, so the browser build cannot use it and does not import it; the
@@ -39,7 +57,7 @@ import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
 import type { MainSource } from '../source.js';
 import { createTmuxRunner, listVamSessions, type TmuxSession } from '../tmux/spawn.js';
-import { type AgentRoster, readAgentRoster } from './agent-roster.js';
+import { type AgentRoster, readAgentRoster, subagentsDirOf } from './agent-roster.js';
 import { type AgentsResult, type LiveAgent, listLiveAgents } from './agents.js';
 import { type BuiltinCommandList, createBuiltinCommandReader } from './builtin-commands.js';
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
@@ -67,6 +85,7 @@ import {
   stopSession,
   stopSessionViaCli,
 } from './stop.js';
+import { withLiveAgentTurn } from './subagent.js';
 import {
   compactAge,
   EMPTY_FACTS,
@@ -171,9 +190,14 @@ async function readTranscript(
     // holds and the ids a page hands back are minted from the same offsets --
     // which is the whole reason a page can be merged into the tail at all.
     const tail = await readTranscriptWindow(path, info.size - TAIL_BYTES, info.size);
+    const facts = summarizeTranscript(tail.text, sessionId, tail.start);
+    // The roster's walk is what names the live agents, and it has already been
+    // paid for the `●N` badge -- so a session with none costs nothing new here
+    // and reads no file it did not read before (`subagent.ts`).
+    const roster = await readAgentRoster(path, nowMs);
     return {
-      facts: summarizeTranscript(tail.text, sessionId, tail.start),
-      roster: await readAgentRoster(path, nowMs),
+      facts: await withLiveAgentTurn(facts, roster, subagentsDirOf(path), sessionId),
+      roster,
       mtimeMs: info.mtimeMs,
     };
   } catch {
