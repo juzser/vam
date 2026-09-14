@@ -372,8 +372,42 @@ jobs:
       # `pnpm dist` builds for a release. `dist-app/linux-unpacked/` is where
       # `electron-launch.et.ts`'s own `resolveExecutablePath()` looks on this
       # platform.
+      #
+      # `--config.electronDownload.isVerifyChecksum=false`, CI-only — this
+      # flag never touches `electron-builder.config.cjs` itself, so a real
+      # release (`pnpm dist`, run by a person) still verifies the checksum.
+      # It exists because of what actually failed here on the first two
+      # Linux runs (GitHub Actions run 34856620778, reproduced identically
+      # on a `--failed` rerun): "downloaded label=electron progress=100%"
+      # immediately followed by "Response code 504 (Gateway Time-out)". That
+      # is NOT the electron.zip download itself succeeding then somehow
+      # re-failing — reading the installed source
+      # (`node_modules/@electron/get/dist/cjs/index.js`'s `validateArtifact`,
+      # called from `app-builder-lib/out/util/electronGet.js`'s
+      # `downloadArtifactToFile`) shows that after every electron zip
+      # download, `@electron/get` fetches a SECOND, separate artifact —
+      # `SHASUMS256.txt`, from the same GitHub release — to verify the zip's
+      # checksum, UNLESS `isVerifyChecksum` is `false`. That file is under
+      # 1MB, so electron-builder's own progress logging skips it entirely
+      # (`electronGet.js`: "That file is tiny (<1 MB) and fires at 100%
+      # immediately... skip progress display"), which is exactly why the log
+      # shows nothing between the electron zip's own 100% line and the 504:
+      # the failing request is silent by design. It is also UNCACHEABLE —
+      # `@electron/get`'s own comment on that call reads "Never use the
+      # cache for loading checksums, load them fresh every time"
+      # (`cacheMode: ElectronDownloadCacheMode.Bypass` is hardcoded, not a
+      # caller-configurable option) — so caching electron-builder's own
+      # artifact directory between runs would not have prevented this
+      # specific failure; it would still 504 on a cache MISS, and the
+      # electron zip download this flag leaves untouched already benefits
+      # from that same cache when warm. Skipping the checksum affects only
+      # THIS job's own throwaway, never-distributed `--dir` build, not the
+      # `sandbox: true` posture AC-14 checks two steps down — that is a
+      # property of the packaged app's own `BrowserWindow` options, set in
+      # `src/main`, and has nothing to do with how its Electron binary was
+      # verified at build time.
       - name: package (electron-builder --dir)
-        run: node_modules/.bin/electron-builder --dir --config electron-builder.config.cjs
+        run: node_modules/.bin/electron-builder --dir --config electron-builder.config.cjs --config.electronDownload.isVerifyChecksum=false
 
       # UNVERIFIED ON A REAL LINUX RUNNER: written and reasoned from the
       # `check` job's own working recipe (same repo, same runner image),
