@@ -67,7 +67,17 @@ export function PairedDeviceList({ read }: PairedDeviceListProps) {
   }
   if (state.kind === 'failed') {
     return (
-      <p data-testid="devices-failed" role="alert" className="text-control text-ink-dim">
+      /* `data-verbatim`: this line begins with the PRODUCT NAME, and the
+         overlay's structural rule capitalises a paragraph's first letter --
+         which would paint "Vam". `styles.css` states the exemption and
+         `e2e/settings-chrome-shots.mjs` measures it as painted case, which is
+         how this was caught. */
+      <p
+        data-testid="devices-failed"
+        data-verbatim
+        role="alert"
+        className="text-control text-ink-dim"
+      >
         vam could not read the paired devices — {state.note}
       </p>
     );

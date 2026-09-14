@@ -85,8 +85,25 @@ async function namedTab(page, label) {
 // ---------------------------------------------------------------- ITEM 1.
 // The name, at every width the strip is the nav at.
 
+/**
+ * THE NARROWEST WIDTH THAT STILL HAS A SETTINGS OVERLAY WORTH MEASURING.
+ *
+ * `SIDEBAR_MIN + DETAIL_MIN` (200 + 320) is the narrowest window the desktop
+ * layout can draw two columns in; one pixel under it is the phone shell
+ * (`phone/viewport.ts`, `PHONE_MAX_WIDTH = 519`). At the operator's request
+ * the phone draws ONE settings section and no nav at all, so every assertion
+ * in this file about a four-tab strip, a keyboard walk across sections, or the
+ * Keyboard section's chord column is a desktop assertion -- it used to run at
+ * 320 and 390, where none of those exist any more.
+ *
+ * Spelled rather than imported because this file runs against the BUILT
+ * bundle. `PHONE_BOUNDARY` below probes the real breakpoint so a change to
+ * either floor reddens this rather than silently moving what is measured.
+ */
+const NARROWEST_DESKTOP = 520;
+
 /** Below `md` the strip is the nav; `sm` is where it stops being two rows. */
-const STRIP_WIDTHS = [320, 390, 500, 639, 700, 767];
+const STRIP_WIDTHS = [NARROWEST_DESKTOP, 560, 600, 639, 700, 767];
 
 for (const width of STRIP_WIDTHS) {
   const page = await openSettings(width);
@@ -164,8 +181,8 @@ for (const width of STRIP_WIDTHS) {
   if (share > 0.25) {
     throw new Error(`${width}px: the section nav takes ${Math.round(share * 100)}% of the screen`);
   }
-  if (width === 390) {
-    await page.screenshot({ path: `${outDir}/settings-nav-390-after.png` });
+  if (width === NARROWEST_DESKTOP) {
+    await page.screenshot({ path: `${outDir}/settings-nav-narrow.png` });
   }
   await page.close();
 }
@@ -175,7 +192,7 @@ for (const width of STRIP_WIDTHS) {
 // section" means: Tab arrives on a NAMED tab, and the arrows walk the rest
 // without ever landing on an anonymous one.
 {
-  const page = await openSettings(390);
+  const page = await openSettings(NARROWEST_DESKTOP);
   const reached = [];
   for (const [id, label] of SECTIONS) {
     const active = await page.evaluate(() => ({
@@ -187,22 +204,24 @@ for (const width of STRIP_WIDTHS) {
     }));
     if (active.role !== 'tab' || active.id !== id) {
       throw new Error(
-        `390px: the keyboard is on ${JSON.stringify(active.id)} (role ${active.role}), expected the ${id} tab`,
+        `${NARROWEST_DESKTOP}px: the keyboard is on ${JSON.stringify(active.id)} (role ${active.role}), expected the ${id} tab`,
       );
     }
     if (active.shown.join(',') !== id) {
-      throw new Error(`390px: ${id} is focused but ${active.shown.join(',')} is the panel on screen`);
+      throw new Error(
+        `${NARROWEST_DESKTOP}px: ${id} is focused but ${active.shown.join(',')} is the panel on screen`,
+      );
     }
     const named = await namedTab(page, label);
     if (named !== id) {
       throw new Error(
-        `390px: the focused ${id} tab does not answer to the name ${JSON.stringify(label)} (it is ${named})`,
+        `${NARROWEST_DESKTOP}px: the focused ${id} tab does not answer to the name ${JSON.stringify(label)} (it is ${named})`,
       );
     }
     reached.push(label);
     await page.keyboard.press('ArrowRight');
   }
-  console.log(`390px: the keyboard reached ${reached.join(', ')}, each by name`);
+  console.log(`${NARROWEST_DESKTOP}px: the keyboard reached ${reached.join(', ')}, each by name`);
   await page.close();
 }
 
@@ -243,8 +262,10 @@ for (const width of STRIP_WIDTHS) {
 {
   for (const theme of ['dark', 'light']) {
     // The wide form and the narrow one where the section strip wraps two by
-    // two: the column has to survive both, and 390 is the narrowest shell.
-    for (const width of [1100, 390]) {
+    // two: the column has to survive both. The narrow one is
+    // `NARROWEST_DESKTOP`, not 390 -- 390 is the phone shell, which draws no
+    // Keyboard section for this to measure.
+    for (const width of [1100, NARROWEST_DESKTOP]) {
       const page = await openSettings(width, 800);
       await page.evaluate((t) => {
         document.documentElement.classList.toggle('light', t === 'light');
@@ -341,18 +362,37 @@ for (const width of STRIP_WIDTHS) {
 // So one is planted, through the same `localStorage` an override really
 // lives in, and asked the same questions.
 //
-// 320px IS IN THIS LIST BECAUSE OF A MUTATION THAT SURVIVED WITHOUT IT.
-// Deleting `whitespace-nowrap` from `SLOT_BOX` and re-running this check at
-// 1100 and 390 changed nothing at all: both of those have room, the
-// `max-content` track takes it, and the chord sits on one line either way. At
-// 320 — the narrowest width this file already tests the nav at — the grid runs
-// out of room, the slot falls back to 154px against 166px of chord, and
-// WITHOUT the class the chord wraps onto a second line that a 26px box cannot
-// show (measured: `lines: 2`, `slotW: 154`). With it, one line, 206px of ink
-// ending 113px inside the panel that clips. So the class is kept for what it
-// actually does — carry the overflow sideways where it stays readable — and
-// this loop runs at the width where deleting it goes red.
-for (const width of [1100, 390, 320]) {
+// THIS LOOP USED TO RUN AT 320 AND USED TO FALSIFY `whitespace-nowrap`. IT NO
+// LONGER FALSIFIES IT, AND SAYING SO IS THE POINT OF THIS PARAGRAPH.
+//
+// What was true: deleting `whitespace-nowrap` from `SLOT_BOX` changed nothing
+// at 1100 or 390 -- both have room, the `max-content` track takes it, the
+// chord sits on one line either way -- but at 320 the PANEL ran out of width,
+// the slot fell back to 154px against 166px of chord, and without the class
+// the chord wrapped onto a second line a 26px box cannot show. So 320 was in
+// this list because it was the width where deleting the class went red.
+//
+// What changed: 320 is the PHONE now. At the operator's request the phone
+// draws one settings section and no Keyboard tab at all
+// (`settings/sections.ts`, `PHONE_SECTIONS`), so there is no chord column
+// there to measure. `NARROWEST_DESKTOP` is the narrowest width this section
+// can be reached at, and the mutation was RE-RUN there rather than assumed:
+//
+//   with and without the class, 520px: Mod-Alt-AudioVolumeDown,
+//   166.17px of ink in a 182px box, 1 line -- identical.
+//
+// The track is `max-content`, so the slot grows with the chord until the panel
+// runs out, and at 520 the panel does not run out for any chord a keyboard
+// reports. Lengthening the plant does not restore the squeeze: measured at
+// `Mod-Alt-LaunchMediaPlayer`, 180.63px of ink in a 197px box, still one line.
+//
+// So: the class is KEPT, because it is correct and costs nothing, and the
+// claim that this loop protects it is RETIRED rather than left standing. What
+// the loop still proves is the rest -- that a planted override really lands,
+// that the chord is one line at both widths, and that it stays inside the box
+// that clips. Anyone who wants the class falsifiable again needs a surface
+// narrower than 520 that still draws a chord column, and there is none.
+for (const width of [1100, NARROWEST_DESKTOP]) {
   const page = await browser.newPage({ viewport: { width, height: 800 } });
   page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
   await page.addInitScript(() => {
