@@ -31,6 +31,26 @@ see [Sources](#sources) below.
 vam does not run agents and does not orchestrate anything. It is a
 read/write window onto a session log that must already exist somewhere.
 
+Every project group in the sidebar holds its live sessions as a strip of
+tabs — the shape that replaced an earlier node-graph canvas in the 0.2
+rewrite — and splitting one tab into two panes (`zs` stacked, `zv` side by
+side, or dragging a tab onto the detail pane) is how more than one shows on
+screen at once. Starting a session (`o` / `Mod-n`, or a project's own `+`)
+draws its own "starting a session in *project*…" row while vam waits for
+the first read back — even for a brand-new project, which has no section in
+the sidebar to hold it yet — and a source that has not answered its very
+first list at all shows `Loading sessions…` instead of a bare empty list, so
+a project that is genuinely empty is never mistaken for one still starting
+up.
+
+Closing a session (`x` / `Mod-w`) only ever kills the tmux pane vam itself
+started for it. vam refuses outright, by name, anything it cannot prove is
+its own — a pane it never started (`not-vam-started`) or an ambiguous case
+where more than one live session shares a project — rather than guessing;
+the refusal offers a confirmed force-kill by process id where one exists,
+re-verified alive at the moment of confirmation, and still declines if that
+check fails.
+
 ## Screenshots
 
 `Mod-k` opens a command palette (`cmdk`) with a jump list of every session,
@@ -40,10 +60,18 @@ grouped into "needs you" and "all sessions":
 
 A session's Agents tab is a navigator: the roster of subagents it is
 running on the left, and on the right the one you picked — its own IN/OUT
-and progress, not just the `●3` badge it collapses to elsewhere. (A session
-started by vam also has a Terminal tab, the screen of the tmux pane vam
-started for it — a snapshot with the agent's own colours, not a live
-stream; see the keyboard reference below.)
+and progress, not just the `●3` badge it collapses to elsewhere. Its PRs tab
+asks GitHub for open pull requests on the session's own branch, and says so
+plainly when it can't ask at all or asked and found none — never one empty
+list standing in for both. (A session started by vam also has a Terminal
+tab, a snapshot of the tmux pane vam started for it — the agent's own
+colours, not a live stream; see the keyboard reference below. That tab is
+withdrawn, not merely empty, for any source that cannot reach a terminal —
+which the phone/remote endpoint deliberately never can: reading, sending,
+answering and resizing a running agent's pane each need their own rate
+limit and their own decision, so `src/main/remote/server.ts`'s own
+`UNSERVED` table turns the capability off outright rather than exposing a
+route it isn't ready to carry.)
 
 ![Agents tab showing one subagent's own IN/OUT](docs/images/agents-tab.png)
 
@@ -280,7 +308,7 @@ whichever your platform uses.
 | `Mod-Shift-p` | New project — choose a directory, and start a session in it. There is no stored project in vam: a project is live sessions grouped by their cwd, so this is the only thing creating one can mean. `Cmd+P` is a different gesture and is bound to nothing, so the browser build keeps its print dialog |
 | `,` | Open settings |
 | `.` | Open Remote — pair a phone, approve or deny it, unpair one, or revoke every device |
-| `E` | Open the error log and the report vam can compose from it |
+| `E` | Open the error log — every genuine failure this session hit, never vam's own intended refusals. Each row can Copy the raw event as text, or Report it: vam composes a pre-filled GitHub issue, scrubbed of anything private, and opens the form in your browser for you to read and submit yourself — it is never sent on vam's behalf |
 | `?` | Open the in-app shortcut sheet (generated from these same bindings) |
 | `f` | Jump (open the jump-label overlay) |
 | `F` | Open the sidebar's filter popover |
