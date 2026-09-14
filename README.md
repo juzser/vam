@@ -73,6 +73,19 @@ pnpm run dist   # electron-vite build + the web build + electron-builder
 
 ### Signing it yourself
 
+**This is the GitHub-release path, not the App Store one**, and they are
+different pieces of work that are easy to confuse. Shipping a `.dmg` from a
+GitHub release needs a **Developer ID Application** certificate and
+**notarisation** — Apple checks the binary automatically, there is no review,
+nobody looks at the app, and it never appears in the store. The App Store is a
+different certificate (*Apple Distribution*), a sandbox vam could not run
+under anyway (it spawns `tmux` and `claude`), and a human review. None of that
+is needed here.
+
+What signing buys, concretely: a notarised download opens on a double click.
+An unsigned one makes every person who downloads it right-click → Open, or run
+`xattr -cr`, and it is the same binary either way.
+
 `electron-builder.config.cjs` sets `mac.identity: null` on purpose: left
 unset, electron-builder signs with whatever identity happens to be in the
 building machine's keychain, so the same commit produces a different artifact
@@ -108,6 +121,14 @@ warms up by reputation, so the first signed builds may still warn.
 None of the above is exercised by this repo — there is no certificate to test
 it with, so treat it as the shape of the work rather than a recipe that has
 been run.
+
+The update check is already pointed at GitHub releases
+(`src/main/update/check.ts` asks `/repos/juzser/vam/releases/latest`, once, at
+launch, with Settings → Update as the way to ask again). That endpoint answers
+404 today, which is not an error: it is "no releases have been published yet",
+and the section says exactly that. Cutting the first release is what turns it
+on — vam downloads nothing either way, it opens the release page in your own
+browser.
 
 ## Quick start
 
