@@ -626,6 +626,27 @@ describe('the steps for connecting a phone', () => {
     expect(note.toLowerCase()).toMatch(/vam can see|from here|cannot/);
   });
 
+  /**
+   * THE STEPS DESCRIBED A FLOW THE SERVER REFUSED. Scanning the QR reached a
+   * page that was itself behind the pairing token, so it answered vam's own
+   * 401 -- whose body reads "check the pairing screen on the desktop", which
+   * is where these steps live. The operator followed them and was sent in a
+   * circle. A walkthrough for a flow that cannot work is the same defect class
+   * as a caption for a control that cannot act, and worse here because it was
+   * followed.
+   *
+   * So the step that sends them to the phone must say what the phone SHOWS.
+   * "It worked" has to be recognisable from the sofa.
+   */
+  it('says what the phone shows when the address opens', () => {
+    draw({ serve: { cliMissing: false, enabled: true } });
+    const text = (screen.getByTestId('pairing-steps').textContent ?? '').toLowerCase();
+    expect(text).toMatch(/form/);
+    // And that it can do nothing else yet -- the honest half, so a page that
+    // shows no sessions does not read as a broken one.
+    expect(text).toMatch(/nothing else|until it has/);
+  });
+
   it('names the phone side of each step it cannot check', () => {
     draw({ serve: { cliMissing: false, enabled: true } });
     const text = (screen.getByTestId('pairing-steps').textContent ?? '').toLowerCase();

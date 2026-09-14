@@ -328,6 +328,41 @@ export function servedDescriptor(
   };
 }
 
+/**
+ * THE APP SHELL, AS A SHAPE.
+ *
+ * Exactly the page and the build's own asset files: `/`, `/index.html`, and
+ * ONE segment under `/assets/`. Deliberately not "paths that look static" and
+ * not a prefix -- a prefix is how a route added next year falls under an
+ * exemption nobody re-read, and a list is how the exemption drifts from what
+ * the build actually emits.
+ *
+ * WHAT IT REFUSES ON PURPOSE. `/favicon.png` is real build output and is not a
+ * secret, and it still stays behind the token: it is not in the shape, and
+ * widening the shape to admit it would mean admitting every top-level file by
+ * extension -- the "looks static" rule this shape exists to avoid. The cost is
+ * a missing tab icon before pairing.
+ *
+ * The first character must be alphanumeric, so `/assets/..` and `/assets/.env`
+ * cannot match, and there is no second slash, so nothing nests. `serveAsset`
+ * refuses to leave the root independently of this: two guards, neither relying
+ * on the other.
+ */
+const APP_SHELL_ASSET = /^\/assets\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function isAppShellPath(path: string): boolean {
+  return path === '/' || path === '/index.html' || APP_SHELL_ASSET.test(path);
+}
+
+/**
+ * Every path the route table registers, for the guard that holds each of them
+ * to the token. Exported so that sweep DERIVES its corpus rather than
+ * repeating a list which goes stale the next time a route is added.
+ */
+export function registeredRoutePaths(options: RemoteServerOptions): readonly string[] {
+  return [...routesFor(options).keys()];
+}
+
 function routesFor(options: RemoteServerOptions): Map<string, { method: string; route: Route }> {
   const table = new Map<string, { method: string; route: Route }>();
   const read = (path: string, produce: () => Promise<unknown>): void => {
@@ -581,6 +616,44 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
       // a knock costs it a counted failure either way.
       if (options.pairing !== undefined && request.method === 'POST' && path === '/api/pair') {
         await handlePair(options.pairing, request, response);
+        return;
+      }
+      // THE APP SHELL, BEFORE THE TOKEN -- the second door an unpaired caller
+      // may use, and the reason the first one is reachable at all.
+      //
+      // `/api/pair` above is a POST, and a phone that has just scanned the QR
+      // code is a browser doing a GET. With the page itself behind the token,
+      // the only way to obtain a token was a request that only the page could
+      // make: the operator scanned the code and got this file's own 401 read
+      // back at them, verbatim, including the sentence telling them to check a
+      // screen they were already looking at. Serving the shell is what turns
+      // that dead end into a form.
+      //
+      // WHAT WIDENED: an unpaired device already on the tailnet can fetch the
+      // browser bundle, where before it could fetch nothing. WHAT DID NOT: no
+      // data, no writes, no session access -- every `/api/*` path below still
+      // answers 401 without a token, which `phone-shell.test.ts` holds to by
+      // sweeping `registeredRoutePaths` rather than a list. The listener is
+      // still loopback-only behind tailnet-only Serve, with `funnel` refused
+      // by name.
+      //
+      // THE ARGUMENT RESTS ON A CLAIM ABOUT A DIRECTORY: that the served root
+      // holds build output and never user data. That claim is CHECKED -- see
+      // "the served root" in `phone-shell.test.ts` -- because a claim nothing
+      // checks is the kind that gets quietly falsified by a later change. Read
+      // that condition before widening this shape.
+      //
+      // NEVER FALLS THROUGH. A shell path that resolves to no file ends here
+      // as a 404; letting it continue would hand an unauthenticated request to
+      // the authenticated table below.
+      if (webRoot !== null && request.method === 'GET' && isAppShellPath(path)) {
+        if (await serveAsset(webRoot, path, response)) {
+          return;
+        }
+        send(response, 404, {
+          ok: false,
+          error: { kind: 'unreachable', code: 'no-such-route', message: path },
+        });
         return;
       }
       const outcome = authenticateDevice(request.headers.authorization, devices);
