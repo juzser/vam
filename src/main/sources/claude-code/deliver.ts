@@ -70,8 +70,38 @@ export type SpawnFailure = {
   readonly message: string;
   readonly code?: string | number | null | undefined;
   readonly killed?: boolean | undefined;
-  readonly signal?: string | undefined;
+  /**
+   * WHICH SIGNAL ENDED IT, or `null` if none did -- and `null` is the answer
+   * node gives for every ordinary non-zero exit.
+   *
+   * MEASURED ON NODE v26.5.0, which is what this app runs:
+   *
+   *   exit 1            -> { code: 1,    killed: false, signal: null      }
+   *   an external kill  -> { code: null, killed: false, signal: 'SIGTERM' }
+   *   node's own timeout-> { code: null, killed: true,  signal: 'SIGTERM' }
+   *
+   * The type used to say `string | undefined`, so the reader beneath it asked
+   * `signal !== undefined` -- which is TRUE for `null`. Every ordinary failure
+   * was therefore classified as a kill, and the operator was told the process
+   * "was killed by null, which vam did not ask for" when nothing had been
+   * killed at all. Reported from use.
+   */
+  readonly signal?: string | null | undefined;
 };
+
+/**
+ * The signal, or `null` for "none" -- collapsing the two ways a failure says
+ * it was not signalled (absent, and `null`) into the one the readers use.
+ *
+ * A PREDICATE AND NOT A COMPARISON, because the comparison is what broke: the
+ * type promised `string | undefined` while node sends `null`, so `!== undefined`
+ * read every ordinary exit as a kill. Asking for a non-empty STRING cannot be
+ * fooled by either absence, and it is the same shape check the rest of this
+ * directory makes on provider data.
+ */
+function signalOf(failure: { readonly signal?: string | null | undefined }): string | null {
+  return typeof failure.signal === 'string' && failure.signal !== '' ? failure.signal : null;
+}
 
 /** What node kills a timed-out child with, and the ONLY signal it ever sends. */
 const TIMEOUT_SIGNAL = 'SIGTERM';
@@ -125,8 +155,8 @@ export function classifyDeliverFailure(input: {
   // 'SIGKILL'}` -- measured on node 26 -- so branching on `killed` sent every
   // real external kill down to `cli-failed`, i.e. reported as a refusal the
   // CLI never made. Branch on the signal.
-  if (failure.killed === true || failure.signal !== undefined) {
-    if (failure.killed === true && failure.signal === TIMEOUT_SIGNAL) {
+  if (failure.killed === true || signalOf(failure) !== null) {
+    if (failure.killed === true && signalOf(failure) === TIMEOUT_SIGNAL) {
       return {
         kind: 'unreachable',
         code: 'timed-out',
@@ -137,7 +167,7 @@ export function classifyDeliverFailure(input: {
       kind: 'unreachable',
       code: 'killed',
       message: `the \`claude\` process for session ${sessionId} was killed${
-        failure.signal === undefined ? '' : ` by ${failure.signal}`
+        signalOf(failure) === null ? '' : ` by ${signalOf(failure)}`
       }, which vam did not ask for`,
     };
   }
