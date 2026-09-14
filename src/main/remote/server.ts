@@ -37,7 +37,14 @@ import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
 import type { MainSource } from '../sources/source.js';
 import { serveAsset } from './assets.js';
-import { authenticateDevice, type DeviceDirectory, type Identity } from './auth.js';
+import {
+  authenticateDevice,
+  authenticateStream,
+  bearerFrom,
+  type DeviceDirectory,
+  type Identity,
+  streamCookie,
+} from './auth.js';
 import type { PairOutcome } from './pairing.js';
 
 /** The one address this server may ever bind. */
@@ -542,6 +549,12 @@ async function handlePair(
     send(response, 401, UNAUTHENTICATED);
     return;
   }
+  // SET HERE SO THE FIRST STREAM ALREADY WORKS. The phone keeps the token from
+  // the body for the header every other route needs; this is the same value,
+  // carried the one way `EventSource` can carry it (`auth.ts`). Nothing is set
+  // on a refusal above -- a caller that did not pair gets no credential, and
+  // the 401 stays byte-for-byte the one every other refusal sends.
+  response.setHeader('set-cookie', streamCookie(outcome.token));
   send(response, 200, {
     ok: true,
     value: {
@@ -656,12 +669,47 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
         });
         return;
       }
-      const outcome = authenticateDevice(request.headers.authorization, devices);
+      /**
+       * THE STREAM IS THE ONE ROUTE A COOKIE MAY ANSWER FOR, and it is named
+       * here rather than consulted as a flag: `EventSource` takes a URL and
+       * nothing else, so `/api/stream` is the one path a header cannot reach.
+       * Every other path goes through `authenticateDevice`, which never looks
+       * at a cookie -- so a caller holding only the cookie gets the same 401
+       * everywhere else, and the sweep in `stream-cookie.test.ts` holds that
+       * over the whole route table rather than over a list.
+       *
+       * The cookie carries the SAME token, resolved by the SAME `find`, so
+       * revocation reaches it without a second path to keep in step. See
+       * `auth.ts`.
+       */
+      const outcome =
+        path === '/api/stream'
+          ? authenticateStream(request.headers.authorization, request.headers.cookie, devices)
+          : authenticateDevice(request.headers.authorization, devices);
       if (!outcome.ok) {
         // The reason is deliberately dropped rather than reported: see
         // `UNAUTHENTICATED`. It exists for this process's own tests and logs.
         send(response, 401, UNAUTHENTICATED);
         return;
+      }
+      /**
+       * RE-ISSUED TO WHOEVER JUST PROVED THEMSELVES WITH THE HEADER, and only
+       * to them.
+       *
+       * The cookie's expiry would otherwise be a cliff: a phone in daily use
+       * would lose live updates one day for no reason it could see, while its
+       * stored token went on working for every other route. Refreshing it from
+       * the header path means the cookie's life tracks the token's USE, and it
+       * cannot outlive a credential it is a copy of -- the token is read from
+       * the header that was just verified, never from the cookie, so a cookie
+       * can never renew itself.
+       *
+       * Set BEFORE the route runs, because SSE writes its own head: node
+       * merges `setHeader` values into `writeHead`'s, so this survives both.
+       */
+      const presented = bearerFrom(request.headers.authorization);
+      if (presented !== null) {
+        response.setHeader('set-cookie', streamCookie(presented));
       }
       const entry = table.get(path);
       if (entry === undefined) {

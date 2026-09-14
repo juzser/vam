@@ -85,6 +85,12 @@ describe.skipIf(!harnessInstalled)(
         'error-log-select.spec.ts',
         'pane-resize.spec.ts',
         'sse-drop.spec.ts',
+        // `stream-cookie.spec.ts` spawns its own node server on an ephemeral
+        // port and never touches this config's `baseURL`, so it needs no
+        // config of its own either -- and a config of its own would be a
+        // fourth thing nobody runs. It is named here for the same reason
+        // every other one is: the collection is a real `--list`.
+        'stream-cookie.spec.ts',
       ]);
     });
 
