@@ -35,10 +35,20 @@ describe('the overlays at phone width', () => {
     expect(document.querySelector('[data-phone-shell] [data-settings-overlay]')).toBeNull();
   });
 
+  /**
+   * THROUGH `remote access`, WHICH IS THE PHONE'S DOOR. It used to press
+   * `settings`, and that gear is gone from the phone at the operator's request
+   * -- four of the five sections behind it configure `localStorage` on the
+   * device holding it rather than the machine the sessions run on
+   * (`settings/sections.ts`, `PHONE_SECTIONS`). The subject here is unchanged:
+   * that the overlay this opens is a marked SHEET HOST, not which control
+   * opens it.
+   */
   it('opens settings as a marked host, reachable from the list', () => {
     render(<Canvas model={MODEL} source={phoneSource()} />);
+    expect(document.querySelector('button[aria-label="settings"]')).toBeNull();
     act(() => {
-      fireEvent.click(document.querySelector('button[aria-label="settings"]') as Element);
+      fireEvent.click(document.querySelector('button[aria-label="remote access"]') as Element);
     });
     const host = document.querySelector('[data-settings-overlay]');
     expect(host).not.toBeNull();

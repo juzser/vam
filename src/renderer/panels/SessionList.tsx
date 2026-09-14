@@ -1307,16 +1307,28 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             {workspace.slice(0, 1).toUpperCase()}
           </span>
           <span className="flex-1" />
-          <ShortcutTip label="Settings" action={SETTINGS_ACTION}>
-            <button
-              type="button"
-              onClick={onSettings}
-              aria-label="settings"
-              className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
-            >
-              <Settings size={14} strokeWidth={1.5} />
-            </button>
-          </ShortcutTip>
+          {/* NOT ON A PHONE, at the operator's request -- and the reason is
+              not that the screen is small. Four of the five sections behind
+              this gear read and write `prefs`, which is `localStorage` on
+              whichever device is looking: a theme chosen on the phone changes
+              the phone, not the machine the sessions run on, and a shortcut
+              edited there binds keys for a device with no keyboard. The fifth
+              reaches a bridge the browser build does not have. `Remote` beside
+              this is the one whose subject is the DESKTOP, so it stays and
+              opens the overlay on the one section a phone can act on. See
+              `settings/sections.ts`, `PHONE_SECTIONS`. */}
+          {!phone && (
+            <ShortcutTip label="Settings" action={SETTINGS_ACTION}>
+              <button
+                type="button"
+                onClick={onSettings}
+                aria-label="settings"
+                className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+              >
+                <Settings size={14} strokeWidth={1.5} />
+              </button>
+            </ShortcutTip>
+          )}
           {/* Beside Settings, at the operator's request: pairing, approve/deny,
               unpair and revoke-all were all real already, buried one section
               inside Settings. This opens the same overlay, focused directly

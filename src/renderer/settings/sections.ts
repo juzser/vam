@@ -27,6 +27,28 @@ import {
 export type SectionId = 'appearance' | 'sessions' | 'remote' | 'keyboard' | 'update';
 
 /**
+ * WHAT A PHONE MAY SEE OF THIS OVERLAY, and why it is almost none of it.
+ *
+ * Operator instruction: "on mobile the settings part can be removed; remote
+ * only needs to show the paired devices". The reason it is right is stronger
+ * than the screen being small. Appearance, Sessions and Keyboard read and
+ * write `prefs`, which is `localStorage` ON WHICHEVER DEVICE IS LOOKING -- so
+ * a theme chosen on the phone changes the phone, not the machine the sessions
+ * run on, and a shortcut edited there binds keys for a device with no
+ * keyboard. Update reaches `window.api.update`, which the browser build does
+ * not have at all. Four controls that look like they configure vam and
+ * configure a copy of vam nobody is watching.
+ *
+ * Remote is the one whose subject is the DESKTOP rather than the device
+ * holding it, which is exactly what a phone has a reason to look at.
+ *
+ * A LIST RATHER THAN A BOOLEAN, so the next section added has to answer the
+ * question "can this act from a phone?" by being put in or left out, instead
+ * of inheriting an answer from whatever `id !== 'remote'` happened to mean.
+ */
+export const PHONE_SECTIONS: readonly SectionId[] = ['remote'];
+
+/**
  * The order is hard-coded and never sorted: a nav that reorders under the
  * operator is a nav nobody learns. `appearance` is first because it is where
  * the overlay opens, which is also what keeps the theme assertions in
