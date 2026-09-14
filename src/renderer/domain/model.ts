@@ -109,6 +109,22 @@ export type Decision = {
   /** Commands this decision is asking you to run by hand — see `yy` in §4. */
   readonly commands: readonly Command[];
   /**
+   * WHEN THE OPERATOR ASKED, ISO-8601, and when this turn last did anything.
+   *
+   * The In bubble pins a turn's prompt while the activity line under it stays
+   * live, so on a long turn the two are hours apart and the pin reads as the
+   * current question. These are what let the pane say otherwise.
+   *
+   * OPTIONAL, AND NULL IS ORDINARY, on the rule this file already keeps for
+   * `errorCount`: absent means the SOURCE cannot say. Claude Code's
+   * `last-prompt` marker carries no timestamp at all (0 of 25,259 measured),
+   * so a turn whose prompt line is above the top of the read window has no
+   * honest time to report -- and the first thing that happened afterwards is
+   * the answer's time, not the question's.
+   */
+  readonly promptedAt?: string | null;
+  readonly latestAt?: string | null;
+  /**
    * How many tool calls FAILED inside this turn, of the ones vam read.
    *
    * WHY IT EXISTS. A turn's mark on the progress line was binary — working or
