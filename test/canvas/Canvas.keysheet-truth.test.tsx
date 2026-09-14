@@ -28,7 +28,7 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import type { AgentQuestion, CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import {
   ACTION_LABELS,
   buildKeySheet,
@@ -65,6 +65,41 @@ const TWO_PROJECTS: CanvasModel = {
     { id: 'p2', name: 'beta', source: 'factory', sessions: [session('b1'), session('b2')] },
   ],
 };
+
+/** One session, asking one question -- the ordinary case, and the one where
+ *  the card has no step to walk and must not eat the key. */
+const asking = (questions: readonly AgentQuestion[]): CanvasModel => ({
+  projects: [
+    {
+      id: 'p1',
+      name: 'alpha',
+      source: 'factory',
+      sessions: [{ ...session('a1'), status: 'waiting', questions }],
+    },
+  ],
+});
+
+const COLOUR: AgentQuestion = {
+  id: 'toolu_1:0',
+  header: 'Colour',
+  question: 'Which colour?',
+  multiSelect: false,
+  options: [
+    { label: 'Crimson', description: null },
+    { label: 'Cobalt', description: null },
+  ],
+  answer: null,
+};
+const FRUIT: AgentQuestion = {
+  ...COLOUR,
+  id: 'toolu_1:1',
+  header: 'Fruit',
+  question: 'Which fruit?',
+  options: [{ label: 'Apple', description: null }],
+};
+
+const ASKING = asking([COLOUR]);
+const ASKING_TWICE = asking([COLOUR, FRUIT]);
 
 const focusedTitle = () =>
   document
@@ -242,6 +277,41 @@ describe('Insert: h leaves the mode, l steps a question that may not exist', () 
     expect(mode()).toBe('Insert');
     pressFocused('h');
     expect(mode()).toBe('Select');
+  });
+
+  /**
+   * THE CASE THE CAPTION IS ACTUALLY ABOUT, and the only one it was never
+   * tested in. The sheet says `h` is "previous step of a question with
+   * several, else back to Select", and the test above proves the `else` half
+   * with NO QUESTION OPEN -- the one state where the caption's first half
+   * cannot apply and the card is not on screen to swallow anything.
+   *
+   * With a question open, `h` did nothing at all. The card claimed the key
+   * unconditionally: `walkStep` called `preventDefault` whether or not the
+   * walk moved, the canvas listener stood down at `event.defaultPrevented`,
+   * and a clamp at step 0 ate the keystroke in silence. Since a single
+   * question has ONLY step 0, that is every ordinary question vam draws --
+   * the operator pressing the key the sheet documents got nothing, and no
+   * refusal either.
+   */
+  it('h still hands the keyboard back from the FIRST step of a question', () => {
+    render(<Canvas model={ASKING} />);
+    press('I');
+    expect(mode()).toBe('Insert');
+    expect(document.querySelector('[data-question-option]')).not.toBeNull();
+    pressFocused('h');
+    expect(mode()).toBe('Select');
+  });
+
+  it('but keeps h inside the card while there is a step to walk back to', () => {
+    render(<Canvas model={ASKING_TWICE} />);
+    press('I');
+    pressFocused('l');
+    expect(document.querySelector('[data-question-text]')?.textContent).toContain('fruit');
+    pressFocused('h');
+    expect(document.querySelector('[data-question-text]')?.textContent).toContain('colour');
+    // It walked a step, so it did NOT also leave the mode.
+    expect(mode()).toBe('Insert');
   });
 
   it('l says there is nothing to step when no question is open', () => {
