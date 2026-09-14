@@ -467,8 +467,16 @@ export type SessionListProps = {
    * would draw "starting a session" over a project being deleted -- two
    * different things wearing one value, which is the defect this repo keeps
    * finding rather than one to add.
+   *
+   * `projectId` IS `null` FOR A PROJECT THAT DOES NOT EXIST YET -- the
+   * "new project" `+`'s whole case. That control chooses a directory and
+   * starts a session in it; there is no project, and so no section in
+   * `entries`, until that session exists. `null` is how this component tells
+   * the two waits apart: a real id is matched against an existing section
+   * (below), and `null` draws a provisional section of its own, named from
+   * `projectName` because there is no `Project` to read a name off.
    */
-  readonly starting: { readonly projectId: string } | null;
+  readonly starting: { readonly projectId: string | null; readonly projectName: string } | null;
   /** Opens the icon picker for a project's heading — the mouse route; there
    * is no keyboard shortcut for it, unlike the session picker's `s`. */
   readonly onPickIcon: (project: Project) => void;
@@ -1726,6 +1734,56 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                 <Folder size={11} strokeWidth={1.7} />
               </span>
               {groupEditor}
+            </li>
+          )}
+          {/* A PROJECT THAT DOES NOT EXIST YET -- `newProject`'s whole case,
+              and the reason `starting.projectId` can be `null`. Every OTHER
+              wait is drawn inside a section that already exists (below,
+              `starting?.projectId === section.project.id`); this one has no
+              such section to join, because there is no project until a
+              session is actually running in this directory.
+
+              So it draws its own, and deliberately not by building a fake
+              `Project` and reusing the real heading: that heading's `+`,
+              menu, collapse and rename all close over `section.project`, and
+              handing them one invented for a directory that may still fail to
+              spawn would offer "Remove project", "Change project icon" and a
+              per-project `+` for something that is not there to remove,
+              re-icon or add to. This heading is a name and nothing a pointer
+              can act on -- no button, no menu, not even the session count the
+              real heading prints, because inventing a count for zero sessions
+              would look like a project the model disagrees with a heartbeat
+              later. `data-session-starting`, not `data-session-row`, for the
+              same reason the real one is: not focusable, not closable, not
+              stoppable.
+
+              IT DISAPPEARS THE MOMENT `starting` DOES -- the row arriving
+              (Canvas.tsx's shared arrival effect, the same one that clears an
+              existing project's wait) or the attempt failing (`newProject`'s
+              own catch). Nothing here starts a timer or guesses an amount of
+              time to wait. */}
+          {starting !== null && starting.projectId === null && (
+            <li data-project-section-provisional className="flex flex-col gap-[5px]">
+              <div className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5">
+                <span className="flex h-[15px] w-[15px] flex-none items-center justify-center text-ink-faint">
+                  <Monitor size={11} strokeWidth={1.7} />
+                </span>
+                <span className="truncate font-mono text-meta text-ink-dim uppercase tracking-[0.12em]">
+                  {starting.projectName}
+                </span>
+              </div>
+              <div className="flex flex-col gap-[5px] pl-1.5">
+                <div
+                  data-session-starting
+                  aria-live="polite"
+                  className="flex items-center gap-2 rounded-[9px] border border-line border-dashed px-3 py-2 text-control text-ink-faint"
+                >
+                  <span className="h-1.5 w-1.5 flex-none rounded-full bg-line-strong vam-breathe" />
+                  <span className="min-w-0 truncate">
+                    starting a session in {starting.projectName}…
+                  </span>
+                </div>
+              </div>
             </li>
           )}
           {drawn.map((item) => {

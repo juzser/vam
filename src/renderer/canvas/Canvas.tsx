@@ -1542,9 +1542,19 @@ function CanvasInner({
    * a row the keyboard can reach, and a thing `Close` and `Stop` would offer
    * to act on -- for a session that does not exist. It is drawn beside the
    * model and nothing may act on it.
+   *
+   * `projectId` IS NULLABLE, for `newProject`'s sake. `createSession` always
+   * names an EXISTING project -- there is a section for it already -- but
+   * `newProject` starts one in a directory that has no project until this
+   * very session exists in it, so there is no id to give and no section for
+   * the sidebar to match against. `null` says so honestly rather than
+   * reusing `NEW_PROJECT_PENDING` (that sentinel names `pendingAction`, a
+   * different lock for a different reason) or inventing an id nothing else
+   * will ever answer to.
    */
   const [starting, setStarting] = useState<{
-    readonly projectId: string;
+    /** `null` for a project that does not exist yet -- see above. */
+    readonly projectId: string | null;
     readonly projectName: string;
     /** Which pane should show the wait. Never null: `o` uses the focused one. */
     readonly paneId: string;
@@ -3835,6 +3845,16 @@ function CanvasInner({
         return;
       }
       const name = directoryName(cwd);
+      // THE WAIT BECOMES VISIBLE HERE, exactly where `createSession` arms its
+      // own -- the moment the directory is chosen (its "before the write"),
+      // not after `createSessionIn` resolves. `projectId: null` because this
+      // project has no id yet: there is no section for the sidebar to match
+      // against, so it draws a provisional one instead (`SessionList.tsx`).
+      // `known` is captured BEFORE the write for the same reason `createSession`
+      // captures it there: "which row is new" has to be measured against what
+      // existed when the operator picked the directory.
+      const known = new Set(entriesByIdRef.current.keys());
+      setStarting({ projectId: null, projectName: name, paneId: focusedPaneIdRef.current, known });
       // The first half of one sentence, exactly as `createSession` says it:
       // "starting…" here, "started … it may take a moment to appear" below.
       setStatus(`starting a new session in ${name}…`);
@@ -3843,6 +3863,10 @@ function CanvasInner({
         setStatus(`started a new session in ${name} — it may take a moment to appear`);
         if (source.kind === 'session') source.onWrote();
       } catch (cause) {
+        // NOTHING IS LEFT SPINNING -- the same discipline `createSession`'s
+        // own catch keeps, for the same reason: a wait that outlived this
+        // failure would say vam is still trying when vam has stopped.
+        setStarting(null);
         setStatus(noteFailure('new project', cause));
       }
     } finally {
@@ -5137,13 +5161,20 @@ function CanvasInner({
     // no other column takes this.
     entries: entries,
     loading: sidebarLoading,
-    /* WHICH PROJECT VAM IS STARTING A SESSION IN, or null. The project id
-       alone, because that is all the sidebar needs to know where to draw the
-       wait -- and deliberately not `pendingAction`, which is the shared
-       serialisation lock and also holds a project id while one is being
-       REMOVED. Two different things wearing one value is how a "starting"
-       indicator comes to appear over a project being deleted. */
-    starting: starting === null ? null : { projectId: starting.projectId },
+    /* WHICH PROJECT VAM IS STARTING A SESSION IN, or null. The project id and
+       name -- the id alone used to be enough, because every existing project
+       already carries its own name in the section the sidebar matches it
+       against. `newProject` has no such section (`projectId` is `null` for
+       it, see `starting`'s own comment above), so the name has to ride along
+       for the sidebar to have anything to print. Deliberately not
+       `pendingAction`, which is the shared serialisation lock and also holds
+       a project id while one is being REMOVED. Two different things wearing
+       one value is how a "starting" indicator comes to appear over a project
+       being deleted. */
+    starting:
+      starting === null
+        ? null
+        : { projectId: starting.projectId, projectName: starting.projectName },
     // The UNFILTERED set, for the two things about removing a project
     // that must not read a narrowed list -- see `allEntries` on
     // `SessionListProps`. `entries` above has already been through
