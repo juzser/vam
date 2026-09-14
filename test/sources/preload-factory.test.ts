@@ -75,6 +75,7 @@ function makeApi(descriptor: SourceDescriptor): PreloadSourceApi {
     describe: vi.fn(async () => descriptor),
     load: vi.fn(async () => []),
     subscribe: vi.fn(() => unsubscribe),
+    agentWork: vi.fn(async () => ({ kind: 'work' as const, turns: [], brief: null, whole: true })),
     recordPrompt: vi.fn(async () => undefined),
     renameSession: vi.fn(async () => undefined),
     closeSession: vi.fn(async () => undefined),

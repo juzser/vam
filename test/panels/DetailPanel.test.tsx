@@ -22,9 +22,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // `main/`: `test/canvas/Canvas.new-project.test.tsx` already does the same
 // for `whyNotARepository`, which is the precedent this follows.
 import { summarizeTranscript } from '../../src/main/sources/claude-code/transcript.js';
-import type { Command, Decision, Project, Session } from '../../src/renderer/domain/model.js';
+import type {
+  Command,
+  Decision,
+  Project,
+  Session,
+  SessionAgent,
+} from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import {
+  AGENT_SPLIT_PX,
   ATTACH_LIMIT_BYTES,
   type AttachedFile,
   attachIntoDraft,
@@ -48,6 +55,11 @@ import {
   DEFAULT_PROMPT_SUBMIT_KEY,
   setActivePromptSubmitKey,
 } from '../../src/renderer/prefs/submit-key.js';
+import {
+  type AgentWorkReader,
+  AgentWorkReaderProvider,
+} from '../../src/renderer/sources/agent-work-reader.js';
+import type { AgentWork } from '../../src/shared/agent-work.js';
 import type { PaneSendResult, PaneView } from '../../src/shared/terminal.js';
 
 /** `attachIntoDraft` for the cases a test knows will be accepted. */
@@ -422,7 +434,15 @@ function reconcile(over: Partial<DetailPanelProps>): Partial<DetailPanelProps> {
   return { ...over, entry: { ...ENTRY, session: { ...ENTRY.session, decisions: [picked] } } };
 }
 
-function draw(over: Partial<DetailPanelProps> = {}) {
+/**
+ * The source's agent reader, published the way `App.tsx` publishes it -- a
+ * context, not a prop (`sources/agent-work-reader.ts` says why). Taken as a
+ * second argument rather than smuggled into `DetailPanelProps`, so the test
+ * mounts exactly what the app mounts.
+ */
+type Reader = AgentWorkReader | null;
+
+function draw(over: Partial<DetailPanelProps> = {}, agentWork: Reader = null) {
   const props: DetailPanelProps = {
     entry: ENTRY,
     // The newest turn, which is the one the canvas focuses by default.
@@ -439,11 +459,15 @@ function draw(over: Partial<DetailPanelProps> = {}) {
     resizeHandle: null,
     ...reconcile(over),
   };
-  render(<DetailPanel {...props} />);
+  render(
+    <AgentWorkReaderProvider value={agentWork}>
+      <DetailPanel {...props} />
+    </AgentWorkReaderProvider>,
+  );
 }
 
 /** `draw`, but able to re-render with new props -- for a capability that changes. */
-function drawFor(over: Partial<DetailPanelProps> = {}) {
+function drawFor(over: Partial<DetailPanelProps> = {}, agentWork: Reader = null) {
   const build = (extra: Partial<DetailPanelProps>): DetailPanelProps => ({
     entry: ENTRY,
     decision: DECISIONS[0] as Decision,
@@ -459,10 +483,14 @@ function drawFor(over: Partial<DetailPanelProps> = {}) {
     resizeHandle: null,
     ...reconcile({ ...over, ...extra }),
   });
-  const view = render(<DetailPanel {...build({})} />);
+  const wrap = (extra: Partial<DetailPanelProps>) => (
+    <AgentWorkReaderProvider value={agentWork}>
+      <DetailPanel {...build(extra)} />
+    </AgentWorkReaderProvider>
+  );
+  const view = render(wrap({}));
   return {
-    rerender: (extra: Partial<DetailPanelProps>) =>
-      view.rerender(<DetailPanel {...build(extra)} />),
+    rerender: (extra: Partial<DetailPanelProps>) => view.rerender(wrap(extra)),
   };
 }
 
@@ -2454,6 +2482,252 @@ describe('the Agents tab', () => {
     expect(all('[data-agent-row]')).toHaveLength(0);
     expect(q<HTMLElement>('[data-agents-empty]')?.textContent).not.toContain('spawned no agents');
     expect(q<HTMLElement>('[data-agents-empty]')?.textContent).toContain('does not report');
+  });
+
+  /**
+   * THE AGENTS TAB IS A NAVIGATOR NOW, not a list.
+   *
+   * The operator: "show the agent list on the left as a secondary navigator
+   * inside the agents pane, on the right the detail of what that subagent is
+   * doing, with in/out/progress". The list keeps every rule it already had --
+   * the four states, the idle toggle, the running dot -- and gains a selection
+   * that drives a detail side beside it.
+   */
+  describe('picking an agent to see what it is doing', () => {
+    const RUNNING = [
+      { id: 'agent-one', type: 'coder', description: 'write the parser', running: true },
+      { id: 'agent-two', type: 'uiux', description: 'review the pane', running: true },
+    ];
+
+    const turn = (over: Partial<Decision> = {}): Decision => ({
+      id: 'agent-one:tail:0',
+      label: 'agent-one',
+      input: 'the brief the parent wrote',
+      output: 'what it has found so far',
+      commands: [],
+      errorCount: 0,
+      steps: [{ id: 'agent-one:tail:0:0', label: 'Bash: run the tests', failed: false }],
+      ...over,
+    });
+
+    const working = (over: Partial<Extract<AgentWork, { kind: 'work' }>> = {}): AgentWork => ({
+      kind: 'work',
+      turns: [turn()],
+      brief: null,
+      whole: true,
+      ...over,
+    });
+
+    /** Draws the tab with a reader that answers whatever the test says. */
+    const withWork = (
+      answer: AgentWork | Promise<AgentWork>,
+      agents: Session['agents'] = RUNNING,
+    ) => {
+      const agentWork = vi.fn(async () => await answer);
+      draw({ entry: withAgents(agents) }, agentWork);
+      openAgents();
+      return agentWork;
+    };
+
+    const rows = () => all('[data-agent-row]');
+    const pick = (index: number) => {
+      const row = rows()[index];
+      if (row === undefined) throw new Error(`no agent row ${index}`);
+      fireEvent.click(row.querySelector('[data-agent-pick]') ?? row);
+    };
+
+    it('asks nobody until an agent is picked, and invites one instead', async () => {
+      const agentWork = withWork(working());
+      await act(async () => {});
+      expect(agentWork).not.toHaveBeenCalled();
+      expect(q<HTMLElement>('[data-agent-detail]')?.textContent).toContain('Pick an agent');
+    });
+
+    it('asks about the agent that was picked', async () => {
+      const agentWork = withWork(working());
+      pick(0);
+      await act(async () => {});
+      expect(agentWork).toHaveBeenCalledWith(SESSION.id, 'agent-one');
+    });
+
+    /**
+     * THE LIST STAYS. It is a navigator, which is the whole word the operator
+     * used: picking a second agent has to be one click, not a click back and a
+     * click in.
+     */
+    it('keeps the list beside the detail once something is picked', async () => {
+      withWork(working());
+      pick(0);
+      await act(async () => {});
+      expect(q('[data-agents-list]')).not.toBeNull();
+      expect(rows()).toHaveLength(2);
+      expect(q('[data-agent-detail]')).not.toBeNull();
+    });
+
+    it('marks which agent the detail is about', async () => {
+      withWork(working());
+      pick(1);
+      await act(async () => {});
+      const marked = all('[data-agent-row][data-agent-selected="true"]');
+      expect(marked).toHaveLength(1);
+      expect(marked[0]?.textContent).toContain('uiux');
+    });
+
+    it('draws the turn it read: what was asked, what came back, what it called', async () => {
+      withWork(working());
+      pick(0);
+      await act(async () => {});
+      const detail = q<HTMLElement>('[data-agent-detail]');
+      expect(detail?.textContent).toContain('the brief the parent wrote');
+      expect(detail?.textContent).toContain('what it has found so far');
+      expect(detail?.textContent).toContain('Bash: run the tests');
+    });
+
+    /**
+     * LOADING IS ITS OWN SENTENCE. An empty detail while the read is in flight
+     * would say "this agent has done nothing", which is a claim about the
+     * agent made out of vam's own latency.
+     */
+    it('says it is still asking rather than drawing an empty agent', () => {
+      withWork(new Promise<AgentWork>(() => {}));
+      pick(0);
+      const detail = q<HTMLElement>('[data-agent-detail]');
+      expect(detail?.textContent).toContain('Asking');
+      expect(detail?.textContent).not.toContain('has done nothing');
+    });
+
+    it('carries the source’s own words when it could not read the agent', async () => {
+      withWork({
+        kind: 'unavailable',
+        error: { kind: 'unreachable', code: 'agent:unreadable', message: 'could not open it' },
+      });
+      pick(0);
+      await act(async () => {});
+      expect(q<HTMLElement>('[data-agent-detail]')?.textContent).toContain('could not open it');
+    });
+
+    /**
+     * AN AGENT THAT HAS BEEN ASKED AND NOT ANSWERED is the commonest live
+     * case, and it is not an empty pane: the question is there and the answer
+     * is honestly absent.
+     */
+    it('says an answer has not arrived, rather than leaving the space blank', async () => {
+      withWork(working({ turns: [turn({ output: null })] }));
+      pick(0);
+      await act(async () => {});
+      const detail = q<HTMLElement>('[data-agent-detail]');
+      expect(detail?.textContent).toContain('the brief the parent wrote');
+      expect(detail?.textContent).toContain('no answer yet');
+    });
+
+    it('says an agent has done nothing vam could read, when that is the reading', async () => {
+      withWork(working({ turns: [] }));
+      pick(0);
+      await act(async () => {});
+      expect(q<HTMLElement>('[data-agent-detail]')?.textContent).toContain(
+        'nothing vam could read',
+      );
+    });
+
+    /**
+     * AND IT ADMITS THE MIDDLE IT DID NOT READ. Only 6% of the subagent
+     * transcripts on this machine fit in one window, so this is the usual
+     * case, not the exception -- and drawing the brief joined to the newest
+     * turn would claim the agent went straight from one to the other.
+     */
+    it('shows the brief above the gap it did not read', async () => {
+      withWork(
+        working({
+          whole: false,
+          brief: turn({ id: 'agent-one:head:0', input: 'the original brief', output: null }),
+        }),
+      );
+      pick(0);
+      await act(async () => {});
+      const detail = q<HTMLElement>('[data-agent-detail]');
+      expect(detail?.textContent).toContain('the original brief');
+      expect(q('[data-agent-gap]')).not.toBeNull();
+    });
+
+    it('draws no gap marker when it read the whole agent', async () => {
+      withWork(working());
+      pick(0);
+      await act(async () => {});
+      expect(q('[data-agent-gap]')).toBeNull();
+    });
+
+    it('says so when the source cannot report agent work at all', async () => {
+      draw({ entry: withAgents(RUNNING) }, null);
+      openAgents();
+      pick(0);
+      await act(async () => {});
+      expect(q<HTMLElement>('[data-agent-detail]')?.textContent).toContain('cannot report');
+    });
+
+    /**
+     * THE NARROW PANE STILL HAS A WAY BACK. Below the two-column width the
+     * detail takes the pane, so the control that returns to the list is the
+     * only way back to it -- and it is named for where it goes.
+     */
+    it('offers a way back to the list, named for where it goes', async () => {
+      withWork(working());
+      pick(0);
+      await act(async () => {});
+      const back = q<HTMLElement>('[data-agent-back]');
+      expect(back).not.toBeNull();
+      expect(back?.textContent?.toLowerCase()).toContain('agents');
+    });
+
+    it('returns to nothing-picked when the way back is pressed', async () => {
+      withWork(working());
+      pick(0);
+      await act(async () => {});
+      fireEvent.click(q<HTMLButtonElement>('[data-agent-back]') as HTMLButtonElement);
+      expect(all('[data-agent-row][data-agent-selected="true"]')).toHaveLength(0);
+      expect(q<HTMLElement>('[data-agent-detail]')?.textContent).toContain('Pick an agent');
+    });
+
+    /**
+     * AND A SELECTION DOES NOT OUTLIVE ITS AGENT. Rows come off a poll: an
+     * agent that finishes leaves the running-only list, and a detail still
+     * captioned with it would be describing a row that is no longer there.
+     */
+    it('drops a selection when that agent leaves the list', async () => {
+      const agentWork = vi.fn(async () => working());
+      const view = drawFor({ entry: withAgents(RUNNING) }, agentWork);
+      openAgents();
+      pick(0);
+      await act(async () => {});
+      expect(all('[data-agent-row][data-agent-selected="true"]')).toHaveLength(1);
+      view.rerender({ entry: withAgents([RUNNING[1] as SessionAgent]) });
+      await act(async () => {});
+      expect(all('[data-agent-row][data-agent-selected="true"]')).toHaveLength(0);
+    });
+  });
+
+  /**
+   * THE SPLIT IS A CLASS TAILWIND CAN FIND, AND THIS IS WHAT PROVES IT.
+   *
+   * Tailwind generates a utility only when it finds the COMPLETE string in the
+   * source, so `@min-[${AGENT_SPLIT_PX}px]:flex-row` generates nothing at all
+   * -- the markup reads correct here, the DOM reads correct here, and the pane
+   * paints one column at every width. The number is therefore typed literally
+   * in the class and named in `AGENT_SPLIT_PX`, and this is the assertion that
+   * stops the two from drifting apart. The geometry itself is measured in a
+   * real browser (`e2e/agents-navigator-shots.mjs`); this only catches the
+   * cheaper half, which is the half that looks fine in review.
+   */
+  it('splits on a literal class that matches the width it names', () => {
+    draw({ entry: withAgents([{ id: 'a', type: 'coder', description: 'x', running: true }]) });
+    openAgents();
+    const split = q<HTMLElement>('[data-agents-split]');
+    expect(split?.className).toContain(`@min-[${AGENT_SPLIT_PX}px]:flex-row`);
+    // And the container it queries is an ANCESTOR, never itself: a container
+    // query does not apply to the element that declares the container.
+    const container = q<HTMLElement>('[data-agents]');
+    expect(container?.className).toContain('@container');
+    expect(container).not.toBe(split);
+    expect(container?.contains(split as Node)).toBe(true);
   });
 
   const idleToggle = () => q<HTMLButtonElement>('[data-agents-toggle]');

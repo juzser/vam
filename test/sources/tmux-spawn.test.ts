@@ -19,7 +19,16 @@ import {
 /** A runner that records what it was asked and answers with a canned result. */
 function fakeTmux(
   answer: (argv: readonly string[]) => {
-    failure?: { message: string; code?: string | number; killed?: boolean; signal?: string };
+    failure?: {
+      message: string;
+      code?: string | number;
+      killed?: boolean;
+      // `string | null`, because `null` is what node sends for an ordinary
+      // non-zero exit and this helper's whole job is to answer what node
+      // answers. Narrowed to `string` it could not express the shape the
+      // classifier was getting wrong, which is how the family stayed green.
+      signal?: string | null;
+    };
     stdout?: string;
     stderr?: string;
   },
@@ -65,6 +74,47 @@ describe('classifyTmuxFailure', () => {
     ]);
   });
 
+  /**
+   * THE SHAPE NODE ACTUALLY SENDS FOR AN ORDINARY NON-ZERO EXIT.
+   *
+   * Measured on node v26.5.0, which is what this app runs:
+   *
+   *   exit 1          -> { code: 1,    killed: false, signal: null      }
+   *   external SIGTERM-> { code: null, killed: false, signal: 'SIGTERM' }
+   *   node's timeout  -> { code: null, killed: true,  signal: 'SIGTERM' }
+   *
+   * `signal` is NULL, not absent -- and `null !== undefined`, so the kill arm
+   * above swallowed every ordinary tmux failure and reported it as "tmux was
+   * killed before it answered by null, which vam did not ask for". The
+   * operator saw that sentence when they typed into a session.
+   *
+   * The cost is not the wrong sentence, it is the three branches below it:
+   * no-server, no-such-session and duplicate were ALL unreachable in
+   * production, and `listVamSessions` turns exactly one of them into "there
+   * are no sessions" rather than "vam could not ask".
+   *
+   * Every fixture in this block omitted `signal`, which is a shape node never
+   * produces -- so the whole family was green.
+   */
+  describe('an ordinary non-zero exit, as node really reports it', () => {
+    const exited = (stderr: string) =>
+      at({ message: 'Command failed', code: 1, killed: false, signal: null }, stderr);
+
+    it('is not a kill', () => {
+      expect(exited('something tmux has never said before').code).toBe('tmux-failed');
+    });
+
+    it('never tells the operator it was killed by null', () => {
+      expect(exited('anything at all').message).not.toContain('null');
+    });
+
+    it('still reaches the reason tmux gave, on every branch below the kill arm', () => {
+      expect(exited('no server running on /tmp/tmux-501/default').code).toBe('no-server');
+      expect(exited("can't find session: vam-nope").code).toBe('no-such-session');
+      expect(exited('duplicate session: vam-taken').code).toBe('session-exists');
+    });
+  });
+
   it('does not call a SIGKILL from outside a timeout', () => {
     // node's own timeout kills with SIGTERM. A SIGKILL means something else
     // killed tmux -- the OOM killer, most plainly -- and reporting that as
@@ -94,6 +144,28 @@ describe('listVamSessions', () => {
   it('reads "no server running" as NO SESSIONS, not as an error', async () => {
     const run = fakeTmux(() => ({
       failure: { message: 'exit 1' },
+      stderr: 'no server running on /tmp/tmux-501/default',
+    }));
+    await expect(listVamSessions(run)).resolves.toEqual({ kind: 'ok', sessions: [] });
+  });
+
+  /**
+   * AND THE SAME THING AGAIN IN THE SHAPE NODE REALLY SENDS.
+   *
+   * The case above passes a failure with no `signal` key, which node never
+   * produces: an ordinary non-zero exit carries `signal: null` (measured on
+   * node v26.5.0). That one difference routed this through the classifier's
+   * kill arm, so `no-server` never matched and vam reported "could not ask"
+   * for the ordinary state of a machine with no tmux server running -- while
+   * the test above stayed green.
+   *
+   * This is the difference between "there are no sessions" and "vam could not
+   * ask", which `source.ts` turns into a `vamControlled` that is false versus
+   * one that is absent from the session entirely.
+   */
+  it('reads it as NO SESSIONS when the exit arrives as node really reports it', async () => {
+    const run = fakeTmux(() => ({
+      failure: { message: 'Command failed', code: 1, killed: false, signal: null },
       stderr: 'no server running on /tmp/tmux-501/default',
     }));
     await expect(listVamSessions(run)).resolves.toEqual({ kind: 'ok', sessions: [] });

@@ -91,6 +91,7 @@ import {
 } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { AgentWork } from '../../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PanePrompt, PromptView } from '../../shared/answer.js';
 import { PROVIDERS, type ProviderId, resolveProvider } from '../../shared/providers.js';
 import type { PaneKey, PaneSendResult } from '../../shared/terminal.js';
@@ -125,9 +126,11 @@ import {
   submitsPrompt,
   subscribePromptSubmitKey,
 } from '../prefs/submit-key.js';
+import { useAgentWorkReader } from '../sources/agent-work-reader.js';
 import { useHistoryReader } from '../sources/history-reader.js';
 import { describeFailure } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
+import { useAgentWork } from '../sources/useAgentWork.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { copyText } from './clipboard.js';
@@ -1260,8 +1263,240 @@ function PullRequestsTab({
  * working. The roster is capped at the source (`agent-roster.ts`), so this
  * renders everything it is given and counts only what it hides.
  */
-function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | undefined }) {
+/**
+ * THE WIDTH AT WHICH THE LIST AND THE DETAIL SIT SIDE BY SIDE.
+ *
+ * WRITTEN OUT AS `420` IN EVERY CLASS BELOW, and this constant is what a test
+ * reads rather than what the markup interpolates. Tailwind finds classes by
+ * scanning source TEXT for complete strings: `@min-[${AGENT_SPLIT_PX}px]:flex`
+ * is not a string it can find, so the rule would simply never be generated and
+ * the pane would silently have one column at every width. This repo has
+ * already paid for that exact shape once -- a selector that matched nothing,
+ * live through review and merge -- so the number is typed where Tailwind can
+ * read it and named here where a person can.
+ *
+ * A CONTAINER QUERY, NOT A VIEWPORT ONE, and that is the whole reason this is
+ * a number in CSS rather than the `phone` prop: the detail pane is resizable
+ * between `DETAIL_MIN` (320) and `DETAIL_MAX` (520), so a desktop pane can be
+ * narrower than a phone screen. Asking the viewport would put two columns in a
+ * 320px pane and one column on a 430px phone -- both backwards.
+ *
+ * 420 is where both halves still do their job: the navigator needs ~150px
+ * before an agent type like `security-reviewer` stops being readable at all,
+ * and a turn needs ~250px before its prose stops reading as prose (the same
+ * floor `DETAIL_MIN`'s own note argues from). Below it the detail takes the
+ * pane and `data-agent-back` is the way out.
+ */
+export const AGENT_SPLIT_PX = 420;
+
+/**
+ * ONE TURN OF AN AGENT'S THREAD: what it was asked, what it said, what it
+ * called.
+ *
+ * DELIBERATELY NOT `TurnBlock`. That component carries the session's own
+ * conversation and everything the operator can DO to it -- unfold, the prompt
+ * menu, the answer menu, focus view, cancel -- and none of those exist here:
+ * there is no channel from this pane into a subagent, so a copy of it wearing
+ * dead affordances would promise a control that does nothing. What IS shared
+ * is `StepRow`, which is the genuinely common piece, and it is imported rather
+ * than reproduced.
+ */
+function AgentTurn({ turn }: { readonly turn: Decision }) {
+  const steps = turn.steps ?? [];
+  const shown = steps.slice(0, MAX_STEP_ROWS);
+  const hidden = steps.length - shown.length;
+  return (
+    <li data-agent-turn={turn.id} className="flex min-w-0 flex-col gap-1.5">
+      <div
+        data-agent-turn-in
+        className="vam-clamp-6 min-w-0 whitespace-pre-wrap break-words rounded-[9px] bg-raised px-2.5 py-2 text-body text-ink"
+      >
+        {turn.input}
+      </div>
+      <div
+        data-agent-turn-out
+        className="min-w-0 whitespace-pre-wrap break-words px-2.5 text-body text-ink-soft"
+      >
+        {/* ABSENT IS ITS OWN SENTENCE. An agent that has been asked and has
+            not answered is the commonest live case, and a blank space there
+            reads as an agent that answered with nothing. */}
+        {turn.output ?? <span className="text-ink-faint italic">no answer yet</span>}
+      </div>
+      {steps.length > 0 && (
+        <ul
+          data-agent-turn-steps
+          className="flex min-w-0 flex-col gap-0.5 px-2.5 font-mono text-meta text-ink-faint"
+        >
+          {shown.map((step) => (
+            <StepRow key={step.id} step={step} />
+          ))}
+          {/* The cap says its own size, on the rule `MAX_STEP_ROWS` states:
+              a fold that will not name what it folded is the thing this
+              surface exists to refuse. */}
+          {hidden > 0 && (
+            <li data-agent-steps-more>{t('steps.more', { count: String(hidden) })}</li>
+          )}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+/** One plain sentence, which is all any of this pane's empty states get. */
+function AgentNote({ children, mark }: { readonly children: ReactNode; readonly mark?: string }) {
+  return (
+    <p {...(mark === undefined ? {} : { [mark]: true })} className="text-control text-ink-faint">
+      {children}
+    </p>
+  );
+}
+
+/**
+ * WHAT ONE AGENT IS DOING -- the right-hand side of the navigator.
+ *
+ * FIVE STATES AND FIVE SENTENCES, on the rule the list beside it already
+ * keeps: nothing picked, still asking, vam could not read, read and found
+ * nothing, and the work itself. The two in the middle are the ones a careless
+ * version collapses, and collapsing them makes vam's own latency or vam's own
+ * failure read as a fact about the agent.
+ */
+function AgentDetail({
+  work,
+  state,
+  onBack,
+}: {
+  readonly work: AgentWork | null;
+  readonly state: 'idle' | 'loading' | 'ready';
+  readonly onBack: () => void;
+}) {
+  const body = () => {
+    if (state === 'idle') {
+      return <AgentNote>Pick an agent to see what it is doing.</AgentNote>;
+    }
+    if (state === 'loading' || work === null) {
+      return <AgentNote>Asking this agent’s transcript…</AgentNote>;
+    }
+    if (work.kind === 'unavailable') {
+      // The source's own words, whole. `port.ts` built them to be read.
+      return <AgentNote>{work.error.message}</AgentNote>;
+    }
+    if (work.turns.length === 0 && work.brief === null) {
+      return <AgentNote>This agent has done nothing vam could read yet.</AgentNote>;
+    }
+    return (
+      <ul className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+        {work.brief !== null && <AgentTurn turn={work.brief} />}
+        {/* THE MIDDLE VAM DID NOT READ, said rather than hidden. Only 6% of
+            the subagent transcripts measured fit in one window, so this is the
+            usual case; drawing the brief joined to the newest turn would claim
+            the agent went straight from one to the other. */}
+        {!work.whole && (
+          <li data-agent-gap className="px-2.5 text-meta text-ink-faint">
+            — vam read this agent’s beginning and its newest work, not the middle —
+          </li>
+        )}
+        {work.turns.map((turn) => (
+          <AgentTurn key={turn.id} turn={turn} />
+        ))}
+      </ul>
+    );
+  };
+
+  return (
+    <div data-agent-detail className="flex min-h-0 flex-1 flex-col gap-2">
+      {/* THE WAY BACK, named for where it GOES rather than for its container
+          -- the rule the phone shell's own control keeps. It is drawn only
+          below the split, where the detail has taken the pane; above it the
+          list is already on screen and a back control would point at it. */}
+      {state !== 'idle' && (
+        <button
+          type="button"
+          data-agent-back
+          onClick={onBack}
+          className={
+            'flex-none cursor-pointer self-start rounded-[var(--radius-sm)] px-1.5 py-0.5 text-control text-ink-faint hover:bg-raised hover:text-ink @min-[420px]:hidden'
+          }
+        >
+          ‹ All agents
+        </button>
+      )}
+      {body()}
+    </div>
+  );
+}
+
+/**
+ * The Agents tab: which subagents this session spawned, running ones first and
+ * by default running ones only -- and what the one you pick is doing.
+ *
+ * FOUR STATES, AND THREE OF THEM DRAW NO ROW FOR DIFFERENT REASONS
+ * (model.ts). Absent is a source with no agent surface at all — the factory
+ * reports a live count and nothing about which agents they are — and empty is
+ * a source that looked and found none, which is the common case, since most
+ * sessions never spawn a subagent. The third is new with the filter: agents
+ * exist and none of them is running. That one must NOT fall through to
+ * "spawned no agents", which would be the caption outrunning the data while
+ * twenty finished agents sit one keypress away; it says how many there are and
+ * keeps the toggle on screen beside it. Each gets one plain sentence. None
+ * gets a spinner or a placeholder row: this pane has spent several rounds
+ * having invented content removed from it.
+ *
+ * The default is running-only because that is what the operator opened the tab
+ * to see; the toggle exists because a filter with no way out hides work. It
+ * carries the count of what it is hiding, so a hidden row is never silently
+ * invisible — and it counts IDLE agents, never running ones, precisely so it
+ * cannot be read against the tab's `●N` running badge, which counts the whole
+ * directory before the roster cap and may legitimately exceed the rows here.
+ *
+ * The toggle's state is component state, not a `prefs.ts` field, for the same
+ * reason the chosen tab is: nothing outside this pane has an opinion about it,
+ * and persisting a presentation toggle would put it in a payload every other
+ * surface has to migrate around. Unlike the tab it resets per pane render,
+ * which is the wanted default — the next session is asked the same question.
+ *
+ * It is a button, not a key chord: nothing binds it, so nothing captions it as
+ * bound.
+ *
+ * A row survives an unreadable meta file. The agent's id and whether it is
+ * running come from its own transcript, so they are facts whatever the meta
+ * file says; the labels are what goes `unknown`, and the row still says who is
+ * working. The roster is capped at the source (`agent-roster.ts`), so this
+ * renders everything it is given and counts only what it hides.
+ *
+ * ── AND IT IS A NAVIGATOR NOW ────────────────────────────────────────────
+ * The operator asked for the list to become a secondary navigator with the
+ * selected agent's work beside it. The list keeps every rule above; what is
+ * new is a SELECTION, which drives one on-demand read (`useAgentWork`). The
+ * selection lives here rather than in `prefs.ts` for the toggle's own reason,
+ * and it is DROPPED when its agent leaves the list: rows come off a poll, a
+ * finishing agent falls out of the running-only filter, and a detail still
+ * captioned with it would describe a row that is no longer on screen.
+ */
+function AgentsTab({
+  agents,
+  sessionId,
+}: {
+  readonly agents: readonly SessionAgent[] | undefined;
+  readonly sessionId: string;
+}) {
+  /**
+   * FROM CONTEXT, not from a prop, and `agent-work-reader.ts` carries the
+   * argument: this is the source's member rather than this pane's, it takes
+   * the session id it acts on, and every split leaf wants the same function.
+   * `null` is an honest "this source cannot look", never a stub.
+   */
+  const agentWork = useAgentWorkReader() ?? undefined;
   const [showIdle, setShowIdle] = useState(false);
+  const [picked, setPicked] = useState<string | null>(null);
+
+  const idleCount = (agents ?? []).filter((agent) => !agent.running).length;
+  const shown = showIdle ? (agents ?? []) : (agents ?? []).filter((agent) => agent.running);
+  // A SELECTION MAY NOT OUTLIVE ITS ROW. Derived rather than cleaned up in an
+  // effect: an effect would render once with the stale pairing on screen, and
+  // the stale pairing is a detail captioned with an agent that is not there.
+  const selected = shown.some((agent) => agent.id === picked) ? picked : null;
+  const work = useAgentWork(sessionId, selected, agentWork);
+
   if (agents === undefined || agents.length === 0) {
     return (
       <p data-agents data-agents-empty className="text-control text-ink-faint">
@@ -1271,8 +1506,6 @@ function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | unde
       </p>
     );
   }
-  const idleCount = agents.filter((agent) => !agent.running).length;
-  const shown = showIdle ? agents : agents.filter((agent) => agent.running);
   const toggle =
     idleCount === 0 ? null : (
       <button
@@ -1286,52 +1519,103 @@ function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | unde
       </button>
     );
   return (
-    <div data-agents className="flex min-h-0 flex-1 flex-col gap-1.5">
-      {shown.length === 0 ? (
-        <p data-agents-empty className="text-control text-ink-faint">
-          {agents.length === 1
-            ? 'This session’s one agent is not running right now.'
-            : `None of this session’s ${agents.length} agents is running right now.`}
-        </p>
-      ) : (
-        <ul className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
-          {shown.map((agent) => (
-            <li
-              key={agent.id}
-              data-agent-row
-              data-agent-running={agent.running ? 'true' : 'false'}
-              className="flex items-center gap-2 rounded-[9px] border border-line bg-card px-3 py-2"
+    <div
+      data-agents
+      /* THE QUERY CONTAINER IS THE OUTER BOX AND THE RESPONDING ROW IS INSIDE
+         IT. A container query does not apply to the element that DECLARES the
+         container, so `@container` and `@min-[420px]:flex-row` on one div is a
+         rule that can never fire -- the pane would be one column at every
+         width and nothing on screen would say so. Hence two boxes, and a
+         browser guard that measures where the halves actually land: a class
+         that was merely TYPED proves nothing about what paints. */
+      className="@container flex min-h-0 flex-1 flex-col"
+    >
+      <div data-agents-split className="flex min-h-0 flex-1 flex-col gap-3 @min-[420px]:flex-row">
+        {shown.length === 0 ? (
+          <div data-agents-list className="flex min-h-0 flex-1 flex-col gap-1.5">
+            <p data-agents-empty className="text-control text-ink-faint">
+              {agents.length === 1
+                ? 'This session’s one agent is not running right now.'
+                : `None of this session’s ${agents.length} agents is running right now.`}
+            </p>
+            {toggle}
+          </div>
+        ) : (
+          <>
+            {/* THE NAVIGATOR. Below the split it yields the pane to the detail
+              once something is picked; above it, it stays -- picking a second
+              agent has to be one click, which is the whole word "navigator". */}
+            <div
+              data-agents-list
+              className={[
+                'flex min-h-0 flex-col gap-1.5',
+                '@min-[420px]:w-[9.5rem] @min-[420px]:flex-none',
+                'flex-1',
+                selected === null ? '' : '@max-[420px]:hidden',
+              ].join(' ')}
             >
-              {/* The same dot the pane header uses for a session, meaning the same
-              thing: filled and breathing while it works, quiet when it is
-              done. `running` here is "wrote to its transcript in the last few
-              minutes", which is all the source can see. */}
-              <span
-                className={[
-                  'h-1.5 w-1.5 flex-none rounded-full',
-                  agent.running ? 'bg-running vam-breathe' : 'bg-line-strong',
-                ].join(' ')}
-              />
-              <span className="min-w-0 flex-1">
-                <span data-agent-type className="block truncate text-body text-ink">
-                  {/* No type means no readable meta file beside the transcript, so
-                  the id is the only name this agent has. */}
-                  {agent.type ?? `${agent.id} (type unknown)`}
-                </span>
-                <span
-                  data-agent-description
-                  className="mt-0.5 block truncate text-meta text-ink-faint"
-                >
-                  {/* Truncated, not wrapped: the pane is 408px and a spawn
-                  description is a sentence. The whole roster stays scannable. */}
-                  {agent.description ?? 'no description recorded'}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {toggle}
+              <ul className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
+                {shown.map((agent) => (
+                  <li
+                    key={agent.id}
+                    data-agent-row
+                    data-agent-running={agent.running ? 'true' : 'false'}
+                    data-agent-selected={agent.id === selected ? 'true' : undefined}
+                  >
+                    <button
+                      type="button"
+                      data-agent-pick={agent.id}
+                      aria-current={agent.id === selected ? 'true' : undefined}
+                      onClick={() => setPicked(agent.id)}
+                      className={[
+                        'flex w-full cursor-pointer items-center gap-2 rounded-[9px] border px-3 py-2 text-left',
+                        agent.id === selected
+                          ? 'border-line-strong bg-raised'
+                          : 'border-line bg-card hover:bg-raised',
+                      ].join(' ')}
+                    >
+                      {/* The same dot the pane header uses for a session, meaning the same
+                    thing: filled and breathing while it works, quiet when it is
+                    done. `running` here is "wrote to its transcript in the last few
+                    minutes", which is all the source can see. */}
+                      <span
+                        className={[
+                          'h-1.5 w-1.5 flex-none rounded-full',
+                          agent.running ? 'bg-running vam-breathe' : 'bg-line-strong',
+                        ].join(' ')}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span data-agent-type className="block truncate text-body text-ink">
+                          {/* No type means no readable meta file beside the transcript, so
+                        the id is the only name this agent has. */}
+                          {agent.type ?? `${agent.id} (type unknown)`}
+                        </span>
+                        <span
+                          data-agent-description
+                          className="mt-0.5 block truncate text-meta text-ink-faint"
+                        >
+                          {/* Truncated, not wrapped: a spawn description is a sentence
+                        and the whole roster stays scannable. */}
+                          {agent.description ?? 'no description recorded'}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {toggle}
+            </div>
+            <div
+              className={[
+                'flex min-h-0 min-w-0 flex-1 flex-col',
+                selected === null ? '@max-[420px]:hidden' : '',
+              ].join(' ')}
+            >
+              <AgentDetail work={work.work} state={work.state} onBack={() => setPicked(null)} />
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -5087,7 +5371,7 @@ export function DetailPanel(props: DetailPanelProps) {
             send={globalThis.window?.api?.terminal?.send}
           />
         ) : current === 'Agents' ? (
-          <AgentsTab agents={entry?.session.agents} />
+          <AgentsTab agents={entry?.session.agents} sessionId={entry?.session.id ?? ''} />
         ) : current === 'PRs' ? (
           <PullRequestsTab
             pullRequests={entry?.session.pullRequests}

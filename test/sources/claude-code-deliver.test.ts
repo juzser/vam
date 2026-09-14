@@ -90,6 +90,47 @@ describe('classifyDeliverFailure', () => {
     expect(error.code).toBe('timed-out');
   });
 
+  /**
+   * THE SHAPE NODE ACTUALLY SENDS FOR AN ORDINARY NON-ZERO EXIT, and the one
+   * the operator hit: typing into a session answered "the `claude` process for
+   * session <id> was killed by null, which vam did not ask for".
+   *
+   * Measured on node v26.5.0: `exit 1` gives `{ code: 1, killed: false, signal:
+   * null }`. `null !== undefined`, so the kill arm claimed every ordinary
+   * refusal the CLI ever made -- including the one below it that explains a
+   * session is already running, which is the commonest reason a delivery is
+   * declined and was therefore never once shown.
+   *
+   * Every fixture in this file omitted `signal` or set a real one, so the
+   * family was green over a production path that could not work.
+   */
+  describe('an ordinary non-zero exit, as node really reports it', () => {
+    const exited = (stderr: string) =>
+      classifyDeliverFailure({
+        failure: Object.assign(new Error('Command failed'), {
+          code: 1,
+          killed: false,
+          signal: null,
+        }),
+        stderr,
+        sessionId: SESSION,
+      });
+
+    it('is a refusal by the CLI, not a kill vam did not ask for', () => {
+      const error = exited('Error: something else entirely');
+      expect(error.kind).toBe('refused');
+      expect(error.code).toBe('cli-failed');
+    });
+
+    it('never tells the operator it was killed by null', () => {
+      expect(exited('anything at all').message).not.toContain('null');
+    });
+
+    it('reaches the running-session refusal underneath the kill arm', () => {
+      expect(exited(refusal).code).toBe('session-running');
+    });
+  });
+
   it('falls back to the CLI stderr for an exit it does not recognise', () => {
     const error = classifyDeliverFailure({
       failure: new Error('exit 2'),

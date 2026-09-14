@@ -34,6 +34,7 @@ import { bridgeMainErrors } from './errors/main-errors-bridge.js';
 import { DEMO_MODEL, demoModelWithTurns } from './fixtures/demo.js';
 import { createDemoHistory } from './fixtures/demo-history.js';
 import { PairingScreen } from './panels/PairingScreen.js';
+import { AgentWorkReaderProvider } from './sources/agent-work-reader.js';
 import { HistoryReaderProvider } from './sources/history-reader.js';
 import { createSourceFromHttp } from './sources/http-factory.js';
 import { describeFailure, type SessionSource } from './sources/port.js';
@@ -406,21 +407,27 @@ function SourceCanvas({
               argument, so the panes that draw a column all want the same
               function. `sources/history-reader.ts` carries the argument in
               full. */}
-          <HistoryReaderProvider value={source?.history ?? null}>
-            <Canvas
-              model={model}
-              source={
-                source === null
-                  ? // Not the default `READ_ONLY_SOURCE`: it says "no write route
-                    // — this canvas is read-only", which is a claim about a source
-                    // that has not answered yet and, here, is usually wrong. With
-                    // `shown` set there is no source and there will not be one, so
-                    // the cell says that instead of connecting forever.
-                    { kind: 'connecting', error: shown }
-                  : { kind: 'session', source, error: shown, loading, onWrote: reload }
-              }
-            />
-          </HistoryReaderProvider>
+          {/* AND THE AGENT READER BESIDE IT, on the identical argument
+              (`sources/agent-work-reader.ts`): one per app, takes the session
+              id it acts on, wanted by every pane that draws an Agents tab.
+              `null` when the source cannot look, never a stub. */}
+          <AgentWorkReaderProvider value={source?.agentWork ?? null}>
+            <HistoryReaderProvider value={source?.history ?? null}>
+              <Canvas
+                model={model}
+                source={
+                  source === null
+                    ? // Not the default `READ_ONLY_SOURCE`: it says "no write route
+                      // — this canvas is read-only", which is a claim about a source
+                      // that has not answered yet and, here, is usually wrong. With
+                      // `shown` set there is no source and there will not be one, so
+                      // the cell says that instead of connecting forever.
+                      { kind: 'connecting', error: shown }
+                    : { kind: 'session', source, error: shown, loading, onWrote: reload }
+                }
+              />
+            </HistoryReaderProvider>
+          </AgentWorkReaderProvider>
         </ErrorBoundary>
       </div>
     </div>
