@@ -532,10 +532,15 @@ describe('normalizeKey — the digit row is a position, not a character', () => 
     expect(normalizeKey({ key: '<', metaKey: true, shiftKey: true })).toBe('Mod-<');
   });
 
-  it('leaves a letter with no modifier exactly as the browser typed it', () => {
+  it("decides a bare letter's case from shiftKey, not from event.key", () => {
     // `H`, `F` and the rest of the bare shifted letters are their own
-    // bindings and are matched by character; nothing above this line touches
-    // the unmodified path.
+    // bindings, and they are matched by character -- but the character comes
+    // from `shiftKey`, not from `event.key` unchanged. A REAL Shift+H (`key:
+    // 'H', shiftKey: true`) answers `H`; a bare `h` with no Shift answers `h`.
+    // What is deliberately NOT tested here is `{ key: 'H', shiftKey: false }`
+    // -- that object is what CapsLock produces for a bare `h` press, and it
+    // must answer `h`, the opposite of leaving `event.key` untouched. See
+    // `capslock.test.ts` for that case, argued at length.
     expect(normalizeKey({ key: 'H', code: 'KeyH', shiftKey: true })).toBe('H');
     expect(normalizeKey({ key: 'h', code: 'KeyH' })).toBe('h');
   });

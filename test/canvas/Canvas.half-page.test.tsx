@@ -105,10 +105,15 @@ function layOut(el: HTMLElement, clientHeight: number, scrollHeight: number, scr
  * the case can ask whether this grammar took it.
  */
 function press(key: string, modifiers: KeyboardEventInit = {}): KeyboardEvent {
+  // A bare single UPPERCASE letter models a real Shift press: since the
+  // CapsLock fix, `normalizeKey` (`keyboard/chords.ts`) decides a letter's
+  // case from `shiftKey` alone, not from `event.key`, so a synthetic event
+  // has to carry the modifier explicitly to mean what it used to mean.
   const event = new KeyboardEvent('keydown', {
     key,
     bubbles: true,
     cancelable: true,
+    shiftKey: /^[A-Z]$/.test(key) ? true : undefined,
     ...modifiers,
   });
   act(() => {

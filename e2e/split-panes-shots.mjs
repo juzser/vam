@@ -241,7 +241,10 @@ if (!refusal.includes('only 3 tabs')) {
 }
 // CMD+0 — out of the tabs and back to the sidebar. Read off the mode cell,
 // which is the same state `H` sets and the status bar already prints.
-await page.keyboard.press('I');
+// `Shift+I`: Playwright's `press('I')` sends `{ key: 'I', shiftKey: false }`
+// -- CapsLock's own shape -- and `normalizeKey` now folds that to `i`
+// (`prompt`), not `I` (`focusAction`).
+await page.keyboard.press('Shift+I');
 await page.waitForTimeout(150);
 const inThePane = await modeCell();
 await modChord('0');

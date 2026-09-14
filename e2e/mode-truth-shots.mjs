@@ -298,7 +298,10 @@ for (const theme of ['dark', 'light']) {
 
   // INSERT, reached the way an operator reaches it: `I` hands the keyboard to
   // the pane, and the mode follows DOM focus (there is no flag to set).
-  await page.keyboard.press('I');
+  // `Shift+I`, not `I`: Playwright's `press('I')` sends `{ key: 'I',
+  // shiftKey: false }` -- CapsLock's own shape -- and `normalizeKey` now
+  // folds that to `i` (`prompt`), not `I` (`focusAction`).
+  await page.keyboard.press('Shift+I');
   await page.waitForFunction(
     () => (document.querySelector('[data-mode]')?.textContent ?? '') === 'Insert',
     null,
@@ -368,7 +371,8 @@ check(
   `still running ${quiet.join(', ')}`,
 );
 
-await page.keyboard.press('I');
+// `Shift+I`: see the note above the first `press('I')` in this file.
+await page.keyboard.press('Shift+I');
 await page.waitForFunction(
   () => (document.querySelector('[data-mode]')?.textContent ?? '') === 'Insert',
   null,
@@ -398,7 +402,8 @@ await page.waitForTimeout(900);
 // ill; the chip's inversion carries the state without it, which is the same
 // bargain every other animation in `styles.css` already makes.
 await page.emulateMedia({ reducedMotion: 'reduce' });
-await page.keyboard.press('I');
+// `Shift+I`: see the note above the first `press('I')` in this file.
+await page.keyboard.press('Shift+I');
 await page.waitForFunction(
   () => (document.querySelector('[data-mode]')?.textContent ?? '') === 'Insert',
   null,

@@ -1,4 +1,5 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
+import { normalizeKey } from '../keyboard/chords.js';
 
 /**
  * THE RIGHT-CLICK MENU — one component, because there were about to be five.
@@ -140,17 +141,27 @@ export function ContextMenu({ label, items, at, onClose }: ContextMenuProps) {
   };
 
   const onKeys = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') {
+    // NORMALIZED, NOT RAW: this used to test `event.key === 'j'` / `'k'`
+    // directly, which is the same hazard `keyboard/chords.ts` documents at
+    // length for the chord grammar and this menu never inherited. With
+    // CapsLock on, the browser hands back `'J'` / `'K'` with `shiftKey: false`
+    // — indistinguishable at the character level from a real Shift press —
+    // so neither branch matched, the arrows still worked, and the vim keys
+    // this menu's own header advertises ("`j`/`k` walk beside the arrows")
+    // went silently dead. `normalizeKey` folds a bare letter's case off
+    // `shiftKey` instead, the fix already in force for the chord tables.
+    const key = normalizeKey(event);
+    if (key === 'Escape') {
       event.preventDefault();
       onClose();
       return;
     }
-    if (event.key === 'ArrowDown' || event.key === 'j') {
+    if (key === 'ArrowDown' || key === 'j') {
       event.preventDefault();
       walk(1);
       return;
     }
-    if (event.key === 'ArrowUp' || event.key === 'k') {
+    if (key === 'ArrowUp' || key === 'k') {
       event.preventDefault();
       walk(-1);
     }

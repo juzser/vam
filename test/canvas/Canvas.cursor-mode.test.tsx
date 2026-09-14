@@ -134,8 +134,15 @@ const marked = () => options().filter((el) => el.getAttribute('data-picked') ===
 
 /** A keydown on the window — how a key with nothing focused reaches the app. */
 function press(key: string, modifiers: KeyboardEventInit = {}) {
+  // A bare single UPPERCASE letter models a real Shift press: since the
+  // CapsLock fix, `normalizeKey` (`keyboard/chords.ts`) decides a letter's
+  // case from `shiftKey` alone, not from `event.key`, so a synthetic event
+  // has to carry the modifier explicitly to mean what it used to mean.
+  const shiftKey = /^[A-Z]$/.test(key) ? true : undefined;
   act(() => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...modifiers }));
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, shiftKey, ...modifiers }),
+    );
   });
 }
 

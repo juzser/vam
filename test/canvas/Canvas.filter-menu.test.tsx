@@ -127,7 +127,12 @@ describe('the filter popover beside the sidebar search box', () => {
 
   it('opens on `F` and closes on Escape, handing the keyboard back to the control', () => {
     render(<Canvas model={MODEL} />);
-    fireEvent.keyDown(window, { key: 'F' });
+    // `shiftKey: true` is load-bearing, not decoration: `F` is a real Shift+F
+    // keydown, and since the CapsLock fix `normalizeKey` derives a bare
+    // letter's case from `shiftKey` rather than from `event.key` — a bare `F`
+    // with no `shiftKey` is what CapsLock produces for a plain `f`, and would
+    // open `jump`, not this popover.
+    fireEvent.keyDown(window, { key: 'F', shiftKey: true });
     expect(menu()).toBeTruthy();
     // Keyboard-first: the popover takes focus so the next key lands in it.
     expect(menu()?.contains(document.activeElement)).toBe(true);
