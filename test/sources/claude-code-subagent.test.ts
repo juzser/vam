@@ -87,11 +87,11 @@ const toolLine = (name: string, at: string) =>
 
 describe('operatorHandoff — which lines are the operator speaking', () => {
   it('takes the words out of a handoff and leaves the machinery behind', () => {
-    expect(operatorHandoff(handoff('build me a local one'))).toBe('build me a local one');
+    expect(operatorHandoff(handoff('try the other ordering instead'))).toBe('try the other ordering instead');
   });
 
   it('keeps a multi-line message whole', () => {
-    const words = '- hide the popover after submit\n- and it covers the phone screen';
+    const words = '- the first of two things asked at once\n- and the second one under it';
     expect(operatorHandoff(handoff(words))).toBe(words);
   });
 

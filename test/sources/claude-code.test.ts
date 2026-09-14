@@ -636,13 +636,13 @@ describe('loadClaudeCodeProjects', () => {
         'agent-aaa',
         jsonl(
           { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'a brief' }] } },
-          handoffLine('hide the popover after submit', '2026-09-03T09:00:00.000Z'),
+          handoffLine('start with the second one instead', '2026-09-03T09:00:00.000Z'),
           agentTool('Bash', '2026-09-03T09:01:00.000Z'),
           agentSaid('on it now', '2026-09-03T09:02:00.000Z'),
         ),
       );
       const session = await loaded();
-      expect(session?.decisions[0]?.input).toBe('hide the popover after submit');
+      expect(session?.decisions[0]?.input).toBe('start with the second one instead');
     });
 
     /**
