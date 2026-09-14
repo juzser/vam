@@ -488,6 +488,93 @@ describe('the paired devices', () => {
  * that it matches anything, which is exactly how the gap above shipped
  * unnoticed. This suite fails the moment these controls go bare again.
  */
+/**
+ * HOW TO CONNECT A PHONE, IN THE PLACE WHERE YOU CONNECT A PHONE.
+ *
+ * Operator: "I will test mobile in the next build. Put detailed instructions
+ * into the Remote settings." The README already carries the explanation; what
+ * it cannot do is be on screen while somebody stands there with a phone in one
+ * hand. So the steps are in the panel, in order, and each one that vam can
+ * SEE the state of says whether it is done.
+ *
+ * THE MARKS ARE READINGS, NOT A WIZARD. Three of the five steps have an
+ * observable answer -- is Tailscale on this machine, is phone access on, has a
+ * device been paired -- and two do not: vam cannot know that a camera was
+ * pointed at the QR or that eight characters were typed into a phone. Those
+ * are drawn plainly rather than guessed at, and the list says what a tick
+ * means, because a checklist that invents its own ticks is worse than one with
+ * none.
+ */
+describe('the steps for connecting a phone', () => {
+  const steps = () => [...document.querySelectorAll('[data-pairing-step]')];
+  const done = () =>
+    steps()
+      .filter((el) => el.getAttribute('data-done') === 'true')
+      .map((el) => el.getAttribute('data-pairing-step'));
+
+  it('draws the whole sequence, in order, before anything is set up', () => {
+    draw({ serve: { cliMissing: true, enabled: false }, devices: [], view: IDLE });
+    expect(steps().map((el) => el.getAttribute('data-pairing-step'))).toEqual([
+      'tailscale',
+      'serve',
+      'open',
+      'code',
+      'allow',
+    ]);
+  });
+
+  it('marks nothing as done when nothing is', () => {
+    draw({ serve: { cliMissing: true, enabled: false }, devices: [], view: IDLE });
+    expect(done()).toEqual([]);
+  });
+
+  it('marks Tailscale done once the CLI is there', () => {
+    draw({ serve: { cliMissing: false, enabled: false }, devices: [], view: IDLE });
+    expect(done()).toEqual(['tailscale']);
+  });
+
+  it('marks phone access done once serve is on', () => {
+    draw({ serve: { cliMissing: false, enabled: true }, devices: [], view: IDLE });
+    expect(done()).toEqual(['tailscale', 'serve']);
+  });
+
+  it('marks the last step done once a device is paired', () => {
+    draw({
+      serve: { cliMissing: false, enabled: true },
+      devices: [{ deviceId: 'd-1', name: 'a phone', pairedAt: NOW, lastSeenAt: NOW }],
+      view: IDLE,
+    });
+    expect(done()).toEqual(['tailscale', 'serve', 'allow']);
+  });
+
+  it('never marks the two steps that happen on the phone', () => {
+    // vam cannot see a camera or a keyboard on another device. A checklist
+    // that ticked those would be inventing the one thing it is for.
+    draw({
+      serve: { cliMissing: false, enabled: true },
+      devices: [{ deviceId: 'd-1', name: 'a phone', pairedAt: NOW, lastSeenAt: NOW }],
+      view: LIVE,
+    });
+    expect(done()).not.toContain('open');
+    expect(done()).not.toContain('code');
+  });
+
+  it('says what a tick means, so an unticked step is not read as a failure', () => {
+    draw();
+    const note = screen.getByTestId('pairing-steps-note').textContent ?? '';
+    expect(note.toLowerCase()).toMatch(/vam can see|from here|cannot/);
+  });
+
+  it('names the phone side of each step it cannot check', () => {
+    draw({ serve: { cliMissing: false, enabled: true } });
+    const text = (screen.getByTestId('pairing-steps').textContent ?? '').toLowerCase();
+    // The two acts that happen on the other device, in words, because the
+    // operator is holding that device while they read this.
+    expect(text).toMatch(/camera|scan/);
+    expect(text).toMatch(/type|enter/);
+  });
+});
+
 describe('styled with the rest of src/renderer/settings, not a dead semantic class', () => {
   it('draws the pairing code as a large, generously tracked monospace glyph', () => {
     draw();
@@ -507,7 +594,20 @@ describe('styled with the rest of src/renderer/settings, not a dead semantic cla
     expect(name.className.length).toBeGreaterThan(0);
   });
 
-  it('gives every action button in this panel a real 44px+ hit target', () => {
+  it('gives every action button in this panel a 44px target where a finger is', () => {
+    // IT USED TO ASK FOR `min-h-[44px]`, UNCONDITIONALLY, and that is why
+    // these buttons were 44px tall on the DESKTOP -- in a dialog where every
+    // other control is 28, measured by the button census in
+    // `e2e/settings-chrome-shots.mjs`. The floor was right and the device was
+    // not: `.vam-phone .vam-tap` (`styles.css`) is how the rest of the app
+    // spells "this is a touch target", and it applies where a touch is.
+    //
+    // A CLASS-NAME ASSERTION, WHICH THIS REPO OTHERWISE DISTRUSTS, and the
+    // reason is that no guard can reach this surface: the Remote panel needs
+    // `window.api.remote`, a preload bridge, so the browser build draws the
+    // "no bridge" state instead and a phone-viewport run measures nothing
+    // here. Same position as the PRs footer. The class is therefore checked
+    // here and the RULE it depends on is measured in a browser elsewhere.
     draw({ devices: [{ deviceId: 'd-1', name: 'a phone', pairedAt: NOW, lastSeenAt: NOW }] });
     const buttons = [
       screen.getByRole('button', { name: /copy/i }),
@@ -517,7 +617,10 @@ describe('styled with the rest of src/renderer/settings, not a dead semantic cla
       screen.getByRole('button', { name: /revoke all/i }),
     ];
     for (const button of buttons) {
-      expect(button.className).toMatch(/min-h-\[44px\]/);
+      expect(button.className, `${button.textContent} is not a tap target`).toMatch(/\bvam-tap\b/);
+      // And the same resting height as its neighbours, so the phone floor is
+      // the only thing that changes between the two devices.
+      expect(button.className).toMatch(/\bh-\[28px\]/);
     }
   });
 
