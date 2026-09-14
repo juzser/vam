@@ -87,6 +87,7 @@ import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.
 import { buildActions, clampIndex } from '../panels/actions.js';
 import { CommandPalette } from '../panels/CommandPalette.js';
 import { ConfirmForceClose } from '../panels/ConfirmForceClose.js';
+import { ContextMenu } from '../panels/ContextMenu.js';
 import { copyText } from '../panels/clipboard.js';
 import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
 import { GroupPicker, type GroupPickerChoice } from '../panels/GroupPicker.js';
@@ -96,7 +97,7 @@ import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
 import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
-import { NEW_PROJECT_PENDING, SessionList } from '../panels/SessionList.js';
+import { NEW_PROJECT_PENDING, rowMenuItems, SessionList } from '../panels/SessionList.js';
 import { SplitResizer } from '../panels/SplitResizer.js';
 import { resolveSessionGlyph } from '../panels/session-icon.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
@@ -811,6 +812,7 @@ function TabStrip({
   paneFocused,
   onSelect,
   onClose,
+  onTabContextMenu,
   onTabDragStart,
   onTabDragEnd,
 }: {
@@ -839,6 +841,19 @@ function TabStrip({
   readonly onSelect: (sessionId: string, viaPointer: boolean) => void;
   readonly onClose: (sessionId: string) => void;
   /**
+   * A RIGHT-CLICK ON A TAB, carried up with the pointer where it happened.
+   *
+   * Optional for the same reason `onTabDragStart` is: every existing caller
+   * and every existing test that has no reason to care keeps working, and
+   * `Canvas.tsx`'s own render is the one caller that supplies it. A strip with
+   * no handler simply lets the event through, which on a browser build is the
+   * browser's own menu and is the right answer there.
+   */
+  readonly onTabContextMenu?: (
+    entry: SessionEntry,
+    at: { readonly x: number; readonly y: number },
+  ) => void;
+  /**
    * A15.1 — dragging a tab is how a split is made. Optional so every
    * existing caller (and every existing test) that has no reason to care
    * about splitting keeps working unchanged; `Canvas.tsx`'s own render is
@@ -849,6 +864,17 @@ function TabStrip({
   ) => (event: ReactDragEvent<HTMLButtonElement>) => void;
   readonly onTabDragEnd?: () => void;
 }) {
+  /** One right-click handler per tab, shared by its two buttons so they cannot
+   *  drift, and `undefined` when the caller offered no menu -- which leaves the
+   *  event to whatever shell is hosting the strip. */
+  const tabMenuOf = (entry: SessionEntry) =>
+    onTabContextMenu === undefined
+      ? undefined
+      : (event: { preventDefault: () => void; clientX: number; clientY: number }) => {
+          event.preventDefault();
+          onTabContextMenu(entry, { x: event.clientX, y: event.clientY });
+        };
+
   /** STATE, not `useRef`: until the strip has tabs it renders a placeholder
    *  div with no scroller at all, so a ref read by an effect that runs once
    *  on mount is null for good and the wheel listener below is never
@@ -1015,6 +1041,14 @@ function TabStrip({
               onDragStart={onTabDragStart?.(entry.session.id)}
               onDragEnd={onTabDragEnd}
               onClick={(event) => onSelect(entry.session.id, event.detail > 0)}
+              /* ON THE BUTTONS, not on the tab's wrapper. This one is the
+                 element the keyboard focuses, and the Menu key and Shift+F10
+                 fire `contextmenu` on the focused element -- so one handler
+                 serves the pointer and the keyboard, where a handler on the
+                 static wrapper would have served only the pointer.
+                 `preventDefault` only when there IS a menu: with no handler
+                 the event belongs to whatever shell hosts the strip. */
+              onContextMenu={tabMenuOf(entry)}
               className={`max-w-[160px] cursor-pointer truncate py-1 ${active ? TAB_STATUS_INK[entry.session.status] : ''}`}
             >
               {glyph !== null && (
@@ -1029,6 +1063,9 @@ function TabStrip({
             <button
               type="button"
               data-tab-close
+              /* The `x` is a second focusable stop inside the tab, so it needs
+                 the same handler or a right-click on it reaches nothing. */
+              onContextMenu={tabMenuOf(entry)}
               aria-label={`close ${entry.session.title} tab`}
               onClick={(event) => {
                 event.stopPropagation();
@@ -1721,6 +1758,16 @@ function CanvasInner({
     },
     [],
   );
+  /**
+   * THE RIGHT-CLICKED TAB. Holds the ENTRY rather than an id: a tab already
+   * has its whole `SessionEntry` in hand, so there is nothing to look up and
+   * no way to resolve to a neighbour when the strip changes under an open
+   * menu. The sidebar's equivalent holds an id because a row hands it one.
+   */
+  const [tabMenu, setTabMenu] = useState<{
+    readonly entry: SessionEntry;
+    readonly at: { readonly x: number; readonly y: number };
+  } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   /**
    * WHICH source's session is being renamed, captured when the editor opens
@@ -1770,6 +1817,31 @@ function CanvasInner({
    * construction (functional setState, no model read), so it can sit in a
    * node's data without going stale as the model refreshes.
    */
+  /**
+   * BEGIN A RENAME ON ONE SESSION, whichever route asked.
+   *
+   * Factored out of `case 'rename'` when the right-click menu arrived: the
+   * chord acts on the FOCUSED row and the menu acts on the row the pointer
+   * named, and those are different rows often enough that two copies of this
+   * body would drift. The source guard is the same one the icon picker keeps
+   * below, for the same reason -- a project with no source has nowhere to
+   * store the new title.
+   */
+  const beginSessionRename = useCallback((entry: SessionEntry) => {
+    const projectSource = entry.project.source;
+    if (projectSource === undefined) {
+      setStatus('this project has no source — rename unavailable');
+      return;
+    }
+    setRenameDraft(entry.session.title);
+    setRenameTarget({
+      source: projectSource,
+      sessionId: entry.session.id,
+      title: entry.session.title,
+    });
+    setRenamingId(entry.session.id);
+  }, []);
+
   const openSessionIconPicker = useCallback((entry: SessionEntry) => {
     // A project with no source cannot store an icon under one: guessing a
     // fallback here would reintroduce the exact cross-source collision this
@@ -4381,17 +4453,7 @@ function CanvasInner({
             setStatus('pick a session first');
             return;
           }
-          if (focusedEntry.project.source === undefined) {
-            setStatus('this project has no source — rename unavailable');
-            return;
-          }
-          setRenameDraft(focusedEntry.session.title);
-          setRenameTarget({
-            source: focusedEntry.project.source,
-            sessionId: focusedEntry.session.id,
-            title: focusedEntry.session.title,
-          });
-          setRenamingId(focusedEntry.session.id);
+          beginSessionRename(focusedEntry);
           return;
         case 'icon':
           if (focusedEntry === null) {
@@ -4623,6 +4685,7 @@ function CanvasInner({
     query,
     copyAllCommands,
     beginComposing,
+    beginSessionRename,
     closeSession,
     createSession,
     newProject,
@@ -4688,6 +4751,34 @@ function CanvasInner({
     setRenamingId(null);
     setRenameTarget(null);
   }, []);
+
+  /**
+   * THE RIGHT-CLICK MENU'S TWO ROUTES, BY ID.
+   *
+   * The chords act on `focusedEntry`; a right-click names its own row and must
+   * NOT have to move the cursor there first -- renaming the row you pointed at
+   * while the cursor sits elsewhere is the whole point of a context menu. The
+   * lookup is over `entries`, the set the sidebar actually draws, so an id
+   * that is no longer on screen resolves to nothing and the menu item does
+   * nothing rather than acting on a neighbour.
+   */
+  const onSidebarRenameSession = useCallback(
+    (sessionId: string) => {
+      const found = entries.find((candidate) => candidate.session.id === sessionId);
+      if (found === undefined) return;
+      beginSessionRename(found);
+    },
+    [entries, beginSessionRename],
+  );
+
+  const onSidebarPickSessionIcon = useCallback(
+    (sessionId: string) => {
+      const found = entries.find((candidate) => candidate.session.id === sessionId);
+      if (found === undefined) return;
+      openSessionIconPicker(found);
+    },
+    [entries, openSessionIconPicker],
+  );
 
   const onSidebarPick = useCallback(
     (sessionId: string) => {
@@ -4887,6 +4978,8 @@ function CanvasInner({
     onRenameCancel: onSidebarRenameCancel,
     onPick: onSidebarPick,
     onClose: onSidebarClose,
+    onRenameSession: onSidebarRenameSession,
+    onPickSessionIcon: onSidebarPickSessionIcon,
     onAdd: onSidebarAdd,
     onAddInProject: onSidebarAddInProject,
     pendingAction: pendingAction,
@@ -5180,6 +5273,10 @@ function CanvasInner({
                 }
               }}
               onClose={(sessionId) => closePaneTab(leaf.id, sessionId)}
+              /* The tab CARRIES its entry, so the menu needs no lookup and
+                 cannot resolve to a neighbour -- unlike the sidebar's, which
+                 is handed an id by a row it does not own. */
+              onTabContextMenu={(tabEntry, at) => setTabMenu({ entry: tabEntry, at })}
               onTabDragStart={(sessionId) => onTabDragStart(leaf.id, sessionId)}
               onTabDragEnd={onTabDragEnd}
             />
@@ -5604,6 +5701,27 @@ function CanvasInner({
             Keyboard shortcut
           </span>
         </footer>
+      )}
+
+      {/* THE TAB'S RIGHT-CLICK MENU, at the shell level. `position: fixed`
+          (see `ContextMenu.tsx`), so it is not clipped by the strip's own
+          horizontal scroller -- which is exactly what would happen if it were
+          drawn inside the tab it belongs to. */}
+      {tabMenu !== null && (
+        <ContextMenu
+          label={`actions for ${tabMenu.entry.session.title}`}
+          at={tabMenu.at}
+          onClose={() => setTabMenu(null)}
+          items={rowMenuItems(tabMenu.entry.session.id, {
+            // THE SAME BUILDER THE SIDEBAR ROW USES. A tab and a row are one
+            // session seen twice; two item lists would be two answers to
+            // "what can I do to this session", and they would drift.
+            closing: pendingAction === tabMenu.entry.session.id,
+            onRenameSession: onSidebarRenameSession,
+            onPickSessionIcon: onSidebarPickSessionIcon,
+            onClose: (sessionId) => void closeSession(sessionId, tabMenu.entry.session.title),
+          })}
+        />
       )}
     </div>
   );
