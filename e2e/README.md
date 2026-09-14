@@ -643,3 +643,18 @@ Its output is gitignored like every other shot. The one comparison worth
 keeping is committed at `docs/images/dark-ladder-before-after.png`: pane
 15.64 → 22.62, card 18.94 → 27.97, ground unchanged at 10.27 — the frame
 where the question card stops merging into the surface behind it.
+
+**The "after" half is never hardcoded** — it is simply the live build with
+`BEFORE_THE_WIDEN`'s overrides removed, so it always paints whatever
+`styles.css` currently ships. That is what makes the committed PNG able to go
+stale without the script itself being wrong: `--vam-in-bubble` moved twice
+after this script was written (`#354646` at authoring time → `#425453` on
+`main` briefly → `#505050`, #347), and the committed frame kept whichever of
+those the build wore on the day someone last ran the script by hand. Found
+2026-09 by re-running it: the checked-in image's "after" bubble was still the
+pre-#347 teal, `main`'s own stylesheet had carried grey for a while by then.
+Regenerated against the current build — `getComputedStyle` now reads
+`rgb(80, 80, 80)` for both panels' "after" In bubble, matching `--vam-in-bubble:
+#505050` in `styles.css` and the live page. There is no fix to the script
+itself: re-run it after any palette change that reaches a token this file
+reads, the same discipline `pane-colour-shots.mjs` already asks for.
