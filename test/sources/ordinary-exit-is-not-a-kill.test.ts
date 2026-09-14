@@ -23,8 +23,26 @@ import { describe, expect, it } from 'vitest';
 import { classifyDeliverFailure } from '../../src/main/sources/claude-code/deliver.js';
 import { classifyTmuxFailure } from '../../src/main/sources/tmux/spawn.js';
 
-/** What node really hands back for `exit 1`, measured on v26.5.0. */
-const ORDINARY_EXIT = { code: 1, killed: false, signal: null } as const;
+/**
+ * What node really hands back for `exit 1`, measured on v26.5.0. `message`
+ * is required by both `SpawnFailure` types and is the string execFile builds
+ * from the exit code alone -- it names no signal, which is the whole point:
+ * the kill claim never came from the child, it came from the reader.
+ */
+const ORDINARY_EXIT = {
+  message: 'Command failed with exit code 1',
+  code: 1,
+  killed: false,
+  signal: null,
+} as const;
+
+/** An external `kill -9`: node reports the signal that really ended it. */
+const REAL_KILL = {
+  message: 'Command failed: killed by SIGKILL',
+  code: null,
+  killed: false,
+  signal: 'SIGKILL',
+} as const;
 
 describe('an ordinary non-zero exit', () => {
   it('lets tmux say what it actually said, instead of claiming a kill', () => {
@@ -52,7 +70,7 @@ describe('an ordinary non-zero exit', () => {
 describe('a real signal still reads as one', () => {
   it('keeps the kill arm reachable for tmux', () => {
     const error = classifyTmuxFailure({
-      failure: { code: null, killed: false, signal: 'SIGKILL' },
+      failure: REAL_KILL,
       stderr: '',
       action: 'listing sessions',
     });
@@ -61,7 +79,7 @@ describe('a real signal still reads as one', () => {
 
   it('keeps the kill arm reachable for the CLI', () => {
     const error = classifyDeliverFailure({
-      failure: { code: null, killed: false, signal: 'SIGKILL' },
+      failure: REAL_KILL,
       stderr: '',
       sessionId: 'D-1',
     });

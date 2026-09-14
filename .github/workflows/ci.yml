@@ -88,6 +88,18 @@ jobs:
         if: '!cancelled()'
         run: pnpm run typecheck:test
 
+      # BEFORE the unit suite, not after. `test/main/remote/phone-shell.test.ts`
+      # asserts that the directory the phone's shell is served from holds
+      # nothing but build output, and it refuses to pass quietly when there is
+      # no build to read -- in CI it requires one. `pnpm run build` below emits
+      # `dist/`; only `build:web` emits `dist-web`, and nothing in this job ran
+      # it, so that guard had failed on every run since it landed. It stayed
+      # green on a developer's machine for an unrelated reason: `pnpm dist`
+      # leaves a `dist-web` behind.
+      - name: build the browser bundle, so the served-root guard reads a real one
+        if: '!cancelled()'
+        run: pnpm run build:web
+
       - name: unit tests
         if: '!cancelled()'
         run: pnpm test
