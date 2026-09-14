@@ -23,6 +23,7 @@
  */
 
 import { Copy, Trash2 } from 'lucide-react';
+import type { RemoteLinkKey } from '../../preload/api.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { QrAddress } from './QrAddress.js';
 import { Switch } from './Switch.js';
@@ -114,6 +115,14 @@ export type PairingPanelProps = {
   readonly onDisableServe: () => void;
   /** Persists the preference above. Takes effect the next time vam starts. */
   readonly onSetWritesPreference: (next: boolean) => void;
+  /**
+   * Opens one of the panel's two external links, by key.
+   *
+   * OPTIONAL, and absent is the browser build: no preload bridge, no window
+   * policy to be refused by, and an ordinary anchor that already works. See
+   * `ExternalLink`.
+   */
+  readonly onOpenLink?: (key: RemoteLinkKey) => void;
 };
 
 /** `XXXX-XXXX`: a group of four is what a person holds while looking away. */
@@ -211,6 +220,58 @@ const ALERT_BOX = 'rounded-md border border-danger bg-panel p-3 text-control tex
 const HINT = 'max-w-[52ch] text-control text-ink-dim';
 const SECTION = 'border-line-loud border-t pt-4';
 const HEADING = 'font-medium text-body text-ink';
+
+/**
+ * A LINK OUT OF VAM, UNDER A WINDOW THAT REFUSES TO NAVIGATE.
+ *
+ * Operator: "in settings the tailscale link is not clickable." It was an
+ * ordinary `target="_blank"` anchor, and `setWindowOpenHandler(() => ({ action:
+ * 'deny' }))` in `src/main/index.ts` refuses every `window.open` in this app.
+ * The link was not broken; it was refused, by policy, for the reason
+ * `errors/report.ts` states: a renderer that can navigate off-origin is a
+ * renderer that can exfiltrate.
+ *
+ * STILL AN ANCHOR. A `<button>` dressed as a link loses what a link announces
+ * to a screen reader and what a pointer expects from one -- and the
+ * destination really is reached, in the operating system's browser, which is
+ * where an external page belongs. The `href` stays real, which is also what
+ * makes the browser build need no branch: there is no bridge there, nothing
+ * calls `preventDefault`, and the anchor works the way an anchor works.
+ *
+ * `onOpen` TAKES A KEY. Main owns both destinations; see `remoteOpenLink`.
+ */
+function ExternalLink({
+  href,
+  onOpen,
+  linkKey,
+  className,
+  children,
+}: {
+  readonly href: string;
+  readonly onOpen?: (key: RemoteLinkKey) => void;
+  readonly linkKey: RemoteLinkKey;
+  readonly className: string;
+  readonly children: React.ReactNode;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className={className}
+      onClick={(event) => {
+        if (onOpen === undefined) return;
+        // The window would deny this anyway. Stopping it here keeps one path
+        // rather than two, and a second path is what later gets "fixed" by
+        // widening the policy.
+        event.preventDefault();
+        onOpen(linkKey);
+      }}
+    >
+      {children}
+    </a>
+  );
+}
 
 /**
  * One step of the connect-a-phone list.
@@ -325,14 +386,14 @@ export function PairingPanel(props: PairingPanelProps) {
             {/* An inline link inside a sentence is WCAG 2.5.5's own documented
                 exception to the 44px target-size floor -- forcing this into a
                 button-sized box would look absurd mid-paragraph. */}
-            <a
+            <ExternalLink
               href="https://tailscale.com/download"
-              target="_blank"
-              rel="noreferrer"
+              onOpen={props.onOpenLink}
+              linkKey="download"
               className="text-ink underline underline-offset-2 hover:text-ink-dim"
             >
               Install Tailscale
-            </a>
+            </ExternalLink>
             , then reopen this screen.
           </p>
         ) : serve.enabled ? (
@@ -411,14 +472,14 @@ export function PairingPanel(props: PairingPanelProps) {
               Serve is turned off for your whole tailnet. A tailnet admin needs to turn it on here,
               then Enable phone access can be pressed again:
             </p>
-            <a
+            <ExternalLink
               href={serve.tailnetServeDisabledUrl}
-              target="_blank"
-              rel="noreferrer"
+              onOpen={props.onOpenLink}
+              linkKey="serve-admin"
               className="mt-1 inline-block break-all font-mono text-control text-ink underline underline-offset-2 hover:text-ink-dim"
             >
               {serve.tailnetServeDisabledUrl}
-            </a>
+            </ExternalLink>
           </div>
         ) : serve.lastError === null && !serve.timedOut ? null : (
           <p data-testid="serve-error" role="alert" className={`mt-2 ${ALERT_BOX}`}>
