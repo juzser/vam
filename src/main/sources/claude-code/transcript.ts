@@ -86,7 +86,7 @@ export const EMPTY_FACTS: TranscriptFacts = {
   questions: [],
 };
 
-type Line = Record<string, unknown>;
+export type Line = Record<string, unknown>;
 
 /** One parsed line, and where in the FILE it begins. */
 type Located = {
@@ -257,7 +257,16 @@ function messageText(line: Line): string | null {
  * characters and the longest is 1,057, and neither the activity line nor a
  * progress row draws more than one line of it anyway.
  */
-function toolUseLabel(part: Line): string {
+/**
+ * EXPORTED FOR THE ONE OTHER READER OF THIS FORMAT. `subagent.ts` reads
+ * subagent transcripts, which no function in this file can parse -- measured:
+ * 0 of 250 of them carry the `last-prompt` line a turn here is NAMED by, so
+ * `summarizeTranscript` returns zero turns for every one of them. What it does
+ * share is the shape of a tool call and the rules for reading a failure off a
+ * result, and those are argued for here at length. A second copy of them there
+ * would be a second place for the `=== true` to become truthy.
+ */
+export function toolUseLabel(part: Line): string {
   const input = part['input'];
   const description =
     typeof input === 'object' && input !== null ? str((input as Line)['description']) : null;
@@ -266,7 +275,7 @@ function toolUseLabel(part: Line): string {
 }
 
 /** Every `{type:'tool_use'}` part of an assistant message, in order. */
-function toolUses(line: Line): readonly Line[] {
+export function toolUses(line: Line): readonly Line[] {
   const message = line['message'];
   if (typeof message !== 'object' || message === null) return [];
   const content = (message as Line)['content'];
@@ -307,7 +316,7 @@ function toolUse(line: Line): string | null {
  * data, and a failure badge is not worth guessing for. It counts PARTS, not
  * lines, because one result line can carry several.
  */
-function toolErrors(line: Line): number {
+export function toolErrors(line: Line): number {
   const message = line['message'];
   if (typeof message !== 'object' || message === null) return 0;
   const content = (message as Line)['content'];
@@ -334,7 +343,7 @@ function toolErrors(line: Line): number {
  * session transcripts, all 1,221 `is_error:true` results named a
  * `tool_use_id` that matches a call in the same file.
  */
-function failedToolUseIds(line: Line): readonly string[] {
+export function failedToolUseIds(line: Line): readonly string[] {
   const message = line['message'];
   if (typeof message !== 'object' || message === null) return [];
   const content = (message as Line)['content'];
@@ -359,7 +368,11 @@ function failedToolUseIds(line: Line): readonly string[] {
  * A list keyed on a value vam does not mint collapses two rows the day one
  * repeats.
  */
-type ReadCall = { readonly toolUseId: string | null; readonly label: string; failed: boolean };
+export type ReadCall = {
+  readonly toolUseId: string | null;
+  readonly label: string;
+  failed: boolean;
+};
 
 /** `2m`, `6h`, `3d` -- the compact form the sidebar right-aligns. */
 export function compactAge(ms: number): string {

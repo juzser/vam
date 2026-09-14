@@ -62,7 +62,15 @@ import { join } from 'node:path';
 import type { Decision } from '../../../renderer/domain/model.js';
 import type { AgentRoster } from './agent-roster.js';
 import { extractCommands } from './commands.js';
-import type { TranscriptFacts } from './transcript.js';
+import {
+  failedToolUseIds,
+  type ReadCall,
+  type TranscriptFacts,
+  type Line as TranscriptLine,
+  toolErrors,
+  toolUseLabel,
+  toolUses,
+} from './transcript.js';
 import { fileTranscriptSource, type TranscriptSource } from './window.js';
 
 /** The one envelope that is the operator speaking inside an agent's thread. */
@@ -212,7 +220,12 @@ function toolNameOf(message: unknown): string | null {
   return null;
 }
 
-type Line = { type?: string; isMeta?: boolean; timestamp?: string; message?: unknown };
+type Line = {
+  type?: string;
+  isMeta?: boolean;
+  timestamp?: string;
+  message?: unknown;
+} & TranscriptLine;
 
 function parseLine(raw: string): Line | null {
   if (!raw.startsWith('{')) return null;
@@ -577,4 +590,142 @@ export async function withLiveAgentTurn(
     activity: turn.activity ?? facts.activity,
     decisions: [agentDecision(turn, idPrefix, facts), ...facts.decisions],
   };
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * THE AGENTS PANE'S DETAIL SIDE: one subagent's work, as turns.
+ *
+ * The Agents tab was a flat list of rows -- a dot, a type, a description --
+ * and the operator asked for the list to become a navigator with the selected
+ * agent's work beside it, "with in/out/progress". Those are the three things a
+ * `Decision` already carries, so this produces `Decision`s and the pane reuses
+ * the turn renderer it has rather than growing a second one.
+ *
+ * WHY `summarizeTranscript` IS NOT WHAT RUNS HERE, measured before this was
+ * written: of 250 of the 872 subagent transcripts on this machine, ZERO carry
+ * a `type:'last-prompt'` line and it returns ZERO turns for all 250. That is
+ * it being right, not wrong -- a turn there is opened by the operator's line
+ * and NAMED by the marker after it, and an agent's thread has no markers, so
+ * every turn it opens is correctly dropped as unnamed. Reusing it would have
+ * drawn an empty pane for every agent on the machine.
+ *
+ * A TURN HERE IS OPENED BY WHAT WAS SAID *TO* THE AGENT, and there are exactly
+ * two kinds of that: the TASK BRIEF the parent wrote, and an OPERATOR HANDOFF.
+ * Everything else on a `user` line is a tool result, which is an answer to a
+ * call and not a thing anyone said.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Is this `user` line something said TO the agent, and what was said?
+ *
+ * `null` for a tool result, for the two envelopes that are not the operator,
+ * and for a line with no text. The `isMeta` split is the whole classifier:
+ * meta means the operator (or one of the impostors `operatorHandoff` refuses),
+ * and non-meta means the parent's brief.
+ */
+function saidToAgent(line: Line): string | null {
+  if (isToolResult(line)) return null;
+  const text = textOf(line.message).trim();
+  if (text === '') return null;
+  return line.isMeta === true ? operatorHandoff(text) : text;
+}
+
+function isToolResult(line: Line): boolean {
+  const content = (line.message as { content?: unknown } | null)?.content;
+  if (!Array.isArray(content)) return false;
+  return (content as Part[]).some((part) => part?.type === 'tool_result');
+}
+
+/**
+ * One subagent's turns, OLDEST FIRST -- the order a pane reads top to bottom,
+ * and the order `TranscriptPage` uses, rather than a session row's newest-first
+ * `decisions`.
+ *
+ * THE ATTRIBUTION RULES ARE `transcript.ts`'s, because they were argued for
+ * there and a second set of them would be a second set to get wrong: an answer
+ * belongs to the turn that was OPEN, a call belongs to the turn that was open
+ * when it was MADE, and work that happened before the window's first turn is
+ * charged to NOTHING rather than to the turn that had not started.
+ *
+ * ZERO AND EMPTY ARE READINGS. `model.ts` reserves absence for a source that
+ * cannot report a thing; this one looks at every line, so `errorCount` and
+ * `steps` are always answered.
+ */
+const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
+
+export function agentTurns(window: string, idPrefix: string): readonly Decision[] {
+  type Open = {
+    input: string;
+    promptedAt: string | null;
+    latestAt: string | null;
+    output: string | null;
+    errors: number;
+    calls: ReadCall[];
+  };
+  const turns: Open[] = [];
+
+  for (const raw of window.split('\n')) {
+    const line = parseLine(raw);
+    if (line === null) continue;
+    const stamp = typeof line.timestamp === 'string' ? line.timestamp : null;
+
+    if (line.type === 'user') {
+      const asked = saidToAgent(line);
+      if (asked !== null) {
+        turns.push({
+          input: asked,
+          promptedAt: stamp,
+          latestAt: null,
+          output: null,
+          errors: 0,
+          calls: [],
+        });
+        continue;
+      }
+      // A tool result belongs to the turn that was open when it arrived. With
+      // no open turn -- the window began mid-run -- it is charged to nothing.
+      const open = turns.at(-1);
+      if (open === undefined) continue;
+      open.errors += toolErrors(line);
+      for (const id of failedToolUseIds(line)) {
+        for (const call of open.calls) if (call.toolUseId === id) call.failed = true;
+      }
+      continue;
+    }
+
+    if (line.type !== 'assistant') continue;
+    const open = turns.at(-1);
+    if (open === undefined) continue;
+    // WHEN THE TURN LAST DID ANYTHING: every assistant line counts, an answer
+    // as much as a tool call -- both are the agent doing something.
+    if (stamp !== null) open.latestAt = stamp;
+    const text = textOf(line.message).trim();
+    if (text !== '') open.output = text;
+    for (const part of toolUses(line)) {
+      open.calls.push({ toolUseId: str(part['id']), label: toolUseLabel(part), failed: false });
+    }
+  }
+
+  return turns.map((turn, index) => {
+    // POSITIONAL, AND BOUNDED TO ONE READ. A session turn's id is a byte
+    // offset because two windows of the same file must agree on it; nothing
+    // pages an agent, so there is no second window to agree with, and an index
+    // within this read is unique by construction whatever the provider wrote.
+    const id = `${idPrefix}:${index}`;
+    return {
+      id,
+      label: idPrefix,
+      input: turn.input,
+      output: turn.output,
+      commands: turn.output === null ? [] : extractCommands(turn.output, id),
+      errorCount: turn.errors,
+      promptedAt: turn.promptedAt,
+      latestAt: turn.latestAt,
+      steps: turn.calls.map((call, at) => ({
+        id: `${id}:${at}`,
+        label: call.label,
+        failed: call.failed,
+      })),
+    };
+  });
 }
