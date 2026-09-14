@@ -78,6 +78,7 @@ function draw(
     onEnableServe: vi.fn(),
     onDisableServe: vi.fn(),
     onSetWritesPreference: vi.fn(),
+    onOpenLink: vi.fn(),
     ...rest,
     serve: { ...SERVE_DEFAULT, ...serveOver },
   };
@@ -505,6 +506,66 @@ describe('the paired devices', () => {
  * means, because a checklist that invents its own ticks is worse than one with
  * none.
  */
+/**
+ * THE TWO LINKS, AND THE POLICY THAT ATE THEM.
+ *
+ * Operator: "in settings the tailscale link is not clickable." True, and the
+ * cause is vam's own: `setWindowOpenHandler(() => ({ action: 'deny' }))` in
+ * `src/main/index.ts` refuses every `window.open`, which is what a
+ * `target="_blank"` anchor becomes. The link was not broken, it was refused --
+ * the same shape as the microphone, one screen over.
+ *
+ * The policy stays. The click goes through main, which owns both destinations
+ * and is handed a KEY rather than a URL, so this cannot become a
+ * navigate-anywhere capability through a different door.
+ *
+ * IT IS STILL AN ANCHOR. A `<button>` styled as a link would lose what a link
+ * announces and what a pointer expects, and the destination IS reached -- in
+ * the operating system's browser, which is where an external page belongs. The
+ * `href` stays real so the browser build, which has no bridge and no policy to
+ * be refused by, keeps working with no branch of its own.
+ */
+describe('the panel’s external links, under a policy that denies window.open', () => {
+  const link = (name: RegExp) => screen.getByRole('link', { name });
+
+  it('asks main to open the download page, naming a key and not a URL', () => {
+    const props = draw({ serve: { cliMissing: true } });
+    const anchor = link(/install tailscale/i);
+    expect(anchor.getAttribute('href')).toBe('https://tailscale.com/download');
+    fireEvent.click(anchor);
+    expect(props.onOpenLink).toHaveBeenCalledWith('download');
+  });
+
+  it('asks main to open the tailnet admin page the same way', () => {
+    const url = 'https://login.tailscale.com/f/serve?node=abc';
+    const props = draw({ serve: { tailnetServeDisabledUrl: url, enabled: false } });
+    const anchor = link(/login.tailscale.com/);
+    fireEvent.click(anchor);
+    expect(props.onOpenLink).toHaveBeenCalledWith('serve-admin');
+  });
+
+  it('stops the navigation the window would refuse anyway', () => {
+    // Without `preventDefault` the click ALSO reaches the policy, which denies
+    // it -- harmless today, and exactly the kind of second path that later
+    // gets "fixed" by widening the policy.
+    const props = draw({ serve: { cliMissing: true } });
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link(/install tailscale/i).dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(props.onOpenLink).toHaveBeenCalled();
+  });
+
+  it('leaves the link alone where there is no bridge to ask across', () => {
+    // The browser build: no preload, no window policy, and an ordinary anchor
+    // that already works. A `preventDefault` with nothing behind it would turn
+    // a working link into a dead one.
+    const props = draw({ serve: { cliMissing: true }, onOpenLink: undefined });
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link(/install tailscale/i).dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
+
 describe('the steps for connecting a phone', () => {
   const steps = () => [...document.querySelectorAll('[data-pairing-step]')];
   const done = () =>

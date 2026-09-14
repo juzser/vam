@@ -356,6 +356,12 @@ function startRemoteTransport(): void {
       enableServe: () => enableServe(spawnTailscaleServe, config.port),
       disableServe: () => disableServe(spawnTailscaleServe),
       writesPreference,
+      // The panel's two links. `shell.openExternal` is the operating system's
+      // browser, not this window -- which would refuse the navigation anyway.
+      // The renderer hands over a KEY; `remote/ipc.ts` owns both destinations.
+      openExternal: async (url) => {
+        await shell.openExternal(url);
+      },
     });
     try {
       await startRemoteServer({
