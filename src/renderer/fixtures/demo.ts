@@ -96,6 +96,39 @@ export const DEMO_MODEL: CanvasModel = {
           branch: null,
           status: 'waiting',
           runningAgents: 3,
+          /**
+           * THE ROSTER BEHIND THE `●3`, so the Agents tab has something to be.
+           *
+           * It carried the count and no roster, which meant the tab drew "this
+           * source does not report which agents a session is running" -- the
+           * sentence reserved for a source with NO agent surface -- on the one
+           * fixture a screenshot may use. Three running, matching the badge,
+           * and two finished so the idle toggle has something to reveal.
+           *
+           * Invented, like every other line of this file.
+           */
+          agents: [
+            {
+              id: 'agent-coder',
+              type: 'coder',
+              description: 'wire the stream route',
+              running: true,
+            },
+            {
+              id: 'agent-tester',
+              type: 'tester',
+              description: 'drive the reconnect path',
+              running: true,
+            },
+            {
+              id: 'agent-reviewer',
+              type: 'reviewer',
+              description: 'read the diff for the cookie decision',
+              running: true,
+            },
+            { id: 'agent-planner', type: 'planner', description: 'split the epic', running: false },
+            { id: 'agent-scribe', type: null, description: null, running: false },
+          ],
           activity: 'coder · round 2 · sonnet',
           age: '4m',
           // Newest first — the model's order, not the reading order. The canvas
