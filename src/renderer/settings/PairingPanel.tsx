@@ -355,14 +355,22 @@ export function PairingPanel(props: PairingPanelProps) {
             Turn on phone access below. It runs <code>tailscale serve</code>, which puts this
             machine's loopback server behind an <code>https://…ts.net</code> address.
           </Step>
+          {/* WHAT THE PHONE SHOWS, named here, because the operator is holding
+              that phone while they read this and "it worked" has to be
+              recognisable. These two steps described a flow the server refused
+              until the app shell was served without a token: scanning the code
+              produced vam's own 401, whose body reads "check the pairing
+              screen on the desktop" -- which the operator dutifully did, and
+              found this walkthrough telling them to scan the code. */}
           <Step id="open">
             On the phone, scan the QR code beside that address with the camera — or open the address
-            by hand.
+            by hand. A pairing form loads, asking for a code; it can reach nothing else until it has
+            one.
           </Step>
           <Step id="code">
-            Press “Regenerate” here for a pairing code, and type those characters into the phone.
-            The code is short-lived and is not in the QR: the address is not a secret, and pairing
-            is what authorises a device.
+            Press “Regenerate” here for a code, and type those eight characters into that form. The
+            code lives two minutes, is single-use, and is deliberately not in the QR: the address is
+            not a secret, and pairing is what authorises a device.
           </Step>
           <Step id="allow" done={props.devices.length > 0}>
             Allow the device when it appears here. You can revoke it later, one at a time or all at

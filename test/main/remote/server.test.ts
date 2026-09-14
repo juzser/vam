@@ -621,9 +621,21 @@ describe('the descriptor the server serves', () => {
 });
 
 /**
- * The page itself. An asset is served by the SAME request path as the API, so
- * identity is verified before the file is opened -- a static file that could be
- * fetched by someone `/api/load` would refuse is a way around the door.
+ * The page itself.
+ *
+ * THIS BLOCK USED TO ASSERT THE OPPOSITE, and the assertion was correct about
+ * the piece it named while the whole was broken. It read: identity is verified
+ * before the file is opened, because a static file fetchable by someone
+ * `/api/load` would refuse is a way around the door. True of a file holding
+ * DATA -- and the app shell holds none. What it cost was the only route a new
+ * phone had: `/api/pair` is a POST, a scanned QR is a GET, and the page that
+ * makes that POST was itself behind the token it exists to obtain. The
+ * operator scanned the code and got this server's own 401 read back.
+ *
+ * So the shell -- `/`, `/index.html`, `/assets/<one segment>` -- is served
+ * without a token, and everything else still is not. The cases below hold the
+ * new boundary from both sides; `phone-shell.test.ts` walks the journey end to
+ * end and states the security argument in full.
  */
 describe('static assets', () => {
   let root: string;
@@ -636,15 +648,22 @@ describe('static assets', () => {
     await writeFile(join(root, '..', 'outside.txt'), 'not yours');
   });
 
-  it('refuses an asset to a caller with no verified identity', async () => {
+  it('serves the shell to a caller with no verified identity', async () => {
     const response = await get(await start({ webRoot: root }), '/', null);
-    expect(response.status).toBe(401);
-    expect(response.headers.get('content-type')).toContain('application/json');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/html');
   });
 
-  it('refuses an asset to a forged assertion', async () => {
+  it('serves the shell, and only the shell, to a forged assertion', async () => {
     const base = await start({ webRoot: root });
-    expect((await get(base, '/assets/app.js', 'not-a-token-we-minted')).status).toBe(401);
+    const forged = 'not-a-token-we-minted';
+    // The bundle: public build output, and reachable by anyone on the tailnet
+    // whether they forge a header or send none at all.
+    expect((await get(base, '/assets/app.js', forged)).status).toBe(200);
+    // The model: unchanged. A forged assertion buys exactly the page, which
+    // can do nothing without a token this server minted.
+    expect((await get(base, '/api/load', forged)).status).toBe(401);
+    expect((await get(base, '/api/describe', forged)).status).toBe(401);
   });
 
   it('serves the page at the root to a verified identity', async () => {
