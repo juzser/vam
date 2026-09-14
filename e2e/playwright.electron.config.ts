@@ -30,4 +30,9 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: 60_000,
+  // Same as the other two configs — costs nothing on a passing run, and CI
+  // (ci.yml, `playwright-electron` job) uploads this on failure.
+  use: {
+    trace: 'retain-on-failure',
+  },
 });

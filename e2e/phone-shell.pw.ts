@@ -981,7 +981,33 @@ test.describe('the phone search route', () => {
     const menu = page.locator('[data-filter-menu]');
     await expect(menu).toBeVisible();
 
-    await page.setViewportSize({ width: 375, height: 667 - IOS_KEYBOARD_CSS_PX });
+    const shrunkViewport = 667 - IOS_KEYBOARD_CSS_PX;
+    await page.setViewportSize({ width: 375, height: shrunkViewport });
+    // `useFilterPopoverCap` (SessionList.tsx) recomputes its cap from a
+    // `resize` LISTENER, not synchronously with `setViewportSize` -- the same
+    // asynchrony the Android-case test above already polls for
+    // (`expect.poll(... boundingBox()?.height ...)`). Reading geometry right
+    // after `setViewportSize`, with nothing awaited in between, races that
+    // listener: on a loaded machine (this file's own 32 sequential tests,
+    // one worker) the read can land before the `resize` event fires,
+    // capturing the cap computed for the PRE-shrink 667px viewport --
+    // measured at exactly 452 (`667 - top(207) - FILTER_POPOVER_FOOT(8)`,
+    // SessionList.tsx) against a 331px shrunk one -- instead of the
+    // post-shrink cap this test means to assert on. Falsified: run alone,
+    // or with `menu.evaluate` called immediately as it was before this poll,
+    // this test is green in isolation and red only after ~7 preceding tests
+    // in the same worker -- a race, not a bound that needs loosening.
+    //
+    // `boundingBox()` returns `{x, y, width, height}` -- NOT a `DOMRect`, so
+    // it has no `.bottom` -- unlike `getBoundingClientRect()`, which the
+    // `menu.evaluate` block below (a real `DOMRect`) uses instead. `y +
+    // height` is this method's own equivalent.
+    await expect
+      .poll(async () => {
+        const box = await menu.boundingBox();
+        return box === null ? Number.POSITIVE_INFINITY : Math.round(box.y + box.height);
+      })
+      .toBeLessThanOrEqual(shrunkViewport);
     const seen = await menu.evaluate((el) => {
       const read = () =>
         [...el.querySelectorAll('button, input')].map((c) => {

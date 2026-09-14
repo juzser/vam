@@ -1,26 +1,47 @@
 # vam CI — the gates that can actually run here.
 #
-# The `web-guards` job below DOES drive a real Chromium: the four asserting
-# scripts under `e2e/` need nothing but the web bundle, and they carry the only
-# automatic checks on what jsdom cannot see (split/pane ordering, per-project
-# layout restore, focus at the moment of an event, `position: sticky` against
-# real layout). They ran by hand until now, which is to say they mostly did not
-# run.
+# Four jobs drive a real Chromium (or a real packaged Electron). `web-guards`
+# runs the four asserting `e2e/*.mjs` scripts that need nothing but the web
+# bundle — the only automatic checks on what jsdom cannot see (split/pane
+# ordering, per-project layout restore, focus at the moment of an event,
+# `position: sticky` against real layout). `playwright-e2e` runs the
+# Playwright TEST-RUNNER suites that only need a browser and vam's own dev/
+# preview server: `test:e2e` (`branch-overlap`, `error-log-select`,
+# `pane-resize`, `stream-cookie` — real hit-testing, a real pointer drag, a
+# real cookie over a real response, none of which jsdom or happy-dom can
+# decide) and `test:e2e:phone` (`phone-shell.pw.ts`, 32 tests at 390px — the
+# phone shell's touch targets and sheet geometry, laid out by a real engine).
+# `playwright-electron` runs `test:e2e:electron` against an actual
+# electron-builder `--dir` package — AC-18, the one check that `app.isPackaged`
+# is really true and the renderer loads from the packaged `out/`, not
+# `ELECTRON_RENDERER_URL`. None of the three ran automatically before this;
+# by hand, on whichever machine last remembered to, is close enough to never.
 #
 # WHAT IS STILL DELIBERATELY ABSENT, and why, so nobody reads a green tick as
-# more than it is: neither SSE e2e spec runs here. `e2e/sse-drop.spec.ts`
-# (AC-G1) and `e2e/sse-drop-reconnect.pw.ts` (AC-10) each need a live factory
-# backend — they spawn it via SMITH_CLI_ENTRY, which points into a SIBLING
-# REPOSITORY that is private and not checked out here. That blocker is not
-# fixable by adding a step to this file, so those two remain hand-run per
-# e2e/README.md and a green run of THIS workflow still says nothing about SSE
-# recovery. Nor do the five screenshot-only scripts
-# (focus-edge-visibility, issue-188-shots, pane-refinements-shots,
-# phone-list-shots, phone-prompt-shots) run anywhere: they assert NOTHING, and
-# wiring shot-takers into CI would buy a slower job and no guard.
+# more than it is: neither SSE e2e spec exercises a real factory here.
+# `e2e/sse-drop.spec.ts` (AC-G1, one of the ten `playwright-e2e` tests) and
+# `e2e/sse-drop-reconnect.pw.ts` (AC-10, its own script, `test:e2e:reconnect`
+# — NOT wired into any job below) each need a live factory backend: they
+# spawn it via SMITH_CLI_ENTRY, which points into a SIBLING REPOSITORY that
+# is private and not checked out here. That blocker is not fixable by adding
+# a step to this file. `sse-drop.spec.ts` itself is left inside `test:e2e`
+# rather than filtered out — it `test.skip()`s itself the moment
+# SMITH_CLI_ENTRY is unset (see its own header), which this workflow never
+# sets, so it reports SKIPPED, never PASSED; a skip cannot be mistaken for
+# coverage the way a silently-absent script could. `test:e2e:reconnect` gets
+# no job at all, for the opposite reason: it is the ONLY script in its own
+# config (`playwright.reconnect.config.ts`'s `testMatch` names the one file),
+# so running it would produce nothing but that same skip, on its own runner
+# minute, telling a reader nothing `test:e2e`'s own skip line does not
+# already say. Both remain hand-run per `e2e/README.md`, and a green run of
+# every job below still says nothing about SSE recovery. Nor do the five
+# screenshot-only scripts (focus-edge-visibility, issue-188-shots,
+# pane-refinements-shots, phone-list-shots, phone-prompt-shots) run anywhere:
+# they assert NOTHING, and wiring shot-takers into CI would buy a slower job
+# and no guard.
 #
 # `e2e/` is also excluded from vitest.config.ts, tsconfig*.json and biome.json,
-# so the jobs below do not typecheck or lint those files either.
+# so no job below typechecks or lints those files either.
 name: CI
 
 on:
@@ -150,9 +171,9 @@ jobs:
         if: '!cancelled()'
         run: xvfb-run --auto-servernum pnpm run test:app
 
-  # The four asserting e2e scripts, against a real browser. Separate job, so a
-  # unit-suite failure and a real-browser failure are told apart at a glance and
-  # neither waits on the other.
+  # The four asserting `e2e/*.mjs` scripts, against a real browser. Separate
+  # job, so a unit-suite failure and a real-browser failure are told apart at
+  # a glance and neither waits on the other.
   web-guards:
     runs-on: ubuntu-latest
     steps:
@@ -212,3 +233,174 @@ jobs:
           name: web-guard-shots
           path: ${{ runner.temp }}/web-guard-shots
           if-no-files-found: warn
+
+  # The Playwright TEST-RUNNER suites — `test:e2e` (branch-overlap,
+  # error-log-select, pane-resize, sse-drop [skips itself, see this file's own
+  # header], stream-cookie) and `test:e2e:phone` (phone-shell.pw.ts, 32 tests
+  # at 390px) — against a real headless Chromium. Separate job from
+  # `web-guards`, on that job's own reasoning: a real-browser failure here
+  # should never be confused with a unit-suite or web-guard one, and none of
+  # the three should wait on either of the others.
+  playwright-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # package.json engines: node >=22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # `web-guards`' own step installs only `playwright-core` — enough for
+      # `run-web-guards.mjs`'s bare `import { chromium } from 'playwright-core'`.
+      # `test:e2e`/`test:e2e:phone` instead run
+      # `e2e/node_modules/.bin/playwright test --config=...`, the actual
+      # `@playwright/test` TEST RUNNER, whose config files and specs
+      # `import ... from '@playwright/test'` — so this installs
+      # `@playwright/test` itself (npm resolves that to `playwright` and
+      # `playwright-core` underneath, the same 1.62.1 `e2e/node_modules`
+      # already resolves to locally) and symlinks its `.bin` in too, not just
+      # the one package `web-guards` needed.
+      - name: playwright 1.62.1 (test runner), outside the root lockfile
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/pw" @playwright/test@1.62.1
+          mkdir -p e2e/node_modules
+          for pkg in .bin @playwright playwright playwright-core; do
+            ln -sfn "$RUNNER_TEMP/pw/node_modules/$pkg" "e2e/node_modules/$pkg"
+          done
+          node "$RUNNER_TEMP/pw/node_modules/playwright-core/cli.js" install --with-deps chromium
+
+      # `playwright.config.ts`'s own `webServer` block builds and serves
+      # `dist-web` via `vite --port 5273`; `playwright.phone.config.ts` does
+      # the same on its own port with `vite preview`. `sse-drop.spec.ts`
+      # skips itself (`SMITH_CLI_ENTRY` unset — see this file's own header);
+      # the other four `test:e2e` specs and all 32 `test:e2e:phone` tests run
+      # for real.
+      - name: test:e2e (desktop, real Chromium)
+        run: pnpm run test:e2e
+
+      # `!cancelled()`, not the default: a desktop-suite failure above must
+      # not hide whether the phone suite also passes — the same discipline
+      # the `check` job's own steps use.
+      - name: test:e2e:phone (390px, real Chromium)
+        if: '!cancelled()'
+        run: pnpm run test:e2e:phone
+
+      # Both suites' traces land under `e2e/test-results/` (both configs'
+      # own `outputDir`) — one artifact for the job, since only one of the
+      # two ever needs inspecting on a given red run. `ignore`, not `warn`
+      # (unlike `web-guards`' shots, which are written on every run whether
+      # or not anything failed): `trace: 'retain-on-failure'` writes nothing
+      # at all on an all-green run, so a missing directory there is the
+      # expected case, not a warning.
+      - name: upload traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-e2e-traces
+          path: e2e/test-results
+          if-no-files-found: ignore
+
+  # `test:e2e:electron` (AC-18) — one Playwright test against the ACTUAL
+  # electron-builder `--dir` package, not `electron-vite dev` and not the
+  # `check` job's own launch harness (`test/electron/launch.test.ts`, AC-13/
+  # AC-14): that one spawns the raw `electron` binary straight at `out/`, so
+  # `app.isPackaged` there is always false. This is the one check that a REAL
+  # package boots with `app.isPackaged: true`, loading from the packaged
+  # `out/renderer/index.html` rather than `ELECTRON_RENDERER_URL` — the one
+  # regression AC-18 exists to catch and the `check` job's own harness cannot.
+  #
+  # Separate job from `playwright-e2e`: packaging is a materially heavier,
+  # differently-shaped build (electron-vite build, the web bundle, the
+  # bundle-externals audit, then a real electron-builder package) than a
+  # headless-Chromium suite needs, and a packaging break should read as a
+  # packaging break rather than get buried in a browser job's log.
+  playwright-electron:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # package.json engines: node >=22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Same install as `playwright-e2e` — `e2e/electron-launch.et.ts` also
+      # imports `_electron` from `@playwright/test`. See that job's own
+      # comment for why this installs the whole package, not just
+      # `playwright-core`. No `install --with-deps chromium` here: `_electron`
+      # launches the PACKAGED app's own Electron binary (below), never a
+      # Playwright-managed browser.
+      - name: playwright 1.62.1 (test runner), outside the root lockfile
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/pw" @playwright/test@1.62.1
+          mkdir -p e2e/node_modules
+          for pkg in .bin @playwright playwright playwright-core; do
+            ln -sfn "$RUNNER_TEMP/pw/node_modules/$pkg" "e2e/node_modules/$pkg"
+          done
+
+      # The same three steps `pnpm dist` runs before packaging (package.json's
+      # own `dist` script), minus the electron-builder call itself, which runs
+      # next with `--dir` instead of `dist`'s full installer targets:
+      # `electron-vite build` (main, preload, renderer -> `out/`), the web
+      # bundle (`dist-web/`, which `electron-builder.config.cjs`'s own
+      # `files` list ships inside the package for phone pairing), and the
+      # bundle-externals audit that config's own comment says protects
+      # `out/main/index.cjs`'s requires.
+      - name: build the three packaging inputs
+        run: |
+          pnpm run build:app
+          pnpm run build:web
+          node scripts/check-bundle-externals.mjs
+
+      # `--dir`, not the full `dist` target: an unpacked app is enough to
+      # launch and inspect, and skips the slower installer/AppImage target
+      # `pnpm dist` builds for a release. `dist-app/linux-unpacked/` is where
+      # `electron-launch.et.ts`'s own `resolveExecutablePath()` looks on this
+      # platform.
+      - name: package (electron-builder --dir)
+        run: node_modules/.bin/electron-builder --dir --config electron-builder.config.cjs
+
+      # UNVERIFIED ON A REAL LINUX RUNNER: written and reasoned from the
+      # `check` job's own working recipe (same repo, same runner image),
+      # adjusted from `node_modules/electron/dist/chrome-sandbox` to the
+      # PACKAGED app's own copy — electron-builder's `--dir` step above
+      # downloads and bundles its OWN Electron binary into `dist-app/`, a
+      # separate copy from `node_modules/electron`'s, so the `check` job's
+      # own chown never reaches this one. This task's own environment is
+      # macOS, which has no SUID sandbox concept at all, so this exact step
+      # could not be exercised here — confirm on the first real run that it
+      # actually finds and fixes the right file, the way `check`'s own
+      # comment records having measured its.
+      - name: give the packaged app's SUID sandbox the ownership it requires
+        run: |
+          set -euo pipefail
+          sandbox=$(find dist-app -name chrome-sandbox -print -quit)
+          test -n "$sandbox"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+
+      - name: test:e2e:electron (packaged app, needs a display)
+        run: xvfb-run --auto-servernum pnpm run test:e2e:electron
+
+      - name: upload traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-electron-traces
+          path: e2e/test-results/electron
+          if-no-files-found: ignore
