@@ -175,7 +175,11 @@ if (multi !== undefined && start.projects.length >= 2) {
     { timeout: 4000 },
   );
   await page.keyboard.press('g');
-  await page.keyboard.press(forward ? 't' : 'T');
+  // `Shift+T`: Playwright's `press('T')` alone sends `{ key: 'T', shiftKey:
+  // false }` -- the exact shape a real CapsLock keydown carries, not a Shift
+  // press -- so it no longer reaches `gT` now that `normalizeKey` decides a
+  // bare letter's case from `shiftKey` rather than from `event.key`.
+  await page.keyboard.press(forward ? 't' : 'Shift+T');
   await page.waitForFunction(
     (id) =>
       document.querySelector('[data-row-cursor]')?.closest('[data-session-row]')
@@ -236,7 +240,10 @@ const quietHasNoCard = await page.evaluate(
 );
 check('the quiet session really has no question card', quietHasNoCard);
 
-const insertDown = await pressAndReadStatus(['I', 'j']);
+// `Shift+I`, not `I`: Playwright's `press('I')` sends `{ key: 'I', shiftKey:
+// false }` -- CapsLock's own shape -- and `normalizeKey` now folds that to
+// `i` (`prompt`), not `I` (`focusAction`). `Shift+I` is the real gesture.
+const insertDown = await pressAndReadStatus(['Shift+I', 'j']);
 console.log('Insert j:', JSON.stringify(insertDown));
 check('Insert j refuses out loud', insertDown.text !== '', 'the bar stayed empty');
 check(
@@ -250,14 +257,14 @@ check(
   `${insertDown.scrollWidth}px of text in a ${insertDown.clientWidth}px cell`,
 );
 
-const insertUp = await pressAndReadStatus(['I', 'k']);
+const insertUp = await pressAndReadStatus(['Shift+I', 'k']);
 console.log('Insert k:', JSON.stringify(insertUp.text));
 check(
   'k answers with its own direction rather than j’s sentence',
   insertUp.text !== '' && insertUp.text !== insertDown.text,
 );
 
-const insertRight = await pressAndReadStatus(['I', 'l']);
+const insertRight = await pressAndReadStatus(['Shift+I', 'l']);
 console.log('Insert l:', JSON.stringify(insertRight.text));
 check('Insert l refuses out loud', insertRight.text !== '', 'the bar stayed empty');
 check(
@@ -285,7 +292,9 @@ console.log(`${outDir}/key-truth-insert-refusal.png`);
 await reset();
 await page.locator(`[data-session-row="${ASKING_SESSION}"]`).click();
 await page.waitForSelector('[data-question-option]', { timeout: 4000 });
-await page.keyboard.press('I');
+// `Shift+I`: see the note above `insertDown` for why a bare `press('I')` no
+// longer means Shift+I.
+await page.keyboard.press('Shift+I');
 await page.waitForFunction(
   () => document.activeElement?.hasAttribute('data-question-option') === true,
   undefined,
@@ -412,7 +421,9 @@ await settle(
 );
 
 // F5. `I` LANDS THE KEYBOARD SOMEWHERE REAL, or does not claim Insert.
-await page.keyboard.press('I');
+// `Shift+I`: see the note above `insertDown` for why a bare `press('I')` no
+// longer means Shift+I.
+await page.keyboard.press('Shift+I');
 const entered = (await settle(
   () => document.activeElement instanceof HTMLElement && document.activeElement.closest('[data-insert-scope]') !== null,
   undefined,
@@ -652,7 +663,9 @@ check(
   `drawn "${newProject.text}" vs full "${newProject.full}"`,
 );
 
-await page.keyboard.press('E');
+// `Shift+E`: see the note above `insertDown` for why a bare `press('E')` no
+// longer means Shift+E.
+await page.keyboard.press('Shift+E');
 const logOpen = await settle(
   () => document.querySelector('[data-error-log]') !== null,
   undefined,

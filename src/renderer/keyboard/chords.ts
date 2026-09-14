@@ -148,7 +148,39 @@ export function normalizeKey(event: KeyEventLike): string | null {
   const mod = event.ctrlKey === true || event.metaKey === true;
   const alt = event.altKey === true;
   if (!mod && !alt) {
-    return event.key;
+    // THE SAME HAZARD AS BELOW, UNGUARDED HERE. CapsLock upper-cases a bare
+    // letter exactly the way it upper-cases a modified one, and the browser
+    // hands back whatever case is currently active with `shiftKey: false` --
+    // indistinguishable at the character level from a real Shift press. The
+    // modified branch a few lines down already carries the fix and says so in
+    // its own comment; returning `event.key` raw here is the same mistake the
+    // comment argues against, just not applied. Under CapsLock every bare
+    // letter arrived upper-cased and resolved against the wrong binding or
+    // against none: `i` as `I` (`focusAction` instead of `prompt`), `g` as `G`
+    // (`last`, so the `g` prefix could never open, taking `gg`/`gt`/`gT`/`gm`
+    // down with it), and `h j k l x r s o p` matched nothing and died
+    // silently -- `resolveChord` returns `action: null` for an unbound key,
+    // which looks identical to a frozen application.
+    //
+    // `shiftKey` decides the case, not the character the browser produced --
+    // the same substitution the branch below makes, for the same reason: a
+    // real Shift press and a CapsLock press are not the same intent, and only
+    // `shiftKey` tells them apart. This also settles CapsLock+Shift, where the
+    // browser hands back a LOWERCASE letter (the two cancel): holding Shift
+    // still means the operator wants the Shift binding, and `shiftKey` alone
+    // gives them one.
+    //
+    // ONLY LETTERS. A shifted CHARACTER is already itself -- `?` arrives as
+    // `?`, `<` as `<`, `>` as `>` -- and those are real bindings in this
+    // grammar, so folding them by `shiftKey` too would give one keystroke two
+    // spellings and only one would ever match: the exact defect this fixes,
+    // reintroduced one clause wider. `Enter`, `Escape` and every other named
+    // key is longer than one character and passes through untouched.
+    return /^[a-zA-Z]$/.test(event.key)
+      ? event.shiftKey === true
+        ? event.key.toUpperCase()
+        : event.key.toLowerCase()
+      : event.key;
   }
   const position = positionKey(event);
   if (position !== null) {

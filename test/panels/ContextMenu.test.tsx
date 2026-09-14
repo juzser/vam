@@ -198,6 +198,22 @@ describe('what the menu does', () => {
     expect(document.activeElement).toBe(item('rename'));
   });
 
+  /**
+   * THE SAME HAZARD `keyboard/chords.ts` DOCUMENTS, in a listener that never
+   * routed through it. With CapsLock on, the browser hands back `'J'` / `'K'`
+   * with `shiftKey: false` -- indistinguishable at the character level from a
+   * real Shift press -- so a raw `event.key === 'j'` comparison went dead and
+   * only the arrows still worked. `{ key: 'J', shiftKey: false }` is the exact
+   * shape a real CapsLock+`j` keydown carries.
+   */
+  it('still walks with j and k under CapsLock', () => {
+    draw();
+    fireEvent.keyDown(panel() as HTMLElement, { key: 'J', shiftKey: false });
+    expect(document.activeElement).toBe(item('icon'));
+    fireEvent.keyDown(panel() as HTMLElement, { key: 'K', shiftKey: false });
+    expect(document.activeElement).toBe(item('rename'));
+  });
+
   it('wraps at both ends, as a menu does', () => {
     draw();
     fireEvent.keyDown(panel() as HTMLElement, { key: 'ArrowUp' });

@@ -394,7 +394,10 @@ await page.setViewportSize({ width: 1100, height: 700 });
 await page.waitForTimeout(200);
 await page.locator(`[data-session-row="${ASKING_SESSION}"]`).click();
 await page.waitForSelector('[data-question-option]', { timeout: 4000 });
-await page.keyboard.press('I');
+// `Shift+I`: Playwright's `press('I')` sends `{ key: 'I', shiftKey: false }`
+// -- CapsLock's own shape -- and `normalizeKey` now folds that to `i`
+// (`prompt`), not `I` (`focusAction`).
+await page.keyboard.press('Shift+I');
 await page.waitForFunction(
   () => document.activeElement?.hasAttribute('data-question-option') === true,
   undefined,

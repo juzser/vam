@@ -7,9 +7,15 @@ describe('normalizeKey', () => {
     expect(normalizeKey({ key: 'Escape' })).toBe('Escape');
   });
 
-  it('keeps case, because G and g are different bindings', () => {
-    expect(normalizeKey({ key: 'G' })).toBe('G');
-    expect(normalizeKey({ key: 'T' })).toBe('T');
+  it('keeps case, because G and g are different bindings — decided by shiftKey', () => {
+    // NOT `normalizeKey({ key: 'G' })`: that object is what CapsLock produces
+    // for a bare `g` press (`{ key: 'G', shiftKey: false }`), and the whole
+    // point of the CapsLock fix is that such an event must answer `g`, not
+    // `G`. A real Shift+G carries `shiftKey: true`, which is what earns the
+    // capital here — see the `capslock.test.ts` file for the CapsLock side of
+    // this distinction, argued at length.
+    expect(normalizeKey({ key: 'G', shiftKey: true })).toBe('G');
+    expect(normalizeKey({ key: 'T', shiftKey: true })).toBe('T');
   });
 
   it('folds Ctrl and Cmd into one Mod token', () => {
