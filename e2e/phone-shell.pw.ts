@@ -537,9 +537,18 @@ test.describe('the phone shell at 390px', () => {
  * (styles.css). The pass never reported them because it never looked here.
  */
 test.describe('settings at 390px', () => {
+  /**
+   * THROUGH `remote access`, WHICH IS THE PHONE'S ONLY DOOR NOW. The gear is
+   * withdrawn at 390px at the operator's request -- four of the five sections
+   * behind it configure `localStorage` on the device holding it rather than
+   * the machine the sessions run on (`settings/sections.ts`,
+   * `PHONE_SECTIONS`). The dialog is the same dialog; what is inside it is
+   * one section.
+   */
   async function openSettings(page: Page): Promise<void> {
     await openDemo(page);
-    await page.locator('[data-phone-shell] button[aria-label="settings"]').first().tap();
+    await expect(page.locator('[data-phone-shell] button[aria-label="settings"]')).toHaveCount(0);
+    await page.locator('[data-phone-shell] button[aria-label="remote access"]').first().tap();
     await expect(page.locator('[data-settings-overlay]')).toBeVisible();
   }
 
@@ -614,22 +623,40 @@ test.describe('settings at 390px', () => {
   test('every control in the settings dialog is at least 44x44', async ({ page }) => {
     await openSettings(page);
     const boxes = await settingsControls(page);
-    expect(boxes.length, 'controls measured in the dialog').toBeGreaterThan(10);
+    /**
+     * THE CORPUS IS SMALL NOW, AND IS PROVED BY IDENTITY RATHER THAN BY A
+     * COUNT. This asked for more than ten controls, which was a fair floor
+     * when the dialog drew five sections at 390px; a phone draws one. A count
+     * that can no longer be met would be deleted, and a sweep with no corpus
+     * check at all is the failure mode this repo tracks -- so the close
+     * button, the one control the dialog always has, is named. If the census
+     * selector ever stops matching, this goes red instead of going quiet.
+     */
+    const names = boxes.map((box) => box.label.toLowerCase());
+    expect(names, 'the census found the dialog at all').toContain('close');
     expect(undersized(boxes), 'settings controls under 44x44 on a phone').toEqual([]);
   });
 
-  test('and in every section of it, not only the one it opens on', async ({ page }) => {
+  /**
+   * WHAT REPLACED "AND IN EVERY SECTION OF IT". That test tapped each nav item
+   * and re-measured, which was the right shape while five sections were
+   * reachable at 390px. None of the other four is reachable there any more --
+   * that is the operator's change, not a gap -- so the test would have been
+   * measuring a nav that is not drawn. Retired, and replaced by the invariant
+   * that made it obsolete, which is the thing now worth guarding: one section,
+   * no nav, and a way out that is not a keystroke.
+   */
+  test('the phone dialog is one section, with no nav and a real way out', async ({ page }) => {
     await openSettings(page);
-    const sections = page.locator('[data-settings-overlay] [data-settings-nav-item]');
-    const count = await sections.count();
-    expect(count, 'sections offered').toBeGreaterThanOrEqual(3);
-    const bad: string[] = [];
-    for (let i = 0; i < count; i += 1) {
-      const name = (await sections.nth(i).getAttribute('data-settings-nav-item')) ?? String(i);
-      await sections.nth(i).tap();
-      for (const row of undersized(await settingsControls(page))) bad.push(`${name}: ${row}`);
-    }
-    expect(bad, 'settings controls under 44x44, by section').toEqual([]);
+    await expect(page.locator('[data-settings-overlay] [data-settings-nav]')).toHaveCount(0);
+    await expect(page.locator('[data-settings-overlay] [data-settings-panel]')).toHaveCount(1);
+    await expect(page.locator('[data-settings-overlay] [data-settings-panel="remote"]')).toHaveCount(
+      1,
+    );
+    const close = page.locator('[data-settings-overlay] button[aria-label="close"]');
+    await expect(close).toHaveCount(1);
+    await close.tap();
+    await expect(page.locator('[data-settings-overlay]')).toHaveCount(0);
   });
 });
 
@@ -643,8 +670,10 @@ test.describe('settings at 390px', () => {
  * quietly asserted from CSS again -- see the skip's own comment.
  */
 test.describe('the overlay sheets at 390px', () => {
+  // Through `remote access`: the gear is not drawn at 390px. What this test is
+  // about is the SHEET the overlay becomes, not which control opens it.
   const openSettings = async (page: Page): Promise<Locator> => {
-    await page.locator('[data-phone-shell] button[aria-label="settings"]').tap();
+    await page.locator('[data-phone-shell] button[aria-label="remote access"]').tap();
     return page.locator('[data-overlay-host]');
   };
   const openIconPicker = async (page: Page): Promise<Locator> => {

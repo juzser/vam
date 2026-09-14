@@ -714,6 +714,44 @@ export type DetailPanelProps = {
    * desktop detail column, which has no pane identity at all.
    */
   readonly paneFocused?: boolean;
+  /**
+   * The last send in THIS session that failed, or null -- the sentence the
+   * status bar already showed, drawn again where the operator is looking.
+   *
+   * Operator instruction. A refused send rolls its optimistic turn back and
+   * puts the words back in the composer, so from the pane a send that failed
+   * and a send never attempted were the same picture; the only trace was one
+   * line in the status bar that the next act overwrote. The caller owns the
+   * string because the caller is the one that performs the send and already
+   * holds the sentence (`noteFailure`'s return) -- this component would have
+   * to re-derive it from a source it does not talk to.
+   *
+   * ONE SENTENCE, NOT A LIST. The error log is the history; this is the
+   * standing verdict on the last thing the operator tried, and it goes away
+   * when they try again.
+   */
+  readonly sendFailure?: string | null;
+  /**
+   * The view this pane is showing, when the CALLER owns that fact.
+   *
+   * WHY A CALLER OWNS IT AT ALL. A view is a per-session choice -- operator
+   * instruction: "when session 1 switches to the PRs view, the rest of the
+   * sessions do not switch" -- and this component cannot keep that promise by
+   * itself. A pane reuses ONE instance for every session it shows, so a view
+   * held in local state here is a fact about the PANE, and switching the
+   * session tab handed the next session whatever the last one was left on.
+   * `Canvas.tsx` keeps a per-session record beside the drafts and action
+   * cursors it already keys that way, and names the current session's entry
+   * here.
+   *
+   * An OPAQUE STRING for the same reason `initialTab` is one: the validating
+   * happens here, against `TABS`, so a caller need not know the vocabulary.
+   *
+   * ABSENT means this pane owns its own view, seeded from `initialTab` --
+   * what every caller predating the split shell does, and what keeps this
+   * component usable on its own.
+   */
+  readonly tab?: string | null;
   readonly initialTab?: string | null;
   readonly onTabChange?: (tab: string) => void;
   /**
@@ -3591,49 +3629,77 @@ export function DetailPanel(props: DetailPanelProps) {
   /** The first option of the open question, when one is being asked. */
   const firstOptionRef = useRef<HTMLButtonElement>(null);
   /**
-   * Which tab the pane is showing. Still component state, and still nobody
-   * else's opinion: it survives switching sessions on purpose -- an operator
-   * who opened Agents is looking at agents, not at whichever tab the last
-   * session left behind -- and it now survives a QUIT for the same reason,
-   * seeded from what the caller remembered rather than owned by it.
+   * Which view the pane is showing -- the caller's fact when it has one, this
+   * component's own when it does not.
    *
-   * The seed is validated against `TABS` here because this is where the bar is.
-   * A name that is not on the bar (an older vam's tab, a hand-edited store) is
-   * simply not a seed, so it costs the default tab and nothing else.
+   * IT USED TO BE LOCAL STATE THAT DELIBERATELY SURVIVED A SESSION SWITCH, on
+   * the reasoning that "an operator who opened Agents is looking at agents,
+   * not at whichever tab the last session left behind". The operator has
+   * overruled it: a view is a per-session choice, and switching session 1 to
+   * PRs must leave every other session where it was. The sentence above was
+   * true of ONE session in ONE pane and became false the moment a pane could
+   * show several -- `Canvas.tsx` claimed the isolation in a comment on
+   * `renderLeaf` while `key={leaf.id}` remounted nothing.
+   *
+   * The validating stays HERE, for both routes, because this is where the bar
+   * is: a name that is not on it (an older vam's tab, a hand-edited store) is
+   * simply not a view, so it costs the default and nothing else.
    */
-  const [tab, setTab] = useState<Tab>(() => {
+  const [ownTab, setOwnTab] = useState<Tab>(() => {
     const remembered = props.initialTab;
     return TABS.find((name) => name === remembered) ?? 'Response';
   });
+  const named = props.tab;
+  const controlled = named !== undefined;
+  const tab = controlled ? (TABS.find((name) => name === named) ?? 'Response') : ownTab;
   const onTabChange = props.onTabChange;
   /**
    * Report the operator's CHOICE, never `current`. `current` falls back to
-   * Response while a source withdraws the Terminal tab, and persisting that
+   * Response while a source withdraws the Terminal tab, and reporting that
    * would let walking past a session without a terminal erase a choice the
    * operator never changed.
    *
-   * FROM THE FOCUSED PANE ONLY, and this one is not a preference: `prefs`
-   * holds ONE remembered tab and `onTabChange` is a fresh closure every
-   * render, so this effect fires on every render — with two panes showing
-   * two different tabs, each write re-rendered the other pane, which wrote
-   * back, forever. Measured on this head before the fix: clicking the PRs
-   * icon in one pane of a split hangs the shell in a synchronous loop of
-   * `savePrefs`. One writer, the pane holding the keyboard, is what makes
-   * "the tab a previous run left showing" a single fact again; a background
-   * pane's tab is not the operator's current choice anyway.
+   * FROM THE ACT, NOT FROM AN EFFECT, and that is what closes a loop rather
+   * than opening one. This used to be `useEffect(() => onTabChange?.(tab))`
+   * gated on `paneFocused`: `onTabChange` is a fresh closure every render, so
+   * it fired on every render, and with two panes showing two different tabs
+   * each write re-rendered the other pane, which wrote back, forever --
+   * measured, a synchronous `savePrefs` loop that hung the shell. Calling it
+   * only when a view is actually PICKED means there is no render-driven write
+   * left to loop, so the `paneFocused` gate that was holding the loop shut is
+   * no longer load-bearing and is gone with it. A background pane can now
+   * report its own session's view, which is correct: it is still an act the
+   * operator performed, in the pane they performed it in.
    */
-  useEffect(() => {
-    if (!paneFocused) return;
-    onTabChange?.(tab);
-  }, [tab, onTabChange, paneFocused]);
+  const pickTab = useCallback(
+    (next: Tab) => {
+      if (!controlled) setOwnTab(next);
+      onTabChange?.(next);
+    },
+    [controlled, onTabChange],
+  );
   const tabRequest = props.tabRequest ?? null;
   const viewNote = props.viewNote ?? null;
-  // A withdrawn tab is not refused here: `current` below already falls back to
-  // Response when the showing tab is not on offer, so asking for Terminal
-  // where there is none lands exactly where clicking would have.
+  /**
+   * A withdrawn tab is not refused here: `current` below already falls back to
+   * Response when the showing tab is not on offer, so asking for Terminal
+   * where there is none lands exactly where clicking would have.
+   *
+   * THROUGH A REF, and the reason is the loop this file has now had twice.
+   * `pickTab` closes over `onTabChange`, which every caller builds inline and
+   * therefore hands over fresh on every render. In the dependency array that
+   * makes this effect re-run on every render, re-applying a request the
+   * operator pressed once -- so a view picked in one session was re-asserted
+   * onto the next session the pane showed, which is the exact bleed the
+   * per-session view exists to stop, arriving through the fix for it. The
+   * request object is the only thing that should re-run this, so it is the
+   * only dependency.
+   */
+  const pickTabRef = useRef(pickTab);
+  pickTabRef.current = pickTab;
   useEffect(() => {
     if (tabRequest !== null) {
-      setTab(tabRequest.tab);
+      pickTabRef.current(tabRequest.tab);
     }
   }, [tabRequest]);
   // Which tabs this source actually has. A withdrawn tab cannot stay SHOWING:
@@ -4500,6 +4566,8 @@ export function DetailPanel(props: DetailPanelProps) {
    * in that padding already.
    */
   const failedBanner = current === 'Response' && entry?.session.status === 'failed';
+  /** The caller's verdict on the last send here, or null. See the prop. */
+  const sendFailure = props.sendFailure ?? null;
   /**
    * The phone keystroke strip's own gate -- structurally the SAME boolean
    * `canCycleMode` already is, shared rather than re-derived, AND the card
@@ -4909,7 +4977,7 @@ export function DetailPanel(props: DetailPanelProps) {
             tabs={tabs}
             runningAgents={entry?.session.runningAgents ?? 0}
             current={current}
-            onSelect={setTab}
+            onSelect={pickTab}
           />
         </div>
       )}
@@ -5513,6 +5581,39 @@ export function DetailPanel(props: DetailPanelProps) {
               )}
             </div>
           </div>
+        )}
+        {/* THE LAST SEND THAT FAILED, at the foot of the out area -- directly
+            above the composer the words came from, and drawn whether or not
+            this session has a transcript yet.
+
+            Operator instruction: a send that errors must say so in the out
+            area, not only in the status bar. OUTSIDE the scrolling column on
+            purpose, because the column is not always there: a session created
+            a moment ago has no turns, so `orderedTurns.length === 0` draws
+            "This session has no steps yet" instead -- and a brand new session
+            is exactly where the first send fails. A note living inside the
+            column would have been invisible in the one case it was reported
+            for.
+
+            NOT THE `data-session-failed` BANNER, which sits above the column
+            and says something else: that one is a standing fact about the
+            session, this is the verdict on one act, and it goes away when the
+            operator tries again.
+
+            `role="status"` rather than `alert`: it appears right after the key
+            the operator pressed and the same words reach the status bar, so
+            assertive would interrupt a screen reader to repeat something. */}
+        {current === 'Response' && sendFailure !== null && (
+          <p
+            data-send-failed
+            role="status"
+            className="flex flex-none items-start gap-1.5 rounded-[9px] border border-failed bg-card px-3 py-2 text-control text-failed"
+          >
+            <span role="img" aria-label="failed" className="flex pt-[2px]">
+              <CircleSlash size={13} strokeWidth={1.6} />
+            </span>
+            <span className="min-w-0 flex-1">{sendFailure}</span>
+          </p>
         )}
       </div>
 

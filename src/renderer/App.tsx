@@ -19,6 +19,7 @@ import type {
   ClipboardApi,
   DesktopSourceApi,
   DialogApi,
+  IssueApi,
   MainErrorsApi,
   TerminalApi,
   UpdateApi,
@@ -53,6 +54,13 @@ declare global {
     readonly api?: DesktopSourceApi & {
       readonly usage: UsageApi;
       readonly clipboard: ClipboardApi;
+      /**
+       * Opens a PREFILLED issue form in the operator's own browser and posts
+       * nothing. Desktop-only: the browser build has no bridge, and the error
+       * log falls back to showing the URL there -- which it can now do usefully,
+       * because its text is selectable.
+       */
+      readonly issue: IssueApi;
       readonly terminal: TerminalApi;
       /** Electron's `showOpenDialog`; the browser build has no picker at all. */
       readonly dialog: DialogApi;

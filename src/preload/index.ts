@@ -15,6 +15,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   createClipboardApi,
   createDialogApi,
+  createIssueApi,
   createMainErrorsApi,
   createPrefsBridge,
   createPreloadApi,
@@ -33,6 +34,9 @@ contextBridge.exposeInMainWorld('api', {
   // this bridge checks on its own.
   update: createUpdateApi(ipcRenderer),
   clipboard: createClipboardApi(ipcRenderer),
+  // Opens a PREFILLED issue form in the operator's own browser, and posts
+  // nothing. Takes text, never a location -- see `CHANNELS.issueOpen`.
+  issue: createIssueApi(ipcRenderer),
   terminal: createTerminalApi(ipcRenderer),
   dialog: createDialogApi(ipcRenderer),
   // The pairing screen's own channels. Exposed unconditionally like every

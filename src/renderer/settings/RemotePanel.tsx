@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { RemoteApi, RemoteState } from '../../preload/api.js';
+import { PairedDeviceList } from './PairedDeviceList.js';
 import { PairingPanel } from './PairingPanel.js';
 
 /** Matches main's `ADDRESS_CACHE_MS` floor: the poll is cheap by construction. */
@@ -190,12 +191,38 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
     [act],
   );
 
-  if (api === undefined || off) {
+  /**
+   * NO BRIDGE MEANS THE PHONE, AND THE PHONE GETS THE LIST.
+   *
+   * This branch used to print one sentence -- "Remote access is part of the
+   * desktop app: this page has no bridge to a pairing screen" -- which is true
+   * about the ACTS and was the whole of what a phone could see. At the
+   * operator's request Remote is now the only settings section a phone draws
+   * (`sections.ts`, `PHONE_SECTIONS`), so that sentence had become the entire
+   * destination of the entire overlay. The list comes over HTTP instead, from
+   * a route that can only read (`sources/devices.ts`). The sentence about
+   * where the controls are survives inside `PairedDeviceList`, which is the
+   * part of it that was worth keeping.
+   *
+   * `off` is a DIFFERENT absence and keeps its own words: a desktop whose
+   * remote endpoint is not running has a bridge and nothing behind it, and
+   * there is no server to ask for a list either.
+   */
+  if (api === undefined) {
+    /**
+     * GATED ON `active` FOR THE SAME REASON THE POLL ABOVE IS: every panel in
+     * this overlay is MOUNTED, only the inactive ones are `hidden`
+     * (`SettingsOverlay`'s `Panel`) -- so an ungated read here fires a request
+     * every time the overlay opens on any section at all. Measured as a real
+     * connection attempt out of thirteen unit test files that had never
+     * touched the network.
+     */
+    return active ? <PairedDeviceList /> : null;
+  }
+  if (off) {
     return (
       <p data-testid="remote-off">
-        {api === undefined
-          ? 'Remote access is part of the desktop app: this page has no bridge to a pairing screen.'
-          : "vam's remote endpoint is not running, so there is nothing for a phone to pair with."}
+        vam's remote endpoint is not running, so there is nothing for a phone to pair with.
       </p>
     );
   }

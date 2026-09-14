@@ -27,6 +27,14 @@ import { createHash, timingSafeEqual } from 'node:crypto';
  */
 export const MAX_TOKEN_LENGTH = 512;
 
+/**
+ * A `Cookie` header far above anything vam's own cookie can make is refused
+ * before it is split at all -- the same reasoning as `MAX_TOKEN_LENGTH`, one
+ * layer out. Generous, because the header carries every other cookie the
+ * origin has too, and this server is not the only thing that may have set one.
+ */
+const MAX_COOKIE_HEADER = 8_192;
+
 /** Who a request is, once its token resolved. Replaces the Access `email`. */
 export type Identity = { readonly deviceId: string; readonly name: string };
 
@@ -83,6 +91,133 @@ export function bearerFrom(header: string | readonly string[] | undefined): stri
     return null;
   }
   return token;
+}
+
+/**
+ * The cookie that carries the same token to the ONE route a header cannot
+ * reach.
+ *
+ * `EventSource` cannot send a header. That is not a limitation of this app or
+ * of any library -- the constructor takes a URL and nothing else -- so
+ * `/api/stream` could carry no credential at all, and a paired phone loaded
+ * the model once and then sat there. The alternative, a token in the query
+ * string, is refused by name in `server.ts`: a credential in a URL is written
+ * into proxy logs and browser history, and making it short-lived narrows the
+ * window without changing what was written down. A cookie puts nothing in a
+ * URL, and `EventSource` sends it without being asked.
+ *
+ * IT IS NOT A SECOND CREDENTIAL, and that is structural rather than promised:
+ * it carries the SAME per-device token the header carries, resolves through
+ * the SAME `DeviceDirectory.find`, and is only ever issued to a request that
+ * already proved itself with the header. There is no state in which the cookie
+ * is valid and the token is not -- so revocation needs no second path, and
+ * cannot grow one that drifts.
+ *
+ * IT IS NOT A SECOND WAY IN either: `authenticateStream` is the only function
+ * that reads it, and `server.ts` calls that for `/api/stream` alone. Every
+ * other route answers 401 to a caller holding nothing but this cookie, which
+ * `stream-cookie.test.ts` holds to by sweeping the route table rather than a
+ * list.
+ */
+export const STREAM_COOKIE = 'vam_stream';
+
+/**
+ * How long the browser keeps it.
+ *
+ * Long, because a phone that has to re-pair to see updates is a phone the
+ * operator stops using -- and short would not be the safety it looks like: the
+ * cookie is refused the instant the device leaves the directory, whatever its
+ * expiry says, and that check runs on every request. What the expiry really
+ * bounds is a device nobody has used in a month, which re-pairs. The cookie is
+ * also re-issued on every request that authenticates by header, so a phone in
+ * daily use never approaches it.
+ */
+const COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+
+/**
+ * The `Set-Cookie` value, as one string.
+ *
+ * `Secure` UNCONDITIONALLY, and there is no development exception because none
+ * is needed. The two origins this server is ever reached on are the HTTPS one
+ * `tailscale serve` publishes and `http://127.0.0.1:<port>` -- and loopback is
+ * a potentially-trustworthy origin in every browser vam targets, so a `Secure`
+ * cookie is stored and sent there. `e2e/stream-cookie.spec.ts` MEASURES that
+ * rather than citing it, because a browser-behaviour claim nobody ran is the
+ * kind that is wrong for a year. A plain-HTTP LAN origin would not store it --
+ * and that is the correct outcome, not a gap: vam's remote path is Tailscale
+ * Serve, and a credential sent in clear over a LAN is the thing this whole
+ * module exists to refuse.
+ *
+ * `SameSite=Strict` means a cross-site request never carries it, so it is not
+ * a CSRF lever even if some later route did read it. `Path` scopes it to the
+ * one route that honours it, so it is not attached to any other request in the
+ * first place.
+ */
+export function streamCookie(token: string): string {
+  return [
+    `${STREAM_COOKIE}=${token}`,
+    'Path=/api/stream',
+    'HttpOnly',
+    'Secure',
+    'SameSite=Strict',
+    `Max-Age=${COOKIE_MAX_AGE_SECONDS}`,
+  ].join('; ');
+}
+
+/**
+ * The token out of a `Cookie` header, or nothing.
+ *
+ * A REPEATED vam COOKIE IS REFUSED rather than resolved, the same rule
+ * `bearerFrom` applies to a repeated `Authorization`: a caller who can get a
+ * second cookie in front of the first is a caller choosing which identity the
+ * server sees, and picking one of two credentials is not a decision a parser
+ * makes on the operator's behalf.
+ *
+ * Nothing is read out of the value beyond its length before the directory sees
+ * it -- same order as `authenticateDevice`, and for the same reason.
+ */
+export function cookieTokenFrom(header: string | readonly string[] | undefined): string | null {
+  if (typeof header !== 'string' || header.length > MAX_COOKIE_HEADER) {
+    return null;
+  }
+  let found: string | null = null;
+  for (const pair of header.split(';')) {
+    const equals = pair.indexOf('=');
+    if (equals < 0) continue;
+    if (pair.slice(0, equals).trim() !== STREAM_COOKIE) continue;
+    // A second one is not a tie to break.
+    if (found !== null) return null;
+    found = pair.slice(equals + 1).trim();
+  }
+  if (found === null || found.length === 0 || found.length > MAX_TOKEN_LENGTH) {
+    return null;
+  }
+  return found;
+}
+
+/**
+ * One request's credential for the STREAM, which may arrive either way.
+ *
+ * ONE CREDENTIAL PER REQUEST. A present-but-broken `Authorization` is a caller
+ * asserting an identity, and it is refused rather than quietly answered by a
+ * cookie: "which of the two did the server believe" is not a question this
+ * code should be able to raise. The cookie is consulted only when no header
+ * was sent at all, which is exactly the `EventSource` case it exists for.
+ */
+export function authenticateStream(
+  authorization: string | readonly string[] | undefined,
+  cookie: string | readonly string[] | undefined,
+  directory: DeviceDirectory,
+): AuthOutcome {
+  if (authorization !== undefined) {
+    return authenticateDevice(authorization, directory);
+  }
+  const token = cookieTokenFrom(cookie);
+  if (token === null) {
+    return { ok: false, reason: cookie === undefined ? 'missing' : 'malformed' };
+  }
+  const identity = directory.find(token);
+  return identity === null ? { ok: false, reason: 'unknown-device' } : { ok: true, identity };
 }
 
 /**

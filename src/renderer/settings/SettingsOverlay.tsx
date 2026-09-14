@@ -63,7 +63,7 @@ import {
 import { type PromptSubmitKey, SUBMIT_KEY_LABELS } from '../prefs/submit-key.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
 import { Switch } from './Switch.js';
-import { SECTIONS, type SectionId, shortcutSections } from './sections.js';
+import { PHONE_SECTIONS, SECTIONS, type SectionId, shortcutSections } from './sections.js';
 import { desktopUpdateApi, UpdatePanel } from './UpdatePanel.js';
 
 export type SettingsOverlayProps = {
@@ -209,14 +209,28 @@ export function SettingsOverlay({
   // and persisting it would open the overlay somewhere different every time.
   // Read once, at mount — the overlay is only ever mounted fresh (`Canvas.tsx`
   // conditionally renders it), so there is no later prop change to track.
-  const [section, setSection] = useState<SectionId>(initialSection ?? 'appearance');
+  const [sectionChosen, setSection] = useState<SectionId>(initialSection ?? 'appearance');
   const [capturing, setCapturing] = useState<Capturing>(null);
   const [message, setMessage] = useState('');
   const wide = useWideNav();
-  /** Is this the phone shell's width? Read for COPY, never for layout — the
-   *  dialog's own breakpoint is `useWideNav` above, and a second reader of one
-   *  fact is how two of them disagree. */
+  /**
+   * Is this the phone shell's width?
+   *
+   * It used to be read for COPY only, with the dialog's own breakpoint left to
+   * `useWideNav`. It decides WHICH SECTIONS EXIST now as well (operator
+   * instruction; see `PHONE_SECTIONS`) -- which is not a second opinion about
+   * layout, it is a different question: `useWideNav` asks whether there is
+   * room for a nav column, this asks whether the device can act on what the
+   * nav would point at.
+   */
   const phone = usePhoneViewport();
+  /**
+   * WHICH SECTION IS OPEN. On a phone there is one, so there is nothing for a
+   * chosen value to mean -- and pinning it here rather than only hiding the
+   * others means `Ctrl+Tab` and a stale `initialSection` cannot land the
+   * overlay on a panel that is not drawn, which is a blank dialog.
+   */
+  const section: SectionId = phone ? (PHONE_SECTIONS[0] as SectionId) : sectionChosen;
   /** Read off the map on screen, not remembered from a write: the overlay can
    *  be OPENED over a contested map, which is the case no write path sees. */
   const clashes = bindingClashes(prefs.keyBindings);
@@ -426,19 +440,25 @@ export function SettingsOverlay({
         {/* `min-h-0` or the panel's scroll container will not shrink inside the
             flex column, and the fixed height above becomes an overflow. */}
         <div className="flex min-h-0 flex-1">
-          {wide ? <SectionRail section={section} onGo={go} onStep={step} /> : null}
+          {/* NO NAV ON A PHONE. `PHONE_SECTIONS` leaves one destination, and a
+              nav with one destination is a control where every press lands
+              where you already are. The close button above is the way out, and
+              it is the reason that button had to be a real control rather than
+              the `Esc` hint it used to be. */}
+          {wide && !phone ? <SectionRail section={section} onGo={go} onStep={step} /> : null}
           {/* Named, because it is the scrollport a `sticky` child measures
               against and the box an e2e guard has to compare a message to:
               "the refusal is painted" and "the refusal is where the operator
               is looking" are different questions, and the second one needs
               this element. */}
           <div data-settings-scroll className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-            {wide ? null : <SectionStrip section={section} onGo={go} onStep={step} />}
+            {wide || phone ? null : <SectionStrip section={section} onGo={go} onStep={step} />}
 
             <Panel
               id="appearance"
               active={section === 'appearance'}
               hint={t('settings.appearance.hint')}
+              phone={phone}
             >
               <Block
                 label={t('settings.appearance.theme.label')}
@@ -682,7 +702,12 @@ export function SettingsOverlay({
               </Block>
             </Panel>
 
-            <Panel id="sessions" active={section === 'sessions'} hint={t('settings.sessions.hint')}>
+            <Panel
+              id="sessions"
+              active={section === 'sessions'}
+              hint={t('settings.sessions.hint')}
+              phone={phone}
+            >
               <Block label={t('settings.sessions.provider.label')} hint={PROVIDER_HINT}>
                 {CAN_CHOOSE_PROVIDER ? (
                   <div className="flex gap-1">
@@ -783,7 +808,12 @@ export function SettingsOverlay({
               </Block>
             </Panel>
 
-            <Panel id="remote" active={section === 'remote'} hint={t('settings.remote.hint')}>
+            <Panel
+              id="remote"
+              active={section === 'remote'}
+              hint={t('settings.remote.hint')}
+              phone={phone}
+            >
               {/* The bridge is read HERE rather than passed down from the
                   canvas: `window.api` exists only in the Electron shell, and
                   this is the one section that needs it. */}
@@ -794,7 +824,12 @@ export function SettingsOverlay({
               />
             </Panel>
 
-            <Panel id="keyboard" active={section === 'keyboard'} hint={t('settings.keyboard.hint')}>
+            <Panel
+              id="keyboard"
+              active={section === 'keyboard'}
+              hint={t('settings.keyboard.hint')}
+              phone={phone}
+            >
               {/* STICKY, and that is the whole point of the wrapper.
                   MEASURED, not designed: the reset control that produces a
                   refusal can be thirty rows down a panel that scrolls, and
@@ -894,7 +929,12 @@ export function SettingsOverlay({
                 "GitHub is rate-limiting you" and "it never got out" can be
                 four different sentences instead of one silence.
                 `UpdatePanel.tsx` carries the argument. */}
-            <Panel id="update" active={section === 'update'} hint={t('settings.update.hint')}>
+            <Panel
+              id="update"
+              active={section === 'update'}
+              hint={t('settings.update.hint')}
+              phone={phone}
+            >
               <UpdatePanel api={desktopUpdateApi()} />
             </Panel>
           </div>
@@ -1056,13 +1096,24 @@ function Panel({
   id,
   active,
   hint,
+  phone = false,
   children,
 }: {
   readonly id: SectionId;
   readonly active: boolean;
   readonly hint: string;
+  /** Phone width. A section this shell has no business drawing is not drawn. */
+  readonly phone?: boolean;
   readonly children: React.ReactNode;
 }) {
+  /**
+   * NOT DRAWN, rather than drawn-and-hidden. `hidden` would keep every one of
+   * these mounted on a phone -- their effects included, and `UpdatePanel`'s
+   * effect reaches a bridge the browser build does not have -- for four
+   * sections the operator can never reach. `PHONE_SECTIONS` says which one
+   * survives and why.
+   */
+  if (phone && !PHONE_SECTIONS.includes(id)) return null;
   return (
     <section
       data-settings-panel={id}

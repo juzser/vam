@@ -1687,6 +1687,77 @@ function CanvasInner({
   const [composingBySession, setComposingBySession] = useState<Readonly<Record<string, boolean>>>(
     {},
   );
+  /**
+   * WHICH VIEW EACH SESSION IS ON — the same record shape as the drafts above,
+   * and here for the same reason, arrived at three years late.
+   *
+   * Operator instruction: "when session 1 switches to the PRs view, the rest
+   * of the sessions do not switch". `DetailPanel` used to hold ONE view in
+   * local state and a pane reuses ONE instance for every session it shows, so
+   * the view was a fact about the pane; `renderLeaf`'s own comment asserted
+   * the isolation ("a leaf that stays mounted while its OWN `sessionId`
+   * changes must still be a fresh component instance") while `key={leaf.id}`
+   * remounted nothing, which is how a documented invariant names the bug.
+   *
+   * A session with no entry here opens on `viewSeed`, never on
+   * `prefs.detailTab` read live — that distinction is the second half of the
+   * same bleed. `prefs.detailTab` is what the NEXT RUN opens on, so re-reading
+   * it as each session first appears would put the choice made for session 1
+   * onto every session shown after it, just more slowly. The seed is taken
+   * ONCE, when the shell mounts, and the preference is written past it.
+   */
+  const [viewBySession, setViewBySession] = useState<Readonly<Record<string, DetailTab>>>({});
+  const [viewSeed] = useState<string | null>(() => prefs.detailTab);
+  /**
+   * THE LAST SEND THAT FAILED, per session -- the sentence, kept until the
+   * operator does something about it.
+   *
+   * Operator instruction: a send that errors has to say so in the OUT area,
+   * not only in the status bar. The status bar is a running commentary that
+   * the next act overwrites, and a refused send already rolls its optimistic
+   * turn back and returns the words to the composer -- so from the pane, an
+   * act that failed and an act never attempted looked exactly the same. This
+   * is the surface that stays put.
+   *
+   * KEYED BY SESSION for the reason every record here is: the pane showing
+   * session 2 must not carry session 1's verdict. CLEARED WHEN THE NEXT
+   * ATTEMPT BEGINS rather than on a timer or a dismissal -- a verdict about a
+   * send that has been superseded is worse than no verdict, and the operator
+   * pressing Enter again is the unambiguous signal that they have moved on.
+   *
+   * NOT A SECOND ERROR LOG. `noteFailure` still records the event and still
+   * returns the status-bar sentence; this stores that same sentence. Three
+   * surfaces, three jobs, one source of words.
+   */
+  const [sendFailureBySession, setSendFailureBySession] = useState<
+    Readonly<Record<string, string>>
+  >({});
+  const setSendFailureFor = useCallback((sessionId: string, note: string | null) => {
+    setSendFailureBySession((current) => {
+      if ((current[sessionId] ?? null) === note) return current;
+      const next = { ...current };
+      if (note === null) delete next[sessionId];
+      else next[sessionId] = note;
+      return next;
+    });
+  }, []);
+  /**
+   * THE ONE WRITER, and it writes two places because there are two questions.
+   * The record is what THIS SESSION is showing now; the preference is what the
+   * NEXT RUN opens on. Both routes to a view -- the icon the operator clicks
+   * and the `Alt+<digit>` they press -- come through here, so neither can
+   * drift into answering only one of them, which is what happened the first
+   * time the chord was wired past it.
+   */
+  const setViewFor = useCallback(
+    (sessionId: string, view: DetailTab) => {
+      setViewBySession((current) =>
+        current[sessionId] === view ? current : { ...current, [sessionId]: view },
+      );
+      if (view !== prefs.detailTab) savePrefs(setDetailTab(prefs, view));
+    },
+    [prefs, savePrefs],
+  );
   const setDraftFor = useCallback((sessionId: string, value: string) => {
     setDraftsBySession((current) => ({ ...current, [sessionId]: value }));
   }, []);
@@ -1863,15 +1934,17 @@ function CanvasInner({
   }, []);
   /** The sidebar's filter popover — the ONE home for narrowing (SessionList). */
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
-  /**
-   * The two chords whose EFFECT belongs to a panel: `Mod-<digit>` picks
-   * a detail tab, `p` reveals a project. A fresh object per press, never the
-   * state itself — the tab and the reveal stay where they are drawn and only
-   * the ask travels, which keeps both keys in the chord table (so the sheet
-   * lists them and an open overlay silences them) without pulling a panel's
-   * presentation into the canvas's model.
+  /*
+   * `Alt-<digit>` USED TO TRAVEL AS A REQUEST OBJECT, on the reasoning that a
+   * chord whose effect belongs to a panel should leave the state where it is
+   * drawn. That held while the view was the panel's own state; it stopped
+   * holding the moment a view became a per-session fact this file keeps
+   * (`viewBySession`), because the request had no end -- it never reset to
+   * null, so it was re-delivered to whichever pane took focus next and to
+   * whichever session that pane was showing. The chord writes the record now;
+   * `DetailPanel` keeps the `tabRequest` prop for `PhoneShell`, whose icon row
+   * is a genuinely separate surface asking a pane to move.
    */
-  const [tabRequest, setTabRequest] = useState<{ readonly tab: DetailTab } | null>(null);
   /**
    * What the last `Alt+<digit>` REFUSED, or null at rest — the "refuses
    * aloud" half of A2.5/A5.4.
@@ -1880,9 +1953,8 @@ function CanvasInner({
    * `Alt+<digit>` into the binding tables moved the listener into this file
    * and deleted the panel's own. The refusal still draws where it always
    * drew — a `role="status"` line beside the view icons, in the focused pane
-   * — so it travels down as a prop the same way `tabRequest` does, and is
-   * gated on `isFocused` for the same reason: the pane that could not have
-   * answered the key must not be the one apologising for it.
+   * — so it travels down as a prop, gated on `isFocused`: the pane that
+   * could not have answered the key must not be the one apologising for it.
    *
    * Not `setStatus`: that is the canvas-wide cell in the status bar, where
    * `Mod-<digit>`'s refusal goes because `Mod-<digit>` may be about the
@@ -3262,6 +3334,12 @@ function CanvasInner({
         setDraftFor(entry.session.id, '');
         setComposingFor(entry.session.id, false);
         setWritingFor(entry.session.id, true);
+        // A new attempt supersedes the last verdict. Cleared HERE, where the
+        // attempt begins, rather than in each success branch: a send that
+        // fails a second time writes its own sentence back a moment later,
+        // and one that is still in flight should not be showing the previous
+        // one as if it were about this one.
+        setSendFailureFor(entry.session.id, null);
         return one;
       };
       // A refusal must leave no trace of a turn that never happened -- and give
@@ -3288,7 +3366,9 @@ function CanvasInner({
           source.onWrote();
         } catch (cause) {
           rollBack(painted);
-          setStatus(noteFailure('send prompt', cause));
+          const note = noteFailure('send prompt', cause);
+          setStatus(note);
+          setSendFailureFor(entry.session.id, note);
         } finally {
           setWritingFor(entry.session.id, false);
         }
@@ -3303,7 +3383,9 @@ function CanvasInner({
         source.onWrote();
       } catch (cause) {
         rollBack(painted);
-        setStatus(noteFailure('send prompt', cause));
+        const note = noteFailure('send prompt', cause);
+        setStatus(note);
+        setSendFailureFor(entry.session.id, note);
       } finally {
         setWritingFor(entry.session.id, false);
       }
@@ -3316,6 +3398,7 @@ function CanvasInner({
       setDraftFor,
       setComposingFor,
       setWritingFor,
+      setSendFailureFor,
     ],
   );
 
@@ -3555,6 +3638,13 @@ function CanvasInner({
       }
       const route = newSessionRoute(source);
       if (!route.ok) {
+        // RECORDED, like the identical refusal the "new project" control
+        // raises one function down -- and it was not. The same sentence left a
+        // trace from one button and vanished from the one beside it, while the
+        // status bar it went to is overwritten by the next act, which on this
+        // path is usually the operator pressing the control again. Never as a
+        // failure: this is vam working, and a report is not what it needs.
+        recordRefusal('new session', route.decline);
         setStatus(route.decline);
         return;
       }
@@ -4311,7 +4401,15 @@ function CanvasInner({
             return;
           }
           setViewNote(null);
-          setTabRequest({ tab: view });
+          // WRITTEN, NOT REQUESTED. This used to `setTabRequest({ tab: view })`
+          // and let the panel hold the answer, which was right while the view
+          // was the panel's own state. It is this session's fact now, and the
+          // chord means "the session the keyboard is in", so the one writer
+          // writes it. A request object would be a second writer whose value
+          // outlives the press -- it never resets to null, so moving focus
+          // between panes re-delivered the last press to a pane that never
+          // heard it.
+          if (focusedSessionId !== null) setViewFor(focusedSessionId, view);
           return;
         }
         case 'scrollHalf': {
@@ -4709,6 +4807,7 @@ function CanvasInner({
     closeFocusedSplit,
     stepFocusedSplit,
     setFocusedSessionId,
+    setViewFor,
   ]);
 
   // `sidebarProps` feeds a `React.memo`-wrapped `SessionList`; a fresh
@@ -5032,11 +5131,12 @@ function CanvasInner({
    * app's Insert-mode keyboard — agree with that isolation instead of all
    * pointing at whichever session happens to be globally focused.
    *
-   * `isFocused` gates exactly three things: `tabRequest` (a one-shot ask
-   * from `Mod-<digit>`, which only ever means "the pane the keyboard is in
-   * right now"), `active` (whether this pane currently holds Insert), and
-   * whether leaving the composer also drops the app back to Select — a
-   * background pane's own Escape has no sidebar-focus fact to give back.
+   * `isFocused` gates exactly three things: `viewNote` (the last
+   * `Alt+<digit>` refusal, which only the pane that could have answered the
+   * key may apologise for), `active` (whether this pane currently holds
+   * Insert), and whether leaving the composer also drops the app back to
+   * Select — a background pane's own Escape has no sidebar-focus fact to
+   * give back.
    * Everything else — the draft, whether it is composing, its action
    * cursor, whether it is mid-send — reads and writes the SAME per-session
    * `*BySession` records the single-pane shell already used, keyed by this
@@ -5108,24 +5208,33 @@ function CanvasInner({
         defaultProvider: prefs.defaultProvider,
         onSetDefaultProvider: (id) => savePrefs(setDefaultProvider(prefs, id)),
         sending: paneWriting,
-        // A one-shot ask only the FOCUSED pane may consume — see the doc
-        // comment above.
-        tabRequest: isFocused ? tabRequest : null,
         // The refusal is the focused pane's too, and for the same reason:
         // a background pane cannot have answered the key it would be
         // explaining. Keyed to that pane's own session, so a refusal raised
         // for the session just left does not hang over the next one.
         viewNote: isFocused ? viewNote : null,
         // The view icons are drawn in the focused pane and nowhere else
-        // (operator instruction) — the SAME fact `tabRequest` above is gated
+        // (operator instruction) — the SAME fact `viewNote` above is gated
         // on, which is the point: a pane that cannot consume an `Alt+<digit>`
         // should not be showing the row that names one.
         paneFocused: isFocused,
-        initialTab: prefs.detailTab,
+        // THIS SESSION'S VIEW, not this pane's and not the app's. `undefined`
+        // for a pane showing no session at all -- there is no per-session fact
+        // to name, so the panel falls back to owning its own, seeded the same
+        // way. See `viewBySession`.
+        // The last send that failed in THIS session, drawn in the pane -- see
+        // `sendFailureBySession`. `null` for a pane showing no session: there
+        // is nothing that could have failed in it.
+        sendFailure: sessionId === null ? null : (sendFailureBySession[sessionId] ?? null),
+        tab: sessionId === null ? undefined : (viewBySession[sessionId] ?? viewSeed),
+        initialTab: viewSeed,
         onTabChange: (next) => {
-          if (next !== prefs.detailTab) {
-            savePrefs(setDetailTab(prefs, next));
-          }
+          // Re-narrowed rather than cast. `onTabChange` is typed `string`
+          // (the store must not know the vocabulary), and a name off the bar
+          // is not a view -- the same rule the panel applies to the seed.
+          // `setViewFor` is the one writer; it keeps the preference too.
+          const picked = TABS.find((name) => name === next);
+          if (sessionId !== null && picked !== undefined) setViewFor(sessionId, picked);
         },
         draft: paneDraft,
         onDraftChange: (value: string) => {
@@ -5167,9 +5276,11 @@ function CanvasInner({
       composingBySession,
       writingBySession,
       actionIndexBySession,
+      sendFailureBySession,
+      viewBySession,
+      viewSeed,
       source,
       terminalTab,
-      tabRequest,
       viewNote,
       prefs,
       savePrefs,
@@ -5177,6 +5288,7 @@ function CanvasInner({
       setDraftFor,
       setComposingFor,
       sendPromptFor,
+      setViewFor,
       mode,
     ],
   );
@@ -5194,14 +5306,25 @@ function CanvasInner({
 
   /**
    * One `DetailPanel`, mounted for one leaf of `panes` — the render-side
-   * half of the isolation `buildDetailProps` sets up. `key={leaf.id}` is
-   * not decorative: two leaves are two DOM siblings regardless, but a leaf
-   * that stays mounted while its OWN `sessionId` changes (the focused pane
-   * switching which session it shows) must still be a fresh component
-   * instance, or `DetailPanel`'s internal state for the session it used to
-   * show would bleed into the one it shows now — the very bleed this whole
-   * feature exists to prevent, just aimed at itself instead of at another
-   * pane.
+   * half of the isolation `buildDetailProps` sets up.
+   *
+   * `key={leaf.id}` KEEPS THE INSTANCE, it does not refresh it, and this
+   * comment used to claim the opposite: that a leaf whose own `sessionId`
+   * changes "must still be a fresh component instance, or `DetailPanel`'s
+   * internal state for the session it used to show would bleed into the one
+   * it shows now". `leaf.id` does not change when `leaf.sessionId` does, so
+   * nothing ever remounted and the bleed was the shipped behaviour — the
+   * operator found it as "session 2 switched to PRs because session 1 did".
+   *
+   * The isolation is real now and comes from the other direction: every fact
+   * that belongs to a session is keyed by session in `buildDetailProps`
+   * (draft, composing, action cursor, mid-send, and now the VIEW), so the
+   * panel holds no per-session state left to bleed. Remounting per session
+   * would have been the cheaper-looking fix and the wrong one — it throws
+   * away scroll position and every open disclosure on each tab click, and it
+   * would not have fixed the view anyway, because the view was seeded from a
+   * single global preference. Anything per-session added here later belongs
+   * in a `*BySession` record, not in `DetailPanel`'s `useState`.
    */
   const renderLeaf = useCallback(
     (leaf: Leaf) => {

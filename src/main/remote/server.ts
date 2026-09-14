@@ -37,7 +37,15 @@ import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
 import type { MainSource } from '../sources/source.js';
 import { serveAsset } from './assets.js';
-import { authenticateDevice, type DeviceDirectory, type Identity } from './auth.js';
+import {
+  authenticateDevice,
+  authenticateStream,
+  bearerFrom,
+  type DeviceDirectory,
+  type Identity,
+  streamCookie,
+} from './auth.js';
+import type { PairedDevice } from './devices.js';
 import type { PairOutcome } from './pairing.js';
 
 /** The one address this server may ever bind. */
@@ -64,6 +72,20 @@ export type RemoteServerOptions = {
   readonly pairing?: PairPort;
   /** Where live SSE connections are held, so a revoked device can be dropped. */
   readonly streams?: StreamRegistry;
+  /**
+   * The paired devices, for `/api/devices`.
+   *
+   * A READER, NOT THE REGISTRY. What this route needs is a list; handing the
+   * whole `DeviceRegistry` over would put `grant`, `remove` and `removeAll` on
+   * an object the request path holds, and the one thing that must stay true of
+   * this route is that there is nothing on the other end of it that can change
+   * anything.
+   *
+   * Absent means the route is NOT REGISTERED -- the table has no entry and the
+   * process answers 404, the same shape read-only mode already uses for the
+   * write routes. See `routesFor`.
+   */
+  readonly pairedDevices?: () => readonly PairedDevice[];
   readonly allowWrites: boolean;
   readonly source: MainSource;
   readonly subscribe: (onChange: () => void) => () => void;
@@ -380,6 +402,43 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
   read('/api/load', async () => await options.source.load());
 
   /**
+   * THE PAIRED DEVICES, FOR A PHONE THAT HAS NO BRIDGE TO ASK.
+   *
+   * Operator instruction: on mobile, Remote only needs to show the paired
+   * devices. The desktop reads them over IPC from the registry itself; the
+   * browser build has no `window.api` at all, so without this route the one
+   * control left on a phone opens onto an apology.
+   *
+   * A READ, registered here beside `describe` and `load` -- above the
+   * `allowWrites` return -- so a server started read-only still carries it.
+   * Nothing on the other end of it can change anything: `pairedDevices` is a
+   * reader, and there is deliberately no route that removes a device.
+   * Revocation from a device that can itself be revoked is a fight the
+   * operator cannot referee from either end, and the desktop holds the file.
+   *
+   * The caller's own id travels with the list so the phone can mark "this
+   * device" rather than making the operator match a name they typed weeks ago.
+   * It is not new information: the caller authenticated as it.
+   *
+   * NO CREDENTIAL CAN BE IN THE ANSWER: `PairedDevice` has no token field
+   * (`devices.ts` -- "it is returned once and never again"), so this is a
+   * property of the type rather than a stripping step someone can forget.
+   */
+  if (options.pairedDevices !== undefined) {
+    const pairedDevices = options.pairedDevices;
+    table.set('/api/devices', {
+      method: 'GET',
+      route: async (_request, response, { identity }) => {
+        send(
+          response,
+          200,
+          await envelope(async () => ({ you: identity.deviceId, devices: pairedDevices() })),
+        );
+      },
+    });
+  }
+
+  /**
    * SCROLLING BACK, and it is registered as a READ -- before the `allowWrites`
    * return below, so a server started read-only still carries it.
    *
@@ -542,6 +601,12 @@ async function handlePair(
     send(response, 401, UNAUTHENTICATED);
     return;
   }
+  // SET HERE SO THE FIRST STREAM ALREADY WORKS. The phone keeps the token from
+  // the body for the header every other route needs; this is the same value,
+  // carried the one way `EventSource` can carry it (`auth.ts`). Nothing is set
+  // on a refusal above -- a caller that did not pair gets no credential, and
+  // the 401 stays byte-for-byte the one every other refusal sends.
+  response.setHeader('set-cookie', streamCookie(outcome.token));
   send(response, 200, {
     ok: true,
     value: {
@@ -656,12 +721,47 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
         });
         return;
       }
-      const outcome = authenticateDevice(request.headers.authorization, devices);
+      /**
+       * THE STREAM IS THE ONE ROUTE A COOKIE MAY ANSWER FOR, and it is named
+       * here rather than consulted as a flag: `EventSource` takes a URL and
+       * nothing else, so `/api/stream` is the one path a header cannot reach.
+       * Every other path goes through `authenticateDevice`, which never looks
+       * at a cookie -- so a caller holding only the cookie gets the same 401
+       * everywhere else, and the sweep in `stream-cookie.test.ts` holds that
+       * over the whole route table rather than over a list.
+       *
+       * The cookie carries the SAME token, resolved by the SAME `find`, so
+       * revocation reaches it without a second path to keep in step. See
+       * `auth.ts`.
+       */
+      const outcome =
+        path === '/api/stream'
+          ? authenticateStream(request.headers.authorization, request.headers.cookie, devices)
+          : authenticateDevice(request.headers.authorization, devices);
       if (!outcome.ok) {
         // The reason is deliberately dropped rather than reported: see
         // `UNAUTHENTICATED`. It exists for this process's own tests and logs.
         send(response, 401, UNAUTHENTICATED);
         return;
+      }
+      /**
+       * RE-ISSUED TO WHOEVER JUST PROVED THEMSELVES WITH THE HEADER, and only
+       * to them.
+       *
+       * The cookie's expiry would otherwise be a cliff: a phone in daily use
+       * would lose live updates one day for no reason it could see, while its
+       * stored token went on working for every other route. Refreshing it from
+       * the header path means the cookie's life tracks the token's USE, and it
+       * cannot outlive a credential it is a copy of -- the token is read from
+       * the header that was just verified, never from the cookie, so a cookie
+       * can never renew itself.
+       *
+       * Set BEFORE the route runs, because SSE writes its own head: node
+       * merges `setHeader` values into `writeHead`'s, so this survives both.
+       */
+      const presented = bearerFrom(request.headers.authorization);
+      if (presented !== null) {
+        response.setHeader('set-cookie', streamCookie(presented));
       }
       const entry = table.get(path);
       if (entry === undefined) {
