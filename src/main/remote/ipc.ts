@@ -45,6 +45,8 @@ export type RemoteIpcOptions = {
   readonly disableServe: () => Promise<ServeToggleResult>;
   /** The persisted write-access choice, read at snapshot time and set from the panel. */
   readonly writesPreference: WritesPreference;
+  /** `shell.openExternal`, for the panel's two links. See `remoteOpenLink`. */
+  readonly openExternal?: (url: string) => Promise<void>;
   readonly now?: () => number;
 };
 
@@ -72,8 +74,38 @@ export const ADDRESS_CACHE_MS = 30_000;
 /** A device id is a `randomUUID`; the bound is far above one. */
 const MAX_DEVICE_ID_LENGTH = 200;
 
+/** The one link that is a constant. No interpolation, no caller input. */
+const TAILSCALE_DOWNLOAD_URL = 'https://tailscale.com/download';
+
+/**
+ * The tailnet admin page, IF main has read one and it is still what it claims.
+ *
+ * Two checks, not one. The key must be the admin key -- so no other string
+ * reaches a URL at all -- and the URL itself must still be an https page on
+ * Tailscale's own login host, because it was parsed out of a subprocess's
+ * stdout and the process that produced it is not this one.
+ */
+function adminUrl(key: unknown, serve: ServeState): string | null {
+  if (key !== 'serve-admin') return null;
+  const raw = serve.tailnetServeDisabledUrl;
+  if (raw === null) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:') return null;
+  if (parsed.hostname !== 'login.tailscale.com') return null;
+  return parsed.href;
+}
+
 export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOptions): RemoteIpc {
   const now = options.now ?? (() => Date.now());
+  // Defaulted rather than required, like `now`: every existing caller in the
+  // tests wires this module without a shell, and a link that opens nothing is
+  // the correct behaviour for a process that has none.
+  const openExternal = options.openExternal ?? (async () => {});
   let cached: { at: number; address: ServeAddress } | null = null;
   /** Set once, by `reportServerError` below, and never cleared -- see `RemoteState.serverError`. */
   let serverError: string | null = null;
@@ -255,6 +287,41 @@ export function registerRemoteIpc(ipcMain: IpcMainLike, options: RemoteIpcOption
   ipcMain.handle(CHANNELS.serveDisable, async (): Promise<RemoteState> => {
     serve = nextServeState(await options.disableServe(), false);
     return await snapshot();
+  });
+
+  /**
+   * THE TWO LINKS THE PANEL DRAWS, OPENED WHERE A BROWSER CAN OPEN THEM.
+   *
+   * `setWindowOpenHandler` denies every `window.open` in this app, so an
+   * ordinary `<a target="_blank">` in the panel did nothing at all -- which is
+   * the operator's report, and the policy working rather than failing. The
+   * link goes through here instead, the way the update notice's release page
+   * already does.
+   *
+   * A KEY, NOT A URL. The renderer is the least trusted process in the app,
+   * and a channel that took a destination from it would be the navigate-
+   * anywhere capability the window policy exists to refuse, reached through a
+   * different door. There are exactly two destinations and main owns both: a
+   * constant, and the tailnet admin URL main ITSELF parsed out of `tailscale
+   * serve`'s output -- of which the renderer only ever had a copy.
+   *
+   * AND THAT SECOND ONE IS RE-CHECKED AT THE MOMENT IT IS OPENED, because it
+   * came out of a subprocess's bytes. `checkForUpdate` does exactly this to
+   * GitHub's `html_url` for the same reason: a destination read out of
+   * somebody else's output is a destination to verify, never to trust.
+   */
+  ipcMain.handle(CHANNELS.remoteOpenLink, async (_event, ...args): Promise<boolean> => {
+    const [key] = args;
+    const url = key === 'download' ? TAILSCALE_DOWNLOAD_URL : adminUrl(key, serve);
+    if (url === null) return false;
+    try {
+      await openExternal(url);
+      return true;
+    } catch {
+      // No browser, or a shell that refused. The panel still shows the
+      // address, which is the whole answer either way.
+      return false;
+    }
   });
 
   ipcMain.handle(CHANNELS.remoteWritesSet, async (_event, ...args): Promise<RemoteState> => {

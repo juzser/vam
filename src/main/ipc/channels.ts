@@ -85,6 +85,19 @@ export const CHANNELS = {
    * that reaches a host outside this machine, and it does so unauthenticated,
    * with no query and no body; see `src/main/update/check.ts`.
    */
+  /**
+   * "Open one of the two links the Remote panel draws."
+   *
+   * THE RENDERER NAMES A KEY, NEVER A URL, and that is the whole design:
+   * `window.open` is denied for every page in this app, so a link in the panel
+   * did nothing at all -- and the fix must not become an open-anything
+   * capability behind a different door. Main maps the key to a destination it
+   * owns: a constant for the download page, and for the tailnet admin page the
+   * URL main itself read out of `tailscale serve`'s own output.
+   *
+   * Answers a bare boolean: did a browser open. Same shape as `updateOpen`.
+   */
+  remoteOpenLink: 'vam:remote:open-link',
   updateCheck: 'vam:update:check',
   /**
    * The same question, asked AGAIN, because a person pressed a button.

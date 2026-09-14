@@ -241,6 +241,12 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
         onEnableServe={() => actServe('serveEnable', () => api.enableServe())}
         onDisableServe={() => actServe('serveDisable', () => api.disableServe())}
         onSetWritesPreference={(next) => void act('setWrites', () => api.setWrites(next))}
+        onOpenLink={(key) => {
+          // Not through `act`: that records a REFUSAL against a named action
+          // and re-reads the whole remote state, and neither belongs to a
+          // link. A browser that did not open is not a failure of pairing.
+          void api.openLink(key).catch(() => false);
+        }}
       />
       {state.registry !== null ? (
         <p data-testid="remote-registry" role="alert">
