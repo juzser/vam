@@ -32,6 +32,7 @@ import { Canvas } from './canvas/Canvas.js';
 import { ErrorBoundary } from './errors/ErrorBoundary.js';
 import { bridgeMainErrors } from './errors/main-errors-bridge.js';
 import { DEMO_MODEL, demoModelWithTurns } from './fixtures/demo.js';
+import { demoAgentWork } from './fixtures/demo-agent-work.js';
 import { createDemoHistory } from './fixtures/demo-history.js';
 import { PairingScreen } from './panels/PairingScreen.js';
 import { AgentWorkReaderProvider } from './sources/agent-work-reader.js';
@@ -434,7 +435,18 @@ function SourceCanvas({
   );
 }
 
-function DemoCanvas() {
+/**
+ * The demo shell: no write route, a scripted backward pager, and a scripted
+ * agent-work reader -- everything `?demo=1` can answer, and nothing it
+ * cannot. Exported for the same reason `DesktopCanvas` and `BrowserCanvas`
+ * are: a provider is wiring that can be silently dropped -- nothing stops
+ * compiling when one is deleted, the consumer below simply reads its context
+ * default and draws the sentence reserved for a source with no such surface
+ * -- and the only way to pin that the wiring survives is to mount this
+ * exact component in a test (`test/app/App.agent-work.test.tsx`), the way
+ * `App.history.test.tsx` already does for `DesktopCanvas`'s pager.
+ */
+export function DemoCanvas() {
   // Once per mount: padding 3,276 turns is real work, and doing it on every
   // render would measure the fixture instead of the pane.
   const model = useMemo(() => {
@@ -454,18 +466,25 @@ function DemoCanvas() {
    */
   const history = useMemo(() => (demoHasHistory() ? createDemoHistory() : null), []);
   return (
-    <HistoryReaderProvider value={history}>
-      <Canvas
-        model={model}
-        source={{
-          kind: 'demo',
-          // Refused here rather than at the server: in demo mode there is no
-          // session to refuse it, and "unknown session" is a confusing way to
-          // learn the rows were never real.
-          note: 'demo data — every write is refused',
-        }}
-      />
-    </HistoryReaderProvider>
+    // THE AGENT READER, BESIDE THE PAGER AND FOR THE SAME REASON: without it
+    // `useAgentWorkReader()` reads the context's own default, `null`, and
+    // picking `coder`/`tester`/`reviewer` in the Agents tab drew the sentence
+    // reserved for a source with no agent surface at all -- untrue of the
+    // demo, which can answer anything (`fixtures/demo-agent-work.ts`).
+    <AgentWorkReaderProvider value={demoAgentWork}>
+      <HistoryReaderProvider value={history}>
+        <Canvas
+          model={model}
+          source={{
+            kind: 'demo',
+            // Refused here rather than at the server: in demo mode there is no
+            // session to refuse it, and "unknown session" is a confusing way to
+            // learn the rows were never real.
+            note: 'demo data — every write is refused',
+          }}
+        />
+      </HistoryReaderProvider>
+    </AgentWorkReaderProvider>
   );
 }
 

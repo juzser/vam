@@ -196,6 +196,28 @@ check(
   /agents/i.test(backText),
   JSON.stringify(backText),
 );
+
+// ── AND THE DETAIL SHOWS THE AGENT'S OWN WORK, NOT THE NO-SURFACE REFUSAL ──
+// This is the defect a screenshot caught, not a failing gate: before
+// `fixtures/demo-agent-work.ts` existed, EVERY pick drew "this source cannot
+// report what a session's agents are doing" -- the sentence reserved for a
+// source with no agent surface at all, which was never true of the demo. The
+// checks above only ever asked where boxes sit; they passed while the pane
+// was contradicting itself. This asks what is actually written inside one.
+await page.waitForSelector('[data-agent-turn]', { timeout: 2000 }).catch(() => {});
+const detailText = await page.evaluate(
+  () => document.querySelector('[data-agent-detail]')?.textContent ?? '',
+);
+check(
+  'the picked agent shows its OWN work, not the no-surface refusal',
+  detailText.trim().length > 0 && !/cannot report/i.test(detailText),
+  JSON.stringify(detailText).slice(0, 160),
+);
+const pickedTurns = await page.evaluate(
+  () => document.querySelectorAll('[data-agent-detail] [data-agent-turn]').length,
+);
+check('and at least one turn of that work is actually drawn', pickedTurns > 0, `${pickedTurns} turns`);
+
 await page.screenshot({ path: `${outDir}/agents-navigator-narrow-picked.png` });
 
 // Pressing it returns to the list.
