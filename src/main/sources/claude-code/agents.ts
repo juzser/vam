@@ -177,6 +177,24 @@ export function parseAgentRows(stdout: string, nowMs: number = Date.now()): read
     }
     const pid = typeof row['pid'] === 'number' ? row['pid'] : null;
     rows.push({
+      /**
+       * THE THIRD FALLBACK IS POSITIONAL, AND THAT IS THE ONE WAY THIS KEY
+       * COULD STILL COLLAPSE A ROW.
+       *
+       * `pid` is unique per process and `row.id` per row, so either of the
+       * first two keeps two agents on one session id apart -- which is the
+       * whole reason this is not keyed by `sessionId` alone (see the header).
+       * Measured on a live roster: 8 rows, 0 session ids appearing twice, and
+       * 3 rows with no numeric `pid` all carrying an `id`, so `rows.length` was
+       * never reached.
+       *
+       * THE CONDITION UNDER WHICH IT WOULD: two rows sharing a session id
+       * where BOTH lack a `pid` and BOTH lack an `id`. They would then be
+       * distinguished only by their position in this array -- which also means
+       * a row's key moves when a row above it appears or goes, the same defect
+       * `transcript.ts` removed from turn ids when it stopped counting from the
+       * newest end of a window. Not observed; nothing here prevents it.
+       */
       key: `${sessionId}#${pid ?? str(row['id']) ?? rows.length}`,
       sessionId,
       name: str(row['name']),
