@@ -87,7 +87,9 @@ const toolLine = (name: string, at: string) =>
 
 describe('operatorHandoff — which lines are the operator speaking', () => {
   it('takes the words out of a handoff and leaves the machinery behind', () => {
-    expect(operatorHandoff(handoff('try the other ordering instead'))).toBe('try the other ordering instead');
+    expect(operatorHandoff(handoff('try the other ordering instead'))).toBe(
+      'try the other ordering instead',
+    );
   });
 
   it('keeps a multi-line message whole', () => {
