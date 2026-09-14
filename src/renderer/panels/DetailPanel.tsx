@@ -715,6 +715,23 @@ export type DetailPanelProps = {
    */
   readonly paneFocused?: boolean;
   /**
+   * The last send in THIS session that failed, or null -- the sentence the
+   * status bar already showed, drawn again where the operator is looking.
+   *
+   * Operator instruction. A refused send rolls its optimistic turn back and
+   * puts the words back in the composer, so from the pane a send that failed
+   * and a send never attempted were the same picture; the only trace was one
+   * line in the status bar that the next act overwrote. The caller owns the
+   * string because the caller is the one that performs the send and already
+   * holds the sentence (`noteFailure`'s return) -- this component would have
+   * to re-derive it from a source it does not talk to.
+   *
+   * ONE SENTENCE, NOT A LIST. The error log is the history; this is the
+   * standing verdict on the last thing the operator tried, and it goes away
+   * when they try again.
+   */
+  readonly sendFailure?: string | null;
+  /**
    * The view this pane is showing, when the CALLER owns that fact.
    *
    * WHY A CALLER OWNS IT AT ALL. A view is a per-session choice -- operator
@@ -4549,6 +4566,8 @@ export function DetailPanel(props: DetailPanelProps) {
    * in that padding already.
    */
   const failedBanner = current === 'Response' && entry?.session.status === 'failed';
+  /** The caller's verdict on the last send here, or null. See the prop. */
+  const sendFailure = props.sendFailure ?? null;
   /**
    * The phone keystroke strip's own gate -- structurally the SAME boolean
    * `canCycleMode` already is, shared rather than re-derived, AND the card
@@ -5562,6 +5581,39 @@ export function DetailPanel(props: DetailPanelProps) {
               )}
             </div>
           </div>
+        )}
+        {/* THE LAST SEND THAT FAILED, at the foot of the out area -- directly
+            above the composer the words came from, and drawn whether or not
+            this session has a transcript yet.
+
+            Operator instruction: a send that errors must say so in the out
+            area, not only in the status bar. OUTSIDE the scrolling column on
+            purpose, because the column is not always there: a session created
+            a moment ago has no turns, so `orderedTurns.length === 0` draws
+            "This session has no steps yet" instead -- and a brand new session
+            is exactly where the first send fails. A note living inside the
+            column would have been invisible in the one case it was reported
+            for.
+
+            NOT THE `data-session-failed` BANNER, which sits above the column
+            and says something else: that one is a standing fact about the
+            session, this is the verdict on one act, and it goes away when the
+            operator tries again.
+
+            `role="status"` rather than `alert`: it appears right after the key
+            the operator pressed and the same words reach the status bar, so
+            assertive would interrupt a screen reader to repeat something. */}
+        {current === 'Response' && sendFailure !== null && (
+          <p
+            data-send-failed
+            role="status"
+            className="flex flex-none items-start gap-1.5 rounded-[9px] border border-failed bg-card px-3 py-2 text-control text-failed"
+          >
+            <span role="img" aria-label="failed" className="flex pt-[2px]">
+              <CircleSlash size={13} strokeWidth={1.6} />
+            </span>
+            <span className="min-w-0 flex-1">{sendFailure}</span>
+          </p>
         )}
       </div>
 

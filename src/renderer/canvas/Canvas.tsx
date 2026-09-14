@@ -1709,6 +1709,39 @@ function CanvasInner({
   const [viewBySession, setViewBySession] = useState<Readonly<Record<string, DetailTab>>>({});
   const [viewSeed] = useState<string | null>(() => prefs.detailTab);
   /**
+   * THE LAST SEND THAT FAILED, per session -- the sentence, kept until the
+   * operator does something about it.
+   *
+   * Operator instruction: a send that errors has to say so in the OUT area,
+   * not only in the status bar. The status bar is a running commentary that
+   * the next act overwrites, and a refused send already rolls its optimistic
+   * turn back and returns the words to the composer -- so from the pane, an
+   * act that failed and an act never attempted looked exactly the same. This
+   * is the surface that stays put.
+   *
+   * KEYED BY SESSION for the reason every record here is: the pane showing
+   * session 2 must not carry session 1's verdict. CLEARED WHEN THE NEXT
+   * ATTEMPT BEGINS rather than on a timer or a dismissal -- a verdict about a
+   * send that has been superseded is worse than no verdict, and the operator
+   * pressing Enter again is the unambiguous signal that they have moved on.
+   *
+   * NOT A SECOND ERROR LOG. `noteFailure` still records the event and still
+   * returns the status-bar sentence; this stores that same sentence. Three
+   * surfaces, three jobs, one source of words.
+   */
+  const [sendFailureBySession, setSendFailureBySession] = useState<
+    Readonly<Record<string, string>>
+  >({});
+  const setSendFailureFor = useCallback((sessionId: string, note: string | null) => {
+    setSendFailureBySession((current) => {
+      if ((current[sessionId] ?? null) === note) return current;
+      const next = { ...current };
+      if (note === null) delete next[sessionId];
+      else next[sessionId] = note;
+      return next;
+    });
+  }, []);
+  /**
    * THE ONE WRITER, and it writes two places because there are two questions.
    * The record is what THIS SESSION is showing now; the preference is what the
    * NEXT RUN opens on. Both routes to a view -- the icon the operator clicks
@@ -3301,6 +3334,12 @@ function CanvasInner({
         setDraftFor(entry.session.id, '');
         setComposingFor(entry.session.id, false);
         setWritingFor(entry.session.id, true);
+        // A new attempt supersedes the last verdict. Cleared HERE, where the
+        // attempt begins, rather than in each success branch: a send that
+        // fails a second time writes its own sentence back a moment later,
+        // and one that is still in flight should not be showing the previous
+        // one as if it were about this one.
+        setSendFailureFor(entry.session.id, null);
         return one;
       };
       // A refusal must leave no trace of a turn that never happened -- and give
@@ -3327,7 +3366,9 @@ function CanvasInner({
           source.onWrote();
         } catch (cause) {
           rollBack(painted);
-          setStatus(noteFailure('send prompt', cause));
+          const note = noteFailure('send prompt', cause);
+          setStatus(note);
+          setSendFailureFor(entry.session.id, note);
         } finally {
           setWritingFor(entry.session.id, false);
         }
@@ -3342,7 +3383,9 @@ function CanvasInner({
         source.onWrote();
       } catch (cause) {
         rollBack(painted);
-        setStatus(noteFailure('send prompt', cause));
+        const note = noteFailure('send prompt', cause);
+        setStatus(note);
+        setSendFailureFor(entry.session.id, note);
       } finally {
         setWritingFor(entry.session.id, false);
       }
@@ -3355,6 +3398,7 @@ function CanvasInner({
       setDraftFor,
       setComposingFor,
       setWritingFor,
+      setSendFailureFor,
     ],
   );
 
@@ -5171,6 +5215,10 @@ function CanvasInner({
         // for a pane showing no session at all -- there is no per-session fact
         // to name, so the panel falls back to owning its own, seeded the same
         // way. See `viewBySession`.
+        // The last send that failed in THIS session, drawn in the pane -- see
+        // `sendFailureBySession`. `null` for a pane showing no session: there
+        // is nothing that could have failed in it.
+        sendFailure: sessionId === null ? null : (sendFailureBySession[sessionId] ?? null),
         tab: sessionId === null ? undefined : (viewBySession[sessionId] ?? viewSeed),
         initialTab: viewSeed,
         onTabChange: (next) => {
@@ -5221,6 +5269,7 @@ function CanvasInner({
       composingBySession,
       writingBySession,
       actionIndexBySession,
+      sendFailureBySession,
       viewBySession,
       viewSeed,
       source,
