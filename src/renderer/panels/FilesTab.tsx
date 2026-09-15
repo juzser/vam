@@ -1,9 +1,9 @@
 /**
- * The Files tab: a flat, filterable list of every file under the focused
- * session's own working directory, and a plain-textarea editor for the one
- * the operator picked. The operator's own words were "quản lý file" --
- * managing, not just editing -- and `.env` specifically, which is why
- * browsing exists at all and why dotfiles are never hidden from it.
+ * The Files tab: the session's own working directory as a TREE on the right,
+ * a plain-textarea editor for the open file in the middle, and both on screen
+ * at once. The operator's own words were "quản lý file" -- managing, not just
+ * editing -- and `.env` specifically, which is why browsing exists at all and
+ * why dotfiles are never hidden from it.
  *
  * NO EDITOR LIBRARY. vam ships eleven runtime dependencies and none of them
  * is Monaco, CodeMirror or anything like them, and this tab does not change
@@ -18,47 +18,60 @@
  * bundle cost. No syntax highlighting is drawn, on purpose: a highlighter
  * that mis-tokenises unfamiliar syntax is a worse lie than drawing none.
  *
- * A FLAT LIST, NOT A TREE. The operator's own repository can be a real
- * monorepo, so "flat" here means `list.ts`'s own recursive walk -- every
- * file under the root, filtered by typing, exactly the shape `orca`'s own
- * quick-open already is and the shape `cmdk` (already a dependency, already
- * vam's OWN choice for the same job -- see `CommandPalette.tsx`'s header, "the
- * same library orca uses for its own QuickOpen") already renders well. A
- * real expand/collapse tree is a lot more code for a feature whose own
- * stated audience opens `.env` and a handful of named files, not one that
- * spends its time navigating a directory structure by hand.
+ * A TREE ON THE RIGHT, NOT A SUB-VIEW THAT TRADES PLACES WITH THE EDITOR.
+ * This tab shipped as two sub-views -- a flat `cmdk` list OR the editor,
+ * never both -- on the argument that a split halves an already narrow pane.
+ * The operator's answer to that, in their own words, was "file tree nằm bên
+ * phải pane, content ở giữa, giống orca": the tree on the RIGHT, the content
+ * in the middle, the way orca has it. It is the better arrangement for the
+ * job this tab actually does -- opening `.env`, reading what is beside it,
+ * opening the next one -- because the swap made every one of those a
+ * round-trip through a screen that hid the thing you were editing. The width
+ * argument survives as a CLAMP rather than as a swap (see `TREE_WIDTH`): the
+ * tree takes a share of the pane, floored so it can still be read and capped
+ * so it can never take the editor's.
  *
- * TWO SUB-VIEWS, NEVER A PERMANENT SPLIT. Browsing (the filtered list) and
- * editing (one open file) trade places in the same tab, the way Terminal and
- * Agents trade places on the bar itself -- a split would halve an already
- * narrow detail pane for a feature whose own population is "a few files".
- * Switching between them never discards anything: every file the operator
- * has opened keeps its own buffer, in `buffers` below, for as long as this
- * component stays mounted (see `DetailPanel.tsx`'s own comment on why it
- * stays mounted across a pane-tab switch -- the short version: unsaved text
- * is the one thing this feature must never lose).
+ * THE TREE IS DERIVED IN THE RENDERER, from the flat array of absolute paths
+ * `CHANNELS.filesList` already answers with -- no second channel, no second
+ * walk, no second authorisation surface. `files-tree.ts` is that derivation
+ * and its own header carries the reasoning; what matters here is that
+ * `list.ts` is untouched by this change.
  *
- * THE FOURTH INSERT SCOPE. `keyboard/focus-scope.ts` names three today: the
- * question card, the composer, the terminal pane. The editor's own
- * `<textarea>` is marked `data-insert-scope`/`data-insert-stop` below,
- * conditionally on `!hidden` -- see that prop's own comment for why an
- * ALWAYS-MOUNTED stop would silently break `I` on every OTHER tab. The list's
- * own filter input and the "new file" input are deliberately left UNMARKED,
- * the same as `SessionList.tsx`'s own session-search box: a native
- * `<input>`/`<textarea>` is already exempt from vam's chord grammar by tag
- * name (`Canvas.tsx`'s own `typing` guard), which is what makes typing into
- * either safe without the extra mark; the mark itself is reserved for
- * surfaces the STATUS BAR must call Insert, and neither a filter box nor a
- * "name a new file" box is that.
+ * THE FOURTH INSERT SCOPE, AND THE TWO BOXES THAT ARE DELIBERATELY NOT ONE.
+ * `keyboard/focus-scope.ts` names three today: the question card, the
+ * composer, the terminal pane. The editor's own `<textarea>` is marked
+ * `data-insert-scope`/`data-insert-stop` below, conditionally on `!hidden` --
+ * see that prop's own comment for why an ALWAYS-MOUNTED stop would silently
+ * break `I` on every OTHER tab. The tree's FILTER box and the "new file" box
+ * are left UNMARKED, the same as `SessionList.tsx`'s own session-search box:
+ * a native `<input>` is already exempt from vam's chord grammar by tag name
+ * (`Canvas.tsx`'s own `typing` guard), which is what makes typing into either
+ * safe without the extra mark; the mark itself is reserved for surfaces the
+ * STATUS BAR must call Insert, and neither a filter box nor a "name a new
+ * file" box is that. It is also the sharper half of the `hidden` rule: this
+ * component is mounted EARLIER in the pane than the composer, so an
+ * unconditionally marked filter box would be the first `data-insert-stop`
+ * `focusInsertStop` finds on every other tab, and a `display: none` element
+ * cannot take focus -- `I` would silently stop reaching the composer. There
+ * is a guard for exactly that in `test/panels/DetailPanel.files-tab.test.tsx`
+ * and it asserts the whole tab, not just the textarea.
+ *
+ * AND THE TREE IS NOT AN INSERT SCOPE EITHER, for the opposite reason: it is
+ * walked with BARE `j`/`k`/`h`/`l`, and those keys are only free to mean
+ * "walk" because nothing here is a text box. The rows are `<button>`s that
+ * call `preventDefault()` on exactly the keys they answer, which is how
+ * `Canvas.tsx`'s window listener stands down for them (`event.
+ * defaultPrevented`, the same contract an open question's option list uses)
+ * without either side enumerating the other's keys.
  */
 
-import { Command } from 'cmdk';
-import { FilePlus, FolderOpen, Loader2, RefreshCw, Save } from 'lucide-react';
+import { FilePlus, Loader2, RefreshCw, Save, Search } from 'lucide-react';
 import {
   type KeyboardEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -72,6 +85,7 @@ import { normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import type { SourceError } from '../sources/port.js';
 import { applyTab, relativeLabel } from './files-editor-text.js';
+import { EDITOR_KEYS, type FileTreeRow, fileTreeRows, resolveTreeKey } from './files-tree.js';
 
 export type ReadFile = (path: string) => Promise<FileReadResult>;
 export type WriteFile = (
@@ -80,6 +94,27 @@ export type WriteFile = (
   baseSignature: FileSignature | null,
 ) => Promise<FileWriteResult>;
 export type ListFiles = (sessionId: string) => Promise<FileListResult>;
+
+/**
+ * HOW WIDE THE TREE IS, and why it is a clamp rather than a number.
+ *
+ * A SHARE, so a wide pane gives the tree room to show a real path and a
+ * narrow one does not hand it a third of nothing. FLOORED at 7.5rem because
+ * below that a row shows an ellipsis and no name, which is not a tree. CAPPED
+ * at 13.5rem because past that the tree is taking width from the only thing
+ * on this tab anyone types into. The floor is what the editor is measured
+ * against at vam's narrowest legal pane (`DETAIL_MIN`, 320px) in
+ * `e2e/files-tab-keyboard-shots.mjs`: the editor keeps the larger half there.
+ *
+ * NO RESIZER. orca's own file tree has one (`use-combined-diff-file-tree-
+ * resize.ts`, a stored width clamped against the container) and vam has the
+ * parts for it -- `SplitResizer` and `PaneResizer` both exist. It is left out
+ * deliberately: a drag handle is a third resizable boundary in a pane that
+ * already has two, with its own keyboard story, its own persistence and its
+ * own narrow-pane arithmetic, and none of that is what the operator asked
+ * for. A clamp needs no guard beyond the two measurements above.
+ */
+const TREE_WIDTH = 'w-[38%] min-w-[7.5rem] max-w-[13.5rem]';
 
 export type FilesTabProps = {
   /**
@@ -99,15 +134,32 @@ export type FilesTabProps = {
   readonly read: ReadFile | undefined;
   readonly write: WriteFile | undefined;
   /**
-   * `DetailPanel.tsx`'s own `cornerOverlay`: the view-icon strip floats,
-   * `position: absolute`, over this tab's own top-right corner whenever the
-   * pane is focused and this is not a phone, exactly as it does over the
+   * `DetailPanel.tsx`'s own `cornerReserve`: how far the view-icon pill
+   * reaches IN FROM THE RIGHT of this tab's own box. The strip floats,
+   * `position: absolute`, over this tab's top-right corner whenever the pane
+   * is focused and this is not a phone, exactly as it does over the
    * transcript column (`TurnBlock`'s own `reserveCorner`) -- and it takes
    * real clicks, not just paint. Measured directly: without this, the Save
    * button sat under the Agents icon and Playwright's own click retried for
    * thirty seconds before timing out on the element actually receiving it.
    */
   readonly reserveCorner: number;
+  /**
+   * The same pill, DOWNWARDS: how far it reaches in from the TOP of this
+   * tab's own box. The vertical half was not needed while this tab drew one
+   * full-width column; it is needed now, because the thing in the top-right
+   * corner is the TREE, and no amount of right-hand padding moves a column
+   * that is supposed to be at the right-hand edge. The header row below
+   * wears it as a minimum height, so everything under that row -- the tree
+   * included -- clears the pill by construction rather than by whatever the
+   * header row's font happened to make it. See `DetailPanel.tsx`, where both
+   * numbers are derived from the pill's own geometry, and
+   * `e2e/files-tab-keyboard-shots.mjs`, which asserts the result as a
+   * rectangle rather than as a click -- the Save button was measurably 18px
+   * under the pill while every click-based check passed, because Playwright
+   * clicks an element's CENTRE and the centre was clear.
+   */
+  readonly reserveCornerHeight: number;
 };
 
 type SaveState =
@@ -144,11 +196,38 @@ const NO_BRIDGE: SourceError = {
   message: 'the file editor is only available in the vam desktop app',
 };
 
-export function FilesTab({ hidden, sessionId, list, read, write, reserveCorner }: FilesTabProps) {
+export function FilesTab({
+  hidden,
+  sessionId,
+  list,
+  read,
+  write,
+  reserveCorner,
+  reserveCornerHeight,
+}: FilesTabProps) {
   const [buffers, setBuffers] = useState<Record<string, Buffer>>({});
   const [activeBySession, setActiveBySession] = useState<Record<string, string | null>>({});
   const [listing, setListing] = useState<Record<string, ListState>>({});
   const [newFileName, setNewFileName] = useState('');
+  const [filter, setFilter] = useState('');
+  /**
+   * Which directories are open, by absolute path — so nothing has to be
+   * keyed by session: a path belongs to exactly one session's root, and a
+   * path from another root simply never matches a row here. Same for the
+   * cursor below.
+   */
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const [cursorPath, setCursorPath] = useState<string | null>(null);
+  /**
+   * WHAT THE LAST KEYSTROKE REFUSED, in words, or null at rest. The house
+   * rule this tab is held to: a control that cannot act says so rather than
+   * doing nothing, because a key that silently does nothing is
+   * indistinguishable from a frozen application. Modelled on
+   * `DetailPanel.tsx`'s own `viewNote` — `role="status"`, not `alert`: it
+   * appears immediately after the key the operator pressed, so assertive
+   * would interrupt a screen reader to repeat something.
+   */
+  const [note, setNote] = useState<string | null>(null);
 
   const activePath = sessionId === null ? null : (activeBySession[sessionId] ?? null);
   const activeBuffer = activePath === null ? undefined : buffers[activePath];
@@ -182,6 +261,29 @@ export function FilesTab({ hidden, sessionId, list, read, write, reserveCorner }
     return () => window.removeEventListener('beforeunload', warn);
   }, [anyDirty]);
   const currentListing = sessionId === null ? undefined : listing[sessionId];
+  const ready = currentListing?.kind === 'ready' ? currentListing.result : null;
+  const root = ready?.root ?? null;
+
+  /** The visible rows, in draw order. See `files-tree.ts`. */
+  const rows: readonly FileTreeRow[] = useMemo(
+    () =>
+      ready === null
+        ? []
+        : fileTreeRows({ root: ready.root, files: ready.files, expanded, filter }),
+    [ready, expanded, filter],
+  );
+  /**
+   * WHERE THE TREE'S CURSOR IS, derived rather than held — the same rule
+   * `keyboard/focus-scope.ts` makes about the cursor MODE, for the same
+   * reason. A stored index would go stale the moment a filter, an expand or
+   * a fresh listing changed the rows under it; a stored PATH that is no
+   * longer drawn simply falls back to the first row.
+   */
+  const cursorIndex = Math.max(
+    0,
+    rows.findIndex((row) => row.path === cursorPath),
+  );
+  const cursorRow = rows[cursorIndex] ?? null;
 
   /**
    * (Re-)loads `path` from disk, replacing whatever buffer it had. Used both
@@ -235,10 +337,10 @@ export function FilesTab({ hidden, sessionId, list, read, write, reserveCorner }
   );
 
   /**
-   * Switches the active view to `path` and, ONLY when nothing is open at
-   * that path yet, loads it. An already-open buffer — including a dirty one
-   * — is shown exactly as it stood, never refetched: this is the whole of
-   * how switching between files keeps unsaved text (see this file's header).
+   * Switches the editor to `path` and, ONLY when nothing is open at that
+   * path yet, loads it. An already-open buffer — including a dirty one — is
+   * shown exactly as it stood, never refetched: this is the whole of how
+   * switching between files keeps unsaved text (see this file's header).
    */
   const openFile = useCallback(
     (path: string) => {
@@ -252,11 +354,6 @@ export function FilesTab({ hidden, sessionId, list, read, write, reserveCorner }
     },
     [sessionId, loadInto],
   );
-
-  const closeEditor = useCallback(() => {
-    if (sessionId === null) return;
-    setActiveBySession((prev) => ({ ...prev, [sessionId]: null }));
-  }, [sessionId]);
 
   const setContent = useCallback((path: string, content: string) => {
     setBuffers((prev) => {
@@ -373,10 +470,92 @@ export function FilesTab({ hidden, sessionId, list, read, write, reserveCorner }
     pendingSelection.current = null;
   });
 
+  /* -------------------------------------------------------------------------
+   * MOVING THE KEYBOARD BETWEEN THE TWO HALVES.
+   *
+   * Both of these ANSWER whether they landed, the way `focusInsertStop` does
+   * and for the same reason: an element that cannot take focus would
+   * otherwise report a move that never happened, and the caller has a
+   * refusal to say instead.
+   * ---------------------------------------------------------------------- */
+  const treeRef = useRef<HTMLDivElement | null>(null);
+  const filterRef = useRef<HTMLInputElement | null>(null);
+
+  const focusCursorRow = useCallback((): boolean => {
+    const row = treeRef.current?.querySelector<HTMLElement>('[data-files-cursor]') ?? null;
+    if (row === null) return false;
+    row.focus();
+    return row.ownerDocument.activeElement === row;
+  }, []);
+
+  const focusEditor = useCallback((): boolean => {
+    const editor = textareaRef.current;
+    if (editor === null) return false;
+    editor.focus();
+    return editor.ownerDocument.activeElement === editor;
+  }, []);
+
+  /**
+   * A row move and a file open both have to re-focus AFTER React has drawn
+   * the new state — the cursor row is a different element each time, and a
+   * file opened from the tree may not have a textarea until its read
+   * resolves. Two flags rather than one effect that guesses: each is set by
+   * the act that wants it and cleared by the frame that satisfies it.
+   */
+  const wantRowFocus = useRef(false);
+  const wantEditorFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (wantRowFocus.current) {
+      wantRowFocus.current = false;
+      treeRef.current?.querySelector<HTMLElement>('[data-files-cursor]')?.focus();
+    }
+    if (!wantEditorFocus.current) return;
+    const editor = textareaRef.current;
+    if (editor !== null) {
+      wantEditorFocus.current = false;
+      editor.focus();
+      return;
+    }
+    // No textarea yet. Keep waiting only while the buffer is still being
+    // read: a file that turns out binary, refused or gone never grows one,
+    // and a flag left armed would steal the keyboard the next time one did.
+    if (activeBuffer?.kind !== 'loading') wantEditorFocus.current = false;
+  });
+
+  /** Opens `path` in the editor and puts the tree's cursor on it. */
+  const openFromTree = useCallback(
+    (path: string, intoEditor: boolean) => {
+      setNote(null);
+      setCursorPath(path);
+      openFile(path);
+      if (intoEditor) wantEditorFocus.current = true;
+      else wantRowFocus.current = true;
+    },
+    [openFile],
+  );
+
+  const toggleDir = useCallback((path: string, open: boolean) => {
+    setNote(null);
+    setCursorPath(path);
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (open) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+  }, []);
+
   const onEditorKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (activePath === null) return;
-      if (event.key === 'Escape' || normalizeKey(event) === 'Mod-[') {
+      const key = normalizeKey(event);
+      // NOT OURS, AND SAID FIRST -- `EDITOR_KEYS` is the list, and it is the
+      // same list the README's Files-tab table is held against. Everything
+      // else falls through unprevented to the app-wide grammar, which is what
+      // keeps `Mod-<digit>`, `Mod-k` and `Mod-Shift-[` working from inside
+      // this box exactly as they do from inside the composer.
+      if (key === null || !EDITOR_KEYS.includes(key)) return;
+      if (key === 'Escape' || key === 'Mod-[') {
         // THE WAY OUT, exactly as it is for the composer (`DetailPanel.tsx`'s
         // own `Mod-[` branch): blur, hand the keyboard back to Select. NOT a
         // discard — the buffer is untouched, dirty or not, so unsaved text
@@ -385,7 +564,16 @@ export function FilesTab({ hidden, sessionId, list, read, write, reserveCorner }
         event.currentTarget.blur();
         return;
       }
-      if (event.key === 'Tab') {
+      if (key === 'Mod-Shift-e') {
+        // ACROSS, to the tree. The same chord goes back (see `onTreeKeyDown`)
+        // rather than a second one for the return leg: it is one act -- "the
+        // other half of this tab" -- and one act with two spellings is two
+        // things to remember for no gain.
+        event.preventDefault();
+        setNote(focusCursorRow() ? null : 'nothing to move to — no file here matches the filter');
+        return;
+      }
+      if (key === 'Tab') {
         // TRAPPED, not a focus move — see `applyTab`'s own header for why
         // that is safe here specifically: Escape and Mod-[ are both real
         // exits already, unlike `TerminalTab`, which has only Tab.
@@ -405,7 +593,7 @@ export function FilesTab({ hidden, sessionId, list, read, write, reserveCorner }
         setContent(activePath, result.value);
         return;
       }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+      if (key === 'Mod-s') {
         // Blocked here before it reaches the browser's own "Save Page" —
         // `preventDefault` on the native event is what the window listener's
         // `defaultPrevented` check (`Canvas.tsx`) then honours too.
@@ -413,7 +601,77 @@ export function FilesTab({ hidden, sessionId, list, read, write, reserveCorner }
         void saveFile(activePath);
       }
     },
-    [activePath, setContent, saveFile],
+    [activePath, setContent, saveFile, focusCursorRow],
+  );
+
+  /**
+   * THE TREE'S OWN KEYBOARD. `resolveTreeKey` decides; this only carries the
+   * decision out.
+   *
+   * `preventDefault` on exactly what it answered, and NOTHING else -- a
+   * `null` step falls through unprevented so `Alt-<digit>`, `Mod-k` and the
+   * rest of the grammar still work with the keyboard in here. It is
+   * deliberately not `stopPropagation`, for the reason `focus-scope.ts`
+   * states about the question list: swallowing everything would strand the
+   * keyboard in a list it could not leave.
+   */
+  const onTreeKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLElement>) => {
+      const key = normalizeKey(event);
+      if (key === null) return;
+      const step = resolveTreeKey({ key, rows, index: cursorIndex, expanded });
+      if (step === null) return;
+      event.preventDefault();
+      switch (step.kind) {
+        case 'move':
+          setNote(null);
+          setCursorPath(rows[step.index]?.path ?? null);
+          wantRowFocus.current = true;
+          return;
+        case 'expand':
+          toggleDir(step.path, true);
+          wantRowFocus.current = true;
+          return;
+        case 'collapse':
+          toggleDir(step.path, false);
+          wantRowFocus.current = true;
+          return;
+        case 'open':
+          openFromTree(step.path, step.focusEditor);
+          return;
+        case 'filter':
+          setNote(null);
+          filterRef.current?.focus();
+          return;
+        case 'editor':
+          setNote(focusEditor() ? null : 'no file is open — press Enter on one in the tree first');
+          return;
+        case 'leave':
+          (document.activeElement as HTMLElement | null)?.blur();
+          return;
+        case 'refuse':
+          setNote(step.message);
+          return;
+      }
+    },
+    [rows, cursorIndex, expanded, toggleDir, openFromTree, focusEditor],
+  );
+
+  /** Escape/Mod-[ out of either text box, and Mod-Shift-e across to the editor. */
+  const onBoxKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      const key = normalizeKey(event);
+      if (event.key === 'Escape' || key === 'Mod-[') {
+        event.preventDefault();
+        event.currentTarget.blur();
+        return;
+      }
+      if (key === 'Mod-Shift-e') {
+        event.preventDefault();
+        setNote(focusEditor() ? null : 'no file is open — press Enter on one in the tree first');
+      }
+    },
+    [focusEditor],
   );
 
   if (sessionId === null) {
@@ -432,26 +690,89 @@ export function FilesTab({ hidden, sessionId, list, read, write, reserveCorner }
     );
   }
 
-  if (activePath !== null && activeBuffer !== undefined) {
-    return (
-      <FileEditor
-        hidden={hidden}
-        reserveCorner={reserveCorner}
-        path={activePath}
-        root={currentListing?.kind === 'ready' ? currentListing.result.root : null}
-        buffer={activeBuffer}
-        textareaRef={textareaRef}
-        onChange={(content) => setContent(activePath, content)}
-        onKeyDown={onEditorKeyDown}
-        onSave={() => void saveFile(activePath)}
-        onReload={() => reloadFile(activePath)}
-        onBrowse={closeEditor}
-      />
-    );
-  }
+  const label =
+    activePath === null ? null : root === null ? activePath : relativeLabel(root, activePath);
+  const dirty = isDirty(activeBuffer);
 
   return (
-    <div data-files data-files-list hidden={hidden} className="flex min-h-0 flex-1 flex-col gap-2">
+    <div
+      data-files
+      data-files-view
+      hidden={hidden}
+      className="flex min-h-0 flex-1 flex-col gap-1.5"
+    >
+      {/* THE CORNER, RESERVED BY MEASUREMENT, IN BOTH DIRECTIONS --
+          `DetailPanel.tsx`'s own `cornerReserve`/`cornerReserveHeight`, which
+          derive the pill's real footprint from the pill rather than restating
+          it as a constant. `paddingRight` keeps the Save button out from
+          under it: measured at a 1100px window, the pill is 118px once this
+          tab adds a fifth view icon, and the `6rem` this row first used left
+          the button's right 18px under it -- while `elementFromPoint` at the
+          button's CENTRE still returned the button, so a click-based check
+          passed the whole way through. `minHeight` is what keeps the TREE out
+          from under it: the tree is at the right-hand edge by definition, so
+          no horizontal padding can move it, and its clearance is this row's
+          height. Both are asserted as RECTANGLES, not clicks, in
+          `e2e/files-tab-keyboard-shots.mjs`. */}
+      <div
+        data-files-header
+        className="flex flex-none items-center gap-1.5"
+        style={{
+          ...(reserveCorner > 0 ? { paddingRight: reserveCorner } : {}),
+          ...(reserveCornerHeight > 0 ? { minHeight: reserveCornerHeight } : {}),
+        }}
+      >
+        {activePath === null ? (
+          <span data-files-none className="min-w-0 flex-1 truncate text-control text-ink-faint">
+            No file open — pick one in the tree.
+          </span>
+        ) : (
+          <>
+            <span
+              data-files-path
+              className="min-w-0 flex-1 truncate font-mono text-control text-ink-dim"
+              title={activePath}
+            >
+              {label}
+              {activeBuffer?.kind === 'editable' && activeBuffer.isNew && ' (new)'}
+            </span>
+            {dirty && (
+              <span
+                data-files-dirty
+                aria-hidden="true"
+                className="flex-none rounded-full bg-ink-dim"
+                style={{ width: 6, height: 6 }}
+              />
+            )}
+            {activeBuffer?.kind === 'editable' && (
+              <button
+                type="button"
+                data-files-save
+                data-files-save-state={activeBuffer.save.kind}
+                onClick={() => void saveFile(activePath)}
+                disabled={activeBuffer.save.kind === 'saving'}
+                aria-label="save this file"
+                className="vam-tap flex flex-none cursor-pointer items-center gap-1 rounded-[6px] border border-line px-2 py-1 text-control text-ink-dim hover:border-line-strong hover:text-ink disabled:cursor-default disabled:opacity-60"
+              >
+                {activeBuffer.save.kind === 'saving' ? (
+                  <Loader2 size={12} strokeWidth={1.8} className="animate-spin" />
+                ) : (
+                  <Save size={12} strokeWidth={1.8} />
+                )}
+                Save
+              </button>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* WHAT THE LAST KEYSTROKE REFUSED. See `note`'s own comment. */}
+      {note !== null && (
+        <p data-files-note role="status" className="flex-none text-control text-waiting">
+          {note}
+        </p>
+      )}
+
       {currentListing?.kind === 'error' && (
         <p
           data-files-refusal={currentListing.error.code}
@@ -460,152 +781,168 @@ export function FilesTab({ hidden, sessionId, list, read, write, reserveCorner }
           {currentListing.error.message}
         </p>
       )}
-      <form
-        data-files-new
-        className="flex flex-none items-center gap-1.5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const name = newFileName.trim();
-          const root = currentListing?.kind === 'ready' ? currentListing.result.root : null;
-          if (name === '' || root === null) return;
-          const base = root.endsWith('/') ? root.slice(0, -1) : root;
-          openFile(`${base}/${name.replace(/^\/+/, '')}`);
-          setNewFileName('');
-        }}
-      >
-        <FilePlus
-          size={13}
-          strokeWidth={1.6}
-          className="flex-none text-ink-faint"
-          aria-hidden="true"
-        />
-        <input
-          value={newFileName}
-          onChange={(event) => setNewFileName(event.target.value)}
-          placeholder="new file, relative to this session's directory…"
-          aria-label="create a new file"
-          className="min-w-0 flex-1 rounded-[7px] border border-line bg-card px-2 py-1 font-mono text-control text-ink outline-none placeholder:text-ink-faint"
-        />
-      </form>
-      <Command
-        label="files"
-        className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[9px] border border-line bg-panel"
-        loop
-        onKeyDown={(event) => {
-          if (event.key === 'Escape' || normalizeKey(event) === 'Mod-[') {
-            event.preventDefault();
-            (document.activeElement as HTMLElement | null)?.blur();
-          }
-        }}
-      >
-        <div className="flex flex-none items-center gap-1.5 border-line border-b px-2.5 py-1.5">
-          <FolderOpen
-            size={13}
-            strokeWidth={1.6}
-            className="flex-none text-ink-faint"
-            aria-hidden="true"
-          />
-          <Command.Input
-            autoFocus={!hidden}
-            placeholder="filter files…"
-            className="min-w-0 flex-1 bg-transparent font-mono text-control text-ink outline-none placeholder:text-ink-faint"
-          />
+
+      {/* THE ONE REFUSAL THAT MATTERS MOST, drawn as an offer rather than a
+          failure: the file changed on disk since this buffer's own baseline,
+          so the write was refused rather than overwriting whatever an agent
+          (or the operator, elsewhere) just wrote. The operator's own text is
+          UNTOUCHED — still in the textarea below, still what `Reload` will
+          ask them to give up, in those words, before it does. */}
+      {activeBuffer?.kind === 'editable' && activeBuffer.save.kind === 'conflict' && (
+        <p
+          data-files-conflict
+          role="status"
+          className="flex flex-none items-center gap-2 rounded-[8px] border border-failed bg-card px-2.5 py-1.5 text-control text-failed"
+        >
+          <span className="min-w-0 flex-1">
+            {label} changed on disk since you opened it — your edits below are still here, but
+            saving them now would overwrite what changed.
+          </span>
           <button
             type="button"
-            aria-label="refresh file list"
-            onClick={fetchListing}
-            className="vam-tap flex-none cursor-pointer rounded-[6px] p-1 text-ink-faint hover:text-ink"
+            data-files-reload
+            onClick={() => activePath !== null && reloadFile(activePath)}
+            className="vam-tap flex-none cursor-pointer rounded-[6px] border border-failed px-1.5 py-0.5 text-meta hover:bg-failed hover:text-ground"
           >
-            <RefreshCw size={13} strokeWidth={1.6} />
+            Reload — discards your edits
           </button>
-        </div>
-        <Command.List className="vam-no-scrollbar min-h-0 flex-1 overflow-y-auto p-1">
-          {currentListing?.kind === 'loading' && (
-            <p data-files-listing-pending className="px-2 py-3 text-control text-ink-faint">
-              Reading the directory…
+        </p>
+      )}
+      {activeBuffer?.kind === 'editable' && activeBuffer.save.kind === 'error' && (
+        <p
+          data-files-refusal={activeBuffer.save.error.code}
+          className="flex-none text-control text-failed"
+        >
+          {activeBuffer.save.error.message}
+        </p>
+      )}
+
+      {/* THE TWO COLUMNS. Editor in the middle, tree on the right — the
+          operator's own arrangement, and orca's. `min-w-0` on the editor is
+          what lets it shrink rather than push the tree off the pane. */}
+      <div className="flex min-h-0 flex-1 gap-1.5">
+        <div data-files-editor-column className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {activePath === null && (
+            <p className="text-control text-ink-faint">
+              Nothing to edit yet. Walk the tree with <code>j</code>/<code>k</code>, step in and out
+              with <code>l</code>/<code>h</code>, and press Enter to open a file here.
             </p>
           )}
-          <Command.Empty className="px-2 py-3 text-control text-ink-faint">No match</Command.Empty>
-          {currentListing?.kind === 'ready' &&
-            currentListing.result.files.map((path) => {
-              const dirty = isDirty(buffers[path]);
-              return (
-                <Command.Item
-                  key={path}
-                  value={path}
-                  data-files-row
-                  data-files-row-path={path}
-                  onSelect={() => openFile(path)}
-                  className="flex cursor-pointer items-baseline gap-1.5 rounded-[6px] px-2 py-1 font-mono text-control text-ink data-[selected=true]:bg-line-strong"
-                >
-                  {dirty && (
-                    <span
-                      data-files-dirty
-                      aria-hidden="true"
-                      className="flex-none rounded-full bg-ink-dim"
-                      style={{ width: 6, height: 6 }}
-                    />
-                  )}
-                  <span className="min-w-0 flex-1 truncate">
-                    {relativeLabel(currentListing.result.root, path)}
-                  </span>
-                </Command.Item>
-              );
-            })}
-        </Command.List>
-        {currentListing?.kind === 'ready' && currentListing.result.truncated && (
-          <p className="flex-none border-line border-t px-2.5 py-1 text-meta text-ink-faint">
-            Showing the first {currentListing.result.files.length.toLocaleString()} files — this
-            directory has more.
-          </p>
-        )}
-      </Command>
+
+          {activeBuffer?.kind === 'loading' && (
+            <p data-files-loading className="text-control text-ink-faint">
+              Reading {label}…
+            </p>
+          )}
+
+          {activeBuffer?.kind === 'binary' && (
+            <p data-files-binary className="text-control text-ink-faint">
+              {label} looks like a binary file ({activeBuffer.size.toLocaleString()} bytes) — vam
+              does not show binary content.
+            </p>
+          )}
+
+          {activeBuffer?.kind === 'refused' && (
+            <p data-files-refusal={activeBuffer.error.code} className="text-control text-failed">
+              {activeBuffer.error.message}
+            </p>
+          )}
+
+          {activeBuffer?.kind === 'editable' && (
+            <Editor
+              hidden={hidden}
+              label={label ?? ''}
+              content={activeBuffer.content}
+              textareaRef={textareaRef}
+              onChange={(content) => activePath !== null && setContent(activePath, content)}
+              onKeyDown={onEditorKeyDown}
+            />
+          )}
+        </div>
+
+        <Tree
+          treeRef={treeRef}
+          filterRef={filterRef}
+          rows={rows}
+          cursorPath={cursorRow?.path ?? null}
+          activePath={activePath}
+          expanded={expanded}
+          buffers={buffers}
+          filter={filter}
+          onFilterChange={setFilter}
+          listing={currentListing}
+          onRefresh={fetchListing}
+          onKeyDown={onTreeKeyDown}
+          onBoxKeyDown={onBoxKeyDown}
+          onOpen={(path) => openFromTree(path, false)}
+          onToggle={toggleDir}
+          onFilterEnter={() => {
+            setCursorPath(rows[0]?.path ?? null);
+            wantRowFocus.current = true;
+            setNote(rows.length === 0 ? 'no file here matches the filter' : null);
+          }}
+          newFileName={newFileName}
+          onNewFileName={setNewFileName}
+          onNewFile={() => {
+            const name = newFileName.trim();
+            if (name === '' || root === null) return;
+            const base = root.endsWith('/') ? root.slice(0, -1) : root;
+            openFromTree(`${base}/${name.replace(/^\/+/, '')}`, true);
+            setNewFileName('');
+          }}
+        />
+      </div>
     </div>
   );
 }
 
-function FileEditor({
+/**
+ * THE GUTTER AND THE TEXTAREA SHARE ONE BOX, and every property that keeps
+ * their two columns in step is load-bearing rather than cosmetic:
+ *
+ *  * `whiteSpace: 'pre'` ON THE TEXTAREA. A wrapped line occupies two ROWS
+ *    but is still one LINE, so the moment the textarea soft-wraps, number N
+ *    stops pointing at line N and every number below it is wrong -- the
+ *    single classic bug of a hand-built gutter. Not wrapping is also what
+ *    Monaco (orca's own editor) does by default, and it is why `applyTab`
+ *    indents with spaces rather than a tab byte: a tab's RENDERED width is a
+ *    font-and-platform question neither column could answer the same way.
+ *  * ONE TEXT NODE, joined by newlines, inside a `pre` box -- not one element
+ *    per line. The numbers then inherit exactly the same line box the text
+ *    does instead of depending on a second set of margins agreeing with the
+ *    first.
+ *  * `overflow-hidden` ON THE GUTTER, scrolled only by the sync below, so it
+ *    can never be scrolled independently into a position the text is not at.
+ *  * The MARKS STAY ON THE TEXTAREA, never on the wrapper: the insert scope
+ *    has to be the thing that actually takes focus.
+ */
+function Editor({
   hidden,
-  reserveCorner,
-  path,
-  root,
-  buffer,
+  label,
+  content,
   textareaRef,
   onChange,
   onKeyDown,
-  onSave,
-  onReload,
-  onBrowse,
 }: {
   readonly hidden: boolean;
-  readonly reserveCorner: number;
-  readonly path: string;
-  readonly root: string | null;
-  readonly buffer: Buffer;
+  readonly label: string;
+  readonly content: string;
   readonly textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   readonly onChange: (content: string) => void;
   readonly onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
-  readonly onSave: () => void;
-  readonly onReload: () => void;
-  readonly onBrowse: () => void;
 }) {
-  const label = root === null ? path : relativeLabel(root, path);
-  const dirty = isDirty(buffer);
   const gutterRef = useRef<HTMLDivElement | null>(null);
 
   /**
    * The gutter's own text: `1\n2\n3...`, one number per LINE of the buffer
-   * (never per visual row -- see the editor's own comment for why the
-   * textarea must not wrap). An empty file is one line, the same way a
-   * blank editor shows a caret on line 1, which is why this counts
-   * separators plus one rather than counting non-empty pieces.
+   * (never per visual row). An empty file is one line, the same way a blank
+   * editor shows a caret on line 1, which is why this counts separators plus
+   * one rather than counting non-empty pieces.
    */
-  const lineNumbers =
-    buffer.kind === 'editable'
-      ? Array.from({ length: buffer.content.split('\n').length }, (_, index) => index + 1).join(
-          '\n',
-        )
-      : '';
+  const lineNumbers = Array.from(
+    { length: content.split('\n').length },
+    (_, index) => index + 1,
+  ).join('\n');
 
   /**
    * Keep the numbers level with the text. The textarea owns the scroll (it
@@ -622,187 +959,234 @@ function FileEditor({
   }, [textareaRef]);
 
   return (
-    <div
-      data-files
-      data-files-editor-view
-      hidden={hidden}
-      className="flex min-h-0 flex-1 flex-col gap-1.5"
-    >
-      {/* THE CORNER, RESERVED BY MEASUREMENT -- `DetailPanel.tsx`'s own
-          `cornerReserve`, which reads the pill's real width off the element
-          rather than restating it as a constant. Without any reservation the
-          Save button sits under the view icons; with the `6rem` this row
-          first used, it still did: measured at a 1100px window, the pill is
-          118px once this tab adds a fifth view icon, and the button's right
-          18px stayed under it. `elementFromPoint` at the button's CENTRE
-          still returned the button, so a click-based check passed the whole
-          way through -- which is exactly why this is reserved against a
-          measured width now and asserted as a rectangle, not a click, in
-          `e2e/files-tab-keyboard-shots.mjs`. */}
+    <div className="flex min-h-0 flex-1 overflow-hidden rounded-[9px] border border-line bg-panel focus-within:border-line-strong">
       <div
-        className="flex flex-none items-center gap-1.5"
-        style={reserveCorner > 0 ? { paddingRight: reserveCorner } : undefined}
+        ref={gutterRef}
+        data-files-gutter
+        aria-hidden="true"
+        className="vam-no-scrollbar flex-none select-none overflow-hidden py-2 pr-2 pl-3 text-right font-mono text-control text-ink-faint leading-[1.5]"
+        style={{ whiteSpace: 'pre' }}
       >
+        {lineNumbers}
+      </div>
+      {/* AN INSERT SCOPE, AND AN INSERT STOP -- ONLY WHILE VISIBLE. `hidden`
+          is checked here rather than left to CSS alone: an always-mounted,
+          merely-hidden `data-insert-stop` is still the FIRST match
+          `focusInsertStop`'s blind `querySelector` would find in document
+          order on every OTHER tab, and a `display: none` element cannot in
+          fact receive the `.focus()` call that follows — so leaving the mark
+          on regardless would make `I`, pressed anywhere in this pane,
+          silently fail to reach the composer the moment this build has ever
+          shown the Files tab once. See this file's own header. */}
+      <textarea
+        ref={textareaRef}
+        data-files-editor
+        {...(hidden ? {} : insertScopeMark)}
+        {...(hidden ? {} : insertStopMark)}
+        value={content}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        onScroll={syncGutter}
+        spellCheck={false}
+        aria-label={`edit ${label}`}
+        className="vam-no-scrollbar min-h-0 min-w-0 flex-1 resize-none border-0 bg-transparent py-2 pr-3 pl-1 font-mono text-control text-ink leading-[1.5] outline-none"
+        style={{ whiteSpace: 'pre', overflowWrap: 'normal' }}
+      />
+    </div>
+  );
+}
+
+function Tree({
+  treeRef,
+  filterRef,
+  rows,
+  cursorPath,
+  activePath,
+  expanded,
+  buffers,
+  filter,
+  onFilterChange,
+  listing,
+  onRefresh,
+  onKeyDown,
+  onBoxKeyDown,
+  onOpen,
+  onToggle,
+  onFilterEnter,
+  newFileName,
+  onNewFileName,
+  onNewFile,
+}: {
+  readonly treeRef: React.RefObject<HTMLDivElement | null>;
+  readonly filterRef: React.RefObject<HTMLInputElement | null>;
+  readonly rows: readonly FileTreeRow[];
+  readonly cursorPath: string | null;
+  readonly activePath: string | null;
+  readonly expanded: ReadonlySet<string>;
+  readonly buffers: Record<string, Buffer>;
+  readonly filter: string;
+  readonly onFilterChange: (value: string) => void;
+  readonly listing: ListState | undefined;
+  readonly onRefresh: () => void;
+  readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+  readonly onBoxKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+  readonly onOpen: (path: string) => void;
+  readonly onToggle: (path: string, open: boolean) => void;
+  readonly onFilterEnter: () => void;
+  readonly newFileName: string;
+  readonly onNewFileName: (value: string) => void;
+  readonly onNewFile: () => void;
+}) {
+  return (
+    <div
+      data-files-tree
+      className={`flex min-h-0 flex-none flex-col overflow-hidden rounded-[9px] border border-line bg-panel ${TREE_WIDTH}`}
+    >
+      <div className="flex flex-none items-center gap-1 border-line border-b px-2 py-1.5">
+        <Search
+          size={12}
+          strokeWidth={1.6}
+          className="flex-none text-ink-faint"
+          aria-hidden="true"
+        />
+        {/* UNMARKED, deliberately — see this file's header. A native `input`
+            is already exempt from the chord grammar by tag name; the insert
+            marks are for surfaces the status bar must call Insert, and a
+            filter box is not one. */}
+        <input
+          ref={filterRef}
+          data-files-filter
+          value={filter}
+          onChange={(event) => onFilterChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              onFilterEnter();
+              return;
+            }
+            onBoxKeyDown(event);
+          }}
+          placeholder="filter…"
+          aria-label="filter files"
+          className="min-w-0 flex-1 bg-transparent font-mono text-control text-ink outline-none placeholder:text-ink-faint"
+        />
         <button
           type="button"
-          onClick={onBrowse}
-          aria-label="back to the file list"
+          aria-label="refresh file list"
+          onClick={onRefresh}
           className="vam-tap flex-none cursor-pointer rounded-[6px] p-1 text-ink-faint hover:text-ink"
         >
-          <FolderOpen size={13} strokeWidth={1.6} />
+          <RefreshCw size={12} strokeWidth={1.6} />
         </button>
-        <span
-          data-files-path
-          className="min-w-0 flex-1 truncate font-mono text-control text-ink-dim"
-          title={path}
-        >
-          {label}
-          {buffer.kind === 'editable' && buffer.isNew && ' (new)'}
-        </span>
-        {dirty && (
-          <span
-            data-files-dirty
-            aria-hidden="true"
-            className="flex-none rounded-full bg-ink-dim"
-            style={{ width: 6, height: 6 }}
-          />
-        )}
-        {buffer.kind === 'editable' && (
-          <button
-            type="button"
-            data-files-save
-            data-files-save-state={buffer.save.kind}
-            onClick={onSave}
-            disabled={buffer.save.kind === 'saving'}
-            aria-label="save this file"
-            className="vam-tap flex flex-none cursor-pointer items-center gap-1 rounded-[6px] border border-line px-2 py-1 text-control text-ink-dim hover:border-line-strong hover:text-ink disabled:cursor-default disabled:opacity-60"
-          >
-            {buffer.save.kind === 'saving' ? (
-              <Loader2 size={12} strokeWidth={1.8} className="animate-spin" />
-            ) : (
-              <Save size={12} strokeWidth={1.8} />
-            )}
-            Save
-          </button>
-        )}
       </div>
 
-      {buffer.kind === 'loading' && (
-        <p data-files-loading className="text-control text-ink-faint">
-          Reading {label}…
-        </p>
-      )}
+      <form
+        data-files-new
+        className="flex flex-none items-center gap-1 border-line border-b px-2 py-1.5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onNewFile();
+        }}
+      >
+        <FilePlus
+          size={12}
+          strokeWidth={1.6}
+          className="flex-none text-ink-faint"
+          aria-hidden="true"
+        />
+        <input
+          value={newFileName}
+          onChange={(event) => onNewFileName(event.target.value)}
+          onKeyDown={onBoxKeyDown}
+          placeholder="new file…"
+          aria-label="create a new file"
+          className="min-w-0 flex-1 bg-transparent font-mono text-control text-ink outline-none placeholder:text-ink-faint"
+        />
+      </form>
 
-      {buffer.kind === 'binary' && (
-        <p data-files-binary className="text-control text-ink-faint">
-          {label} looks like a binary file ({buffer.size.toLocaleString()} bytes) — vam does not
-          show binary content.
-        </p>
-      )}
-
-      {buffer.kind === 'refused' && (
-        <p data-files-refusal={buffer.error.code} className="text-control text-failed">
-          {buffer.error.message}
-        </p>
-      )}
-
-      {buffer.kind === 'editable' && (
-        <>
-          {/* THE ONE REFUSAL THAT MATTERS MOST, drawn as an offer rather than
-              a failure: the file changed on disk since this buffer's own
-              baseline, so the write was refused rather than overwriting
-              whatever an agent (or the operator, elsewhere) just wrote. The
-              operator's own text is UNTOUCHED — still in the textarea below,
-              still what `Reload` will ask them to give up, in those words,
-              before it does. */}
-          {buffer.save.kind === 'conflict' && (
-            <p
-              data-files-conflict
-              role="status"
-              className="flex flex-none items-center gap-2 rounded-[8px] border border-failed bg-card px-2.5 py-1.5 text-control text-failed"
-            >
-              <span className="min-w-0 flex-1">
-                {label} changed on disk since you opened it — your edits below are still here, but
-                saving them now would overwrite what changed.
-              </span>
+      {/* THE `tree` ROLE AND THE KEYDOWN ARE ON THE ROWS' OWN WRAPPER, NOT ON
+          THE SCROLLER.
+          One listener rather than one per row -- and it still only ever fires
+          for a row, because a row is the only thing in here that can hold
+          focus. It is a SEPARATE element from the scroller on purpose:
+          `role="tree"` may own only `treeitem`s and `group`s, and the notices
+          the scroller also holds ("Reading the directory…", "No match", the
+          truncation line) are real text a screen reader has to reach. One
+          element for both would have made those notices either invalid
+          children of the tree or `presentation`al -- and `presentation` would
+          have hidden the words. */}
+      <div className="vam-no-scrollbar min-h-0 flex-1 overflow-y-auto p-1">
+        {listing?.kind === 'loading' && (
+          <p data-files-listing-pending className="px-2 py-3 text-control text-ink-faint">
+            Reading the directory…
+          </p>
+        )}
+        {listing?.kind === 'ready' && rows.length === 0 && (
+          <p data-files-no-match className="px-2 py-3 text-control text-ink-faint">
+            {filter.trim() === '' ? 'Nothing in this directory' : 'No match'}
+          </p>
+        )}
+        <div ref={treeRef} role="tree" aria-label="files" onKeyDown={onKeyDown}>
+          {rows.map((row) => {
+            const open = expanded.has(row.path);
+            const isCursor = row.path === cursorPath;
+            return (
               <button
+                key={row.path}
                 type="button"
-                data-files-reload
-                onClick={onReload}
-                className="vam-tap flex-none cursor-pointer rounded-[6px] border border-failed px-1.5 py-0.5 text-meta hover:bg-failed hover:text-ground"
+                role="treeitem"
+                data-files-row
+                data-files-row-path={row.path}
+                data-files-row-kind={row.isDirectory ? 'directory' : 'file'}
+                {...(row.isDirectory ? { 'data-files-row-open': String(open) } : {})}
+                {...(isCursor ? { 'data-files-cursor': '' } : {})}
+                {...(row.path === activePath ? { 'data-files-row-active': '' } : {})}
+                aria-expanded={row.isDirectory ? open : undefined}
+                aria-selected={row.path === activePath}
+                // The DEPTH, said to a screen reader -- 1-based, as ARIA wants
+                // it, where `depth` is 0-based because it multiplies an indent.
+                // Without it a nested tree is announced as a flat list, which
+                // is the one thing this whole change stopped it being.
+                aria-level={row.depth + 1}
+                // ROVING TABINDEX: one station in the Tab order for the whole
+                // tree, not one per file. A 5,000-entry listing would otherwise
+                // put 5,000 stops between the tab and whatever follows it.
+                tabIndex={isCursor ? 0 : -1}
+                onClick={() => (row.isDirectory ? onToggle(row.path, !open) : onOpen(row.path))}
+                style={{ paddingLeft: 6 + row.depth * 10 }}
+                className={[
+                  'flex w-full cursor-pointer items-center gap-1 rounded-[6px] py-0.5 pr-1 text-left font-mono text-control outline-none',
+                  row.path === activePath ? 'text-ink' : 'text-ink-dim',
+                  isCursor ? 'bg-line-strong text-ink' : 'hover:bg-raised hover:text-ink',
+                ].join(' ')}
               >
-                Reload — discards your edits
+                <span
+                  aria-hidden="true"
+                  className="flex-none text-ink-faint"
+                  style={{ width: 8, fontSize: 9, lineHeight: '1' }}
+                >
+                  {row.isDirectory ? (open ? '▾' : '▸') : ''}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{row.name}</span>
+                {isDirty(buffers[row.path]) && (
+                  <span
+                    data-files-dirty
+                    aria-hidden="true"
+                    className="flex-none rounded-full bg-ink-dim"
+                    style={{ width: 5, height: 5 }}
+                  />
+                )}
               </button>
-            </p>
-          )}
-          {buffer.save.kind === 'error' && (
-            <p
-              data-files-refusal={buffer.save.error.code}
-              className="flex-none text-control text-failed"
-            >
-              {buffer.save.error.message}
-            </p>
-          )}
-          {/* AN INSERT SCOPE, AND AN INSERT STOP -- ONLY WHILE VISIBLE.
-              `hidden` is checked here rather than left to CSS alone: an
-              always-mounted, merely-hidden `data-insert-stop` is still the
-              FIRST match `focusInsertStop`'s blind `querySelector` would find
-              in document order on every OTHER tab, and a `display: none`
-              element cannot in fact receive the `.focus()` call that follows
-              — so leaving the mark on regardless would make `I`, pressed
-              anywhere in this pane, silently fail to reach the composer the
-              moment this build has ever shown the Files tab once. See this
-              file's own header. */}
-          {/* THE GUTTER AND THE TEXTAREA SHARE ONE BOX, and every property
-              that keeps their two columns in step is load-bearing rather
-              than cosmetic:
-
-              * `whiteSpace: 'pre'` ON THE TEXTAREA. A wrapped line occupies
-                two ROWS but is still one LINE, so the moment the textarea
-                soft-wraps, number N stops pointing at line N and every
-                number below it is wrong -- the single classic bug of a
-                hand-built gutter. Not wrapping is also what Monaco (orca's
-                own editor) does by default, and it is why `applyTab` indents
-                with spaces rather than a tab byte: a tab's RENDERED width is
-                a font-and-platform question neither column could answer the
-                same way.
-              * ONE TEXT NODE, joined by newlines, inside a `pre` box -- not
-                one element per line. The numbers then inherit exactly the
-                same line box the text does instead of depending on a second
-                set of margins agreeing with the first.
-              * `overflow-hidden` ON THE GUTTER, scrolled only by the sync
-                below, so it can never be scrolled independently into a
-                position the text is not at.
-              * The MARKS STAY ON THE TEXTAREA, never on this wrapper: the
-                insert scope has to be the thing that actually takes focus.
-          */}
-          <div className="flex min-h-0 flex-1 overflow-hidden rounded-[9px] border border-line bg-panel focus-within:border-line-strong">
-            <div
-              ref={gutterRef}
-              data-files-gutter
-              aria-hidden="true"
-              className="vam-no-scrollbar flex-none select-none overflow-hidden py-2 pr-2 pl-3 text-right font-mono text-control text-ink-faint leading-[1.5]"
-              style={{ whiteSpace: 'pre' }}
-            >
-              {lineNumbers}
-            </div>
-            <textarea
-              ref={textareaRef}
-              data-files-editor
-              {...(hidden ? {} : insertScopeMark)}
-              {...(hidden ? {} : insertStopMark)}
-              value={buffer.content}
-              onChange={(event) => onChange(event.target.value)}
-              onKeyDown={onKeyDown}
-              onScroll={syncGutter}
-              spellCheck={false}
-              aria-label={`edit ${label}`}
-              className="vam-no-scrollbar min-h-0 min-w-0 flex-1 resize-none border-0 bg-transparent py-2 pr-3 pl-1 font-mono text-control text-ink leading-[1.5] outline-none"
-              style={{ whiteSpace: 'pre', overflowWrap: 'normal' }}
-            />
-          </div>
-        </>
-      )}
+            );
+          })}
+        </div>
+        {listing?.kind === 'ready' && listing.result.truncated && (
+          <p className="px-2 py-1 text-meta text-ink-faint">
+            Showing the first {listing.result.files.length.toLocaleString()} files — this directory
+            has more.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

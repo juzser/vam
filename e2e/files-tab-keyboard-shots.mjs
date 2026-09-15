@@ -89,7 +89,15 @@ function check(label, ok, detail) {
  */
 await page.addInitScript(() => {
   const ENV_PATH = '/work/demo/.env';
-  const files = new Map([[ENV_PATH, { content: 'A=1\n', rev: 0 }]]);
+  // THREE PATHS, NOT ONE, AND TWO LEVELS DEEP ON PURPOSE. The tab draws a
+  // TREE now, and a listing of one top-level file has no directory row, no
+  // depth and nothing to expand -- every tree check below would pass against
+  // a component that could not draw a directory at all.
+  const files = new Map([
+    [ENV_PATH, { content: 'A=1\n', rev: 0 }],
+    ['/work/demo/src/index.ts', { content: 'export const a = 1\n', rev: 0 }],
+    ['/work/demo/src/lib/util.ts', { content: 'export const b = 2\n', rev: 0 }],
+  ]);
   const sig = (path) => {
     const entry = files.get(path);
     return { size: entry.content.length, mtimeMs: entry.rev, sha256: `rev-${entry.rev}` };
@@ -290,7 +298,53 @@ check(
 );
 await page.locator('[data-view="files"]').click();
 await page.waitForSelector('[data-files-row]', { timeout: 5_000 });
-await page.locator('[data-files-row]').first().click();
+
+/** One tree row, by the absolute path it carries. */
+const treeRow = (path) => page.locator(`[data-files-row-path="${path}"]`);
+/** Every visible row's path, in draw order. */
+const treePaths = () =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('[data-files-row]')].map((el) =>
+      el.getAttribute('data-files-row-path'),
+    ),
+  );
+/** The path the tree's keyboard cursor is on, as Chromium reports focus. */
+const focusedRow = () =>
+  page.evaluate(
+    () => document.activeElement?.getAttribute('data-files-row-path') ?? null,
+  );
+
+/**
+ * THE CORNER, IN THE STATE THE TAB OPENS IN — before a file is picked.
+ *
+ * This is where the reservation was nearly lost. The tree's clearance is the
+ * height of the header row above it, and that row holds the open file's path
+ * and its Save button: WITH a file open it comes to 26px, WITHOUT one it
+ * comes to 16px, and the pill reaches 30px into this tab either way. So a
+ * check that only ever measured the tab with a file open would pass on an
+ * accidental 2px while the state a pane actually LANDS in -- nothing open --
+ * had its first tree row 8px under the icons. Measured, both, with the
+ * reservation deliberately removed. `cornerReserveHeight` is what makes the
+ * row 34px in both states, and this is the half of the guard that says so.
+ */
+const emptyCorner = await page.evaluate(() => {
+  const r = (sel) => {
+    const e = document.querySelector(sel);
+    if (e === null) return null;
+    const b = e.getBoundingClientRect();
+    return { top: Math.round(b.top), bottom: Math.round(b.bottom), height: Math.round(b.height) };
+  };
+  return { overlay: r('[data-view-overlay]'), tree: r('[data-files-tree]') };
+});
+check(
+  'with NO file open — the state the tab lands in — the tree still clears the view pill',
+  emptyCorner.tree !== null &&
+    emptyCorner.overlay !== null &&
+    emptyCorner.tree.top >= emptyCorner.overlay.bottom,
+  `tree top ${emptyCorner.tree?.top}, pill bottom ${emptyCorner.overlay?.bottom}`,
+);
+
+await treeRow('/work/demo/.env').click();
 await page.waitForSelector('[data-files-editor]', { timeout: 5_000 });
 
 // ---------------------------------------------------------------------------
@@ -315,6 +369,8 @@ const pillBox = await page.evaluate(() => {
     overlay: r('[data-view-overlay]'),
     save: r('[data-files-save]'),
     path: r('[data-files-path]'),
+    tree: r('[data-files-tree]'),
+    editorColumn: r('[data-files-editor-column]'),
     icons: document.querySelectorAll('[data-view-overlay] [data-view]').length,
   };
 });
@@ -332,6 +388,36 @@ check(
   'and so does the file path beside it',
   pillBox.path !== null && pillBox.overlay !== null && pillBox.path.right <= pillBox.overlay.left,
   `path ends at ${pillBox.path?.right}, pill starts at ${pillBox.overlay?.left}`,
+);
+
+/**
+ * AND THE TREE, WHICH IS THE CORNER NOW.
+ *
+ * The other two checks above are HORIZONTAL, and horizontal is all the
+ * reservation used to be, because everything this tab drew was a full-width
+ * row that could be pushed left. The tree is a COLUMN AT THE RIGHT-HAND EDGE:
+ * no amount of right-hand padding moves it out from under the pill, and the
+ * only thing that clears it is starting BELOW the pill. That is what
+ * `DetailPanel.tsx`'s `cornerReserveHeight` buys, worn by the header row as a
+ * minimum height -- and it is worth stating plainly that it could not be left
+ * to the header row's own natural height: measured, that came to ~26px
+ * against a pill reaching 30px into this tab's box, so the tree's top row
+ * would have sat under the pill by a margin small enough that only its first
+ * row's top pixels were buried. That is exactly the shape of the Save
+ * button's own 18px bug -- clickable at the centre, buried at the edge --
+ * which is why this is a rectangle and not a click.
+ */
+check(
+  'the tree column really is drawn, and at the right-hand edge of the pane',
+  pillBox.tree !== null &&
+    pillBox.editorColumn !== null &&
+    pillBox.tree.left >= pillBox.editorColumn.right,
+  `tree ${JSON.stringify(pillBox.tree)}, editor column ${JSON.stringify(pillBox.editorColumn)}`,
+);
+check(
+  'the tree starts entirely below the view pill — nothing in it is under the icons',
+  pillBox.tree !== null && pillBox.overlay !== null && pillBox.tree.top >= pillBox.overlay.bottom,
+  `tree top ${pillBox.tree?.top}, pill bottom ${pillBox.overlay?.bottom}`,
 );
 
 // ---------------------------------------------------------------------------
@@ -593,6 +679,222 @@ check(
 await page.screenshot({ path: `${outDir}/files-tab-gutter.png` });
 console.log(`${outDir}/files-tab-gutter.png`);
 
+// ---------------------------------------------------------------------------
+// 5. THE TREE'S OWN KEYBOARD, IN A REAL BROWSER.
+//
+// `test/panels/files-tree.test.ts` proves what each key DECIDES and
+// `test/panels/DetailPanel.files-tab.test.tsx` proves the wiring reaches it.
+// Neither can answer the two questions that only Chromium can:
+//
+//   * IS THE TREE REALLY OUTSIDE THE INSERT SCOPE? The cursor mode is derived
+//     from `document.activeElement`'s own ancestry, live (`keyboard/
+//     focus-scope.ts`), and the status chip is the app's own report of it. A
+//     tree that accidentally sat inside an insert scope would make every bare
+//     `j` here a character somewhere -- and happy-dom, which lays nothing out
+//     and focuses anything, cannot tell the two apart.
+//   * DOES FOCUS ACTUALLY LAND? `focusCursorRow` and `focusEditor` both
+//     REPORT whether they landed, and a refusal is drawn when they do not.
+//     Only a real browser can say whether a `<button>` with a roving
+//     `tabIndex` took the keyboard.
+
+await treeRow('/work/demo/.env').click();
+await page.waitForFunction(
+  () => document.activeElement?.hasAttribute('data-files-row') ?? false,
+  null,
+  { timeout: 3_000 },
+);
+check(
+  'clicking a row puts the keyboard on that row',
+  (await focusedRow()) === '/work/demo/.env',
+  `focus is on ${await focusedRow()}`,
+);
+const modeOnTree = await page.evaluate(
+  () => document.querySelector('[data-mode]')?.textContent ?? '',
+);
+check(
+  'the mode chip reads Select with the keyboard in the tree — it is NOT an insert scope',
+  modeOnTree === 'Select',
+  `it reads ${modeOnTree}`,
+);
+
+// A bare `j` walks the tree. Two things are asserted about one keystroke: the
+// cursor moved, AND the editor's text is untouched -- a `j` that had been
+// swallowed as TEXT would have shown up there, and a `j` that had fallen
+// through to the canvas grammar would have moved the session cursor instead.
+const editorBeforeWalk = await editor.inputValue();
+await page.keyboard.press('k');
+check(
+  'a bare k walks up to the directory above',
+  (await focusedRow()) === '/work/demo/src',
+  `focus is on ${await focusedRow()}`,
+);
+await page.keyboard.press('j');
+check('and a bare j walks back down', (await focusedRow()) === '/work/demo/.env');
+check(
+  'and neither of them was typed into the open file',
+  (await editor.inputValue()) === editorBeforeWalk,
+);
+
+// `l` opens the directory under the cursor, `h` shuts it -- the two keys the
+// whole tree exists for.
+await page.keyboard.press('k'); // back onto src/
+await page.keyboard.press('l');
+await page.waitForFunction(
+  () => document.querySelectorAll('[data-files-row]').length > 2,
+  null,
+  { timeout: 3_000 },
+);
+check(
+  'l opens the directory under the cursor, listing its own children',
+  JSON.stringify(await treePaths()) ===
+    JSON.stringify([
+      '/work/demo/src',
+      '/work/demo/src/lib',
+      '/work/demo/src/index.ts',
+      '/work/demo/.env',
+    ]),
+  JSON.stringify(await treePaths()),
+);
+await page.keyboard.press('l'); // step into it
+check(
+  'and pressing it again steps into the directory rather than opening it twice',
+  (await focusedRow()) === '/work/demo/src/lib',
+  `focus is on ${await focusedRow()}`,
+);
+await page.keyboard.press('h'); // back out to the parent
+check('h steps back out to the parent', (await focusedRow()) === '/work/demo/src');
+await page.keyboard.press('h'); // shut it
+await page.waitForFunction(
+  () => document.querySelectorAll('[data-files-row]').length === 2,
+  null,
+  { timeout: 3_000 },
+);
+check(
+  'and h on an open directory shuts it again',
+  JSON.stringify(await treePaths()) === JSON.stringify(['/work/demo/src', '/work/demo/.env']),
+  JSON.stringify(await treePaths()),
+);
+
+await page.screenshot({ path: `${outDir}/files-tab-tree.png` });
+console.log(`${outDir}/files-tab-tree.png`);
+
+// Enter opens the file AND hands the keyboard to the editor -- the two halves
+// of one act, which is why it is one key.
+await page.keyboard.press('j');
+await page.keyboard.press('Enter');
+await page.waitForFunction(
+  () => document.activeElement?.matches('[data-files-editor]') ?? false,
+  null,
+  { timeout: 3_000 },
+);
+check(
+  'Enter on a file row opens it and puts the caret in the editor',
+  await page.evaluate(() => document.activeElement?.matches('[data-files-editor]') ?? false),
+);
+const modeAfterEnter = await page.evaluate(
+  () => document.querySelector('[data-mode]')?.textContent ?? '',
+);
+check('and the mode chip follows the keyboard into Insert', modeAfterEnter === 'Insert',
+  `it reads ${modeAfterEnter}`);
+
+/**
+ * MOD-SHIFT-E, BOTH WAYS. One chord for one act -- "the other half of this
+ * tab" -- rather than one per direction. This is the check to break when
+ * falsifying: make either branch a no-op and the leg that used it reddens
+ * while the other stays green, which is how a half-wired toggle would
+ * otherwise ship.
+ */
+await page.keyboard.press('Control+Shift+E');
+await page.waitForFunction(
+  () => document.activeElement?.hasAttribute('data-files-row') ?? false,
+  null,
+  { timeout: 3_000 },
+).catch(() => {});
+check(
+  'Mod-Shift-e takes the keyboard from the editor to the tree',
+  (await focusedRow()) === '/work/demo/.env',
+  `focus is on ${await focusedRow()}`,
+);
+await page.keyboard.press('Control+Shift+E');
+await page.waitForFunction(
+  () => document.activeElement?.matches('[data-files-editor]') ?? false,
+  null,
+  { timeout: 3_000 },
+).catch(() => {});
+check(
+  'and Mod-Shift-e takes it straight back to the editor',
+  await page.evaluate(() => document.activeElement?.matches('[data-files-editor]') ?? false),
+);
+
+// ---------------------------------------------------------------------------
+// 6. AND ALL OF IT AT vam's NARROWEST LEGAL PANE.
+//
+// `prefs/panes.ts` floors the detail pane at `DETAIL_MIN` = 320px, and
+// `SIDEBAR_MIN + DETAIL_MIN` = 520px is the narrowest window that can draw
+// both columns at all (one pixel under it, `usePhoneViewport` hands the whole
+// window to the phone shell instead). So 520px is exactly the floor, and it
+// is the width at which a second column either fits or takes the editor's.
+//
+// The invariant asserted is NOT a pixel count -- that would be a restatement
+// of `TREE_WIDTH` rather than a check on it -- but the two properties the
+// clamp exists to hold: the tree is still wide enough to read a name in, and
+// the editor still has the larger half of what is left.
+
+await page.setViewportSize({ width: 520, height: 760 });
+await page.waitForTimeout(200);
+const narrow = await page.evaluate(() => {
+  const r = (sel) => {
+    const e = document.querySelector(sel);
+    if (e === null) return null;
+    const b = e.getBoundingClientRect();
+    return {
+      left: Math.round(b.left),
+      right: Math.round(b.right),
+      top: Math.round(b.top),
+      bottom: Math.round(b.bottom),
+      width: Math.round(b.width),
+    };
+  };
+  return {
+    pane: r('[data-action-pane]'),
+    tree: r('[data-files-tree]'),
+    editorColumn: r('[data-files-editor-column]'),
+    editor: r('[data-files-editor]'),
+    overlay: r('[data-view-overlay]'),
+  };
+});
+check(
+  'the pane really is at its 320px floor — otherwise this section proves nothing',
+  narrow.pane !== null && Math.abs(narrow.pane.width - 320) <= 2,
+  `the pane is ${narrow.pane?.width}px wide`,
+);
+check(
+  'both columns are still drawn at the floor — neither is swapped out',
+  narrow.tree !== null && narrow.tree.width > 0 && narrow.editor !== null && narrow.editor.width > 0,
+  JSON.stringify(narrow),
+);
+check(
+  'the tree is still wide enough to read a name in',
+  narrow.tree !== null && narrow.tree.width >= 118,
+  `the tree is ${narrow.tree?.width}px wide`,
+);
+check(
+  'and the editor keeps the larger half — the tree is capped, never the other way round',
+  narrow.editorColumn !== null &&
+    narrow.tree !== null &&
+    narrow.editorColumn.width >= narrow.tree.width,
+  `editor column ${narrow.editorColumn?.width}px vs tree ${narrow.tree?.width}px`,
+);
+check(
+  'and the tree still clears the view pill at the narrowest pane there is',
+  narrow.tree !== null && narrow.overlay !== null && narrow.tree.top >= narrow.overlay.bottom,
+  `tree top ${narrow.tree?.top}, pill bottom ${narrow.overlay?.bottom}`,
+);
+await page.screenshot({ path: `${outDir}/files-tab-narrow.png` });
+console.log(`${outDir}/files-tab-narrow.png`);
+await page.setViewportSize({ width: 1100, height: 800 });
+await page.waitForTimeout(200);
+
 // Leave the buffer clean so nothing is pending when the browser closes.
 await page.locator('[data-files-save]').click();
 await page
@@ -602,6 +904,45 @@ await page
     { timeout: 5_000 },
   )
   .catch(() => {});
+
+// ---------------------------------------------------------------------------
+// 7. THE PICTURE THE README USES.
+//
+// Taken LAST, from the same stub every check above ran against, so the image
+// in the prose is the layout the guards actually hold rather than a hand-posed
+// one: `docs/images/files-tab.png` is this shot, copied in. A short, plainly
+// fictional `.env` and one directory opened, because a 400-line generated
+// buffer and a single collapsed row illustrate neither half of what this tab
+// now is.
+await editor.click();
+await editor.fill('API_URL=http://localhost:8787\nLOG_LEVEL=debug\n');
+await page.locator('[data-files-save]').click();
+await page
+  .waitForFunction(
+    () => document.querySelector('[data-files-save]')?.getAttribute('data-files-save-state') === 'idle',
+    null,
+    { timeout: 5_000 },
+  )
+  .catch(() => {});
+await treeRow('/work/demo/src').click();
+await page.waitForFunction(
+  () => document.querySelectorAll('[data-files-row]').length > 2,
+  null,
+  { timeout: 3_000 },
+);
+await treeRow('/work/demo/src/lib').click();
+await page.waitForFunction(
+  () => document.querySelectorAll('[data-files-row]').length > 4,
+  null,
+  { timeout: 3_000 },
+);
+check(
+  'the README picture really shows a nested tree beside the editor',
+  (await treePaths()).length === 5 && (await editor.inputValue()).startsWith('API_URL='),
+  JSON.stringify(await treePaths()),
+);
+await page.screenshot({ path: `${outDir}/files-tab-readme.png` });
+console.log(`${outDir}/files-tab-readme.png`);
 
 await browser.close();
 

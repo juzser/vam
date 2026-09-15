@@ -50,6 +50,18 @@ const ENTRY: SessionEntry = { project: PROJECT, session: SESSION };
 const q = <T extends Element>(selector: string) => document.querySelector<T>(selector);
 const qa = <T extends Element>(selector: string) => [...document.querySelectorAll<T>(selector)];
 
+/** The tree's rows, in draw order, by the absolute path each carries. */
+const rowPaths = (): string[] =>
+  qa<HTMLElement>('[data-files-row]').map((el) => el.getAttribute('data-files-row-path') ?? '');
+
+/** One tree row, by absolute path. */
+const row = (path: string): HTMLElement | undefined =>
+  qa<HTMLElement>('[data-files-row]').find((el) => el.getAttribute('data-files-row-path') === path);
+
+/** The path the tree's keyboard cursor is on, or null. */
+const cursor = (): string | null =>
+  q<HTMLElement>('[data-files-cursor]')?.getAttribute('data-files-row-path') ?? null;
+
 const SIGNATURE = (over: Partial<FileSignature> = {}): FileSignature => ({
   size: 12,
   mtimeMs: 1,
@@ -144,8 +156,8 @@ describe('no session focused', () => {
   });
 });
 
-describe('the file list', () => {
-  it('lists what the bridge answers, dotfiles included, and lets the operator pick one', async () => {
+describe('the file tree', () => {
+  it('draws what the bridge answers as a tree, dotfiles included, directories first', async () => {
     const list = vi.fn(async (sessionId: string) => {
       expect(sessionId).toBe('s1');
       return {
@@ -158,10 +170,107 @@ describe('the file list', () => {
     draw({ files: true });
     await openFiles();
 
-    const rows = qa<HTMLElement>('[data-files-row]');
-    const labels = rows.map((row) => row.textContent);
-    expect(labels.some((text) => text?.includes('.env'))).toBe(true);
-    expect(labels.some((text) => text?.includes('src/index.ts'))).toBe(true);
+    // Two rows, not two files: `src` is one collapsed directory, and `.env`
+    // is a dotfile the tree must never hide — it is the file this whole tab
+    // exists for.
+    expect(rowPaths()).toEqual(['/work/atlas/src', '/work/atlas/.env']);
+    expect(row('/work/atlas/src')?.getAttribute('data-files-row-kind')).toBe('directory');
+    expect(row('/work/atlas/.env')?.getAttribute('data-files-row-kind')).toBe('file');
+  });
+
+  /**
+   * THE TREE AND THE EDITOR ARE BOTH ON SCREEN — the whole of what the
+   * operator asked for ("file tree nằm bên phải pane, content ở giữa"), and
+   * the property the shipped two-sub-view version could not have: it drew one
+   * OR the other. A regression here would be invisible to every refusal test
+   * in this file, because each of those only ever looks at one half.
+   */
+  it('keeps the tree on screen while a file is open in the editor', async () => {
+    withBridge({
+      list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
+      read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
+    });
+    draw({ files: true });
+    await openFiles();
+    expect(q('[data-files-tree]')).not.toBeNull();
+    await act(async () => {
+      row('/work/atlas/.env')?.click();
+      await Promise.resolve();
+    });
+    expect(q('[data-files-editor]')).not.toBeNull();
+    expect(q('[data-files-tree]')).not.toBeNull();
+    expect(row('/work/atlas/.env')).not.toBeNull();
+  });
+
+  /**
+   * MUTATION TARGET: make a directory row's `onClick` do nothing, or drop
+   * the `expanded` check out of `fileTreeRows`, and this reddens.
+   */
+  it('opens and shuts a directory on click, drawing its children only while it is open', async () => {
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/src/index.ts', '/work/atlas/src/panels/FilesTab.tsx'],
+        truncated: false,
+      }),
+    });
+    draw({ files: true });
+    await openFiles();
+    expect(rowPaths()).toEqual(['/work/atlas/src']);
+    expect(row('/work/atlas/src')?.getAttribute('data-files-row-open')).toBe('false');
+
+    await act(async () => {
+      row('/work/atlas/src')?.click();
+      await Promise.resolve();
+    });
+    expect(rowPaths()).toEqual([
+      '/work/atlas/src',
+      '/work/atlas/src/panels',
+      '/work/atlas/src/index.ts',
+    ]);
+    expect(row('/work/atlas/src')?.getAttribute('data-files-row-open')).toBe('true');
+    expect(row('/work/atlas/src')?.getAttribute('aria-expanded')).toBe('true');
+
+    await act(async () => {
+      row('/work/atlas/src')?.click();
+      await Promise.resolve();
+    });
+    expect(rowPaths()).toEqual(['/work/atlas/src']);
+  });
+
+  it('filters the tree, keeping the directories that lead to a match', async () => {
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/.env', '/work/atlas/src/panels/FilesTab.tsx'],
+        truncated: false,
+      }),
+    });
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      fireEvent.change(q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement, {
+        target: { value: 'filestab' },
+      });
+      await Promise.resolve();
+    });
+    // Opened by the filter, with nothing expanded by hand: a filter that hid
+    // its own matches behind a shut parent would have answered nothing.
+    expect(rowPaths()).toEqual([
+      '/work/atlas/src',
+      '/work/atlas/src/panels',
+      '/work/atlas/src/panels/FilesTab.tsx',
+    ]);
+    expect(q('[data-files-no-match]')).toBeNull();
+
+    await act(async () => {
+      fireEvent.change(q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement, {
+        target: { value: 'nothing-matches-this' },
+      });
+      await Promise.resolve();
+    });
+    expect(rowPaths()).toEqual([]);
+    expect(q('[data-files-no-match]')?.textContent).toContain('No match');
   });
 
   it('shows the listing refusal in the source’s own words', async () => {
@@ -376,10 +485,8 @@ describe('dirty state', () => {
     await openFiles();
 
     const openRow = async (path: string) => {
-      const rows = qa<HTMLElement>('[data-files-row-path]');
-      const row = rows.find((r) => r.getAttribute('data-files-row-path') === path);
       await act(async () => {
-        row?.click();
+        row(path)?.click();
         await Promise.resolve();
       });
     };
@@ -390,19 +497,12 @@ describe('dirty state', () => {
       fireEvent.change(envEditor, { target: { value: 'A=UNSAVED' } });
     });
 
-    // Back to the list, open the OTHER file.
-    await act(async () => {
-      q<HTMLButtonElement>('[aria-label="back to the file list"]')?.click();
-      await Promise.resolve();
-    });
+    // Straight to the OTHER file — no trip through a list that hides this
+    // one, because the tree never went away.
     await openRow('/work/atlas/README.md');
     expect(q<HTMLTextAreaElement>('[data-files-editor]')?.value).toBe('# readme');
 
     // Back to .env — the unsaved text must still be there.
-    await act(async () => {
-      q<HTMLButtonElement>('[aria-label="back to the file list"]')?.click();
-      await Promise.resolve();
-    });
     await openRow('/work/atlas/.env');
     expect(q<HTMLTextAreaElement>('[data-files-editor]')?.value).toBe('A=UNSAVED');
   });
@@ -637,9 +737,267 @@ describe('the keyboard model', () => {
     // focus-based assertion here would pass in this environment whether the
     // bug was present or not. The browser half lives in
     // `e2e/files-tab-keyboard-shots.mjs`.
+    //
+    // AND ASSERTED OVER THE WHOLE TAB, not over the textarea alone. This
+    // check used to read `firstStop.hasAttribute('data-files-editor')`, which
+    // answered the question only for the ONE element that carried a mark at
+    // the time. The tree added a filter box and a "new file" box to this
+    // hidden subtree; marking either of them — conditionally or not — would
+    // put a `display: none` stop first in document order and make `I` fail
+    // silently on every other tab, and the old assertion would have passed,
+    // because the first stop still would not have been the editor.
     const firstStop = q('[data-question-option], [data-insert-stop]');
     expect(firstStop).not.toBeNull();
-    expect(firstStop?.hasAttribute('data-files-editor')).toBe(false);
+    expect(firstStop?.closest('[data-files]')).toBeNull();
+    // The two boxes in the tree are not insert surfaces at all, showing or
+    // hidden: a native `input` is already exempt from the chord grammar by
+    // tag name, and the marks are for what the STATUS BAR must call Insert.
+    for (const box of qa('[data-files] input')) {
+      expect(box.hasAttribute('data-insert-scope')).toBe(false);
+      expect(box.hasAttribute('data-insert-stop')).toBe(false);
+    }
+  });
+});
+
+/**
+ * THE TREE'S OWN KEYBOARD.
+ *
+ * Every chord here is wired in `FilesTab.tsx` and decided in
+ * `files-tree.ts`; `test/panels/files-tree.test.ts` proves the DECISIONS and
+ * this proves the WIRING — that a real keystroke on a real row reaches them
+ * and that what comes back actually moves focus, opens a file or redraws the
+ * tree. Both halves are needed: a resolver nothing calls is as dead as a
+ * handler that resolves nothing.
+ */
+describe('walking the tree from the keyboard', () => {
+  const TREE = {
+    list: async () => ({
+      root: '/work/atlas',
+      files: ['/work/atlas/.env', '/work/atlas/src/index.ts'],
+      truncated: false,
+    }),
+    read: async (path: string) => ({
+      content: path.endsWith('.env') ? 'A=1' : 'export {}',
+      isBinary: false,
+      signature: SIGNATURE(),
+    }),
+  };
+
+  const openTree = async () => {
+    withBridge(TREE);
+    draw({ files: true });
+    await openFiles();
+  };
+
+  /** A bare key on whatever row the cursor is on. Returns `defaultPrevented`. */
+  const press = async (key: string, init: KeyboardEventInit = {}): Promise<boolean> => {
+    const target = (q<HTMLElement>('[data-files-cursor]') ??
+      q<HTMLElement>('[role="tree"]')) as HTMLElement;
+    const event = new KeyboardEvent('keydown', {
+      key,
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+    await act(async () => {
+      target.dispatchEvent(event);
+      await Promise.resolve();
+    });
+    return event.defaultPrevented;
+  };
+
+  it('starts with the cursor on the first row', async () => {
+    await openTree();
+    expect(cursor()).toBe('/work/atlas/src');
+  });
+
+  it('j and k walk the rows, stopping at the ends', async () => {
+    await openTree();
+    await press('j');
+    expect(cursor()).toBe('/work/atlas/.env');
+    await press('j');
+    expect(cursor()).toBe('/work/atlas/.env');
+    await press('k');
+    expect(cursor()).toBe('/work/atlas/src');
+    await press('k');
+    expect(cursor()).toBe('/work/atlas/src');
+  });
+
+  /**
+   * MUTATION TARGET: drop the `expand`/`collapse` cases out of
+   * `onTreeKeyDown`, or make `resolveTreeKey` answer `null` for `l`/`h` on a
+   * directory, and this reddens.
+   */
+  it('l opens the directory under the cursor and h shuts it again', async () => {
+    await openTree();
+    await press('l');
+    expect(rowPaths()).toEqual(['/work/atlas/src', '/work/atlas/src/index.ts', '/work/atlas/.env']);
+    await press('h');
+    expect(rowPaths()).toEqual(['/work/atlas/src', '/work/atlas/.env']);
+  });
+
+  it('l steps into a directory that is already open, and h steps back out', async () => {
+    await openTree();
+    await press('l'); // open src
+    await press('l'); // step into it
+    expect(cursor()).toBe('/work/atlas/src/index.ts');
+    await press('h'); // back out to the parent
+    expect(cursor()).toBe('/work/atlas/src');
+  });
+
+  it('l on a file opens it in the editor without taking the keyboard off the tree', async () => {
+    await openTree();
+    await press('j'); // onto .env
+    await press('l');
+    expect(q<HTMLTextAreaElement>('[data-files-editor]')?.value).toBe('A=1');
+    expect(document.activeElement?.getAttribute('data-files-row-path')).toBe('/work/atlas/.env');
+  });
+
+  it('Enter opens the file AND puts the caret in the editor', async () => {
+    await openTree();
+    await press('j');
+    await press('Enter');
+    expect(q<HTMLTextAreaElement>('[data-files-editor]')?.value).toBe('A=1');
+    expect(document.activeElement).toBe(q('[data-files-editor]'));
+  });
+
+  /**
+   * MUTATION TARGET: make the `Mod-Shift-e` branch in either `onEditorKeyDown`
+   * or `onTreeKeyDown` a no-op and this reddens — in one direction each.
+   */
+  it('Mod-Shift-e moves the keyboard from the editor to the tree, and back again', async () => {
+    await openTree();
+    await press('j');
+    await press('Enter');
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(editor);
+
+    fireEvent.keyDown(editor, { key: 'e', metaKey: true, shiftKey: true });
+    expect(document.activeElement?.getAttribute('data-files-row-path')).toBe('/work/atlas/.env');
+
+    fireEvent.keyDown(document.activeElement as HTMLElement, {
+      key: 'e',
+      metaKey: true,
+      shiftKey: true,
+    });
+    expect(document.activeElement).toBe(q('[data-files-editor]'));
+  });
+
+  it('Mod-Shift-e refuses out loud from the tree when no file is open', async () => {
+    await openTree();
+    const cursorRow = q<HTMLElement>('[data-files-cursor]') as HTMLElement;
+    cursorRow.focus();
+    fireEvent.keyDown(cursorRow, { key: 'e', metaKey: true, shiftKey: true });
+    expect(q('[data-files-note]')?.textContent).toContain('no file is open');
+  });
+
+  it('h at the top of the tree refuses out loud rather than doing nothing', async () => {
+    await openTree();
+    await press('j'); // .env, a top-level file
+    expect(await press('h')).toBe(true);
+    expect(q('[data-files-note]')?.textContent).toMatch(/top of the tree/i);
+    // And the refusal goes away the moment something does act.
+    await press('k');
+    expect(q('[data-files-note]')).toBeNull();
+  });
+
+  it('/ puts the caret in the filter box', async () => {
+    await openTree();
+    await press('/');
+    expect(document.activeElement).toBe(q('[data-files-filter]'));
+  });
+
+  it('Enter in the filter box hands the keyboard to the first matching row', async () => {
+    await openTree();
+    const box = q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(box, { target: { value: 'env' } });
+      await Promise.resolve();
+    });
+    box.focus();
+    await act(async () => {
+      fireEvent.keyDown(box, { key: 'Enter' });
+      await Promise.resolve();
+    });
+    expect(document.activeElement?.getAttribute('data-files-row-path')).toBe('/work/atlas/.env');
+  });
+
+  it('Escape hands the keyboard back to Select without leaving the tree behind', async () => {
+    await openTree();
+    const cursorRow = q<HTMLElement>('[data-files-cursor]') as HTMLElement;
+    cursorRow.focus();
+    fireEvent.keyDown(cursorRow, { key: 'Escape' });
+    expect(document.activeElement).not.toBe(cursorRow);
+    expect(q('[data-files-tree]')).not.toBeNull();
+  });
+
+  /**
+   * THE HALF THAT KEEPS THE APP'S OWN GRAMMAR WORKING. `Canvas.tsx`'s window
+   * listener stands down for a key the pane has already answered
+   * (`event.defaultPrevented`) and for nothing else — so the tree must claim
+   * exactly what it handles and leave the rest alone, or `Alt-<digit>`,
+   * `Mod-k` and `I` would all go dead with the keyboard in here.
+   */
+  it('claims the keys it answers and leaves every other key to the grammar', async () => {
+    await openTree();
+    for (const key of ['j', 'k', 'l', 'h', 'Enter', '/']) {
+      expect(await press(key), `${key} should be claimed`).toBe(true);
+    }
+    for (const key of ['x', 'i', 'G', '?']) {
+      expect(await press(key), `${key} should be left alone`).toBe(false);
+    }
+  });
+
+  /**
+   * A TREE THAT ANNOUNCES ITSELF AS ONE. A nested tree read out as a flat
+   * list of buttons is the one thing this whole change stopped it being for
+   * anyone looking at the screen, and `aria-level` is how it stops being that
+   * for anyone who is not. The role's own structural rule is checked
+   * alongside it: `role="tree"` may own only `treeitem`s and `group`s, so the
+   * notices this panel also draws ("Reading the directory…", "No match", the
+   * truncation line) live OUTSIDE it and stay real text a screen reader
+   * reaches.
+   */
+  it('announces the tree as a tree — depth, expansion and selection, with the notices outside it', async () => {
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/.env', '/work/atlas/src/panels/FilesTab.tsx'],
+        truncated: false,
+      }),
+      read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
+    });
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/src')?.click(); // open it
+      await Promise.resolve();
+    });
+
+    const tree = q<HTMLElement>('[role="tree"]');
+    expect(tree).not.toBeNull();
+    // Only treeitems inside the tree — nothing else is a child of it.
+    expect([...(tree?.children ?? [])].every((el) => el.getAttribute('role') === 'treeitem')).toBe(
+      true,
+    );
+    expect(row('/work/atlas/src')?.getAttribute('aria-level')).toBe('1');
+    expect(row('/work/atlas/src/panels')?.getAttribute('aria-level')).toBe('2');
+    expect(row('/work/atlas/src')?.getAttribute('aria-expanded')).toBe('true');
+    expect(row('/work/atlas/.env')?.hasAttribute('aria-expanded')).toBe(false);
+
+    await act(async () => {
+      row('/work/atlas/.env')?.click();
+      await Promise.resolve();
+    });
+    expect(row('/work/atlas/.env')?.getAttribute('aria-selected')).toBe('true');
+    expect(row('/work/atlas/src')?.getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('the tree is not an insert scope — bare j and k could not mean "walk" if it were', async () => {
+    await openTree();
+    expect(q('[data-files-tree] [data-insert-scope]')).toBeNull();
+    expect(q('[data-files-row][data-insert-scope]')).toBeNull();
+    expect(q('[data-files-row][data-insert-stop]')).toBeNull();
   });
 });
 
@@ -680,19 +1038,20 @@ describe('closing warns — the one exit dirty text cannot survive', () => {
     draw({ files: true });
     await openFiles();
     await act(async () => {
-      const rows = qa<HTMLElement>('[data-files-row-path]');
-      rows.find((r) => r.getAttribute('data-files-row-path')?.endsWith('.env'))?.click();
+      row('/work/atlas/.env')?.click();
       await Promise.resolve();
     });
     const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
     await act(async () => {
       fireEvent.change(editor, { target: { value: 'A=UNSAVED' } });
     });
-    // Back to the list — the dirty .env buffer is no longer the one showing.
+    // On to the OTHER file — the dirty .env buffer is no longer the one
+    // showing, and the warning is about every buffer, not the visible one.
     await act(async () => {
-      q<HTMLButtonElement>('[aria-label="back to the file list"]')?.click();
+      row('/work/atlas/README.md')?.click();
       await Promise.resolve();
     });
+    expect(q<HTMLTextAreaElement>('[data-files-editor]')?.value).toBe('# readme');
     expect(dispatchBeforeUnload()).toBe(true);
   });
 
