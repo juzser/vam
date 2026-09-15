@@ -314,7 +314,11 @@ describe('palette templates', () => {
     // screen area.
     const panes = TINTED.map((t) => templatePalette(t.id, 'dark')['--vam-pane'] as string);
     expect(new Set(panes).size).toBe(TINTED.length);
-    const flat = panes.filter((p) => deltaE(p, '#363636') < 2.3);
+    // `--vam-pane`'s own dark value, which the fourth dark pass moved from
+    // #363636 to #2d2d2d. Measured against what the stylesheet ACTUALLY
+    // paints: a template compared against a retired colour is a step away
+    // from nothing.
+    const flat = panes.filter((p) => deltaE(p, '#2d2d2d') < 2.3);
     expect(flat).toEqual([]);
   });
 

@@ -949,20 +949,31 @@ console.log(`${outDir}/list-markers-dark.png`);
 // and a guard that expects what the code now does passes on whatever the
 // code does next.
 //
-// THE CLAIM IS DIFFERENT THIS TIME, not just the numbers. The first two
-// passes were uniform-then-widened lifts and asked "did every rung move by
-// a bit". This pass pins `--vam-ground` and asks two things instead:
-// GROUND DID NOT MOVE (a uniform lift is now structurally unable to reach
-// through this file, because moving the anchor is what a uniform lift does
-// first) and EVERY SURFACE ABOVE IT WIDENED BY MORE THAN A JND, which is
-// the separation the operator's complaint was actually about.
-const GROUND_WAS = '#1c1c1c';
+// THE CLAIM IS DIFFERENT AGAIN, and the change is the point. The first two
+// passes were uniform lifts asking "did every rung move by a bit". The third
+// pinned `--vam-ground` and asked whether the rungs above it had SEPARATED.
+// The fourth -- this one -- moved the whole ladder DOWN, on the operator's
+// own ask ("cả nền cũng cần tối hơn": the ground needs to be darker too),
+// which means the third pass's two questions can no longer both be asked in
+// their old form: the anchor moved deliberately, and every surface is now
+// darker than the absolute fill the second pass recorded.
+//
+// SO THE DURABLE HALF IS KEPT AND THE DATED HALF IS RE-DERIVED. The ground is
+// still PINNED -- to where this pass put it, so accidental drift still fails
+// even though a deliberate move passed. And instead of "lighter than the
+// second pass's fill", each rung must still stand as far ABOVE THE GROUND as
+// the third pass left it: that is the separation the operator complained
+// about twice, and darkening the room is not allowed to quietly spend it.
+const GROUND_IS = '#141414';
 const GROUND_TOLERANCE = 1; // pinned to the pixel; this is rounding room, not a floor.
+/** `aboveGround`: the third pass's own ΔL* off its ground (10.27 L*). */
 const WIDENED_LADDER = [
-  { what: 'the sidebar', selector: '[data-sidebar-pane]', was: '#272727' },
-  { what: 'the detail pane', selector: '[data-action-pane]', was: '#272727' },
-  { what: 'a card on the pane', selector: '[data-question]', was: '#2e2e2e' },
+  { what: 'the sidebar', selector: '[data-sidebar-pane]', aboveGround: 12.35 },
+  { what: 'the detail pane', selector: '[data-action-pane]', aboveGround: 12.35 },
+  { what: 'a card on the pane', selector: '[data-question]', aboveGround: 17.7 },
 ];
+/** How much of that distance 8-bit rounding may eat. Not a budget to spend. */
+const ABOVE_GROUND_SLACK = 0.5;
 /** What the LIGHT theme paints on ground plus these three nodes, unmoved. */
 const LIGHT_UNMOVED = [
   'rgb(255, 255, 255)',
@@ -983,7 +994,7 @@ const groundSeen = async () =>
       step: painted ? Number((lightness(fill) - lightness(was)).toFixed(2)) : null,
       light: painted ? Number(lightness(fill).toFixed(2)) : null,
     };
-  }, { was: GROUND_WAS });
+  }, { was: GROUND_IS });
 
 const widenedSeen = async () =>
   page.evaluate(
@@ -1001,7 +1012,6 @@ const widenedSeen = async () =>
           ...rung,
           fill,
           painted,
-          step: painted ? Number((lightness(fill) - lightness(rung.was)).toFixed(2)) : null,
           light: painted ? Number(lightness(fill).toFixed(2)) : null,
         };
       });
@@ -1012,9 +1022,10 @@ const widenedSeen = async () =>
 console.log('\n=== the dark ladder, on the painted node');
 const ground = await groundSeen();
 const widened = await widenedSeen();
-console.log(`  the page behind the panes: ${GROUND_WAS} -> ${ground.fill} (L* ${ground.light}, step ${ground.step})`);
+console.log(`  the page behind the panes: ${GROUND_IS} -> ${ground.fill} (L* ${ground.light}, step ${ground.step})`);
 for (const rung of widened) {
-  console.log(`  ${rung.what}: ${rung.was} -> ${rung.fill} (L* ${rung.light}, step ${rung.step})`);
+  const above = ground.light === null || rung.light === null ? null : Number((rung.light - ground.light).toFixed(2));
+  console.log(`  ${rung.what}: ${rung.fill} (L* ${rung.light}, ${above} above ground, third pass had ${rung.aboveGround})`);
 }
 check(
   'every surface the ladder covers is drawn, and paints an opaque fill',
@@ -1023,15 +1034,19 @@ check(
 );
 if (ground.painted && widened.every((r) => r.painted)) {
   check(
-    'the page behind the panes did NOT move -- pinned, this pass, for the first time',
+    'the page behind the panes is exactly where the fourth pass pinned it',
     Math.abs(ground.step) <= GROUND_TOLERANCE,
-    `step ${ground.step} L*`,
+    `step ${ground.step} L* off ${GROUND_IS}`,
   );
-  const notWidened = widened.filter((r) => r.step < 2.3);
+  const lostGround = widened
+    .map((r) => ({ ...r, above: Number((r.light - ground.light).toFixed(2)) }))
+    .filter((r) => r.above < r.aboveGround - ABOVE_GROUND_SLACK);
   check(
-    'and every surface above it widened by more than a JND from the second pass',
-    notWidened.length === 0,
-    notWidened.map((r) => `${r.what}: ${r.was} -> ${r.fill}, ${r.step} L*`).join(' ; '),
+    'and darkening the room did not spend the separation the third pass bought',
+    lostGround.length === 0,
+    lostGround
+      .map((r) => `${r.what}: ${r.above} above ground, third pass had ${r.aboveGround}`)
+      .join(' ; '),
   );
   // AND THE ORDER SURVIVED IT. The ladder is ground < sidebar = pane < card,
   // and a lift that moved one rung past another would be a new design rather
