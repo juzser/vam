@@ -4092,8 +4092,9 @@ function CanvasInner({
        *
        * It is deliberately not `stopPropagation` on the other side. The list
        * handles some keys and not others, and the ones it does not handle
-       * (`Escape`, `H`) are exactly the ways OUT of it: swallowing everything
-       * would strand the keyboard in a list it could not leave.
+       * (`Escape`, `Mod-Shift-h`, `Mod-0`) are exactly the ways OUT of it:
+       * swallowing everything would strand the keyboard in a list it could
+       * not leave.
        */
       if (event.defaultPrevented) {
         return;
@@ -4658,14 +4659,28 @@ function CanvasInner({
           return;
         }
         case 'focusList':
-          // AND `H` / `Mod-0` ARE THE FOCUS MOVE BACK — audit F4. Setting the
-          // flag was all this used to do, so the bar read Select while a
-          // now read-only textarea still held the keyboard and the window
-          // listener's own typing guard ate every bare `j` that followed.
-          // `releaseInsert` blurs whatever is in an insert scope, which is the
-          // exit `Escape` in the composer already took and this one did not.
+          // `Mod-Shift-h` / `Mod-0` ARE THE FOCUS MOVE BACK — audit F4.
+          // Setting the flag was all this used to do, so the bar read Select
+          // while a now read-only textarea still held the keyboard and the
+          // window listener's own typing guard ate every bare `j` that
+          // followed. `releaseInsert` blurs whatever is in an insert scope,
+          // which is the exit `Escape` in the composer already took and this
+          // one did not.
           releaseInsert(document.activeElement);
           setComposing(false);
+          // AND SAID ALOUD WHEN THERE WAS NOWHERE TO COME BACK FROM. Every
+          // other navigation key in this switch refuses out loud at the edge
+          // of what it walks — `hjkl`, `gg`/`G`, `gt`/`gT` all do, and
+          // `chords.ts` states that as the house rule. This one did not:
+          // `releaseInsert` returning `false` and `setComposing(false)` being
+          // a no-op both look like success from here, so pressing it with the
+          // keyboard already on the session list did nothing and said
+          // nothing. `cursorMode` is read at the top of this handler, before
+          // this case ran anything, so it names the mode the keypress
+          // actually found.
+          if (cursorMode === 'select') {
+            setStatus('the keyboard is already on the session list');
+          }
           return;
         case 'rename':
           if (focusedEntry === null) {
@@ -4760,8 +4775,11 @@ function CanvasInner({
           // In Insert the seam is approached from the OTHER side: "widen
           // the pane I am in" (the detail pane) means "shrink the sidebar",
           // so the sign flips. In Select it is the sidebar's own edge, sign
-          // unchanged — the same `pane` state `I`/`H` already set decides
-          // which (epic.md §4.5).
+          // unchanged — the same `cursorMode` above decides which. There is
+          // no `pane` state to read it off: the mode is derived from where
+          // `document.activeElement` sits (`cursorModeAt`,
+          // `keyboard/focus-scope.ts`), the same fact `I` moves it into and
+          // `Mod-Shift-h` / `Mod-0` hand it back out of (epic.md §4.5).
           const sign = cursorMode === 'insert' ? -1 : 1;
           const step = action.delta * sign * PANE_RESIZE_STEP;
           savePrefs(setPaneWidth(prefs, 'sidebar', prefs.panes.sidebar + step));

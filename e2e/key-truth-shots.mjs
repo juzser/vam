@@ -496,6 +496,45 @@ if (composing) {
 }
 
 // ---------------------------------------------------------------------------
+// F-new. `Mod-0` / `Mod-Shift-h` WITH NOWHERE TO COME BACK FROM: the one
+// navigation key that used to differ from every neighbour above by staying
+// silent. `releaseInsert` returning `false` and `setComposing(false)` being a
+// no-op both look like success to a hand-built jsdom event, which is exactly
+// why this is here rather than only in a unit test — the status bar is real
+// DOM text, not `defaultPrevented`, so this could have been measured all
+// along and simply was not.
+await reset();
+await page.locator(`[data-session-row="${QUIET_SESSION}"]`).click();
+await settle(
+  (id) =>
+    document.querySelector('[data-row-cursor]')?.closest('[data-session-row]')
+      ?.getAttribute('data-session-row') === id,
+  QUIET_SESSION,
+  'the quiet session takes the cursor before the already-Select case starts',
+);
+const alreadySelect = await keyboardAt();
+check('the keyboard really is in Select before the key is pressed', alreadySelect.mode === 'Select');
+
+const modZero = await pressAndReadStatus(['Control+Digit0']);
+console.log('Mod-0 already in Select:', JSON.stringify(modZero.text));
+check('Mod-0 refuses aloud rather than doing nothing', modZero.text !== '', 'the bar stayed empty');
+check(
+  'and the refusal fits the cell whole',
+  modZero.text === modZero.full,
+  `drawn "${modZero.text}" vs full "${modZero.full}"`,
+);
+
+const modShiftH = await pressAndReadStatus(['Control+Shift+KeyH']);
+console.log('Mod-Shift-h already in Select:', JSON.stringify(modShiftH.text));
+check(
+  'Mod-Shift-h answers the same act, and says the same thing',
+  modShiftH.text === modZero.text,
+  `Mod-0 said "${modZero.text}", Mod-Shift-h said "${modShiftH.text}"`,
+);
+await page.screenshot({ path: `${outDir}/key-truth-focus-list-already-select.png` });
+console.log(`${outDir}/key-truth-focus-list-already-select.png`);
+
+// ---------------------------------------------------------------------------
 // THE BRACKET FAMILIES: a tab step, a pane step, and digits across panes.
 
 /** Every tab drawn, pane by pane, in the order the strips paint them. */

@@ -291,12 +291,13 @@ is hand-maintained, but not merely trusted: `test/keyboard/chords.readme.test.ts
 reads `chords.ts`'s own binding tables and this file's `Key`/`Chord` columns
 and fails `vitest run` the moment either side names something the other
 doesn't — the same source the in-app `?` sheet is generated from. `hjkl`
-move the focused node the way they always do; `Mod` means Ctrl or Cmd,
-whichever your platform uses.
+mean different things in Select and Insert — there is no node-graph left for
+them to move a cursor on, only the session list and the question card — and
+`Mod` means Ctrl or Cmd, whichever your platform uses.
 
 | Key | Action |
 |---|---|
-| `h` `j` `k` `l` | Move focus left / down / up / right |
+| `h` `j` `k` `l` | **Select:** `j`/`k` walk the session list, one row at a time, stopping at the ends; `h`/`l` cycle the active project's open tabs, a ring that wraps. **Insert:** `j`/`k` walk an open question's options; `h` returns to Select, `l` steps a multi-question call's steps |
 | `i` | Put the caret in the prompt box, aimed at the focused session |
 | `I` | Move keyboard control into the right-hand action pane |
 | `Mod-Shift-h` / `Mod-0` | Move keyboard control back to the session list. `Cmd+Shift+H` rather than `Cmd+H`, which is macOS's own Hide and is claimed by the application menu before the page ever sees it |
@@ -316,7 +317,7 @@ whichever your platform uses.
 | `/` | Search sessions |
 | `n` / `N` | Next / previous search match |
 | `p` | Reveal the focused session's project in the sidebar |
-| `Enter` | Open the focused step |
+| `Enter` | **Select:** nothing to open — the whole detail is already in the right pane, and it says so. **Insert:** marks the option under the cursor, or opens the prompt box |
 | `Mod-k` | Open the command palette |
 | `Mod-1` `Mod-2` `Mod-3` `Mod-4` `Mod-5` `Mod-6` `Mod-7` `Mod-8` `Mod-9` | Select a session tab by position, counting ACROSS every pane on screen in the order the strips draw them — the same meaning wherever the keyboard is, and picking a tab another pane holds moves the keyboard there with it. `Mod-9` is always the last one. Past nine open tabs the digits stop covering everything: that is the price of counting one list rather than one per strip, and `Mod-Shift-[` / `]` is how you reach the rest |
 | `Mod-Shift-[` / `Mod-Shift-]` | Previous / next session tab, over that same across-panes list, wrapping at both ends — the browser's own tab gesture, and it fires from inside the prompt box |
@@ -334,8 +335,8 @@ Chord prefixes — press the first key, then the second:
 | `gg` | Jump to the first session |
 | `gt` / `gT` | Next / previous project |
 | `gm` | Move the focused session's project into a folder, or out of one |
-| `yy` | Copy the focused step's commands |
-| `z0` | Reset both panes to their default widths and bring back any hidden pane |
+| `yy` | Copy this session's newest turn's proposed commands. Against a real session there usually are none yet — the factory has no event that carries one — and the chord says so ("no command to copy") rather than copying nothing |
+| `z0` | Reset both panes to their default widths |
 | `zs` / `zv` | Split the focused tab — `zs` horizontally (stacked), `zv` vertically (side by side); dragging a tab onto the detail pane does the same, and only within one project |
 | `zc` | Close the focused split — the session keeps running |
 | `zw` / `zW` | Move the keyboard to the next / previous split |
@@ -355,11 +356,11 @@ itself — zoom, tab selection, and the tab and window lifecycle:
 
 vam claims every keystroke it acts on, which is everything a page is allowed
 to do; a browser is free to act anyway on these, and for zoom and tab
-switching it does. Where one of them matters there is another way in: `H`
-reaches the session list as well as `Mod-0`, `x` closes a session as well as
-`Mod-w`, `o` starts one as well as `Mod-n`, and the tab ring is walkable with
-`zw` / `zW`. Leaving the prompt box is `Ctrl-[` — vim's own Escape, and no
-browser binds it.
+switching it does. Where one of them matters there is another way in:
+`Cmd+Shift+H` reaches the session list as well as `Mod-0`, `x` closes a
+session as well as `Mod-w`, `o` starts one as well as `Mod-n`, and the tab
+ring is walkable with `zw` / `zW`. Leaving the prompt box is `Ctrl-[` — vim's
+own Escape, and no browser binds it.
 
 This list is held against the grammar by
 `test/keyboard/browser-contested-chords.test.ts`, so a new binding that lands
