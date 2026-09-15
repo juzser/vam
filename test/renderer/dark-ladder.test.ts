@@ -86,7 +86,19 @@ const SEGMENT_ON = '--vam-segment-on';
  * `keeps the light theme exactly where it was` below and the "no two rungs
  * collapse" assertion together are what would catch.
  */
-const GROUND_PINNED = '#1c1c1c';
+/**
+ * THE GROUND MOVED, on the operator's own fourth ask -- "cả nền cũng cần tối
+ * hơn", the ground needs to be darker too -- and this constant moves with it
+ * rather than being deleted.
+ *
+ * The third pass pinned #1c1c1c and this file asserted it, for a reason worth
+ * keeping: two passes in a row had answered "flat" with a uniform lift, and a
+ * uniform lift moves the anchor first. Pinning the anchor is what made a
+ * fourth uniform lift structurally unable to pass as a fix for separation.
+ * That reasoning is about DRIFT, not about the value -- so the pin follows
+ * the deliberate move and still refuses the accidental one.
+ */
+const GROUND_PINNED = '#141414';
 
 /** The two HELD tokens, unmoved across all three passes, and why is in `styles.css`. */
 const HELD = {
@@ -135,7 +147,7 @@ describe('the dark ladder: eight surfaces, seven gaps, every one a JND', () => {
     }
   });
 
-  it('pins --vam-ground to the exact value both earlier passes left it at', () => {
+  it('pins --vam-ground to the value the fourth pass placed it at', () => {
     expect(hex(dark, '--vam-ground')).toBe(GROUND_PINNED);
   });
 

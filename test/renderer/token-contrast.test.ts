@@ -122,13 +122,20 @@ const TEXT_GROUNDS = [
   // when the operator reported black patches a second time. It carries
   // captions, key hints, provider names and every menu row in the sidebar's
   // popovers, so it owes 1.4.3 like the rest -- and it is the ground that
-  // BOUNDS its own value: at #2f2f2f `ink-quiet` measures 4.526:1 and one step
-  // further (#303030) 4.462:1, which fails — so `--vam-card` stops one rung
-  // under that ceiling rather than lifting further off the pane. The ceiling
-  // is a function of the INK and moves with it: it was #272727 while
-  // `ink-quiet` was #8d8d8d, and the second dark lift carried that ink to
-  // #969696, which is what bought the card a real step off the pane (2.95 ->
-  // 3.30 L*, `dark-lift.test.ts`).
+  // BOUNDS its own value whenever it climbs: at #2f2f2f `ink-quiet` measured
+  // 4.526:1 and one step further (#303030) 4.462:1, which fails — so while the
+  // card was climbing it stopped one rung under that ceiling rather than
+  // lifting further off the pane. The ceiling is a function of the INK and
+  // moves with it: it was #272727 while `ink-quiet` was #8d8d8d, and the
+  // second dark lift carried that ink to #969696, which is what bought the
+  // card a real step off the pane (2.95 -> 3.30 L*, `dark-lift.test.ts`).
+  //
+  // THE CARD IS NO LONGER NEAR THAT CEILING. The fourth dark pass took the
+  // whole ladder DOWN about 4 L* (`styles.css`'s own header), so at #393939
+  // the quiet inks read 5.325:1 here where they read 4.634:1 — what holds the
+  // card in place now is the ladder either side of it, not WCAG. The
+  // reasoning above is kept rather than deleted because it binds again the
+  // moment anything walks this fill back up.
   '--vam-card',
 ] as const;
 

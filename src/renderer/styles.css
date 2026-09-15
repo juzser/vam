@@ -388,9 +388,9 @@
  * time because the first two answers, however large, could not have been the
  * fix.
  *
- * SO THIS PASS DOES NOT LIFT THE ANCHOR AGAIN. `--vam-ground` does not move —
- * #1c1c1c, to the pixel, both passes' own fix to "too dark" left standing.
- * What moves is the SPACING: every one of the seven gaps between the eight
+ * SO THE THIRD PASS DID NOT LIFT THE ANCHOR AGAIN. `--vam-ground` did not
+ * move — #1c1c1c, to the pixel, both earlier passes' own fix to "too dark"
+ * left standing. What moved was the SPACING: every one of the seven gaps between the eight
  * distinct dark surfaces (`sidebar` and `pane` still share one value, by
  * design — see `--color-pane` below) is re-derived so it clears the JND with
  * real margin, 2.33 to 2.75 L*, not the bare minimum. `test/renderer/
@@ -467,8 +467,11 @@
  * cleared on the numbers it already had.
  *
  * THE REST OF THE HUES: syntax, diff and fifteen of the sixteen ANSI tones are
- * measured against `--vam-ground`, which did not move — so NONE of those
- * readings changed, and neither did the values. `--vam-rule-progress` and
+ * measured against `--vam-ground`, which the third pass did not move — so none
+ * of those readings changed THEN, and neither did the values. (The FOURTH pass
+ * did move the ground, which changed every one of those readings — all of them
+ * upward, since the surface went down and the hue did not. The values still
+ * did not need to move: see the fourth pass's own note above.) `--vam-rule-progress` and
  * `--vam-rule-out` are measured against `--vam-panel`/`--vam-pane`, which DID
  * move, and needed a one-hex nudge each to keep clearing 4.5:1 on the harder
  * of the two (`--vam-rule-in` already cleared both with room). `--vam-ansi-
@@ -483,32 +486,74 @@
  * JND, ground pinned exactly) that the old file's framing could not state.
  * `e2e/pane-colour-shots.mjs` re-measures the ladder, and the separation, as
  * PAINT.
+ *
+ * ── THE FOURTH PASS: THE WHOLE ROOM, DOWN ──────────────────────────────────
+ *
+ * Operator, after the third pass shipped: "Tối hơn là phần bậc thang tối. Cả
+ * nền cũng cần tối hơn" — the darker thing is the dark ladder, and the ground
+ * needs to be darker too. So this one moves what the third deliberately
+ * pinned, and it is NOT a fourth application of the uniform lift the header
+ * above argues against: that argument was about answering FLATNESS with a
+ * shift, and flatness is not what was asked for this time. Darkness was.
+ *
+ * EVERY RUNG DOWN BY ABOUT 4 L*, SPACING KEPT. ground 10.27 → 6.32, card
+ * 27.97 → 23.97; span 17.71 → 17.65 L*, and the seven gaps stay 2.36–2.78
+ * where they were 2.33–2.75. The separation the operator complained about
+ * twice is not spent to buy the darkness — `pane-colour-shots.mjs` asserts
+ * exactly that, as paint, by holding each rung's distance ABOVE THE GROUND to
+ * what the third pass left it.
+ *
+ * WHAT THIS BUYS BEYOND THE LOOK: every ink gets MORE contrast, not less,
+ * because the surfaces under it went down and the inks did not. The quiet
+ * inks read 5.325:1 on the card where they read 4.634:1 — so `--vam-card` is
+ * no longer bounded by WCAG at all (see its own comment), and the syntax,
+ * diff and ANSI tones measured against the ground all improve by roughly 8%
+ * (e.g. `--vam-ansi-black` 4.315:1 → 4.665:1). Nothing that was passing a
+ * floor moved closer to it; `token-contrast.test.ts` recomputes all 63 pairs.
+ *
+ * WHAT MOVED THAT IS NOT A SURFACE: `--vam-in-bubble` and `--vam-segment-on`,
+ * both of which are DERIVED FROM a surface that moved and would otherwise
+ * have been left behind by it — see their own comments. The light block did
+ * not move; `dark-ladder.test.ts` still pins all 24 of its values.
  */
 :root {
-  /* PINNED — see the block header. Both earlier fixes to "too dark" stand;
-     this pass does not touch the deepest surface a third time. Everything
-     below is placed relative to THIS value, unmoved, not to a floor that
-     rises with it. */
-  --vam-ground: #1c1c1c;
-  --vam-sunken: #212121;
+  /* MOVED, on the operator's fourth ask -- "cả nền cũng cần tối hơn", the
+     ground needs to be darker too. The third pass pinned this at #1c1c1c and
+     placed every rung above it; this one takes the WHOLE ladder down by about
+     4 L* and keeps the spacing, so the room is darker without any rung giving
+     back the separation the third pass bought. 10.27 -> 6.32 L*.
+     `dark-ladder.test.ts` pins the new value for the same reason it pinned
+     the old one: a deliberate move is not drift, and drift still fails. */
+  --vam-ground: #141414;
+  --vam-sunken: #191919;
   /* A dialog's own floor, and the fill the modal scrim is judged against:
-     9.60 L* above `ground`, where it was 3.93. It is also the rung a settings
-     option recesses out of (`sunken`, 7.13 L* below it, where it was 2.93). */
-  --vam-panel: #303030;
-  /* 2.70 L* above the pane and the sidebar, where it was 2.36 -- clearing the
-     just-noticeable difference with more room than before, which is the same
-     as saying a hovered row, a tooltip and an inline code chip stay visibly
-     raised rather than only barely so. */
-  --vam-raised: #3c3c3c;
-  --vam-header: #2b2b2b;
-  --vam-well: #262626;
-  --vam-sidebar: #363636;
+     9.80 L* above `ground` (9.60 before the room was darkened, 3.93 before the
+     third pass). It is also the rung a settings option recesses out of
+     (`sunken`, 7.36 L* below it, where it was 7.13, and 2.93 before that). */
+  --vam-panel: #282828;
+  /* 2.78 L* above the pane and the sidebar -- 2.70 before the room was
+     darkened, 2.36 before the third pass -- clearing the just-noticeable
+     difference with more room than before, which is the same as saying a
+     hovered row, a tooltip and an inline code chip stay visibly raised rather
+     than only barely so. The darker pass did not spend this: the gap grew by
+     0.08 L*, because the same 8-bit steps are worth slightly more in L* lower
+     down the curve. */
+  --vam-raised: #333333;
+  --vam-header: #232323;
+  --vam-well: #1e1e1e;
+  --vam-sidebar: #2d2d2d;
   /* The same value as `sidebar`, deliberately: see `--color-pane` above. */
-  --vam-pane: #363636;
+  --vam-pane: #2d2d2d;
 
-  /* 1.202:1 and 5.36 L* above the pane and the sidebar, where `panel` used to
-     paint 1.028:1 BELOW them before the first lift. #424242 IS THE CEILING and
-     the reason this is not lighter still: `--vam-ink-quiet` / `--vam-ink-faint`
+  /* 1.192:1 and 5.50 L* above the pane and the sidebar (1.202:1 / 5.36 L*
+     before the room was darkened), where `panel` used to paint 1.028:1 BELOW
+     them before the first lift. THE CEILING BELOW IS NO LONGER WHAT BINDS
+     THIS VALUE, and that is worth saying rather than deleting: the whole
+     ladder came down about 4 L*, so the quiet inks now read 5.325:1 here
+     instead of 4.634:1, with the floor a long way off. What holds the card
+     where it is now is the LADDER -- a JND from `raised` below and from
+     `segment-on` above -- not WCAG. The reasoning is kept because it is what
+     binds again the moment anything walks this fill back up: `--vam-ink-quiet` / `--vam-ink-faint`
      measure 4.634:1 there and would drop under 4.5 one step further, so a
      brighter card fill would put every caption drawn on one under WCAG 1.4.3.
      Checked by `test/renderer/token-contrast.test.ts`, which counts `card`
@@ -521,39 +566,48 @@
      rather than by exactly matching the old reading: an exact match
      (#aaaaaa) would have cleared this fill by 0.03, indistinguishable from a
      future regression. */
-  --vam-card: #424242;
+  --vam-card: #393939;
 
   /* THE IN BUBBLE, DARK. RE-DERIVED AGAIN, not carried through -- and this
      round drops what every earlier one kept: the hue. Operator: "drop the
      teal for a grey that contrasts with the panel background", read as
-     `--vam-pane` (#363636), the surface this bubble is actually drawn on --
+     `--vam-pane` (#2d2d2d since the room was darkened, #363636 when this was
+     first derived), the surface this bubble is actually drawn on --
      see `--color-in-bubble` above for why that is not `--vam-panel`, a
      different, lower token.
 
      LIGHTNESS ONLY, ONE MORE TIME, but onto a straight grey rather than onto
      the teal: `a*`/`b*` go to zero, `L*` is untouched (34.24 -> 34.03, an
-     8-bit rounding difference, not a move). The ratio against the pane holds
-     inside rounding of what it read as a teal -- 1.499:1, where it was
-     1.510 -- still clear of the palette's 1.4 floor, and ΔE now reads as a
-     pure lightness step, 11.41 against a 6.24 floor and against the "further
-     from the pane than the fill it replaced" floor `surface-elevation.
-     test.ts` derives from `--vam-raised`'s own ΔE off the pane -- both
-     bought with `L*` alone now instead of with hue.
+     8-bit rounding difference, not a move).
+
+     IT CAME DOWN WITH THE ROOM, #505050 -> #464646 (34.03 -> 29.72 L*), which
+     is the only way it could keep meaning what it was derived to mean. Held
+     at #505050 over a pane that dropped to #2d2d2d it would have read 1.708:1
+     -- not brighter by design, just left behind by the surface it is measured
+     against, and conspicuously so on the one element the operator reads most.
+     At #464646 it reads 1.459:1, still clear of the palette's 1.4 floor, and
+     ΔE stays a pure lightness step, 11.25 against a 6.24 floor and against
+     the "further from the pane than the fill it replaced" floor
+     `surface-elevation.test.ts` derives from `--vam-raised`'s own ΔE off the
+     pane -- both still bought with `L*` alone instead of with hue.
 
      THE TEXT ON IT MOVED WITH IT (see `DetailPanel.tsx`): the bubble now
      carries `--vam-ink`, not `--vam-ink-dim`, at the operator's own separate
-     ask for a lighter prompt -- 6.887:1 here, where `--vam-ink-dim` read
-     4.782. `--vam-ink-faint` still measures under floor on this fill
-     (3.718:1) and MUST NOT be painted in the bubble -- `e2e/pane-colour-
+     ask for a lighter prompt -- 8.062:1 on the darkened fill, where it read
+     6.887:1 before and where `--vam-ink-dim` read 4.782. `--vam-ink-faint`
+     still measures under floor here (4.352:1, up from 3.718:1 and still short
+     of 4.5) and MUST NOT be painted in the bubble -- `e2e/pane-colour-
      shots.mjs` reads the ink the bubble is really drawn with, so an edit
      that reaches for a quieter grey still fails there. */
-  --vam-in-bubble: #505050;
+  --vam-in-bubble: #464646;
 
-  /* 3.48 L* above `--vam-card`, where it was 4.58 -- narrower than before in
-     absolute terms but still comfortably clear of the JND, and still the
-     lightest surface on the ladder: nothing that reads `--vam-card` as a
-     ceiling reads this one. */
-  --vam-segment-on: #4a4a4a;
+  /* 3.56 L* above `--vam-card` (3.48 before the room was darkened, 4.58
+     before the third pass) -- still comfortably clear of the JND, and still
+     the lightest surface on the ladder: nothing that reads `--vam-card` as a
+     ceiling reads this one. It came down with the ladder rather than staying
+     put, which would have left the selected segment floating 7.49 L* clear of
+     a card it is meant to sit one step above. */
+  --vam-segment-on: #414141;
 
   /* DERIVED FROM THE STACK'S TOP, not from its reading on the pane, and it is
      the one line weight where those two answers differ -- see `--vam-card`
