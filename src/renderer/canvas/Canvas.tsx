@@ -219,6 +219,25 @@ export function compactTokens(n: number): string {
 const STATUS_MAX_CHARS = 72;
 
 /**
+ * How long the SAME prompt to the SAME session is treated as a repeat.
+ *
+ * Measured against what it has to beat: the in-flight guard
+ * (`writingBySession`) already covers a second Return that lands while the
+ * first send is still going, and that send is two tmux spawns -- about ten
+ * milliseconds. So the hole this closes is a second Return that arrives after
+ * the first finished and before the operator could possibly have decided to
+ * ask the same thing again.
+ *
+ * 1.5 seconds is chosen against a person, not a machine: a deliberate
+ * re-send -- "it did not answer, try again" -- takes a beat of reading first,
+ * and nobody re-reads a pane and re-presses Return inside a second and a half.
+ * Long enough to catch a stutter, a stuck key, a trackpad double-fire; short
+ * enough that a genuine repeat is never refused for more than one attempt,
+ * and the refusal says what happened either way.
+ */
+const REPEAT_WINDOW_MS = 1_500;
+
+/**
  * A status message shortened for the bar, never for the log.
  *
  * `describeFailure` renders failures as `code: message` and the codes are
@@ -1460,6 +1479,35 @@ function CanvasInner({
    */
   const [pending, setPending] = useState<readonly PendingPrompt[]>([]);
   const pendingSeq = useRef(0);
+  /**
+   * THE LAST PROMPT EACH SESSION WAS SENT, and when -- the record that stops
+   * one prompt from arriving twice.
+   *
+   * `writingBySession` above already refuses a second send while one is IN
+   * FLIGHT, and that is not enough: the send is a couple of tmux spawns and
+   * resolves in about ten milliseconds, so two Returns a tenth of a second
+   * apart both pass it and the agent receives the same words twice. The
+   * operator reported exactly that.
+   *
+   * A REPEAT IS REFUSED, NOT DELAYED. A true debounce would hold every send
+   * back by the window, which makes Return feel slow for the common case
+   * where nothing is duplicated at all -- and would still have to decide what
+   * to do with the second prompt. This decides that directly: the SAME text,
+   * to the SAME session, inside `REPEAT_WINDOW_MS`, is the one case where
+   * vam can be confident the operator did not mean it twice.
+   *
+   * KEYED BY TEXT, so it can only ever stop a repeat. A different prompt sent
+   * a moment later is a person typing fast, not a double-fire, and it goes
+   * through untouched -- which is the failure a blanket debounce would have.
+   *
+   * WRITTEN ONLY WHERE THE SEND LANDED, never at the attempt. A prompt that
+   * was refused -- an unwritable source, a tmux spawn that threw -- never
+   * reached the agent, so the very next thing the operator does is press
+   * Return on the same words again, and that is a first delivery, not a
+   * second. Recording at the attempt would turn every failure into a 1.5s
+   * lockout of its own retry.
+   */
+  const lastSent = useRef(new Map<string, { readonly text: string; readonly at: number }>());
   // Reconciled against `sourceModel`, which is the model WITHOUT the paint:
   // counting a painted turn as a real one would retire the paint on the render
   // that drew it.
@@ -3417,6 +3465,21 @@ function CanvasInner({
         return;
       }
       const text = entryDraft;
+      // SAID ALOUD, never swallowed. A prompt that vanishes with no word is
+      // indistinguishable from a prompt that was sent, which is the confusion
+      // this whole guard exists to end -- the operator has to be able to tell
+      // "vam ignored my second Return" from "the agent got it twice".
+      const previous = lastSent.current.get(entry.session.id);
+      const repeated =
+        previous !== undefined &&
+        previous.text === text &&
+        Date.now() - previous.at < REPEAT_WINDOW_MS;
+      if (repeated) {
+        setStatus('the same prompt was just sent — ignored, so the agent does not get it twice');
+        setDraftFor(entry.session.id, '');
+        setComposingFor(entry.session.id, false);
+        return;
+      }
       /**
        * Draw the turn now and empty the composer, so the pane reacts to the key
        * rather than to the round trip (`optimistic.ts`). `live` is the source's
@@ -3466,6 +3529,7 @@ function CanvasInner({
               ? `sent into the running session of ${entry.session.title} — it will answer there`
               : `recorded in the log of ${entry.session.title} — recorded, not sent to the agent`,
           );
+          lastSent.current.set(entry.session.id, { text, at: Date.now() });
           source.onWrote();
         } catch (cause) {
           rollBack(painted);
@@ -3483,6 +3547,7 @@ function CanvasInner({
         setStatus(
           `recorded in the log of ${entry.session.title} — recorded, not sent to the agent`,
         );
+        lastSent.current.set(entry.session.id, { text, at: Date.now() });
         source.onWrote();
       } catch (cause) {
         rollBack(painted);
