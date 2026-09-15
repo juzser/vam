@@ -237,6 +237,28 @@ describe('how a paint dies when its words never come back', () => {
     expect(reconcile(model, pending, SENT_AT + PAINT_LIFETIME_MS)).toEqual([]);
   });
 
+  it('retires an expired paint on the evidence when there is evidence', () => {
+    // A paint that is BOTH expired and overtaken must be retired as overtaken,
+    // so that the turn it was overtaken by is spent. Let the clock take it
+    // first and that turn is left unspent for the paint behind it to be
+    // retired by -- one real turn retiring two paints, which is the duplicate
+    // both budgets exist to prevent. Only a paint in each state at once can
+    // tell the two orderings apart.
+    const pending = [
+      pendingOf({ id: 'vam-pending-1', input: 'stale', seenAll: 0, sentAt: SENT_AT }),
+      pendingOf({
+        id: 'vam-pending-2',
+        input: 'just sent',
+        seenAll: 0,
+        sentAt: SENT_AT + PAINT_LIFETIME_MS,
+      }),
+    ];
+    const after = modelOf(session('a1', { decisions: [decision('real-1', 'mangled')] }));
+    expect(reconcile(after, pending, SENT_AT + PAINT_LIFETIME_MS).map((p) => p.id)).toEqual([
+      'vam-pending-2',
+    ]);
+  });
+
   it('expires each paint on its own send time, not on the oldest', () => {
     const model = modelOf(session('a1'));
     const pending = [
@@ -502,6 +524,65 @@ describe('a paint whose words the source never reports back', () => {
     expect(outBlock()).not.toContain('ended without an answer');
   });
 
+  /**
+   * BOTH BASELINES ARE READ FROM THE MODEL, and a session that already has
+   * turns is the only place where that can be seen. Send into an empty one --
+   * which is what every other test here does -- and both baselines are zero
+   * whether they were measured or assumed, so a `seenAll: 0` or a `seen: 0`
+   * passes the whole suite while retiring every paint on the first reconcile,
+   * before the operator's words have been on screen for a frame. That is the
+   * OTHER direction of this fix's cost, and it is the expensive one.
+   */
+  it('keeps a paint sent into a session that already had turns', async () => {
+    const { release, done } = gate();
+    const source = gatedSource(true, async () => {
+      await done;
+    });
+    const busy = modelOf(
+      session('a1', {
+        title: 'nightly sweep',
+        decisions: [decision('d1', 'an older prompt', 'an older answer')],
+      }),
+    );
+    render(<Canvas model={busy} source={source} />);
+    sendWithoutWaiting('ship it');
+    await act(async () => {});
+
+    // The turn the session already had, plus vam's paint -- not the paint
+    // retired as "overtaken" by a turn that arrived long before the send.
+    expect(turnsRead()).toBe(2);
+
+    await act(async () => {
+      release();
+      await done;
+    });
+  });
+
+  it('keeps a paint resending words the session has heard before', async () => {
+    const { release, done } = gate();
+    const source = gatedSource(true, async () => {
+      await done;
+    });
+    const before = modelOf(
+      session('a1', {
+        title: 'nightly sweep',
+        decisions: [decision('d1', 'ship it', 'shipped')],
+      }),
+    );
+    render(<Canvas model={before} source={source} />);
+    sendWithoutWaiting('ship it');
+    await act(async () => {});
+
+    // Matched against the OLD turn rather than against a baseline, this paint
+    // is retired the instant it goes up and the operator sees nothing happen.
+    expect(turnsRead()).toBe(2);
+
+    await act(async () => {
+      release();
+      await done;
+    });
+  });
+
   it('takes the paint down on its own timer, with no new model from the source', async () => {
     // The expiry is the backstop for a source that reports NOTHING back, and
     // `load()` keeps the last good model when it fails -- so a source that has
@@ -523,6 +604,36 @@ describe('a paint whose words the source never reports back', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('does not name the last turn’s tool call as this paint’s working', async () => {
+    const { release, done } = gate();
+    const source = gatedSource(true, async () => {
+      await done;
+    });
+    const working = modelOf(
+      session('a1', {
+        title: 'nightly sweep',
+        status: 'running',
+        activity: 'Bash: run the tests',
+        decisions: [decision('d1', 'an older prompt', 'an older answer')],
+      }),
+    );
+    render(<Canvas model={working} source={source} />);
+    sendWithoutWaiting('ship it');
+    await act(async () => {});
+
+    // `activity` is the newest tool call the SOURCE read, and that reading was
+    // taken before this prompt was sent. Drawn on the paint it names the
+    // agent's previous work as this turn's working -- the same unsupported
+    // claim as "ended without an answer", one line up.
+    expect(runningWord()?.textContent).not.toContain('Bash: run the tests');
+    expect(runningWord()?.textContent).toContain('waiting for the source to report this turn back');
+
+    await act(async () => {
+      release();
+      await done;
+    });
   });
 
   it('says nothing about the turn having ended while the paint is still up', async () => {

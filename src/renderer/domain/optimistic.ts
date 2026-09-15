@@ -205,9 +205,13 @@ export function reconcile(
       beyond.set(one.sessionId, all - 1);
       return false;
     }
+    // MEMOISATION, NOT ACCOUNTING -- stated because the two writes above are
+    // accounting and look identical. Nothing was consumed by a paint that
+    // reaches here: it was not matched and it was not overtaken, so neither
+    // budget moves and this only saves the next paint of the same session a
+    // walk of the model. Deleting it changes no verdict, which is why no test
+    // can be written for it.
     beyond.set(one.sessionId, all);
-    // Nothing was consumed here: an expired paint was not overtaken by any
-    // turn, so neither budget moves.
     return now - one.sentAt < PAINT_LIFETIME_MS;
   });
 }
