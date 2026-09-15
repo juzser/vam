@@ -78,6 +78,57 @@ export const VAM_SESSION_PREFIX = 'vam-';
  */
 export const VAM_PROJECT_OPTION = '@vam-project';
 
+/**
+ * THE SECOND PAIRING, AND WHAT IT ANSWERS THAT THE FIRST CANNOT.
+ *
+ * `VAM_PROJECT_OPTION` names which PROJECT a tmux session belongs to; it
+ * cannot name which ROW, because two sessions vam started for one project
+ * read back identically -- `paneForRow` (`reply.ts`) then has nothing but a
+ * COUNT to go on: exactly one live row in the project, exactly one tagged
+ * session. Two live sessions in one cwd, neither of which has published a
+ * `tmux` field in `~/.claude/sessions/<pid>.json` yet, fail both counts and
+ * `paneForRow` answers `null` for both -- correctly, since nothing in the
+ * project scheme says which row is in which pane.
+ *
+ * This option answers the sharper question directly, WITHOUT a count. At
+ * creation, `createVamSession` (`tmux/spawn.ts`) asks tmux -- in the SAME
+ * `new-session` call, via `-P -F '#{pane_pid}'` -- for the pid of the process
+ * it just exec'd into the pane, and records it here. `LiveAgent.pid`
+ * (`agents.ts`) is the SAME OS pid `claude agents --json` reports for that
+ * exact row, so a tagged session whose recorded pid equals a row's pid is
+ * that row's pane, full stop, however many other rows or tagged sessions
+ * share the project -- a pid names at most one LIVE process at any moment,
+ * which is exactly the sharpness `agents.ts:20-33` demands of anything that
+ * stands in for a row's `key`.
+ *
+ * WHY THE TMUX SESSION'S LIFETIME MAKES THIS SAFE FOREVER, not merely at the
+ * moment it is written. `newSessionArgv` spreads the command across tmux's own
+ * argv rather than running it through a shell (see the module note), so the
+ * pane holds exactly one process for its whole life: when that process exits,
+ * tmux tears the pane down and, with no other window or pane left, the
+ * session with it (`remain-on-exit` is off, tmux's default). MEASURED, on
+ * tmux 3.7b over a private `-L` socket: a session created to run a
+ * short-lived command answered `no server running` the instant that command
+ * exited. So a LIVE tmux session's `@vam-pid` can never outlive the one
+ * process it was recorded for, and a pid the OS later recycles onto an
+ * unrelated process cannot forge a match here -- the tmux session that would
+ * have to carry the stale tag is already gone.
+ *
+ * A session vam did not start can never carry this option at all: every name
+ * this file's callers see has already passed `isVamSession`'s prefix filter
+ * (`listVamSessions`, `spawn.ts`), so the operator's own sessions -- including
+ * one they happen to have running `claude` in, in their own tmux, under a name
+ * that is not `vam-*` -- are never in `sessions` for this to match against.
+ *
+ * A BONUS PROOF, NOT THE PRIMARY ONE. A session the project tag already
+ * records is still findable, repliable and closeable by the older, per-project
+ * fallback with or without this: `createVamSession` degrades silently, not
+ * with a refusal, when the pid cannot be read or recorded (`spawn.ts`) --
+ * exactly how an older Claude Code that never publishes a `tmux` field is
+ * already treated, not an exception to it.
+ */
+export const VAM_PID_OPTION = '@vam-pid';
+
 /** Characters tmux itself dislikes in a session name (`.` and `:` are targets). */
 const UNSAFE_NAME = /[^A-Za-z0-9_-]+/g;
 
@@ -138,6 +189,13 @@ const paneTarget = (name: string): string => `=${name}:`;
  * because whether tmux consumes one before a `shell-command` is not something
  * vam can verify without creating a real session on the operator's server, and
  * a guess there would break every session vam starts.
+ *
+ * `-P -F PANE_PID_FORMAT` COSTS NOTHING EXTRA, and answers a question
+ * `createVamSession` would otherwise have no cheap way to ask: the pid of the
+ * process tmux just exec'd into the pane, printed on the SAME call that
+ * creates it. See `VAM_PID_OPTION` for why that pid is what closes the
+ * "two live sessions, one project" defect, and `PANE_PID_FORMAT` for the
+ * measurement behind it.
  */
 export function newSessionArgv(input: {
   name: string;
@@ -151,8 +209,44 @@ export function newSessionArgv(input: {
   if (program.startsWith('-')) {
     return failCommand(`tmux would read \`${program}\` as an option, not as the program to run`);
   }
-  return ['new-session', '-d', '-s', input.name, '-c', input.cwd, ...input.command];
+  return [
+    'new-session',
+    '-d',
+    '-P',
+    '-F',
+    PANE_PID_FORMAT,
+    '-s',
+    input.name,
+    '-c',
+    input.cwd,
+    ...input.command,
+  ];
 }
+
+/**
+ * What `-P -F` prints about the pane `new-session` just created: the pid of
+ * the process tmux exec'd into it.
+ *
+ * WHY AT CREATION, AND NOT LOOKED UP LATER. `create-session.ts`'s own header
+ * says vam does not know the Claude session id at this point -- `claude`
+ * mints it after it starts, well after this call returns. This format needs
+ * none of that: tmux knows the pid of the child it just forked before that
+ * child has done anything at all, so there is no window to wait out and
+ * nothing to guess in the meantime.
+ *
+ * MEASURED, on tmux 3.7b over a private `-L` socket: `new-session -d -P -F
+ * '#{pane_pid}' -s name -c dir sleep 100` printed exactly the pid `ps`
+ * reported for the `sleep` process the trailing argv spread into the pane --
+ * the SAME identity `agents.ts` names `pid` on a `LiveAgent`, since both name
+ * the OS process the command line handed to `exec`, and this file's own
+ * `newSessionArgv` note already establishes that the command reaches tmux
+ * unwrapped, spread across argv rather than run through a shell, so there is
+ * no intervening shell pid to be confused with. The same socket confirmed the
+ * OTHER half of the safety argument: once that process exited, the whole
+ * session -- and with it, any `@vam-pid` recorded on it -- was gone; `list-
+ * sessions` answered "no server running" (see `VAM_PID_OPTION`).
+ */
+const PANE_PID_FORMAT = '#{pane_pid}';
 
 const failCommand = (why: string): never => {
   throw new Error(`vam will not build a tmux new-session argv: ${why}`);
@@ -416,18 +510,22 @@ export function sendEscapeArgv(name: string): readonly string[] {
 }
 
 /**
- * Every session on the server: the project vam recorded on it, a TAB, and the
- * session name. The filtering to vam's own happens after the read, in
- * `spawn.ts`: tmux's `-f` filter language is another string to get wrong, and
- * the rows are already in hand.
+ * Every session on the server: the project vam recorded on it, a TAB, the pid
+ * vam recorded on it, a second TAB, and the session name. The filtering to
+ * vam's own happens after the read, in `spawn.ts`: tmux's `-f` filter language
+ * is another string to get wrong, and the rows are already in hand.
  *
- * A tab separates them because a session name cannot contain one -- tmux
- * rejects it -- and a project id is a digest (`project-id.ts`), so neither
- * field can swallow the other. An unset option arrives as an empty first
- * field, which is precisely the answer "vam did not start this one".
+ * Tabs separate them because a session name cannot contain one -- tmux rejects
+ * it -- a project id is a digest (`project-id.ts`), and a pid is digits only
+ * (`PANE_PID_FORMAT`), so no field can swallow another. An unset option
+ * arrives as an empty field, which is precisely the answer "vam did not
+ * record this" -- "did not start this one" for the project field, "an older
+ * vam, or the tag call itself failed" for the pid field (`createVamSession`
+ * degrades silently rather than refusing when that happens; see
+ * `VAM_PID_OPTION`).
  */
 export function listSessionsArgv(): readonly string[] {
-  return ['list-sessions', '-F', `#{${VAM_PROJECT_OPTION}}\t#{session_name}`];
+  return ['list-sessions', '-F', `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}`];
 }
 
 /**
@@ -442,7 +540,24 @@ export function listSessionsArgv(): readonly string[] {
  * an fnmatch to fall through to.
  */
 export function tagSessionArgv(name: string, projectId: string): readonly string[] {
-  return ['set-option', '-t', name, VAM_PROJECT_OPTION, projectId];
+  return setOptionArgv(name, VAM_PROJECT_OPTION, projectId);
+}
+
+/**
+ * Record which pid `new-session -P -F` printed for this session's pane, on
+ * the session itself -- `tagSessionArgv`'s twin, and the same bare-target
+ * argument applies: nothing vam runs between the two `set-option` calls this
+ * file's callers make at creation could rename or replace the exact name they
+ * both target, so there is still nothing for a prefix or an fnmatch to fall
+ * through to by the time this one runs.
+ */
+export function tagPidArgv(name: string, pid: string): readonly string[] {
+  return setOptionArgv(name, VAM_PID_OPTION, pid);
+}
+
+/** The one shape both tag calls share -- a bare-target `set-option`, see `tagSessionArgv`. */
+function setOptionArgv(name: string, key: string, value: string): readonly string[] {
+  return ['set-option', '-t', name, key, value];
 }
 
 /**

@@ -37,7 +37,7 @@ function runner(captures: readonly string[]) {
   const queue = [...captures];
   const run: TmuxRun = async (argv) => {
     argvs.push(argv);
-    if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t${NAME}\n`);
+    if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t\t${NAME}\n`);
     if (argv.includes('capture-pane')) return ok(queue.shift() ?? '');
     return ok('');
   };
@@ -273,7 +273,7 @@ describe('a refusal after part of the set has been committed', () => {
     let sends = 0;
     const run: TmuxRun = async (argv) => {
       argvs.push(argv);
-      if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t${NAME}\n`);
+      if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t\t${NAME}\n`);
       if (argv.includes('capture-pane')) return ok(queue.shift() ?? '');
       sends += 1;
       return sends >= nth

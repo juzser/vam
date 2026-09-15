@@ -192,3 +192,99 @@ describe('paneForRow and panes another row has claimed', () => {
     expect(paneForRow(one, [ALPHA, GAMMA], GAMMA, new Map())).toBeNull();
   });
 });
+
+/**
+ * THE DEFECT THIS TASK EXISTS FOR, reproduced directly: two live sessions in
+ * one cwd, NEITHER of which has published a `tmux` field yet -- the exact
+ * condition under which the published check answers nothing for either row
+ * and the project-tag counts below it (`here.length`, `tagged.length`) are
+ * both greater than one, so the old code answered `null` for both.
+ *
+ * `createVamSession` (`tmux/spawn.ts`) now records the pid of each pane's
+ * process on its tmux session, at creation, as `VAM_PID_OPTION`. `row.pid` is
+ * the SAME os pid `claude agents --json` reports for that row (`agents.ts`),
+ * so it resolves each row to its own pane WITHOUT counting -- see
+ * `VAM_PID_OPTION`'s own doc for the argument.
+ */
+describe('paneForRow proves a row by its OWN pid, without counting', () => {
+  const ALPHA_PID = { ...ALPHA, pid: 111 };
+  const BETA_PID = { ...BETA, pid: 222 };
+  /** The exact shape measured: two tagged sessions, two matching pids. */
+  const twoTaggedByPid: readonly TmuxSession[] = [
+    { project, pid: '111', name: 'vam-atlas-aa11bb' },
+    { project, pid: '222', name: 'vam-atlas-cc22dd' },
+  ];
+
+  it('gives each of two live, unpublished sessions its own pane by pid alone', () => {
+    // Neither row published anything (no `panes` map at all), and BOTH the
+    // live-row count and the tagged-session count are 2 -- the old fallback
+    // would refuse both. The pid tag settles it per row.
+    expect(paneForRow(twoTaggedByPid, [ALPHA_PID, BETA_PID], ALPHA_PID)).toBe('vam-atlas-aa11bb');
+    expect(paneForRow(twoTaggedByPid, [ALPHA_PID, BETA_PID], BETA_PID)).toBe('vam-atlas-cc22dd');
+  });
+
+  it('still resolves when only ONE of the two tagged sessions carries a pid', () => {
+    // The other session is untagged for pid -- an older vam, or a pid tag
+    // call that itself failed (`createVamSession` degrades silently). ALPHA
+    // is still provable; BETA falls back to the old counting rule, which
+    // still refuses with two live rows and two tagged sessions.
+    const mixed: readonly TmuxSession[] = [
+      { project, pid: '111', name: 'vam-atlas-aa11bb' },
+      { project, pid: '', name: 'vam-atlas-cc22dd' },
+    ];
+    expect(paneForRow(mixed, [ALPHA_PID, BETA_PID], ALPHA_PID)).toBe('vam-atlas-aa11bb');
+    expect(paneForRow(mixed, [ALPHA_PID, BETA_PID], BETA_PID)).toBeNull();
+  });
+
+  it('is null for a row with no pid at all -- vam did not spawn it, or the CLI reported none', () => {
+    // A `LiveAgent` with `pid: null` (an older CLI, or the field genuinely
+    // absent) has nothing to match against, and neither does a caller
+    // (`StoppableAgent`) that never had a pid to give. Falls through to the
+    // pre-existing counting rule, which refuses with two live rows present.
+    const noPid = { ...ALPHA, pid: null };
+    const noPidField = ALPHA;
+    expect(paneForRow(twoTaggedByPid, [noPid, BETA_PID], noPid)).toBeNull();
+    expect(paneForRow(twoTaggedByPid, [noPidField, BETA_PID], noPidField)).toBeNull();
+  });
+
+  it('never matches a pid tagged for a DIFFERENT project', () => {
+    // Same pid, wrong project: `row.pid` alone is not the proof, the pid
+    // AND the project both have to be this row's.
+    const elsewhere: readonly TmuxSession[] = [
+      { project: projectIdOf('/work/beacon'), pid: '111', name: 'vam-beacon-zz00zz' },
+    ];
+    expect(paneForRow(elsewhere, [ALPHA_PID], ALPHA_PID)).toBeNull();
+  });
+
+  it('does not answer for a session vam did not start -- pid tags never reach that far', () => {
+    // `sessions` here is exactly what `listVamSessions` would hand back: only
+    // vam's own, prefix-filtered names ever arrive as a `TmuxSession` at all
+    // (`spawn.ts`). A `pid` coincidence with something outside that list can
+    // never occur because nothing outside it is ever compared.
+    expect(paneForRow([], [ALPHA_PID], ALPHA_PID)).toBeNull();
+  });
+
+  it('does not resolve a pid match to a pane another row has already published', () => {
+    // Defense in depth: the pid tier is vetoed by the SAME claim rule as the
+    // tag fallback below it, even though a live pid match and a conflicting
+    // published claim on the identical session should not coexist under
+    // normal operation.
+    const panes = new Map([['sess-gamma#9', 'vam-atlas-aa11bb']]);
+    expect(paneForRow(twoTaggedByPid, [ALPHA_PID, BETA_PID], ALPHA_PID, panes)).toBeNull();
+  });
+
+  it('is bypassed entirely by a published pane -- checked first, and never reached at all', () => {
+    // The published check runs first and returns before the pid tier is ever
+    // reached -- constraint 3: it must not be weakened. Agreeing, it answers
+    // the same name the pid tag would have; a NAME published for a session
+    // that does not exist is a hard veto (`REFUSES ... when the published
+    // pane has ended`, above) that the pid tier never gets a chance to
+    // second-guess, even though ALPHA_PID's own tag would otherwise resolve.
+    const agrees = new Map([['sess-alpha#7', 'vam-atlas-aa11bb']]);
+    expect(paneForRow(twoTaggedByPid, [ALPHA_PID, BETA_PID], ALPHA_PID, agrees)).toBe(
+      'vam-atlas-aa11bb',
+    );
+    const ended = new Map([['sess-alpha#7', 'vam-atlas-zz99zz']]);
+    expect(paneForRow(twoTaggedByPid, [ALPHA_PID, BETA_PID], ALPHA_PID, ended)).toBeNull();
+  });
+});

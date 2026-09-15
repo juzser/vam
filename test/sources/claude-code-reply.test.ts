@@ -45,7 +45,7 @@ const noDeliver = async () => {
 
 describe('replyToSession', () => {
   it('types the reply into the pane of a session vam started, and never spawns the CLI', async () => {
-    const tmux = fakeTmux(`${projectIdOf(CWD)}\t${PANE}\n`);
+    const tmux = fakeTmux(`${projectIdOf(CWD)}\t\t${PANE}\n`);
     const error = await replyToSession({
       agents,
       rowId: `${SESSION}#7`,
@@ -66,7 +66,7 @@ describe('replyToSession', () => {
 
   it('sends NOTHING to tmux for a session vam did not start, and falls back to the CLI', async () => {
     // A tmux server with sessions on it, none of them vam's for this project.
-    const tmux = fakeTmux(`\tnotes\n${projectIdOf(OTHER)}\tvam-other-999999\n`);
+    const tmux = fakeTmux(`\t\tnotes\n${projectIdOf(OTHER)}\t\tvam-other-999999\n`);
     let asked: { sessionId: string; cwd: string } | null = null;
     const error = await replyToSession({
       agents,
@@ -93,7 +93,7 @@ describe('replyToSession', () => {
 
   it('does not guess between two panes vam started for one project', async () => {
     const id = projectIdOf(CWD);
-    const tmux = fakeTmux(`${id}\tvam-atlas-aaa\n${id}\tvam-atlas-bbb\n`);
+    const tmux = fakeTmux(`${id}\t\tvam-atlas-aaa\n${id}\t\tvam-atlas-bbb\n`);
     let calledCli = false;
     await replyToSession({
       agents,
@@ -113,7 +113,7 @@ describe('replyToSession', () => {
   it('will not type into a pane when the project holds more than one live session', async () => {
     // The pairing tmux records is a PROJECT, not a session, so a second live
     // session in the same directory means the pane might be the other one.
-    const tmux = fakeTmux(`${projectIdOf(CWD)}\t${PANE}\n`);
+    const tmux = fakeTmux(`${projectIdOf(CWD)}\t\t${PANE}\n`);
     let calledCli = false;
     await replyToSession({
       agents: [...agents, { key: 'other#8', sessionId: 'other', cwd: CWD }],
@@ -145,7 +145,7 @@ describe('replyToSession', () => {
   });
 
   it('reports a tmux that refused the keystrokes rather than reporting a delivery', async () => {
-    const tmux = fakeTmux(`${projectIdOf(CWD)}\t${PANE}\n`, {
+    const tmux = fakeTmux(`${projectIdOf(CWD)}\t\t${PANE}\n`, {
       'send-keys': {
         failure: { message: 'exit 1', code: 1 },
         stdout: '',
@@ -197,7 +197,7 @@ describe('replyToSession with published panes', () => {
 
   it('types into the pane the row published, with a second session in the project', async () => {
     const project = projectIdOf(CWD);
-    const tmux = fakeTmux(`${project}\tvam-atlas-aa11bb\n${project}\tvam-atlas-cc22dd\n`);
+    const tmux = fakeTmux(`${project}\t\tvam-atlas-aa11bb\n${project}\t\tvam-atlas-cc22dd\n`);
     const error = await replyToSession({
       agents: [alpha, beta],
       rowId: 'sess-beta#8',

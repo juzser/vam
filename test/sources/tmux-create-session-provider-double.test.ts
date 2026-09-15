@@ -114,6 +114,9 @@ describe('the requested provider is what runs, not merely what the default alrea
     expect(run.calls[0]).toEqual([
       'new-session',
       '-d',
+      '-P',
+      '-F',
+      '#{pane_pid}',
       '-s',
       'vam-orchard-a1b2c3',
       '-c',
@@ -143,6 +146,9 @@ describe('the requested provider is what runs, not merely what the default alrea
     expect(run.calls[0]).toEqual([
       'new-session',
       '-d',
+      '-P',
+      '-F',
+      '#{pane_pid}',
       '-s',
       'vam-new-work-a1b2c3',
       '-c',
