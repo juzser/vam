@@ -19,6 +19,12 @@
  */
 
 import type { MainFailureEvent } from '../main/errors/log.js';
+// `./types.js` ONLY -- never `./content.js` or `./ipc.js`, which need
+// `node:crypto`/`node:path`/`Buffer` and would drag this whole preload
+// module (imported for types by `src/renderer/App.tsx`) into a typecheck
+// (`tsconfig.web.json`) that carries no `node` types at all. See
+// `src/main/files/types.ts`'s own header.
+import type { FileReadResult, FileSignature, FileWriteResult } from '../main/files/types.js';
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
 import type { RemoteState } from '../main/remote/state.js';
 import type { Project } from '../renderer/domain/model.js';
@@ -389,6 +395,44 @@ export type DialogApi = {
 export function createDialogApi(ipc: InvokerLike): DialogApi {
   return {
     chooseDirectory: () => ipc.invoke(CHANNELS.chooseDirectory) as Promise<string | null>,
+  };
+}
+
+/**
+ * The bridge's files member: the file-editor tab's read and write, both
+ * answering through the `IpcResult` envelope -- there IS a refusal behind
+ * each in a source's own words (outside every session's directory, too
+ * large, changed on disk since the edit began), so `unwrap` is used here
+ * exactly as it is for `pickImageAttachment`. See `src/main/files/ipc.ts`
+ * for the full refusal vocabulary and `src/main/files/authorize.ts` for what
+ * "outside every session's directory" means and why it is checked the way
+ * it is.
+ */
+export type FilesApi = {
+  read(path: string): Promise<FileReadResult>;
+  /**
+   * `baseSignature` is the signature the edit was based on -- `null` means
+   * "this is a new file, nothing should be there yet". A mismatch against
+   * what is actually on disk right now is refused as `changed-on-disk`,
+   * never silently overwritten or merged.
+   */
+  write(
+    path: string,
+    content: string,
+    baseSignature: FileSignature | null,
+  ): Promise<FileWriteResult>;
+};
+
+/**
+ * Forwards straight through `unwrap`, like `pickImageAttachment` -- neither
+ * channel answers bare, because both have a refusal worth the caller's own
+ * words rather than a rejected promise electron has rewritten.
+ */
+export function createFilesApi(ipc: InvokerLike): FilesApi {
+  return {
+    read: (path) => unwrap<FileReadResult>(ipc.invoke(CHANNELS.filesRead, path)),
+    write: (path, content, baseSignature) =>
+      unwrap<FileWriteResult>(ipc.invoke(CHANNELS.filesWrite, path, content, baseSignature)),
   };
 }
 
