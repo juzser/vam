@@ -26,6 +26,13 @@ import type { CanvasModel, SourceId } from '../domain/model.js';
 import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
 import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/chords.js';
 import { setActiveProvider } from '../sources/provider.js';
+import {
+  clampEditorIndent,
+  DEFAULT_EDITOR_HIGHLIGHT,
+  DEFAULT_EDITOR_INDENT,
+  readEditorHighlight,
+  setActiveEditorSettings,
+} from './editor.js';
 import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
 import { DEFAULT_FOCUS_VIEW, readFocusView, setActiveFocusView } from './progress.js';
 import {
@@ -437,6 +444,26 @@ export type Prefs = {
    * person, not a session that stopped existing.
    */
   readonly promptSubmitKey: PromptSubmitKey;
+  /**
+   * Whether the file editor colours what it can tokenise (`FilesTab.tsx`).
+   *
+   * GLOBAL, for the reason `focusView` is: it is a reading preference rather
+   * than an arrangement, and `Canvas.tsx` mounts one `FilesTab` per split leaf
+   * with no dialogue in which one pane could be asked. Exempt from the icon
+   * TTL like `theme`: it describes the person, not a session that stopped
+   * existing.
+   */
+  readonly editorHighlight: boolean;
+  /**
+   * How many SPACES one indent step is in the file editor — what Tab inserts,
+   * and what a JSON format indents by.
+   *
+   * A COUNT OF SPACES, never a tab byte, and `prefs/editor.ts` carries the
+   * whole argument: the editor's line-number gutter and its text share one
+   * line box, and a tab's RENDERED width is the one thing those two columns
+   * would answer differently.
+   */
+  readonly editorIndent: number;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -460,6 +487,8 @@ export const EMPTY_PREFS: Prefs = {
   detailTab: null,
   focusView: DEFAULT_FOCUS_VIEW,
   promptSubmitKey: DEFAULT_PROMPT_SUBMIT_KEY,
+  editorHighlight: DEFAULT_EDITOR_HIGHLIGHT,
+  editorIndent: DEFAULT_EDITOR_INDENT,
 };
 
 /**
@@ -685,6 +714,12 @@ function parsePrefs(
     // must read back as the key the box has always sent on. `readPromptSubmitKey`
     // is where that direction is argued.
     promptSubmitKey: readPromptSubmitKey((parsed as { promptSubmitKey?: unknown }).promptSubmitKey),
+    // Per field like every line above it, and normalised rather than merely
+    // defaulted, in the same two safe directions `prefs/editor.ts` argues:
+    // an unreadable flag keeps the colours, and an unreadable width lands on
+    // the two spaces the editor indented by before there was a setting.
+    editorHighlight: readEditorHighlight((parsed as { editorHighlight?: unknown }).editorHighlight),
+    editorIndent: clampEditorIndent((parsed as { editorIndent?: unknown }).editorIndent),
   };
 }
 
@@ -1080,6 +1115,19 @@ export function setFocusView(prefs: Prefs, on: unknown): Prefs {
  *  operator's send key on the strength of it. */
 export function setPromptSubmitKey(prefs: Prefs, key: unknown): Prefs {
   return { ...prefs, promptSubmitKey: readPromptSubmitKey(key) };
+}
+
+/** Normalised on the way in as well as on the way out, for the reason every
+ *  setter above it is: a caller that stored something unreadable would take
+ *  the editor's colours away on the strength of it. */
+export function setEditorHighlight(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, editorHighlight: readEditorHighlight(on) };
+}
+
+/** Clamped on the way in as well, like `setOutFontSize`: the stepper cannot
+ *  produce an out-of-range width, but a future caller could. */
+export function setEditorIndent(prefs: Prefs, width: unknown): Prefs {
+  return { ...prefs, editorIndent: clampEditorIndent(width) };
 }
 
 /**
@@ -2058,6 +2106,7 @@ export function activatePrefs(prefs: Prefs): Prefs {
   setActiveProvider(prefs.defaultProvider);
   setActiveFocusView(prefs.focusView);
   setActivePromptSubmitKey(prefs.promptSubmitKey);
+  setActiveEditorSettings({ highlight: prefs.editorHighlight, indent: prefs.editorIndent });
   /**
    * AND ONE PREFERENCE CROSSES INTO MAIN, because the read it changes happens
    * there: `gh` is spawned by `main/sources/claude-code/source.ts`, which has

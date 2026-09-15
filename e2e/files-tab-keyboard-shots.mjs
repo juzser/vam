@@ -679,6 +679,314 @@ check(
 await page.screenshot({ path: `${outDir}/files-tab-gutter.png` });
 console.log(`${outDir}/files-tab-gutter.png`);
 
+
+// ---------------------------------------------------------------------------
+// 4b. THE HIGHLIGHT OVERLAY IS THE THIRD COLUMN, AND IT IS MEASURED LIKE ONE.
+//
+// The colours are painted on a `<pre>` BEHIND a transparent-text textarea,
+// which means the same characters are laid out twice and the operator's caret
+// is in the copy they cannot see. That illusion survives exactly as long as
+// every one of these holds -- identical face, size, line-height and padding
+// box; the same height over the same 60 lines; the same top; no wrapping; and
+// both axes of scroll carried across. Every one of them is a LAYOUT fact, and
+// happy-dom (which the unit suite runs in) lays none of it out: the unit test
+// can prove the overlay holds the right TEXT and nothing more.
+//
+// One measured quirk is asserted rather than papered over: a `<pre>` gives the
+// final `\n` of its text no line box and a `<textarea>` does, so `FilesTab`
+// appends one newline to the overlay when the file ends in one. Without that
+// the two columns differ by exactly one line's height -- 18px here -- which is
+// what the equal-scrollHeight check below would have caught.
+
+await editor.click();
+await editor.fill(`${Array.from({ length: LINES }, (_, i) => `A_${i + 1}=value ${i + 1}`).join('\n')}\n`);
+await page.waitForFunction(
+  (n) => (document.querySelector('[data-files-gutter]')?.textContent ?? '').endsWith(`\n${n + 1}`),
+  LINES,
+  { timeout: 3_000 },
+);
+
+const layers = await page.evaluate(() => {
+  const area = document.querySelector('[data-files-editor]');
+  const over = document.querySelector('[data-files-highlight]');
+  const gutter = document.querySelector('[data-files-gutter]');
+  if (area === null || over === null || gutter === null) return null;
+  const as = getComputedStyle(area);
+  const os = getComputedStyle(over);
+  const gs = getComputedStyle(gutter);
+  const box = (el) => {
+    const b = el.getBoundingClientRect();
+    return { top: Math.round(b.top), left: Math.round(b.left), width: Math.round(b.width) };
+  };
+  const same = (prop) => as[prop] === os[prop];
+  return {
+    areaScrollHeight: area.scrollHeight,
+    overScrollHeight: over.scrollHeight,
+    gutterScrollHeight: gutter.scrollHeight,
+    areaBox: box(area),
+    overBox: box(over),
+    gutterTop: box(gutter).top,
+    // Every property that decides where a glyph lands.
+    sameFont: same('fontFamily') && same('fontSize') && same('fontWeight'),
+    sameMetrics: same('lineHeight') && same('letterSpacing') && same('wordSpacing'),
+    samePadding:
+      as.paddingTop === os.paddingTop &&
+      as.paddingLeft === os.paddingLeft &&
+      as.paddingRight === os.paddingRight &&
+      as.paddingBottom === os.paddingBottom,
+    sameBorder: as.borderWidth === os.borderWidth,
+    sameWrap: same('whiteSpace') && same('tabSize'),
+    sameScale: as.zoom === os.zoom && as.transform === os.transform,
+    // And the same face as the GUTTER, which the pre-existing check holds for
+    // the textarea -- three columns, one line box.
+    gutterSameMetrics: gs.lineHeight === os.lineHeight && gs.fontSize === os.fontSize,
+    overlayText: over.textContent,
+    areaValue: area.value,
+    // `text-transparent` on the textarea is what lets the overlay show, and a
+    // caret that went transparent with it would be an editor with no cursor.
+    areaColour: as.color,
+    caret: as.caretColor,
+  };
+});
+
+check('the overlay is actually drawn for a .env file', layers !== null, 'no [data-files-highlight]');
+check(
+  'the overlay and the textarea render the same face at the same size',
+  layers?.sameFont === true,
+  JSON.stringify(layers),
+);
+check(
+  'and the same line-height, letter-spacing and word-spacing',
+  layers?.sameMetrics === true,
+  JSON.stringify(layers),
+);
+check(
+  'and the same padding box — a pixel of padding is a permanent offset on every line',
+  layers?.samePadding === true && layers?.sameBorder === true,
+  JSON.stringify(layers),
+);
+check(
+  'and the same wrapping and tab-size, so neither can break a line the other does not',
+  layers?.sameWrap === true && layers?.sameScale === true,
+  JSON.stringify(layers),
+);
+check(
+  'so 60 lines occupy the same height in the overlay as in the text',
+  layers !== null && Math.abs(layers.overScrollHeight - layers.areaScrollHeight) <= 1,
+  `overlay ${layers?.overScrollHeight}px vs editor ${layers?.areaScrollHeight}px`,
+);
+check(
+  'and the gutter is still the same height as both — three columns, one line box',
+  layers !== null && Math.abs(layers.gutterScrollHeight - layers.areaScrollHeight) <= 1,
+  `gutter ${layers?.gutterScrollHeight}px vs editor ${layers?.areaScrollHeight}px`,
+);
+check(
+  'the two layers start at the same point, to the pixel',
+  layers !== null &&
+    layers.overBox.top === layers.areaBox.top &&
+    layers.overBox.left === layers.areaBox.left &&
+    layers.overBox.width === layers.areaBox.width,
+  `overlay ${JSON.stringify(layers?.overBox)} vs editor ${JSON.stringify(layers?.areaBox)}`,
+);
+check(
+  'and the gutter is level with them',
+  layers !== null && Math.abs(layers.gutterTop - layers.areaBox.top) <= 1,
+  `gutter top ${layers?.gutterTop} vs editor top ${layers?.areaBox.top}`,
+);
+check(
+  'the overlay holds the file’s own text, plus only the one newline a <pre> drops',
+  layers !== null && layers.overlayText === `${layers.areaValue}\n`,
+  `overlay ${JSON.stringify(layers?.overlayText?.slice(-40))} vs value ${JSON.stringify(layers?.areaValue?.slice(-40))}`,
+);
+check(
+  'the text under the overlay is transparent and its caret is NOT',
+  layers !== null &&
+    layers.areaColour === 'rgba(0, 0, 0, 0)' &&
+    layers.caret !== 'rgba(0, 0, 0, 0)' &&
+    layers.caret !== layers.areaColour,
+  `colour ${layers?.areaColour}, caret ${layers?.caret}`,
+);
+
+// THE COLOURS ARE REALLY PAINTED, and they are really different from each
+// other. A stylesheet that defined none of these tokens would leave every run
+// the same inherited ink, every check above would still pass, and the whole
+// feature would be invisible -- which is the shape `a-content-scan-proves-the-
+// rule-was-typed` warns about. So this measures the PAINT, per token kind.
+const painted = await page.evaluate(() => {
+  const runs = [...document.querySelectorAll('[data-files-highlight] span')];
+  const byClass = new Map();
+  for (const run of runs) {
+    const key = run.className || 'plain';
+    if (!byClass.has(key)) byClass.set(key, getComputedStyle(run).color);
+  }
+  return Object.fromEntries(byClass);
+});
+check(
+  'the overlay paints at least two distinct colours — a key is not its value',
+  new Set(Object.values(painted)).size >= 2,
+  JSON.stringify(painted),
+);
+check(
+  'and the keyword colour is a real token rather than the inherited ink',
+  painted['text-syn-keyword'] !== undefined && painted['text-syn-keyword'] !== painted.plain,
+  JSON.stringify(painted),
+);
+
+// BOTH AXES OF SCROLL. The vertical one the gutter already proves; the
+// HORIZONTAL one is the overlay's alone, because the gutter has no long lines
+// and never scrolls sideways. An overlay that tracked only `scrollTop` would
+// look perfect until the first line wider than the pane.
+await editor.fill(`LONG=${'x'.repeat(4_000)}\nSHORT=1\n`);
+const overlayWrap = await page.evaluate(() => {
+  const area = document.querySelector('[data-files-editor]');
+  const over = document.querySelector('[data-files-highlight]');
+  if (area === null || over === null) return null;
+  return {
+    areaScrollWidth: area.scrollWidth,
+    overScrollWidth: over.scrollWidth,
+    clientWidth: area.clientWidth,
+    sameHeight: Math.abs(over.scrollHeight - area.scrollHeight) <= 1,
+  };
+});
+check(
+  'a 4,000-character line makes the overlay scroll sideways too, rather than wrap',
+  overlayWrap !== null &&
+    overlayWrap.overScrollWidth > overlayWrap.clientWidth &&
+    // The textarea's own scrollWidth excludes its padding-right in Chromium
+    // and the `<pre>`'s does not, so the two differ by exactly that padding.
+    // The property that matters is that neither WRAPPED, which is the height.
+    overlayWrap.sameHeight,
+  JSON.stringify(overlayWrap),
+);
+
+// Driven the way an operator drives it: a real horizontal wheel over the text,
+// not an assignment to `scrollLeft`.
+await editor.click();
+await page.mouse.wheel(600, 0);
+await page.waitForFunction(
+  () => (document.querySelector('[data-files-highlight]')?.scrollLeft ?? 0) > 0,
+  null,
+  { timeout: 3_000 },
+).catch(() => {});
+const carried = await page.evaluate(() => ({
+  area: document.querySelector('[data-files-editor]')?.scrollLeft ?? -1,
+  over: document.querySelector('[data-files-highlight]')?.scrollLeft ?? -1,
+}));
+check(
+  'and a sideways scroll carries the colours with the text, to the pixel',
+  carried.area > 0 && carried.area === carried.over,
+  `editor at ${carried.area}, overlay at ${carried.over}`,
+);
+
+// AND THE VERTICAL AXIS, driven by a real wheel over the text.
+await editor.fill(Array.from({ length: 400 }, (_, i) => `K_${i + 1}=v`).join('\n'));
+await editor.click();
+await page.mouse.wheel(0, 900);
+await page.waitForFunction(
+  () => (document.querySelector('[data-files-editor]')?.scrollTop ?? 0) > 0,
+  null,
+  { timeout: 3_000 },
+);
+const carriedDown = await page.evaluate(() => ({
+  area: document.querySelector('[data-files-editor]')?.scrollTop ?? -1,
+  over: document.querySelector('[data-files-highlight]')?.scrollTop ?? -1,
+  gutter: document.querySelector('[data-files-gutter]')?.scrollTop ?? -1,
+}));
+check(
+  'a real wheel scroll carries BOTH the numbers and the colours with the text',
+  carriedDown.area > 0 &&
+    Math.abs(carriedDown.area - carriedDown.over) <= 1 &&
+    Math.abs(carriedDown.area - carriedDown.gutter) <= 1,
+  JSON.stringify(carriedDown),
+);
+await page.screenshot({ path: `${outDir}/files-tab-highlight.png` });
+console.log(`${outDir}/files-tab-highlight.png`);
+
+// ---------------------------------------------------------------------------
+// 4c. FORMAT, AND THE UNDO THAT MAKES IT SAFE TO PRESS.
+//
+// The unit suite proves the formatter's answers and the tab's three branches.
+// What only a real browser can answer is whether `Mod-Shift-f` and `Mod-z`
+// reach the editor AT ALL: both are chords, both pass through `normalizeKey`,
+// and `Mod-z` is deliberately NOT swallowed unless there is a format to undo
+// -- a `preventDefault` decided from a handler's return value, on a cancelable
+// event, which is the one thing `key-truth-shots.mjs` exists to say cannot be
+// measured with a hand-built event.
+
+await treeRow('/work/demo/.env').click();
+await editor.click();
+const BEFORE = 'A=1\n\n\n\n# a note   \nB=2\n';
+await editor.fill(BEFORE);
+await page.keyboard.press('Control+Shift+KeyF');
+await page.waitForFunction(
+  () => (document.querySelector('[data-files-editor]')?.value ?? '') === 'A=1\n\n# a note\nB=2\n',
+  null,
+  { timeout: 3_000 },
+).catch(() => {});
+check(
+  'Mod-Shift-f formats the open file from the keyboard',
+  (await editor.inputValue()) === 'A=1\n\n# a note\nB=2\n',
+  JSON.stringify(await editor.inputValue()),
+);
+check(
+  'and says so, with the way back out of it on screen',
+  (await page.locator('[data-files-note]').textContent())?.includes('Mod-z') === true &&
+    (await page.locator('[data-files-format-undo]').count()) === 1,
+);
+await page.keyboard.press('Control+KeyZ');
+await page.waitForFunction(
+  (want) => (document.querySelector('[data-files-editor]')?.value ?? '') === want,
+  BEFORE,
+  { timeout: 3_000 },
+).catch(() => {});
+check(
+  'and Mod-z puts the file back exactly as it was, in a real browser',
+  (await editor.inputValue()) === BEFORE,
+  JSON.stringify(await editor.inputValue()),
+);
+
+// THE REFUSAL, ALOUD AND BY NAME, on a file type vam will not format -- and
+// with no overlay drawn for it either, which is the same decision seen twice.
+await treeRow('/work/demo/src').click();
+await page.waitForFunction(() => document.querySelectorAll('[data-files-row]').length > 2, null, {
+  timeout: 3_000,
+});
+await treeRow('/work/demo/src/index.ts').click();
+await page.waitForFunction(
+  () => (document.querySelector('[data-files-editor]')?.value ?? '').startsWith('export'),
+  null,
+  { timeout: 3_000 },
+);
+check(
+  'a .ts file gets no overlay — vam draws no colour it cannot prove',
+  (await page.locator('[data-files-highlight]').count()) === 0,
+);
+await page.locator('[data-files-format]').click();
+const refusal = (await page.locator('[data-files-note]').textContent()) ?? '';
+check(
+  'and pressing Format on it says so by name rather than doing nothing',
+  refusal.includes('.ts') && refusal.includes('.json'),
+  JSON.stringify(refusal),
+);
+check(
+  'and the file itself is untouched by the refusal',
+  (await editor.inputValue()) === 'export const a = 1\n',
+  JSON.stringify(await editor.inputValue()),
+);
+
+// PUT THE TREE BACK AS THIS SECTION FOUND IT. Section 5 below walks the tree
+// from its own starting shape and counts rows; leaving `src` expanded here
+// moved its cursor two rows and reddened two of ITS checks, which is a state
+// leak between sections rather than a bug in either. Shut the directory, and
+// leave the keyboard where the next section expects to pick it up.
+await treeRow('/work/demo/src').click();
+await page.waitForFunction(
+  () => document.querySelectorAll('[data-files-row]').length === 2,
+  null,
+  { timeout: 3_000 },
+);
+await treeRow('/work/demo/.env').click();
+
 // ---------------------------------------------------------------------------
 // 5. THE TREE'S OWN KEYBOARD, IN A REAL BROWSER.
 //

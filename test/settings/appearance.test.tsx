@@ -14,6 +14,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import { EDITOR_INDENT_MAX, EDITOR_INDENT_MIN } from '../../src/renderer/prefs/editor.js';
 import {
   type EffectiveTheme,
   EMPTY_PREFS,
@@ -437,5 +438,73 @@ describe('the out text size is an appearance setting', () => {
         ?.textContent ?? '';
     expect(caption.length).toBeGreaterThan(20);
     expect(caption).not.toMatch(NAMES_A_PANE);
+  });
+});
+
+/**
+ * THE FILE EDITOR'S OWN TWO SETTINGS, in the section the operator asked for
+ * them in ("thêm setting riêng cho tab đó trong phần appearance").
+ *
+ * The pair is proven three ways across this repo and each way is needed: the
+ * STORE round-trips them (`test/prefs/prefs.editor.test.ts`), the EDITOR
+ * honours them without a remount (`test/panels/DetailPanel.files-tab.test.tsx`),
+ * and this file proves the two controls exist, sit in Appearance, and write
+ * the pref the other two read. A setting nobody can reach is the storage-shaped
+ * version of a control that changes nothing.
+ */
+describe('the file editor has its own settings in Appearance', () => {
+  const highlight = () => document.querySelector<HTMLElement>('[data-switch="editor-highlight"]');
+  const indent = () => screen.getByLabelText('editor indent') as HTMLInputElement;
+
+  it('puts both of them under Appearance, beside the theme and the colours', () => {
+    open();
+    expect(highlight()).not.toBeNull();
+    expect(highlight()?.closest('section')?.querySelector('h2, h3')?.textContent).toBe(
+      'Appearance',
+    );
+    expect(indent().closest('section')?.querySelector('h2, h3')?.textContent).toBe('Appearance');
+  });
+
+  it('shows the colour setting in force and writes the one you pick', () => {
+    const { onChange } = open({ ...EMPTY_PREFS, editorHighlight: true });
+    expect(highlight()?.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(highlight() as HTMLElement);
+    expect(changed(onChange, 0).editorHighlight).toBe(false);
+  });
+
+  it('shows the indent in force, writes the one you pick, and offers no illegal width', () => {
+    const { onChange } = open({ ...EMPTY_PREFS, editorIndent: 2 });
+    expect(indent().value).toBe('2');
+    fireEvent.change(indent(), { target: { value: '4' } });
+    expect(changed(onChange, 0).editorIndent).toBe(4);
+    expect(Number(indent().min)).toBe(EDITOR_INDENT_MIN);
+    expect(Number(indent().max)).toBe(EDITOR_INDENT_MAX);
+  });
+
+  /**
+   * THE CAPTION IS THE WHOLE DOCUMENTATION for a setting whose "off" position
+   * is the one an operator reaches for when a file looks wrong. Two facts have
+   * to be in it: that the colours are only drawn for formats vam can read, and
+   * WHICH those are — otherwise "no colours in my .ts file" reads as a broken
+   * setting rather than as the deliberate refusal it is.
+   *
+   * Asserted as the PROPERTY, never as the sentence: an exact-string check
+   * would fail on a typo fix and would still pass if the note stopped naming
+   * anything.
+   */
+  it('says which formats are coloured, so an uncoloured file is not read as a fault', () => {
+    open();
+    const note = document.querySelector('[data-editor-highlight-note]')?.textContent ?? '';
+    expect(note).toMatch(/json/i);
+    expect(note).toContain('.env');
+    expect(note).toMatch(/plain text/i);
+  });
+
+  /** And the indent's own caption has to say SPACES — "indent: 4" reads as a
+   *  tab width, and a tab byte is the one thing that breaks the gutter. */
+  it('says the indent is spaces', () => {
+    open();
+    const hint = indent().closest('div')?.parentElement?.textContent ?? '';
+    expect(hint).toMatch(/space/i);
   });
 });

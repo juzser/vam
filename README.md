@@ -89,8 +89,17 @@ and `docs/index.ts` are two different files, and a flat row reading
 from the keyboard — `j`/`k` down and up, `l`/`h` in and out, `Enter` to open
 a file and land in the editor, `Mod-Shift-e` to cross back — and every one
 of those is in the table under *In the Files tab* below. There is no editor
-library behind it and no syntax highlighting: a highlighter that
-mis-tokenises unfamiliar syntax is a worse lie than drawing none.
+library behind it — the colours are vam's own, and so is the formatter.
+
+Both are drawn only where vam is sure, because a highlighter that
+mis-tokenises unfamiliar syntax is a worse lie than drawing none, and a
+formatter that mangles a file is worse than no formatter at all. So JSON,
+`.env` and `.ini` are coloured and everything else renders as plain text;
+`Mod-Shift-f` reformats a `.json` only when it can prove the result differs
+from your file by whitespace alone, tidies nothing in a `.env` but its blank
+lines and comments, and refuses by name everywhere else. A format is one
+`Mod-z` away from being exactly undone. Appearance carries the two settings
+the editor has of its own: whether to colour, and how wide one indent step is.
 
 What it does take seriously is that an agent is editing these files while
 you have them open. A save carries the size, mtime and hash the file had
@@ -391,6 +400,8 @@ says so, in the tab, rather than doing nothing.
 | `/` | Put the caret in the tree's filter box. `Enter` there hands the keyboard to the first matching row |
 | `Tab` / `Shift-Tab` | Indent / outdent in the editor — trapped there, never a focus move, because `Escape` and `Mod-[` are both real ways out already |
 | `Mod-s` | Save the open file. vam takes this before the browser's own "Save Page" |
+| `Mod-Shift-f` | Format the open file — vam's own formatter, not the project's. It reformats only where it can prove it changed nothing but whitespace (`.json`, and the blank lines and comments of a `.env`/`.ini`) and names what it will not touch: pressing it on a `.ts` says so rather than doing nothing |
+| `Mod-z` | Undo the last format, exactly, while the file is still what that format produced. Type one character and it is not vam's key any more: the browser's own undo of your typing gets it, as it always has |
 | `Escape` / `Mod-[` | Hand the keyboard back to Select — from the editor, the tree, the filter box or the new-file box. Never a discard: unsaved text survives it, exactly as it survives switching files, tabs and sessions |
 
 These are held against the code by `test/keyboard/files-tab.readme.test.ts`,

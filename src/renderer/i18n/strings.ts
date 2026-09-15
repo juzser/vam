@@ -88,7 +88,7 @@ const EN = {
 
   // ── Appearance ───────────────────────────────────────────────────────────
   'settings.appearance.hint':
-    'theme, colours, the size of the text in out, and how much of a turn the transcript draws',
+    'theme, colours, the size of the text in out, how much of a turn the transcript draws, and the file editor',
   'settings.appearance.theme.label': 'theme',
   'settings.appearance.theme.hint': 'system follows what the operating system asks for',
   'settings.appearance.templates.label': 'templates',
@@ -105,6 +105,19 @@ const EN = {
     "fold each turn's tool calls away, leaving your prompts and the agent's answers",
   'settings.appearance.focusView.on': 'on',
   'settings.appearance.focusView.off': 'off',
+  // THE FILE EDITOR'S OWN TWO. The label says which editor, because vam has
+  // more than one text box and only this one has a gutter to keep level.
+  'settings.appearance.editorHighlight.label': 'file editor colours',
+  'settings.appearance.editorHighlight.hint':
+    'syntax colours in the Files tab, for the formats vam can read without guessing',
+  'settings.appearance.editorHighlight.on': 'on',
+  'settings.appearance.editorHighlight.off': 'off',
+  'settings.appearance.editorIndent.label': 'file editor indent',
+  // SPACES IS NOT A DETAIL: it is what keeps the line-number gutter level with
+  // the text, so the caption says it rather than leaving "indent" to be read
+  // as "a tab".
+  'settings.appearance.editorIndent.hint':
+    'how many spaces one Tab inserts in the Files tab, and what a format indents by',
 
   // ── Update ───────────────────────────────────────────────────────────────
   // THE OPERATOR ASKED A QUESTION, SO EVERY ANSWER IS A SENTENCE. The popover

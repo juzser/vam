@@ -203,8 +203,23 @@ export const TREE_KEYS: readonly string[] = [
  * Every key the EDITOR answers. `Tab` covers Shift+Tab too: `normalizeKey`
  * folds Shift into a token for LETTERS only, so both arrive spelled `Tab` and
  * the handler reads `event.shiftKey` for the direction.
+ *
+ * `Mod-z` IS ON THIS LIST AND IS STILL NOT ALWAYS OURS. Being here only means
+ * the handler is given the keystroke; `FilesTab.tsx`'s own branch then calls
+ * `preventDefault` ONLY when there is a format to undo, and otherwise leaves
+ * the event entirely alone, so the browser's own undo of whatever was typed
+ * runs exactly as it always has. Every other key on this list is answered
+ * unconditionally, which is why this one carries a note.
  */
-export const EDITOR_KEYS: readonly string[] = ['Escape', 'Mod-[', 'Tab', 'Mod-s', 'Mod-Shift-e'];
+export const EDITOR_KEYS: readonly string[] = [
+  'Escape',
+  'Mod-[',
+  'Tab',
+  'Mod-s',
+  'Mod-Shift-e',
+  'Mod-Shift-f',
+  'Mod-z',
+];
 
 /**
  * What one key means to the tree. `null` is "not the tree's key" and is a

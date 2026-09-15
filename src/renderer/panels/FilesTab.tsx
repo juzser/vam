@@ -15,8 +15,33 @@
  * with a good gutter. `.env` and "a few other files" is a narrower job than
  * orca's own, so a `<textarea>` with a line-number gutter, trapped Tab
  * indentation and a monospace face buys most of the same value at zero
- * bundle cost. No syntax highlighting is drawn, on purpose: a highlighter
- * that mis-tokenises unfamiliar syntax is a worse lie than drawing none.
+ * bundle cost.
+ *
+ * COLOUR, AND THE RULE THAT SURVIVED IT. This tab shipped with no syntax
+ * highlighting at all, on a stated rule: "a highlighter that mis-tokenises
+ * unfamiliar syntax is a worse lie than drawing none." The operator has since
+ * asked for styling, so vam draws it -- and the rule is intact, as the list of
+ * what `files-highlight.ts` declines to colour (it names `.ts`'s regex
+ * literals and `.sh`'s heredocs, both of which defeat a scanner this size on
+ * VALID input). A file vam is not confident about renders as plain text, with
+ * no overlay mounted at all.
+ *
+ * AND A FORMATTER, WHICH IS MOSTLY REFUSALS. `files-format.ts` reformats only
+ * where it can prove it changed nothing but whitespace -- a JSON file, guarded
+ * token by token, and the blank lines and comments of a `.env`/`.ini` -- and
+ * refuses aloud, by name, for everything else. The operator asked for it in
+ * vam's own style ("tự format theo kiểu của mình") rather than the open
+ * project's, which is what makes a refusal an acceptable answer: there is no
+ * other formatter here to fall back on and nothing to be consistent with.
+ *
+ * THE OVERLAY IS TWO LAYERS HOLDING ONE TEXT. A `<textarea>` cannot be styled
+ * inside, so the colours are painted on a `<pre>` BEHIND it and the textarea's
+ * own text is made transparent (its caret is not). That is only an illusion
+ * for as long as every one of these holds, which is why each is asserted in
+ * `e2e/files-tab-keyboard-shots.mjs` against real Chromium rather than
+ * described here: identical font, size, line-height and padding box on both
+ * layers; the overlay scrolls with the textarea in BOTH axes; neither wraps;
+ * and the gutter stays level with both. happy-dom lays none of that out.
  *
  * A TREE ON THE RIGHT, NOT A SUB-VIEW THAT TRADES PLACES WITH THE EDITOR.
  * This tab shipped as two sub-views -- a flat `cmdk` list OR the editor,
@@ -65,7 +90,7 @@
  * without either side enumerating the other's keys.
  */
 
-import { FilePlus, Loader2, RefreshCw, Save, Search } from 'lucide-react';
+import { AlignLeft, FilePlus, Loader2, RefreshCw, Save, Search } from 'lucide-react';
 import {
   type KeyboardEvent,
   useCallback,
@@ -74,6 +99,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import type {
   FileListResult,
@@ -83,9 +109,13 @@ import type {
 } from '../../main/files/types.js';
 import { normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
+import { activeEditorSettings, subscribeEditorSettings } from '../prefs/editor.js';
 import type { SourceError } from '../sources/port.js';
 import { applyTab, relativeLabel } from './files-editor-text.js';
+import { formatFile } from './files-format.js';
+import { type EditorLang, highlightEditor, highlightLangFor } from './files-highlight.js';
 import { EDITOR_KEYS, type FileTreeRow, fileTreeRows, resolveTreeKey } from './files-tree.js';
+import { SYNTAX_CLASS } from './highlight.js';
 
 export type ReadFile = (path: string) => Promise<FileReadResult>;
 export type WriteFile = (
@@ -228,6 +258,40 @@ export function FilesTab({
    * would interrupt a screen reader to repeat something.
    */
   const [note, setNote] = useState<string | null>(null);
+  /**
+   * THE LAST FORMAT, AND THE WAY BACK OUT OF IT.
+   *
+   * A format replaces the whole buffer, and this textarea's `value` is a
+   * controlled React prop -- so the replacement is programmatic, and a
+   * programmatic replacement is exactly what the browser's own undo stack does
+   * NOT record. Left at that, `Mod-z` after a format would not give the
+   * operator their file back, and a format is a whole-file change. That is the
+   * same class of harm as `changed-on-disk`: text the operator had, gone,
+   * with nothing on screen saying so.
+   *
+   * So vam keeps its own one-step undo, offered two ways (`Mod-z`, and a
+   * button in the note for hands that are not in the editor). It is armed by a
+   * format and it DISARMS ITSELF -- see `formatUndoReady` -- rather than being
+   * cleared by a lifecycle nobody can keep track of.
+   */
+  const [formatUndo, setFormatUndo] = useState<{
+    readonly path: string;
+    readonly before: string;
+    readonly after: string;
+  } | null>(null);
+
+  /**
+   * The editor's own two settings, as the operator set them (Appearance).
+   * Subscribed rather than drilled, for the reason `prefs/editor.ts` gives:
+   * `Canvas.tsx` mounts one of these per split leaf and neither setting is a
+   * paint CSS could carry -- one decides what Tab inserts, the other decides
+   * what is rendered at all.
+   */
+  const settings = useSyncExternalStore(
+    subscribeEditorSettings,
+    activeEditorSettings,
+    activeEditorSettings,
+  );
 
   const activePath = sessionId === null ? null : (activeBySession[sessionId] ?? null);
   const activeBuffer = activePath === null ? undefined : buffers[activePath];
@@ -470,6 +534,64 @@ export function FilesTab({
     pendingSelection.current = null;
   });
 
+  /**
+   * IS THERE A FORMAT TO UNDO RIGHT NOW? Derived, never stored — the same rule
+   * the tree's cursor is held to, and for a sharper reason here: a stored
+   * "undo is available" flag would have to be cleared by every act that
+   * touches the buffer (typing, Tab, a reload, a switch, a save), and the one
+   * that got missed would be an undo that silently reverted a format the
+   * operator made five minutes and forty keystrokes ago.
+   *
+   * Asking instead whether the buffer IS STILL EXACTLY what the format
+   * produced cannot miss a case: type one character and this is false, so
+   * `Mod-z` is not ours and the browser's own undo of that keystroke runs.
+   */
+  const formatUndoReady =
+    formatUndo !== null &&
+    formatUndo.path === activePath &&
+    activeBuffer?.kind === 'editable' &&
+    activeBuffer.content === formatUndo.after;
+
+  /**
+   * FORMAT THE OPEN FILE, or say why not. `files-format.ts` decides; this only
+   * carries the decision out, and draws all three of its answers -- including
+   * `unchanged`, because "I pressed it and nothing happened" is
+   * indistinguishable from a broken button.
+   */
+  const formatActive = useCallback(() => {
+    if (activePath === null) return;
+    const buffer = buffers[activePath];
+    if (buffer?.kind !== 'editable') return;
+    const result = formatFile(activePath, buffer.content, settings.indent);
+    if (result.kind === 'refused') {
+      setNote(result.message);
+      return;
+    }
+    if (result.kind === 'unchanged') {
+      setNote('already formatted — vam found nothing it could tidy.');
+      return;
+    }
+    // The caret, kept roughly where it was rather than thrown to the end of a
+    // reflowed file: the textarea would otherwise scroll to the bottom on a
+    // format, which looks like the file jumping.
+    const caret = Math.min(textareaRef.current?.selectionStart ?? 0, result.value.length);
+    pendingSelection.current = { path: activePath, start: caret, end: caret };
+    setFormatUndo({ path: activePath, before: buffer.content, after: result.value });
+    setContent(activePath, result.value);
+    setNote('formatted — Mod-z puts it back exactly as it was.');
+  }, [activePath, buffers, setContent, settings.indent]);
+
+  /** Put the file back as it was before the last format. Answers whether it
+   *  had anything to undo, because `Mod-z` has to know whether to keep the
+   *  keystroke or hand it to the browser. */
+  const undoFormat = useCallback((): boolean => {
+    if (!formatUndoReady || formatUndo === null) return false;
+    setContent(formatUndo.path, formatUndo.before);
+    setFormatUndo(null);
+    setNote(null);
+    return true;
+  }, [formatUndo, formatUndoReady, setContent]);
+
   /* -------------------------------------------------------------------------
    * MOVING THE KEYBOARD BETWEEN THE TWO HALVES.
    *
@@ -573,6 +695,21 @@ export function FilesTab({
         setNote(focusCursorRow() ? null : 'nothing to move to — no file here matches the filter');
         return;
       }
+      if (key === 'Mod-Shift-f') {
+        event.preventDefault();
+        formatActive();
+        return;
+      }
+      if (key === 'Mod-z') {
+        // OURS ONLY WHILE THERE IS A FORMAT TO UNDO, and this is the one
+        // branch in here that decides whether to `preventDefault` from its
+        // RESULT rather than up front. With nothing to undo, the keystroke is
+        // left entirely alone and reaches the browser's own undo of whatever
+        // the operator last typed -- which is the behaviour this textarea has
+        // always had and must keep.
+        if (undoFormat()) event.preventDefault();
+        return;
+      }
       if (key === 'Tab') {
         // TRAPPED, not a focus move — see `applyTab`'s own header for why
         // that is safe here specifically: Escape and Mod-[ are both real
@@ -584,6 +721,7 @@ export function FilesTab({
           target.selectionStart ?? 0,
           target.selectionEnd ?? 0,
           event.shiftKey,
+          settings.indent,
         );
         pendingSelection.current = {
           path: activePath,
@@ -601,7 +739,7 @@ export function FilesTab({
         void saveFile(activePath);
       }
     },
-    [activePath, setContent, saveFile, focusCursorRow],
+    [activePath, setContent, saveFile, focusCursorRow, formatActive, undoFormat, settings.indent],
   );
 
   /**
@@ -744,6 +882,26 @@ export function FilesTab({
                 style={{ width: 6, height: 6 }}
               />
             )}
+            {/* FORMAT, AND IT IS NEVER DISABLED. Every file type gets this
+                control, including the ones vam will not format: pressing it
+                on a `.ts` puts the reason on screen, by name, which is a
+                better answer than a greyed-out button that says nothing about
+                why. It is an ICON rather than a word because the row it is in
+                also holds the path, the dirty dot, Save and the view pill's
+                own reservation, and at the 320px floor the path has to keep
+                something to truncate. */}
+            {activeBuffer?.kind === 'editable' && (
+              <button
+                type="button"
+                data-files-format
+                onClick={formatActive}
+                aria-label="format this file"
+                title="format this file (Mod-Shift-f)"
+                className="vam-tap flex flex-none cursor-pointer items-center rounded-[6px] border border-line px-1.5 py-1 text-ink-dim hover:border-line-strong hover:text-ink"
+              >
+                <AlignLeft size={12} strokeWidth={1.8} />
+              </button>
+            )}
             {activeBuffer?.kind === 'editable' && (
               <button
                 type="button"
@@ -766,10 +924,31 @@ export function FilesTab({
         )}
       </div>
 
-      {/* WHAT THE LAST KEYSTROKE REFUSED. See `note`'s own comment. */}
-      {note !== null && (
-        <p data-files-note role="status" className="flex-none text-control text-waiting">
-          {note}
+      {/* WHAT THE LAST KEYSTROKE REFUSED. See `note`'s own comment.
+          AND THE WAY OUT OF A FORMAT. The button is drawn from
+          `formatUndoReady` rather than from the note, so it survives a note
+          being cleared by the next keystroke and disappears the instant the
+          buffer stops being what the format produced — the two are one row
+          because they answer the same question ("what just happened, and can
+          I take it back"), and because a second banner would push the editor
+          down every time the operator pressed Format. */}
+      {(note !== null || formatUndoReady) && (
+        <p
+          data-files-note
+          role="status"
+          className="flex flex-none items-center gap-2 text-control text-waiting"
+        >
+          <span className="min-w-0 flex-1">{note}</span>
+          {formatUndoReady && (
+            <button
+              type="button"
+              data-files-format-undo
+              onClick={undoFormat}
+              className="vam-tap flex-none cursor-pointer rounded-[6px] border border-line px-1.5 py-0.5 text-meta text-ink-dim hover:border-line-strong hover:text-ink"
+            >
+              Undo format
+            </button>
+          )}
         </p>
       )}
 
@@ -853,6 +1032,13 @@ export function FilesTab({
               hidden={hidden}
               label={label ?? ''}
               content={activeBuffer.content}
+              /* NULL IS "DRAW IT AS PLAIN TEXT", and both ways of reaching it
+                 are real answers rather than a gap: a file type vam will not
+                 tokenise (`highlightLangFor`) and an operator who turned the
+                 colours off (Appearance). No overlay is mounted in either
+                 case, so the textarea keeps its own ink and there is no second
+                 layer to fall out of step with. */
+              lang={settings.highlight && activePath !== null ? highlightLangFor(activePath) : null}
               textareaRef={textareaRef}
               onChange={(content) => activePath !== null && setContent(activePath, content)}
               onKeyDown={onEditorKeyDown}
@@ -897,29 +1083,56 @@ export function FilesTab({
 }
 
 /**
- * THE GUTTER AND THE TEXTAREA SHARE ONE BOX, and every property that keeps
- * their two columns in step is load-bearing rather than cosmetic:
+ * THREE COLUMNS THAT ARE ONE LINE BOX, and every property that keeps them in
+ * step is load-bearing rather than cosmetic:
  *
- *  * `whiteSpace: 'pre'` ON THE TEXTAREA. A wrapped line occupies two ROWS
- *    but is still one LINE, so the moment the textarea soft-wraps, number N
- *    stops pointing at line N and every number below it is wrong -- the
- *    single classic bug of a hand-built gutter. Not wrapping is also what
- *    Monaco (orca's own editor) does by default, and it is why `applyTab`
- *    indents with spaces rather than a tab byte: a tab's RENDERED width is a
- *    font-and-platform question neither column could answer the same way.
- *  * ONE TEXT NODE, joined by newlines, inside a `pre` box -- not one element
- *    per line. The numbers then inherit exactly the same line box the text
- *    does instead of depending on a second set of margins agreeing with the
- *    first.
- *  * `overflow-hidden` ON THE GUTTER, scrolled only by the sync below, so it
- *    can never be scrolled independently into a position the text is not at.
- *  * The MARKS STAY ON THE TEXTAREA, never on the wrapper: the insert scope
- *    has to be the thing that actually takes focus.
+ *  * `whiteSpace: 'pre'` ON EVERY LAYER. A wrapped line occupies two ROWS but
+ *    is still one LINE, so the moment the textarea soft-wraps, number N stops
+ *    pointing at line N and every number below it is wrong -- the single
+ *    classic bug of a hand-built gutter. Not wrapping is also what Monaco
+ *    (orca's own editor) does by default, and it is why `applyTab` indents
+ *    with spaces rather than a tab byte: a tab's RENDERED width is a
+ *    font-and-platform question the columns could not answer the same way.
+ *  * ONE TEXT NODE PER COLUMN, joined by newlines, inside a `pre` box -- not
+ *    one element per line. Each column then inherits exactly the same line box
+ *    instead of depending on a second set of margins agreeing with the first.
+ *    (The overlay is spans, but they are INLINE and carry no box of their own.)
+ *  * `overflow-hidden` ON THE GUTTER AND ON THE OVERLAY, both scrolled only by
+ *    the sync below, so neither can be scrolled independently into a position
+ *    the text is not at. The overlay follows BOTH axes: this editor scrolls
+ *    sideways by design, and an overlay that only tracked `scrollTop` would
+ *    come apart from the text on the first long line.
+ *  * `EDITOR_TEXT` IS ONE STRING, worn by the overlay and the textarea alike.
+ *    Two hand-kept copies of a font stack, a size, a line-height and a padding
+ *    box is precisely how an overlay comes to sit one pixel off, and one pixel
+ *    off is a visible ghost behind every glyph.
+ *  * The MARKS STAY ON THE TEXTAREA, never on the wrapper and never on the
+ *    overlay: the insert scope has to be the thing that actually takes focus,
+ *    and the overlay is drawn FIRST in document order -- a mark there would be
+ *    the first `data-insert-stop` in the pane, which is the trap this file's
+ *    own header describes.
  */
+
+/**
+ * The classes every text layer wears, spelled once.
+ *
+ * `pl-1`/`pr-3`/`py-2` is the padding box the textarea has always had; the
+ * overlay has to have the same one, because a scrolling box's padding scrolls
+ * with its content and a difference of a single pixel is a permanent offset.
+ */
+const EDITOR_TEXT = 'font-mono text-control leading-[1.5] py-2 pr-3 pl-1';
+
+/** The style object both layers share, for the properties Tailwind has no
+ *  utility for here. `tabSize` is stated rather than inherited: vam's own
+ *  indent is spaces (`prefs/editor.ts`), but a file may CONTAIN a tab byte,
+ *  and the two layers must then be wrong in exactly the same way. */
+const EDITOR_TEXT_STYLE = { whiteSpace: 'pre', overflowWrap: 'normal', tabSize: 4 } as const;
+
 function Editor({
   hidden,
   label,
   content,
+  lang,
   textareaRef,
   onChange,
   onKeyDown,
@@ -927,11 +1140,14 @@ function Editor({
   readonly hidden: boolean;
   readonly label: string;
   readonly content: string;
+  /** Which tokenizer the overlay draws with, or null for no overlay at all. */
+  readonly lang: EditorLang | null;
   readonly textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   readonly onChange: (content: string) => void;
   readonly onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
 }) {
   const gutterRef = useRef<HTMLDivElement | null>(null);
+  const overlayRef = useRef<HTMLPreElement | null>(null);
 
   /**
    * The gutter's own text: `1\n2\n3...`, one number per LINE of the buffer
@@ -945,16 +1161,43 @@ function Editor({
   ).join('\n');
 
   /**
-   * Keep the numbers level with the text. The textarea owns the scroll (it
-   * is the only one of the two that can be scrolled by a caret, a wheel or a
-   * drag); the gutter follows it, one assignment, on the same frame the
+   * The coloured runs, or null when nothing is being coloured. Memoised on the
+   * two things it depends on, because it runs on every keystroke in the file.
+   *
+   * Each run carries the BYTE OFFSET it starts at, accumulated once here
+   * rather than recomputed per element in the map below -- the same key
+   * `Fence` in `DetailPanel.tsx` uses and for the same reason (an offset is
+   * unique even when the same word repeats, which in a config file it does on
+   * nearly every line), but counted in one pass rather than n².
+   */
+  const tokens = useMemo(() => {
+    if (lang === null) return null;
+    let at = 0;
+    return highlightEditor(content, lang).map((token) => {
+      const run = { ...token, at };
+      at += token.text.length;
+      return run;
+    });
+  }, [content, lang]);
+
+  /**
+   * Keep every column level with the text. The textarea owns the scroll (it
+   * is the only one of the three that can be scrolled by a caret, a wheel or a
+   * drag); the others follow it, one assignment each, on the same frame the
    * browser already scheduled for the scroll event -- no state, no re-render.
    */
-  const syncGutter = useCallback(() => {
-    const gutter = gutterRef.current;
+  const syncScroll = useCallback(() => {
     const textarea = textareaRef.current;
-    if (gutter !== null && textarea !== null) {
-      gutter.scrollTop = textarea.scrollTop;
+    if (textarea === null) return;
+    const gutter = gutterRef.current;
+    if (gutter !== null) gutter.scrollTop = textarea.scrollTop;
+    const overlay = overlayRef.current;
+    if (overlay !== null) {
+      overlay.scrollTop = textarea.scrollTop;
+      // BOTH AXES. The gutter needs only the vertical one -- it has no long
+      // lines -- but the overlay is the same text as the textarea and this
+      // editor scrolls sideways rather than wrapping.
+      overlay.scrollLeft = textarea.scrollLeft;
     }
   }, [textareaRef]);
 
@@ -964,34 +1207,77 @@ function Editor({
         ref={gutterRef}
         data-files-gutter
         aria-hidden="true"
-        className="vam-no-scrollbar flex-none select-none overflow-hidden py-2 pr-2 pl-3 text-right font-mono text-control text-ink-faint leading-[1.5]"
+        className={`vam-no-scrollbar flex-none select-none overflow-hidden pr-2 pl-3 text-right ${EDITOR_TEXT} text-ink-faint`}
         style={{ whiteSpace: 'pre' }}
       >
         {lineNumbers}
       </div>
-      {/* AN INSERT SCOPE, AND AN INSERT STOP -- ONLY WHILE VISIBLE. `hidden`
-          is checked here rather than left to CSS alone: an always-mounted,
-          merely-hidden `data-insert-stop` is still the FIRST match
-          `focusInsertStop`'s blind `querySelector` would find in document
-          order on every OTHER tab, and a `display: none` element cannot in
-          fact receive the `.focus()` call that follows — so leaving the mark
-          on regardless would make `I`, pressed anywhere in this pane,
-          silently fail to reach the composer the moment this build has ever
-          shown the Files tab once. See this file's own header. */}
-      <textarea
-        ref={textareaRef}
-        data-files-editor
-        {...(hidden ? {} : insertScopeMark)}
-        {...(hidden ? {} : insertStopMark)}
-        value={content}
-        onChange={(event) => onChange(event.target.value)}
-        onKeyDown={onKeyDown}
-        onScroll={syncGutter}
-        spellCheck={false}
-        aria-label={`edit ${label}`}
-        className="vam-no-scrollbar min-h-0 min-w-0 flex-1 resize-none border-0 bg-transparent py-2 pr-3 pl-1 font-mono text-control text-ink leading-[1.5] outline-none"
-        style={{ whiteSpace: 'pre', overflowWrap: 'normal' }}
-      />
+      {/* ONE BOX, TWO LAYERS. `relative` here rather than on the row above:
+          the two layers are positioned against THIS element, which is exactly
+          the textarea's old box, so the textarea's own geometry is unchanged
+          by the overlay's arrival. */}
+      <div className="relative min-h-0 min-w-0 flex-1">
+        {tokens !== null && (
+          <pre
+            ref={overlayRef}
+            data-files-highlight
+            aria-hidden="true"
+            className={`vam-no-scrollbar pointer-events-none absolute inset-0 m-0 h-full w-full overflow-hidden ${EDITOR_TEXT} text-ink`}
+            style={EDITOR_TEXT_STYLE}
+          >
+            {tokens.map((token) => (
+              <span key={token.at} className={SYNTAX_CLASS[token.kind]}>
+                {token.text}
+              </span>
+            ))}
+            {/* THE LAST NEWLINE, PUT BACK. Measured in Chromium: a `<pre>`
+                does not give the final `\n` a line box of its own, and a
+                `<textarea>` does -- so a file ending in a newline left the
+                overlay exactly one line shorter than the text it sits behind,
+                and every check of their two heights would have been off by
+                18px. One extra `\n` restores it in every case (a file ending
+                in two, three or no newlines included). */}
+            {content.endsWith('\n') ? '\n' : ''}
+          </pre>
+        )}
+        {/* AN INSERT SCOPE, AND AN INSERT STOP -- ONLY WHILE VISIBLE. `hidden`
+            is checked here rather than left to CSS alone: an always-mounted,
+            merely-hidden `data-insert-stop` is still the FIRST match
+            `focusInsertStop`'s blind `querySelector` would find in document
+            order on every OTHER tab, and a `display: none` element cannot in
+            fact receive the `.focus()` call that follows — so leaving the mark
+            on regardless would make `I`, pressed anywhere in this pane,
+            silently fail to reach the composer the moment this build has ever
+            shown the Files tab once. See this file's own header. */}
+        <textarea
+          ref={textareaRef}
+          data-files-editor
+          {...(hidden ? {} : insertScopeMark)}
+          {...(hidden ? {} : insertStopMark)}
+          value={content}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={onKeyDown}
+          onScroll={syncScroll}
+          spellCheck={false}
+          aria-label={`edit ${label}`}
+          className={`vam-no-scrollbar absolute inset-0 h-full w-full resize-none overflow-auto border-0 bg-transparent ${EDITOR_TEXT} outline-none ${
+            tokens === null ? 'text-ink' : 'text-transparent'
+          }`}
+          /* THE TEXT IS TRANSPARENT AND THE CARET IS NOT, which is the whole
+             of the overlay technique: the glyphs the operator reads are the
+             `<pre>`'s, and the ones they are editing are here, invisible,
+             exactly on top. `caretColor` has to be stated because `color`
+             would otherwise take the caret with it -- an editor with no
+             visible caret is the one way this could be worse than no colour
+             at all. A SELECTION still paints its own background, so selected
+             text stays findable. */
+          style={
+            tokens === null
+              ? EDITOR_TEXT_STYLE
+              : { ...EDITOR_TEXT_STYLE, caretColor: 'var(--vam-ink)' }
+          }
+        />
+      </div>
     </div>
   );
 }
