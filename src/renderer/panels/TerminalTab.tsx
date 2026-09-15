@@ -52,6 +52,7 @@ import {
   type FocusEvent,
   Fragment,
   type KeyboardEvent,
+  type PointerEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -603,9 +604,14 @@ export function TerminalTab({
    * that focus into a text control collapses the document selection -- so
    * dragging across the screen selected nothing at all and the operator lost
    * the only way there is to copy text out of this tab. While the pointer is
-   * down the box does not take the keyboard; `onPointerUp` gives it over only
-   * when the gesture left no selection behind, and a keystroke (below) is what
-   * ends a copy gesture that did.
+   * down the box does not take the keyboard; `onLostPointerCapture` gives it
+   * over only when the gesture left no selection behind, and a keystroke
+   * (below) is what ends a copy gesture that did.
+   *
+   * IT IS SET ONLY BEHIND A HELD POINTER CAPTURE, which is what makes a stuck
+   * `true` unreachable rather than merely unlikely -- see `onPointerDown` for
+   * the release-outside-the-pane defect that shape fixes, and for why the
+   * capture is taken before the flag is set.
    */
   const pointerDown = useRef(false);
 
@@ -1085,10 +1091,44 @@ export function TerminalTab({
         {...insertStopMark}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        onPointerDown={() => {
+        onPointerDown={(event: PointerEvent<HTMLElement>) => {
+          /**
+           * THE GESTURE IS CAPTURED, WHICH IS THE WHOLE OF WHY IT CANNOT GET
+           * STUCK -- and it is `PaneResizer.tsx`'s idiom, not a new one: "the
+           * drag is held entirely by `setPointerCapture`/
+           * `releasePointerCapture`", for this same reason.
+           *
+           * THE DEFECT IT FIXES, which shipped in the first cut of this pane
+           * and was found in review. The suppression below is a boolean, and
+           * this one was cleared by an `onPointerUp` ON THIS ELEMENT -- so it
+           * was cleared only when the pointer came up OVER the pane. Press
+           * inside and release outside, which is the ORDINARY way a person
+           * drags out to select the last line of a terminal, and the pane was
+           * not on the event's path at all: the flag stayed set for the life
+           * of the component, the forward below returned early every time,
+           * the box never took the keyboard again, and Vietnamese went
+           * straight back to leaking `tieengs` into a running agent. It
+           * self-healed on the SECOND keystroke (see `onKeyDown`), which is
+           * precisely what made it invisible by hand -- only the first
+           * character of the next syllable was typed raw.
+           *
+           * Capture ends on release, on cancel, AND when the element is
+           * removed, and it retargets the release to this element wherever it
+           * physically lands. Measured in Chromium both ways: without it, a
+           * release outside fired `window`'s `pointerup` and never this
+           * element's; with it, this element gets the release in both cases,
+           * and the drag-selection this suppression exists to protect is
+           * character-for-character identical.
+           *
+           * THE ORDER OF THESE TWO LINES IS THE FAIL-SAFE. The flag is set
+           * only once the capture is actually held, so an engine that refuses
+           * the capture degrades to possibly losing a selection -- never to a
+           * pane whose keyboard does not come back.
+           */
+          event.currentTarget.setPointerCapture(event.pointerId);
           pointerDown.current = true;
         }}
-        onPointerUp={() => {
+        onLostPointerCapture={() => {
           pointerDown.current = false;
           // A DRAG THAT SELECTED SOMETHING KEEPS THE KEYBOARD ON THE PANE.
           // Focusing a text control collapses the document selection, so
@@ -1096,6 +1136,11 @@ export function TerminalTab({
           // just made -- and mouse selection is the only way there is to copy
           // text out of this tab. A plain click leaves nothing selected and
           // does hand it over, which is what a click on a terminal means.
+          //
+          // HERE RATHER THAN IN `onPointerUp` so that there is ONE place a
+          // gesture can end: a cancelled pointer hands the keyboard back on
+          // the same line a completed one does, instead of being a second
+          // path nobody wrote.
           if (globalThis.getSelection()?.isCollapsed === false) return;
           takeKeyboard();
         }}

@@ -428,6 +428,83 @@ check(
 );
 
 // ---------------------------------------------------------------------------
+// 6b. A DRAG THAT ENDS OUTSIDE THE PANE STILL ENDS.
+//
+// THE DEFECT THIS EXISTS FOR, found in review of the first cut of this pane.
+// The suppression that protects the drag above is a boolean set on
+// `pointerdown`, and it was cleared by an `onPointerUp` ON THE PANE -- so only
+// a release OVER the pane cleared it. Dragging out past the edge to reach the
+// last line is the ordinary way anyone selects the bottom of a terminal, and
+// that release never reached the pane at all: the flag stayed set for the life
+// of the component, every later focus forward returned early, the box never
+// took the keyboard again, and Vietnamese went back to leaking `tieengs` into
+// the agent one raw keystroke at a time. It self-healed on the SECOND
+// keystroke, which is what made it invisible by hand.
+//
+// ONLY A REAL BROWSER CAN SHOW IT. The fix is `setPointerCapture`, and what
+// capture promises -- that the release is retargeted to the capturing element
+// wherever the pointer physically goes up -- is exactly what happy-dom stubs
+// out. So the mouse really leaves the pane here, and what is checked after it
+// is the HARM rather than the mechanism: a focus that arrives with no pointer
+// release over the pane (which is what `I` is) must still reach the box, and a
+// composition after it must still land.
+
+await page.evaluate(() => {
+  globalThis.getSelection().removeAllRanges();
+});
+// UPWARD, OUT OF THE TOP. Measured: the pane runs to within 8px of the bottom
+// of an 1100x800 viewport, so a point below it is off-screen -- `mouse.move`
+// cannot reach it and `elementFromPoint` answers `null` there, which would
+// make this case pass while never leaving the pane at all. Dragging back
+// through the scrollback is the natural gesture anyway.
+const release = { x: paneBox.x + 200, y: paneBox.y - 20 };
+await page.mouse.move(paneBox.x + 60, paneBox.y + 80);
+await page.mouse.down();
+await page.mouse.move(paneBox.x + 320, paneBox.y + 30, { steps: 8 });
+await page.mouse.move(release.x, release.y, { steps: 8 });
+await page.mouse.up();
+await page.waitForTimeout(200);
+const escaped = await page.evaluate((at) => {
+  const pane = document.querySelector('[data-terminal-pane]');
+  const under = document.elementFromPoint(at.x, at.y);
+  // NOT `!pane.contains(under)` alone: `elementFromPoint` answers `null` for a
+  // point outside the viewport, and a null would then read as "escaped" for a
+  // drag that never moved. The element has to BE something, and something else.
+  return { tag: under?.tagName ?? null, outside: under !== null && !pane.contains(under) };
+}, release);
+check(
+  'the release really did land outside the pane, or this case proves nothing',
+  escaped.outside,
+  `the point under the release is ${JSON.stringify(escaped)} — the coordinates need moving`,
+);
+
+await page.evaluate(() => {
+  document.activeElement.blur();
+  globalThis.getSelection().removeAllRanges();
+  // The focus `I` performs: `focusInsertStop` calls this on the pane and
+  // touches no pointer, so nothing about it can clear a stuck suppression.
+  document.querySelector('[data-terminal-pane]').focus();
+});
+await page.waitForTimeout(150);
+const afterEscape = await keyboardAt();
+check(
+  'a gesture released outside the pane still ends it, so the keyboard comes back to the box',
+  afterEscape.isBox,
+  `the keyboard is stuck on <${afterEscape.tag}> — the suppression was never cleared`,
+);
+
+await sent();
+await cdp.send('Input.imeSetComposition', { text: 'ti', selectionStart: 2, selectionEnd: 2 });
+await cdp.send('Input.insertText', { text: SYLLABLE });
+await page.waitForTimeout(250);
+const afterEscapeSent = await sent();
+check(
+  'and Vietnamese still composes after it, which is the harm this guards',
+  afterEscapeSent.length === 1 && afterEscapeSent[0]?.text === SYLLABLE,
+  `the pane sent ${JSON.stringify(afterEscapeSent)}`,
+);
+
+// ---------------------------------------------------------------------------
 // 4. TAB REALLY LEAVES, FORWARDS AND BACKWARDS.
 
 await keyDown('Tab', 'Tab', 9);

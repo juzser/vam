@@ -349,9 +349,71 @@ describe('the hidden box does not take the pane’s place', () => {
     box.focus();
     await settle();
     expect(document.activeElement).toBe(box);
-    fireEvent.pointerUp(box);
+    fireEvent.lostPointerCapture(box);
     expect(document.activeElement).toBe(input());
     expect(focusInsertStop(view.container)).toBe(true);
+  });
+
+  /**
+   * THE STUCK FLAG, AND WHY IT REINSTATES THE WHOLE BUG.
+   *
+   * The suppression that protects a drag is a boolean, and a boolean set on
+   * `pointerdown` has to be cleared on every way a press can END. The first
+   * cut of this pane cleared it in an `onPointerUp` ON THE PANE, so it was
+   * cleared only when the pointer came up OVER the pane. Press inside and
+   * release outside -- the ORDINARY way a person drags out to select the last
+   * line of a terminal -- and the pane is not on the event's path at all: the
+   * flag stays set for the life of the component, the focus forward returns
+   * early every time, the box never takes the keyboard again, and Vietnamese
+   * goes straight back to leaking `tieengs` into a running agent.
+   *
+   * IT SELF-HEALS ON THE SECOND KEYSTROKE, which is exactly what made it
+   * invisible by hand: `onKeyDown` re-arms the box, so only the FIRST
+   * character of the next syllable is typed raw and everything after it looks
+   * right.
+   *
+   * THE FIX IS POINTER CAPTURE, and these two cases are the two halves of it
+   * that this environment can hold. happy-dom has `setPointerCapture` as a
+   * stub -- it neither retargets a release nor fires `lostpointercapture` --
+   * so what is proved here is that the pane ASKS for the capture, and that
+   * losing it ends the gesture. That the browser then really delivers the
+   * release to a captured element wherever the pointer physically goes up is
+   * `e2e/terminal-ime-shots.mjs`'s to prove, and it drags off the pane to do
+   * it.
+   */
+  it('takes pointer capture, which is what makes a release reach it wherever it lands', async () => {
+    await open();
+    const box = pane() as HTMLElement;
+    const captured: number[] = [];
+    box.setPointerCapture = (pointerId: number) => {
+      captured.push(pointerId);
+    };
+    fireEvent.pointerDown(box, { pointerId: 7 });
+    expect(captured).toEqual([7]);
+  });
+
+  it('hands the keyboard back when the gesture ends, however it ended', async () => {
+    await open();
+    (input() as HTMLTextAreaElement).blur();
+    const box = pane() as HTMLElement;
+    fireEvent.pointerDown(box);
+    box.focus();
+    await settle();
+    // Suppressed while the pointer is down: this is the focus that would
+    // otherwise collapse the selection being made.
+    expect(document.activeElement).toBe(box);
+    // `lostpointercapture` is the ONE end of a gesture -- a release over the
+    // pane, a release anywhere else, a cancelled pointer and the element being
+    // removed all arrive here, instead of a release handler that hears only
+    // one of the four.
+    fireEvent.lostPointerCapture(box);
+    expect(document.activeElement).toBe(input());
+    // And the suppression is really gone, not merely bypassed once: the next
+    // focus that lands on the pane is forwarded too.
+    (input() as HTMLTextAreaElement).blur();
+    box.focus();
+    await settle();
+    expect(document.activeElement).toBe(input());
   });
 
   it('leaves the keyboard alone when the gesture selected text, so the copy survives', async () => {
@@ -368,7 +430,7 @@ describe('the hidden box does not take the pane’s place', () => {
       fireEvent.pointerDown(box);
       box.focus();
       await settle();
-      fireEvent.pointerUp(box);
+      fireEvent.lostPointerCapture(box);
       expect(document.activeElement).toBe(box);
     } finally {
       spy.mockRestore();
