@@ -3130,7 +3130,16 @@ const TurnBlock = memo(function TurnBlock({
   readonly waitingCause: string | null;
   readonly age: string | null;
   readonly status: SessionStatus | null;
-  readonly reserveCorner: boolean;
+  /**
+   * HOW MUCH OF THIS BUBBLE'S FIRST LINE THE VIEW PILL SITS OVER, in px --
+   * 0 when no pill is drawn. The pane's own `cornerOverhang`, which is the
+   * pill's width less the distance this bubble's right edge already sits
+   * inside the pane's; see its comment. Not the pill's full width: reserving
+   * that costs ~60px of the first line for a gap nothing is painted in, and
+   * `e2e/narrow-pane-overlay-shots.mjs` fails on THAT as well as on covering
+   * the text -- a reservation is wrong in both directions.
+   */
+  readonly reserveCorner: number;
   /** Focus view, as the operator set it -- see `prefs/progress.ts`. */
   readonly focusView: boolean;
   /** Has the operator pressed this turn's way back? */
@@ -3360,11 +3369,25 @@ const TurnBlock = memo(function TurnBlock({
                 turns that are not pinned and cannot be wrong at any scroll
                 offset. Only when the overlay is actually drawn -- an unfocused
                 pane paints no pill. */}
-            {reserveCorner && (
+            {reserveCorner > 0 && (
               <span
                 data-detail-corner-reserve
                 aria-hidden="true"
-                className="float-right h-[22px] w-[66px]"
+                className="float-right h-[22px]"
+                /* EXACTLY THE PART OF THE PILL THAT OVERHANGS THIS BUBBLE --
+                   measured, both edges, every time either can have moved.
+                   The `66px` this replaces was fitted to a THREE-icon pill
+                   (90px) and survived only because this bubble's right edge
+                   already sat ~44px inside the pane's, leaving 46px to
+                   cover. A source with a terminal draws four icons and one
+                   with the file bridge draws five (146px): ~102px to cover,
+                   and the first line of the pinned prompt -- the most-read
+                   text in the app -- would have run under the difference.
+                   Reserving the pill's whole width instead is the OTHER
+                   failure the guard names: 60px of a narrow pane's first
+                   line spent on a gap nothing was ever painted in. Only the
+                   overhang is right, and only measurement knows it. */
+                style={{ width: reserveCorner }}
               />
             )}
             {decision.input}
@@ -4889,6 +4912,48 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const cornerOverlay = !phone && paneFocused;
   /**
+   * HOW WIDE THE CORNER PILL IS, from the one thing that decides it: how many
+   * view icons are on it. Every reader of this used to restate `6rem`, and
+   * that constant was only ever right for THREE.
+   *
+   * MEASURED, both ends: a focused demo pane draws Response/PRs/Agents and
+   * the pill is 90px -- 30px per icon, exactly the `6rem` (96px) the old
+   * constant reserved, gap included. A pane whose source has a terminal draws
+   * four, and one with the file bridge draws five: 146px measured, already
+   * 50px past that reservation. The four-icon case was live on the
+   * integration branch before this tab existed and no guard saw it, because
+   * every web guard runs against `?demo=1` -- no terminal, no file bridge,
+   * three icons, the only case the constant fitted. Adding `Files` puts a
+   * fifth icon on every desktop pane, which is what turned a silent overlap
+   * into the visibly clipped Save button in this tab's own header row.
+   *
+   * DERIVED AT RENDER TIME, NOT MEASURED FROM THE DOM, and that is a
+   * correction rather than a preference: measuring the pill in a layout
+   * effect and re-rendering with the result changes the height of every turn
+   * in the column AFTER the column has already scrolled to its end, which
+   * unpins the newest turn's bubble. `narrow-pane-overlay-shots.mjs` caught
+   * exactly that -- it found the pill no longer reaching the bubble at all
+   * and refused the run as vacuous rather than passing it. `tabs` is known
+   * before paint, so nothing reflows.
+   *
+   * WHAT THIS STILL DOES NOT COVER, said plainly because the old constant did
+   * not either: `data-view-note`, which adds up to 160px to the LEFT of the
+   * icons while it is drawn. It is transient, it truncates itself, and no
+   * reservation has ever accounted for it.
+   */
+  const PILL_PER_ICON = 30;
+  const cornerReserve = cornerOverlay ? tabs.length * PILL_PER_ICON + 6 : 0;
+  /**
+   * The same pill, for a block whose right edge is NOT the pane's. The prompt
+   * bubble sits a variable distance inside it -- 44px at a 253px pane, 54px
+   * at a wide one (the jump gutter, a scrollbar) -- so it only has to clear
+   * the part of the pill that actually overhangs it, and reserving the pill's
+   * whole width takes ~60px out of the first line for nothing. Measured, that
+   * overhang is the pill's width less 34px..44px; less 28 lands inside the
+   * 0-48px window `narrow-pane-overlay-shots.mjs` allows at BOTH pane widths.
+   */
+  const cornerOverhang = cornerOverlay ? Math.max(0, tabs.length * PILL_PER_ICON - 28) : 0;
+  /**
    * Is the failed-session banner drawn above the column? Two readers, which
    * is why it is named: the banner itself, and the column, which hands its
    * top padding to the sticky ground and must NOT when something is sitting
@@ -5358,8 +5423,9 @@ export function DetailPanel(props: DetailPanelProps) {
                  pane for nothing is the over-reservation the identity line's
                  own `7rem` was deleted for. `e2e/narrow-pane-overlay-shots.mjs`
                  measures both halves. */
-              cornerOverlay ? 'pr-[6rem]' : 'pr-3',
+              cornerOverlay ? '' : 'pr-3',
             ].join(' ')}
+            style={cornerOverlay ? { paddingRight: cornerReserve } : undefined}
           >
             <span role="img" aria-label="failed" className="flex">
               <CircleSlash size={13} strokeWidth={1.6} />
@@ -5612,8 +5678,9 @@ export function DetailPanel(props: DetailPanelProps) {
                  -- invisible here, since this block paints no ground, and a
                  trap for whoever gives it one. */
                 className={`-ml-3.5 -mr-11 flex flex-none flex-col gap-0.5 pt-3 pb-1 pl-3.5 font-mono text-meta text-ink-faint ${
-                  cornerOverlay ? 'pr-[6rem]' : 'pr-11'
+                  cornerOverlay ? '' : 'pr-11'
                 }`}
+                style={cornerOverlay ? { paddingRight: cornerReserve } : undefined}
               >
                 {/* WRAPPING, since the qualifier below can be a PHRASE where
                   this row has only ever held tokens.
@@ -5811,7 +5878,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   waitingCause={d.id === newestId ? waitingCause : null}
                   age={d.id === newestId ? liveAge : null}
                   status={entry?.session.status ?? null}
-                  reserveCorner={cornerOverlay}
+                  reserveCorner={cornerOverhang}
                   focusView={focusView}
                   unfolded={unfolded.has(d.id)}
                   onUnfold={unfold}
@@ -5974,9 +6041,10 @@ export function DetailPanel(props: DetailPanelProps) {
             // this file) floats ABOVE this tab's own content at `top-2
             // right-2.5`, real clicks and all -- measured directly: the Save
             // button sat under the Agents icon until this was threaded
-            // through, the same `pr-[6rem]` reservation `TurnBlock`'s own
-            // `reserveCorner` already uses for the identical corner.
-            reserveCorner={cornerOverlay}
+            // through -- and `6rem` was not enough once this tab's own icon
+            // widened the pill, so it is the MEASURED `cornerReserve` rather
+            // than a constant. See its own comment above.
+            reserveCorner={cornerReserve}
           />
         )}
       </div>

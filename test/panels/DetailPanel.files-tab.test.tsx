@@ -408,6 +408,89 @@ describe('dirty state', () => {
   });
 });
 
+describe('the line-number gutter', () => {
+  const openWith = async (content: string) => {
+    withBridge({
+      list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
+      read: async () => ({ content, isBinary: false, signature: SIGNATURE() }),
+    });
+    draw({ files: true });
+    await act(async () => {
+      q<HTMLButtonElement>('[data-view="files"]')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      q<HTMLElement>('[data-files-row]')?.click();
+      await Promise.resolve();
+    });
+  };
+
+  it('numbers every line of the file, one per line and no more', async () => {
+    await openWith('A=1\nB=2\nC=3');
+    expect(q('[data-files-gutter]')?.textContent).toBe('1\n2\n3');
+  });
+
+  it('counts a trailing newline as the line the caret would sit on', async () => {
+    // A file ending in a newline has an empty last line, and an editor that
+    // did not number it would put the caret on a row with no number beside
+    // it -- the drift this whole gutter exists to avoid, one line early.
+    await openWith('A=1\n');
+    expect(q('[data-files-gutter]')?.textContent).toBe('1\n2');
+  });
+
+  it('shows a single number for an empty file, not an empty gutter', async () => {
+    await openWith('');
+    expect(q('[data-files-gutter]')?.textContent).toBe('1');
+  });
+
+  it('follows the text as it is typed, rather than only as it was loaded', async () => {
+    await openWith('A=1');
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]');
+    if (editor === null) throw new Error('no editor');
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=1\nB=2\nC=3\nD=4' } });
+      await Promise.resolve();
+    });
+    expect(q('[data-files-gutter]')?.textContent).toBe('1\n2\n3\n4');
+  });
+
+  it('never wraps the text, because a wrapped line would put two rows against one number', async () => {
+    // The one property the numbers cannot survive losing. Asserted on the
+    // inline style rather than a computed layout because happy-dom lays
+    // nothing out -- the browser half is a real measurement in
+    // `e2e/files-tab-keyboard-shots.mjs`.
+    await openWith('A=1');
+    expect(q<HTMLTextAreaElement>('[data-files-editor]')?.style.whiteSpace).toBe('pre');
+  });
+
+  it('scrolls the numbers with the text, so they stay level in a long file', async () => {
+    await openWith(Array.from({ length: 400 }, (_, i) => `line ${i + 1}`).join('\n'));
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]');
+    const gutter = q<HTMLElement>('[data-files-gutter]');
+    if (editor === null || gutter === null) throw new Error('no editor');
+    await act(async () => {
+      editor.scrollTop = 250;
+      fireEvent.scroll(editor);
+      await Promise.resolve();
+    });
+    // The WIRING, not the layout: happy-dom lays nothing out, so this proves
+    // the handler carries the textarea's own offset across, which is the half
+    // that can silently go missing. That the two columns then LOOK level is a
+    // font-metric fact only a real browser can answer.
+    expect(gutter.scrollTop).toBe(250);
+  });
+
+  it('keeps the gutter out of the accessibility tree and out of the keyboard path', async () => {
+    await openWith('A=1\nB=2');
+    const gutter = q('[data-files-gutter]');
+    expect(gutter?.getAttribute('aria-hidden')).toBe('true');
+    // Decoration only: it must never be an insert scope of its own, or
+    // `cursorModeAt` would report Insert for a thing nobody can type into.
+    expect(gutter?.hasAttribute('data-insert-scope')).toBe(false);
+    expect(gutter?.hasAttribute('data-insert-stop')).toBe(false);
+  });
+});
+
 describe('the keyboard model', () => {
   it('marks the editor as an insert scope while it is the showing tab', async () => {
     withBridge({
@@ -512,6 +595,51 @@ describe('the keyboard model', () => {
       await Promise.resolve();
     });
     expect(write).toHaveBeenCalledWith('/work/atlas/.env', 'A=2', SIGNATURE());
+  });
+
+  /**
+   * THE MARK COMES OFF WHILE ANOTHER TAB IS SHOWING, and this is the sibling
+   * of the test above rather than a restatement of it: `FilesTab` is the one
+   * tab that stays MOUNTED when it is not current (`DetailPanel.tsx`'s own
+   * mount site -- unsaved text is why), and it is mounted EARLIER in the
+   * pane's document order than the composer. `focusInsertStop` takes the
+   * FIRST `STOP_SELECTOR` match in that order and focuses it blindly, so a
+   * mark left on a `display: none` textarea would be found first, fail to
+   * take focus, and make `I` refuse out loud on every OTHER tab -- for any
+   * operator who had opened a file once. Nothing else in this suite would
+   * notice: the editor would still be marked, still mounted, still correct
+   * on its own tab.
+   */
+  it('takes the insert marks off once another tab is showing, so `I` still reaches the composer', async () => {
+    withBridge({
+      list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
+      read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
+    });
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      q<HTMLElement>('[data-files-row]')?.click();
+      await Promise.resolve();
+    });
+    expect(q('[data-files-editor][data-insert-stop]')).not.toBeNull();
+
+    await act(async () => {
+      q<HTMLButtonElement>('[data-view="response"]')?.click();
+      await Promise.resolve();
+    });
+    // Still mounted -- that is the whole point of the mount site.
+    expect(q('[data-files-editor]')).not.toBeNull();
+    // But no longer claiming the keyboard for a pane that is not showing it.
+    expect(q('[data-files-editor][data-insert-scope]')).toBeNull();
+    expect(q('[data-files-editor][data-insert-stop]')).toBeNull();
+    // Asserted as the QUERY rather than as a real `.focus()` landing on
+    // purpose: happy-dom will happily focus a `display: none` element, so a
+    // focus-based assertion here would pass in this environment whether the
+    // bug was present or not. The browser half lives in
+    // `e2e/files-tab-keyboard-shots.mjs`.
+    const firstStop = q('[data-question-option], [data-insert-stop]');
+    expect(firstStop).not.toBeNull();
+    expect(firstStop?.hasAttribute('data-files-editor')).toBe(false);
   });
 });
 

@@ -107,7 +107,7 @@ export type FilesTabProps = {
    * button sat under the Agents icon and Playwright's own click retried for
    * thirty seconds before timing out on the element actually receiving it.
    */
-  readonly reserveCorner: boolean;
+  readonly reserveCorner: number;
 };
 
 type SaveState =
@@ -578,7 +578,7 @@ function FileEditor({
   onBrowse,
 }: {
   readonly hidden: boolean;
-  readonly reserveCorner: boolean;
+  readonly reserveCorner: number;
   readonly path: string;
   readonly root: string | null;
   readonly buffer: Buffer;
@@ -591,6 +591,35 @@ function FileEditor({
 }) {
   const label = root === null ? path : relativeLabel(root, path);
   const dirty = isDirty(buffer);
+  const gutterRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * The gutter's own text: `1\n2\n3...`, one number per LINE of the buffer
+   * (never per visual row -- see the editor's own comment for why the
+   * textarea must not wrap). An empty file is one line, the same way a
+   * blank editor shows a caret on line 1, which is why this counts
+   * separators plus one rather than counting non-empty pieces.
+   */
+  const lineNumbers =
+    buffer.kind === 'editable'
+      ? Array.from({ length: buffer.content.split('\n').length }, (_, index) => index + 1).join(
+          '\n',
+        )
+      : '';
+
+  /**
+   * Keep the numbers level with the text. The textarea owns the scroll (it
+   * is the only one of the two that can be scrolled by a caret, a wheel or a
+   * drag); the gutter follows it, one assignment, on the same frame the
+   * browser already scheduled for the scroll event -- no state, no re-render.
+   */
+  const syncGutter = useCallback(() => {
+    const gutter = gutterRef.current;
+    const textarea = textareaRef.current;
+    if (gutter !== null && textarea !== null) {
+      gutter.scrollTop = textarea.scrollTop;
+    }
+  }, [textareaRef]);
 
   return (
     <div
@@ -599,13 +628,21 @@ function FileEditor({
       hidden={hidden}
       className="flex min-h-0 flex-1 flex-col gap-1.5"
     >
-      {/* `pr-[6rem]` ONLY while the corner overlay is actually drawn over
-          this row -- the same reservation `TurnBlock`'s own `reserveCorner`
-          and the failed-session banner both already use for the identical
-          `data-view-overlay` box, measured against the same `6rem` its own
-          pill needs. Without it the Save button sits under the Agents icon
-          and a real click lands on the wrong element. */}
-      <div className={`flex flex-none items-center gap-1.5 ${reserveCorner ? 'pr-[6rem]' : ''}`}>
+      {/* THE CORNER, RESERVED BY MEASUREMENT -- `DetailPanel.tsx`'s own
+          `cornerReserve`, which reads the pill's real width off the element
+          rather than restating it as a constant. Without any reservation the
+          Save button sits under the view icons; with the `6rem` this row
+          first used, it still did: measured at a 1100px window, the pill is
+          118px once this tab adds a fifth view icon, and the button's right
+          18px stayed under it. `elementFromPoint` at the button's CENTRE
+          still returned the button, so a click-based check passed the whole
+          way through -- which is exactly why this is reserved against a
+          measured width now and asserted as a rectangle, not a click, in
+          `e2e/files-tab-keyboard-shots.mjs`. */}
+      <div
+        className="flex flex-none items-center gap-1.5"
+        style={reserveCorner > 0 ? { paddingRight: reserveCorner } : undefined}
+      >
         <button
           type="button"
           onClick={onBrowse}
@@ -716,18 +753,54 @@ function FileEditor({
               anywhere in this pane, silently fail to reach the composer the
               moment this build has ever shown the Files tab once. See this
               file's own header. */}
-          <textarea
-            ref={textareaRef}
-            data-files-editor
-            {...(hidden ? {} : insertScopeMark)}
-            {...(hidden ? {} : insertStopMark)}
-            value={buffer.content}
-            onChange={(event) => onChange(event.target.value)}
-            onKeyDown={onKeyDown}
-            spellCheck={false}
-            aria-label={`edit ${label}`}
-            className="vam-no-scrollbar min-h-0 flex-1 resize-none rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-control text-ink leading-[1.5] outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-line-strong"
-          />
+          {/* THE GUTTER AND THE TEXTAREA SHARE ONE BOX, and every property
+              that keeps their two columns in step is load-bearing rather
+              than cosmetic:
+
+              * `whiteSpace: 'pre'` ON THE TEXTAREA. A wrapped line occupies
+                two ROWS but is still one LINE, so the moment the textarea
+                soft-wraps, number N stops pointing at line N and every
+                number below it is wrong -- the single classic bug of a
+                hand-built gutter. Not wrapping is also what Monaco (orca's
+                own editor) does by default, and it is why `applyTab` indents
+                with spaces rather than a tab byte: a tab's RENDERED width is
+                a font-and-platform question neither column could answer the
+                same way.
+              * ONE TEXT NODE, joined by newlines, inside a `pre` box -- not
+                one element per line. The numbers then inherit exactly the
+                same line box the text does instead of depending on a second
+                set of margins agreeing with the first.
+              * `overflow-hidden` ON THE GUTTER, scrolled only by the sync
+                below, so it can never be scrolled independently into a
+                position the text is not at.
+              * The MARKS STAY ON THE TEXTAREA, never on this wrapper: the
+                insert scope has to be the thing that actually takes focus.
+          */}
+          <div className="flex min-h-0 flex-1 overflow-hidden rounded-[9px] border border-line bg-panel focus-within:border-line-strong">
+            <div
+              ref={gutterRef}
+              data-files-gutter
+              aria-hidden="true"
+              className="vam-no-scrollbar flex-none select-none overflow-hidden py-2 pr-2 pl-3 text-right font-mono text-control text-ink-faint leading-[1.5]"
+              style={{ whiteSpace: 'pre' }}
+            >
+              {lineNumbers}
+            </div>
+            <textarea
+              ref={textareaRef}
+              data-files-editor
+              {...(hidden ? {} : insertScopeMark)}
+              {...(hidden ? {} : insertStopMark)}
+              value={buffer.content}
+              onChange={(event) => onChange(event.target.value)}
+              onKeyDown={onKeyDown}
+              onScroll={syncGutter}
+              spellCheck={false}
+              aria-label={`edit ${label}`}
+              className="vam-no-scrollbar min-h-0 min-w-0 flex-1 resize-none border-0 bg-transparent py-2 pr-3 pl-1 font-mono text-control text-ink leading-[1.5] outline-none"
+              style={{ whiteSpace: 'pre', overflowWrap: 'normal' }}
+            />
+          </div>
         </>
       )}
     </div>
