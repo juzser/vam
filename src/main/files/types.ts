@@ -43,3 +43,19 @@ export type FileWriteResult = {
   /** The signature immediately after this write -- the next edit's baseline. */
   readonly signature: FileSignature;
 };
+
+/**
+ * What `CHANNELS.filesList` answers with, on success. See `list.ts` and
+ * `list-ipc.ts`. `files` carries only PATHS -- no content, no per-entry
+ * signature -- for the same reason `FileReadResult.content` is `''` for a
+ * binary file: this shape is what the renderer draws a list from, and a list
+ * row is a place to click, not a place file content ever needs to reach.
+ */
+export type FileListResult = {
+  /** The (already `realpath`-resolved) directory this listing is rooted at. */
+  readonly root: string;
+  /** Every regular file found under `root`, as absolute paths, sorted. */
+  readonly files: readonly string[];
+  /** `true` once the walk's own cap was reached and it stopped early. */
+  readonly truncated: boolean;
+};

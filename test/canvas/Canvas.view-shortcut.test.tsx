@@ -127,12 +127,26 @@ describe('the digit still names a view, and still refuses aloud', () => {
     expect(note()).toBeNull();
   });
 
-  it('says how many views exist for a digit that names none, and moves nothing', () => {
+  /**
+   * `Alt-5` now names Files (`TABS[4]`) — a real view this test's fixture
+   * source does not offer (no `window.api.files` in a jsdom test), so it
+   * refuses BY NAME, the same shape `Alt-3`/Terminal already does above, not
+   * as "no view 5". `Alt-6` is what is actually past `TABS`' own length now.
+   */
+  it('Alt-5 refuses by NAME once Files is withdrawn, never landing on Response silently', () => {
     render(<Canvas model={MODEL} />);
     altDigit(5);
     expect(pressed('response')).toBe('true');
     expect(note()?.getAttribute('role')).toBe('status');
-    expect(note()?.textContent ?? '').toContain('no view 5');
+    expect(note()?.textContent ?? '').toContain('Files');
+  });
+
+  it('says how many views exist for a digit that names none, and moves nothing', () => {
+    render(<Canvas model={MODEL} />);
+    altDigit(6);
+    expect(pressed('response')).toBe('true');
+    expect(note()?.getAttribute('role')).toBe('status');
+    expect(note()?.textContent ?? '').toContain('no view 6');
   });
 
   it('clears the refusal as soon as a press lands somewhere', () => {

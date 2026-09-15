@@ -245,6 +245,31 @@ export const CHANNELS = {
    */
   filesWrite: 'vam:files:write',
   /**
+   * The file-editor tab's directory listing: given a live session's own id,
+   * every regular file under that session's own working directory --
+   * `node_modules` and `.git` walked over rather than into (orca's own
+   * quick-open exemption, generalised: every OTHER dotfile and dotdirectory
+   * stays visible, because `.env` is the file the operator named this
+   * feature for), symlinks neither listed nor followed. See
+   * `src/main/files/list.ts` for the walk and `./files/list-ipc.ts` for the
+   * channel.
+   *
+   * ADDED AFTER `filesRead`/`filesWrite` SHIPPED, and keyed by SESSION ID
+   * rather than by a directory string, for the reason `pickImageAttachment`
+   * already is: `renderer/domain/model.ts` carries no `cwd` field, so a
+   * channel this shape is the only way the renderer can ever discover a path
+   * to hand `filesRead` in the first place. Listing grants no standing of its
+   * own -- every path it returns is still independently re-authorised
+   * (`authorize.ts`) the moment it is handed to `filesRead`/`filesWrite`.
+   *
+   * THE SAME DESKTOP-ONLY STANDING AS `filesRead`/`filesWrite` -- covered by
+   * the SAME `UNSERVED.files` entry in `remote/server.ts` rather than a
+   * second one, since the argument ("arbitrary file access over a network is
+   * at least as serious as typing into a running agent") does not change
+   * because the payload is names instead of bytes.
+   */
+  filesList: 'vam:files:list',
+  /**
    * The pairing screen's channels. Every one of them answers a bare
    * `RemoteState` (`src/main/remote/ipc.ts`) rather than an `IpcResult`: the
    * screen's whole content is that one snapshot, so an act returning the

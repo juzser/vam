@@ -320,12 +320,21 @@ describe('the generated key sheet tells the truth about the digits', () => {
   });
 
   /**
-   * The sheet may not name a VIEW that cannot exist. `Alt-5`..`Alt-9` are
+   * The sheet may not name a VIEW that cannot exist. `Alt-6`..`Alt-9` are
    * bound so the pane can refuse them aloud rather than let them reach the
-   * browser, and a sheet that captioned them as views would be naming five
+   * browser, and a sheet that captioned them as views would be naming four
    * that do not exist. (The Cmd row has no such ceiling — a pane's strip holds
    * as many tabs as the project has sessions — which is why its caption names
    * no count at all.)
+   *
+   * `Alt-5` is DELIBERATELY EXCLUDED from this loop now that `TABS` holds
+   * five names (`Files`, appended): the STATIC caption this test reads is a
+   * function of `TABS` alone (`pickView`'s own label in `keysheet.ts`), which
+   * knows nothing about whether any particular SOURCE actually offers Files
+   * at runtime -- that refusal is a different one, and
+   * `Canvas.view-shortcut.test.tsx`'s own "Files — this source has none" test
+   * covers it, the same way Terminal's own withdrawal is covered there and
+   * not here.
    */
   it('names no view past the last one the pane can hold', () => {
     const viewLabels = rows()
@@ -333,7 +342,8 @@ describe('the generated key sheet tells the truth about the digits', () => {
       .map((row) => row.label);
     expect(viewLabels.length).toBe(9);
     expect(viewLabels.some((label) => label.includes('Agents'))).toBe(true);
-    for (const digit of [5, 6, 7, 8, 9]) {
+    expect(viewLabels.some((label) => label.includes('Files'))).toBe(true);
+    for (const digit of [6, 7, 8, 9]) {
       const row = rows().find((each) => each.keys === `Alt-${digit}`);
       expect(row?.label, `Alt-${digit}`).toContain(`no view ${digit}`);
     }

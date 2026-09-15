@@ -39,7 +39,7 @@
  * appends to a log. `delivers` carries the difference, and with nothing said
  * the wording stays at "record".
  *
- * ## The mockup's four tabs
+ * ## The mockup's four tabs, and the fifth that was never in it
  *
  * ADE puts Response / PRs / Terminal / Agents across the top, and all four now
  * have something behind them — which was not true when this comment was first
@@ -50,6 +50,15 @@
  * branch; Agents reads the roster beside a session's transcript; Terminal
  * reads a tmux pane, and only for sessions vam itself started, because no
  * process can take over another's controlling TTY.
+ *
+ * `Files` is the operator's own addition, not the mockup's: a file manager and
+ * editor scoped to the session's own working directory, for the `.env` and
+ * "a few other files" no chat transcript was ever going to be the right place
+ * to touch. See `FilesTab.tsx`. It is withdrawn the OPPOSITE way Terminal is
+ * (`tabs.ts`'s own header) — absent unless this build actually has the
+ * desktop bridge behind it, never a per-source decline, because no source
+ * declares it and none ever will (`CHANNELS.filesRead`'s header: no remote
+ * route, by design).
  *
  * The `LIVE_TABS` list below is the honest part: a tab is live for a SOURCE
  * that reports the thing it draws, and the factory source still reports none
@@ -63,6 +72,7 @@ import {
   ChevronsDown,
   ChevronsUp,
   CircleSlash,
+  FileText,
   GitPullRequest,
   Hand,
   Image as ImageIcon,
@@ -136,6 +146,7 @@ import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { copyText } from './clipboard.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import { type DictationHandle, dictationAvailable, startDictation } from './dictation.js';
+import { FilesTab } from './FilesTab.js';
 import {
   type DiffKind,
   diffLineKind,
@@ -639,6 +650,18 @@ export type DetailPanelProps = {
    */
   readonly terminal?: boolean;
   /**
+   * Whether THIS BUILD can show a file editor at all -- `true` only once the
+   * caller has confirmed `window.api.files` exists. See `tabs.ts`'s
+   * `visibleTabs` header for why this defaults the OPPOSITE way `terminal`
+   * does: there is no per-source capability behind Files to read (nothing
+   * declares it, nothing ever will -- `CHANNELS.filesRead`'s own header), so
+   * `undefined`/`false` both withdraw the tab and only an explicit `true`
+   * shows it. Every existing caller of this panel, including every test that
+   * predates this tab, keeps Files withdrawn without needing to learn a new
+   * prop.
+   */
+  readonly files?: boolean;
+  /**
    * Opens the native image picker for the focused session, scoped to and
    * validated against its own working directory -- present only when
    * `SourceCapabilities.promptAttachments` is true AND this shell can reach
@@ -891,6 +914,7 @@ const VIEW_ICON: Readonly<Record<Tab, typeof MessageSquare>> = {
   PRs: GitPullRequest,
   Terminal: SquareTerminal,
   Agents: Users,
+  Files: FileText,
 };
 
 /**
@@ -3647,6 +3671,7 @@ export function DetailPanel(props: DetailPanelProps) {
     answer,
     prompt,
     terminal,
+    files,
     pickImageAttachment,
     sending = false,
     width,
@@ -4010,7 +4035,7 @@ export function DetailPanel(props: DetailPanelProps) {
   // the operator can be on Terminal when focus moves to a session from a
   // source without one, and a tab bar with nothing selected over a pane
   // drawing a tab that is no longer offered is the state this collapses.
-  const tabs = visibleTabs(terminal !== false);
+  const tabs = visibleTabs(terminal !== false, files === true);
   const current = tabs.includes(tab) ? tab : 'Response';
 
   /** Whether the step counter has been asked for the sentence it abbreviates. */
@@ -5401,7 +5426,11 @@ export function DetailPanel(props: DetailPanelProps) {
                 : { ...prRepo, projectName: prRepo.projectName ?? entry?.project.name }
             }
           />
-        ) : orderedTurns.length === 0 ? (
+        ) : current === 'Files' ? // Drawn by the ALWAYS-MOUNTED `FilesTab` sibling below instead --
+        // see its own comment for why. This slot contributes nothing so the
+        // Response-column branches below it never run for a tab that is not
+        // Response.
+        null : orderedTurns.length === 0 ? (
           entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip
           // above it, and an empty strip already says "no sessions open —
           // pick one from the sidebar". This line said the same thing in
@@ -5919,6 +5948,37 @@ export function DetailPanel(props: DetailPanelProps) {
             <span className="min-w-0 flex-1">{sendFailure}</span>
           </p>
         )}
+        {/* ALWAYS MOUNTED WHILE THIS BUILD HAS THE BRIDGE -- deliberately NOT
+            gated behind `current === 'Files'` the way `TerminalTab` is gated
+            behind `current === 'Terminal'`. `TerminalTab`'s own header says
+            what it costs to unmount-and-remount: nothing, because there is a
+            poll to stop. An open file's UNSAVED TEXT is not nothing -- "the
+            worst outcome this feature can have, worse than not shipping it"
+            was the exact instruction this tab was built against -- so
+            `FilesTab` stays mounted for as long as this panel shows ANY tab,
+            keeping every open buffer's dirty text in memory across a switch
+            to Response/PRs/Terminal/Agents and back. `hidden` (`display:
+            none`) removes it from layout and from the Tab order without
+            unmounting it, which is the one property this choice needs: React
+            state survives, nothing currently on screen shows it, and it costs
+            no timer and no IPC while hidden -- `FilesTab` itself polls
+            nothing, unlike Terminal's `capture-pane`. */}
+        {files === true && (
+          <FilesTab
+            hidden={current !== 'Files'}
+            sessionId={entry?.session.id ?? null}
+            list={globalThis.window?.api?.files?.list}
+            read={globalThis.window?.api?.files?.read}
+            write={globalThis.window?.api?.files?.write}
+            // The view-icon corner overlay (`data-view-overlay`, further down
+            // this file) floats ABOVE this tab's own content at `top-2
+            // right-2.5`, real clicks and all -- measured directly: the Save
+            // button sat under the Agents icon until this was threaded
+            // through, the same `pr-[6rem]` reservation `TurnBlock`'s own
+            // `reserveCorner` already uses for the identical corner.
+            reserveCorner={cornerOverlay}
+          />
+        )}
       </div>
 
       {/* The question's own block, drawn only when there IS one: it was split
@@ -5929,7 +5989,12 @@ export function DetailPanel(props: DetailPanelProps) {
         `waitingFor` too, for the notice above the prompt input the operator
         asked to remove; keeping that disjunct would draw a bordered empty
         block on every waiting session -- a seam with nothing behind it. */}
-      {current !== 'Terminal' && newestQuestion !== null && (
+      {/* NOT ON `Files` EITHER, same reasoning as Terminal: a full-pane
+        surface with its own keyboard (the editor's own insert scope) has no
+        room for a question card floating over it, and the question this
+        card answers is the AGENT's, unrelated to a file the operator opened
+        to read or edit by hand. */}
+      {current !== 'Terminal' && current !== 'Files' && newestQuestion !== null && (
         <div
           data-question-bar
           // AN INSERT SCOPE (`keyboard/focus-scope.ts`): while anything in
@@ -5982,7 +6047,12 @@ export function DetailPanel(props: DetailPanelProps) {
         is the darker colour they were looking at. Nothing else in the app
         wears `header` now; the token stays defined, unworn, rather than being
         deleted out from under a theme that still names it. */}
-      {current !== 'Terminal' && !composerHidden && (
+      {/* NOT ON `Files`, for the same reason as the question bar just above:
+        the editor is a full-pane surface with its own keyboard, and a
+        composer prompting the AGENT underneath it would be a second insert
+        scope competing for the same keystrokes a person is typing into a
+        file. */}
+      {current !== 'Terminal' && current !== 'Files' && !composerHidden && (
         <div
           data-composer-bar
           // The other insert scope, and the common one: with no question open
