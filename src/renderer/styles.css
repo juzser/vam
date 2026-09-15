@@ -1544,6 +1544,29 @@ body {
 }
 
 /*
+ * THE FILE EDITOR'S OVERLAY, IN FORCED COLOURS.
+ *
+ * `FilesTab.tsx` draws its syntax colours on a `<pre>` behind the textarea and
+ * makes the textarea's own text transparent, which is the only way to colour
+ * text inside a `<textarea>` at all. A forced-colours mode (Windows High
+ * Contrast, and Chromium's own emulation) overrides `color` on every element
+ * to a system colour -- INCLUDING the transparent one. The result is the same
+ * text painted twice, once in the forced ink and once in the overlay's, one
+ * pixel apart from nothing and readable as neither.
+ *
+ * So in that mode the overlay is simply not drawn. The operator loses colour
+ * they did not ask for in a mode whose whole purpose is that they choose the
+ * colours, and keeps a legible editor, which is the trade in the only
+ * direction worth making. `text-transparent` on the textarea is overridden by
+ * the same cascade, so nothing else is needed to bring its own ink back.
+ */
+@media (forced-colors: active) {
+  [data-files-highlight] {
+    display: none;
+  }
+}
+
+/*
  * A control smaller than the AA target floor, given a 24x24 hit area without
  * changing what it looks like or what it does to the row it sits in.
  *

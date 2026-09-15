@@ -22,6 +22,11 @@ import type {
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
+import {
+  DEFAULT_EDITOR_HIGHLIGHT,
+  DEFAULT_EDITOR_INDENT,
+  setActiveEditorSettings,
+} from '../../src/renderer/prefs/editor.js';
 
 const DECISION: Decision = {
   id: 'd1',
@@ -1080,5 +1085,269 @@ describe('closing warns — the one exit dirty text cannot survive', () => {
       await Promise.resolve();
     });
     expect(dispatchBeforeUnload()).toBe(false);
+  });
+});
+
+/* ===========================================================================
+ * THE FORMATTER, THE COLOURS, AND THE TWO SETTINGS THAT GOVERN THEM.
+ *
+ * `files-format.ts` and `files-highlight.ts` are proven on their own, in their
+ * own files, against strings. What can only be proven HERE is that the tab
+ * actually calls them, draws all three of the formatter's answers, and -- the
+ * one that matters most -- that a format the operator did not want is one
+ * keystroke away from being undone. Losing typed text is the worst thing this
+ * feature can do, and it is the same class of harm as `changed-on-disk`.
+ * ======================================================================== */
+
+/** Opens `path` with `content` on screen, and hands back its textarea. */
+async function openFile(path: string, content: string): Promise<HTMLTextAreaElement> {
+  withBridge({
+    list: async () => ({ root: '/work/atlas', files: [path], truncated: false }),
+    read: async () => ({ content, isBinary: false, signature: SIGNATURE() }),
+  });
+  draw({ files: true });
+  await openFiles();
+  await act(async () => {
+    row(path)?.click();
+    await Promise.resolve();
+  });
+  const editor = q<HTMLTextAreaElement>('[data-files-editor]');
+  if (editor === null) throw new Error(`no editor for ${path}`);
+  return editor;
+}
+
+const note = (): string => q('[data-files-note]')?.textContent ?? '';
+
+const pressFormat = async () => {
+  await act(async () => {
+    q<HTMLButtonElement>('[data-files-format]')?.click();
+    await Promise.resolve();
+  });
+};
+
+afterEach(() => {
+  setActiveEditorSettings({ highlight: DEFAULT_EDITOR_HIGHLIGHT, indent: DEFAULT_EDITOR_INDENT });
+});
+
+describe('the formatter, as the tab presents it', () => {
+  it('formats a JSON file in place', async () => {
+    const editor = await openFile('/work/atlas/tsconfig.json', '{"a":1}');
+    await pressFormat();
+    expect(editor.value).toBe('{\n  "a": 1\n}\n');
+  });
+
+  it('follows the indent width the operator set', async () => {
+    setActiveEditorSettings({ highlight: true, indent: 4 });
+    const editor = await openFile('/work/atlas/tsconfig.json', '{"a":1}');
+    await pressFormat();
+    expect(editor.value).toBe('{\n    "a": 1\n}\n');
+  });
+
+  it('inserts that same width on Tab, so one setting governs both', async () => {
+    setActiveEditorSettings({ highlight: true, indent: 4 });
+    const editor = await openFile('/work/atlas/.env', 'A=1');
+    editor.setSelectionRange(0, 0);
+    await act(async () => {
+      fireEvent.keyDown(editor, { key: 'Tab' });
+      await Promise.resolve();
+    });
+    expect(editor.value).toBe('    A=1');
+  });
+
+  /**
+   * THE REFUSAL, ALOUD AND BY NAME. A control that cannot act says so: the
+   * house rule this tab's other seven refusals already keep, and the one
+   * thing a disabled button could never do.
+   *
+   * MUTATION TARGET: make the refusal branch `return` without setting a note
+   * and this reddens -- which is the whole difference between refusing and
+   * doing nothing.
+   */
+  it('refuses a file type it cannot prove, by name, rather than doing nothing', async () => {
+    const editor = await openFile('/work/atlas/index.ts', 'const a=1\n');
+    await pressFormat();
+    expect(note()).toContain('.ts');
+    expect(note()).toContain('.json');
+    expect(editor.value).toBe('const a=1\n');
+  });
+
+  it('says a tidy file was already tidy rather than falling silent', async () => {
+    const editor = await openFile('/work/atlas/tsconfig.json', '{\n  "a": 1\n}\n');
+    await pressFormat();
+    expect(note()).toMatch(/already/i);
+    expect(editor.value).toBe('{\n  "a": 1\n}\n');
+  });
+
+  it('refuses invalid JSON with the parser’s own position', async () => {
+    await openFile('/work/atlas/tsconfig.json', '{"a":1,}');
+    await pressFormat();
+    expect(note()).toMatch(/position \d+/);
+  });
+
+  it('leaves a .env assignment alone while tidying the blank runs around it', async () => {
+    const editor = await openFile('/work/atlas/.env', 'A=1   \n\n\n\nB=2\n');
+    await pressFormat();
+    expect(editor.value).toBe('A=1   \n\nB=2\n');
+  });
+
+  it('makes the buffer dirty, so a format is a change the operator must save', async () => {
+    await openFile('/work/atlas/tsconfig.json', '{"a":1}');
+    expect(q('[data-files-dirty]')).toBeNull();
+    await pressFormat();
+    expect(q('[data-files-dirty]')).not.toBeNull();
+  });
+});
+
+/**
+ * THE UNDO, WHICH IS THE PART THIS FEATURE CANNOT SHIP WITHOUT.
+ *
+ * React drives this textarea's `value` as a controlled prop, so a format
+ * REPLACES the whole value programmatically -- and a programmatic replace is
+ * exactly what the browser's own undo stack does not record. Without something
+ * here, `Mod-z` after a format would not give the operator their text back,
+ * and a format is a whole-file change.
+ *
+ * So the undo is vam's own, explicit, and offered two ways: the key the
+ * operator's hands already reach for, and a button in the note for the times
+ * they do not. It is armed by a format and DISARMS ITSELF the moment the
+ * buffer stops being exactly what that format produced -- so `Mod-z` after
+ * typing is the browser's own undo of the typing, never a surprise reversal
+ * of a format five minutes old.
+ */
+describe('undoing a format', () => {
+  const modZ = (editor: HTMLTextAreaElement): boolean =>
+    fireEvent.keyDown(editor, { key: 'z', metaKey: true });
+
+  it('puts the file back exactly as it was, byte for byte', async () => {
+    const before = '{"a":1,   "b":2}';
+    const editor = await openFile('/work/atlas/tsconfig.json', before);
+    await pressFormat();
+    expect(editor.value).not.toBe(before);
+    await act(async () => {
+      modZ(editor);
+      await Promise.resolve();
+    });
+    expect(editor.value).toBe(before);
+  });
+
+  it('offers the same undo as a button, for hands that are not on the editor', async () => {
+    const before = '{"a":1,   "b":2}';
+    const editor = await openFile('/work/atlas/tsconfig.json', before);
+    await pressFormat();
+    expect(q('[data-files-format-undo]')).not.toBeNull();
+    await act(async () => {
+      q<HTMLButtonElement>('[data-files-format-undo]')?.click();
+      await Promise.resolve();
+    });
+    expect(editor.value).toBe(before);
+    // And the offer goes with it: an undo of an undo is not a thing.
+    expect(q('[data-files-format-undo]')).toBeNull();
+  });
+
+  it('swallows Mod-z only while it has a format to undo, so native undo still works', async () => {
+    const editor = await openFile('/work/atlas/tsconfig.json', '{"a":1}');
+    // Nothing formatted yet: the key is NOT ours, and must reach the browser.
+    expect(modZ(editor), 'before any format').toBe(true);
+    await pressFormat();
+    let reachedTheBrowser = true;
+    await act(async () => {
+      reachedTheBrowser = modZ(editor);
+      await Promise.resolve();
+    });
+    expect(reachedTheBrowser, 'with a format to undo').toBe(false);
+    // And once undone, it is not ours again.
+    expect(modZ(editor), 'after the undo').toBe(true);
+  });
+
+  it('stands down the moment the operator types, rather than reversing an old format', async () => {
+    const editor = await openFile('/work/atlas/tsconfig.json', '{"a":1}');
+    await pressFormat();
+    const formatted = editor.value;
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: `${formatted}  ` } });
+      await Promise.resolve();
+    });
+    expect(q('[data-files-format-undo]')).toBeNull();
+    expect(modZ(editor), 'typing has happened since the format').toBe(true);
+    expect(editor.value).toBe(`${formatted}  `);
+  });
+});
+
+describe('the highlight overlay', () => {
+  /**
+   * THE INVARIANT THE WHOLE TECHNIQUE RESTS ON: two layers, one text. A byte
+   * of drift and every line after it is painted in the wrong place.
+   *
+   * WITH ONE MEASURED EXCEPTION, stated here exactly rather than loosely. A
+   * `<pre>` gives the final `\n` of its text no line box and a `<textarea>`
+   * does, so the overlay carries ONE extra newline when — and only when — the
+   * file ends in one. That is not drift: it is the compensation that makes the
+   * two columns the same HEIGHT, which `e2e/files-tab-keyboard-shots.mjs`
+   * measures in the only engine that can lay it out.
+   */
+  it('draws the same characters as the textarea, for a file vam can tokenise', async () => {
+    const editor = await openFile('/work/atlas/.env', 'A=1\n# note\nB="two"\n');
+    const overlay = q('[data-files-highlight]');
+    expect(overlay).not.toBeNull();
+    expect(overlay?.textContent).toBe(`${editor.value}\n`);
+  });
+
+  it('adds nothing at all to a file that does not end in a newline', async () => {
+    const editor = await openFile('/work/atlas/.env', 'A=1\nB=2');
+    expect(q('[data-files-highlight]')?.textContent).toBe(editor.value);
+  });
+
+  it('keeps following the text as it is typed', async () => {
+    const editor = await openFile('/work/atlas/.env', 'A=1\n');
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=1\nB=2\nC=3\n' } });
+      await Promise.resolve();
+    });
+    expect(q('[data-files-highlight]')?.textContent).toBe('A=1\nB=2\nC=3\n\n');
+  });
+
+  it('draws no overlay for a file type vam will not tokenise', async () => {
+    await openFile('/work/atlas/index.ts', 'const a = /["]/\n');
+    expect(q('[data-files-highlight]')).toBeNull();
+  });
+
+  /**
+   * MUTATION TARGET, and the one the brief names: make the setting a no-op
+   * (draw the overlay whatever `highlight` says) and this reddens.
+   */
+  it('draws no overlay at all when the operator turned highlighting off', async () => {
+    setActiveEditorSettings({ highlight: false, indent: 2 });
+    await openFile('/work/atlas/.env', 'A=1\n');
+    expect(q('[data-files-highlight]')).toBeNull();
+  });
+
+  it('honours the setting immediately, without a remount', async () => {
+    await openFile('/work/atlas/.env', 'A=1\n');
+    expect(q('[data-files-highlight]')).not.toBeNull();
+    await act(async () => {
+      setActiveEditorSettings({ highlight: false, indent: 2 });
+      await Promise.resolve();
+    });
+    expect(q('[data-files-highlight]')).toBeNull();
+  });
+
+  /**
+   * THE TRAP THIS FILE HAS FALLEN INTO TWICE. `focusInsertStop` takes the
+   * FIRST `data-insert-stop` in the pane in document order and focuses it
+   * blindly, and `FilesTab` stays MOUNTED behind every other tab. The overlay
+   * is drawn BEFORE the textarea in document order, so a mark on it would be
+   * the first stop found -- and a `display: none` element cannot take focus,
+   * so `I` would silently stop reaching the composer everywhere in the app.
+   */
+  it('is decoration only — never an insert scope, never in the keyboard path', async () => {
+    await openFile('/work/atlas/.env', 'A=1\n');
+    const overlay = q('[data-files-highlight]');
+    expect(overlay?.getAttribute('aria-hidden')).toBe('true');
+    expect(overlay?.hasAttribute('data-insert-scope')).toBe(false);
+    expect(overlay?.hasAttribute('data-insert-stop')).toBe(false);
+    // The editor is still the tab's ONE insert stop, and the overlay did not
+    // become a second one.
+    expect(qa('[data-files] [data-insert-stop]').length).toBe(1);
+    expect(q('[data-files] [data-insert-stop]')?.hasAttribute('data-files-editor')).toBe(true);
   });
 });

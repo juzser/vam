@@ -35,6 +35,7 @@ import {
 } from '../keyboard/chords.js';
 import { type BindingRow, buildBindingSheet } from '../keyboard/keysheet.js';
 import { usePhoneViewport } from '../phone/viewport.js';
+import { EDITOR_INDENT_MAX, EDITOR_INDENT_MIN } from '../prefs/editor.js';
 import {
   applyPaletteTemplate,
   PALETTE_TEMPLATES,
@@ -51,6 +52,8 @@ import {
   paletteFor,
   paletteValue,
   setDefaultProvider,
+  setEditorHighlight,
+  setEditorIndent,
   setFocusView,
   setKeyBindings,
   setOutFontSize,
@@ -699,6 +702,72 @@ export function SettingsOverlay({
                   <code className="text-ink">· N failed</code> count, and so does the newest turn
                   while the session is working or waiting.
                 </p>
+              </Block>
+
+              {/* THE FILE EDITOR'S OWN TWO, and they are here for the reason
+                  `out text` and `focus view` are: this is paint, not
+                  behaviour -- what the Files tab's editor LOOKS like, in the
+                  family the theme, the colours and the text size above it are
+                  in. The operator asked for exactly that ("nếu cần có thể
+                  thêm setting riêng cho tab đó trong phần appearance").
+
+                  TWO, AND NOT A THIRD. A word-wrap toggle is the one a reader
+                  of this list will miss, and it is deliberately absent: the
+                  editor's gutter numbers LINES, not visual rows, so a wrapped
+                  line makes every number under it wrong. That is an invariant
+                  rather than a preference, and a setting whose "on" position
+                  breaks the column beside it is not a setting. An editor font
+                  size is absent for a different reason: the editor draws at
+                  one step of vam's own type scale, and a second independent
+                  size would be a knob rather than a choice.
+
+                  THE INDENT REACHES TWO PLACES, which is why it is worth a
+                  row at all: it is what `Tab` inserts in that editor AND what
+                  `Mod-Shift-f` indents a JSON file by. It is a count of
+                  SPACES, never a tab byte -- `prefs/editor.ts` carries the
+                  argument, and it is the gutter's own correctness. */}
+              <Block
+                label={t('settings.appearance.editorHighlight.label')}
+                hint={t('settings.appearance.editorHighlight.hint')}
+              >
+                <Switch
+                  name="editor-highlight"
+                  label={t('settings.appearance.editorHighlight.label')}
+                  checked={prefs.editorHighlight}
+                  onChange={(next) => onChange(setEditorHighlight(prefs, next))}
+                  on={t('settings.appearance.editorHighlight.on')}
+                  off={t('settings.appearance.editorHighlight.off')}
+                />
+                {/* NOT OPENING WITH "vam", and that is a rule rather than a
+                    preference: this panel upper-cases a paragraph's first
+                    letter and the product is spelled `vam`.
+                    `e2e/settings-chrome-shots.mjs` holds exactly that
+                    invariant, and caught this sentence when it opened with the
+                    name. */}
+                <p
+                  data-editor-highlight-note
+                  className="mt-3 max-w-[52ch] text-control text-ink-dim"
+                >
+                  colours are drawn for the formats vam can tokenise without guessing — JSON,{' '}
+                  <code className="text-ink">.env</code> and <code className="text-ink">.ini</code>.
+                  Every other file is drawn as plain text on purpose: a regex literal defeats a
+                  scanner this size, and a wrong colour asserts a structure that is not in the file.
+                </p>
+              </Block>
+
+              <Block
+                label={t('settings.appearance.editorIndent.label')}
+                hint={t('settings.appearance.editorIndent.hint')}
+              >
+                <Stepper
+                  name="editor indent"
+                  min={EDITOR_INDENT_MIN}
+                  max={EDITOR_INDENT_MAX}
+                  step={1}
+                  value={prefs.editorIndent}
+                  unit="spaces"
+                  onCommit={(next) => onChange(setEditorIndent(prefs, next))}
+                />
               </Block>
             </Panel>
 

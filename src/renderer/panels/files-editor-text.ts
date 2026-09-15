@@ -1,7 +1,11 @@
 /**
  * The file editor's own text arithmetic -- pure, DOM-free, so it can be
- * proven without a real `<textarea>`. `FilesTab.tsx` is the only caller.
+ * proven without a real `<textarea>`. `FilesTab.tsx` is the only caller of the
+ * Tab arithmetic; the file classifier at the foot of this file is shared with
+ * `files-format.ts` and `files-highlight.ts`, and says there why.
  */
+
+import { indentText } from '../prefs/editor.js';
 
 /** The result of applying (or removing) one indent step. */
 export type TabResult = {
@@ -9,12 +13,6 @@ export type TabResult = {
   readonly selectionStart: number;
   readonly selectionEnd: number;
 };
-
-/** What one indent step looks like. Spaces, not a literal tab byte, so the
- *  gutter's own column math (`FilesTab.tsx`) never has to guess a tab's
- *  rendered width -- the one thing that makes a line-number gutter drift
- *  out of sync with its own text. */
-const INDENT = '  ';
 
 /**
  * Tab/Shift+Tab, TRAPPED inside the editor rather than moving focus to the
@@ -47,7 +45,14 @@ export function applyTab(
   selectionStart: number,
   selectionEnd: number,
   outdent: boolean,
+  indentWidth: number,
 ): TabResult {
+  // A WIDTH, NOT A STRING, and `indentText` is the only way to turn one into
+  // characters -- so an indent of tab bytes is not a thing a caller can pass.
+  // See `prefs/editor.ts`: the gutter and the text share one line box, and a
+  // tab's RENDERED width is the one thing those two columns would answer
+  // differently.
+  const indent = indentText(indentWidth);
   const spansLines = value.slice(selectionStart, selectionEnd).includes('\n');
   if (!spansLines) {
     if (outdent) {
@@ -56,8 +61,8 @@ export function applyTab(
       // delete.
       return { value, selectionStart, selectionEnd };
     }
-    const next = value.slice(0, selectionStart) + INDENT + value.slice(selectionEnd);
-    const caret = selectionStart + INDENT.length;
+    const next = value.slice(0, selectionStart) + indent + value.slice(selectionEnd);
+    const caret = selectionStart + indent.length;
     return { value: next, selectionStart: caret, selectionEnd: caret };
   }
 
@@ -70,11 +75,7 @@ export function applyTab(
   const block = value.slice(lineStart, lineEnd);
   const lines = block.split('\n');
   const nextLines = lines.map((line) =>
-    outdent
-      ? line.startsWith(INDENT)
-        ? line.slice(INDENT.length)
-        : line.replace(/^ /, '')
-      : `${INDENT}${line}`,
+    outdent ? outdentLine(line, indent.length) : indent + line,
   );
   const nextBlock = nextLines.join('\n');
   const next = value.slice(0, lineStart) + nextBlock + value.slice(lineEnd);
@@ -83,6 +84,72 @@ export function applyTab(
     selectionStart: lineStart,
     selectionEnd: lineStart + nextBlock.length,
   };
+}
+
+/**
+ * UP TO one indent step off the front of a line — never more, and never a
+ * character that is not a space.
+ *
+ * "Up to" is what makes an outdent safe on a block whose lines are indented
+ * unevenly (a pasted fragment nearly always is): a line with one space loses
+ * its one space, a line with none is returned untouched, and no line ever
+ * loses a character of its own text.
+ */
+function outdentLine(line: string, width: number): string {
+  let taken = 0;
+  while (taken < width && line[taken] === ' ') taken += 1;
+  return line.slice(taken);
+}
+
+/* -------------------------------------------------------------------------
+ * WHAT KIND OF FILE THIS IS -- asked by the formatter and by the highlighter,
+ * answered once.
+ *
+ * ONE CLASSIFIER, TWO DECISIONS. `files-format.ts` and `files-highlight.ts`
+ * both have to know that `.env.local` is a `.env` and that `.env` is a NAME
+ * rather than an extension, and two copies of that rule is how one of them
+ * comes to disagree with the other about the file on screen. What each module
+ * DOES with the answer stays its own -- a format is a promise about bytes and
+ * a colour is a claim about meaning, and there is no reason the two lists
+ * should have to move together.
+ * ---------------------------------------------------------------------- */
+
+/** The three kinds the editor has an opinion about. */
+export type EditorFileKind = 'json' | 'env' | 'ini';
+
+/** The last path segment — the only part of a path either module reads. */
+export function baseName(path: string): string {
+  const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return cut === -1 ? path : path.slice(cut + 1);
+}
+
+/**
+ * The extension, lower-cased, WITH its dot — or null for a name that has
+ * none. A LEADING dot does not start an extension: `.env` is a name, and that
+ * is the case this tab cares most about (`FilesTab.tsx`'s own header — a
+ * dotfile is never hidden here, because `.env` is why browsing exists at all).
+ */
+export function extensionOf(name: string): string | null {
+  const dot = name.lastIndexOf('.');
+  return dot <= 0 ? null : name.slice(dot).toLowerCase();
+}
+
+/** Which of the three kinds `path` is, or null for everything else. */
+export function editorFileKind(path: string): EditorFileKind | null {
+  const name = baseName(path);
+  // `.env`, `.env.local`, `.env.production` — a name, not an extension.
+  if (name === '.env' || name.startsWith('.env.')) return 'env';
+  switch (extensionOf(name)) {
+    case '.json':
+      return 'json';
+    // `dev.env`, `staging.env` — the same format, named the other way round.
+    case '.env':
+      return 'env';
+    case '.ini':
+      return 'ini';
+    default:
+      return null;
+  }
 }
 
 /**

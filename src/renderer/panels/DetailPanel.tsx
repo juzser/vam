@@ -152,7 +152,7 @@ import {
   diffLineKind,
   type HighlightLang,
   resolveLang,
-  type TokenKind,
+  SYNTAX_CLASS,
   tokenizeCode,
 } from './highlight.js';
 import { Note } from './Note.js';
@@ -1789,21 +1789,6 @@ function noAnswerNote(output: string | null, status: SessionStatus | null): stri
  * is the correct policy. So the address is printed instead, in a region where
  * text is selectable, and opening it is a deliberate copy-and-paste.
  */
-/**
- * The fence palette: which token kind wears which colour.
- *
- * Every class here is a TOKEN utility, never a literal colour (13.1), and none
- * of them is one of the four status colours — see the note beside them in
- * styles.css for why an added line must not be `running` green.
- */
-const SYNTAX_CLASS: Record<TokenKind, string> = {
-  plain: '',
-  comment: 'text-syn-comment',
-  string: 'text-syn-string',
-  number: 'text-syn-number',
-  keyword: 'text-syn-keyword',
-};
-
 const DIFF_CLASS: Record<DiffKind, string> = {
   plain: '',
   add: 'text-diff-add',
