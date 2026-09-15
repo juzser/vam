@@ -139,6 +139,16 @@ describe('the digit still names a view, and still refuses aloud', () => {
     expect(pressed('response')).toBe('true');
     expect(note()?.getAttribute('role')).toBe('status');
     expect(note()?.textContent ?? '').toContain('Files');
+    /**
+     * AND IT NAMES THE RIGHT REASON, which the name alone cannot tell apart.
+     * Every other withdrawn view is a SOURCE capability, so the shared
+     * wording is "this source has none" -- but no source declares a file
+     * bridge and none ever will (`panels/tabs.ts`'s own header), so blaming
+     * the source here would send the operator looking for a setting on a
+     * thing that has no say in it. The bridge is the desktop app's.
+     */
+    expect(note()?.textContent ?? '').not.toContain('this source');
+    expect(note()?.textContent ?? '').toContain('desktop app');
   });
 
   it('says how many views exist for a digit that names none, and moves nothing', () => {

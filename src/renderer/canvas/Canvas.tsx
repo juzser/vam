@@ -4543,7 +4543,15 @@ function CanvasInner({
             setViewNote(
               named === undefined
                 ? `no view ${action.digit} — only ${drawn.length} shown (${drawn.join(', ')})`
-                : `${named} — this source has none`,
+                : // FILES IS NOT A SOURCE CAPABILITY, so "this source has
+                  // none" would name the wrong reason: no source declares a
+                  // file bridge and none ever will (`tabs.ts`'s own header),
+                  // and the operator could go looking for a setting on a
+                  // source that has no say in it. The bridge is the desktop
+                  // app's, so that is what the refusal says.
+                  named === 'Files'
+                  ? 'Files — only the desktop app can edit files'
+                  : `${named} — this source has none`,
             );
             return;
           }

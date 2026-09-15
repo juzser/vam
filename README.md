@@ -75,6 +75,28 @@ route it isn't ready to carry.)
 
 ![Agents tab showing one subagent's own IN/OUT](docs/images/agents-tab.png)
 
+A Files tab sits beside them: the session's own working directory, and a
+plain editor for anything in it. It exists for the files no transcript is
+the right place to touch — `.env` and the handful of config files beside
+it — so dotfiles are never hidden from the list, only `node_modules` and
+`.git` are skipped, and symlinks are neither listed nor followed. There is
+no editor library behind it and no syntax highlighting: a highlighter that
+mis-tokenises unfamiliar syntax is a worse lie than drawing none.
+
+What it does take seriously is that an agent is editing these files while
+you have them open. A save carries the size, mtime and hash the file had
+when you opened it; if any of them moved, the write is refused rather than
+landing on top of whatever was just written, your own edit stays in the box,
+and `Reload` is the only thing that gives it up. Unsaved text survives
+switching files, switching tabs and switching sessions; quitting is the one
+exit it cannot survive, so vam asks before the window closes on it. Like
+the Terminal tab, this one is desktop-only and withdrawn rather than shown
+empty: `UNSERVED` carries no file-read, file-write or file-listing route,
+because arbitrary file access over a network is at least as serious as
+typing into a running agent.
+
+![The Files tab, editing a session's own .env](docs/images/files-tab.png)
+
 The composer can attach a text file, read locally and folded straight into
 the prompt — vam uploads nothing:
 
@@ -322,8 +344,8 @@ them to move a cursor on, only the session list and the question card — and
 | `Mod-1` `Mod-2` `Mod-3` `Mod-4` `Mod-5` `Mod-6` `Mod-7` `Mod-8` `Mod-9` | Select a session tab by position, counting ACROSS every pane on screen in the order the strips draw them — the same meaning wherever the keyboard is, and picking a tab another pane holds moves the keyboard there with it. `Mod-9` is always the last one. Past nine open tabs the digits stop covering everything: that is the price of counting one list rather than one per strip, and `Mod-Shift-[` / `]` is how you reach the rest |
 | `Mod-Shift-[` / `Mod-Shift-]` | Previous / next session tab, over that same across-panes list, wrapping at both ends — the browser's own tab gesture, and it fires from inside the prompt box |
 | `Mod-Alt-[` / `Mod-Alt-]` | Previous / next pane — one modifier up from the tab pair, and the same act as `zw` / `zW` |
-| `Alt-1` `Alt-2` `Alt-3` `Alt-4` | Show a view in the focused pane — Response, PRs, Terminal, Agents, in that fixed order. A digit always names the SAME view: if this source has no terminal, `Alt-3` says so rather than opening whatever sits third |
-| `Alt-5` `Alt-6` `Alt-7` `Alt-8` `Alt-9` | Nothing — bound only so they say there is no fifth view instead of reaching the browser |
+| `Alt-1` `Alt-2` `Alt-3` `Alt-4` `Alt-5` | Show a view in the focused pane — Response, PRs, Terminal, Agents, Files, in that fixed order. A digit always names the SAME view: if this source has no terminal, `Alt-3` says so rather than opening whatever sits third, and `Alt-5` says the same on a build without the desktop file bridge |
+| `Alt-6` `Alt-7` `Alt-8` `Alt-9` | Nothing — bound only so they say there is no sixth view instead of reaching the browser |
 | `Mod-d` / `Mod-u` | Half a screen down / up the FOCUSED PANE's transcript — vim's own `Ctrl-D` / `Ctrl-U`. Half the column's visible height per press, instant, clamped at both ends; scrolling to the top is what reads earlier turns in, exactly as a trackpad scroll there does. **Select only:** with the caret in the prompt box, on a question card or in the terminal these two stay that surface's own, where `Ctrl-D` is delete-forward (and EOF) and `Ctrl-U` deletes to the start of the line. `Mod` is Ctrl or Cmd as everywhere in this table, so `Cmd+D` scrolls as well |
 | `<` / `>` | Narrow / widen the focused side pane |
 | `Escape` | Cancel whatever is half-typed |
