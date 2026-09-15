@@ -15,6 +15,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   createClipboardApi,
   createDialogApi,
+  createFilesApi,
   createIssueApi,
   createMainErrorsApi,
   createPrefsBridge,
@@ -39,6 +40,10 @@ contextBridge.exposeInMainWorld('api', {
   issue: createIssueApi(ipcRenderer),
   terminal: createTerminalApi(ipcRenderer),
   dialog: createDialogApi(ipcRenderer),
+  // The file-editor tab's read and write, authorised against every live
+  // session's own working directory in main before a byte moves either way.
+  // See `src/main/files/authorize.ts` and `src/main/files/ipc.ts`.
+  files: createFilesApi(ipcRenderer),
   // The pairing screen's own channels. Exposed unconditionally like every
   // other member -- whether main registered them is runtime state, and the
   // bridge's shape may not depend on runtime state.

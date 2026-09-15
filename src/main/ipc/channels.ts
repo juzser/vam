@@ -220,6 +220,31 @@ export const CHANNELS = {
    */
   pickImageAttachment: 'vam:dialog:pick-image-attachment',
   /**
+   * The file-editor tab's read: one operator-named path, authorised against
+   * every LIVE session's own working directory before a byte is opened. See
+   * `src/main/files/authorize.ts` for why a prefix check alone cannot do
+   * that authorisation and `src/main/files/ipc.ts` for the size ceiling,
+   * binary sniff and the full refusal vocabulary. Answers through the
+   * `IpcResult` envelope: "outside every session's directory" and "too
+   * large" are both refusals in `SourceError`'s own words, not exceptions.
+   *
+   * DESKTOP-ONLY BY CONSTRUCTION, NOT BY CONVENTION: `src/main/remote/
+   * server.ts`'s route table carries no matching path, and its `UNSERVED`
+   * ledger names `files` beside `terminal` so the absence is documented
+   * rather than merely true. Arbitrary file read/write over a network is at
+   * least as serious as typing into a running agent.
+   */
+  filesRead: 'vam:files:read',
+  /**
+   * The file-editor tab's write, with its conflict model IN the same
+   * request rather than a follow-up: the caller's signature (size, mtime
+   * and a content hash -- `src/main/files/content.ts`) must match what is
+   * on disk right now, or the write is refused as `changed-on-disk` rather
+   * than overwriting an agent's own concurrent edit. See `./files/ipc.ts`.
+   * The SAME desktop-only standing as `filesRead`, for the same reason.
+   */
+  filesWrite: 'vam:files:write',
+  /**
    * The pairing screen's channels. Every one of them answers a bare
    * `RemoteState` (`src/main/remote/ipc.ts`) rather than an `IpcResult`: the
    * screen's whole content is that one snapshot, so an act returning the

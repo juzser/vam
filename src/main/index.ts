@@ -8,7 +8,7 @@
  */
 
 import { execFile, spawn } from 'node:child_process';
-import { realpath } from 'node:fs/promises';
+import { readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -20,6 +20,7 @@ import { registerDialogIpc } from './dialog/ipc.js';
 import { applyLoginShellPath, probeLoginShellPath } from './env/resolve-path.js';
 import { registerMainErrorIpc } from './errors/ipc.js';
 import { recordMainFailure } from './errors/log.js';
+import { registerFilesIpc } from './files/ipc.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { registerIssueIpc } from './issue/ipc.js';
 import { applyApplicationMenu } from './menu.js';
@@ -562,6 +563,29 @@ void app.whenReady().then(async () => {
     // before its bytes are ever attached. See `attach-image.ts`'s own header
     // for the finding this closes and the TOCTOU window it does not.
     (path) => realpath(path),
+  );
+  // The file-editor tab's read and write. The root set is every LIVE
+  // session's own cwd, asked fresh per request -- the same reasoning as
+  // `registerAttachImageIpc`'s own cwd lookup just above, generalised from
+  // one session to all of them because this channel is not asked with a
+  // session id at all: a path is authorised by being inside SOME session's
+  // directory, not one particular caller's. See `./files/authorize.ts`.
+  registerFilesIpc(
+    ipcMain,
+    async () => {
+      const agentsResult = await listLiveAgents();
+      // `unavailable` becomes no roots at all, same reading as the image
+      // picker's own `null`: vam could not ask, so nothing is authorised --
+      // never "every path is", which is the direction a bug here must fail.
+      if (agentsResult.kind === 'unavailable') return [];
+      return [...new Set(agentsResult.agents.map((agent) => agent.cwd))];
+    },
+    // The real `fs.realpath`, the same seam `registerAttachImageIpc` wires
+    // just above and for the same reason: a symlink inside a session's
+    // directory that points outside it must be caught before its content is
+    // ever read or its target ever written to.
+    (path) => realpath(path),
+    { stat, readFile, writeFile, rename },
   );
   startRemoteTransport();
   createWindow();
