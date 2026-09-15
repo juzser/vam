@@ -26,6 +26,8 @@ import { registerSourceIpc } from './ipc/handlers.js';
 import { registerIssueIpc } from './issue/ipc.js';
 import { applyApplicationMenu } from './menu.js';
 import { isSameOrigin } from './origin.js';
+import { createQuitGuard, registerUnsavedIpc } from './quit/guard.js';
+import { unsavedQuitPrompt } from './quit/unsaved.js';
 import { openDeviceRegistry, registryPath } from './remote/devices.js';
 import { bindFailureEvent, setupFailureEvent } from './remote/failure-messages.js';
 import { readServeAddress } from './remote/hostname.js';
@@ -227,6 +229,59 @@ function registerContentSecurityPolicy(): void {
   });
 }
 
+/**
+ * THE GUARD ON CMD-Q, and the one piece of renderer state main keeps a copy of.
+ *
+ * The Files tab holds unsaved edits in renderer memory and nowhere else, and
+ * guards them with `beforeunload` -- a PAGE hook, which covers the window
+ * closing and does not cover quitting: Cmd-Q reaches `app.on('before-quit')`
+ * here, where a page hook has no standing, and the window is torn down after.
+ * So the renderer pushes what it is holding (`CHANNELS.filesUnsaved`), main
+ * keeps the last report, and the handler below reads a local variable.
+ *
+ * IT NEVER WAITS ON THE RENDERER. That is the whole reason the fact is pushed
+ * rather than asked for: a quit handler that waits is a quit handler a wedged
+ * renderer can hang, and an app that cannot be quit is worse than the bug this
+ * closes -- it has to be force-killed, which loses the same text and every
+ * other session's state with it. `src/main/quit/guard.ts` holds the four ways
+ * that could still have happened and the guard on each.
+ *
+ * `showMessageBoxSync`, NOT the async form: `before-quit` is a veto and the
+ * veto has to be decided before the handler returns. See that same header.
+ */
+const quitGuard = createQuitGuard({
+  ask: (report) => {
+    const prompt = unsavedQuitPrompt(report);
+    // Attached to the window where there is one, so it is a sheet on vam
+    // rather than a free-floating alert; modeless when the window has already
+    // gone, which `dialog` accepts and which must not throw here (a prompt
+    // that cannot be drawn is not a veto -- the guard would let the quit
+    // through anyway, but there is no reason to take that path when electron
+    // offers this overload).
+    const [window] = BrowserWindow.getAllWindows();
+    const chosen =
+      window === undefined
+        ? dialog.showMessageBoxSync(prompt)
+        : dialog.showMessageBoxSync(window, prompt);
+    return chosen === prompt.cancelId ? 'cancel' : 'quit';
+  },
+  // `destroy()`, NOT `close()`. The operator has just been told this text will
+  // be discarded and pressed the button that discards it -- and `close()`
+  // would run the renderer's `beforeunload`, which the Files tab arms whenever
+  // anything is dirty, i.e. exactly now. Electron documents that handler as
+  // able to cancel a quit, and to do so WITHOUT a prompt of its own, so
+  // `close()` here risks an application that silently declines to quit right
+  // after saying it would. `destroy()` skips `beforeunload` and `unload`
+  // entirely, and nothing in this renderer persists anything at unload time
+  // (prefs are written to `localStorage` as they change), so nothing else is
+  // lost by taking that route. See `QuitGuardDeps.release`.
+  release: () => {
+    for (const open of BrowserWindow.getAllWindows()) {
+      open.destroy();
+    }
+  },
+});
+
 function createWindow(): void {
   const window = new BrowserWindow({
     width: 1280,
@@ -246,6 +301,17 @@ function createWindow(): void {
 
   window.once('ready-to-show', () => {
     window.show();
+  });
+
+  // The window is gone, so the unsaved text it was holding is gone with it --
+  // `beforeunload` owns that exit, and by the time this fires it has either
+  // had its say or been bypassed. What must not happen next is main asking
+  // about buffers that no longer exist: `window-all-closed` calls `app.quit()`
+  // below, and a stale report would put a dialog in front of a quit nobody can
+  // answer usefully. A reload needs no equivalent hook -- the fresh renderer
+  // reports on mount, including zero.
+  window.on('closed', () => {
+    quitGuard.clear();
   });
 
   // Registered here, not at `app.whenReady`, because it needs THIS window's
@@ -609,8 +675,29 @@ void app.whenReady().then(async () => {
     (path) => realpath(path),
     (dir) => readdir(dir, { withFileTypes: true }),
   );
+  // The file-editor tab's LAST channel, and the only one that carries no path
+  // at all: how many of its buffers are unsaved, and what they are called.
+  // Registered here rather than in `createWindow` because the guard it feeds
+  // is bound to `app`, not to a window -- and registered BEFORE the window
+  // exists, like every channel above, so the renderer's first report cannot
+  // race an unregistered channel. See `quitGuard` above.
+  registerUnsavedIpc(ipcMain, quitGuard);
   startRemoteTransport();
   createWindow();
+});
+
+/**
+ * THE VETO. Emitted before the application starts closing its windows, which
+ * is the one moment a renderer's `beforeunload` cannot speak for itself --
+ * see `quitGuard` above for the whole argument and `src/main/quit/guard.ts`
+ * for why this can never leave the app unquittable.
+ *
+ * Registered beside `window-all-closed` below because they are the two halves
+ * of one lifecycle: that one turns the last window closing into a quit, and
+ * this one is what that quit then has to get past.
+ */
+app.on('before-quit', (event) => {
+  quitGuard.beforeQuit(event);
 });
 
 app.on('window-all-closed', () => {

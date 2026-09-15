@@ -22,6 +22,7 @@ import type {
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
+import { resetUnsavedRegistry } from '../../src/renderer/panels/unsaved-files.js';
 import {
   DEFAULT_EDITOR_HIGHLIGHT,
   DEFAULT_EDITOR_INDENT,
@@ -86,6 +87,8 @@ type Bridge = {
     content: string,
     baseSignature: FileSignature | null,
   ) => Promise<FileWriteResult>;
+  /** The quit guard's own half of this bridge — see `src/main/quit/guard.ts`. */
+  reportUnsaved: (report: { count: number; names: readonly string[] }) => void;
 };
 
 function withBridge(bridge: Partial<Bridge>) {
@@ -97,6 +100,7 @@ function withBridge(bridge: Partial<Bridge>) {
         read: bridge.read ?? (async () => Promise.reject(refusal('not-found', 'missing'))),
         write:
           bridge.write ?? (async () => Promise.reject(refusal('unreadable', 'no write wired'))),
+        reportUnsaved: bridge.reportUnsaved,
       },
     },
   });
@@ -105,6 +109,10 @@ function withBridge(bridge: Partial<Bridge>) {
 afterEach(() => {
   cleanup();
   Reflect.deleteProperty(window, 'api');
+  // The unsaved registry is module-wide (`panels/unsaved-files.ts`). `cleanup`
+  // already unmounts every tab, which releases its slot; this is the belt to
+  // that braces, so one test's dirty buffer can never be counted in the next.
+  resetUnsavedRegistry();
 });
 
 function draw(over: Partial<DetailPanelProps> = {}) {
@@ -1006,13 +1014,14 @@ describe('walking the tree from the keyboard', () => {
   });
 });
 
-describe('closing warns — the one exit dirty text cannot survive', () => {
-  const dispatchBeforeUnload = (): boolean => {
-    const event = new Event('beforeunload', { cancelable: true });
-    window.dispatchEvent(event);
-    return event.defaultPrevented;
-  };
+/** Did anything veto the page going away? Shared with the quit tests below. */
+const dispatchBeforeUnload = (): boolean => {
+  const event = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+};
 
+describe('closing warns — the one exit dirty text cannot survive', () => {
   it('arms no warning while nothing is dirty', async () => {
     withBridge({
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
@@ -1085,6 +1094,167 @@ describe('closing warns — the one exit dirty text cannot survive', () => {
       await Promise.resolve();
     });
     expect(dispatchBeforeUnload()).toBe(false);
+  });
+});
+
+/* ===========================================================================
+ * QUITTING — the exit `beforeunload` cannot reach.
+ *
+ * `beforeunload` is a PAGE hook: it covers the window closing. Cmd-Q reaches
+ * `app.on('before-quit')` in main, where it has no standing at all, so the
+ * fact has to cross the bridge. What is asserted here is the RENDERER's end of
+ * that: this tab reports what it is holding, with a count and the names, and
+ * corrects itself the moment a save makes it clean. `test/main/quit/` holds
+ * the other end.
+ *
+ * Both mechanisms read the SAME derivation inside `FilesTab` -- that is the
+ * property that keeps them from ever disagreeing about what is dirty -- so
+ * these tests sit directly beneath the `beforeunload` ones on purpose.
+ * ======================================================================== */
+describe('quitting asks — what the Files tab tells main it is holding', () => {
+  /** The listing and one readable file, plus a spy on the quit report. */
+  function withReporter(files: readonly string[] = ['/work/atlas/.env']) {
+    const reportUnsaved = vi.fn();
+    withBridge({
+      list: async () => ({ root: '/work/atlas', files: [...files], truncated: false }),
+      read: async (path: string) => ({
+        content: path.endsWith('.env') ? 'A=1' : '# readme',
+        isBinary: false,
+        signature: SIGNATURE(),
+      }),
+      write: async (): Promise<FileWriteResult> => ({ signature: SIGNATURE({ sha256: 'new' }) }),
+      reportUnsaved,
+    });
+    return reportUnsaved;
+  }
+
+  const lastReport = (spy: ReturnType<typeof vi.fn>) =>
+    spy.mock.calls.at(-1)?.[0] as { count: number; names: readonly string[] } | undefined;
+
+  it('says "nothing" on mount — which is what corrects main after a reload', async () => {
+    const reportUnsaved = withReporter();
+    draw({ files: true });
+    await openFiles();
+    expect(lastReport(reportUnsaved)).toEqual({ count: 0, names: [] });
+  });
+
+  it('NAMES the file, and counts it, the moment the buffer is dirty', async () => {
+    const reportUnsaved = withReporter();
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/.env')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=UNSAVED' } });
+    });
+    // The label the tab itself draws, relative to the session's root -- never
+    // the absolute path, which is what main would otherwise have to print.
+    expect(lastReport(reportUnsaved)).toEqual({ count: 1, names: ['.env'] });
+  });
+
+  it('counts TWO as two and names both — a count fixed at one would be a lie in a modal', async () => {
+    const reportUnsaved = withReporter(['/work/atlas/.env', '/work/atlas/README.md']);
+    draw({ files: true });
+    await openFiles();
+    for (const path of ['/work/atlas/.env', '/work/atlas/README.md']) {
+      await act(async () => {
+        row(path)?.click();
+        await Promise.resolve();
+      });
+      const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+      await act(async () => {
+        fireEvent.change(editor, { target: { value: `${path} UNSAVED` } });
+      });
+    }
+    expect(lastReport(reportUnsaved)).toEqual({ count: 2, names: ['.env', 'README.md'] });
+  });
+
+  it('says "nothing" again once the buffer is saved', async () => {
+    const reportUnsaved = withReporter();
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/.env')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=2' } });
+    });
+    expect(lastReport(reportUnsaved)).toEqual({ count: 1, names: ['.env'] });
+    await act(async () => {
+      q<HTMLButtonElement>('[data-files-save]')?.click();
+      await Promise.resolve();
+    });
+    expect(lastReport(reportUnsaved)).toEqual({ count: 0, names: [] });
+  });
+
+  it('does not report again for a keystroke into a file that was already dirty', async () => {
+    // A push per character would put an IPC message on main's event loop for
+    // every key typed into the editor. The set is what main needs, so the set
+    // is what the effect watches.
+    const reportUnsaved = withReporter();
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/.env')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=U' } });
+    });
+    const afterFirst = reportUnsaved.mock.calls.length;
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=UN' } });
+    });
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=UNS' } });
+    });
+    expect(reportUnsaved.mock.calls.length).toBe(afterFirst);
+  });
+
+  it('stops speaking for a tab that has been unmounted', async () => {
+    const reportUnsaved = withReporter();
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/.env')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=UNSAVED' } });
+    });
+    expect(lastReport(reportUnsaved)).toEqual({ count: 1, names: ['.env'] });
+    // Closing the pane throws the text away in the renderer there and then.
+    // Main must stop asking about it rather than block a quit over a buffer
+    // that no longer exists.
+    cleanup();
+    expect(lastReport(reportUnsaved)).toEqual({ count: 0, names: [] });
+  });
+
+  it('reports nothing at all without the bridge member — the browser build has no app to quit', async () => {
+    withBridge({
+      list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
+      read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
+    });
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/.env')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=UNSAVED' } });
+    });
+    // No throw, and `beforeunload` is still armed: the two mechanisms read one
+    // derivation, so the one that survives without a bridge still works.
+    expect(dispatchBeforeUnload()).toBe(true);
   });
 });
 

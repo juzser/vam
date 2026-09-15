@@ -95,6 +95,7 @@ import {
   type KeyboardEvent,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -116,6 +117,13 @@ import { formatFile } from './files-format.js';
 import { type EditorLang, highlightEditor, highlightLangFor } from './files-highlight.js';
 import { EDITOR_KEYS, type FileTreeRow, fileTreeRows, resolveTreeKey } from './files-tree.js';
 import { SYNTAX_CLASS } from './highlight.js';
+import {
+  encodeUnsaved,
+  NO_UNSAVED_FILES,
+  publishUnsaved,
+  releaseUnsaved,
+  type UnsavedReportSink,
+} from './unsaved-files.js';
 
 export type ReadFile = (path: string) => Promise<FileReadResult>;
 export type WriteFile = (
@@ -163,6 +171,16 @@ export type FilesTabProps = {
   readonly list: ListFiles | undefined;
   readonly read: ReadFile | undefined;
   readonly write: WriteFile | undefined;
+  /**
+   * Tells MAIN how much unsaved text this tab is holding, so
+   * `app.on('before-quit')` has something true to say before Cmd-Q throws it
+   * away. `undefined` in the browser build, which has no file editor and no
+   * application to quit -- `beforeunload` is the whole of the guard there, and
+   * it is the same derivation, so nothing is half-armed. See
+   * `./unsaved-files.ts` for the union across split leaves and
+   * `src/main/quit/guard.ts` for what main does with it.
+   */
+  readonly reportUnsaved: UnsavedReportSink | undefined;
   /**
    * `DetailPanel.tsx`'s own `cornerReserve`: how far the view-icon pill
    * reaches IN FROM THE RIGHT of this tab's own box. The strip floats,
@@ -232,6 +250,7 @@ export function FilesTab({
   list,
   read,
   write,
+  reportUnsaved,
   reserveCorner,
   reserveCornerHeight,
 }: FilesTabProps) {
@@ -296,6 +315,10 @@ export function FilesTab({
   const activePath = sessionId === null ? null : (activeBySession[sessionId] ?? null);
   const activeBuffer = activePath === null ? undefined : buffers[activePath];
 
+  const currentListing = sessionId === null ? undefined : listing[sessionId];
+  const ready = currentListing?.kind === 'ready' ? currentListing.result : null;
+  const root = ready?.root ?? null;
+
   /**
    * THE ONE THING THAT CANNOT SURVIVE: THE APP CLOSING. Every OTHER exit this
    * component has -- Escape/Mod-[ off the editor, switching files, switching
@@ -304,13 +327,44 @@ export function FilesTab({
    * own header). Quitting vam, or closing this browser tab, ends that: there
    * is no main-process persistence for a draft, so any of them WOULD be lost
    * silently, which is the one outcome the brief that built this tab named as
-   * worse than not shipping it at all. `beforeunload` is the one hook a page
-   * has for "something you have not saved is about to disappear", and it is
-   * armed exactly when — no earlier, no later — `buffers` actually holds
-   * unsaved text, across every open file and every session, not only the one
-   * currently showing.
+   * worse than not shipping it at all.
+   *
+   * ── ONE DERIVATION, TWO EXITS ─────────────────────────────────────────
+   * There are two hooks below and exactly one set of facts under them, and
+   * that is deliberate: a second, independent "is anything dirty?" would be a
+   * second answer that could disagree with the first, and the two exits would
+   * then guard different things while looking like they guarded the same one.
+   *
+   *  `beforeunload` is a PAGE hook. It covers the window closing and a browser
+   *  tab closing, and it is armed exactly when -- no earlier, no later --
+   *  `buffers` holds unsaved text, across every open file and every session,
+   *  not only the one currently showing.
+   *
+   *  `reportUnsaved` covers QUITTING THE APPLICATION, which `beforeunload`
+   *  cannot: Cmd-Q reaches `app.on('before-quit')` in main, where a page hook
+   *  has no standing, and the window is torn down afterwards. Main cannot read
+   *  React state, so this tab pushes the fact across the bridge whenever it
+   *  changes and main holds the last one (`src/main/quit/guard.ts`).
+   *
+   * The encoded set is a STRING rather than an array so the push below fires
+   * when the SET changes and not on every keystroke into a file that was
+   * already dirty -- see `encodeUnsaved`. `useMemo` recomputes it on every
+   * render; what it buys is a dependency React can compare by value.
    */
-  const anyDirty = Object.values(buffers).some(isDirty);
+  const unsavedKey = useMemo(
+    () =>
+      encodeUnsaved(
+        Object.entries(buffers)
+          .filter(([, buffer]) => isDirty(buffer))
+          // `relativeLabel` only where a root is known. A buffer belonging to
+          // another session's root falls through to the absolute path, which
+          // is that function's own documented fallback and is the more useful
+          // label in a dialog listing files from two directories.
+          .map(([path]) => ({ path, label: root === null ? path : relativeLabel(root, path) })),
+      ),
+    [buffers, root],
+  );
+  const anyDirty = unsavedKey !== NO_UNSAVED_FILES;
   useEffect(() => {
     if (!anyDirty) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -324,9 +378,27 @@ export function FilesTab({
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [anyDirty]);
-  const currentListing = sessionId === null ? undefined : listing[sessionId];
-  const ready = currentListing?.kind === 'ready' ? currentListing.result : null;
-  const root = ready?.root ?? null;
+  /**
+   * One slot per mounted tab, so the union across split leaves is a union and
+   * not last-writer-wins -- `unsaved-files.ts` carries that argument in full.
+   * `useId` is stable for the life of this component, which is exactly the
+   * lifetime a slot has.
+   */
+  const unsavedSlot = useId();
+  useEffect(() => {
+    // Runs on mount too, with whatever this tab holds -- including nothing.
+    // That zero is what corrects main's copy after a reload: the renderer that
+    // reported the old one is gone, and this is the first true word since.
+    publishUnsaved(unsavedSlot, unsavedKey, reportUnsaved);
+  }, [unsavedSlot, unsavedKey, reportUnsaved]);
+  useEffect(
+    // UNMOUNT ONLY -- an empty dependency list, not a cleanup on `unsavedKey`,
+    // which would release and re-take the slot on every change. Closing this
+    // tab's pane discards its unsaved text in the renderer there and then;
+    // this is what stops main from later asking about text that is gone.
+    () => () => releaseUnsaved(unsavedSlot, reportUnsaved),
+    [unsavedSlot, reportUnsaved],
+  );
 
   /** The visible rows, in draw order. See `files-tree.ts`. */
   const rows: readonly FileTreeRow[] = useMemo(

@@ -270,6 +270,33 @@ export const CHANNELS = {
    */
   filesList: 'vam:files:list',
   /**
+   * HOW MUCH UNSAVED TEXT THE FILE EDITOR IS HOLDING -- a count and a list of
+   * labels, pushed by the renderer whenever that changes and read by
+   * `app.on('before-quit')` (`src/main/quit/guard.ts`).
+   *
+   * NOT A MEMBER OF `PreloadSourceApi`, the same standing as `setPrRepos` and
+   * `streamSubscribe`, and here the reason is the plainest of the three: this
+   * is about QUITTING THIS APPLICATION, and a paired phone has neither a file
+   * editor nor an application to quit. It is covered by the SAME
+   * `UNSERVED.files` entry in `remote/server.ts` as the three channels above
+   * rather than a second one, because "the remote endpoint carries no file
+   * route" is exactly what this is.
+   *
+   * IT IS A PUSH, NOT A PULL, and that is why it exists at all rather than
+   * main simply asking when the operator quits. `beforeunload` cannot cover
+   * Cmd-Q -- it is a page hook and `before-quit` is a main-process veto -- and
+   * a `before-quit` that WAITS on the renderer for an answer is one a wedged
+   * renderer can hang. An app that cannot be quit is a worse bug than the one
+   * this closes. Main keeps the last report and reads a local variable, so
+   * there is no wait and nothing to time out; `src/main/quit/unsaved.ts` names
+   * the staleness that costs and why both directions of it are safe.
+   *
+   * Answers the `IpcResult` envelope like its neighbours, always `{ok: true}`:
+   * the reader is total, so a payload main cannot parse already means "nothing
+   * is unsaved" -- which blocks no quit, rather than blocking every one.
+   */
+  filesUnsaved: 'vam:files:unsaved',
+  /**
    * The pairing screen's channels. Every one of them answers a bare
    * `RemoteState` (`src/main/remote/ipc.ts`) rather than an `IpcResult`: the
    * screen's whole content is that one snapshot, so an act returning the

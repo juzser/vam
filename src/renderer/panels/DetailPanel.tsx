@@ -6044,6 +6044,13 @@ export function DetailPanel(props: DetailPanelProps) {
             list={globalThis.window?.api?.files?.list}
             read={globalThis.window?.api?.files?.read}
             write={globalThis.window?.api?.files?.write}
+            // The quit guard's half of the same bridge. `beforeunload` (armed
+            // inside `FilesTab`, off the SAME derivation) covers the window
+            // closing; this covers Cmd-Q, which reaches `app.on('before-quit')`
+            // in main and never reaches the page at all. Absent in the browser
+            // build, which has no application to quit. See
+            // `src/main/quit/guard.ts`.
+            reportUnsaved={globalThis.window?.api?.files?.reportUnsaved}
             // The view-icon corner overlay (`data-view-overlay`, further down
             // this file) floats ABOVE this tab's own content at `top-2
             // right-2.5`, real clicks and all -- measured directly: the Save
