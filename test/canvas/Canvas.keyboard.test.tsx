@@ -1506,6 +1506,119 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
     expect(wrote.count).toBe(1);
   });
 
+  /**
+   * ONE PROMPT, SENT ONCE.
+   *
+   * `writingBySession` already refuses a second Return that lands while the
+   * first send is still in flight -- and that send is two tmux spawns, about
+   * ten milliseconds, so two Returns a tenth of a second apart both cleared
+   * it and the agent received the same words twice. The operator reported
+   * exactly that, with a screenshot of a brand-new session holding one prompt
+   * in two turns.
+   *
+   * The rule is SAME TEXT, SAME SESSION, INSIDE THE WINDOW -- not a delay.
+   */
+  async function submitAgain(text: string) {
+    const input = promptInput() as HTMLTextAreaElement;
+    press('i');
+    typeInto(input, text);
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+  }
+
+  it('refuses an identical prompt sent straight after the first, and says so', async () => {
+    const calls: string[] = [];
+    const { source } = fakeSessionSource({ deliverPrompt: true }, async (_id, prompt) => {
+      calls.push(prompt);
+    });
+    await submit(source, 'hello, who are you?');
+    await submitAgain('hello, who are you?');
+    expect(calls).toEqual(['hello, who are you?']);
+    // Said aloud, never swallowed: a prompt that vanishes without a word
+    // reads exactly like one that was sent, which is the confusion this ends.
+    expect(statusBar()).toContain('the same prompt was just sent');
+  });
+
+  it('lets a DIFFERENT prompt straight after through untouched', async () => {
+    const calls: string[] = [];
+    const { source } = fakeSessionSource({ deliverPrompt: true }, async (_id, prompt) => {
+      calls.push(prompt);
+    });
+    await submit(source, 'hello, who are you?');
+    await submitAgain('and what can you do?');
+    // The failure a blanket debounce would have had: a person typing fast is
+    // not a double-fire, and the second prompt is not the first one twice.
+    expect(calls).toEqual(['hello, who are you?', 'and what can you do?']);
+  });
+
+  it('lets the same words through again once the window has passed', async () => {
+    const calls: string[] = [];
+    const clock = vi.spyOn(Date, 'now');
+    try {
+      clock.mockReturnValue(1_000);
+      const { source } = fakeSessionSource({ deliverPrompt: true }, async (_id, prompt) => {
+        calls.push(prompt);
+      });
+      await submit(source, 'ping');
+      // A deliberate re-send -- "it did not answer, try again" -- takes a beat
+      // of reading first, and must never be refused for longer than that.
+      clock.mockReturnValue(1_000 + 1_600);
+      await submitAgain('ping');
+      expect(calls).toEqual(['ping', 'ping']);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('lets the same words through to a DIFFERENT session, immediately', async () => {
+    // KEYED BY SESSION. "continue" typed into one pane and then into the next
+    // is two agents being told to continue, not one being told twice -- and
+    // that is the ordinary way an operator drives several sessions at once.
+    // A single global key passes every other case here and silently eats the
+    // second pane's prompt.
+    const calls: { sessionId: string; prompt: string }[] = [];
+    const { source } = fakeSessionSource({ deliverPrompt: true }, async (sessionId, prompt) => {
+      calls.push({ sessionId, prompt });
+    });
+    await submit(source, 'continue');
+    // Sending leaves the composer in insert mode -- the operator keeps
+    // typing into the same pane by default -- so `j` only reaches the sidebar
+    // after Escape, exactly as it does by hand.
+    press('Escape');
+    press('j');
+    expect(focused()).toBe('alpha/a2');
+    await submitAgain('continue');
+    expect(calls).toEqual([
+      { sessionId: 'a1', prompt: 'continue' },
+      { sessionId: 'a2', prompt: 'continue' },
+    ]);
+    expect(statusBar()).not.toContain('the same prompt was just sent');
+  });
+
+  it('lets the same words straight through again when the first send FAILED', async () => {
+    // A refused send never reached the agent, so pressing Return on the same
+    // words is a FIRST delivery, not a second -- and it arrives immediately,
+    // because the operator is answering a red status bar, not re-reading a
+    // reply. Recording the repeat at the attempt rather than at the landing
+    // would lock a failure out of its own retry for the whole window.
+    const calls: string[] = [];
+    const { source } = fakeSessionSource({ deliverPrompt: true }, async (_id, prompt) => {
+      if (calls.length === 0) {
+        calls.push(prompt);
+        throw { code: 'tmux-failed', message: 'no server running' };
+      }
+      calls.push(prompt);
+    });
+    await submit(source, 'ship it');
+    expect(statusBar()).toContain('no server running');
+    // The words are handed back, so `submitAgain` retypes what is already
+    // there -- exactly what the operator does after reading the failure.
+    await submitAgain('ship it');
+    expect(calls).toEqual(['ship it', 'ship it']);
+    expect(statusBar()).not.toContain('the same prompt was just sent');
+  });
+
   it('refuses without calling anything when recordPrompt is false — the guard is real', async () => {
     let called = 0;
     const { source, wrote } = fakeSessionSource({ recordPrompt: false }, async () => {
