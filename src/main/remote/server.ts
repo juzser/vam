@@ -297,9 +297,10 @@ function write(
  * by whoever lacks the thing.
  *
  * `'files'` IS NOT A KEY OF `SourceCapabilities`, and that is deliberate
- * rather than a gap this map papers over: the file-editor tab's read and
- * write channels (`src/main/files/ipc.ts`) are a bridge beside the source,
- * exactly as `dialog` and `terminal`'s own IPC are -- never a member of
+ * rather than a gap this map papers over: the file-editor tab's read, write
+ * and LIST channels (`src/main/files/ipc.ts`, `./files/list-ipc.ts`) are a
+ * bridge beside the source, exactly as `dialog` and `terminal`'s own IPC are
+ * -- never a member of
  * `MainSource#descriptor`, so there is no capability flag for `servedDescriptor`
  * below to turn off. The entry exists anyway, in the SAME map `terminal` and
  * `governance` are named in, because the reason this server carries no
@@ -319,9 +320,9 @@ export const UNSERVED: Partial<Record<keyof SourceCapabilities | 'files', string
     'the remote endpoint does not expose the terminal surface: read, send, answer ' +
     'and resize type into a running agent and need their own rate limit and decision',
   files:
-    'the remote endpoint carries no file-read or file-write route: arbitrary file ' +
-    'access over a network is at least as serious as typing into a running agent, ' +
-    'and it gets no route, no grant and no follow-up',
+    'the remote endpoint carries no file-read, file-write or file-listing route: ' +
+    'arbitrary file access over a network is at least as serious as typing into a ' +
+    'running agent, and it gets no route, no grant and no follow-up',
 };
 
 /** The capabilities that live behind the write routes, registered or not. */

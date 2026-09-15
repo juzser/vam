@@ -127,12 +127,36 @@ describe('the digit still names a view, and still refuses aloud', () => {
     expect(note()).toBeNull();
   });
 
-  it('says how many views exist for a digit that names none, and moves nothing', () => {
+  /**
+   * `Alt-5` now names Files (`TABS[4]`) — a real view this test's fixture
+   * source does not offer (no `window.api.files` in a jsdom test), so it
+   * refuses BY NAME, the same shape `Alt-3`/Terminal already does above, not
+   * as "no view 5". `Alt-6` is what is actually past `TABS`' own length now.
+   */
+  it('Alt-5 refuses by NAME once Files is withdrawn, never landing on Response silently', () => {
     render(<Canvas model={MODEL} />);
     altDigit(5);
     expect(pressed('response')).toBe('true');
     expect(note()?.getAttribute('role')).toBe('status');
-    expect(note()?.textContent ?? '').toContain('no view 5');
+    expect(note()?.textContent ?? '').toContain('Files');
+    /**
+     * AND IT NAMES THE RIGHT REASON, which the name alone cannot tell apart.
+     * Every other withdrawn view is a SOURCE capability, so the shared
+     * wording is "this source has none" -- but no source declares a file
+     * bridge and none ever will (`panels/tabs.ts`'s own header), so blaming
+     * the source here would send the operator looking for a setting on a
+     * thing that has no say in it. The bridge is the desktop app's.
+     */
+    expect(note()?.textContent ?? '').not.toContain('this source');
+    expect(note()?.textContent ?? '').toContain('desktop app');
+  });
+
+  it('says how many views exist for a digit that names none, and moves nothing', () => {
+    render(<Canvas model={MODEL} />);
+    altDigit(6);
+    expect(pressed('response')).toBe('true');
+    expect(note()?.getAttribute('role')).toBe('status');
+    expect(note()?.textContent ?? '').toContain('no view 6');
   });
 
   it('clears the refusal as soon as a press lands somewhere', () => {

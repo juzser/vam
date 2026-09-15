@@ -1739,6 +1739,31 @@ function CanvasInner({
    */
   const terminalTab = source.kind === 'session' && source.source.capabilities.terminal;
   /**
+   * Whether THIS BUILD can show a file editor at all -- read the same way
+   * `dialog.chooseDirectory`'s own presence already is (`window.api?.dialog?.
+   * chooseDirectory`, further down this file), because there is no per-source
+   * capability to ask: `CHANNELS.filesRead`'s own header states that `files`
+   * is deliberately NOT a member of `SourceCapabilities` at all, so a source
+   * has nothing to decline here.
+   *
+   * DELIBERATELY NOT GATED ON `source.kind === 'session'`, unlike
+   * `terminalTab` above -- and that omission is a decision, not an oversight.
+   * `terminalTab` reads `source.source.capabilities.terminal`, a field that
+   * only TYPE-EXISTS on a `'session'` source, so the gate there is load-bearing
+   * for the compiler as much as for the UI. `files` has no such dependency:
+   * every path this tab ever touches is re-authorised in MAIN, fresh, against
+   * the REAL live agent roster (`main/files/authorize.ts`) -- a demo or `live`
+   * canvas's own session id simply will not match anything real there, and
+   * main answers `unknown-session`/`not-authorized` exactly as it would for
+   * any other id it does not recognise. So gating on `source.kind` here would
+   * only be withholding the tab from a canvas that already cannot leak
+   * anything through it, which is also what makes this flag STUB-ABLE in a
+   * browser guard (`e2e/files-tab-keyboard-shots.mjs`) by injecting
+   * `window.api.files` alone, without needing a live Electron backend behind
+   * `?demo=1` at all.
+   */
+  const filesTab = globalThis.window?.api?.files !== undefined;
+  /**
    * How many things have BROKEN this session. Refusals are excluded on
    * purpose: a badge that counted vam's intended "no"s would be a number that
    * grows during correct use, and a number like that is one nobody reads.
@@ -4511,14 +4536,22 @@ function CanvasInner({
            * digit inside `TABS` names a real view THIS SOURCE has withdrawn,
            * and a digit past `TABS` names nothing at all.
            */
-          const drawn = visibleTabs(terminalTab);
+          const drawn = visibleTabs(terminalTab, filesTab);
           const view = tabForDigit(drawn, action.digit);
           if (view === undefined) {
             const named = TABS[action.digit - 1];
             setViewNote(
               named === undefined
                 ? `no view ${action.digit} — only ${drawn.length} shown (${drawn.join(', ')})`
-                : `${named} — this source has none`,
+                : // FILES IS NOT A SOURCE CAPABILITY, so "this source has
+                  // none" would name the wrong reason: no source declares a
+                  // file bridge and none ever will (`tabs.ts`'s own header),
+                  // and the operator could go looking for a setting on a
+                  // source that has no say in it. The bridge is the desktop
+                  // app's, so that is what the refusal says.
+                  named === 'Files'
+                  ? 'Files — only the desktop app can edit files'
+                  : `${named} — this source has none`,
             );
             return;
           }
@@ -4940,6 +4973,7 @@ function CanvasInner({
     prefs,
     savePrefs,
     terminalTab,
+    filesTab,
     overlayOpen,
     openSessionIconPicker,
     splitFocused,
@@ -5353,6 +5387,7 @@ function CanvasInner({
             ? async () => DEMO_PROMPT
             : globalThis.window?.api?.terminal?.prompt,
         terminal: terminalTab,
+        files: filesTab,
         // A15.4 — the GLOBAL "what a new session starts with"
         // preference, identical for every pane (it names nothing about
         // THIS session, only the next one created), the same reasoning
@@ -5434,6 +5469,7 @@ function CanvasInner({
       viewSeed,
       source,
       terminalTab,
+      filesTab,
       viewNote,
       prefs,
       savePrefs,

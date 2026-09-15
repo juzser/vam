@@ -39,7 +39,7 @@
  * appends to a log. `delivers` carries the difference, and with nothing said
  * the wording stays at "record".
  *
- * ## The mockup's four tabs
+ * ## The mockup's four tabs, and the fifth that was never in it
  *
  * ADE puts Response / PRs / Terminal / Agents across the top, and all four now
  * have something behind them — which was not true when this comment was first
@@ -50,6 +50,15 @@
  * branch; Agents reads the roster beside a session's transcript; Terminal
  * reads a tmux pane, and only for sessions vam itself started, because no
  * process can take over another's controlling TTY.
+ *
+ * `Files` is the operator's own addition, not the mockup's: a file manager and
+ * editor scoped to the session's own working directory, for the `.env` and
+ * "a few other files" no chat transcript was ever going to be the right place
+ * to touch. See `FilesTab.tsx`. It is withdrawn the OPPOSITE way Terminal is
+ * (`tabs.ts`'s own header) — absent unless this build actually has the
+ * desktop bridge behind it, never a per-source decline, because no source
+ * declares it and none ever will (`CHANNELS.filesRead`'s header: no remote
+ * route, by design).
  *
  * The `LIVE_TABS` list below is the honest part: a tab is live for a SOURCE
  * that reports the thing it draws, and the factory source still reports none
@@ -63,6 +72,7 @@ import {
   ChevronsDown,
   ChevronsUp,
   CircleSlash,
+  FileText,
   GitPullRequest,
   Hand,
   Image as ImageIcon,
@@ -136,6 +146,7 @@ import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { copyText } from './clipboard.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import { type DictationHandle, dictationAvailable, startDictation } from './dictation.js';
+import { FilesTab } from './FilesTab.js';
 import {
   type DiffKind,
   diffLineKind,
@@ -639,6 +650,18 @@ export type DetailPanelProps = {
    */
   readonly terminal?: boolean;
   /**
+   * Whether THIS BUILD can show a file editor at all -- `true` only once the
+   * caller has confirmed `window.api.files` exists. See `tabs.ts`'s
+   * `visibleTabs` header for why this defaults the OPPOSITE way `terminal`
+   * does: there is no per-source capability behind Files to read (nothing
+   * declares it, nothing ever will -- `CHANNELS.filesRead`'s own header), so
+   * `undefined`/`false` both withdraw the tab and only an explicit `true`
+   * shows it. Every existing caller of this panel, including every test that
+   * predates this tab, keeps Files withdrawn without needing to learn a new
+   * prop.
+   */
+  readonly files?: boolean;
+  /**
    * Opens the native image picker for the focused session, scoped to and
    * validated against its own working directory -- present only when
    * `SourceCapabilities.promptAttachments` is true AND this shell can reach
@@ -891,6 +914,7 @@ const VIEW_ICON: Readonly<Record<Tab, typeof MessageSquare>> = {
   PRs: GitPullRequest,
   Terminal: SquareTerminal,
   Agents: Users,
+  Files: FileText,
 };
 
 /**
@@ -3106,7 +3130,16 @@ const TurnBlock = memo(function TurnBlock({
   readonly waitingCause: string | null;
   readonly age: string | null;
   readonly status: SessionStatus | null;
-  readonly reserveCorner: boolean;
+  /**
+   * HOW MUCH OF THIS BUBBLE'S FIRST LINE THE VIEW PILL SITS OVER, in px --
+   * 0 when no pill is drawn. The pane's own `cornerOverhang`, which is the
+   * pill's width less the distance this bubble's right edge already sits
+   * inside the pane's; see its comment. Not the pill's full width: reserving
+   * that costs ~60px of the first line for a gap nothing is painted in, and
+   * `e2e/narrow-pane-overlay-shots.mjs` fails on THAT as well as on covering
+   * the text -- a reservation is wrong in both directions.
+   */
+  readonly reserveCorner: number;
   /** Focus view, as the operator set it -- see `prefs/progress.ts`. */
   readonly focusView: boolean;
   /** Has the operator pressed this turn's way back? */
@@ -3336,11 +3369,25 @@ const TurnBlock = memo(function TurnBlock({
                 turns that are not pinned and cannot be wrong at any scroll
                 offset. Only when the overlay is actually drawn -- an unfocused
                 pane paints no pill. */}
-            {reserveCorner && (
+            {reserveCorner > 0 && (
               <span
                 data-detail-corner-reserve
                 aria-hidden="true"
-                className="float-right h-[22px] w-[66px]"
+                className="float-right h-[22px]"
+                /* EXACTLY THE PART OF THE PILL THAT OVERHANGS THIS BUBBLE --
+                   measured, both edges, every time either can have moved.
+                   The `66px` this replaces was fitted to a THREE-icon pill
+                   (90px) and survived only because this bubble's right edge
+                   already sat ~44px inside the pane's, leaving 46px to
+                   cover. A source with a terminal draws four icons and one
+                   with the file bridge draws five (146px): ~102px to cover,
+                   and the first line of the pinned prompt -- the most-read
+                   text in the app -- would have run under the difference.
+                   Reserving the pill's whole width instead is the OTHER
+                   failure the guard names: 60px of a narrow pane's first
+                   line spent on a gap nothing was ever painted in. Only the
+                   overhang is right, and only measurement knows it. */
+                style={{ width: reserveCorner }}
               />
             )}
             {decision.input}
@@ -3647,6 +3694,7 @@ export function DetailPanel(props: DetailPanelProps) {
     answer,
     prompt,
     terminal,
+    files,
     pickImageAttachment,
     sending = false,
     width,
@@ -4010,7 +4058,7 @@ export function DetailPanel(props: DetailPanelProps) {
   // the operator can be on Terminal when focus moves to a session from a
   // source without one, and a tab bar with nothing selected over a pane
   // drawing a tab that is no longer offered is the state this collapses.
-  const tabs = visibleTabs(terminal !== false);
+  const tabs = visibleTabs(terminal !== false, files === true);
   const current = tabs.includes(tab) ? tab : 'Response';
 
   /** Whether the step counter has been asked for the sentence it abbreviates. */
@@ -4864,6 +4912,48 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const cornerOverlay = !phone && paneFocused;
   /**
+   * HOW WIDE THE CORNER PILL IS, from the one thing that decides it: how many
+   * view icons are on it. Every reader of this used to restate `6rem`, and
+   * that constant was only ever right for THREE.
+   *
+   * MEASURED, both ends: a focused demo pane draws Response/PRs/Agents and
+   * the pill is 90px -- 30px per icon, exactly the `6rem` (96px) the old
+   * constant reserved, gap included. A pane whose source has a terminal draws
+   * four, and one with the file bridge draws five: 146px measured, already
+   * 50px past that reservation. The four-icon case was live on the
+   * integration branch before this tab existed and no guard saw it, because
+   * every web guard runs against `?demo=1` -- no terminal, no file bridge,
+   * three icons, the only case the constant fitted. Adding `Files` puts a
+   * fifth icon on every desktop pane, which is what turned a silent overlap
+   * into the visibly clipped Save button in this tab's own header row.
+   *
+   * DERIVED AT RENDER TIME, NOT MEASURED FROM THE DOM, and that is a
+   * correction rather than a preference: measuring the pill in a layout
+   * effect and re-rendering with the result changes the height of every turn
+   * in the column AFTER the column has already scrolled to its end, which
+   * unpins the newest turn's bubble. `narrow-pane-overlay-shots.mjs` caught
+   * exactly that -- it found the pill no longer reaching the bubble at all
+   * and refused the run as vacuous rather than passing it. `tabs` is known
+   * before paint, so nothing reflows.
+   *
+   * WHAT THIS STILL DOES NOT COVER, said plainly because the old constant did
+   * not either: `data-view-note`, which adds up to 160px to the LEFT of the
+   * icons while it is drawn. It is transient, it truncates itself, and no
+   * reservation has ever accounted for it.
+   */
+  const PILL_PER_ICON = 30;
+  const cornerReserve = cornerOverlay ? tabs.length * PILL_PER_ICON + 6 : 0;
+  /**
+   * The same pill, for a block whose right edge is NOT the pane's. The prompt
+   * bubble sits a variable distance inside it -- 44px at a 253px pane, 54px
+   * at a wide one (the jump gutter, a scrollbar) -- so it only has to clear
+   * the part of the pill that actually overhangs it, and reserving the pill's
+   * whole width takes ~60px out of the first line for nothing. Measured, that
+   * overhang is the pill's width less 34px..44px; less 28 lands inside the
+   * 0-48px window `narrow-pane-overlay-shots.mjs` allows at BOTH pane widths.
+   */
+  const cornerOverhang = cornerOverlay ? Math.max(0, tabs.length * PILL_PER_ICON - 28) : 0;
+  /**
    * Is the failed-session banner drawn above the column? Two readers, which
    * is why it is named: the banner itself, and the column, which hands its
    * top padding to the sticky ground and must NOT when something is sitting
@@ -5333,8 +5423,9 @@ export function DetailPanel(props: DetailPanelProps) {
                  pane for nothing is the over-reservation the identity line's
                  own `7rem` was deleted for. `e2e/narrow-pane-overlay-shots.mjs`
                  measures both halves. */
-              cornerOverlay ? 'pr-[6rem]' : 'pr-3',
+              cornerOverlay ? '' : 'pr-3',
             ].join(' ')}
+            style={cornerOverlay ? { paddingRight: cornerReserve } : undefined}
           >
             <span role="img" aria-label="failed" className="flex">
               <CircleSlash size={13} strokeWidth={1.6} />
@@ -5401,7 +5492,11 @@ export function DetailPanel(props: DetailPanelProps) {
                 : { ...prRepo, projectName: prRepo.projectName ?? entry?.project.name }
             }
           />
-        ) : orderedTurns.length === 0 ? (
+        ) : current === 'Files' ? // Drawn by the ALWAYS-MOUNTED `FilesTab` sibling below instead --
+        // see its own comment for why. This slot contributes nothing so the
+        // Response-column branches below it never run for a tab that is not
+        // Response.
+        null : orderedTurns.length === 0 ? (
           entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip
           // above it, and an empty strip already says "no sessions open —
           // pick one from the sidebar". This line said the same thing in
@@ -5583,8 +5678,9 @@ export function DetailPanel(props: DetailPanelProps) {
                  -- invisible here, since this block paints no ground, and a
                  trap for whoever gives it one. */
                 className={`-ml-3.5 -mr-11 flex flex-none flex-col gap-0.5 pt-3 pb-1 pl-3.5 font-mono text-meta text-ink-faint ${
-                  cornerOverlay ? 'pr-[6rem]' : 'pr-11'
+                  cornerOverlay ? '' : 'pr-11'
                 }`}
+                style={cornerOverlay ? { paddingRight: cornerReserve } : undefined}
               >
                 {/* WRAPPING, since the qualifier below can be a PHRASE where
                   this row has only ever held tokens.
@@ -5782,7 +5878,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   waitingCause={d.id === newestId ? waitingCause : null}
                   age={d.id === newestId ? liveAge : null}
                   status={entry?.session.status ?? null}
-                  reserveCorner={cornerOverlay}
+                  reserveCorner={cornerOverhang}
                   focusView={focusView}
                   unfolded={unfolded.has(d.id)}
                   onUnfold={unfold}
@@ -5919,6 +6015,38 @@ export function DetailPanel(props: DetailPanelProps) {
             <span className="min-w-0 flex-1">{sendFailure}</span>
           </p>
         )}
+        {/* ALWAYS MOUNTED WHILE THIS BUILD HAS THE BRIDGE -- deliberately NOT
+            gated behind `current === 'Files'` the way `TerminalTab` is gated
+            behind `current === 'Terminal'`. `TerminalTab`'s own header says
+            what it costs to unmount-and-remount: nothing, because there is a
+            poll to stop. An open file's UNSAVED TEXT is not nothing -- "the
+            worst outcome this feature can have, worse than not shipping it"
+            was the exact instruction this tab was built against -- so
+            `FilesTab` stays mounted for as long as this panel shows ANY tab,
+            keeping every open buffer's dirty text in memory across a switch
+            to Response/PRs/Terminal/Agents and back. `hidden` (`display:
+            none`) removes it from layout and from the Tab order without
+            unmounting it, which is the one property this choice needs: React
+            state survives, nothing currently on screen shows it, and it costs
+            no timer and no IPC while hidden -- `FilesTab` itself polls
+            nothing, unlike Terminal's `capture-pane`. */}
+        {files === true && (
+          <FilesTab
+            hidden={current !== 'Files'}
+            sessionId={entry?.session.id ?? null}
+            list={globalThis.window?.api?.files?.list}
+            read={globalThis.window?.api?.files?.read}
+            write={globalThis.window?.api?.files?.write}
+            // The view-icon corner overlay (`data-view-overlay`, further down
+            // this file) floats ABOVE this tab's own content at `top-2
+            // right-2.5`, real clicks and all -- measured directly: the Save
+            // button sat under the Agents icon until this was threaded
+            // through -- and `6rem` was not enough once this tab's own icon
+            // widened the pill, so it is the MEASURED `cornerReserve` rather
+            // than a constant. See its own comment above.
+            reserveCorner={cornerReserve}
+          />
+        )}
       </div>
 
       {/* The question's own block, drawn only when there IS one: it was split
@@ -5929,7 +6057,12 @@ export function DetailPanel(props: DetailPanelProps) {
         `waitingFor` too, for the notice above the prompt input the operator
         asked to remove; keeping that disjunct would draw a bordered empty
         block on every waiting session -- a seam with nothing behind it. */}
-      {current !== 'Terminal' && newestQuestion !== null && (
+      {/* NOT ON `Files` EITHER, same reasoning as Terminal: a full-pane
+        surface with its own keyboard (the editor's own insert scope) has no
+        room for a question card floating over it, and the question this
+        card answers is the AGENT's, unrelated to a file the operator opened
+        to read or edit by hand. */}
+      {current !== 'Terminal' && current !== 'Files' && newestQuestion !== null && (
         <div
           data-question-bar
           // AN INSERT SCOPE (`keyboard/focus-scope.ts`): while anything in
@@ -5982,7 +6115,12 @@ export function DetailPanel(props: DetailPanelProps) {
         is the darker colour they were looking at. Nothing else in the app
         wears `header` now; the token stays defined, unworn, rather than being
         deleted out from under a theme that still names it. */}
-      {current !== 'Terminal' && !composerHidden && (
+      {/* NOT ON `Files`, for the same reason as the question bar just above:
+        the editor is a full-pane surface with its own keyboard, and a
+        composer prompting the AGENT underneath it would be a second insert
+        scope competing for the same keystrokes a person is typing into a
+        file. */}
+      {current !== 'Terminal' && current !== 'Files' && !composerHidden && (
         <div
           data-composer-bar
           // The other insert scope, and the common one: with no question open

@@ -24,7 +24,12 @@ import type { MainFailureEvent } from '../main/errors/log.js';
 // module (imported for types by `src/renderer/App.tsx`) into a typecheck
 // (`tsconfig.web.json`) that carries no `node` types at all. See
 // `src/main/files/types.ts`'s own header.
-import type { FileReadResult, FileSignature, FileWriteResult } from '../main/files/types.js';
+import type {
+  FileListResult,
+  FileReadResult,
+  FileSignature,
+  FileWriteResult,
+} from '../main/files/types.js';
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
 import type { RemoteState } from '../main/remote/state.js';
 import type { Project } from '../renderer/domain/model.js';
@@ -421,6 +426,15 @@ export type FilesApi = {
     content: string,
     baseSignature: FileSignature | null,
   ): Promise<FileWriteResult>;
+  /**
+   * Every regular file under a live SESSION's own working directory --
+   * `sessionId`, not a path, for the same reason `pickImageAttachment` takes
+   * one: the renderer never learns a session's `cwd` (`renderer/domain/
+   * model.ts` carries no field for it), so this is the one way it can ever
+   * discover a path to hand `read`/`write` above. Rejects with the port's
+   * `SourceError`, same as both. See `src/main/files/list-ipc.ts`.
+   */
+  list(sessionId: string): Promise<FileListResult>;
 };
 
 /**
@@ -431,6 +445,7 @@ export type FilesApi = {
 export function createFilesApi(ipc: InvokerLike): FilesApi {
   return {
     read: (path) => unwrap<FileReadResult>(ipc.invoke(CHANNELS.filesRead, path)),
+    list: (sessionId) => unwrap<FileListResult>(ipc.invoke(CHANNELS.filesList, sessionId)),
     write: (path, content, baseSignature) =>
       unwrap<FileWriteResult>(ipc.invoke(CHANNELS.filesWrite, path, content, baseSignature)),
   };

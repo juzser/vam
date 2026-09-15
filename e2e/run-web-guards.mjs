@@ -34,7 +34,14 @@
  * viewport IS once a browser has laid the column out (`clientHeight` is 0 in
  * happy-dom, so the distance is unmeasurable there) and whether writing
  * `scrollTop` reaches the column's own pager, which it does here and does not
- * in any unit environment, where assigning it fires no scroll event at all.
+ * in any unit environment, where assigning it fires no scroll event at all,
+ * and -- since the Files tab -- whether the editor's `<textarea>` is a REAL
+ * insert scope once Chromium has actually focused it (read off the mode chip,
+ * the same live-DOM signal `mode-truth-shots.mjs` already proves), whether
+ * the one select-only chord in the whole table is silently declined while it
+ * has focus, whether a `changed-on-disk` refusal still shows the operator's
+ * own edit after a real save round-trip, and whether closing the page while
+ * a buffer is dirty is something ONLY a real `beforeunload` event can answer.
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -77,6 +84,7 @@ const GUARDS = [
   'target-size-shots',
   'turn-steps-shots',
   'agents-navigator-shots',
+  'files-tab-keyboard-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

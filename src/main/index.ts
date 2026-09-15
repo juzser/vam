@@ -8,7 +8,7 @@
  */
 
 import { execFile, spawn } from 'node:child_process';
-import { readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
+import { readdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -21,6 +21,7 @@ import { applyLoginShellPath, probeLoginShellPath } from './env/resolve-path.js'
 import { registerMainErrorIpc } from './errors/ipc.js';
 import { recordMainFailure } from './errors/log.js';
 import { registerFilesIpc } from './files/ipc.js';
+import { registerFilesListIpc } from './files/list-ipc.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { registerIssueIpc } from './issue/ipc.js';
 import { applyApplicationMenu } from './menu.js';
@@ -466,6 +467,26 @@ function spawnTailscaleServe(
   return { exit, kill: () => child.kill() };
 }
 
+/**
+ * A live session's own working directory, off the SAME live agent roster
+ * `registerFilesIpc`'s own root list is built from -- asked fresh per call,
+ * never cached, so a session that closed between two requests stops
+ * authorising anything the moment it drops off the roster. Shared between
+ * `registerAttachImageIpc` and `registerFilesListIpc` so the image picker and
+ * the file-editor tab's listing cannot drift on how a session id becomes a
+ * directory -- they used to be two copies of the same four lines.
+ */
+async function resolveSessionCwd(sessionId: string): Promise<string | null> {
+  const agentsResult = await listLiveAgents();
+  // `unavailable` becomes `null`, same as an unmatched row: vam could not
+  // ask, so it has no cwd to answer with -- never "no sessions are running".
+  if (agentsResult.kind === 'unavailable') return null;
+  const row =
+    agentsResult.agents.find((agent) => agent.key === sessionId) ??
+    agentsResult.agents.find((agent) => agent.sessionId === sessionId);
+  return row?.cwd ?? null;
+}
+
 void app.whenReady().then(async () => {
   // FIRST, BEFORE ANYTHING ELSE SPAWNS A CHILD PROCESS. A GUI launch (Finder,
   // Dock, Spotlight) does not inherit the operator's shell PATH -- only
@@ -536,17 +557,7 @@ void app.whenReady().then(async () => {
   registerAttachImageIpc(
     ipcMain,
     { showOpenDialog: (options) => dialog.showOpenDialog(options) },
-    async (sessionId) => {
-      const agentsResult = await listLiveAgents();
-      // `unavailable` becomes `null`, same as an unmatched row: vam could not
-      // ask, so it has no cwd to attach an image relative to -- not "no
-      // sessions are running".
-      if (agentsResult.kind === 'unavailable') return null;
-      const row =
-        agentsResult.agents.find((agent) => agent.key === sessionId) ??
-        agentsResult.agents.find((agent) => agent.sessionId === sessionId);
-      return row?.cwd ?? null;
-    },
+    resolveSessionCwd,
     async (path) => {
       const { open } = await import('node:fs/promises');
       const handle = await open(path, 'r');
@@ -586,6 +597,17 @@ void app.whenReady().then(async () => {
     // ever read or its target ever written to.
     (path) => realpath(path),
     { stat, readFile, writeFile, rename },
+  );
+  // The file-editor tab's directory listing -- the piece `filesRead`/
+  // `filesWrite` never carried: a way for the renderer to DISCOVER a path
+  // before it has one to hand either of them. Keyed by session id and
+  // resolved through `resolveSessionCwd` exactly as the image picker is
+  // above; see `./files/list-ipc.ts` and `CHANNELS.filesList`'s own header.
+  registerFilesListIpc(
+    ipcMain,
+    resolveSessionCwd,
+    (path) => realpath(path),
+    (dir) => readdir(dir, { withFileTypes: true }),
   );
   startRemoteTransport();
   createWindow();

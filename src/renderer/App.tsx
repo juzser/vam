@@ -19,6 +19,7 @@ import type {
   ClipboardApi,
   DesktopSourceApi,
   DialogApi,
+  FilesApi,
   IssueApi,
   MainErrorsApi,
   TerminalApi,
@@ -66,6 +67,14 @@ declare global {
       readonly terminal: TerminalApi;
       /** Electron's `showOpenDialog`; the browser build has no picker at all. */
       readonly dialog: DialogApi;
+      /**
+       * The file-editor tab's read, write and list, authorised against every
+       * live session's own working directory in main before a byte or a name
+       * crosses this bridge. See `src/main/files/authorize.ts`. Desktop-only,
+       * by construction rather than convention -- there is no matching route
+       * on `remote/server.ts`'s table, ever (`CHANNELS.filesRead`'s header).
+       */
+      readonly files: FilesApi;
       /**
        * The launch check's answer, and the click that opens the release page
        * in the operator's browser. Desktop-only: the browser build has no

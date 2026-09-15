@@ -27,13 +27,20 @@
  * `visibleTabs`' return value is the bug, not an implementation detail.
  */
 
-/** Every tab the pane can hold, in bar order. */
-export const TABS = ['Response', 'PRs', 'Terminal', 'Agents'] as const;
+/**
+ * Every tab the pane can hold, in bar order. `Files` is FIFTH and APPENDED --
+ * never inserted before Terminal/Agents -- because a digit names a FIXED SLOT
+ * in this list (see `tabForDigit` below), and inserting anywhere but the end
+ * would silently renumber every existing binding an operator already has
+ * memorised or rebound in `keyboard/chords.ts`'s own table.
+ */
+export const TABS = ['Response', 'PRs', 'Terminal', 'Agents', 'Files'] as const;
 
 export type Tab = (typeof TABS)[number];
 
 /**
- * The tabs actually drawn, given whether the source has a terminal to show.
+ * The tabs actually drawn, given whether the source has a terminal to show
+ * and whether this build can show a file editor at all.
  *
  * `Terminal` is withdrawn rather than mounted-and-apologising when the source
  * declares none, which moves every tab after it up a position IN THIS LIST.
@@ -43,9 +50,22 @@ export type Tab = (typeof TABS)[number];
  * moment it returns. This list answers one question only -- which names are
  * currently on the bar -- and `tabForDigit` is the one place that turns a
  * digit into a name.
+ *
+ * `files` DEFAULTS THE OPPOSITE WAY FROM `terminal`, and both arguments are
+ * REQUIRED rather than optional so no caller can forget to think about
+ * either. `terminal` reads `!== false` at its call sites -- absent means
+ * shown -- because the flag is a per-SOURCE decline, and most sources have a
+ * terminal. `files` has no source-level capability at all: the file-editor
+ * tab's main-process bridge is desktop-only BY CONSTRUCTION, not by a flag
+ * any source declares (`CHANNELS.filesRead`'s own header -- there is no
+ * remote route, ever, by design), so a caller passes `true` only once it has
+ * actually confirmed `window.api.files` exists. Every other caller --
+ * including every existing test that predates this tab -- keeps it withdrawn
+ * simply by doing nothing, rather than needing to learn a new flag to stay
+ * correct.
  */
-export function visibleTabs(terminal: boolean): readonly Tab[] {
-  return TABS.filter((name) => name !== 'Terminal' || terminal);
+export function visibleTabs(terminal: boolean, files: boolean): readonly Tab[] {
+  return TABS.filter((name) => (name !== 'Terminal' || terminal) && (name !== 'Files' || files));
 }
 
 /**

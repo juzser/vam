@@ -48,7 +48,14 @@
  * `ShortcutTip.tsx` — a subscription — not in a note here.
  */
 
-import { Bot, GitPullRequest, type LucideIcon, MessageSquare, SquareTerminal } from 'lucide-react';
+import {
+  Bot,
+  FileText,
+  GitPullRequest,
+  type LucideIcon,
+  MessageSquare,
+  SquareTerminal,
+} from 'lucide-react';
 import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { Project, Session } from '../domain/model.js';
 import { orderedInProject } from '../domain/selectors.js';
@@ -112,6 +119,12 @@ const VIEW_ICON: Record<Tab, LucideIcon> = {
   PRs: GitPullRequest,
   Terminal: SquareTerminal,
   Agents: Bot,
+  // Never actually drawn on a phone -- `detail.files` is only ever true
+  // behind a desktop bridge no browser build has, so `visibleTabs` withdraws
+  // it here the same way it would withdraw Terminal for a source with none.
+  // Present anyway because `VIEW_ICON` is a `Record<Tab, _>`, and `Tab` now
+  // includes `Files` everywhere -- see `tabs.ts`.
+  Files: FileText,
 };
 
 /**
@@ -428,7 +441,10 @@ export function PhoneShell({
    * session left ten minutes ago.
    */
   const newest = session?.decisions[0] ?? null;
-  const views = visibleTabs(detail.terminal !== false);
+  // `detail.files` reads `false`/`undefined` on every real phone -- there is
+  // no desktop bridge behind a browser build, ever -- so this withdraws
+  // `Files` the same way `detail.terminal !== false` withdraws Terminal.
+  const views = visibleTabs(detail.terminal !== false, detail.files === true);
 
   useEffect(() => {
     const pop = (event: PopStateEvent) => {
