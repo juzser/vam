@@ -177,6 +177,30 @@ export type Decision = {
    * nothing.
    */
   readonly steps?: readonly TurnStep[];
+  /**
+   * THE ONE FIELD NO SOURCE MAY SET. True on a turn VAM ITSELF painted: the
+   * prompt the operator just sent, drawn as the newest turn from the moment it
+   * left, before any source has reported it back (`optimistic.ts`).
+   *
+   * WHY IT IS ON THE MODEL AT ALL. Every other reader goes on treating a paint
+   * exactly as it treats a real turn, which is the whole point of painting into
+   * the model rather than beside it. The exception is a reader that draws a
+   * turn's ABSENCES -- "this turn ended without an answer" and its three
+   * siblings in `DetailPanel.tsx` -- because every one of those sentences is a
+   * claim about what the SOURCE reported, and on a paint no source has
+   * reported anything at all. Nothing ended; vam has not heard back.
+   *
+   * ABSENT IS THE ORDINARY CASE and means "this turn came from outside". It is
+   * not a source reading and has no `null` state, so unlike `errorCount` there
+   * is no third thing to distinguish: a source adapter that sets it is stating
+   * something untrue about its own data.
+   *
+   * NOT AN ID PREFIX. `optimistic.ts` does mint its ids as `vam-pending-N` and
+   * the panel could have matched on that, but an id's SHAPE is not a promise
+   * -- ids arrive from outside vam, and a display that keys on one is a
+   * display a source can spoof by accident.
+   */
+  readonly unconfirmed?: boolean;
 };
 
 /**

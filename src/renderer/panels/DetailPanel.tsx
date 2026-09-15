@@ -1754,8 +1754,29 @@ export function splitAnswers(output: string): string[] {
  * A `waiting` session gets neither sentence: its turn has not ended, and the
  * prose about whose move it is was removed from this pane deliberately -- the
  * breathing amber dot in the header says it.
+ *
+ * A THIRD ABSENCE, and it is not a reading at all. On a turn vam painted
+ * itself (`unconfirmed`, model.ts) there is no source report to describe:
+ * every sentence below is a claim about what a source said, and the last of
+ * them -- "this turn ended without an answer" -- is the one vam least can
+ * support, because nothing ended. It was the sentence the operator was shown
+ * beside a Terminal tab holding the agent's actual answer. So the paint gets
+ * its own, which says only what is true: the words went out and vam has not
+ * heard back yet.
  */
-function noAnswerNote(output: string | null, status: SessionStatus | null): string {
+function noAnswerNote(
+  output: string | null,
+  status: SessionStatus | null,
+  unconfirmed: boolean | undefined,
+): string {
+  // FIRST, and it shadows none of the sentences under it: a paint's `output` is
+  // `null` by construction (`optimistic.ts`), so the two answers-exist branches
+  // below were never reachable for one anyway. What it does displace is the
+  // status-derived tail, which reads the SESSION's status -- and a session that
+  // is `done` is not evidence about a turn the source has never mentioned.
+  if (unconfirmed === true) {
+    return '\u2014 waiting for the source to report this turn back \u2014';
+  }
   // A live turn that HAS an answer still gets a line, and the absence wordings
   // would all be lies about it: it is not empty, and it is not answerless. All
   // this line asserts there is what the caret asserts -- the session is
@@ -3637,7 +3658,16 @@ const TurnBlock = memo(function TurnBlock({
                     {'✳'}
                   </span>{' '}
                   <span data-out-running-word className="vam-running-word">
-                    {activity ?? noAnswerNote(decision.output, status)}
+                    {/* `activity` is the newest tool call the source read, and
+                        on a turn vam painted itself that reading is about the
+                        PREVIOUS turn -- it was taken before this prompt was
+                        sent. Drawing it here would name work the agent did
+                        earlier as this turn's working, which is the same
+                        unsupported claim `noAnswerNote` refuses one line down.
+                        So the paint's own sentence wins over it. */}
+                    {decision.unconfirmed === true
+                      ? noAnswerNote(decision.output, status, decision.unconfirmed)
+                      : (activity ?? noAnswerNote(decision.output, status, decision.unconfirmed))}
                   </span>
                   <span aria-hidden="true" data-out-ellipsis className="vam-ellipsis">
                     <span>.</span>
@@ -3652,7 +3682,7 @@ const TurnBlock = memo(function TurnBlock({
                   )}
                 </span>
               ) : (
-                noAnswerNote(decision.output, status)
+                noAnswerNote(decision.output, status, decision.unconfirmed)
               )}
             </p>
           )}
