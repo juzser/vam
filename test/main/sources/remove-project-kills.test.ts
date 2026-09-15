@@ -51,7 +51,7 @@ function agent(sessionId: string): StoppableAgent {
 /** Two tagged tmux sessions in the project, one per row that published a pane. */
 const listed: TmuxRunResult = {
   failure: null,
-  stdout: `${projectIdOf(CWD)}\t${OWNED_PANE}\n${projectIdOf(CWD)}\t${OTHER_PANE}\n`,
+  stdout: `${projectIdOf(CWD)}\t\t${OWNED_PANE}\n${projectIdOf(CWD)}\t\t${OTHER_PANE}\n`,
   stderr: '',
 };
 
@@ -96,7 +96,7 @@ describe('the main-side ownership guard', () => {
   /** alpha's tagged session, and beta's -- both vam's, different projects. */
   const bothProjects: TmuxRunResult = {
     failure: null,
-    stdout: `${projectIdOf(CWD)}\t${OWNED_PANE}\n${projectIdOf('/w/beta')}\t${BETA_PANE}\n`,
+    stdout: `${projectIdOf(CWD)}\t\t${OWNED_PANE}\n${projectIdOf('/w/beta')}\t\t${BETA_PANE}\n`,
     stderr: '',
   };
 

@@ -130,7 +130,7 @@ describe('the cursor reaches the tab, or the tab is told nothing was read', () =
     (stdout: string): TmuxRun =>
     async (argv) =>
       argv[0] === 'list-sessions'
-        ? { failure: null, stdout: `${ATLAS}\tvam-atlas-a1b2c3\n`, stderr: '' }
+        ? { failure: null, stdout: `${ATLAS}\t\tvam-atlas-a1b2c3\n`, stderr: '' }
         : { failure: null, stdout, stderr: '' };
 
   it('carries the position through to the PaneView the renderer draws', async () => {

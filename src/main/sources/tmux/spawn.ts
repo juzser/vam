@@ -44,6 +44,7 @@ import {
   listSessionsArgv,
   newSessionArgv,
   resizeWindowArgv,
+  tagPidArgv,
   tagSessionArgv,
   VAM_CURSOR_MARK,
 } from './argv.js';
@@ -235,10 +236,25 @@ export function createTmuxRunner(binary = 'tmux'): TmuxRun {
 
 /**
  * One session on the server, as vam sees it: the project id vam recorded on it
- * (`''` when nothing did -- see `VAM_PROJECT_OPTION`) and the session name.
+ * (`''` when nothing did -- see `VAM_PROJECT_OPTION`), the pid vam recorded on
+ * it, and the session name.
  */
 export type TmuxSession = {
   readonly project: string;
+  /**
+   * A STRING, not a number: tmux options are strings, and this is compared
+   * against `String(row.pid)` in `paneForRow` (`reply.ts`) rather than parsed
+   * back -- one direction of conversion to get wrong, not two.
+   *
+   * OPTIONAL, unlike `project` -- `listVamSessions` always sets it (to `''`
+   * when nothing tagged the session, the same as `project`), but a great many
+   * fixtures in this test suite predate this field and construct a
+   * `TmuxSession` literal directly; making it required would cost every one
+   * of them an edit for a field their test does not exercise. `undefined` and
+   * `''` mean the identical thing to every reader -- `paneForRow` compares
+   * against a real pid string, which neither can ever equal.
+   */
+  readonly pid?: string;
   readonly name: string;
 };
 
@@ -334,15 +350,35 @@ export async function listVamSessions(run: TmuxRun): Promise<TmuxSessions> {
   }
   const sessions: TmuxSession[] = [];
   for (const line of stdout.split('\n')) {
-    // Split ONCE. The name is whatever follows the first tab, so a value that
-    // somehow held one cannot shorten the name it is paired with.
-    const tab = line.indexOf('\t');
-    if (tab === -1) continue;
-    const name = line.slice(tab + 1).trim();
+    // Split on the FIRST TWO tabs only. The name is whatever follows the
+    // second one, so a value that somehow held a tab cannot shorten the name
+    // it is paired with.
+    const firstTab = line.indexOf('\t');
+    if (firstTab === -1) continue;
+    const secondTab = line.indexOf('\t', firstTab + 1);
+    if (secondTab === -1) continue;
+    const name = line.slice(secondTab + 1).trim();
     if (!isVamSession(name)) continue;
-    sessions.push({ project: line.slice(0, tab).trim(), name });
+    sessions.push({
+      project: line.slice(0, firstTab).trim(),
+      pid: line.slice(firstTab + 1, secondTab).trim(),
+      name,
+    });
   }
   return { kind: 'ok', sessions };
+}
+
+/**
+ * The pid `new-session -P -F` printed on its own stdout, or `null` for
+ * anything this cannot trust: empty output -- what an option a very old tmux
+ * does not know expands to, measured, rather than failing (`CURSOR_FORMAT`'s
+ * same note) -- or anything that is not purely digits, which a real pid
+ * always is. `null` is never a reason to refuse the session that already
+ * started; see the caller.
+ */
+function readPanePid(stdout: string): string | null {
+  const trimmed = stdout.trim();
+  return /^\d+$/.test(trimmed) ? trimmed : null;
 }
 
 /**
@@ -353,28 +389,43 @@ export async function createVamSession(
   run: TmuxRun,
   input: { name: string; cwd: string; command: readonly string[]; projectId: string },
 ): Promise<SourceError | null> {
-  const { failure, stderr } = await run(newSessionArgv(input));
+  const { failure, stdout, stderr } = await run(newSessionArgv(input));
   if (failure !== null) {
     return classifyTmuxFailure({ failure, stderr, action: `creating session ${input.name}` });
   }
-  // THE PAIRING IS RECORDED HERE OR NOWHERE. tmux has no way to create a
-  // session and set an option on it in one command, so this is a second call
+  // THE PROJECT PAIRING IS RECORDED HERE OR NOWHERE. tmux has no way to create
+  // a session and set an option on it in one command, so this is a second call
   // and it can fail on its own.
   const tagged = await run(tagSessionArgv(input.name, input.projectId));
-  if (tagged.failure === null) return null;
-  // The session IS running -- reporting a failure to start it would send the
-  // operator looking for something that is not wrong. What is wrong is that
-  // the Terminal tab will not find it, and that is what this says.
-  const error = classifyTmuxFailure({
-    failure: tagged.failure,
-    stderr: tagged.stderr,
-    action: `recording which project ${input.name} belongs to`,
-  });
-  return {
-    ...error,
-    code: 'session-untagged',
-    message: `the session started, but vam could not record which project it belongs to, so the Terminal tab will not find it: ${error.message}`,
-  };
+  if (tagged.failure !== null) {
+    // The session IS running -- reporting a failure to start it would send the
+    // operator looking for something that is not wrong. What is wrong is that
+    // the Terminal tab will not find it, and that is what this says.
+    const error = classifyTmuxFailure({
+      failure: tagged.failure,
+      stderr: tagged.stderr,
+      action: `recording which project ${input.name} belongs to`,
+    });
+    return {
+      ...error,
+      code: 'session-untagged',
+      message: `the session started, but vam could not record which project it belongs to, so the Terminal tab will not find it: ${error.message}`,
+    };
+  }
+  // THE PID TAG, AND ITS FAILURE IS NOT THE PROJECT TAG'S SEVERITY. It is a
+  // BONUS proof (`VAM_PID_OPTION`): a session the project tag above already
+  // recorded is still findable, repliable and closeable by the older,
+  // per-project fallback with or without it. So an unreadable pid, or a
+  // `set-option` that itself fails, degrades SILENTLY to that older, still
+  // honest behaviour rather than turning a session that DID start into a
+  // reported failure over a feature that is allowed to be missing -- exactly
+  // how an older Claude Code that never publishes a `tmux` field is already
+  // treated, not an exception to it.
+  const pid = readPanePid(stdout);
+  if (pid !== null) {
+    await run(tagPidArgv(input.name, pid));
+  }
+  return null;
 }
 
 /**

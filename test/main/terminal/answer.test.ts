@@ -89,7 +89,7 @@ const verbOf = (argv: readonly string[]): string | undefined =>
  * screen, which is what lets a test say "and after that arrow the pane looked
  * like this" instead of assuming the module re-read at all.
  */
-function runner(captures: readonly string[], listed = `${ATLAS}\t${NAME}\n`) {
+function runner(captures: readonly string[], listed = `${ATLAS}\t\t${NAME}\n`) {
   const argvs: (readonly string[])[] = [];
   const queue = [...captures];
   const run: TmuxRun = async (argv) => {
@@ -144,7 +144,7 @@ describe('reading the picker off the screen', () => {
 
 describe('the pairing guard stands in front of every answer', () => {
   it('refuses, and captures nothing, when no session of vam~s answers for the project', async () => {
-    const { run, argvs } = runner([colours(0)], `${BEACON}\tvam-beacon-d4e5f6\n`);
+    const { run, argvs } = runner([colours(0)], `${BEACON}\t\tvam-beacon-d4e5f6\n`);
     expect(await answerQuestion(run, ATLAS, single(['Crimson']))).toEqual({ kind: 'unaimed' });
     expect(argvs.map((argv) => argv[0])).toEqual(['list-sessions']);
   });
@@ -223,7 +223,7 @@ describe('refusing rather than guessing', () => {
     const argvs: (readonly string[])[] = [];
     const run: TmuxRun = async (argv) => {
       argvs.push(argv);
-      if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t${NAME}\n`);
+      if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t\t${NAME}\n`);
       if (argv.includes('capture-pane')) return ok(colours(0));
       return failed('cant find pane');
     };
@@ -413,7 +413,7 @@ describe('when the pane stops cooperating part way through', () => {
     let sends = 0;
     const keys: (string | undefined)[] = [];
     const run: TmuxRun = async (argv) => {
-      if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t${NAME}\n`);
+      if (argv[0] === 'list-sessions') return ok(`${ATLAS}\t\t${NAME}\n`);
       if (argv.includes('capture-pane')) {
         const next = queue.shift();
         return next === undefined ? failed('cant find pane') : ok(next);

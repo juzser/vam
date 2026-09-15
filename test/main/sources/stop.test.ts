@@ -344,7 +344,7 @@ describe('closing a session vam itself started', () => {
   });
   const runner = (
     rest: TmuxRunResult = ok,
-    listed = listing(`${projectIdOf('/w/alpha')}\t${OWNED}`),
+    listed = listing(`${projectIdOf('/w/alpha')}\t\t${OWNED}`),
   ) => {
     const calls: string[][] = [];
     const run: TmuxRun = async (argv) => {
@@ -364,7 +364,7 @@ describe('closing a session vam itself started', () => {
 
   it('SPAWNS NOTHING for an interactive session vam did not start, and cannot resolve a pane for it', async () => {
     // No tmux session carries this row's project, so no pairing exists.
-    const { calls, run } = runner(ok, listing(`${projectIdOf('/w/elsewhere')}\t${OWNED}`));
+    const { calls, run } = runner(ok, listing(`${projectIdOf('/w/elsewhere')}\t\t${OWNED}`));
     const stop = vi.fn(async () => null);
     const error = await stopSession([interactive], 'sess-2#77', stop, run);
     // `not-vam-started`, which is what this test's own name has always said:
@@ -406,6 +406,46 @@ describe('closing a session vam itself started', () => {
     );
     expect(error?.code).toBe('pane-unresolved');
     expect(calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
+  });
+
+  /**
+   * THE DEFECT THIS TASK EXISTS FOR, closed. Same shape as the test above --
+   * two live rows in one project, neither published -- except now the tmux
+   * session is ALSO tagged with the pid `new-session -P -F` printed for it
+   * at creation (`VAM_PID_OPTION`, `tmux/spawn.ts`). The row that pid names
+   * closes without the count ever being consulted; the row it does NOT name
+   * still gets the honest refusal above, unchanged.
+   */
+  it('closes the row its OWN pid was tagged with, even with a second live row in the project', async () => {
+    const withPid: StoppableAgent = { ...owned, pid: 4242 };
+    const twinNoMatch: StoppableAgent = {
+      ...owned,
+      key: 'sess-8#13',
+      sessionId: 'sess-8',
+      pid: 9999,
+    };
+    const taggedByPid = () => runner(ok, listing(`${projectIdOf('/w/alpha')}\t4242\t${OWNED}`));
+
+    const { calls, run } = taggedByPid();
+    const closed = await stopSession(
+      [withPid, twinNoMatch],
+      'sess-9#12',
+      vi.fn(async () => null),
+      run,
+    );
+    expect(closed).toBeNull();
+    expect(calls).toContainEqual(['kill-session', '-t', `=${OWNED}`]);
+
+    // The OTHER row, whose pid nothing on the server was tagged with, is not
+    // rescued by its neighbour's proof -- it still refuses honestly.
+    const { run: run2 } = taggedByPid();
+    const stillUnresolved = await stopSession(
+      [withPid, twinNoMatch],
+      'sess-8#13',
+      vi.fn(async () => null),
+      run2,
+    );
+    expect(stillUnresolved?.code).toBe('pane-unresolved');
   });
 
   /**
@@ -503,7 +543,7 @@ describe('stopSession with published panes', () => {
   const project = projectIdOf('/w/alpha');
   const listed: TmuxRunResult = {
     failure: null,
-    stdout: `${project}\tvam-alpha-aa11bb\n${project}\tvam-alpha-cc22dd\n`,
+    stdout: `${project}\t\tvam-alpha-aa11bb\n${project}\t\tvam-alpha-cc22dd\n`,
     stderr: '',
   };
 
@@ -622,7 +662,7 @@ describe('a row whose published pane belongs to another project', () => {
     failure: null,
     // Tagged for '/w/other', never '/w/mine' -- a real vam session, just not
     // this row's project.
-    stdout: `${projectIdOf('/w/other')}\tvam-other-ee55ff\n`,
+    stdout: `${projectIdOf('/w/other')}\t\tvam-other-ee55ff\n`,
     stderr: '',
   };
   const run: TmuxRun = async (argv) =>

@@ -56,39 +56,69 @@ export type ReplyRow = {
   readonly key: string;
   readonly sessionId: string;
   readonly cwd: string;
+  /**
+   * The OS pid `claude agents --json` reported for this row -- `LiveAgent`'s
+   * own field, satisfied structurally by every production caller. OPTIONAL,
+   * for the same reason `StoppableAgent.pid` is: a caller with nothing to
+   * give (most existing tests, and a row the CLI itself reported with no
+   * pid) keeps the pre-existing behaviour rather than being forced to
+   * fabricate a value -- `paneForRow` treats an absent pid exactly like a
+   * `null` one, and either just skips the pid tier below.
+   */
+  readonly pid?: number | null;
 };
 
 /**
  * The pane this row can be PROVEN to be running in, or `null`.
  *
- * TWO PROOFS, AND THE PUBLISHED ONE WINS. `panes` is what the sessions
- * themselves report -- Claude Code writes its own tmux pane into
- * `~/.claude/sessions/<pid>.json` beside its session id, so the pairing is per
- * SESSION and comes from the process that is in the pane (`session-pane.ts`).
- * It is preferred because the project tag below cannot answer the case the
- * operator actually hits: two sessions vam started in one project fail both of
- * its conditions, so neither row can be replied to, closed, or drawn.
+ * THREE PROOFS, TRIED IN ORDER, AND EACH BYPASSES THE COUNTS BELOW IT RATHER
+ * THAN MERELY OUTRANKING THEM. `panes` is what the sessions themselves report
+ * -- Claude Code writes its own tmux pane into `~/.claude/sessions/<pid>.json`
+ * beside its session id, so the pairing is per SESSION and comes from the
+ * process that is in the pane (`session-pane.ts`). It is tried first because
+ * neither of the other two can answer the case the operator actually hits:
+ * two sessions vam started in one project fail both of the project tag's
+ * conditions below, so neither row could be replied to, closed, or drawn.
+ *
+ * THE SECOND PROOF IS VAM'S OWN, sourced independently of anything Claude
+ * Code publishes: `createVamSession` (`tmux/spawn.ts`) records the pid of
+ * each pane's process on its tmux session AT CREATION, as `VAM_PID_OPTION`.
+ * `row.pid` is the same OS pid `claude agents --json` reports for this exact
+ * row (`agents.ts`), and a pid names at most one LIVE process at any moment,
+ * so a tagged session recorded with THIS row's pid is this row's pane
+ * regardless of how many other rows or tagged sessions share the project --
+ * see `VAM_PID_OPTION`'s own doc for why that holds for the tmux session's
+ * whole life, not merely at the instant it is written. It is tried second,
+ * after the published pane and before the project-tag count, because a row
+ * that published something said so ITSELF and a disagreement there is
+ * evidence of a corrupt pairing (see below) -- vam's own creation-time record
+ * must not override what the row says about itself, only stand in when the
+ * row said nothing.
  *
  * The published name is still checked against `sessions`, which is vam's own
  * prefix filtered (`listVamSessions`). So a session the operator started in
  * their own tmux publishes a pane here and is still never acted on, and a pane
  * that has ended since falls through to the tag rather than being typed into.
  *
- * THE PUBLISHED PANE BYPASSES THE COUNTS, it does not merely outrank them.
- * The fallback demands exactly one live row in the project, and measured on a
- * real machine that is UNSATISFIABLE for an operator who runs several sessions
- * per project: three live sessions share one cwd against one vam pane, so the
- * count vetoes every row and close refuses all three. Consulting it after a
- * pairing has been proven would keep that veto.
+ * THE PUBLISHED PANE AND THE PID TAG BOTH BYPASS THE COUNTS, neither merely
+ * outranks them. The fallback demands exactly one live row in the project,
+ * and measured on a real machine that is UNSATISFIABLE for an operator who
+ * runs several sessions per project: three live sessions share one cwd
+ * against one vam pane, so the count vetoes every row and close refuses all
+ * three. Consulting it after a pairing has been proven would keep that veto.
  *
- * THE TAG REMAINS -- vetoed by one rule -- for a session whose file carries no
- * `tmux` field: one not under tmux, or an older Claude Code that did not
- * publish it. Its two conditions are the whole of the safety argument in that
- * case: exactly one tagged tmux session for this project, and exactly one live
- * row in it -- and, per the paragraph above, it answers `null` for every row
- * in a cwd that holds more than one live session. That is correct (nothing in
- * the project scheme says which row is in the pane) and it is why this defect
- * stayed invisible: the pairing was not wrong, it was unanswerable.
+ * THE PROJECT TAG REMAINS -- vetoed by one rule -- for a session that neither
+ * of the two proofs above could place: one not under tmux, an older Claude
+ * Code that never publishes a `tmux` field, or a pid tag that was never
+ * recorded (`VAM_PID_OPTION` degrades silently rather than refusing when
+ * that happens). Its two conditions are the whole of the safety argument in
+ * that case: exactly one tagged tmux session for this project, and exactly
+ * one live row in it -- and it answers `null` for every row in a cwd that
+ * holds more than one live session and no other proof. That is correct
+ * (nothing in the project scheme alone says which row is in the pane) and it
+ * is why this defect stayed invisible for as long as it did: the pairing was
+ * not wrong, it was unanswerable without a proof one of the two tiers above
+ * now supplies for the common case.
  *
  * THE VETO: a tagged session that some row has PUBLISHED itself into belongs
  * to that row, and handing it to a silent neighbour -- which is what happened,
@@ -137,6 +167,23 @@ export function paneForRow(
     return sessions.some((session) => session.name === published && session.project === projectId)
       ? published
       : null;
+  }
+  // VAM'S OWN CREATION-TIME PROOF -- see the header for why it is tried here,
+  // between the published pane and the project-tag count. `row.pid` skipped
+  // entirely (falls through to the count below) when it is `null` or absent:
+  // a row vam did not spawn, or one the CLI reported with no pid, has nothing
+  // for this tier to match against, which is the honest answer for it.
+  if (row.pid !== null && row.pid !== undefined) {
+    const pid = String(row.pid);
+    const own = sessions.find((session) => session.project === projectId && session.pid === pid);
+    if (own !== undefined) {
+      // Same claim veto as the tag path below, applied LAST so it can only
+      // veto -- see the header on `claimedPanes` there. Not reachable under
+      // normal operation (the session this pid names can only be the one
+      // process this row IS), kept for the same defence-in-depth reason the
+      // rest of this function never trusts a single proof unchecked.
+      return claimedPanes(panes).has(own.name) ? null : own.name;
+    }
   }
   const here = agents.filter((agent) => projectIdOf(agent.cwd) === projectId);
   if (here.length !== 1) return null;

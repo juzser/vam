@@ -26,17 +26,26 @@ import {
   sendEnterArgv,
   sendEscapeArgv,
   sendTextArgv,
+  tagPidArgv,
   tagSessionArgv,
+  VAM_PID_OPTION,
   VAM_PROJECT_OPTION,
   VAM_SESSION_PREFIX,
   vamSessionName,
 } from '../../src/main/sources/tmux/argv.js';
 
 describe('tmux argv', () => {
-  it('creates a detached, named session in a cwd running a command', () => {
+  it('creates a detached, named session in a cwd running a command, printing the pane’s pid', () => {
+    // `-P -F '#{pane_pid}'` costs no second round trip: tmux already knows the
+    // pid of the child it just forked before that child has done anything at
+    // all, so the SAME call that starts the session also answers the question
+    // `createVamSession` needs for `VAM_PID_OPTION` (`spawn.ts`).
     expect(newSessionArgv({ name: 'vam-a1b2c3', cwd: '/w/demo', command: ['claude'] })).toEqual([
       'new-session',
       '-d',
+      '-P',
+      '-F',
+      '#{pane_pid}',
       '-s',
       'vam-a1b2c3',
       '-c',
@@ -54,6 +63,9 @@ describe('tmux argv', () => {
     expect(argv).toEqual([
       'new-session',
       '-d',
+      '-P',
+      '-F',
+      '#{pane_pid}',
       '-s',
       'vam-a1b2c3',
       '-c',
@@ -174,13 +186,14 @@ describe('tmux argv', () => {
     ]);
   });
 
-  it('asks the listing for the recorded project id beside each name', () => {
-    // Without the option in the format there is nothing to pair on, and the
-    // matcher is back to guessing from a truncated slug.
+  it('asks the listing for the recorded project id and pid beside each name', () => {
+    // Without the options in the format there is nothing to pair on, and the
+    // matcher is back to guessing from a truncated slug (project) or counting
+    // live rows (pid).
     expect(listSessionsArgv()).toEqual([
       'list-sessions',
       '-F',
-      `#{${VAM_PROJECT_OPTION}}\t#{session_name}`,
+      `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}`,
     ]);
   });
 
@@ -195,6 +208,20 @@ describe('tmux argv', () => {
       'vam-a1b2c3',
       '@vam-project',
       'claude-code:demo-11111111',
+    ]);
+  });
+
+  it('records the pid on the session the same bare way, right beside the project', () => {
+    // Same target shape as `tagSessionArgv`, and the same reason: this call
+    // only ever follows immediately after the session vam just created it, so
+    // there is nothing else for a bare `-t` to resolve onto by prefix or
+    // fnmatch.
+    expect(tagPidArgv('vam-a1b2c3', '14709')).toEqual([
+      'set-option',
+      '-t',
+      'vam-a1b2c3',
+      '@vam-pid',
+      '14709',
     ]);
   });
 
@@ -255,6 +282,30 @@ describe('the @vam-project boundary', () => {
       'vam-a1b2c3',
       '@vam-project',
       'claude-code:demo-11111111',
+    ]);
+  });
+});
+
+/**
+ * THE SECOND BOUNDARY, frozen the same way and for the same reason: this is a
+ * contract with sessions running right now, not an internal name free to be
+ * tidied. `paneForRow` (`reply.ts`) compares a row's OWN pid against exactly
+ * this option, read back from `list-sessions -F`; renaming or repointing it
+ * silently un-answers every row it used to resolve, the same way repointing
+ * `@vam-project` would.
+ */
+describe('the @vam-pid boundary', () => {
+  it('is the literal `@vam-pid`', () => {
+    expect(VAM_PID_OPTION).toBe('@vam-pid');
+  });
+
+  it('tags a session with exactly that option and nothing else', () => {
+    expect(tagPidArgv('vam-a1b2c3', '14709')).toEqual([
+      'set-option',
+      '-t',
+      'vam-a1b2c3',
+      '@vam-pid',
+      '14709',
     ]);
   });
 });

@@ -48,14 +48,14 @@ describe('what the send channel calls its refusal', () => {
 
   it('says mispaired when the row published a pane of another project', async () => {
     const send = sender(
-      ok(`${ATLAS}\tvam-atlas-a1b2c3\n${BEACON}\tvam-beacon-d4e5f6\n`),
+      ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n${BEACON}\t\tvam-beacon-d4e5f6\n`),
       new Map([[ATLAS, 'vam-beacon-d4e5f6']]),
     );
     expect(await send({}, ATLAS, { kind: 'text', text: 'h' }, ATLAS)).toBe('mispaired');
   });
 
   it('keeps unaimed for the case it was written for: no session of vam’s own', async () => {
-    const send = sender(ok(`${BEACON}\tvam-beacon-d4e5f6\n`), new Map());
+    const send = sender(ok(`${BEACON}\t\tvam-beacon-d4e5f6\n`), new Map());
     expect(await send({}, ATLAS, { kind: 'text', text: 'h' }, ATLAS)).toBe('unaimed');
   });
 });
