@@ -41,7 +41,15 @@
  * the one select-only chord in the whole table is silently declined while it
  * has focus, whether a `changed-on-disk` refusal still shows the operator's
  * own edit after a real save round-trip, and whether closing the page while
- * a buffer is dirty is something ONLY a real `beforeunload` event can answer.
+ * a buffer is dirty is something ONLY a real `beforeunload` event can answer,
+ * and -- since the Terminal tab learned to take a composed language -- what an
+ * INPUT METHOD really does to a keystroke, which is CDP
+ * `Input.imeSetComposition` and a pipeline no unit environment has at all
+ * (happy-dom's `CompositionEvent` does not even carry its `data`): whether the
+ * commit key really arrives carrying `isComposing`, whether `compositionend`
+ * really delivers the syllable, whether sequential focus navigation really
+ * gets back OUT of a pane whose keyboard lives on a hidden box, and whether a
+ * drag across that pane still selects the text it draws.
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -85,6 +93,7 @@ const GUARDS = [
   'turn-steps-shots',
   'agents-navigator-shots',
   'files-tab-keyboard-shots',
+  'terminal-ime-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

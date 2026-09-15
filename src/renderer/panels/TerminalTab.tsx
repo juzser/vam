@@ -48,6 +48,8 @@
  */
 
 import {
+  type CompositionEvent,
+  type FocusEvent,
   Fragment,
   type KeyboardEvent,
   useCallback,
@@ -59,6 +61,7 @@ import {
 import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { parseAnsi, spanClasses } from './terminal-ansi.js';
+import { composedStrokes } from './terminal-compose.js';
 import { placeCursor } from './terminal-cursor.js';
 import { fitPane, sameSize } from './terminal-size.js';
 
@@ -234,7 +237,79 @@ function strokeFor(key: string): PaneKey | null {
   // One character is what a printable key produces, composed by the layout,
   // so an accented character arrives already composed and a named key
   // (`ArrowUp`, `F5`) never matches.
+  //
+  // `key.length` IS A CODE-UNIT COUNT, AND THAT IS LEFT ALONE DELIBERATELY.
+  // It rejects anything outside the BMP -- an emoji is two units -- which
+  // sounds like a bug and is not reachable as one: no keyboard produces a
+  // non-BMP `event.key`, because nothing is one keystroke there. An emoji
+  // arrives from the picker, dictation or a paste, all of which are
+  // INSERTIONS into the box below rather than keydowns, and never pass
+  // through here at all. Widening this to count code points would change the
+  // behaviour of exactly no input anyone has.
   return key.length === 1 ? { kind: 'text', text: key } : null;
+}
+
+/**
+ * WHAT A FOCUSED TEXT CONTROL TAKES AWAY, AND THE PANE DOES FOR ITSELF.
+ *
+ * The pane is a scroll region with a hidden scrollbar, and the focus stop
+ * exists so that the keyboard can read past the first screenful -- that is the
+ * original reason this element takes focus at all. THE HIDDEN BOX BREAKS THAT
+ * FOR FREE, because the browser gives these keys to whatever text control has
+ * the keyboard before it gives them to a scroll container. Measured in
+ * Chromium with an empty one-by-one `<textarea>` focused inside a scrolling
+ * `<section>`: `PageDown`, `PageUp`, `Home` and `End` moved the pane not at
+ * all, and `ArrowUp`/`ArrowDown` moved it only sometimes -- they fall through
+ * to the container when the caret cannot move, which stops being true the
+ * moment an input method puts a candidate in the box.
+ *
+ * So the pane scrolls itself, for all six, rather than leaving a surface whose
+ * only reason to take focus has silently stopped working. The distance is
+ * measured in the SCREEN'S own rows (the ruler, the same character the column
+ * count is derived from), which is what a terminal scrolls in, and what the
+ * browser's 40px guess was only ever approximating.
+ *
+ * Nothing is stopped from PROPAGATING: these keys still reach vam's own window
+ * listener exactly as they did, where the pane's `data-insert-scope` stands the
+ * canvas grammar down.
+ */
+type PaneScroll = 'up' | 'down' | 'page-up' | 'page-down' | 'top' | 'bottom';
+
+const SCROLL_KEYS: Readonly<Record<string, PaneScroll>> = {
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  PageUp: 'page-up',
+  PageDown: 'page-down',
+  Home: 'top',
+  End: 'bottom',
+};
+
+/**
+ * Move `pane` the way the browser used to, in rows of `row` pixels.
+ *
+ * A page is a screenful LESS one row, which is how every pager overlaps its
+ * screens: the line you were reading at the fold is the line you start the
+ * next screen on, and a page of exactly `clientHeight` loses it.
+ */
+export function scrollPane(pane: HTMLElement, how: PaneScroll, row: number): void {
+  const page = Math.max(pane.clientHeight - row, row);
+  const from = pane.scrollTop;
+  const to =
+    how === 'top'
+      ? 0
+      : how === 'bottom'
+        ? pane.scrollHeight
+        : how === 'up'
+          ? from - row
+          : how === 'down'
+            ? from + row
+            : how === 'page-up'
+              ? from - page
+              : from + page;
+  // Clamped at the top by hand because a negative `scrollTop` is not a
+  // position; the bottom is clamped by the browser against the real content
+  // height, which is the only thing that knows it.
+  pane.scrollTop = Math.max(0, to);
 }
 
 /**
@@ -467,11 +542,87 @@ export function TerminalTab({
   );
 
   /**
-   * Whether the pane itself has focus. It draws exactly one thing -- the hint
-   * naming the way out -- and it draws it only then, because Escape is the
-   * pane's now and Tab is all that is left to leave with.
+   * Whether the pane has the keyboard -- ANYWHERE INSIDE IT, which since the
+   * hidden box below is no longer the same question as whether this element is
+   * `document.activeElement`. It draws exactly one thing -- the hint naming the
+   * way out -- and it draws it only then, because Escape is the pane's now and
+   * Tab is all that is left to leave with.
    */
   const [hasFocus, setHasFocus] = useState(false);
+
+  /**
+   * THE BOX AN INPUT METHOD CAN ACTUALLY COMPOSE INTO, and the reason this
+   * component grew one at all.
+   *
+   * THE REPORT was "terminal đang không support utf-8 nên viết tiếng Việt bị
+   * lỗi?" -- Vietnamese typed here comes out wrong -- and the guess was the
+   * encoding. It is not: `capture-pane`'s stdout is decoded at Node's default
+   * `utf8` and the send path hands `execFile` an argv ARRAY, which Node
+   * encodes as UTF-8. Nothing on either wire is latin-1.
+   *
+   * IT IS COMPOSITION. Telex types `tieengs` to get `tiếng`: seven keydowns of
+   * one printable character each, which `strokeFor` accepts, plus an Enter
+   * that COMMITS the syllable and reads exactly like a send. So the pane typed
+   * `tieengs` into the agent and pressed Return after it.
+   *
+   * A GUARD ALONE WOULD FIX HALF OF IT AND TYPE NOTHING. An input method needs
+   * a focused EDITABLE element to compose into; a `<section>` is not one, so
+   * on this surface there was never a composition to guard -- only its raw
+   * keystrokes leaking through. The answer is the one every browser terminal
+   * uses (xterm.js calls it the helper textarea): a visually hidden
+   * `<textarea>` holds the keyboard while the pane does, receives the
+   * composition, and hands over the committed string, which the pane then
+   * sends as TEXT rather than as the keystrokes it was built from.
+   *
+   * IT IS A STAGING AREA AND NOT A VALUE. Nothing here is ever read except
+   * `compositionend`'s own data; anything else that lands in it (a paste, a
+   * drop, the emoji picker) is emptied and dropped, which is precisely what
+   * happened to those before the box existed -- this surface types keystrokes,
+   * and `MAX_KEY_TEXT` exists so that it can never become a paste into a
+   * running agent.
+   */
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  /**
+   * Put the keyboard on the hidden box.
+   *
+   * `preventScroll` IS LOAD-BEARING, and it was measured: the box is
+   * absolutely positioned inside a scrolling region, so focusing it scrolls
+   * that region to wherever it sits -- the pane jumped to the bottom of the
+   * screen on every click. A focus move must never move somebody's terminal.
+   */
+  const takeKeyboard = useCallback(() => {
+    inputRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  /**
+   * Whether a pointer gesture is in progress inside the pane, and the ONE
+   * thing it is for: not stealing a selection.
+   *
+   * Measured in Chromium: a `mousedown` in the pane focuses it, and forwarding
+   * that focus into a text control collapses the document selection -- so
+   * dragging across the screen selected nothing at all and the operator lost
+   * the only way there is to copy text out of this tab. While the pointer is
+   * down the box does not take the keyboard; `onPointerUp` gives it over only
+   * when the gesture left no selection behind, and a keystroke (below) is what
+   * ends a copy gesture that did.
+   */
+  const pointerDown = useRef(false);
+
+  /**
+   * WHAT THE INPUT METHOD IS BUILDING, WHILE IT IS STILL BUILDING IT.
+   *
+   * A ref and a state, deliberately, because they answer at two different
+   * times. The REF is read inside the box's own `input` handler, in the same
+   * tick the event arrives, to tell an in-flight candidate (keep) from text
+   * that arrived some other way (empty it and drop it) -- a React state read
+   * there is the last render's snapshot, and the events of one composition
+   * arrive faster than a render. The STATE is what gets drawn: the box is
+   * invisible, so without it the operator types a syllable into a hole and
+   * sees nothing until it commits.
+   */
+  const composingNow = useRef(false);
+  const [composing, setComposing] = useState('');
 
   /** Why the last keystroke did NOT land, or `null`. Drawn, not swallowed. */
   const [refused, setRefused] = useState<PaneSendResult | null>(null);
@@ -539,8 +690,48 @@ export function TerminalTab({
   useEffect(() => {
     if (!showing || grabbed.current) return;
     grabbed.current = true;
-    paneRef.current?.focus();
-  }, [showing]);
+    // The BOX, not the pane. The keyboard has to arrive somewhere an input
+    // method can compose into, and the pane is not that -- arriving on the
+    // section and being forwarded a tick later would leave the very first
+    // syllable of a session composed against nothing.
+    takeKeyboard();
+  }, [showing, takeKeyboard]);
+
+  /**
+   * SEND THESE, IN THIS ORDER, ON THE ONE CHAIN.
+   *
+   * Lifted out of the keystroke handler because a committed composition is now
+   * a second caller, and a second queue would be the exact race `chain` exists
+   * to prevent -- one syllable's pieces interleaved with the keys typed around
+   * them. `run` is captured ONCE for the whole batch, so a refusal partway
+   * through a syllable drops the rest of that syllable too: half a word
+   * delivered into an agent reads as the operator's own typing.
+   */
+  const queue = useCallback(
+    (strokes: readonly PaneKey[]) => {
+      if (send === undefined || projectId === null) return;
+      const mine = run.current;
+      for (const stroke of strokes) {
+        chain.current = chain.current.then(async () => {
+          if (run.current !== mine) return;
+          const landed = await send(projectId, stroke, rowId).catch(
+            (): PaneSendResult => 'refused',
+          );
+          if (landed === 'sent') {
+            // The key is IN the pane now; nothing had been asking what that
+            // looked like until the next interval tick. See `ECHO_MS`.
+            echo();
+            return;
+          }
+          // Everything still queued was typed before the operator could know
+          // this failed, so it is dropped rather than sent into the hole.
+          run.current += 1;
+          setRefused(landed);
+        });
+      }
+    },
+    [send, projectId, rowId, echo],
+  );
 
   /**
    * WHO OWNS A KEY WHILE THE PANE HAS FOCUS. Three answers, and the middle one
@@ -591,7 +782,55 @@ export function TerminalTab({
    */
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLElement>) => {
+      /**
+       * A KEYSTROKE THAT BELONGS TO AN INPUT METHOD IS NOT THE PANE'S, and
+       * this is the first thing asked because EVERY branch below would
+       * otherwise answer it -- the printable keys a Telex syllable is built
+       * from, and the Enter that commits it.
+       *
+       * MEASURED in Chromium, the engine vam ships on, by driving a real
+       * composition through CDP `Input.imeSetComposition`: the commit key
+       * arrives as `{ key: 'Enter', keyCode: 13, isComposing: true }`, which
+       * no handler reading `key` alone can tell from a Return. The operator
+       * types Vietnamese; every accented syllable ends in that keystroke.
+       *
+       * `event.nativeEvent.isComposing`, NOT `event.isComposing`. React's
+       * synthetic keyboard event does not carry the property at all -- its
+       * `KeyboardEventInterface` lists key, code, location, the four
+       * modifiers, repeat, locale, getModifierState, charCode, keyCode, which
+       * -- and `@types/react` omits it, so the plain spelling is `undefined`
+       * at runtime and the guard would be dead while looking exactly like a
+       * live one. `DetailPanel.tsx`'s composer records the same trap.
+       *
+       * RETURN, NOT `preventDefault`, AND FOR EVERY KEY RATHER THAN FOR ENTER
+       * ALONE. The composer's own guard is scoped to Enter because its box
+       * handles the rest correctly by default; this surface CONSUMES keys and
+       * types them into somebody's agent, so while a candidate is in flight
+       * every key is the input method's -- the letters that build the
+       * syllable, the Escape that abandons it, the Page keys some methods
+       * page their candidate list with. Claiming any of them would leave the
+       * operator unable to finish the word.
+       */
+      if (event.nativeEvent.isComposing) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+      // TYPING ENDS A COPY GESTURE. `onPointerUp` leaves the keyboard on the
+      // pane rather than the box when a drag selected something, so that
+      // Cmd-C still has a selection to copy; the moment an unmodified key is
+      // pressed the operator is typing, not copying, and the box takes the
+      // keyboard back so the next syllable has somewhere to compose. Deferred
+      // so it cannot move focus out from under this event's own default.
+      if (event.target !== inputRef.current) queueMicrotask(takeKeyboard);
+      // The six keys a focused text control would eat -- see `SCROLL_KEYS`.
+      // Cancelled, because the pane is doing the browser's job here; not
+      // stopped, because they still belong to vam's own keyboard afterwards.
+      const scroll = SCROLL_KEYS[event.key];
+      if (scroll !== undefined) {
+        const pane = paneRef.current;
+        if (pane === null) return;
+        event.preventDefault();
+        scrollPane(pane, scroll, rulerRef.current?.getBoundingClientRect().height ?? 0);
+        return;
+      }
       const stroke = strokeFor(event.key);
       if (stroke === null) return;
       // THE GUARD COMES BEFORE THE CANCELLING, and it did not. A build with no
@@ -605,25 +844,36 @@ export function TerminalTab({
       event.stopPropagation();
       // Return is NOT sent behind the text: each keystroke is one call, so
       // submitting is the operator pressing Return and never vam adding one.
-      // Queued behind the previous key rather than raced against it, and the
-      // run is captured now so a failure can abandon what is already waiting.
-      const mine = run.current;
-      chain.current = chain.current.then(async () => {
-        if (run.current !== mine) return;
-        const landed = await send(projectId, stroke, rowId).catch((): PaneSendResult => 'refused');
-        if (landed === 'sent') {
-          // The key is IN the pane now; nothing had been asking what that
-          // looked like until the next interval tick. See `ECHO_MS`.
-          echo();
-          return;
-        }
-        // Everything still queued was typed before the operator could know
-        // this failed, so it is dropped rather than sent into the hole.
-        run.current += 1;
-        setRefused(landed);
-      });
+      queue([stroke]);
     },
-    [send, projectId, rowId, echo],
+    [send, projectId, queue, takeKeyboard],
+  );
+
+  /**
+   * THE COMMITTED SYLLABLE, AND THE ONLY THING THE HIDDEN BOX EVER DELIVERS.
+   *
+   * `compositionend`'s `data` is the string the input method settled on --
+   * `tiếng` for the seven keystrokes that built it, which is what the agent
+   * should receive and what no keydown could have described. It goes through
+   * the same chain every keystroke does, so it cannot overtake the keys typed
+   * around it, and through `composedStrokes` so that a commit longer than
+   * `MAX_KEY_TEXT` is delivered in pieces rather than refused with a sentence
+   * about pairing (`terminal-compose.ts`).
+   *
+   * AN EMPTY COMMIT IS A CANCELLED ONE -- Escape ends a composition with
+   * `data: ''` -- and `composedStrokes` answers with no strokes at all, so
+   * nothing is sent for a syllable the operator threw away.
+   */
+  const onCompositionEnd = useCallback(
+    (event: CompositionEvent<HTMLTextAreaElement>) => {
+      composingNow.current = false;
+      setComposing('');
+      // The box is a staging area, never a value: emptied here so the next
+      // composition starts from nothing and `input` has nothing to re-fire.
+      event.currentTarget.value = '';
+      queue(composedStrokes(event.data));
+    },
+    [queue],
   );
 
   useEffect(() => {
@@ -816,22 +1066,64 @@ export function TerminalTab({
           a keyboard exit it did not have: `Mod-0` releases whatever is in an
           insert scope, and the comment above could previously only offer Tab
           because Escape is one of the keys this pane SENDS. */}
-      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region
-          is the one case where WCAG 2.1.1 requires exactly this, and this one
-          now also takes text. It is a named <section> and not a textbox role:
-          it is not an editable field -- nothing here holds a value, and the
-          characters live in the agent's own screen, which arrives back as the
-          next capture. */}
+      {/* THE PANE IS NO LONGER THE TAB STOP; THE BOX INSIDE IT IS, and the
+          reason is a focus trap rather than a preference. A container with
+          `tabIndex={0}` sits BEFORE its own children in the focus order, so
+          Shift+Tab out of the box lands back on the container, which hands the
+          keyboard straight back to the box -- measured in Chromium, and there
+          is no way backwards out of it. `tabIndex={-1}` keeps the one thing
+          that still needs the pane itself to be focusable, which is
+          `focusInsertStop`'s blind `.focus()` on the first `data-insert-stop`
+          in the pane; the mark stays HERE, on the pane, so that `I` keeps
+          landing on the surface every comment in this file describes and not
+          on a hidden box. Focus is forwarded from here to the box a microtask
+          later -- see `onFocus` below for why the delay is not a detail. */}
       <section
         ref={paneRef}
         data-terminal-pane
         {...insertScopeMark}
         {...insertStopMark}
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: see above -- a scrollable region that also takes keys
-        tabIndex={0}
+        tabIndex={-1}
         onKeyDown={onKeyDown}
-        onFocus={() => setHasFocus(true)}
-        onBlur={() => setHasFocus(false)}
+        onPointerDown={() => {
+          pointerDown.current = true;
+        }}
+        onPointerUp={() => {
+          pointerDown.current = false;
+          // A DRAG THAT SELECTED SOMETHING KEEPS THE KEYBOARD ON THE PANE.
+          // Focusing a text control collapses the document selection, so
+          // taking the keyboard here would delete the selection the operator
+          // just made -- and mouse selection is the only way there is to copy
+          // text out of this tab. A plain click leaves nothing selected and
+          // does hand it over, which is what a click on a terminal means.
+          if (globalThis.getSelection()?.isCollapsed === false) return;
+          takeKeyboard();
+        }}
+        onFocus={(event: FocusEvent<HTMLElement>) => {
+          setHasFocus(true);
+          // Only focus that landed on the PANE is forwarded; focus that landed
+          // on the box is already where it belongs.
+          if (event.target !== paneRef.current || pointerDown.current) return;
+          /**
+           * A MICROTASK, AND IT IS LOAD-BEARING. `focusInsertStop` focuses
+           * this element and then asks `document.activeElement === stop` --
+           * that answer IS what `I` reports, and a `false` makes the canvas
+           * refuse out loud with "nothing in this pane takes the keyboard".
+           * Forwarding synchronously makes that check fail every time.
+           * Measured both ways in Chromium: deferred by one microtask, the
+           * check still sees this element and the box has the keyboard before
+           * anything can be typed into it.
+           */
+          queueMicrotask(takeKeyboard);
+        }}
+        onBlur={(event: FocusEvent<HTMLElement>) => {
+          // Focus moving between the pane and its own hidden box is not the
+          // operator leaving: without this the corner hint would blink off
+          // and on at every forward, and `hasFocus` would be false while the
+          // keys were still going to this session.
+          if (paneRef.current?.contains(event.relatedTarget) === true) return;
+          setHasFocus(false);
+        }}
         aria-label={`terminal of ${view.name}: typing goes to this session, press Tab to leave`}
         /* THE 10.5px AND THE 1.45 BELOW ARE THE ONE LITERAL SIZE LEFT IN THE
            RENDERER, and they are a measurement rather than a style choice.
@@ -849,8 +1141,72 @@ export function TerminalTab({
            in a comment counts as a call site. Reddening on a comment would be
            noise, and teaching the scan to strip comments would mean teaching
            it to strip `//` out of a URL in a string as well. */
-        className="vam-no-scrollbar relative min-h-0 flex-1 overflow-auto rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-[10.5px] text-ink leading-[1.45] focus-visible:outline focus-visible:outline-2 focus-visible:outline-line-strong"
+        /* THE RING FOLLOWS THE BOX NOW. `focus-visible` on this element would
+           never match again: the keyboard is one element deeper, and a
+           container has no focus of its own to make visible. `has-[...]` keeps
+           the browser's own heuristic -- a ring after a keyboard entry and
+           none after a click -- rather than trading it for `focus-within`,
+           which would draw one every time somebody clicks the screen. The
+           token is unchanged, and `SettingsOverlay.tsx` still names this file
+           as the renderer's one `focus-visible`. */
+        className="vam-no-scrollbar relative min-h-0 flex-1 overflow-auto rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-[10.5px] text-ink leading-[1.45] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-line-strong"
       >
+        {/* WHERE AN INPUT METHOD COMPOSES. See `inputRef` above for the whole
+            of why this exists; what matters HERE is its shape.
+
+            `sr-only` AND NOT `display: none` OR `visibility: hidden`: either
+            of those makes the box unfocusable, which makes it useless -- an
+            input method composes into whatever has the keyboard, and nothing
+            is what a hidden box has. `sr-only` is the renderer's own
+            already-used idiom for "laid out, one pixel, clipped", so it takes
+            no space in the pane and draws nothing over the screen.
+
+            NO INSERT MARK. `focusInsertStop` takes the FIRST
+            `data-insert-stop` in the pane in document order and focuses it
+            blindly; a mark here would make this box that first match, and `I`
+            would land on a box instead of on the pane. The mode is right
+            anyway, because it is derived from the `data-insert-scope` on the
+            pane this sits INSIDE (`keyboard/focus-scope.ts`).
+
+            `tabIndex={0}` because the pane's accessible name promises "press
+            Tab to leave" and something in here has to be the stop that Tab
+            arrives at and departs from. It is not read as a text field
+            worth filling: it carries its own name saying what it is for, and
+            the spelling helpers are off because a terminal is not prose. */}
+        <textarea
+          ref={inputRef}
+          data-terminal-input
+          rows={1}
+          tabIndex={0}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          autoComplete="off"
+          aria-label={`type into ${view.name}`}
+          onKeyDown={onKeyDown}
+          onCompositionStart={() => {
+            composingNow.current = true;
+            setComposing('');
+          }}
+          onCompositionUpdate={(event: CompositionEvent<HTMLTextAreaElement>) =>
+            setComposing(event.data)
+          }
+          onCompositionEnd={onCompositionEnd}
+          onInput={(event) => {
+            // TEXT THAT ARRIVED WITHOUT A COMPOSITION IS DROPPED, and the ref
+            // rather than the state is what decides (see `composingNow`). A
+            // paste, a drop, the emoji picker and an Option-chord's own
+            // character all land here; none of them is a keystroke, this
+            // channel is bounded at sixteen characters precisely so that it
+            // cannot become a paste into a running agent, and every one of
+            // them typed nothing before this box existed. Emptying it is what
+            // keeps that true -- and keeps a hidden box from quietly
+            // accumulating the operator's clipboard.
+            if (composingNow.current) return;
+            event.currentTarget.value = '';
+          }}
+          className="sr-only"
+        />
         {/* The ruler. It is INSIDE the pane so that it inherits the exact font
             family, size and line height the text is drawn in -- measuring a
             character anywhere else would measure a different character. It is
@@ -931,6 +1287,22 @@ export function TerminalTab({
         aria-hidden="true"
         className="pointer-events-none absolute right-1.5 bottom-1 max-w-[60%] truncate rounded-[5px] border border-line bg-panel px-1.5 py-0.5 font-mono text-meta text-ink-faint"
       >
+        {/* WHAT THE INPUT METHOD IS BUILDING, because the box it is building it
+            in cannot be seen. A native terminal draws the in-flight candidate
+            under the cursor; vam's screen is a one-second capture of a pane
+            the syllable has not reached yet, so there is nothing there to
+            draw it on. Without this line the operator types `tieengs` and
+            watches an unchanged screen until the syllable commits, which is
+            the same "the keys do nothing" the bug itself looked like. It
+            rides the badge because that corner is already reserved and costs
+            no row, and it comes FIRST because it is the transient fact --
+            the name is still there when it goes. */}
+        {composing !== '' && (
+          <span data-terminal-composing className="text-ink">
+            {composing}
+            {' · '}
+          </span>
+        )}
         {view.name}
         {hasFocus && (
           <span data-terminal-exit-hint className="text-ink-quiet">

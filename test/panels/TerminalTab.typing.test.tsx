@@ -32,6 +32,17 @@ afterEach(cleanup);
 const q = <T extends Element>(selector: string) => document.querySelector<T>(selector);
 const pane = () => q<HTMLElement>('[data-terminal-pane]');
 
+/**
+ * WHETHER THE PANE HAS THE KEYBOARD -- and it is `contains` rather than an
+ * identity test for a reason worth stating, because the identity test is still
+ * spelled correctly and is now VACUOUS. Since the pane grew a hidden box for
+ * an input method to compose into (`TerminalTab.ime.test.tsx`), focus lands
+ * one element deeper: `document.activeElement !== pane()` is true whether the
+ * pane has the keyboard or not, so every "it did not grab focus back" case
+ * below would pass with the latch deleted.
+ */
+const holdsKeyboard = () => pane()?.contains(document.activeElement) === true;
+
 const ATLAS = 'claude-code:atlas-11111111';
 const BEACON = 'claude-code:beacon-22222222';
 /** A screen with no cursor answer -- what a stub that never asked tmux knows. */
@@ -72,7 +83,12 @@ const keys = (send: { mock: { calls: unknown[][] } }): PaneKey[] =>
 describe('the Terminal tab takes focus when it is opened', () => {
   it('focuses the pane as soon as there is a pane to focus', async () => {
     await open();
-    expect(document.activeElement).toBe(pane());
+    // IN THE PANE, on the hidden box that an input method can compose into --
+    // `TerminalTab.ime.test.tsx` owns why that box exists. What this asserts
+    // is unchanged: the tab the operator opened to type in is ready to type
+    // in, and the keyboard is inside this pane and not on the body.
+    expect(pane()?.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   it('does not take focus while the window is hidden', async () => {
@@ -81,7 +97,7 @@ describe('the Terminal tab takes focus when it is opened', () => {
       await open();
       // Nothing is being read either, so there is no pane to focus and no
       // reason to pull focus out of whatever the operator last touched.
-      expect(document.activeElement).not.toBe(pane());
+      expect(document.activeElement).toBe(document.body);
     } finally {
       spy.mockRestore();
     }
@@ -221,18 +237,58 @@ describe('the pane declines the keys that are not its own', () => {
     ]);
   });
 
-  it('leaves the scrolling keys to the browser, which is why the focus stop exists', async () => {
+  /**
+   * THE SCROLLING KEYS STILL SCROLL, AND THE PANE IS NOW WHAT DOES IT.
+   *
+   * This test used to assert that these six were NOT cancelled, on the
+   * reasoning that the browser's scrolling of a focused overflow element is
+   * the default and vam must not take it. That reasoning died with the hidden
+   * box: the keyboard is on a text control now, and a text control takes these
+   * keys for its own caret before any scroll container sees them. Measured in
+   * Chromium with an empty one-by-one `<textarea>` focused inside a scrolling
+   * `<section>`: `PageDown`, `PageUp`, `Home` and `End` moved the pane not at
+   * all, and the arrows only sometimes.
+   *
+   * So the assertion moved from the MECHANISM to the OUTCOME, which is the
+   * stronger of the two and the one the operator has: the pane moves. A test
+   * that only checked `defaultPrevented` would have gone green through exactly
+   * the regression that made this rewrite necessary.
+   */
+  it('scrolls the pane itself, because a focused text control eats those keys', async () => {
     const send = await open();
-    for (const key of ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End']) {
-      // NOT PREVENTED, and asserting that is the whole test. `fireEvent`
-      // answers false when the default was prevented, and the browser's
-      // scrolling of a focused overflow element IS that default: checking
-      // only that nothing was sent to tmux would stay green while a stray
-      // `preventDefault()` killed keyboard scrolling outright -- which is the
-      // one thing this focus stop was created to provide.
-      expect(fireEvent.keyDown(pane() as HTMLElement, { key })).toBe(true);
+    const box = pane() as HTMLElement;
+    // happy-dom lays nothing out, so the geometry the scroll is computed from
+    // is written here: a screenful of 200px over 1000px of content, and a
+    // 16px row measured off the ruler.
+    Object.defineProperty(box, 'clientHeight', { value: 200, configurable: true });
+    Object.defineProperty(box, 'scrollHeight', { value: 1_000, configurable: true });
+    const ruler = q<HTMLElement>('[data-terminal-ruler]');
+    if (ruler !== null) {
+      ruler.getBoundingClientRect = () => ({ width: 66, height: 16 }) as DOMRect;
     }
+
+    const moved = (key: string, from: number): number => {
+      box.scrollTop = from;
+      // CANCELLED, and that is now the correct answer: the pane performed the
+      // scroll, so leaving the default on would be a second one.
+      expect(fireEvent.keyDown(box, { key })).toBe(false);
+      return box.scrollTop;
+    };
+    expect(moved('ArrowDown', 0)).toBe(16);
+    expect(moved('ArrowUp', 100)).toBe(84);
+    // A page overlaps by one row, the way every pager does: the line at the
+    // fold is the line the next screen starts on.
+    expect(moved('PageDown', 0)).toBe(184);
+    expect(moved('PageUp', 500)).toBe(316);
+    expect(moved('Home', 500)).toBe(0);
+    expect(moved('End', 0)).toBe(1_000);
+    // Never below the top: a negative scroll offset is not a position.
+    expect(moved('ArrowUp', 0)).toBe(0);
+    expect(moved('PageUp', 10)).toBe(0);
+
     await settle();
+    // And none of them is typed into the agent, which was always the other
+    // half: scrolling the transcript is scrolling, not a keypress in the shell.
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -389,13 +445,13 @@ describe('Escape belongs to the pane, and the way out is Tab', () => {
     // mode, dismisses the prompt. Keeping it as an exit made the pane the one
     // place in their tools where Escape did not mean escape.
     const send = await open();
-    expect(document.activeElement).toBe(pane());
+    expect(holdsKeyboard()).toBe(true);
     expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Escape' })).toBe(false);
     await settle();
     expect(keys(send)).toEqual([{ kind: 'escape' }]);
     // And it did NOT let go: the pane still has focus, so the next key is
     // still the pane's.
-    expect(document.activeElement).toBe(pane());
+    expect(holdsKeyboard()).toBe(true);
   });
 
   it('still lets go on Tab, which is now the only key that does', async () => {
@@ -442,13 +498,14 @@ describe('the way out stays out', () => {
       />,
     );
     await settle();
-    expect(document.activeElement).toBe(pane());
+    expect(holdsKeyboard()).toBe(true);
 
     // Leaving is Tab now, and happy-dom does not move focus for a synthetic
-    // Tab, so the blur it would cause is what is simulated.
-    (pane() as HTMLElement).blur();
+    // Tab, so the blur it would cause is what is simulated. It is the BOX
+    // that holds the keyboard, so it is the box that has to let go.
+    (document.activeElement as HTMLElement).blur();
     await settle();
-    expect(document.activeElement).not.toBe(pane());
+    expect(holdsKeyboard()).toBe(false);
 
     // `j` in the canvas moves to the next session, which changes the project
     // this tab is about: `view` is cleared during render, so the pane goes
@@ -466,7 +523,7 @@ describe('the way out stays out', () => {
     );
     await settle();
     expect(pane()).not.toBeNull();
-    expect(document.activeElement).not.toBe(pane());
+    expect(holdsKeyboard()).toBe(false);
   });
 
   it('does not grab focus back after a transient unavailable read', async () => {
@@ -502,7 +559,7 @@ describe('the way out stays out', () => {
         });
       }
       expect(q('[data-terminal-pane]')).not.toBeNull();
-      expect(document.activeElement).not.toBe(pane());
+      expect(holdsKeyboard()).toBe(false);
     } finally {
       vi.useRealTimers();
     }

@@ -376,13 +376,23 @@ describe('the pane can be reached and scrolled from the keyboard', () => {
     await settle();
     const pane = q<HTMLElement>('[data-terminal-pane]');
     if (pane === null) throw new Error('no pane');
-    expect(pane.getAttribute('tabindex')).toBe('0');
+    // THE TAB STOP MOVED ONE ELEMENT INSIDE, and only the tab stop. It is the
+    // hidden box an input method can compose into (`TerminalTab.ime.test.tsx`),
+    // and it has to be the stop rather than this element because a container
+    // is ordered BEFORE its own children: Shift+Tab out of the box would land
+    // back on the container and be handed straight in again.
+    expect(pane.getAttribute('tabindex')).toBe('-1');
+    expect(q<HTMLElement>('[data-terminal-input]')?.getAttribute('tabindex')).toBe('0');
     // A focus stop that says nothing is a trap with a focus ring. A NAMED
     // <section> is a region by its own semantics, not by a role attribute, and
     // it is not a button: nothing is bound to Enter, and nothing captions it
     // as bound.
     expect(pane.tagName).toBe('SECTION');
     expect(pane.getAttribute('aria-label')).toBeTruthy();
+    // Still focusable programmatically, which is the one thing `tabIndex={-1}`
+    // has to keep: `focusInsertStop` lands `I` here by calling `.focus()` on
+    // the first `data-insert-stop` in the pane and answering with whether it
+    // arrived.
     pane.focus();
     expect(document.activeElement).toBe(pane);
   });
