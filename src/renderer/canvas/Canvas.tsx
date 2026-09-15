@@ -60,7 +60,9 @@ import type {
   SourceId,
 } from '../domain/model.js';
 import {
+  countTurns,
   countTurnsWithInput,
+  PAINT_SWEEP_INTERVAL_MS,
   type PendingPrompt,
   reconcile,
   withPending,
@@ -1474,8 +1476,12 @@ function CanvasInner({
    *
    * Held here, one level above `model`, so every pane draws a pending reply
    * exactly as it draws a real turn -- the sidebar and the detail panel both
-   * read `model` and neither learns that a turn can be vam's own, which is
-   * the same rule the rename above follows.
+   * read `model`, which is the same rule the rename above follows.
+   *
+   * WITH ONE EXCEPTION, and it is written into the model rather than passed
+   * beside it: a paint carries `unconfirmed` (model.ts), because a reader that
+   * draws a turn's ABSENCES is making claims about what the source reported and
+   * on a paint the source has reported nothing. No pane learns that from here.
    */
   const [pending, setPending] = useState<readonly PendingPrompt[]>([]);
   const pendingSeq = useRef(0);
@@ -1508,16 +1514,40 @@ function CanvasInner({
    * lockout of its own retry.
    */
   const lastSent = useRef(new Map<string, { readonly text: string; readonly at: number }>());
-  // Reconciled against `sourceModel`, which is the model WITHOUT the paint:
-  // counting a painted turn as a real one would retire the paint on the render
-  // that drew it.
+  /**
+   * Reconciled against `sourceModel`, which is the model WITHOUT the paint:
+   * counting a painted turn as a real one would retire the paint on the render
+   * that drew it.
+   *
+   * ON A TIMER AS WELL AS ON EVERY MODEL, because a paint has two ways to die
+   * and only one of them is news from the source. The other is the expiry
+   * (`PAINT_LIFETIME_MS`), which exists precisely for the case where the source
+   * never reports the words back -- and hanging that on "the next model
+   * arrives" would make the safety valve depend on the thing it is insuring
+   * against. `load()` keeps the last good model when it fails (`useSourceModel`),
+   * so a source that has started erroring produces no new model at all.
+   *
+   * THE CLOCK IS READ HERE, not inside `reconcile`, which stays a pure function
+   * of its arguments. The interval is torn down the moment nothing is pending,
+   * so an idle canvas runs no timer; while one is up it ticks once a second,
+   * and each tick that changes nothing hands the same array identity back and
+   * costs no render.
+   */
+  const paintCount = pending.length;
   useEffect(() => {
-    setPending((current) => {
-      const next = reconcile(sourceModel, current);
-      // Identity, not length, is what stops this effect from looping.
-      return next.length === current.length ? current : next;
-    });
-  }, [sourceModel]);
+    const sweep = () =>
+      setPending((current) => {
+        const next = reconcile(sourceModel, current, Date.now());
+        // Identity, not length, is what stops this effect from looping.
+        return next.length === current.length ? current : next;
+      });
+    sweep();
+    if (paintCount === 0) {
+      return;
+    }
+    const id = window.setInterval(sweep, PAINT_SWEEP_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [sourceModel, paintCount]);
   /**
    * The drawn model: the source's, plus the optimistic paint, plus the
    * operator's grouping resolved on top.
@@ -3494,7 +3524,15 @@ function CanvasInner({
           sessionId: entry.session.id,
           input: text,
           seen: countTurnsWithInput(sourceModel, entry.session.id, text),
+          // The same model and the same instant as `seen` above -- the two
+          // baselines have to be taken together or the overtaken rule is
+          // measuring against a different moment than the match is.
+          seenAll: countTurns(sourceModel, entry.session.id),
           live,
+          // Stamped where the paint goes UP, not where the write comes back:
+          // what the expiry bounds is how long this row has been on screen
+          // asserting a turn (`optimistic.ts`).
+          sentAt: Date.now(),
         };
         setPending((current) => [...current, one]);
         setDraftFor(entry.session.id, '');
