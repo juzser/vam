@@ -24,7 +24,7 @@
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cursorModeAt } from '../../src/renderer/keyboard/focus-scope.js';
-import { REFRESH_MS, TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
+import { ECHO_MS, REFRESH_MS, TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
 import type { PaneKey, PaneSendResult, PaneView } from '../../src/shared/terminal.js';
 
 afterEach(cleanup);
@@ -640,5 +640,83 @@ describe('the pane says whether what is typed is going anywhere', () => {
     // No caption says so any more -- the honesty is in the behaviour above:
     // nothing was consumed, so every one of those keys is still vam's.
     expect(q('[data-terminal-typing]')).toBeNull();
+  });
+});
+
+describe('a keystroke is read back without waiting for the next tick', () => {
+  /**
+   * THE DELAY THE OPERATOR REPORTED. The send itself is ~5ms; what was slow
+   * was that nothing asked for the screen again until the interval came
+   * round, so a typed character took up to `REFRESH_MS` to appear. These
+   * measure the ASKING -- that a landed key causes a read, that a burst is
+   * bounded, and that a key which did NOT land causes none -- not the pixels,
+   * which only a real tmux pane can show.
+   */
+  const openWithRead = async (sent: PaneSendResult = 'sent') => {
+    const read = vi.fn(async () => ok());
+    const send = vi.fn(async (_p: string, _k: PaneKey, _r?: string) => sent);
+    render(
+      <TerminalTab projectId={ATLAS} rowId={ATLAS} read={read} resize={undefined} send={send} />,
+    );
+    await settle();
+    return { read, send };
+  };
+
+  it('reads the pane as soon as the key lands, long before the interval', async () => {
+    const { read } = await openWithRead();
+    const before = read.mock.calls.length;
+    await act(async () => {
+      fireEvent.keyDown(pane() as HTMLElement, { key: 'x' });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(read.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it('asks once per window while typing continues, not once per key', async () => {
+    vi.useFakeTimers();
+    try {
+      const read = vi.fn(async () => ok());
+      const send = vi.fn(async () => 'sent' as PaneSendResult);
+      render(
+        <TerminalTab projectId={ATLAS} rowId={ATLAS} read={read} resize={undefined} send={send} />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const before = read.mock.calls.length;
+      // Eight keys inside one window: the first is read immediately, the rest
+      // collapse into a single trailing read. Ten reads a second while a
+      // person types is the bound; ten per keystroke is not.
+      for (let i = 0; i < 8; i += 1) {
+        await act(async () => {
+          fireEvent.keyDown(pane() as HTMLElement, { key: 'a' });
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+      }
+      await act(async () => {
+        vi.advanceTimersByTime(ECHO_MS);
+        await Promise.resolve();
+      });
+      const added = read.mock.calls.length - before;
+      expect(added).toBeGreaterThan(0);
+      expect(added).toBeLessThanOrEqual(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks for nothing when the key did not land', async () => {
+    const { read } = await openWithRead('refused');
+    const before = read.mock.calls.length;
+    await act(async () => {
+      fireEvent.keyDown(pane() as HTMLElement, { key: 'x' });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // A refused send already stops the run and says so; re-reading the screen
+    // would only confirm that nothing happened.
+    expect(read.mock.calls.length).toBe(before);
   });
 });

@@ -76,6 +76,34 @@ import { fitPane, sameSize } from './terminal-size.js';
 export const REFRESH_MS = 1_000;
 
 /**
+ * How soon after a keystroke actually lands the tab re-reads the pane, and
+ * how often at most while the operator keeps typing.
+ *
+ * THE PROBLEM, and it is a measured one rather than a taste: a keystroke
+ * reaches tmux in about 5ms (`terminal/ipc.ts` measured the send at 5.4ms on
+ * an idle private server), but nothing asked for the screen again afterwards
+ * -- so the character the operator just typed appeared on the NEXT tick of
+ * the interval above. That is up to a full second, half a second on average,
+ * between pressing a key and seeing it. The keystroke was never slow; the
+ * only thing missing was asking what the screen looked like once it landed.
+ *
+ * A LEADING-EDGE THROTTLE, not a debounce. A debounce would show nothing at
+ * all while the operator typed steadily and everything at once when they
+ * stopped, which is the worse half of both behaviours. This reads
+ * immediately on the first key after a pause and then at most once per
+ * `ECHO_MS` for as long as typing continues.
+ *
+ * WHAT IT COSTS, said plainly because `REFRESH_MS`'s own note says vam is
+ * "not spawning processes at interaction rates": while a person is actually
+ * typing into a pane, this spawns up to ten short-lived `capture-pane`
+ * reads a second instead of one. That is a real change to that rule, and it
+ * is deliberately bounded to exactly the moment it buys something -- a human
+ * typing at a keyboard, watching for their own characters. Idle costs
+ * nothing extra: no key, no read.
+ */
+export const ECHO_MS = 100;
+
+/**
  * The reader the tab is given: `window.api.terminal.read`, or nothing.
  *
  * It is asked by PROJECT ID, not by title. The pairing between a session and
@@ -299,6 +327,42 @@ export function TerminalTab({
     if (view !== null && read !== undefined) setView(null);
   }
 
+  /**
+   * The running effect's own `tick`, published so the SEND path can ask for a
+   * read out of band. A ref rather than a second `poll` call site: `tick`
+   * owns the `issued` sequence that decides which answer is still wanted
+   * (see the effect below), and a read issued around it could repaint an
+   * older screen over a newer one -- the exact race that sequence exists to
+   * stop. `null` whenever nothing is polling: a hidden window, no bridge, no
+   * project. Asking then is not deferred, it is declined.
+   */
+  const readNow = useRef<(() => void) | null>(null);
+  const lastEcho = useRef(0);
+  const echoTimer = useRef<number | undefined>(undefined);
+
+  /** Ask for a read now, or at the end of the current `ECHO_MS` window. */
+  const echo = useCallback(() => {
+    const fire = () => {
+      lastEcho.current = Date.now();
+      echoTimer.current = undefined;
+      readNow.current?.();
+    };
+    if (echoTimer.current !== undefined) return;
+    const waited = Date.now() - lastEcho.current;
+    if (waited >= ECHO_MS) {
+      fire();
+      return;
+    }
+    echoTimer.current = window.setTimeout(fire, ECHO_MS - waited);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (echoTimer.current !== undefined) window.clearTimeout(echoTimer.current);
+    },
+    [],
+  );
+
   const poll = useCallback(
     (mine: () => boolean) => {
       if (read === undefined || projectId === null) return;
@@ -343,11 +407,15 @@ export function TerminalTab({
     };
     const start = () => {
       if (timer !== undefined) return;
+      // Published only while a poll is actually running, so `echo` cannot ask
+      // a hidden window (or a tab with no bridge) for a screen nobody reads.
+      readNow.current = tick;
       tick();
       timer = window.setInterval(tick, REFRESH_MS);
     };
     const stop = () => {
       if (timer === undefined) return;
+      readNow.current = null;
       window.clearInterval(timer);
       timer = undefined;
     };
@@ -543,14 +611,19 @@ export function TerminalTab({
       chain.current = chain.current.then(async () => {
         if (run.current !== mine) return;
         const landed = await send(projectId, stroke, rowId).catch((): PaneSendResult => 'refused');
-        if (landed === 'sent') return;
+        if (landed === 'sent') {
+          // The key is IN the pane now; nothing had been asking what that
+          // looked like until the next interval tick. See `ECHO_MS`.
+          echo();
+          return;
+        }
         // Everything still queued was typed before the operator could know
         // this failed, so it is dropped rather than sent into the hole.
         run.current += 1;
         setRefused(landed);
       });
     },
-    [send, projectId, rowId],
+    [send, projectId, rowId, echo],
   );
 
   useEffect(() => {
