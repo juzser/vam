@@ -1164,6 +1164,29 @@ describe('handing the keyboard to the right pane', () => {
     expect(mode()).toBe('Select');
   });
 
+  it('says so when pressed already in Select, rather than doing nothing', () => {
+    // Every other navigation key in this grammar refuses aloud when it
+    // cannot act — `gt` at the last project, `hjkl` at the end of a list.
+    // `Mod-Shift-h` / `Mod-0` were the one exception: `releaseInsert` returns
+    // `false` when there is no insert scope to blur and `setComposing(false)`
+    // is a no-op when nothing was composing, so pressing either with the
+    // keyboard already on the session list did both of those nothings and
+    // said nothing about it.
+    render(<Canvas model={MODEL} />);
+    expect(mode()).toBe('Select');
+    expect(statusText()).toBe('');
+    press('H', { metaKey: true, shiftKey: true });
+    expect(mode()).toBe('Select');
+    expect(statusText()).not.toBe('');
+    expect(statusText()).toContain('already');
+  });
+
+  it('Mod-0 says the same thing in Select — both chords answer one act', () => {
+    render(<Canvas model={MODEL} />);
+    press('0', { metaKey: true });
+    expect(statusText()).not.toBe('');
+  });
+
   it('Escape also hands it back, from wherever you were', () => {
     render(<Canvas model={MODEL} />);
     press('I');

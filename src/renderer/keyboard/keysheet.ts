@@ -166,7 +166,12 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
     label: (a) =>
       a.delta === 1 ? 'next project — its first session' : 'previous project — its first session',
   },
-  jump: { group: 'navigation', label: () => 'jump to a labelled node' },
+  // NAMES ROWS, NOT NODES — the graph `f` used to label was deleted in 0.2;
+  // the labels land on sidebar rows now (`jumpLabels`, `Canvas.tsx`), and
+  // `JUMP_KEYS` is twenty characters long, so a session past the twentieth
+  // row gets no label at all. Said here rather than left for an operator to
+  // discover by running out of letters.
+  jump: { group: 'navigation', label: () => 'jump to a session — labels reach the first 20 rows' },
   // ONE CAPTION, AND NO `byMode` ANY MORE — which is most of what the fourth
   // arrangement of the digit row did to this file. The row carried two
   // captions because the key carried two meanings; it now means one thing with
@@ -249,16 +254,30 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // open since the command strip left the pane: in Select the key answers
   // that the detail is already on screen, and in Insert it marks the option
   // under the cursor (the question card claims it first) or raises the
-  // composer. Two behaviours, so two captions.
+  // composer. Two behaviours, so two captions — and the BASE label below is
+  // a third: `buildKeySheet` and the settings editor's own mode sections
+  // resolve `byMode` correctly, but `SettingsOverlay.tsx`'s `labelFor` names
+  // an action in a binding-clash message straight off this field, with no
+  // mode to split by. "open the focused step" there would tell an operator
+  // whose key collided with `Enter` that Select opens something, which it
+  // never has since the strip left. The base has to be true standing alone.
   open: {
     group: 'session',
-    label: () => 'open the focused step',
+    label: () => 'nothing to open in Select; marks the option or opens the prompt in Insert',
     byMode: () => ({
       select: 'nothing to open — the whole detail is already in the right pane',
       insert: 'mark the option under the cursor, or open the prompt box',
     }),
   },
-  focusAction: { group: 'panes', label: () => 'keyboard to the action pane' },
+  // NAMES WHAT IS THERE, NOT A CHOICE THAT DOES NOT EXIST. The pane holds one
+  // stop (`buildActions`, `panels/actions.ts`) — the command rows that used
+  // to sit beside the prompt went with the strip the operator asked removed,
+  // and this caption calling it "the action pane" without saying so read as a
+  // menu of several.
+  focusAction: {
+    group: 'panes',
+    label: () => 'keyboard to the action pane — today, just the prompt box',
+  },
   focusList: { group: 'panes', label: () => 'keyboard back to the session list' },
   // AND THE PAIR THAT REVERSES WITH THE MODE — audit F1's quietest half. One
   // caption said "widen the focused side pane" while the handler flips the
@@ -344,7 +363,16 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
       insert: 'nothing here — whatever you are typing in keeps Ctrl-D, Cmd+D and Ctrl-U',
     }),
   },
-  copy: { group: 'review', label: () => 'copy this step’s commands' },
+  // NAMES THE TURN, NOT A STEP NO CARD DRAWS ANY MORE. `copyAllCommands`
+  // (`Canvas.tsx`) reads `focusedDecision?.commands` — the focused session's
+  // NEWEST turn, its per-decision walk having left with the graph in 0.2 —
+  // and it always finds `[]` against a real source today: `to-canvas.ts`
+  // has no factory event yet that carries a command a person runs by hand.
+  // The chord stays wired for the day there is one (see that file's own
+  // comment), and it already refuses aloud when there is nothing to copy —
+  // "no command to copy" is the one member of this feature that does not
+  // fail silently the way the `!` typeahead's empty popover still does.
+  copy: { group: 'review', label: () => 'copy this session’s newest turn’s commands' },
   palette: { group: 'view', label: () => 'command palette' },
   filterMenu: { group: 'view', label: () => 'filter the session list' },
   settings: { group: 'view', label: () => 'settings' },

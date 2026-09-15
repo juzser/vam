@@ -231,9 +231,10 @@ export type KeyAction =
   | { readonly kind: 'prompt' }
   /** `I` — move keyboard control into the action pane on the right. */
   | { readonly kind: 'focusAction' }
-  /** `H` / `Mod-0` — back to the session list on the left. `Mod-0` sits at
-      the head of the digit row it belongs to: the digits pick a tab, and zero
-      is the way out of the tabs entirely. */
+  /** `Mod-Shift-h` / `Mod-0` — back to the session list on the left. `Mod-0`
+      sits at the head of the digit row it belongs to: the digits pick a tab,
+      and zero is the way out of the tabs entirely. Refuses aloud rather than
+      doing nothing when the keyboard is already there. */
   | { readonly kind: 'focusList' }
   /** `r` — rename the focused session in place. */
   | { readonly kind: 'rename' }
@@ -260,13 +261,13 @@ export type KeyAction =
       already does, and why it exists. `Mod-t` because "new tab in this one"
       is Cmd+T in every browser and in VSCode's own editor group. */
   | { readonly kind: 'newTab' }
-  /** `Mod-p` — a NEW PROJECT: choose a directory, then start a session in it.
-      vam has no stored project — a project is a grouping of live sessions on
-      their cwd — so that is the only thing "create a project" can mean, and
-      the directory is why this is the one create path that opens a dialog
-      first. It calls the same `newProject` the Projects header's `+` does
-      (`Canvas.tsx`), so the key and the button cannot drift into two
-      behaviours or two refusals.
+  /** `Mod-Shift-p` — a NEW PROJECT: choose a directory, then start a session
+      in it. vam has no stored project — a project is a grouping of live
+      sessions on their cwd — so that is the only thing "create a project"
+      can mean, and the directory is why this is the one create path that
+      opens a dialog first. It calls the same `newProject` the Projects
+      header's `+` does (`Canvas.tsx`), so the key and the button cannot
+      drift into two behaviours or two refusals.
 
       NOT `project`, WHICH IS `gt`/`gT`. That one STEPS between projects that
       already exist — and its caption had to be corrected once precisely
@@ -276,29 +277,31 @@ export type KeyAction =
       in the focused session's project, `newTab` (`Mod-t`) in the focused
       pane's, and this one in a directory nothing is running in yet.
 
-      THE OPERATOR ASKED FOR `Cmd+Shift+P`, AND THIS IS THAT KEYSTROKE.
-      `normalizeKey` folds Shift away for characters and lower-cases a letter
-      under a modifier — deliberately, so `Cmd+K` and `Cmd+Shift+K` cannot
-      become two bindings for one gesture — so a real `Cmd+Shift+P` keydown
-      arrives here spelled `Mod-p`. A table entry written `Mod-Shift-p` would
-      be a string NO keystroke on any layout produces: a dead row in a sheet
-      whose whole contract is that it names no such thing, and one
-      `bindingClashes` could not catch, because a chord with nothing behind it
-      is not a chord two actions claim. The Shift token belongs to the
-      POSITIONAL keys and to nothing else (`POSITION_CODES`).
+      THE OPERATOR ASKED FOR `Cmd+Shift+P`, AND `Mod-Shift-p` IS THAT
+      KEYSTROKE — NOW. It used to live on `Mod-p`: `normalizeKey` folded
+      Shift away for a letter under a modifier, so a real `Cmd+Shift+P`
+      keydown arrived spelled `Mod-p` and a table entry written
+      `Mod-Shift-p` would have been a string no keystroke produced. That fold
+      is gone — lifted for `Mod-Shift-h` (see the `focusList` binding below),
+      which needed the two gestures kept apart so it would not answer to
+      `Cmd+H`, macOS's own Hide — and once a modified letter carries its
+      Shift, `Cmd+Shift+P` has its own true spelling and the binding moved to
+      it rather than going on answering to the folded one.
 
-      AND THE COST, QUOTED: `Cmd+P` is the same folded gesture and reaches the
-      same act. Nothing native answers it — vam owns its application menu and
-      it is appMenu/editMenu/Window, none of which carries a Cmd+P
-      (`src/main/menu.ts`) — and in the browser build the handler's own
-      `preventDefault` keeps print out of it.
+      AND THE COST, QUOTED, NO LONGER PAID: `Cmd+P` (`Mod-p`) used to be the
+      same folded gesture and reach this same act; today it is a distinct,
+      unbound spelling. Nothing native answers it either way — vam owns its
+      application menu and it is appMenu/editMenu/Window, none of which
+      carries a Cmd+P (`src/main/menu.ts`) — so in the browser build `Cmd+P`
+      keeps reaching the browser's own print dialog, which is what the
+      operator's request preserved rather than gave up.
 
       `p` FOR PROJECT, one modifier above the bare `p` that REVEALS the
       focused session's project: the same subject, and `normalizeKey` gives a
       modified letter its own `Mod-` spelling, so neither can answer the
       other's keystroke. Free when it was taken — nothing in any table held
-      it, and `test/keyboard/chords.new-project.test.ts` re-derives that over
-      the generated bindings rather than over this line. */
+      `Mod-Shift-p`, and `test/keyboard/chords.new-project.test.ts` re-derives
+      that over the generated bindings rather than over this line. */
   | { readonly kind: 'newProject' }
   /** `F` — open or close the sidebar's filter popover. Shift-f, because
       plain `f` is already the jump-label move and this is its stronger,
@@ -458,9 +461,9 @@ export type KeyAction =
 
       AND `Cmd+D` IS THE SAME CHORD, because `normalizeKey` folds Ctrl and Cmd
       into one `Mod-` token for every binding in this table — the same alias
-      `Mod-p` already carries for `Cmd+Shift+P`. The operator was told and
-      chose it; `test/keyboard/chords.half-page.test.ts` pins it, so a later
-      attempt to separate the two modifiers reddens rather than passing
+      `Mod-Shift-p` already carries for `Cmd+Shift+P`. The operator was told
+      and chose it; `test/keyboard/chords.half-page.test.ts` pins it, so a
+      later attempt to separate the two modifiers reddens rather than passing
       quietly. */
   | { readonly kind: 'scrollHalf'; readonly delta: 1 | -1 }
   | { readonly kind: 'cancel' };
@@ -505,10 +508,12 @@ const MOVES: Readonly<Record<string, KeyAction>> = {
  *
  * Chosen so a vim user does not have to learn them so much as guess them:
  * `i` stops moving and starts saying something, `I` is its stronger form and
- * moves the whole caret into the pane where saying things happens, `H` and `L`
- * are already "far left" and "far right", `o` opens a new one, `r` replaces a
- * name, `x` deletes. Only `s` (icon) and `,` (settings) are conventions borrowed
- * from elsewhere, and both are conventions rather than inventions.
+ * moves the whole caret into the pane where saying things happens, `o` opens
+ * a new one, `r` replaces a name, `x` deletes. Only `s` (icon) and `,`
+ * (settings) are conventions borrowed from elsewhere, and both are
+ * conventions rather than inventions. (Bare `H`/`L` used to sit here too, as
+ * "far left"/"far right"; `H` moved to `Mod-Shift-h` at the operator's
+ * request and `L` is unbound — neither is a single-key guess any more.)
  *
  * Orca's sidebar has the same capabilities under Cmd-chords — `workspace.rename`,
  * `workspace.delete`, `sidebar.search.toggle`, `sidebar.focusWorktreeList` — so
@@ -696,12 +701,14 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // carries a Cmd+T, and Electron's default accelerators do not include it.
   'Mod-t': { kind: 'newTab' },
   // AND THE THIRD CREATE, the one that needs a directory before it can name a
-  // project at all. `Mod-p` is what a real `Cmd+Shift+P` — the keystroke the
-  // operator asked for — normalizes to: a modified letter folds its Shift
-  // away, so `Mod-Shift-p` would be a spelling no keystroke produces. The
-  // action's own doc comment above argues that, the family it joins, and the
-  // `Cmd+P` this also answers. Free: nothing in any table held `Mod-p`, and
-  // bare `p` (`revealProject`) keeps its own spelling.
+  // project at all. `Mod-Shift-p` is what a real `Cmd+Shift+P` — the
+  // keystroke the operator asked for — normalizes to now that a modified
+  // letter keeps its Shift; `Mod-p` (`Cmd+P`) is left unbound, so the
+  // browser build's print dialog still answers it. The action's own doc
+  // comment above argues that, the family it joins, and the history of the
+  // fold that used to make `Mod-Shift-p` unreachable. Free when it was
+  // taken: nothing in any table held `Mod-Shift-p`, and bare `p`
+  // (`revealProject`) keeps its own spelling.
   'Mod-Shift-p': { kind: 'newProject' },
   // HALF A SCREEN OF TRANSCRIPT, vim's own `Ctrl-D` / `Ctrl-U`, which is the
   // gesture the operator asked for by name.
@@ -750,15 +757,19 @@ const AFTER_Y: Readonly<Record<string, KeyAction>> = {
 /**
  * `z` is vim's "adjust the view" namespace. The three named layouts that used
  * to live here (`zc`/`zC`/`zf`) hid or reordered the canvas column, and the
- * canvas is gone (A12.1, epic.md decision 5) — `c`, `C` and `f` are free.
- * `z0` survives as the "put it back" key. It restores the two panes' default
- * WIDTHS and nothing else — the visibility it also used to restore went with
- * the settings section that was the only way to lose it (see the `resetPanes`
- * handler in `Canvas.tsx`).
+ * canvas is gone (A12.1, epic.md decision 5) — `c`, `C` and `f` were free at
+ * that point. `z0` survives as the "put it back" key. It restores the two
+ * panes' default WIDTHS and nothing else — the visibility it also used to
+ * restore went with the settings section that was the only way to lose it
+ * (see the `resetPanes` handler in `Canvas.tsx`).
  *
- * A15.1 spends four more letters here on split panes, in vim's own window
+ * A15.1 spent four more letters here on split panes, in vim's own window
  * spelling: `s`/`v` split (horizontal/vertical), `c` closes the focused
- * split, `w`/`W` cycle focus between splits. `C` and `f` stay free.
+ * split, `w`/`W` cycle focus between splits — which took `c`, leaving `C` and
+ * `f` free at THAT point. `zf` (below) then took `f` for focus view, so only
+ * `C` is free today; a table that binds it belongs beside `AFTER_Z`, not a
+ * new namespace, and this comment is the reason to check here before adding
+ * one.
  */
 const AFTER_Z: Readonly<Record<string, KeyAction>> = {
   '0': { kind: 'resetPanes' },

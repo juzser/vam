@@ -1,5 +1,5 @@
 /**
- * The right panel: the focused step, in full, and the place you answer it.
+ * The right panel: the focused turn, in full, and the place you answer it.
  *
  * This is the half of the split the canvas exists to make possible. Once the
  * full text lives here, a canvas card can be a strict summary without losing
@@ -576,7 +576,8 @@ export type DetailPanelProps = {
   readonly onStopComposing: () => void;
   /**
    * True while `I` has moved keyboard control into this pane. `j`/`k` then walk
-   * the actions below instead of the sessions, and `Esc`/`H` hands control back.
+   * the actions below instead of the sessions, and `Esc` / `Mod-Shift-h` /
+   * `Mod-0` hands control back.
    */
   readonly active: boolean;
   /** Which action `j`/`k` has landed on while `active`. */
@@ -6901,12 +6902,16 @@ export function DetailPanel(props: DetailPanelProps) {
             than reserved: `flex-wrap` with no fixed height, so an empty `<p>`
             takes no room and nothing below it moves when a hint appears.
 
-            `H` IS DELIBERATELY NOT NAMED, and this is the trap it avoids. `H`
-            is `focusList`'s other binding, so it is the same act everywhere
-            ELSE -- but it is a BARE key, and `Canvas`'s typing guard hands
-            every bare key to the textarea. Pressed here it types an `H` into
-            the operator's prompt and gets nobody out. A hint naming it would
-            send them to press a key that silently edits their draft. */}
+            `Mod-Shift-h` / `Mod-0` ARE NOT NAMED HERE, and it is not because
+            they would not work. They are `Mod-` chords, so `Canvas`'s typing
+            guard lets them straight through to the grammar the same way it
+            lets the leave key through, and `Mod-0` really does get the
+            keyboard out from inside this box (`test/panels/
+            DetailPanel.test.tsx`, "names no leave key at all"). That test is
+            the reason: the operator asked, on a second look, for no
+            leave-key caption under the prompt box at all -- the key still
+            works, the `?` sheet still names it, only the hint is gone -- and
+            `focusList`'s two chords are the same act under the same call. */}
             {composing && (
               <p
                 data-prompt-keys
