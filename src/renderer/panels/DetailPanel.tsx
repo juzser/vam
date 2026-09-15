@@ -4944,6 +4944,28 @@ export function DetailPanel(props: DetailPanelProps) {
   const PILL_PER_ICON = 30;
   const cornerReserve = cornerOverlay ? tabs.length * PILL_PER_ICON + 6 : 0;
   /**
+   * THE SAME PILL, DOWNWARDS -- how far it reaches in from the TOP of the
+   * block below, which is the half no reader needed until the Files tab put a
+   * COLUMN in the corner. A column at the right-hand edge is not moved by
+   * right-hand padding, so a horizontal reservation cannot clear it; what
+   * clears it is the height of the row above it, and that height has to be
+   * stated rather than inherited from whatever a font made the row.
+   *
+   * DERIVED FROM THE PILL'S OWN GEOMETRY, in the one file that draws it, and
+   * spelled as the arithmetic rather than as a total so each term can be
+   * checked against the element it comes from:
+   *   `top-2` on `data-view-overlay`                         ->   8px
+   *   the nav: 1px border + `py-1` + `h-6` + `py-1` + 1px    ->  34px
+   *   `py-3` on the block these tabs are mounted in          -> -12px
+   *   one gap, so the clearance is not exactly zero          ->   4px
+   * Unlike the width, none of these moves with the icon count -- the pill
+   * grows sideways, never downwards -- so this is a sum where `cornerReserve`
+   * is a product. DERIVED AT RENDER TIME, NOT MEASURED FROM THE DOM, for the
+   * reason `cornerReserve` gives above; the result is asserted as a RECTANGLE
+   * rather than as a click in `e2e/files-tab-keyboard-shots.mjs`.
+   */
+  const cornerReserveHeight = cornerOverlay ? 8 + 34 - 12 + 4 : 0;
+  /**
    * The same pill, for a block whose right edge is NOT the pane's. The prompt
    * bubble sits a variable distance inside it -- 44px at a 253px pane, 54px
    * at a wide one (the jump gutter, a scrollbar) -- so it only has to clear
@@ -6045,6 +6067,10 @@ export function DetailPanel(props: DetailPanelProps) {
             // widened the pill, so it is the MEASURED `cornerReserve` rather
             // than a constant. See its own comment above.
             reserveCorner={cornerReserve}
+            // And the pill's VERTICAL footprint, which this tab needs now
+            // that its right-hand column IS the corner. See
+            // `cornerReserveHeight`'s own comment above.
+            reserveCornerHeight={cornerReserveHeight}
           />
         )}
       </div>

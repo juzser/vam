@@ -75,12 +75,21 @@ route it isn't ready to carry.)
 
 ![Agents tab showing one subagent's own IN/OUT](docs/images/agents-tab.png)
 
-A Files tab sits beside them: the session's own working directory, and a
-plain editor for anything in it. It exists for the files no transcript is
-the right place to touch — `.env` and the handful of config files beside
-it — so dotfiles are never hidden from the list, only `node_modules` and
-`.git` are skipped, and symlinks are neither listed nor followed. There is
-no editor library behind it and no syntax highlighting: a highlighter that
+A Files tab sits beside them: the session's own working directory as a tree
+on the right, and a plain editor for the open file in the middle — both on
+screen at once, so opening the next file is not a round trip through a
+screen that hides the one you are editing. It exists for the files no
+transcript is the right place to touch — `.env` and the handful of config
+files beside it — so dotfiles are never hidden from the tree, only
+`node_modules` and `.git` are skipped, and symlinks are neither listed nor
+followed. Typing in the tree's filter box narrows it to the files that
+match and the directories that lead to them, still as a tree: `src/index.ts`
+and `docs/index.ts` are two different files, and a flat row reading
+`index.ts` twice could not say which is which. The whole tree is walkable
+from the keyboard — `j`/`k` down and up, `l`/`h` in and out, `Enter` to open
+a file and land in the editor, `Mod-Shift-e` to cross back — and every one
+of those is in the table under *In the Files tab* below. There is no editor
+library behind it and no syntax highlighting: a highlighter that
 mis-tokenises unfamiliar syntax is a worse lie than drawing none.
 
 What it does take seriously is that an agent is editing these files while
@@ -363,6 +372,33 @@ Chord prefixes — press the first key, then the second:
 | `zc` | Close the focused split — the session keeps running |
 | `zw` / `zW` | Move the keyboard to the next / previous split |
 | `zf` | Focus view on or off — fold every turn's working away (the tool calls it made, listed under its progress line), leaving your prompts and the agent's answers. A folded turn keeps `···` where its working was; press that and the turn comes back on its own. Nothing is folded from a turn whose tools failed, or from the newest turn while the session is working or waiting. `z` is vim's fold prefix and vam's display prefix, and a bare chord is contested by no browser — see *In a browser tab* below |
+
+#### In the Files tab
+
+The Files tab has a keyboard of its own: a file TREE on the right, an editor
+in the middle, and these move between them. They are LOCAL to that tab — every
+chord in the two tables above still works while the keyboard is in it, and
+anything not named here falls straight through to them. A key that cannot act
+says so, in the tab, rather than doing nothing.
+
+| In the Files tab | Action |
+|---|---|
+| `Mod-Shift-e` | Move the keyboard between the editor and the tree — the same chord both ways, because it is one act rather than two. `Cmd+Shift+E` is what VS Code and orca both use to reach a file explorer; `Mod-e` is macOS's own "use selection for find" in every text view, so it is not free |
+| `j` / `k` | Walk down / up the tree, one row at a time, stopping at the ends — the same thing they do to the session list in Select |
+| `l` | Open the directory under the cursor; press it again to step into it. On a file, open it in the editor and leave the keyboard on the tree |
+| `h` | Shut the directory under the cursor, or step out to the one holding it. At the top of the tree it says so rather than doing nothing |
+| `Enter` | Open the file under the cursor AND put the caret in the editor. On a directory, open or shut it |
+| `/` | Put the caret in the tree's filter box. `Enter` there hands the keyboard to the first matching row |
+| `Tab` / `Shift-Tab` | Indent / outdent in the editor — trapped there, never a focus move, because `Escape` and `Mod-[` are both real ways out already |
+| `Mod-s` | Save the open file. vam takes this before the browser's own "Save Page" |
+| `Escape` / `Mod-[` | Hand the keyboard back to Select — from the editor, the tree, the filter box or the new-file box. Never a discard: unsaved text survives it, exactly as it survives switching files, tabs and sessions |
+
+These are held against the code by `test/keyboard/files-tab.readme.test.ts`,
+which reads the `In the Files tab` column above and the two key lists
+`src/renderer/panels/files-tree.ts` actually dispatches on — so a binding
+added without a row, or a row left behind by a binding that went away, fails
+`vitest run` rather than reaching an operator.
+
 
 #### In a browser tab
 
