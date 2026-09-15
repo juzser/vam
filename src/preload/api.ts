@@ -31,6 +31,11 @@ import type {
   FileWriteResult,
 } from '../main/files/types.js';
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
+// Type only, and the module it comes from imports NOTHING -- same trap as
+// `./files/types.js` above: this file is imported for types by
+// `src/renderer/App.tsx`, so anything it reaches is typechecked under
+// `tsconfig.web.json`, which carries no `node` types.
+import type { UnsavedReport } from '../main/quit/unsaved.js';
 import type { RemoteState } from '../main/remote/state.js';
 import type { Project } from '../renderer/domain/model.js';
 import type { SourceError } from '../renderer/sources/port.js';
@@ -435,12 +440,31 @@ export type FilesApi = {
    * `SourceError`, same as both. See `src/main/files/list-ipc.ts`.
    */
   list(sessionId: string): Promise<FileListResult>;
+  /**
+   * HOW MUCH UNSAVED TEXT THE FILE EDITOR IS HOLDING, pushed whenever that
+   * changes so `app.on('before-quit')` has something true to say before Cmd-Q
+   * throws it away -- the one exit `beforeunload` cannot reach, because it is
+   * a page hook and a quit is a main-process veto.
+   *
+   * THE ONLY MEMBER HERE THAT ANSWERS `void` RATHER THAN A PROMISE, and that
+   * is the honest signature rather than a shortcut: this is a state push, not
+   * a request. There is no answer the renderer could act on and nothing for it
+   * to draw if the push failed, so returning a promise would only manufacture
+   * an unhandled rejection in a page with no use for it. The same
+   * fire-and-forget bargain `createStreamSubscribe`'s own `invoke` makes.
+   */
+  reportUnsaved(report: UnsavedReport): void;
 };
 
 /**
  * Forwards straight through `unwrap`, like `pickImageAttachment` -- neither
  * channel answers bare, because both have a refusal worth the caller's own
  * words rather than a rejected promise electron has rewritten.
+ *
+ * `reportUnsaved` IS THE EXCEPTION, deliberately. See its own comment above:
+ * it is a push, its rejection is logged here and goes no further, and a
+ * failure to deliver it costs main one stale copy rather than anything the
+ * page could repair.
  */
 export function createFilesApi(ipc: InvokerLike): FilesApi {
   return {
@@ -448,6 +472,11 @@ export function createFilesApi(ipc: InvokerLike): FilesApi {
     list: (sessionId) => unwrap<FileListResult>(ipc.invoke(CHANNELS.filesList, sessionId)),
     write: (path, content, baseSignature) =>
       unwrap<FileWriteResult>(ipc.invoke(CHANNELS.filesWrite, path, content, baseSignature)),
+    reportUnsaved: (report) => {
+      ipc.invoke(CHANNELS.filesUnsaved, report).catch((error: unknown) => {
+        console.error('vam: unsaved report failed:', error);
+      });
+    },
   };
 }
 
