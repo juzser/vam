@@ -26,6 +26,18 @@
  * VALID input). A file vam is not confident about renders as plain text, with
  * no overlay mounted at all.
  *
+ * AND ONE FILE TYPE HAS A SECOND VIEW. Markdown renders, through the very
+ * same `OUT_MARKDOWN` component map the transcript dresses an agent's answer
+ * with (`out-markdown.tsx`), reached by a toggle beside the formatter and by
+ * `Mod-Shift-m`. The two views are exclusive and the textarea is genuinely
+ * UNMOUNTED in preview rather than hidden -- see the `hidden` prop's own
+ * comment for why a merely-hidden `data-insert-stop` is the trap this file
+ * keeps walking into. Nothing about the buffer changes when the view does:
+ * `buffers` is the only thing holding unsaved text, the toggle does not touch
+ * it, and a view control that lost an edit would be worse than no control.
+ * The preview is READ-ONLY, which is what lets the toggle be free of every
+ * question a two-way editor would raise.
+ *
  * AND A FORMATTER, WHICH IS MOSTLY REFUSALS. `files-format.ts` reformats only
  * where it can prove it changed nothing but whitespace -- a JSON file, guarded
  * token by token, and the blank lines and comments of a `.env`/`.ini` -- and
@@ -90,7 +102,7 @@
  * without either side enumerating the other's keys.
  */
 
-import { AlignLeft, FilePlus, Loader2, RefreshCw, Save, Search } from 'lucide-react';
+import { AlignLeft, Code, Eye, FilePlus, Loader2, RefreshCw, Save, Search } from 'lucide-react';
 import {
   type KeyboardEvent,
   useCallback,
@@ -102,6 +114,8 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type {
   FileListResult,
   FileReadResult,
@@ -112,13 +126,14 @@ import { normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { activeEditorSettings, subscribeEditorSettings } from '../prefs/editor.js';
 import type { SourceError } from '../sources/port.js';
-import { applyTab, relativeLabel } from './files-editor-text.js';
+import { applyTab, isMarkdownPath, relativeLabel } from './files-editor-text.js';
 import { FORMAT_OFFER, formatFile } from './files-format.js';
 import { type EditorLang, highlightEditor, highlightLangFor } from './files-highlight.js';
 import { FileRowIcon } from './files-icons.js';
 import { EDITOR_KEYS, type FileTreeRow, fileTreeRows, resolveTreeKey } from './files-tree.js';
 import { SYNTAX_CLASS } from './highlight.js';
 import { Note } from './Note.js';
+import { OUT_MARKDOWN } from './out-markdown.js';
 import {
   encodeUnsaved,
   NO_UNSAVED_FILES,
@@ -270,6 +285,26 @@ export function FilesTab({
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set<string>());
   const [cursorPath, setCursorPath] = useState<string | null>(null);
   /**
+   * RENDERED, OR RAW — the operator's own toggle, and ONE flag for the whole
+   * tab rather than one per file.
+   *
+   * It is a MODE, not a property of a document: "show me markdown rendered" is
+   * a thing the operator is doing, and it should hold while they read three
+   * `.md` files in a row rather than needing pressing again on each. A file
+   * this tab cannot preview simply ignores it (`showingPreview` below), which
+   * is why opening a `.env` while it is on shows the editor and coming back to
+   * the README shows the document again — the mode was never forgotten, it was
+   * inapplicable. `test/panels/DetailPanel.files-tab.test.tsx` holds exactly
+   * that sequence.
+   *
+   * A per-path record was the alternative and buys one thing: opening a second
+   * `.md` for EDITING while the first is being read. It costs a second map to
+   * keep in step with `buffers`, entries for files that are no longer open,
+   * and a rule about what a file not in the map inherits. One keystroke is a
+   * cheaper answer to the case it serves.
+   */
+  const [preview, setPreview] = useState(false);
+  /**
    * WHAT THE LAST KEYSTROKE REFUSED, in words, or null at rest. The house
    * rule this tab is held to: a control that cannot act says so rather than
    * doing nothing, because a key that silently does nothing is
@@ -316,6 +351,18 @@ export function FilesTab({
 
   const activePath = sessionId === null ? null : (activeBySession[sessionId] ?? null);
   const activeBuffer = activePath === null ? undefined : buffers[activePath];
+
+  /**
+   * Whether the open file COULD be previewed, and whether it IS.
+   *
+   * `isMarkdownPath` rather than `highlightLangFor(...) === 'md'`, deliberately
+   * — the second would make the toggle disappear when the operator turns the
+   * editor's colours off in Appearance, and a rendered document has nothing to
+   * do with whether a raw one is syntax-coloured.
+   */
+  const canPreview =
+    activePath !== null && activeBuffer?.kind === 'editable' && isMarkdownPath(activePath);
+  const showingPreview = preview && canPreview;
 
   const currentListing = sessionId === null ? undefined : listing[sessionId];
   const ready = currentListing?.kind === 'ready' ? currentListing.result : null;
@@ -676,6 +723,10 @@ export function FilesTab({
    * ---------------------------------------------------------------------- */
   const treeRef = useRef<HTMLDivElement | null>(null);
   const filterRef = useRef<HTMLInputElement | null>(null);
+  // `HTMLElement`, not `HTMLDivElement`: the preview is a `<section>` (a
+  // labelled region landmark by element rather than by attribute), and a ref
+  // typed for the wrong tag is a type that quietly stops describing the DOM.
+  const previewRef = useRef<HTMLElement | null>(null);
 
   const focusCursorRow = useCallback((): boolean => {
     const row = treeRef.current?.querySelector<HTMLElement>('[data-files-cursor]') ?? null;
@@ -684,11 +735,19 @@ export function FilesTab({
     return row.ownerDocument.activeElement === row;
   }, []);
 
+  /**
+   * THE MIDDLE COLUMN, whichever of its two shapes is on screen.
+   *
+   * One function rather than two, because every caller means the same thing by
+   * it -- "put the keyboard in the thing I am reading or editing" -- and a
+   * caller that had to ask which mode the tab is in would be a third copy of
+   * that question. Only one of the two refs is ever non-null.
+   */
   const focusEditor = useCallback((): boolean => {
-    const editor = textareaRef.current;
-    if (editor === null) return false;
-    editor.focus();
-    return editor.ownerDocument.activeElement === editor;
+    const target: HTMLElement | null = textareaRef.current ?? previewRef.current;
+    if (target === null) return false;
+    target.focus();
+    return target.ownerDocument.activeElement === target;
   }, []);
 
   /**
@@ -706,7 +765,12 @@ export function FilesTab({
       treeRef.current?.querySelector<HTMLElement>('[data-files-cursor]')?.focus();
     }
     if (!wantEditorFocus.current) return;
-    const editor = textareaRef.current;
+    // EITHER SHAPE THE MIDDLE COLUMN HAS. In preview mode there is no
+    // textarea and never will be for this file, so a flag that only ever
+    // looked for one would fall through to the "give up" branch below and
+    // Enter on a tree row would open the document and leave the keyboard
+    // behind in the tree.
+    const editor: HTMLElement | null = textareaRef.current ?? previewRef.current;
     if (editor !== null) {
       wantEditorFocus.current = false;
       editor.focus();
@@ -741,6 +805,26 @@ export function FilesTab({
     });
   }, []);
 
+  /**
+   * RENDERED OR RAW, AND WHERE THE KEYBOARD GOES WITH IT.
+   *
+   * The toggle is the ONE act, reached three ways -- the button, `Mod-Shift-m`
+   * in the editor, and `Mod-Shift-m` in the preview -- so it lives here rather
+   * than three times. It moves the keyboard because the surface the keyboard
+   * was on stops existing: leaving it where it was would blur it to the body,
+   * and a keystroke that silently drops the operator out of the tab is the
+   * thing `note` exists to prevent everywhere else in this file.
+   *
+   * IT TOUCHES NO BUFFER. That is not incidental -- a view toggle that lost an
+   * edit would be worse than no toggle at all, and `buffers` is the only thing
+   * holding the operator's unsaved text.
+   */
+  const togglePreview = useCallback(() => {
+    setNote(null);
+    setPreview((prev) => !prev);
+    wantEditorFocus.current = true;
+  }, []);
+
   const onEditorKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (activePath === null) return;
@@ -772,6 +856,17 @@ export function FilesTab({
       if (key === 'Mod-Shift-f') {
         event.preventDefault();
         formatActive();
+        return;
+      }
+      if (key === 'Mod-Shift-m') {
+        // ANSWERED EVEN WHEN THERE IS NOTHING TO PREVIEW, because a key that
+        // silently does nothing is this tab's own named failure mode. On a
+        // `.env` it says so; the alternative -- falling through unprevented --
+        // would hand `Mod-Shift-m` to the app grammar from inside a text box,
+        // which is not what the operator pressing it here meant.
+        event.preventDefault();
+        if (canPreview) togglePreview();
+        else setNote('only markdown has a preview — this file is shown as text.');
         return;
       }
       if (key === 'Mod-z') {
@@ -813,7 +908,17 @@ export function FilesTab({
         void saveFile(activePath);
       }
     },
-    [activePath, setContent, saveFile, focusCursorRow, formatActive, undoFormat, settings.indent],
+    [
+      activePath,
+      setContent,
+      saveFile,
+      focusCursorRow,
+      formatActive,
+      undoFormat,
+      settings.indent,
+      canPreview,
+      togglePreview,
+    ],
   );
 
   /**
@@ -884,6 +989,40 @@ export function FilesTab({
       }
     },
     [focusEditor],
+  );
+
+  /**
+   * THE PREVIEW'S OWN KEYBOARD, and it is a SHORT list on purpose.
+   *
+   * It answers the three keys that MOVE the keyboard and nothing else. It is
+   * not an insert scope -- it is a `<div>`, there is nothing here to type into
+   * -- so every other key falls through unprevented to the app-wide grammar,
+   * exactly as it does from a tree row. That includes `j`/`k`: with the
+   * keyboard in here the cursor mode is Select, and Select's keys are the
+   * canvas's, which is the same contract every non-text surface in vam holds.
+   *
+   * Escape and `Mod-[` are here because a read-only pane that swallowed the
+   * keyboard would be the one place in this tab an operator could get stuck.
+   */
+  const onPreviewKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLElement>) => {
+      const key = normalizeKey(event);
+      if (key === 'Escape' || key === 'Mod-[') {
+        event.preventDefault();
+        event.currentTarget.blur();
+        return;
+      }
+      if (key === 'Mod-Shift-m') {
+        event.preventDefault();
+        togglePreview();
+        return;
+      }
+      if (key === 'Mod-Shift-e') {
+        event.preventDefault();
+        setNote(focusCursorRow() ? null : 'nothing to move to — no file here matches the filter');
+      }
+    },
+    [focusCursorRow, togglePreview],
   );
 
   if (sessionId === null) {
@@ -964,6 +1103,38 @@ export function FilesTab({
                 also holds the path, the dirty dot, Save and the view pill's
                 own reservation, and at the 320px floor the path has to keep
                 something to truncate. */}
+            {/* RENDERED OR RAW, NEXT TO THE FORMATTER — the operator's own
+                placement: one toggle button beside the formatter at the top.
+                It sits BEFORE Format rather than after, so the row reads as
+                one view control followed by the two that change the file.
+
+                DRAWN ONLY FOR A FILE THAT HAS A PREVIEW, which is the
+                opposite of the rule the Format button next to it follows,
+                and the difference is real. Format is never disabled because
+                pressing it teaches the operator something — "vam does not
+                format .ts files" is an answer. A preview toggle on a `.ts`
+                would have no second state to show, so a control that is
+                simply absent is the truer surface. The KEY still answers
+                from anywhere (`onEditorKeyDown`), and says why. */}
+            {canPreview && (
+              <Note text="Switch between the rendered document and the raw text (Mod-Shift-m). Rendered is read-only; your unsaved edits survive either way.">
+                <button
+                  type="button"
+                  data-files-preview
+                  data-files-preview-state={showingPreview ? 'preview' : 'raw'}
+                  aria-pressed={showingPreview}
+                  onClick={togglePreview}
+                  aria-label={showingPreview ? 'show the raw markdown' : 'preview this markdown'}
+                  className="vam-tap flex flex-none cursor-pointer items-center rounded-[6px] border border-line px-1.5 py-1 text-ink-dim hover:border-line-strong hover:text-ink aria-pressed:border-line-strong aria-pressed:text-ink"
+                >
+                  {showingPreview ? (
+                    <Code size={12} strokeWidth={1.8} />
+                  ) : (
+                    <Eye size={12} strokeWidth={1.8} />
+                  )}
+                </button>
+              </Note>
+            )}
             {/* AND ITS TOOLTIP IS A `Note`, NOT A `title`. The operator asked
                 for tooltips on this button and on Save; this one HAD a
                 `title`, which is precisely the shape `panels/Note.tsx` exists
@@ -1122,23 +1293,43 @@ export function FilesTab({
             </p>
           )}
 
-          {activeBuffer?.kind === 'editable' && (
-            <Editor
-              hidden={hidden}
-              label={label ?? ''}
-              content={activeBuffer.content}
-              /* NULL IS "DRAW IT AS PLAIN TEXT", and both ways of reaching it
-                 are real answers rather than a gap: a file type vam will not
-                 tokenise (`highlightLangFor`) and an operator who turned the
-                 colours off (Appearance). No overlay is mounted in either
-                 case, so the textarea keeps its own ink and there is no second
-                 layer to fall out of step with. */
-              lang={settings.highlight && activePath !== null ? highlightLangFor(activePath) : null}
-              textareaRef={textareaRef}
-              onChange={(content) => activePath !== null && setContent(activePath, content)}
-              onKeyDown={onEditorKeyDown}
-            />
-          )}
+          {/* ONE OF TWO, NEVER BOTH — and the textarea is genuinely UNMOUNTED
+              in preview rather than hidden. A `display: none` textarea would
+              still be the tab's `data-insert-stop`, still first in document
+              order, and `focusInsertStop`'s blind `.focus()` would silently
+              do nothing to it — which is exactly the trap this file's header
+              describes for the `hidden` prop. While a document is being read
+              there is nothing in this tab to type into, so the honest answer
+              is that the tab has NO insert stop and `I` belongs to the
+              composer. `test/panels/DetailPanel.files-tab.test.tsx` counts
+              them in both modes. */}
+          {activeBuffer?.kind === 'editable' &&
+            (showingPreview ? (
+              <MarkdownPreview
+                content={activeBuffer.content}
+                label={label ?? ''}
+                previewRef={previewRef}
+                onKeyDown={onPreviewKeyDown}
+              />
+            ) : (
+              <Editor
+                hidden={hidden}
+                label={label ?? ''}
+                content={activeBuffer.content}
+                /* NULL IS "DRAW IT AS PLAIN TEXT", and both ways of reaching it
+                   are real answers rather than a gap: a file type vam will not
+                   tokenise (`highlightLangFor`) and an operator who turned the
+                   colours off (Appearance). No overlay is mounted in either
+                   case, so the textarea keeps its own ink and there is no second
+                   layer to fall out of step with. */
+                lang={
+                  settings.highlight && activePath !== null ? highlightLangFor(activePath) : null
+                }
+                textareaRef={textareaRef}
+                onChange={(content) => activePath !== null && setContent(activePath, content)}
+                onKeyDown={onEditorKeyDown}
+              />
+            ))}
         </div>
 
         <Tree
@@ -1222,6 +1413,66 @@ const EDITOR_TEXT = 'font-mono text-control leading-[1.5] py-2 pr-3 pl-1';
  *  indent is spaces (`prefs/editor.ts`), but a file may CONTAIN a tab byte,
  *  and the two layers must then be wrong in exactly the same way. */
 const EDITOR_TEXT_STYLE = { whiteSpace: 'pre', overflowWrap: 'normal', tabSize: 4 } as const;
+
+/**
+ * THE FILE, RENDERED — the other shape the middle column takes.
+ *
+ * `OUT_MARKDOWN` IS THE WHOLE OF THE STYLING, and reusing it is the decision
+ * rather than a saving. It is the component map the transcript already dresses
+ * an agent's answer with, which means (a) this preview looks like the rest of
+ * vam without a second set of type-scale and colour choices to keep in step,
+ * and (b) the security posture is the SAME posture rather than a second one
+ * that has to be re-derived. `out-markdown.tsx`'s header carries the argument:
+ * no `rehype-raw`, nothing handed to `innerHTML`, and `a`/`img` printed rather
+ * than fetched or navigated. A file in a session's working directory is very
+ * often an agent's own output one step removed, so it earns exactly the same
+ * caution the transcript does.
+ *
+ * READ-ONLY, and the toolbar above says so. There is no in-preview editing to
+ * write back, which is why the toggle can be free of every question a WYSIWYG
+ * editor would raise.
+ *
+ * WRAPS, where the editor deliberately does not. The editor's `whiteSpace:
+ * 'pre'` is load-bearing (a wrapped line breaks the gutter's numbering and the
+ * overlay's alignment); a rendered document has neither a gutter nor an
+ * overlay, and prose that scrolled sideways would be unreadable.
+ *
+ * FOCUSABLE, because the keyboard has to be able to BE here: the editor it
+ * replaced was the middle column's one station in the Tab order, and `Enter`
+ * on a tree row means "open it and put me in it". `tabIndex={0}` on a
+ * scrollable region is also what lets it be scrolled with the keyboard at all.
+ * It is NOT an insert scope -- see the call site.
+ */
+function MarkdownPreview({
+  content,
+  label,
+  previewRef,
+  onKeyDown,
+}: {
+  readonly content: string;
+  readonly label: string;
+  readonly previewRef: React.RefObject<HTMLElement | null>;
+  readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+}) {
+  return (
+    // A `<section>` with an accessible name is a region landmark by element
+    // rather than by attribute, which is what a screen reader's landmark list
+    // reads and what biome's own rule asks for in place of `role="region"`.
+    <section
+      ref={previewRef}
+      data-files-preview-view
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: a labelled, scrollable region is the documented exception — see this component's header
+      tabIndex={0}
+      aria-label={`preview of ${label}`}
+      onKeyDown={onKeyDown}
+      className="vam-no-scrollbar flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto rounded-[9px] border border-line bg-panel px-3 py-2 break-words focus-visible:border-line-strong focus-visible:outline-none"
+    >
+      <Markdown remarkPlugins={[remarkGfm]} components={OUT_MARKDOWN}>
+        {content}
+      </Markdown>
+    </section>
+  );
+}
 
 function Editor({
   hidden,

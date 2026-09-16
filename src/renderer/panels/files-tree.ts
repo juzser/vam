@@ -210,6 +210,15 @@ export const TREE_KEYS: readonly string[] = [
  * the event entirely alone, so the browser's own undo of whatever was typed
  * runs exactly as it always has. Every other key on this list is answered
  * unconditionally, which is why this one carries a note.
+ *
+ * `Mod-Shift-m` IS `m` FOR MARKDOWN, and the letter was picked against the two
+ * nearer candidates rather than at random. `Mod-Shift-v` reads as "view" and
+ * is what Chromium binds to paste-as-plain-text INSIDE A TEXT BOX -- taking it
+ * would have traded a real editing key for a view toggle. `Mod-Shift-p` is
+ * `newProject` already. Like every chord on this list it is HARDCODED rather
+ * than rebindable: the editor's keys are not in `chords.ts`'s table, which is
+ * exactly what makes writing one into a tooltip honest rather than a lie
+ * waiting for the operator to rebind something.
  */
 export const EDITOR_KEYS: readonly string[] = [
   'Escape',
@@ -218,6 +227,7 @@ export const EDITOR_KEYS: readonly string[] = [
   'Mod-s',
   'Mod-Shift-e',
   'Mod-Shift-f',
+  'Mod-Shift-m',
   'Mod-z',
 ];
 
