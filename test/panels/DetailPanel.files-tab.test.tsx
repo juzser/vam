@@ -1754,6 +1754,76 @@ describe('the markdown preview', () => {
   });
 
   /**
+   * THE OTHER HALF OF THE WALL, AND THE ONE WITH TEETH IN AN ELECTRON WINDOW.
+   *
+   * `rehype-raw` being off stops HTML somebody WROTE as HTML. It does nothing
+   * about a perfectly ordinary markdown LINK, which react-markdown renders as
+   * a real `<a href>` by default — and in an Electron renderer a click on a
+   * real anchor navigates THE WHOLE APP WINDOW away. The window is the
+   * application: there is no back button, no other tab, and nothing on screen
+   * to say what happened. The same for `<img>`, one step quieter: a rendered
+   * image is a remote fetch that tells whoever wrote the file that this pane
+   * opened, without anybody asking for it.
+   *
+   * `OUT_MARKDOWN`'s `a:` and `img:` overrides are what defuse both, and this
+   * preview reuses them — that is the whole argument for sharing the map with
+   * the transcript rather than writing a second one. What was MISSING until
+   * this test is anything that would notice if the map were taken away.
+   *
+   * MEASURED AS THE RENDERED OUTCOME, NEVER AS THE PROP. Asserting that
+   * `components={OUT_MARKDOWN}` is passed would be a fact about this file's
+   * source text; the question is what reached the DOM.
+   *
+   * AND IT ASSERTS BOTH DIRECTIONS, because half of it is the easy half. "No
+   * anchor" alone is satisfied by rendering NOTHING, which would be a worse
+   * page than the bug: the destination has to still be READABLE, so an
+   * operator can see where a link goes and copy it deliberately. Same for the
+   * image's alt text, which is the only thing left of a picture vam will not
+   * fetch.
+   *
+   * THIS IS THE MUTATION THAT FOUND IT: dropping `components={OUT_MARKDOWN}`
+   * from the preview's own `<Markdown>` left all 1,338 tests in `test/panels`
+   * green. The neighbouring `remarkGfm` check covers a FEATURE; this covers
+   * the safety property sitting beside it.
+   */
+  it('defuses a link and an image — no anchor, no fetch, and the destination still readable', async () => {
+    await openFile(
+      '/work/atlas/README.md',
+      [
+        'See the [runbook](https://example.test/runbook) before deploying.',
+        '',
+        '![architecture diagram](https://example.test/arch.png)',
+        '',
+      ].join('\n'),
+    );
+    await pressPreview();
+    const view = q('[data-files-preview-view]');
+    expect(view).not.toBeNull();
+
+    // NOTHING NAVIGABLE, and nothing that fetches. `a[href]` rather than `a`
+    // because an anchor with no destination is harmless and is not what this
+    // is about; `img` outright, because there is no such thing as a harmless
+    // one here.
+    expect(view?.querySelectorAll('a[href]')).toHaveLength(0);
+    expect(view?.querySelectorAll('img')).toHaveLength(0);
+
+    // AND THE READER LOSES NOTHING. Both the words and the address survive, so
+    // "render nothing" cannot pass this.
+    const text = view?.textContent ?? '';
+    expect(text).toContain('runbook');
+    expect(text).toContain('https://example.test/runbook');
+    expect(text).toContain('architecture diagram');
+
+    // THE THIRD DIRECTION, borrowed from the transcript's own version of this
+    // guard (`DetailPanel.test.tsx`, "prints a link's address..."): the SYNTAX
+    // is consumed. Without this, a preview that had stopped rendering
+    // altogether and was showing the raw source would satisfy every
+    // expectation above — no anchor, no image, and all three strings present.
+    expect(text).not.toContain('](');
+    expect(text).not.toContain('![');
+  });
+
+  /**
    * THE ONE THAT MATTERS MOST. A view toggle that loses an edit is worse than
    * no view toggle, and the buffer is the only thing holding the operator's
    * text — `buffers` survives a tab switch and a pane switch already, and the

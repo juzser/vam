@@ -87,12 +87,18 @@ await page.addInitScript(() => {
    * a fence whose CONTENT must stay uncoloured in the raw view and IS coloured
    * in the rendered one (two different code paths, two different claims), a
    * GFM table and a strikethrough (which plain CommonMark does not produce),
-   * and a line of raw HTML that must reach the DOM as characters.
+   * a LINK and an IMAGE (the two constructs `OUT_MARKDOWN` defuses, and the
+   * ones that bite hardest in an Electron window -- see the check below), and
+   * two lines of raw HTML, a `<script>` and an `<img>`, that must reach the
+   * DOM as characters. Both HTML lines carry a payload that would set a global
+   * if it ever ran, so the check can ask the page rather than the markup.
    */
   const README = [
     '# Atlas',
     '',
-    'A **service** with a [runbook](https://example.test) and `one` inline span.',
+    'A **service** with a [runbook](https://example.test/runbook) and `one` inline span.',
+    '',
+    '![architecture diagram](https://example.test/arch.png)',
     '',
     '## Getting started',
     '',
@@ -118,6 +124,8 @@ await page.addInitScript(() => {
     '~~Deprecated~~ since 0.2.',
     '',
     '<script>globalThis.__pwned = 1</script>',
+    '',
+    '<img src="https://example.test/x.png" onerror="globalThis.__pwned = 2">',
     '',
   ].join('\n');
 
@@ -487,11 +495,30 @@ const rendered = await page.evaluate(() => {
     tableHeaders: view.querySelectorAll('th').length,
     struck: view.querySelector('del')?.textContent ?? null,
     fenceColours: [...colours],
-    // The wall: raw HTML in the file must reach the DOM as CHARACTERS.
+    // The wall, half one: raw HTML in the file must reach the DOM as
+    // CHARACTERS. Both halves are read back off the rendered tree AND off the
+    // page's own globals, because a payload that ran is the only proof that
+    // matters and the markup would not show it.
     scripts: view.querySelectorAll('script').length,
-    images: view.querySelectorAll('img').length,
     showsScriptAsText: (view.textContent ?? '').includes('<script>'),
     pwned: globalThis.__pwned ?? null,
+    // The wall, half two: an ordinary markdown LINK and IMAGE. `rehype-raw`
+    // being off does nothing about these -- react-markdown renders a real
+    // `<a href>` and a real `<img src>` for them by default, and it is
+    // `OUT_MARKDOWN`'s own `a:`/`img:` overrides that defuse them.
+    anchors: view.querySelectorAll('a[href]').length,
+    images: view.querySelectorAll('img').length,
+    // ...and the reader still gets both destinations, which is what stops
+    // "render nothing at all" from satisfying the two counts above.
+    showsHref: (view.textContent ?? '').includes('https://example.test/runbook'),
+    showsLinkWords: (view.textContent ?? '').includes('runbook'),
+    showsAlt: (view.textContent ?? '').includes('architecture diagram'),
+    // ...and the SYNTAX is consumed, which is the third direction the
+    // transcript's own version of this guard carries: without it a preview
+    // that had stopped rendering and was showing raw source would satisfy
+    // every count and every string above.
+    showsRawSyntax: (view.textContent ?? '').includes('](') ||
+      (view.textContent ?? '').includes('!['),
     // And the raw editor is GONE, not hidden — a hidden textarea would still
     // be this tab's first `data-insert-stop` in document order.
     editors: document.querySelectorAll('[data-files-editor]').length,
@@ -516,15 +543,50 @@ check(
 );
 check(
   'raw HTML in the file reaches the DOM as characters and nothing else',
-  rendered?.scripts === 0 &&
-    rendered?.images === 0 &&
-    rendered?.showsScriptAsText === true &&
-    rendered?.pwned === null,
+  rendered?.scripts === 0 && rendered?.showsScriptAsText === true && rendered?.pwned === null,
   JSON.stringify({
     scripts: rendered?.scripts,
-    images: rendered?.images,
     text: rendered?.showsScriptAsText,
     pwned: rendered?.pwned,
+  }),
+);
+/**
+ * AND THE CONSTRUCT THAT BITES HARDEST IN AN ELECTRON WINDOW.
+ *
+ * A markdown link is not raw HTML and `rehype-raw` has nothing to say about
+ * it: react-markdown renders a real `<a href>` for one by default. In this
+ * shell a click on a real anchor navigates THE WHOLE APP WINDOW away -- the
+ * window IS the application, so there is no back button, no other tab, and
+ * nothing on screen to say what happened. An `<img>` is the same shape one
+ * step quieter: a remote fetch that tells whoever wrote the file that this
+ * pane opened.
+ *
+ * `OUT_MARKDOWN`'s `a:` and `img:` overrides are what defuse both, and the
+ * preview reuses them rather than carrying a second set. Dropping
+ * `components={OUT_MARKDOWN}` from the preview's own `<Markdown>` left all
+ * 1,338 tests in `test/panels` green before this check and its unit sibling
+ * existed -- a feature check for `remarkGfm` sat right beside the safety
+ * property and covered none of it.
+ *
+ * BOTH DIRECTIONS, because half of this is the easy half: rendering NOTHING
+ * would satisfy "no anchor, no image" and be a worse page than the bug.
+ */
+check(
+  'a markdown link and image are defused — no anchor to navigate, no image to fetch',
+  rendered?.anchors === 0 && rendered?.images === 0,
+  JSON.stringify({ anchors: rendered?.anchors, images: rendered?.images }),
+);
+check(
+  'and the reader still gets the words, the address and the alt text',
+  rendered?.showsLinkWords === true &&
+    rendered?.showsHref === true &&
+    rendered?.showsAlt === true &&
+    rendered?.showsRawSyntax === false,
+  JSON.stringify({
+    words: rendered?.showsLinkWords,
+    href: rendered?.showsHref,
+    alt: rendered?.showsAlt,
+    rawSyntax: rendered?.showsRawSyntax,
   }),
 );
 check(
