@@ -162,7 +162,20 @@ describe('everything else modified is still vam’s, and reaches vam', () => {
     ['Ctrl and an arrow', { key: 'ArrowUp', ctrlKey: true }],
     ['Ctrl and Tab, which is how the settings overlay steps', { key: 'Tab', ctrlKey: true }],
     ['Ctrl+Shift and a letter', { key: 'P', ctrlKey: true, shiftKey: true }],
-    ['Ctrl+Alt and a bracket', { key: '[', ctrlKey: true, altKey: true }],
+    // A BRACKET FOR VAM'S OWN `Mod-Alt-[`, AND A LETTER FOR THE RULE ITSELF.
+    // Only the second can catch a branch that stopped checking `altKey`: `[`
+    // is not a control letter under any modifier, so the bracket case stayed
+    // green through a mutation that claimed every Ctrl+Alt+letter. And the
+    // letter is the one with real meaning -- Ctrl+Alt+E in a terminal is Meta
+    // and Ctrl together, which `C-e` alone would silently drop the Meta from.
+    [
+      'Ctrl+Alt and a bracket, which vam binds to stepping a split',
+      { key: '[', ctrlKey: true, altKey: true },
+    ],
+    [
+      'Ctrl+Alt and a LETTER, which is Meta and Ctrl at once',
+      { key: 'e', ctrlKey: true, altKey: true },
+    ],
     ['Cmd and a letter', { key: 'k', metaKey: true }],
     ['Cmd and a digit', { key: '1', metaKey: true }],
     ['Cmd+Ctrl together, where Cmd wins', { key: 'u', metaKey: true, ctrlKey: true }],

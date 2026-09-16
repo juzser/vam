@@ -932,13 +932,31 @@ export function TerminalTab({
           // an unprevented chord would edit the composition staging area on
           // its way to the agent.
           event.preventDefault();
-          // STOPPED, which is what makes this pane WIN over vam's grammar
-          // while it holds the keyboard. `Canvas.tsx` returns on
-          // `defaultPrevented`, so cancelling alone would be enough today;
-          // stopping says the stronger thing out loud, and `Mod-w` is the
-          // reason to say it -- a Ctrl+W that both killed a word and closed
-          // the session tab it was typed into is not a bug anybody would
-          // enjoy finding twice.
+          /**
+           * STOPPED, AND IT DOES TWO JOBS -- one obvious, one MEASURED and
+           * previously written down nowhere.
+           *
+           * THE OBVIOUS ONE: it makes this pane win over vam's grammar while
+           * it holds the keyboard. `Canvas.tsx` returns on `defaultPrevented`,
+           * so cancelling alone would be enough today; stopping says the
+           * stronger thing out loud, and `Mod-w` is the reason to say it -- a
+           * Ctrl+W that both killed a word and closed the session tab it was
+           * typed into is not a bug anybody would enjoy finding twice.
+           *
+           * THE OTHER ONE: it is what stops ONE keystroke reaching the agent
+           * TWICE. Measured in Chromium against the real bundle, with a
+           * native listener counting keydowns on this very element: remove
+           * this line and a single `Ctrl+U` arrives at the pane ONCE natively
+           * and is sent to tmux TWICE. It is not new and it is not about
+           * chords -- removing the identical line from the PLAIN-letter path
+           * below, which has stood since this pane learned to type, doubles a
+           * plain `x` in exactly the same way. React 19 dispatches the prop a
+           * second time once the native event is allowed past this element,
+           * and which of its paths does that is not run down here; what is
+           * established is the behaviour and that this line is the thing
+           * holding it. Deleting it would put a second `C-c` into somebody's
+           * agent, which is why it is not a matter of politeness.
+           */
           event.stopPropagation();
           queue([chord]);
         }
