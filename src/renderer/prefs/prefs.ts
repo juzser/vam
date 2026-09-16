@@ -939,8 +939,7 @@ export function setGroupIcon(
  * At most one group per project, and it is enforced here rather than left to
  * the caller because the cost of getting it wrong is not cosmetic: membership
  * is array position, so a project in two groups has its sessions walked twice
- * and mints two nodes carrying the same `info:<sessionId>` id -- which breaks
- * the canvas and the keys `j`/`k` step through.
+ * and the session id the sidebar keys its rows on stops being unique.
  */
 export function addProjectToGroup(
   prefs: Prefs,
@@ -1395,8 +1394,8 @@ export function prRepoFor(prefs: Prefs, sourceId: SourceId, projectId: string): 
 /**
  * Put the stored names onto the model, once, before anything reads it -- the
  * same trick `applyIcons` plays one field over, and for the same reason: the
- * sidebar, the canvas node and the detail panel all render `session.title`,
- * and none of them should have to know that a title can be local.
+ * sidebar and the detail panel both render `session.title`,
+ * and neither should have to know that a title can be local.
  *
  * `projectNames` defaults to `{}` for the same reason `applyIcons`'
  * `projectIcons` argument does: every existing two-argument call site
@@ -1442,8 +1441,8 @@ export function applyRenames(
 /**
  * Put the stored icons onto the model, once, before anything reads it.
  *
- * The sidebar and the canvas node both render `session.icon`, and neither
- * should know that an icon is a local preference rather than something the
+ * Only the tab strip renders `session.icon` today, and it should not
+ * know that an icon is a local preference rather than something the
  * factory said. Applying it here means one place knows. Looked up per
  * project's `source`, not by session id alone — two sources can name a
  * session the same thing (AC-1). `projectIcons` follows the same rule one

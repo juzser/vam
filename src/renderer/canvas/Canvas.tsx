@@ -1461,8 +1461,8 @@ function CanvasInner({
   );
 
   /**
-   * The factory's model with your icons on it. Done here, once, so neither the
-   * sidebar nor the canvas node has to know that an icon comes from somewhere
+   * The factory's model with your icons on it. Done here, once, so the tab
+   * strip does not have to know that an icon comes from somewhere
    * different than the rest of a session.
    */
   // The class on <html> is what styles.css switches on, and prefs is the only

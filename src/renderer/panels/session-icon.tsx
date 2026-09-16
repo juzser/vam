@@ -18,7 +18,7 @@
  * Both ends of the chain can vanish on their own: an empty pick clears a
  * choice rather than storing "" (`setIcon`), and the stored buckets are
  * pruned by a TTL. Either way the value read here is simply absent, so the
- * next link answers and the node never goes blank.
+ * next link answers and the tab never goes blank.
  *
  * The last link is a component rather than a string because a string cannot
  * be a placeholder anyone can see: the chain used to end in a middot, and at

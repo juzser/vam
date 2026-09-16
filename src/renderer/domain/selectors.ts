@@ -19,7 +19,7 @@
 
 import type { CanvasModel, Command, Decision, Group, Project, Session } from './model.js';
 
-/** How many decision rows a session node shows. */
+/** How many decision rows a session shows at once. */
 const VISIBLE_DECISION_COUNT = 3;
 
 export type SessionEntry = {
@@ -94,7 +94,7 @@ export function waitingCount(model: CanvasModel): number {
  * oldest of the three first, newest at the bottom.
  *
  * The model stores decisions newest-first, which is the right shape for "give
- * me the latest N" and the wrong one for reading. A node is read top to bottom
+ * me the latest N" and the wrong one for reading. A list is read top to bottom
  * like a log, so the newest belongs at the bottom — where the eye already is
  * after reading the two above it, and where the next one will appear.
  *
@@ -113,8 +113,8 @@ export function visibleDecisions(session: Session): readonly Decision[] {
  * flagging it would put a call for help on every session that is simply busy.
  * What you owe an answer to is the newest turn of a session that has stopped.
  *
- * It refuses to look past the three rows the node draws: flagging a node for
- * something you cannot see on it sends you looking for a row that is not there.
+ * It refuses to look past the three rows a session shows: flagging one for
+ * something you cannot see sends you looking for a row that is not there.
  */
 export function decisionAwaitingYou(session: Session): Decision | null {
   if (session.status !== 'waiting') {

@@ -2525,8 +2525,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                     project heading groups the list, and a
                                     second one on every row under it repeated
                                     the same mark down a narrow column and took
-                                    width from the title. The canvas root node
-                                    is now the only surface that draws it, and
+                                    width from the title. The tab strip is
+                                    now the only surface that draws it, and
                                     the `s` chord still picks it. */}
                                   <span
                                     data-row-title
