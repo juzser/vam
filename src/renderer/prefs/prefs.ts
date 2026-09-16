@@ -1932,7 +1932,30 @@ export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: 
 ];
 
 /**
- * A COLOUR THE OPERATOR MAY STILL HAVE, AND MAY NO LONGER SET.
+ * THE DEEPEST SURFACE, WHICH IS NOT A SWATCH AND IS NOT UNSETTABLE EITHER.
+ *
+ * One spelling, because three lists below need this token and three lists of
+ * one string is how two of them stop agreeing. What each of them means by it
+ * is deliberately different, and the difference is the whole point:
+ *
+ *  - `RETIRED_TOKENS`: not in the grid. The operator asked for the swatch to
+ *    go ("the ground setting is unnecessary") and it stays gone.
+ *  - `TEMPLATE_TOKENS`: a whole-palette preset MAY write it. Picking one
+ *    colour by hand and choosing a palette someone measured end to end are
+ *    two different acts, and the operator asked to stop doing the first, not
+ *    the second.
+ *  - `PALETTE_KEYS`: may appear in a stored bucket, because it always could.
+ *
+ * The constant was already here, declared beside `LEGACY_GROUND_TOKEN` for the
+ * rename migration, while the retired-token list 80 lines above it typed the
+ * string out again. Two spellings of one token in one file is the drift this
+ * repo keeps paying for, so the declaration moved up to the first place that
+ * needs it and every list below now derives from it.
+ */
+const GROUND_TOKEN = '--vam-ground';
+
+/**
+ * A COLOUR THE OPERATOR MAY STILL HAVE, AND MAY NO LONGER PICK BY HAND.
  *
  * `--vam-ground` left the swatch grid when the operator asked for it to; it
  * did not leave the stylesheet. So a stored override for it is still read,
@@ -1941,12 +1964,36 @@ export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: 
  * migration may not do (`LEGACY_GROUND_TOKEN` below argues the same case for
  * the rename before this one, and that rename now lands here).
  *
+ * "MAY NO LONGER SET" WAS TOO STRONG, and this comment used to say it. What
+ * left was the SWATCH -- a control for picking one colour on its own, which is
+ * the thing the operator called unnecessary and which is still gone. A
+ * template is not that control: it writes a whole palette that was measured as
+ * a whole, and `--vam-ground` is the token that decides whether a dark theme
+ * is dark. `TEMPLATE_TOKENS` below is that permission, held apart from this
+ * list so neither can quietly become the other.
+ *
  * The cost, stated rather than discovered: with no swatch there is no
- * per-token reset either, so "reset <theme> colours" is the only way back.
- * That button clears the whole bucket, retired entries included, so the
- * colour is undoable -- just not individually.
+ * per-token reset either, so "reset <theme> colours" is the only way back --
+ * or the `default` template, which clears the same bucket from the same row
+ * the palette was chosen in, and is the nearer of the two to hand.
  */
-const RETIRED_TOKENS: readonly string[] = ['--vam-ground'];
+const RETIRED_TOKENS: readonly string[] = [GROUND_TOKEN];
+
+/**
+ * WHAT A WHOLE-PALETTE TEMPLATE MAY WRITE, which is the swatch grid plus the
+ * ground and nothing else.
+ *
+ * NOT `PALETTE_KEYS`, and the difference matters the next time something is
+ * retired: that set is "anything that may sit in a stored bucket", which will
+ * grow every time a swatch is withdrawn. A token leaving the grid must not
+ * thereby become something a preset may paint -- that would make every future
+ * retirement a silent widening of what a template can do. This list is a
+ * decision, so it is written as one.
+ */
+export const TEMPLATE_TOKENS: readonly string[] = [
+  ...PALETTE_TOKENS.map((entry) => entry.token),
+  GROUND_TOKEN,
+];
 
 /** Every token that may appear in a stored bucket: offered plus retired. */
 const PALETTE_KEYS = new Set([...PALETTE_TOKENS.map((entry) => entry.token), ...RETIRED_TOKENS]);
@@ -1991,7 +2038,6 @@ const SPLITS: readonly (readonly [string, string])[] = [
  * everything downstream sees exactly one name.
  */
 const LEGACY_GROUND_TOKEN = '--vam-canvas';
-const GROUND_TOKEN = '--vam-ground';
 
 /**
  * What may be written into a custom property.
