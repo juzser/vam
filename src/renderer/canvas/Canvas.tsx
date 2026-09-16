@@ -130,6 +130,7 @@ import {
   renameGroup,
   setDefaultProvider,
   setDetailTab,
+  setFilesTreeWidth,
   setFocusView,
   setGroupCollapsed,
   setGroupIcon,
@@ -5636,6 +5637,15 @@ function CanvasInner({
         // every pane rather than per-session.
         defaultProvider: prefs.defaultProvider,
         onSetDefaultProvider: (id) => savePrefs(setDefaultProvider(prefs, id)),
+        // The Files tab's tree width, and the way back. GLOBAL for the same
+        // reason `defaultProvider` above it is passed identically to every
+        // pane: one `FilesTab` per split leaf, and an arrangement the
+        // operator would otherwise have to re-make on each one. Written only
+        // by a finished gesture -- a drag's own `onPointerUp` or one arrow
+        // press -- never on a render, which is the rule
+        // `prefs/files-tree-width.ts` exists to hold.
+        filesTreeWidth: prefs.filesTreeWidth,
+        onFilesTreeWidth: (width: number) => savePrefs(setFilesTreeWidth(prefs, width)),
         sending: paneWriting,
         // The refusal is the focused pane's too, and for the same reason:
         // a background pane cannot have answered the key it would be

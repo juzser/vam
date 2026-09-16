@@ -58,7 +58,15 @@
  * reaches the DOM as an element or as characters, and where the boxes of three
  * toolbar buttons fall against the view pill -- which is a rectangle question
  * and not a click one, because a control can be half-buried and still take
- * every click aimed at its centre.
+ * every click aimed at its centre,
+ * and -- since the file tree learned to be dragged -- whether a column that
+ * OVERFLOWS really stops at the pane and really scrolls (a `scrollTop` that
+ * moves under a real wheel, which no unit environment can produce), whether
+ * the thumb that says so appears only when there is something to scroll, and
+ * what a pointer-captured drag does to two columns' rectangles at both
+ * extremes and at vam's narrowest legal pane -- including the one act that
+ * proves the container clamp never writes back, which is looking at another
+ * tab and coming back, because a `display: none` tree measures 0px.
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -103,6 +111,7 @@ const GUARDS = [
   'agents-navigator-shots',
   'files-tab-keyboard-shots',
   'files-markdown-shots',
+  'files-tree-resize-shots',
   'terminal-ime-shots',
 ];
 
