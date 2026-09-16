@@ -59,7 +59,7 @@ export class SmithUnreachableError extends Error {
   }
 }
 
-export type SmithClientOptions = {
+type SmithClientOptions = {
   readonly baseUrl: string;
   /** Injected so the tests can drive it without a network or a server. */
   readonly fetch?: typeof globalThis.fetch;

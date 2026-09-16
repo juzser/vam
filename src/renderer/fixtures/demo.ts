@@ -1,5 +1,5 @@
 /**
- * The canvas from docs/design/canvas-layout.md §3, as data.
+ * The canvas, as data.
  *
  * This exists because vam's real feed waits on two capabilities its data
  * source has not shipped yet: pushed updates over SSE, and a heartbeat from

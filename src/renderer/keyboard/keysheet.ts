@@ -72,7 +72,7 @@ export type ActionGroup = 'navigation' | 'session' | 'panes' | 'review' | 'view'
 
 export const GROUP_ORDER = ['navigation', 'session', 'panes', 'review', 'view'] as const;
 
-export const GROUP_TITLES: Readonly<Record<ActionGroup, string>> = {
+const GROUP_TITLES: Readonly<Record<ActionGroup, string>> = {
   navigation: 'move around',
   session: 'this session',
   panes: 'panes & focus',
@@ -385,7 +385,7 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   cancel: { group: 'view', label: () => 'close / cancel' },
 };
 
-export type SheetRow = {
+type SheetRow = {
   readonly keys: string;
   readonly label: string;
   /**
@@ -406,7 +406,7 @@ export type SheetRow = {
    */
   readonly dead: string | null;
 };
-export type SheetGroup = {
+type SheetGroup = {
   readonly group: ActionGroup;
   readonly title: string;
   readonly rows: readonly SheetRow[];
