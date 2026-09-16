@@ -320,9 +320,10 @@ export const UNSERVED: Partial<Record<keyof SourceCapabilities | 'files', string
     'the remote endpoint does not expose the terminal surface: read, send, answer ' +
     'and resize type into a running agent and need their own rate limit and decision',
   files:
-    'the remote endpoint carries no file-read, file-write or file-listing route: ' +
-    'arbitrary file access over a network is at least as serious as typing into a ' +
-    'running agent, and it gets no route, no grant and no follow-up',
+    'the remote endpoint carries no file-read, file-write, file-listing or ' +
+    'reference-resolving route: arbitrary file access over a network is at least ' +
+    'as serious as typing into a running agent, and it gets no route, no grant ' +
+    'and no follow-up',
 };
 
 /** The capabilities that live behind the write routes, registered or not. */

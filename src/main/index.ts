@@ -22,8 +22,10 @@ import { registerMainErrorIpc } from './errors/ipc.js';
 import { recordMainFailure } from './errors/log.js';
 import { registerFilesIpc } from './files/ipc.js';
 import { registerFilesListIpc } from './files/list-ipc.js';
+import { registerFilesResolveIpc } from './files/resolve-ipc.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { registerIssueIpc } from './issue/ipc.js';
+import { registerLinkIpc } from './link/ipc.js';
 import { applyApplicationMenu } from './menu.js';
 import { isSameOrigin } from './origin.js';
 import { createQuitGuard, registerUnsavedIpc } from './quit/guard.js';
@@ -606,6 +608,17 @@ void app.whenReady().then(async () => {
   registerIssueIpc(ipcMain, async (url) => {
     await shell.openExternal(url);
   });
+  // THE ONE CHANNEL THAT TAKES A DESTINATION FROM THE RENDERER, and the
+  // allowlist in `./link/ipc.ts` is what pays for it: `http:`/`https:` only,
+  // parsed by `new URL` on THIS side of the boundary, whatever the page
+  // believed. The addresses are an agent's own, written into its answer --
+  // there is no key for main to map onto a constant the way `remoteOpenLink`
+  // and `issueOpen` above both can. The window's deny-by-default navigation
+  // policy (`registerNavigationPolicy`) is untouched: nothing here navigates
+  // this window anywhere, it hands a URL to the operating system's browser.
+  registerLinkIpc(ipcMain, async (url) => {
+    await shell.openExternal(url);
+  });
   // The Terminal tab's only route to tmux. Registered unconditionally, but it
   // spawns nothing until the renderer asks -- and the renderer asks only while
   // the tab is open, so a closed tab costs a process nothing.
@@ -675,6 +688,13 @@ void app.whenReady().then(async () => {
     (path) => realpath(path),
     (dir) => readdir(dir, { withFileTypes: true }),
   );
+  // `src/foo/bar.ts:42`, as an AGENT wrote it, turned into an absolute path --
+  // authorised against THAT session's own directory alone rather than against
+  // every live root the way `registerFilesIpc` is, because nobody typed this
+  // path. Same `resolveSessionCwd` and the same real `realpath` as the listing
+  // above, so a `..`, a look-alike sibling directory and a symlink out of the
+  // project are all caught against the real disk. See `./files/resolve-ipc.ts`.
+  registerFilesResolveIpc(ipcMain, resolveSessionCwd, (path) => realpath(path));
   // The file-editor tab's LAST channel, and the only one that carries no path
   // at all: how many of its buffers are unsaved, and what they are called.
   // Registered here rather than in `createWindow` because the guard it feeds

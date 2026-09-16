@@ -47,7 +47,12 @@ const find = (root: HTMLElement, sel: string): Element =>
     throw new Error(`no ${sel}`);
   })();
 
-const HINT = 'p span span'; // the `(href)` hint, the smallest thing `out` draws
+// The `(href)` hint, the smallest thing `out` draws. Found by its own
+// attribute rather than by `p span span`: the link became a BUTTON with the
+// address beside it (see `OUT_MARKDOWN`'s `a:`), so the structural selector
+// stopped matching while the claim it was making -- 10.5/12 em -- was
+// untouched.
+const HINT = 'p [data-out-address]';
 
 describe('every size inside out is relative, so one setting moves them all', () => {
   it('leaves no element behind in pixels', () => {

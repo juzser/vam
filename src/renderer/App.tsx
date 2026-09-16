@@ -21,6 +21,7 @@ import type {
   DialogApi,
   FilesApi,
   IssueApi,
+  LinkApi,
   MainErrorsApi,
   TerminalApi,
   UpdateApi,
@@ -64,6 +65,14 @@ declare global {
        * because its text is selectable.
        */
       readonly issue: IssueApi;
+      /**
+       * Opens an address an AGENT wrote, in the operator's own browser -- the
+       * ONE member that names a destination, and the allowlist that pays for
+       * it lives in main (`CHANNELS.linkOpen`). Desktop-only: in the browser
+       * build a link in a transcript stays what it has always been, an address
+       * printed beside its text, and the control says so when pressed.
+       */
+      readonly link: LinkApi;
       readonly terminal: TerminalApi;
       /** Electron's `showOpenDialog`; the browser build has no picker at all. */
       readonly dialog: DialogApi;

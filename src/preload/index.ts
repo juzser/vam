@@ -17,6 +17,7 @@ import {
   createDialogApi,
   createFilesApi,
   createIssueApi,
+  createLinkApi,
   createMainErrorsApi,
   createPrefsBridge,
   createPreloadApi,
@@ -38,6 +39,11 @@ contextBridge.exposeInMainWorld('api', {
   // Opens a PREFILLED issue form in the operator's own browser, and posts
   // nothing. Takes text, never a location -- see `CHANNELS.issueOpen`.
   issue: createIssueApi(ipcRenderer),
+  // The address an AGENT wrote, handed to the operating system's browser --
+  // and the only member that names a destination. The allowlist that pays for
+  // that lives in main (`src/main/link/ipc.ts`), never here: this forwarder
+  // decides nothing, so nothing about what opens depends on it.
+  link: createLinkApi(ipcRenderer),
   terminal: createTerminalApi(ipcRenderer),
   dialog: createDialogApi(ipcRenderer),
   // The file-editor tab's read and write, authorised against every live
