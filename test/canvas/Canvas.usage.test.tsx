@@ -22,7 +22,7 @@ const EMPTY: CanvasModel = { projects: [] };
 const usageCell = () => document.querySelector('[data-usage]');
 
 beforeAll(() => {
-  // ReactFlow measures with APIs happy-dom does not implement.
+  // The rendered session panes measure with APIs happy-dom does not implement.
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}

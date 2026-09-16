@@ -3,8 +3,8 @@
 /**
  * Filtering has ONE home, and it is the sidebar.
  *
- * The status pills (All / Running / Needs you / Done) used to be an
- * `@xyflow/react` `<Panel position="top-left">` floating over the canvas.
+ * The status pills (All / Running / Needs you / Done) used to be a floating
+ * panel pinned to the canvas's top-left corner.
  * They now live in a popover hung off a control beside the sidebar's search
  * box (operator request: "thêm icon filter cạnh ô search ở sidebar, khi
  * toggle sẽ có popover để filter các session trong sidebar").

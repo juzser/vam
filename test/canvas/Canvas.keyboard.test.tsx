@@ -250,9 +250,9 @@ function keyOn(element: Element, key: string, modifiers: KeyboardEventInit = {})
 }
 
 beforeAll(() => {
-  // ReactFlow measures with APIs happy-dom does not implement. The nodes carry
-  // explicit width/height, so navigation does not depend on what these return —
-  // they only need to exist so the renderer does not throw.
+  // The rendered session panes read layout APIs happy-dom does not implement.
+  // The panes carry explicit width/height, so navigation does not depend on
+  // what these return — they only need to exist so the renderer does not throw.
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}
@@ -1017,7 +1017,7 @@ describe('renaming, icons and closing', () => {
       screen.getByText('clear icon').click();
     });
     // It says "on this machine", not "not saved": factory having no icon route
-    // was never the point — §3 says this is per-user state that must NOT reach
+    // was never the point — this is per-user state that must NOT reach
     // the event log.
     expect(screen.getByText(/on this machine/)).toBeTruthy();
     expect(iconPicker()).toBeNull();
