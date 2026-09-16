@@ -83,7 +83,15 @@
  * whether the light theme really remaps the eight rather than reproducing
  * them, what a glyph's rectangle does to the name beside it, and whether the
  * sentence a refusing control owes has a box on screen rather than only a
- * value in a function.
+ * value in a function,
+ * and -- since an agent's links became controls -- whether the SHIPPED BUNDLE
+ * really draws a link as a button and leaves no anchor in the pane (a claim
+ * about the built page, which the component's own unit tests cannot make),
+ * whether the address beside it is PAINTED rather than merely present,
+ * whether a refused scheme puts a sentence on screen with a box of its own,
+ * and whether jumping to `path:line` really SCROLLS the editor there --
+ * computed from the textarea's own line height and viewport, both of which
+ * are 0 or `''` in happy-dom, where the claim cannot be asked at all.
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -133,6 +141,7 @@ const GUARDS = [
   'sidebar-tree-shots',
   'terminal-chrome-shots',
   'tree-icon-shots',
+  'out-links-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

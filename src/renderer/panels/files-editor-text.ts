@@ -193,3 +193,27 @@ export function relativeLabel(root: string, path: string): string {
   const prefix = `${base}/`;
   return path.startsWith(prefix) ? path.slice(prefix.length) : path;
 }
+
+/**
+ * WHERE LINE `line` BEGINS, as a character offset into `text` -- what the
+ * caret is set to when an agent's `src/foo.ts:42` is pressed.
+ *
+ * 1-BASED, because every editor, every compiler and every agent counts that
+ * way, and the one place a 0 could come from (a model writing `:0`) is refused
+ * before it ever reaches here (`src/shared/file-ref.ts`). It is still clamped
+ * rather than trusted: this takes a number out of somebody else's text, and a
+ * caret set past the end of a `<textarea>` is a silent scroll to nowhere.
+ *
+ * `\r\n` NEEDS NO SPECIAL CASE and that is worth stating rather than
+ * rediscovering: splitting on `\n` leaves the `\r` at the END of the previous
+ * line, so the offset after it is still the first character of the next one.
+ */
+export function lineStartOffset(text: string, line: number): number {
+  const lines = text.split('\n');
+  const wanted = Math.min(Math.max(Math.trunc(line), 1), lines.length);
+  let at = 0;
+  for (let i = 0; i < wanted - 1; i += 1) {
+    at += (lines[i] ?? '').length + 1;
+  }
+  return at;
+}

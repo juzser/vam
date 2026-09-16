@@ -134,7 +134,7 @@ import {
 } from '../prefs/files-tree-width.js';
 import { PANE_RESIZE_STEP } from '../prefs/panes.js';
 import type { SourceError } from '../sources/port.js';
-import { applyTab, isMarkdownPath, relativeLabel } from './files-editor-text.js';
+import { applyTab, isMarkdownPath, lineStartOffset, relativeLabel } from './files-editor-text.js';
 import { FORMAT_OFFER, formatFile } from './files-format.js';
 import { type EditorLang, highlightEditor, highlightLangFor } from './files-highlight.js';
 import { FileRowIcon } from './files-icons.js';
@@ -142,7 +142,7 @@ import { EDITOR_KEYS, type FileTreeRow, fileTreeRows, resolveTreeKey } from './f
 import { SYNTAX_CLASS } from './highlight.js';
 import { Note } from './Note.js';
 import { OverlayScroll } from './OverlayScroll.js';
-import { OUT_MARKDOWN } from './out-markdown.js';
+import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { type PointerDragHandlers, usePointerDrag } from './pane-drag.js';
 import {
   encodeUnsaved,
@@ -229,6 +229,28 @@ const TREE_WIDTH = 'w-[38%] min-w-[7.5rem] max-w-[13.5rem]';
  *  handles do not teach an operator's hands two different numbers. */
 const TREE_JUMP_MULTIPLIER = 4;
 
+/**
+ * "OPEN THIS FILE, AT THIS LINE" -- the one thing outside this tab that can
+ * drive it, and it arrives already authorised.
+ *
+ * A REQUEST, NOT A SELECTION, exactly as `DetailPanel.tsx`'s `tabRequest` is,
+ * and a fresh object per press for the same reason: asking twice for the same
+ * file is two asks, which a `{path, line}` compared by value could not say.
+ *
+ * IT CARRIES THE SESSION IT WAS RESOLVED FOR. The path came out of main
+ * authorised against ONE session's working directory (`resolve-ipc.ts`), and
+ * this tab keeps its open file per session -- so a request that arrives after
+ * the operator has walked to another session is dropped rather than filed
+ * under the session now showing.
+ */
+export type FileOpenRequest = {
+  readonly sessionId: string;
+  /** Absolute, already `realpath`-resolved by main. */
+  readonly path: string;
+  /** 1-based. See `src/shared/file-ref.ts`. */
+  readonly line: number;
+};
+
 export type FilesTabProps = {
   /**
    * `true` while another tab is showing. NOT unmounted — see this file's own
@@ -304,6 +326,12 @@ export type FilesTabProps = {
    * times a second is sixty `localStorage` writes for one decision.
    */
   readonly onFilesTreeWidth: ((width: number) => void) | undefined;
+  /**
+   * A file to open, named by something outside this tab -- today, a
+   * `path:line` control in an agent's own answer (`out-markdown.tsx`).
+   * `null` at rest, and `undefined` from any caller that cannot produce one.
+   */
+  readonly openRequest?: FileOpenRequest | null;
 };
 
 type SaveState =
@@ -351,6 +379,7 @@ export function FilesTab({
   reserveCornerHeight,
   filesTreeWidth,
   onFilesTreeWidth,
+  openRequest = null,
 }: FilesTabProps) {
   const [buffers, setBuffers] = useState<Record<string, Buffer>>({});
   const [activeBySession, setActiveBySession] = useState<Record<string, string | null>>({});
@@ -1045,6 +1074,74 @@ export function FilesTab({
     },
     [openFile],
   );
+
+  /**
+   * THE LINE A REQUEST ASKED FOR, held until the file is actually there to
+   * put a caret in.
+   *
+   * It cannot ride on `pendingSelection` above: that one is applied and
+   * CLEARED by the very next render, which is right for a Tab keystroke (the
+   * text is already on screen) and wrong here -- a file opened for the first
+   * time spends one or more renders in `loading`, with no `<textarea>` to
+   * aim at, and a selection cleared during those is a caret that silently
+   * never moved. This one survives until the buffer is editable, and gives up
+   * the moment the buffer turns out to be something a caret cannot go into --
+   * the same bargain `wantEditorFocus` makes just above.
+   */
+  const pendingLine = useRef<{ path: string; line: number } | null>(null);
+
+  /**
+   * SOMEBODY OUTSIDE THIS TAB NAMED A FILE. The path arrived authorised
+   * (`main/files/resolve-ipc.ts`) and is opened through the SAME `openFile`
+   * a tree row goes through -- never a second path into the editor, which is
+   * what keeps an already-open buffer's unsaved text from being re-read out
+   * from under the operator.
+   *
+   * Keyed on the request OBJECT alone. `openFile` is a `useCallback` over the
+   * session id, so listing it too would only re-run this for a request the
+   * operator pressed once -- `DetailPanel.tsx`'s own `tabRequest` effect
+   * carries the same scar.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a request is an act, not a value to re-apply
+  useEffect(() => {
+    if (openRequest === null || sessionId === null) return;
+    // A request resolved for another session is not this tab's to honour --
+    // see `FileOpenRequest`.
+    if (openRequest.sessionId !== sessionId) return;
+    setNote(null);
+    setCursorPath(openRequest.path);
+    pendingLine.current = { path: openRequest.path, line: openRequest.line };
+    wantEditorFocus.current = true;
+    openFile(openRequest.path);
+  }, [openRequest]);
+
+  /**
+   * Puts the caret on the requested line once there is a textarea holding the
+   * file, and scrolls it to the middle of the view.
+   *
+   * THE SCROLL IS SEPARATE FROM THE CARET because a `<textarea>` does not
+   * scroll for a programmatic `setSelectionRange` -- only for typing. Line
+   * height is read off the element rather than assumed: this editor's own
+   * `leading` is a token, and a constant here would be a second copy of it
+   * that drifts the first time the type scale moves. A browser that answers
+   * something unmeasurable (happy-dom answers `''`) leaves the caret right
+   * and the scroll alone, which is the safe half to lose.
+   */
+  useLayoutEffect(() => {
+    const pending = pendingLine.current;
+    if (pending === null) return;
+    if (pending.path !== activePath) return;
+    const buffer = buffers[pending.path];
+    if (buffer?.kind === 'loading') return;
+    pendingLine.current = null;
+    const area = textareaRef.current;
+    if (area === null || buffer?.kind !== 'editable') return;
+    const at = lineStartOffset(buffer.content, pending.line);
+    area.setSelectionRange(at, at);
+    const lineHeight = Number.parseFloat(getComputedStyle(area).lineHeight);
+    if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
+    area.scrollTop = Math.max(0, (pending.line - 1) * lineHeight - area.clientHeight / 2);
+  });
 
   const toggleDir = useCallback((path: string, open: boolean) => {
     setNote(null);
@@ -1741,7 +1838,14 @@ function MarkdownPreview({
       onKeyDown={onKeyDown}
       className="vam-no-scrollbar flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto rounded-[9px] border border-line bg-panel px-3 py-2 break-words focus-visible:border-line-strong focus-visible:outline-none"
     >
-      <Markdown remarkPlugins={[remarkGfm]} components={OUT_MARKDOWN}>
+      {/* The same `urlTransform` the transcript uses, for the same reason:
+          one scheme list, vam's own, strictly narrower than react-markdown's
+          default. See `OUT_URL_TRANSFORM`. */}
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        components={OUT_MARKDOWN}
+        urlTransform={OUT_URL_TRANSFORM}
+      >
         {content}
       </Markdown>
     </section>

@@ -59,3 +59,17 @@ export type FileListResult = {
   /** `true` once the walk's own cap was reached and it stopped early. */
   readonly truncated: boolean;
 };
+
+/**
+ * What `CHANNELS.filesResolve` answers with, on success: one absolute path and
+ * the line the agent pointed at. See `resolve-ipc.ts`.
+ *
+ * The path is the `realpath`-resolved one -- what an `open` would actually
+ * touch -- so the Files tab keys its buffer by the same string every other
+ * files channel uses, rather than by whatever the agent typed.
+ */
+export type FileRefTarget = {
+  readonly path: string;
+  /** 1-based, as every editor counts. See `src/shared/file-ref.ts`. */
+  readonly line: number;
+};

@@ -27,6 +27,7 @@ import type { MainFailureEvent } from '../main/errors/log.js';
 import type {
   FileListResult,
   FileReadResult,
+  FileRefTarget,
   FileSignature,
   FileWriteResult,
 } from '../main/files/types.js';
@@ -42,6 +43,7 @@ import type { SourceError } from '../renderer/sources/port.js';
 import type { AgentWork } from '../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.js';
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
+import type { LinkOutcome } from '../shared/link.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
 import type { PaneKey, PaneSendResult, PaneView } from '../shared/terminal.js';
 import type { UpdateStatus } from '../shared/update.js';
@@ -307,6 +309,31 @@ export function createIssueApi(ipc: InvokerLike): IssueApi {
 }
 
 /**
+ * The bridge's link member: the address an agent wrote, and what became of it.
+ *
+ * THE ONE MEMBER THAT NAMES A DESTINATION, against the rule `issue.open`
+ * directly above exists to keep. `CHANNELS.linkOpen` carries the whole
+ * argument; what matters at this seam is that this forwarder decides NOTHING.
+ * It does not check the scheme, it does not normalise the address and it does
+ * not know which schemes are allowed -- main runs `checkLink` itself on the
+ * far side, so a renderer that skipped its own check, or a preload rewritten
+ * to skip this comment, cannot widen what opens.
+ *
+ * Forwards straight through: the channel answers a bare `LinkOutcome`, not an
+ * `IpcResult`, because a refusal here is a SENTENCE the control draws beside
+ * itself rather than an error to reject with.
+ */
+export type LinkApi = {
+  open(url: string): Promise<LinkOutcome>;
+};
+
+export function createLinkApi(ipc: InvokerLike): LinkApi {
+  return {
+    open: (url) => ipc.invoke(CHANNELS.linkOpen, url) as Promise<LinkOutcome>,
+  };
+}
+
+/**
  * The bridge's terminal member: one read, answered by a bare `PaneView`.
  *
  * Asked by PROJECT ID. The pairing between a session and the tmux session vam
@@ -441,6 +468,16 @@ export type FilesApi = {
    */
   list(sessionId: string): Promise<FileListResult>;
   /**
+   * `src/foo/bar.ts:42` -- an AGENT's own reference -- turned into an absolute
+   * path and a line. Takes the session id for `list`'s reason, and authorises
+   * against that session's directory ALONE: nobody typed this path, so it may
+   * not reach the wider root set `read`/`write` are checked against. Rejects
+   * with the port's `SourceError`, whose message is the sentence the control
+   * shows when a reference points outside the project or at nothing at all.
+   * See `src/main/files/resolve-ipc.ts`.
+   */
+  resolve(sessionId: string, reference: string): Promise<FileRefTarget>;
+  /**
    * HOW MUCH UNSAVED TEXT THE FILE EDITOR IS HOLDING, pushed whenever that
    * changes so `app.on('before-quit')` has something true to say before Cmd-Q
    * throws it away -- the one exit `beforeunload` cannot reach, because it is
@@ -470,6 +507,8 @@ export function createFilesApi(ipc: InvokerLike): FilesApi {
   return {
     read: (path) => unwrap<FileReadResult>(ipc.invoke(CHANNELS.filesRead, path)),
     list: (sessionId) => unwrap<FileListResult>(ipc.invoke(CHANNELS.filesList, sessionId)),
+    resolve: (sessionId, reference) =>
+      unwrap<FileRefTarget>(ipc.invoke(CHANNELS.filesResolve, sessionId, reference)),
     write: (path, content, baseSignature) =>
       unwrap<FileWriteResult>(ipc.invoke(CHANNELS.filesWrite, path, content, baseSignature)),
     reportUnsaved: (report) => {

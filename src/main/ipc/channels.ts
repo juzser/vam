@@ -127,6 +127,42 @@ export const CHANNELS = {
    * Answers a bare boolean: did a browser open. Same shape as `updateOpen`.
    */
   remoteOpenLink: 'vam:remote:open-link',
+  /**
+   * "Open the link this agent wrote" -- THE ONE CHANNEL ON THIS BRIDGE THAT
+   * TAKES A DESTINATION FROM THE RENDERER, and it owes the sharpest argument
+   * here because `remoteOpenLink` directly above and `issueOpen` further up
+   * both exist by NOT taking one.
+   *
+   * Their rule is right and is unchanged: a channel that takes a URL is a
+   * navigate-anywhere capability handed to the least trusted process, so
+   * wherever main CAN own the destination it must. It cannot here. The
+   * addresses in a transcript are whatever a model typed into its answer;
+   * there is no key to map onto a constant, and what vam shipped instead was a
+   * link that did nothing at all -- the operator selecting an address out of a
+   * panel and pasting it into a browser by hand, which is the same defect
+   * `issueOpen` was filed about.
+   *
+   * SO THE ALLOWLIST IS WHAT PAYS FOR IT, AND IT LIVES IN MAIN.
+   * `src/shared/link.ts` is the single decision -- `http:` and `https:`, an
+   * address parsed by `new URL` and never matched as a string, no credentials
+   * hiding the host -- and `src/main/link/ipc.ts` runs it on THIS side of the
+   * boundary, on every call, whatever the renderer believed. `javascript:`,
+   * `data:`, `file:` and every custom app scheme are refused here; the
+   * renderer running the same check first is a convenience whose deletion
+   * would change nothing about what can be opened.
+   *
+   * Answers a bare `LinkOutcome` rather than an `IpcResult`, like
+   * `updateCheck` and `terminalRead`: the type carries its own refusal branch,
+   * and that branch is a SENTENCE to draw beside the control the operator
+   * pressed -- a link that cannot be opened has to say why, or it is the
+   * do-nothing control this channel was added to end.
+   *
+   * NOT A MEMBER OF `PreloadSourceApi`, so `remote/server.ts` has no route to
+   * it: a paired phone has a browser of its own, and "open this URL" asked of
+   * THIS machine by a remote device is a different act that would need its own
+   * decision.
+   */
+  linkOpen: 'vam:link:open',
   updateCheck: 'vam:update:check',
   /**
    * The same question, asked AGAIN, because a person pressed a button.
@@ -269,6 +305,31 @@ export const CHANNELS = {
    * because the payload is names instead of bytes.
    */
   filesList: 'vam:files:list',
+  /**
+   * `src/foo/bar.ts:42`, as an AGENT wrote it, turned into an absolute path
+   * the Files tab may open -- or into a refusal in words.
+   *
+   * KEYED BY SESSION ID for `filesList`'s reason, and with a sharper one of
+   * its own: the reference belongs to the session whose answer it was written
+   * in, and `src/index.ts` names a different file in each project vam is
+   * watching. So this channel authorises against THAT session's own working
+   * directory alone, not against every live root the way `filesRead` does --
+   * `filesRead` is right to accept any of them, because the operator typed
+   * that path, and this is right not to, because nobody typed this one.
+   *
+   * IT GRANTS NO STANDING. The path it answers with is re-authorised from
+   * scratch the moment it is handed to `filesRead`, exactly as a path out of
+   * `filesList` is. What it adds is containment for a string nobody typed --
+   * resolved and compared as canonical paths through the real filesystem, so
+   * a `..`, a sibling directory whose name merely begins with the root's, and
+   * a symlink pointing out of the project are all refused (`resolve-ipc.ts`).
+   *
+   * THE SAME DESKTOP-ONLY STANDING as `filesRead`/`filesWrite`/`filesList`,
+   * covered by the SAME `UNSERVED.files` entry in `remote/server.ts`: turning
+   * a name into an authorised path is the listing question asked one reference
+   * at a time, and it gets no route for the same reason listing gets none.
+   */
+  filesResolve: 'vam:files:resolve',
   /**
    * HOW MUCH UNSAVED TEXT THE FILE EDITOR IS HOLDING -- a count and a list of
    * labels, pushed by the renderer whenever that changes and read by

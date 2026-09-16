@@ -94,6 +94,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -140,7 +141,7 @@ import {
 } from '../prefs/submit-key.js';
 import { useAgentWorkReader } from '../sources/agent-work-reader.js';
 import { useHistoryReader } from '../sources/history-reader.js';
-import { describeFailure } from '../sources/port.js';
+import { describeFailure, type SourceError } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { useAgentWork } from '../sources/useAgentWork.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
@@ -148,9 +149,10 @@ import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { copyText } from './clipboard.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import { type DictationHandle, dictationAvailable, startDictation } from './dictation.js';
-import { FilesTab } from './FilesTab.js';
+import { type FileOpenRequest, FilesTab } from './FilesTab.js';
 import { Note } from './Note.js';
-import { OUT_MARKDOWN } from './out-markdown.js';
+import { type OutActionResult, OutActionsProvider } from './out-actions.js';
+import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 import { TerminalTab } from './TerminalTab.js';
@@ -1903,7 +1905,7 @@ function noAnswerNote(
  * and `test/panels/out-font-size.test.tsx` both reach it at this path, and
  * this is the file whose name says what the map is FOR.
  */
-export { OUT_MARKDOWN };
+export { OUT_MARKDOWN, OUT_URL_TRANSFORM };
 
 /**
  * One answer: the machine-ish head it was built with, then its own markdown.
@@ -1952,7 +1954,16 @@ function OutText({ output }: { readonly output: string }) {
               </span>
             )}
             <div data-out-body className="flex min-w-0 flex-col gap-2">
-              <Markdown remarkPlugins={[remarkGfm]} components={OUT_MARKDOWN}>
+              {/* `urlTransform` is vam's own, and it is a NARROWING: see
+                  `OUT_URL_TRANSFORM`. react-markdown's default silently
+                  blanks four schemes and admits four others, which left this
+                  pane with two disagreeing lists and a refusal that could not
+                  name what it refused. */}
+              <Markdown
+                remarkPlugins={[remarkGfm]}
+                components={OUT_MARKDOWN}
+                urlTransform={OUT_URL_TRANSFORM}
+              >
                 {body}
               </Markdown>
             </div>
@@ -3977,6 +3988,90 @@ export function DetailPanel(props: DetailPanelProps) {
       pickTabRef.current(tabRequest.tab);
     }
   }, [tabRequest]);
+  /**
+   * WHAT A CONTROL INSIDE AN AGENT'S ANSWER CAN ASK THIS PANE FOR.
+   *
+   * Published through a context rather than threaded as props, and
+   * `out-actions.ts` owes the argument for that: `OUT_MARKDOWN` is a module
+   * constant because it is a react-markdown PROP, so a map rebuilt per render
+   * would re-render every answer in the column. The PROVIDER is here, per
+   * pane, because `openFileRef` is about THIS pane's session and THIS pane's
+   * Files tab -- two split panes showing two sessions must not share one.
+   */
+  const [fileOpenRequest, setFileOpenRequest] = useState<FileOpenRequest | null>(null);
+  const refSessionId = entry?.session.id ?? null;
+  const outActions = useMemo(
+    () => ({
+      /**
+       * The address is already parsed and already checked HERE (the control
+       * runs `checkLink` to decide how to draw itself); main parses and checks
+       * it again on its own side, which is where the guarantee is.
+       *
+       * ONLY ONE OF THE TWO SHELLS EVER REACHES THE BRIDGE, and it is worth
+       * saying out loud rather than leaving a reader to assume both do.
+       * `App.tsx` routes on `window.api !== undefined`: with it, the desktop
+       * canvas; without it, the browser shell (the demo and a paired phone
+       * alike), and the two are mutually exclusive. So this member answers for
+       * real in the Electron app, and everywhere else it answers the refusal
+       * below -- in words, never a press that does nothing.
+       *
+       * THAT LEAVES A PHONE WITHOUT A WAY TO OPEN A LINK, which is a real
+       * cost and not an oversight. A `window.open` fallback would work there
+       * (a phone browser has tabs; there is no application window to hijack),
+       * but it would put a call this repo denies by policy into a component
+       * that also runs inside Electron, where the denial is load-bearing --
+       * and the gate that keeps them apart would be one `undefined` check in
+       * the renderer, which is the least trusted process here. If the remote
+       * endpoint ever wants this, it should be decided for the phone
+       * deliberately, not inherited from a fallback nobody re-read.
+       */
+      openLink: async (url: string): Promise<OutActionResult> => {
+        const open = globalThis.window?.api?.link?.open;
+        if (open === undefined) {
+          return {
+            ok: false,
+            reason: 'the vam desktop app is what opens links; this build has no bridge to it.',
+          };
+        }
+        return await open(url);
+      },
+      /**
+       * THE REFERENCE CROSSES AS TEXT. Main resolves it against this session's
+       * own working directory and answers an absolute path, or refuses in the
+       * session's own words (`main/files/resolve-ipc.ts`) -- this pane never
+       * joins a root to a path, because string arithmetic cannot answer
+       * containment (`main/dialog/attach-image.ts` measured that).
+       *
+       * The tab is asked for only AFTER a path comes back. Switching first
+       * would land the operator on a Files tab showing nothing, with the
+       * reason drawn on the tab they just left.
+       */
+      openFileRef: async (reference: string): Promise<OutActionResult> => {
+        const resolve = globalThis.window?.api?.files?.resolve;
+        if (resolve === undefined || files !== true || refSessionId === null) {
+          return {
+            ok: false,
+            reason: 'the vam desktop app is what opens files; this build has no Files tab.',
+          };
+        }
+        try {
+          const target = await resolve(refSessionId, reference);
+          // A FRESH OBJECT every time: pressing the same reference twice is
+          // two asks. Same shape as `tabRequest` above, same reason.
+          setFileOpenRequest({ sessionId: refSessionId, path: target.path, line: target.line });
+          pickTabRef.current('Files');
+          return { ok: true };
+        } catch (reason) {
+          const error = reason as SourceError;
+          return {
+            ok: false,
+            reason: error.message ?? 'vam could not open that file.',
+          };
+        }
+      },
+    }),
+    [refSessionId, files],
+  );
   // Which tabs this source actually has. A withdrawn tab cannot stay SHOWING:
   // the operator can be on Terminal when focus moves to a session from a
   // source without one, and a tab bar with nothing selected over a pane
@@ -5176,7 +5271,12 @@ export function DetailPanel(props: DetailPanelProps) {
    * leaving it computed for no reader -- which is the rule `composerClaim`'s
    * own `word` field was already deleted under.
    */
-  return (
+  // THE PANE ITSELF, held as a value rather than returned directly, and that
+  // is about the DIFF rather than about the code: wrapping this JSX in the
+  // provider below pushes eleven hundred lines of unrelated markup one level
+  // deeper, the formatter rewrites every one of them, and the change ends up
+  // buried in its own reindentation. A wrapper should cost a wrapper.
+  const pane = (
     <aside
       data-action-pane={active ? 'active' : 'idle'}
       style={width === undefined ? undefined : { width }}
@@ -6010,6 +6110,10 @@ export function DetailPanel(props: DetailPanelProps) {
             // own comments above.
             filesTreeWidth={props.filesTreeWidth ?? null}
             onFilesTreeWidth={props.onFilesTreeWidth}
+            // "Open this file, at this line" -- from a `path:line` control in
+            // an agent's own answer, already resolved and authorised in main.
+            // See `outActions.openFileRef` above and `FileOpenRequest`.
+            openRequest={fileOpenRequest}
           />
         )}
       </div>
@@ -7058,6 +7162,11 @@ export function DetailPanel(props: DetailPanelProps) {
         })()}
     </aside>
   );
+
+  // THE PANE'S OWN ACTS, published to every control drawn inside an answer:
+  // the transcript's markdown AND the Files tab's markdown preview, which
+  // share one component map. See `out-actions.ts`.
+  return <OutActionsProvider value={outActions}>{pane}</OutActionsProvider>;
 }
 
 /**
