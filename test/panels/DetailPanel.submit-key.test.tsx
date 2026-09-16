@@ -23,7 +23,7 @@
  * "finishes the job" by routing those two branches through the pref goes red.
  */
 
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -103,7 +103,6 @@ function Harness({
 
 const q = (selector: string) => document.querySelector<HTMLElement>(selector);
 const box = () => q('textarea[aria-label="prompt to session"]') as unknown as HTMLTextAreaElement;
-const hint = () => q('[data-prompt-send-key]');
 
 /** Mount the composer under `mode`, and hand back the list of sends. */
 function composer(mode: PromptSubmitKey, over?: Partial<DetailPanelProps>): string[] {
@@ -313,71 +312,27 @@ describe('an IME composition Enter commits the candidate, it does not send', () 
 });
 
 /**
- * THE BOX SAYS WHICH KEY SENDS.
+ * THE BOX NO LONGER SAYS WHICH KEY SENDS, AND THAT IS THE OPERATOR'S CALL.
  *
- * Before this, `grep -rn "Enter to send\|Shift+Enter" src/` found nothing but a
- * source comment: the composer knew which key sent and showed silence. Adding a
- * swap without a caption would make that worse than silence — the operator
- * would have two possible behaviours and no way to see which one is live.
+ * RETIRED: `'changes the visible caption when the pref changes'`, `'carries the
+ * mode as a fact a guard can read, beside the words'`, `'says record, not send,
+ * where the source cannot deliver'` and `'costs no width while the box is not
+ * open for typing'`. All four were about `[data-prompt-send-key]`, the last
+ * caption on the row under the prompt input, and the row is gone: "remove the
+ * 'Esc to interrupt' shortcut under the prompt input. Nothing is ever displayed
+ * down there."
  *
- * THE ASSERTION IS THAT THE TEXT CHANGES, not that it reads a particular
- * sentence. A test that only checked the default wording would pass with the
- * whole feature reverted.
+ * WHAT IS NOT LOST WITH THEM. The pref is still a real behaviour and every test
+ * ABOVE is about that behaviour rather than about its caption: which keystroke
+ * sends in each mode, which one takes a newline, which one the two typeaheads
+ * keep, and what an IME composition does to all of it. `SUBMIT_KEY_LABELS` is
+ * still asserted by `test/prefs/prefs.submit-key.test.ts`, and still has a
+ * surface -- the Settings picker, where the key is chosen and named.
+ *
+ * WHAT IS LOST, said plainly: on the shipped key nothing on screen names the
+ * send key, and on the swapped key nothing on screen says it moved. That was
+ * already true on a desktop before this change (the caption had been narrowed
+ * to the deviation only, and then to nothing at all once the operator chose the
+ * shipped key); it is now true on a phone too. The operator asked for the
+ * place, not for one of its captions.
  */
-describe('the composer names its send key, and follows the pref', () => {
-  /**
-   * ON A PHONE, WHICH IS WHERE THIS CAPTION LIVES NOW.
-   *
-   * Operator: "of Enter-to-send and Mod-[-to-leave, only the leave one needs
-   * showing." On a desktop the send key is named twice over already -- the
-   * submit button above the row carries the verb and a `Note` -- so the row
-   * keeps only the key nothing else on screen performs. The phone has no
-   * leave hint to make room for and a return key that really is a preference,
-   * so the caption stays there, and every claim below is still a claim about
-   * it. `DetailPanel.test.tsx` holds the desktop half: no send caption there,
-   * and a leave caption that is still drawn.
-   */
-  const ON_A_PHONE = { phone: true } as const;
-
-  it('changes the visible caption when the pref changes', () => {
-    composer('enter', ON_A_PHONE);
-    const shipped = hint()?.textContent ?? '';
-    expect(shipped).toContain('Enter');
-    expect(shipped).not.toContain('Shift');
-
-    act(() => setActivePromptSubmitKey('shift-enter'));
-    const swapped = hint()?.textContent ?? '';
-    expect(swapped).toContain('Shift-Enter');
-    // The load-bearing line: the caption is a report about the pref, not a
-    // fixed string that happens to be true of the default.
-    expect(swapped).not.toBe(shipped);
-  });
-
-  it('carries the mode as a fact a guard can read, beside the words', () => {
-    composer('shift-enter', ON_A_PHONE);
-    expect(hint()?.getAttribute('data-prompt-send-key')).toBe('shift-enter');
-    act(() => setActivePromptSubmitKey('enter'));
-    expect(hint()?.getAttribute('data-prompt-send-key')).toBe('enter');
-  });
-
-  it('says record, not send, where the source cannot deliver', () => {
-    // The button's word is already per-source (`composerClaim`). A caption
-    // promising "send" over a source that only appends to a log would be the
-    // same lie one line lower.
-    composer('enter', { ...ON_A_PHONE, delivers: false });
-    expect(hint(), 'no caption at all — the box says nothing about its key').not.toBeNull();
-    expect(hint()?.textContent).toContain('record');
-    expect(hint()?.textContent).not.toContain('send');
-    cleanup();
-    composer('enter', { ...ON_A_PHONE, delivers: true });
-    expect(hint()?.textContent).toContain('send');
-  });
-
-  it('costs no width while the box is not open for typing', () => {
-    // Same gate as the `Esc → sidebar` hint beside it: the key that sends is
-    // the thing you need to know while you are typing, and nothing the rest of
-    // the time.
-    composer('enter', { composing: false });
-    expect(hint()).toBeNull();
-  });
-});

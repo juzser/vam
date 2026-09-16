@@ -248,6 +248,39 @@
      things. Its own name, like `cursor-ring` and `filter-badge` before it. */
   --color-danger: var(--vam-danger);
 
+  /* THE COMPOSER'S THREE MODES, one hue each. The operator asked for the mode
+     icon in the prompt block to be "filled with colour (for example auto is
+     yellow)" — until then the glyph was `ink-dim` in all three states and its
+     SHAPE was the only thing on screen that said which mode was current, which
+     is the channel an operator has to already know the key for.
+
+     OWN NAMES, LIKE `cursor-ring` AND `filter-badge` BEFORE THEM, and for the
+     reason those two record: a mode is not a session state. Auto and
+     `--color-waiting` land on the same amber, Manual and `--color-done` on the
+     same blue, and sharing the TOKEN would mean a status hue that had stopped
+     meaning a status — the sidebar's "this session needs you" and the
+     composer's "the agent decides its own next step" would move together the
+     next time either one is tuned. Sharing the VALUE is fine and deliberate:
+     these are the app's own hues, not three new ones, so the palette does not
+     grow a rung.
+
+     WHY THESE THREE. Auto is the operator's own pick, and amber is already
+     this app's "something is happening without you". Manual takes the blue,
+     the calm end of the same axis: nothing moves until a hand moves it. Plan
+     takes the violet, which is the one hue in the palette NO session state
+     spends (it exists for `--color-diff-file`), so the third mode cannot be
+     misread as a status the way a green would be a few pixels from a running
+     dot.
+
+     THE FLOOR IS 1.4.11's 3:1, not 1.4.3's 4.5:1 — a glyph is not text. All
+     six values clear 4.5 on the resting chip anyway, since each was already
+     measured as text elsewhere in the palette; `token-contrast.test.ts`
+     measures all three against `card` AND against `line-strong`, the fill the
+     chip takes under a pointer. */
+  --color-mode-auto: var(--vam-mode-auto);
+  --color-mode-manual: var(--vam-mode-manual);
+  --color-mode-plan: var(--vam-mode-plan);
+
   --color-waiting-tint: var(--vam-waiting-tint);
   --color-waiting-wash: var(--vam-waiting-wash);
   --color-done-tint: var(--vam-done-tint);
@@ -823,6 +856,16 @@
      towards it) than the failed red beside it. */
   --vam-danger: #ff8ea0;
 
+  /* The three composer modes, dark. Each is a value this theme already holds
+     somewhere else, taken under its own name rather than borrowed -- see the
+     `@theme inline` block for why a mode may not share a status token, and for
+     which hue each mode got. Measured on `--vam-card`, the chip these sit in:
+     amber 5.378:1, blue 5.485:1, violet 5.932:1; and on `--vam-line-strong`,
+     the chip's hover fill: 3.638:1, 3.711:1, 4.013:1 against a floor of 3. */
+  --vam-mode-auto: #f59e0b;
+  --vam-mode-manual: #75b7ff;
+  --vam-mode-plan: #d2a8ff;
+
   /* The tinted grounds. `--vam-done-tint` still carries the "keep the reading
      you had on the pane" rule the In bubble uses -- 1.502:1, where it read
      1.510. `--vam-waiting-tint` does NOT, this pass, and that is a real
@@ -1085,6 +1128,19 @@ html.light {
   /* Darker than the dark theme's for contrast on a light panel, and still a
      step off `--vam-failed` here -- see the note there. */
   --vam-danger: #be123c;
+
+  /* The three composer modes, light, and RE-DERIVED rather than inverted: each
+     takes this theme's own value for the hue it echoes, which is a good deal
+     darker because a glyph on a white card has to come DOWN to clear its
+     floor. The amber reads brown here, and that is what `--vam-waiting` has
+     always looked like in light -- a mode hue that stayed bright would be the
+     one thing in this theme painted for the other one. Measured on
+     `--vam-card` (#ffffff): 7.090:1, 6.702:1, 7.345:1; and on
+     `--vam-line-strong`, the hover fill: 4.865:1, 4.598:1, 5.039:1 against a
+     floor of 3. */
+  --vam-mode-auto: #92400e;
+  --vam-mode-manual: #1d4ed8;
+  --vam-mode-plan: #6639ba;
 
   --vam-waiting-tint: #f6dcae;
   --vam-waiting-wash: #fdf6e8;

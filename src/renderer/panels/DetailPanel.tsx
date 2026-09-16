@@ -128,10 +128,13 @@ import {
   drawsUnfoldControl,
   subscribeFocusView,
 } from '../prefs/progress.js';
+// `SUBMIT_KEY_LABELS` and `DEFAULT_PROMPT_SUBMIT_KEY` are no longer imported
+// here: this file's only reader of either was the send-key caption under the
+// prompt input, which is gone with the row it sat on (see the comment at the
+// end of the prompt box). The table itself is untouched and still has a
+// reader -- the Settings picker, which is where the key is chosen and named.
 import {
   activePromptSubmitKey,
-  DEFAULT_PROMPT_SUBMIT_KEY,
-  SUBMIT_KEY_LABELS,
   submitsPrompt,
   subscribePromptSubmitKey,
 } from '../prefs/submit-key.js';
@@ -887,18 +890,89 @@ const MODES = ['Auto', 'Manual', 'Plan'] as const;
 type Mode = (typeof MODES)[number];
 
 /**
- * One glyph per mode, chosen for what the mode MEANS and not for decoration —
- * the icon is the only thing on screen that says which mode is current, so two
- * that read alike would make the control unreadable at a glance.
+ * HOW EACH MODE IS DRAWN AND WHAT IT MEANS — one row per mode, because the
+ * four facts below all answer the same question and a reader who knows one has
+ * to be able to find the others.
  *
- * Auto: the agent decides its own next step. Manual: a hand on each one. Plan:
- * it writes the list before it touches anything.
+ * THE GLYPH, chosen for what the mode MEANS and not for decoration — two that
+ * read alike would make the control unreadable at a glance.
+ *
+ * THE HUE, at the operator's ask: "the icon needs to be filled with colour
+ * (for example auto is yellow)." Until then the glyph was `ink-dim` in all
+ * three states, so SHAPE was the only channel that said which mode was
+ * current — and shape is the one an operator has to already know the key for.
+ * The three tokens are in `styles.css`, under their own names rather than
+ * borrowed from the status palette; that comment carries the whole argument
+ * and the measured ratios.
+ *
+ * WHETHER IT IS FILLED, AND THIS IS A MEASUREMENT RATHER THAN A TASTE. Lucide
+ * ships strokes, and "fill it" is not free on a stroke: rendered at the real
+ * 12px and at 64px on this card, `Sparkles` fills into a solid four-point star
+ * and reads BETTER filled than stroked, but `Hand` is four OPEN finger
+ * outlines and filling each one closes it into a wedge — the open hand becomes
+ * a fist, which is a different gesture, not a bolder hand. `ListChecks` is
+ * three zero-area rules and two check polylines, so a fill paints nothing at
+ * all at 12px and turns the ticks into solid arrowheads above it. So the fill
+ * goes where it survives and the other two take their colour on the STROKE,
+ * one weight heavier so the three read as one control rather than as a solid
+ * mark beside two hairlines.
+ *
+ * THE SENTENCE, which used to be this comment's own gloss and is now shipped:
+ * the tooltip says which mode is current and what that mode does, because a
+ * hue means nothing until something names it.
  */
-const MODE_ICON: Readonly<Record<Mode, typeof Sparkles>> = {
-  Auto: Sparkles,
-  Manual: Hand,
-  Plan: ListChecks,
+type ModeSkin = {
+  readonly Glyph: typeof Sparkles;
+  /** The `text-mode-*` utility, one per mode — see `styles.css`. */
+  readonly ink: string;
+  /** `currentColor` where the glyph survives being filled, `none` where it does not. */
+  readonly fill: 'currentColor' | 'none';
+  readonly strokeWidth: number;
+  /** What the mode does, in the operator's terms, for the tooltip. */
+  readonly means: string;
 };
+
+const MODE_SKIN: Readonly<Record<Mode, ModeSkin>> = {
+  Auto: {
+    Glyph: Sparkles,
+    ink: 'text-mode-auto',
+    fill: 'currentColor',
+    strokeWidth: 1.7,
+    means: 'the agent decides its own next step',
+  },
+  Manual: {
+    Glyph: Hand,
+    ink: 'text-mode-manual',
+    fill: 'none',
+    strokeWidth: 2.2,
+    means: 'a hand on each step',
+  },
+  Plan: {
+    Glyph: ListChecks,
+    ink: 'text-mode-plan',
+    fill: 'none',
+    strokeWidth: 2.2,
+    means: 'it writes the list before it touches anything',
+  },
+};
+
+/**
+ * The mode icon, drawn the one way — in the toggle and in the popover's three
+ * options both, because the picker is where an operator LEARNS which hue is
+ * which and a coloured toggle over a grey list would teach nothing.
+ */
+function ModeGlyph({ mode }: { readonly mode: Mode }) {
+  const skin = MODE_SKIN[mode];
+  return (
+    <skin.Glyph
+      data-mode-glyph={mode.toLowerCase()}
+      size={12}
+      fill={skin.fill}
+      strokeWidth={skin.strokeWidth}
+      className={skin.ink}
+    />
+  );
+}
 
 /** One glyph per view — chosen for what each shows, not decoration. */
 const VIEW_ICON: Readonly<Record<Tab, typeof MessageSquare>> = {
@@ -4193,7 +4267,6 @@ export function DetailPanel(props: DetailPanelProps) {
    * these three can be picked here, and an icon has no way to draw a fourth.
    */
   const currentMode: Mode = MODES.find((mode) => mode === readModeRequest(draft)) ?? DEFAULT_MODE;
-  const ModeGlyph = MODE_ICON[currentMode];
   const currentProvider = resolveProvider(defaultProvider);
   const pickImage = async () => {
     if (pickImageAttachment === undefined || entry === null) return;
@@ -5068,18 +5141,13 @@ export function DetailPanel(props: DetailPanelProps) {
    * `e2e/composer-bar-shots.mjs`.
    */
   const ComposerGlyph = composerClaim.Glyph;
-  /**
-   * The verb the send-key caption uses: the same distinction the button's word
-   * carries, off the same fact (`delivers`), because a caption promising
-   * "send" over a source that only appends to a log is that lie one line
-   * lower.
-   *
-   * Read from `delivers` rather than from the claim, which swaps to its
-   * in-flight wording while a write is going out -- the caption would then
-   * read "Enter → sending", which is not what the key does, it is what the app
-   * is doing.
+  /*
+   * GONE WITH THE ROW IT FED: `sendVerb`, the send/record verb the key caption
+   * used. It carried the same `delivers` distinction the submit button's own
+   * name and glyphs carry, so nothing is lost by deleting it rather than
+   * leaving it computed for no reader -- which is the rule `composerClaim`'s
+   * own `word` field was already deleted under.
    */
-  const sendVerb = delivers === true ? 'send' : 'record';
   return (
     <aside
       data-action-pane={active ? 'active' : 'idle'}
@@ -6628,12 +6696,28 @@ export function DetailPanel(props: DetailPanelProps) {
               carries the mode's NAME and the chord, so the one thing the
               glyph says to an eye is said to a screen reader too.
 
+              AND THE TOOLTIP NAMES THE MODE TOO, at the operator's ask. The
+              accessible name has led with `mode: <name>` since this became an
+              icon, while the `Note` beside it explained what the CONTROL DOES
+              and never said which mode was current — so a screen reader was
+              told and an eye was not, which is this file's own rule running
+              backwards. It leads with the same words the label does, and then
+              says what that mode MEANS, because the hue this glyph is painted
+              in has no other legend anywhere in the app.
+
+              WHAT IT DID NOT DROP TO MAKE ROOM: the two mechanisms. This
+              control writes a line into the draft and ⇧Tab presses the
+              session's own chord, and an operator who does not know both is
+              left believing one of them is broken.
+
               The draft stays the single source of truth: read back out of it
               on every render, never mirrored in state, because a mirror is a
               thing that can disagree with the text actually recorded. */}
               {canCycleMode && (
                 <div className="relative flex-none">
-                  <Note text="the mode belongs to the session — this writes your choice into the prompt text that gets recorded, and Shift+Tab presses the session's own chord in the pane vam started">
+                  <Note
+                    text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. It belongs to the session: this writes your choice into the prompt text that gets recorded, and Shift+Tab presses the session's own chord in the pane vam started.`}
+                  >
                     <button
                       type="button"
                       data-mode-toggle
@@ -6642,14 +6726,20 @@ export function DetailPanel(props: DetailPanelProps) {
                       aria-expanded={modePickerOpen}
                       aria-label={`mode: ${currentMode} — change, or ⇧Tab to cycle the session's own`}
                       onClick={() => setModePickerOpen((open) => !open)}
-                      className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
+                      className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
                     >
+                      {/* The glyph carries the ink now (`MODE_SKIN`), so the
+                          button no longer sets one: `text-ink-dim
+                          hover:text-ink` here would have been a second opinion
+                          about the same pixels, settled by source order rather
+                          than by intent. The hover affordance stays on the
+                          chip, which is where it was already drawn. */}
                       <span
                         aria-hidden="true"
                         data-tap-skin
                         className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
                       >
-                        <ModeGlyph size={12} strokeWidth={1.7} />
+                        <ModeGlyph mode={currentMode} />
                       </span>
                     </button>
                   </Note>
@@ -6663,7 +6753,6 @@ export function DetailPanel(props: DetailPanelProps) {
                     >
                       {MODES.map((mode) => {
                         const selected = mode === currentMode;
-                        const Glyph = MODE_ICON[mode];
                         return (
                           <button
                             key={mode}
@@ -6682,7 +6771,10 @@ export function DetailPanel(props: DetailPanelProps) {
                                 : 'text-ink-dim hover:bg-line-strong hover:text-ink',
                             ].join(' ')}
                           >
-                            <Glyph size={12} strokeWidth={1.7} />
+                            {/* Coloured here too: the picker is the one place
+                                all three modes appear at once, so it is the
+                                only legend the hues have. */}
+                            <ModeGlyph mode={mode} />
                             {mode}
                           </button>
                         );
@@ -6821,106 +6913,58 @@ export function DetailPanel(props: DetailPanelProps) {
                 </button>
               </Note>
             </div>
-            {/* THE KEYS THIS BOX IS OPERATED WITH, on a row of their own.
+            {/* THE KEY ROW IS GONE, AND THIS IS THE END OF A SEQUENCE RATHER
+            THAN A DELETION. The operator narrowed it four times, each time
+            after living with the last one, and the reasoning is kept here
+            because the next reader's first instinct will be to put a hint
+            back:
 
-            IT REPLACES `Esc → sidebar`, whose promise stopped being true the
-            day Escape became the interrupt. A hint that outlives the behaviour
-            it described is worse than no hint at all: an operator reading it
-            would press Escape expecting to leave and stop their agent instead.
+              1. It began as three captions: `Esc → sidebar`, `Mod-[ → leave`,
+                 and the send key, on a row of their own under the input
+                 (three do not fit beside the attach/provider/model/mode
+                 controls in a 408px pane, and a caption that truncates hides
+                 whichever is last).
+              2. `Esc → sidebar` went the day Escape in this box became the
+                 agent's INTERRUPT: a hint that outlives the behaviour it
+                 describes is worse than no hint, since an operator would press
+                 it expecting to leave and stop their agent instead.
+              3. Then `Mod-[ → leave`, on a second look: "drop the leave
+                 shortcut from under the prompt box."
+              4. Then the send hint narrowed to the DEVIATION only -- silence
+                 on `Enter`, a caption on `Shift-Enter` -- which left a row
+                 that on a desktop, on the shipped key, drew nothing at all.
+              5. And now: "remove the 'Esc to interrupt' shortcut under the
+                 prompt input. Nothing is ever displayed down there." The whole
+                 row goes, the send caption on it included, because the
+                 operator's sentence is about the PLACE and not about one of
+                 its captions.
 
-            ITS OWN ROW RATHER THAN THE TOOLS ROW ABOVE, which is where both of
-            these captions used to live. Three hints do not fit beside the
-            attach, provider, model and mode controls in a 408px pane, and a
-            caption that truncates hides whichever hint is last. On its own
-            line nothing else can be pushed around by a word changing length,
-            which is the property the send key needs -- it is `Enter` or
-            `Shift-Enter` depending on a preference.
+            WHAT WENT IS CAPTIONS, NOT KEYS, and the distinction is the whole
+            safety of this change. `Mod-[` is still bound in this box's own
+            `onKeyDown` below and still reserved in `chords.ts` so nothing can
+            take it; `Mod-0` and `Mod-Shift-h` still reach `focusList` from in
+            here; Escape is still the interrupt; and the submit key still
+            follows the preference. `test/panels/DetailPanel.test.tsx` asserts
+            the three bindings against the real grammar so that removing a
+            caption can never quietly remove one.
 
-            NO INTERRUPT HINT WHERE THERE IS NO INTERRUPT (`canCycleMode`):
-            promising one for a session vam cannot press a key in would be a
-            control that can only refuse, drawn as one that acts. The way out
-            is named unconditionally, because that one always works.
+            WHAT IS NOW TAUGHT NOWHERE, said plainly rather than left to be
+            discovered. The `?` sheet is generated from the chord TABLES, so it
+            names `Mod-0` and `Mod-Shift-h` and it names neither `Mod-[` (bound
+            here, not in a table) nor Escape (answered ahead of every table in
+            `resolveChord`, which is why `keysheet.ts` gives `cancel` no row).
+            `Mod-[` already went untaught two steps ago; Escape-as-interrupt
+            goes untaught now, and this row was its only caption anywhere. The
+            ACT keeps two real controls -- the In bubble's right-click "Cancel
+            this turn", and the phone keystroke strip's `Esc → agent` button --
+            so what is lost is the keystroke's discoverability, not the
+            interrupt. That is a cost, it was asked for with the place named,
+            and it is recorded here rather than dressed up as a tidy-up.
 
-            THE LEAVE HINT IS GONE, ON THE OPERATOR'S SECOND LOOK. It read
-            `Mod-[ → leave` and it was, for one round, the only caption here:
-            "of Enter-to-send and Mod-[-to-leave, only the leave one needs
-            showing." Then, having lived with it: "drop the leave shortcut from
-            under the prompt box."
-
-            WHAT WENT IS THE CAPTION, NOT THE KEY. `Mod-[` is still bound in
-            this box's own `onKeyDown` below and still reserved in `chords.ts`
-            so nothing can take it; `Mod-0` (`focusList`) still gets out from
-            here too; and the `?` sheet still names them. The argument for
-            printing it -- that the way out is neither guessable nor drawn
-            anywhere -- was a real argument, and it lost to the one thing it
-            could not answer: this row is read on every prompt the operator
-            types, and they are the one reading it.
-
-            AND ON A PHONE ONLY THE SEND KEY IS NAMED. A soft keyboard has no
-            Esc and no Ctrl, so the interrupt caption would be naming a key the
-            device does not have -- and the interrupt has a REAL control there
-            already, the keystroke strip's `Esc → agent` button, pressing the
-            same key over the same bridge. A caption pointing at an absent key
-            beside a working button is the "control that cannot act" rule in
-            its caption form. The return key is real, so the send hint stays.
-
-            THE SEND HINT IS NOW FOR THE DEVIATION ONLY. Operator: "of
-            Enter-to-send and Mod-[-to-leave, only the leave one needs
-            showing." The two were never worth the same. Pressing Return in a
-            text box is the most guessed-at gesture there is, and the submit
-            BUTTON sits directly above this row carrying the verb it performs
-            with a `Note` on it; the way out is neither guessable nor drawn
-            anywhere -- and the key an operator WOULD guess for it (Escape)
-            now interrupts their agent. A row that spends half its width on
-            the convention buries the thing that has to be taught.
-
-            BUT A CAPTION FOR A CONVENTION IS CLUTTER AND A CAPTION FOR A
-            DEVIATION IS THE ONLY REPORT THERE IS. Once this row stopped
-            naming the send key, NOTHING on a desktop did -- the button's
-            `Note` names the outcome, never the keystroke, and the picker is
-            two dialogs away. So it is drawn exactly when the operator is not
-            on the shipped key: `Enter` is silence, `Shift-Enter` says so.
-            That is the state they chose deliberately and the one where Return
-            does something they did not ask for.
-
-            ON A PHONE IT IS UNCONDITIONAL. There is nothing else on the row
-            there, so withdrawing the send hint would not shorten it, it would
-            empty it -- and a soft keyboard's return key is the least
-            conventional of all. `test/panels/DetailPanel.test.tsx` holds all
-            three cases.
-
-            SO THE ROW IS OFTEN EMPTY NOW, on a desktop with the shipped send
-            key and a session vam cannot interrupt, and that is drawn rather
-            than reserved: `flex-wrap` with no fixed height, so an empty `<p>`
-            takes no room and nothing below it moves when a hint appears.
-
-            `Mod-Shift-h` / `Mod-0` ARE NOT NAMED HERE, and it is not because
-            they would not work. They are `Mod-` chords, so `Canvas`'s typing
-            guard lets them straight through to the grammar the same way it
-            lets the leave key through, and `Mod-0` really does get the
-            keyboard out from inside this box (`test/panels/
-            DetailPanel.test.tsx`, "names no leave key at all"). That test is
-            the reason: the operator asked, on a second look, for no
-            leave-key caption under the prompt box at all -- the key still
-            works, the `?` sheet still names it, only the hint is gone -- and
-            `focusList`'s two chords are the same act under the same call. */}
-            {composing && (
-              <p
-                data-prompt-keys
-                className="flex flex-wrap items-center gap-x-3 font-mono text-meta text-ink-faint"
-              >
-                {(phone || submitKey !== DEFAULT_PROMPT_SUBMIT_KEY) && (
-                  <span data-prompt-send-key={submitKey} className="whitespace-nowrap">
-                    {`${SUBMIT_KEY_LABELS[submitKey]} → ${sendVerb}`}
-                  </span>
-                )}
-                {!phone && canCycleMode && (
-                  <span data-prompt-interrupt-key className="whitespace-nowrap">
-                    Esc → interrupt
-                  </span>
-                )}
-              </p>
-            )}
+            SO THE TOOLS ROW ABOVE IS THE LAST THING IN THIS BOX. There is no
+            element under the input at all now -- not an empty one, not a
+            reserved band -- which is what the describe in `DetailPanel.test.
+            tsx` asserts structurally rather than by one absent selector. */}
           </div>
         </div>
       )}

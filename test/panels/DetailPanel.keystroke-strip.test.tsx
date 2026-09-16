@@ -127,13 +127,13 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
     expect(escapeKey?.textContent).not.toBe('Esc');
     expect(enterKey?.textContent).toContain('agent');
     expect(enterKey?.textContent).not.toBe('Enter');
-    // AND ON A PHONE THE TEXTAREA HAS NO Esc HINT TO BE CONFUSED WITH. The
-    // strip's button is the only Escape a soft keyboard has, so the composer's
-    // own key row names the send key and stops there -- the ambiguity this
-    // test was written about cannot arise here at all. The retired
-    // `Esc → sidebar` caption is asserted gone for the same reason: it
-    // promised a destination Escape no longer has anywhere.
-    expect(document.querySelector('[data-prompt-keys]')?.textContent).not.toContain('Esc');
+    // AND THE TEXTAREA NAMES NO KEY AT ALL TO BE CONFUSED WITH. The strip's
+    // button is now the only thing under the composer that says "Esc" on any
+    // route: the key row beneath the input is gone entirely, at the operator's
+    // ask ("nothing is ever displayed down there"). This was already the
+    // ambiguity the test was written about, and the answer is now structural
+    // rather than a matter of which caption won.
+    expect(document.querySelector('[data-prompt-keys]')).toBeNull();
     expect(document.querySelector('[data-prompt-escape]')).toBeNull();
   });
 

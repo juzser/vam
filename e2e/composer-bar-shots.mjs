@@ -322,7 +322,127 @@ check('so the microphone is drawn here', dictation.drawn, JSON.stringify(dictati
 check('beside the send control, where the operator was told it is', dictation.besideSend);
 check('and it starts idle', dictation.pressed === 'false', `aria-pressed ${dictation.pressed}`);
 
+// ------------------------------- N+1. NOTHING IS DRAWN UNDER THE PROMPT INPUT
+//
+// Operator: "remove the 'Esc to interrupt' shortcut under the prompt input.
+// Nothing is ever displayed down there." That is the end of a sequence -- the
+// row began as three captions and was narrowed three times before this -- so
+// what is asserted is the END STATE and not the absence of one selector: a row
+// that was merely renamed would satisfy `[data-prompt-keys] === null` and go
+// on drawing.
+//
+// MEASURED AS LAYOUT, which is the half no unit environment can see: the tools
+// row has to be the last child of the prompt box AND its painted bottom edge
+// has to be the box's own content edge, so nothing sits under the input with a
+// zero height or a transparent fill either.
+const under = await page.evaluate(() => {
+  const box = document.querySelector('[data-prompt-box]');
+  if (box === null) return null;
+  const tools = box.querySelector('[data-prompt-tools]');
+  const cs = getComputedStyle(box);
+  const boxRect = box.getBoundingClientRect();
+  const toolsRect = tools?.getBoundingClientRect() ?? null;
+  return {
+    children: [...box.children].map((el) => el.tagName.toLowerCase()),
+    lastIsTools: box.lastElementChild === tools,
+    keys: box.querySelector('[data-prompt-keys]') !== null,
+    sendKey: box.querySelector('[data-prompt-send-key]') !== null,
+    interruptKey: box.querySelector('[data-prompt-interrupt-key]') !== null,
+    // How far the tools row's bottom sits above the box's own content bottom.
+    // Anything more than a rounding error is a band nobody asked for.
+    gapBelow:
+      toolsRect === null
+        ? null
+        : Number(
+            (
+              boxRect.bottom -
+              Number.parseFloat(cs.borderBottomWidth) -
+              Number.parseFloat(cs.paddingBottom) -
+              toolsRect.bottom
+            ).toFixed(2),
+          ),
+  };
+});
+console.log(`  under the input: ${JSON.stringify(under)}`);
+check('the prompt box is on screen, or none of the checks below is about anything', under !== null);
+check(
+  'the tools row is the LAST thing in the prompt box',
+  under !== null && under.lastIsTools,
+  JSON.stringify(under),
+);
+check(
+  'no key row, no send caption, no interrupt caption',
+  under !== null && !under.keys && !under.sendKey && !under.interruptKey,
+  JSON.stringify(under),
+);
+check(
+  'and nothing is holding space below it',
+  under !== null && under.gapBelow !== null && Math.abs(under.gapBelow) < 1,
+  `${under?.gapBelow}px between the tools row and the box's content edge`,
+);
+await shotOfComposer(`${outDir}/composer-nothing-below.png`);
+console.log(`${outDir}/composer-nothing-below.png`);
+
 await browser.close();
+
+// ---------------------------------- N+2. THE SAME, ON THE PHONE ROUTE
+//
+// THE ROUTE A HALF-DONE REMOVAL SURVIVES ON. The send caption under the input
+// was drawn on every phone prompt regardless of the send-key preference, while
+// on a desktop it was withheld on the shipped key -- so a change that dropped
+// only the interrupt caption would leave the phone still drawing a row, and a
+// desktop-only check would report it green. `PhoneShell` is chosen by a media
+// query (`phone/viewport.ts`), so a real narrow viewport is the only thing
+// that reaches it: no unit environment provides `matchMedia` at all, and they
+// all fall back to the desktop columns.
+const phoneBrowser = await chromium.launch();
+const phone = await phoneBrowser.newPage({ viewport: { width: 390, height: 844 } });
+phone.on('pageerror', (err) => console.error('PHONE PAGE ERROR:', err));
+await phone.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+await phone.waitForSelector('[data-phone-shell="list"]');
+await phone.locator(`[data-session-row="${PLAIN_SESSION}"]`).first().click();
+await phone.waitForSelector('[data-phone-shell="session"]');
+// OPEN FOR TYPING, because the row was only ever drawn while it was. Asserting
+// its absence over a closed composer would pass for the wrong reason.
+await phone.locator('textarea[aria-label="prompt to session"]').click();
+await phone.waitForTimeout(300);
+const onPhone = await phone.evaluate(() => {
+  const box = document.querySelector('[data-prompt-box]');
+  const area = document.querySelector('textarea[aria-label="prompt to session"]');
+  return {
+    shell: document.querySelector('[data-phone-shell]')?.getAttribute('data-phone-shell') ?? null,
+    open: area !== null && document.activeElement === area,
+    lastIsTools: box !== null && box.lastElementChild === box.querySelector('[data-prompt-tools]'),
+    keys: box === null ? null : box.querySelector('[data-prompt-keys]') !== null,
+    sendKey: box === null ? null : box.querySelector('[data-prompt-send-key]') !== null,
+  };
+});
+console.log(`  the phone route: ${JSON.stringify(onPhone)}`);
+check('this really is the phone shell', onPhone.shell === 'session', JSON.stringify(onPhone));
+check('with the composer open for typing', onPhone.open, JSON.stringify(onPhone));
+check(
+  'the tools row is the last thing in the prompt box here too',
+  onPhone.lastIsTools,
+  JSON.stringify(onPhone),
+);
+check(
+  'and the send caption that was unconditional here is gone',
+  onPhone.keys === false && onPhone.sendKey === false,
+  JSON.stringify(onPhone),
+);
+// WHAT IS NOT CHECKED HERE, AND WHERE IT IS. The other half of this change is
+// that what went is a CAPTION and not the act: on a phone the keystroke strip's
+// own `Esc → agent` button still presses the same key over the same bridge.
+// That button is gated on `canSendKeys`, which needs a vam-started session on a
+// source with a terminal, and no `?demo=1` session is both -- the demo source
+// reports no terminal at all, which is why `prompt-mode-icon-shots.mjs` has to
+// patch the bundle to photograph the mode control. Rather than copy that patch
+// into a second guard, the button is held in
+// `test/panels/DetailPanel.composer-escape.test.tsx` ("draws nothing under the
+// input on a phone either"), which can mount the case directly.
+await phone.screenshot({ path: `${outDir}/composer-nothing-below-phone.png` });
+console.log(`${outDir}/composer-nothing-below-phone.png`);
+await phoneBrowser.close();
 
 if (failures.length > 0) {
   throw new Error(`${failures.length} composer bar guard(s) failed:\n  - ${failures.join('\n  - ')}`);
