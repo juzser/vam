@@ -462,6 +462,41 @@ function paneElement(paneId: string): Element | null {
 }
 
 /**
+ * IS SOMETHING ALREADY ANSWERING THE KEYS? Read off the DOM, like the mode.
+ *
+ * Asked by the one act in this file that moves the keyboard on VAM's
+ * initiative rather than the operator's — the new session's arrival — so that
+ * it can decline. Every other focus move here is the direct answer to a key
+ * the operator just pressed, and none of them has any business asking.
+ *
+ * TWO CLAUSES BECAUSE THERE ARE TWO POPULATIONS, and neither contains the
+ * other. `cursorModeAt` covers the regions marked `data-insert-scope` — the
+ * composer, the question card, the terminal — which is Insert, and the reason
+ * they are marked. The tag test covers the boxes that are NOT marked and never
+ * should be: the command palette's filter, the search line, a rename field.
+ * They are overlays and inline edits rather than places the pane cursor lives,
+ * so they carry no scope; they still hold a caret in the middle of a word, and
+ * that is the whole question being asked. It is the same shape as the keydown
+ * handler's own `typing` guard, which reads the same two tag names for the
+ * same reason one layer down.
+ *
+ * A FOCUSED BUTTON IS NOT ANSWERING ANYTHING, deliberately. Measured in
+ * Chromium: a pointer press on a `<button>` leaves `document.activeElement` on
+ * that button. happy-dom's `.click()` moves no focus, so a rule phrased as
+ * "activeElement is not the body" would have declined on every mouse-driven
+ * creation there is — in production only, while every test written against it
+ * stayed green. `Canvas.new-session-focus.test.tsx` focuses the `+`
+ * explicitly for that reason.
+ */
+function answeringKeys(): boolean {
+  const active = document.activeElement;
+  if (cursorModeAt(active) === 'insert') {
+    return true;
+  }
+  return active instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(active.tagName);
+}
+
+/**
  * ONE PANE's transcript column — the region `Mod-d` / `Mod-u` scroll.
  *
  * SCOPED TO THE PANE, the same way `focusInsertStop` is and for the same
@@ -1599,6 +1634,29 @@ function CanvasInner({
    * leaves nothing behind to capture an unrelated session that appears later.
    */
   const pendingNewTab = useRef<{ paneId: string; known: ReadonlySet<string> } | null>(null);
+  /**
+   * THE PANE THAT IS ABOUT TO BE HANDED THE KEYBOARD — one commit early.
+   *
+   * Operator: "when a new session finishes being created, focus should go
+   * straight into that session's Response view, in insert mode." Insert is
+   * not a flag (`keyboard/focus-scope.ts`), so that request is a FOCUS MOVE —
+   * and the move cannot be made where the decision to make it is made.
+   *
+   * WHY THIS IS TWO STEPS AND NOT ONE. At the commit the arrival effect runs
+   * in, the pane it is about is still drawing `StartingSession` IN PLACE OF
+   * its `DetailPanel` (`renderLeaf`) — the wait the operator asked to see.
+   * There is no composer in that pane to land on, so a `focusInsertStop`
+   * called there answers `false` every time, for every pane, including one
+   * that already held a session. The composer exists one commit later, once
+   * `starting` has cleared and `setPaneSession` has put the new tab in front.
+   * STATE rather than a ref for exactly that reason: writing it is what
+   * schedules the commit whose effect then finds the composer rendered.
+   * `TerminalTab`'s own `queueMicrotask` forward is the same measurement in
+   * the smaller.
+   *
+   * ONE ATTEMPT, then it clears — see the effect that consumes it.
+   */
+  const [arrivalFocus, setArrivalFocus] = useState<string | null>(null);
   /**
    * A SESSION VAM IS STARTING, which does not exist yet.
    *
@@ -2790,6 +2848,52 @@ function CanvasInner({
    * disarms, so a session started elsewhere a minute later never lands in a
    * pane nobody pointed at. A pane closed in the meantime disarms too rather
    * than moving focus onto a leaf that is gone.
+   *
+   * AND IT HANDS OVER THE KEYBOARD, which it did not. Operator: "when a new
+   * session finishes being created, focus should go straight into that
+   * session's Response view, in insert mode." Two things follow from that one
+   * sentence, and they are decided differently:
+   *
+   *   THE VIEW is a fact about the SESSION (`viewBySession`), and it is set
+   *   unconditionally. A session that did not exist a moment ago cannot have
+   *   a view the operator chose for it, so there is nothing here to override:
+   *   without this it would open on `viewSeed`, which is the view a PREVIOUS
+   *   RUN was left on, and an operator who quit on Agents would have got the
+   *   Agents view of a session with nothing in it. The stored preference is
+   *   deliberately NOT written — it is what the next run opens on, and vam
+   *   picking Response for a brand-new row is not the operator picking it.
+   *
+   *   THE KEYBOARD is a fact about the OPERATOR, and it is withheld the
+   *   moment there is any sign they have moved on. `tmux new-session -d` plus
+   *   the agent's own registration is seconds of wall clock, and in that time
+   *   they can step to another pane, start typing, or open an overlay;
+   *   pulling the caret out from under any of those is worse than the press
+   *   of `I` this saves. The pane still gets the session either way — where a
+   *   tab is kept is not a claim on who is typing.
+   *
+   * `keyboardIsFree` IS READ BEFORE `setFocusedPaneId` BELOW, and that order
+   * is load-bearing: that setter writes `focusedPaneIdRef.current`
+   * synchronously, so the same comparison made after it would be against the
+   * value this effect had just installed and would be true always.
+   *
+   * SCOPED TO THIS ROUTE, WHICH IS THE ONLY ONE THAT BRINGS A SESSION TO THE
+   * FRONT — the per-pane `+` and `Mod-t`, the two callers that pass a pane.
+   * The others were checked rather than assumed, by driving each:
+   *
+   *   `o` / the sidebar's `+` pass no pane, so nothing arms here and the row
+   *   is picked up instead by the A11.1 adoption effect — which appends to
+   *   `sessionIds` and does NOT touch `sessionId`, so the session becomes a
+   *   BACKGROUND tab of the focused pane. Nothing is in front to focus, and
+   *   bringing it forward is a separate decision about those keys.
+   *
+   *   `newProject` does not reach `createSession` at all (it calls
+   *   `createSessionIn`), and its session is born in a project that is not
+   *   the active one — `activeProjectId` follows the focused SESSION — so no
+   *   pane holds it and the sidebar is the only surface it appears on
+   *   (measured: the pane still shows the session it had). Giving it this
+   *   behaviour means first deciding that starting a session in a new
+   *   directory switches the project you are looking at, which is an operator
+   *   question and not a focus one.
    */
   useEffect(() => {
     const pendingTab = pendingNewTab.current;
@@ -2804,9 +2908,43 @@ function CanvasInner({
     if (findLeaf(panes, pendingTab.paneId) === null) {
       return;
     }
+    const keyboardIsFree =
+      focusedPaneIdRef.current === pendingTab.paneId && !overlayOpen && !answeringKeys();
     setPanes((tree) => setPaneSession(tree, pendingTab.paneId, arrived.session.id));
     setFocusedPaneId(pendingTab.paneId);
-  }, [allEntries, panes, setFocusedPaneId]);
+    setViewBySession((current) => ({ ...current, [arrived.session.id]: 'Response' }));
+    if (keyboardIsFree) {
+      setArrivalFocus(pendingTab.paneId);
+    }
+  }, [allEntries, panes, overlayOpen, setFocusedPaneId]);
+
+  /**
+   * AND THE MOVE ITSELF, one commit later — see `arrivalFocus`.
+   *
+   * By here the pane has drawn the arrived session on its Response view, so
+   * `focusInsertStop` finds the prompt row that did not exist when the
+   * decision above was taken. The same landing `I` uses, so there is one
+   * answer in this file to "where does the keyboard go in a pane".
+   *
+   * IT SAYS NOTHING WHEN IT DOES NOT LAND, and that is the difference from
+   * `I`. `I` refuses aloud because the operator ASKED for the keyboard and is
+   * owed an answer; this move is vam's own initiative, so a complaint would
+   * push the one sentence they did ask for — "started a new session in …" —
+   * off the single line that carries it, to report a non-event. Nothing is
+   * lost by the silence: the session still arrived, still opened in the pane
+   * that asked, and Select with the new tab in front is exactly the state
+   * that shipped before this. (A source that draws no composer cannot reach
+   * here today anyway — `canWriteTo` gates `createSession` on the same
+   * `recordPrompt` capability `composerHidden` reads — but the silence is the
+   * rule rather than a bet on that staying true.)
+   */
+  useEffect(() => {
+    if (arrivalFocus === null) {
+      return;
+    }
+    setArrivalFocus(null);
+    focusInsertStop(paneElement(arrivalFocus));
+  }, [arrivalFocus]);
 
   /**
    * A11.1 — EVERY SESSION OF THE ACTIVE PROJECT IS A TAB OF EXACTLY ONE
