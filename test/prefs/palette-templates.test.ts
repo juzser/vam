@@ -11,8 +11,18 @@
  * picked its own lightnesses would throw that away silently -- the operator
  * would click "nordic" and get back the flat palette the lift was written to
  * fix. So every surface in every template keeps the L* the stylesheet gives
- * it, and only a* and b* move. Elevation ORDER and JND SEPARATION are then
- * preserved by construction, and this file checks that they actually were.
+ * it, and only a* and b* move.
+ *
+ * "PRESERVED BY CONSTRUCTION" IS WHAT THIS FILE USED TO SAY, AND IT WAS WRONG
+ * ABOUT ALL FOUR TEMPLATES IT COVERED. Construction is not a guarantee, it is
+ * an intention, and the four tinted palettes were in fact built from two
+ * REMEMBERED gaps rather than from the rungs: measured, every one of them had
+ * `panel -> pane` at about 1.44 L* and `raised -> card` at 0.93, both under
+ * the 2.3 JND, while this suite stayed green because it checked the two gaps
+ * the prose named and never the ladder. Two tests state it properly now --
+ * `puts every surface back on the rung the stylesheet gives it` and `clears a
+ * JND between every adjacent rung, including the three it cannot set` -- and
+ * both read `styles.css` rather than a copy of it.
  *
  * WHAT A TEMPLATE DOES NOT TOUCH, and it is the more interesting half: the six
  * tokens that carry MEANING. `running`, `waiting`, `done`, `failed`,
@@ -251,9 +261,9 @@ describe('palette templates', () => {
         }
       }
     }
-    // 4 templates x 2 themes x 9 inks x 5 surfaces. The literal is the point:
+    // 7 templates x 2 themes x 9 inks x 5 surfaces. The literal is the point:
     // it turns a shortened list into a failure rather than a quieter pass.
-    expect({ pairs, failing }).toEqual({ pairs: 360, failing: [] });
+    expect({ pairs, failing }).toEqual({ pairs: 630, failing: [] });
   });
 
   it('keeps the elevation ladder the dark lift established', () => {
@@ -280,6 +290,134 @@ describe('palette templates', () => {
       }
     }
     expect(wrong).toEqual([]);
+  });
+
+  /**
+   * THE RUNG CLAIM, WHICH THIS FILE MADE IN PROSE AND NOTHING CHECKED.
+   *
+   * `palette-templates.ts` opens with "each surface keeps the exact L* the
+   * stylesheet gives it and moves only in a* and b*", and that sentence is the
+   * entire safety argument for offering presets: it is what makes a template
+   * inherit the ladder, the separations AND the contrast readings instead of
+   * re-deriving all three by hand. L* is a function of relative luminance
+   * alone, so a surface on the stylesheet's rung reads the SAME ratio against
+   * every ink the stylesheet keeps, whatever hue it wears.
+   *
+   * IT WAS FALSE FOR FOUR TEMPLATES WHEN THIS TEST WAS WRITTEN, which is the
+   * reason the test exists. The four shipped tinted palettes were built from
+   * two REMEMBERED gaps -- `pane -> card` 3.30 and `pane -> raised` 2.36, the
+   * numbers this file's own header quotes from the THIRD dark pass -- rather
+   * than from the rungs. So `slate`'s card sat 2.73 L* below the stylesheet's,
+   * `nordic`'s 2.88, `ember`'s 2.59 and `plum`'s 2.79, and the test after this
+   * one shows what that cost: `raised -> card` had closed to 0.94 L*, well
+   * under the 2.3 JND, in every one of them. Two lists of the same ladder,
+   * drifting -- which is the failure this repo has now paid for five times.
+   *
+   * 0.5 L* OF TOLERANCE, NOT ZERO, and the number is derived rather than
+   * liked: 8-bit sRGB does not offer an exact L* at every hue, so a value has
+   * to be allowed to land near its rung rather than on it. The widest miss in
+   * the shipped table is 0.29 (`contrast`, which spends it to buy a wider
+   * `panel -> pane` -- see its entry) and every other template is inside 0.15.
+   * Half a JND is invisible by construction and still an eighth of the drift
+   * that was here.
+   */
+  it('puts every surface back on the rung the stylesheet gives it', () => {
+    const LADDER_SURFACES = [
+      '--vam-panel',
+      '--vam-sidebar',
+      '--vam-pane',
+      '--vam-raised',
+      '--vam-card',
+    ] as const;
+    const off: string[] = [];
+    let measured = 0;
+    for (const t of TINTED) {
+      const values = templatePalette(t.id, 'dark');
+      for (const surface of LADDER_SURFACES) {
+        const rung = DARK_STYLESHEET.get(surface);
+        expect(rung, `styles.css defines ${surface} in :root`).toMatch(/^#[0-9a-f]{6}$/i);
+        measured += 1;
+        const drift = lightness(values[surface] as string) - lightness(rung as string);
+        if (Math.abs(drift) > 0.5) {
+          off.push(`${t.id}: ${surface} is ${drift.toFixed(2)} L* off the rung`);
+        }
+      }
+    }
+    // 7 templates x 5 ladder surfaces, as a LITERAL rather than as
+    // `TINTED.length * 5`. A count derived from the corpus shrinks with it: a
+    // template that quietly stopped being tinted would leave this sweep
+    // measuring six palettes and still reporting a full house. The standing
+    // lesson in this repo is that a sweep has to prove it found its corpus.
+    expect({ measured, off }).toEqual({ measured: 35, off: [] });
+  });
+
+  /**
+   * THE LADDER, MERGED WITH THE RUNGS A TEMPLATE CANNOT REACH.
+   *
+   * `dark-ladder.test.ts` holds the stylesheet to "every ADJACENT pair of the
+   * sorted ladder clears a JND, whether or not the two surfaces are ever
+   * adjacent on screen". A template inherits that claim and can break it in a
+   * way the stylesheet cannot: it sets four of the seven rungs and CANNOT set
+   * `ground`, `sunken` or `well` -- `--vam-ground` was retired from the swatch
+   * grid at the operator's own ask (`prefs.ts`, `RETIRED_TOKENS`) and the
+   * other two were never offered. So a preset that walks `panel` down lands it
+   * on a `well` that stayed where it was, and a recess inside a dialog stops
+   * being a recess.
+   *
+   * MEASURED ON THE MERGED LADDER FOR EXACTLY THAT REASON. The four settable
+   * rungs are dropped into the three pinned ones, sorted by lightness, and
+   * every adjacent gap owes the JND -- which is also what bounds the two ends:
+   * `panel` may go no lower than `well` + 2.3 and `card` no higher than
+   * `segment-on` - 2.3, so the whole band a template may use is 13.56..22.12
+   * L*, about 8.6 of lightness for three gaps. That is why no template can be
+   * blacker than vam already is, and `contrast` says so at its own entry
+   * rather than pretending otherwise.
+   *
+   * DARK ONLY, and the omission is a measurement rather than an oversight: the
+   * light theme is not a JND ladder and never was. Its `pane` and `raised` sit
+   * 0.60 L* apart and its `panel`, `card` and `ground` share one value --
+   * light separates surfaces with hue and with ΔE (see the In bubble note in
+   * `palette-templates.ts`), which the bubble test below is what measures.
+   */
+  it('clears a JND between every adjacent rung, including the three it cannot set', () => {
+    const PINNED = ['--vam-ground', '--vam-sunken', '--vam-well'] as const;
+    const narrow: string[] = [];
+    let measured = 0;
+    for (const t of TINTED) {
+      const values = templatePalette(t.id, 'dark');
+      const rungs = [
+        ...PINNED.map((token) => {
+          const value = DARK_STYLESHEET.get(token);
+          expect(value, `styles.css defines ${token} in :root`).toMatch(/^#[0-9a-f]{6}$/i);
+          return { label: token, light: lightness(value as string) };
+        }),
+        { label: '--vam-panel', light: lightness(values['--vam-panel'] as string) },
+        { label: '--vam-sidebar/pane', light: lightness(values['--vam-pane'] as string) },
+        { label: '--vam-raised', light: lightness(values['--vam-raised'] as string) },
+        { label: '--vam-card', light: lightness(values['--vam-card'] as string) },
+      ].sort((a, b) => a.light - b.light);
+      for (let i = 1; i < rungs.length; i += 1) {
+        measured += 1;
+        const gap = (rungs[i]?.light as number) - (rungs[i - 1]?.light as number);
+        if (gap < 2.3) {
+          narrow.push(
+            `${t.id}: ${rungs[i - 1]?.label} -> ${rungs[i]?.label} is ${gap.toFixed(2)} L*`,
+          );
+        }
+      }
+      // AND THE RUNG ABOVE THE BAND, which is not part of the ladder above and
+      // is held by `dark-ladder.test.ts` for the stylesheet: the ON segment of
+      // the segmented control is the first fill over `card`, and a card that
+      // climbs onto it is a card with no lid.
+      const segment = DARK_STYLESHEET.get('--vam-segment-on');
+      expect(segment, 'styles.css defines --vam-segment-on in :root').toMatch(/^#[0-9a-f]{6}$/i);
+      measured += 1;
+      const lid = lightness(segment as string) - lightness(values['--vam-card'] as string);
+      if (lid < 2.3) narrow.push(`${t.id}: card is ${lid.toFixed(2)} L* under segment-on`);
+    }
+    // 7 templates x 7 gaps -- six in the merged ladder and the lid above it.
+    // A literal, for the reason the sweep above records.
+    expect({ measured, narrow }).toEqual({ measured: 49, narrow: [] });
   });
 
   it('keeps the two separations the operator complained about', () => {
