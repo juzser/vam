@@ -49,7 +49,16 @@
  * commit key really arrives carrying `isComposing`, whether `compositionend`
  * really delivers the syllable, whether sequential focus navigation really
  * gets back OUT of a pane whose keyboard lives on a hidden box, and whether a
- * drag across that pane still selects the text it draws.
+ * drag across that pane still selects the text it draws,
+ * and -- since the Files tab learned markdown -- what a token CLASS actually
+ * PAINTS (a scanner proven token by token still draws nothing at all if the
+ * stylesheet has no such token), what colour a tree row's glyph is really
+ * given, how much of a row is LEFT FOR ITS NAME once a glyph sits in front of
+ * it at vam's narrowest legal pane, whether raw HTML in a previewed file
+ * reaches the DOM as an element or as characters, and where the boxes of three
+ * toolbar buttons fall against the view pill -- which is a rectangle question
+ * and not a click one, because a control can be half-buried and still take
+ * every click aimed at its centre.
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -93,6 +102,7 @@ const GUARDS = [
   'turn-steps-shots',
   'agents-navigator-shots',
   'files-tab-keyboard-shots',
+  'files-markdown-shots',
   'terminal-ime-shots',
 ];
 
