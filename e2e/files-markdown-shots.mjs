@@ -625,11 +625,18 @@ check(
 // ---------------------------------------------------------------------------
 // 6. `Mod-Shift-m`, BOTH WAYS, THROUGH A REAL KEYBOARD.
 //
+// SPELLED `Meta+`, NOT `Control+`, AND THAT IS NOT A MACOS DETAIL. Since Ctrl
+// stopped spelling `Mod-` on macOS, Control here resolves to nothing on this
+// machine while still resolving on the ubuntu runner -- a guard that goes on
+// passing in CI for a toggle no operator can reach. `Meta` is the one spelling
+// that means `Mod-` on EVERY branch of `normalizeKey`: on macOS it is the only
+// one, and off macOS Super is accepted beside Ctrl.
+//
 // Both legs, because a half-wired toggle ships green when only one is checked:
 // the button and the editor's own branch would cover the way IN, and nothing
 // would notice that the preview could not be left without a mouse.
 
-await page.keyboard.press('Control+Shift+KeyM');
+await page.keyboard.press('Meta+Shift+KeyM');
 await page.waitForSelector('[data-files-editor]', { timeout: 3_000 });
 check(
   'Mod-Shift-m in the preview goes back to the raw text',
@@ -645,7 +652,7 @@ check(
 const editor = page.locator('[data-files-editor]');
 await editor.click();
 await editor.fill('# edited, never saved\n\n- still here\n');
-await page.keyboard.press('Control+Shift+KeyM');
+await page.keyboard.press('Meta+Shift+KeyM');
 await page.waitForSelector('[data-files-preview-view]', { timeout: 3_000 });
 check(
   'Mod-Shift-m in the editor renders the UNSAVED buffer, not what the bridge last read',
@@ -657,7 +664,7 @@ check(
   'and the dirty mark is still on screen in the rendered view',
   (await page.locator('[data-files-dirty]').count()) > 0,
 );
-await page.keyboard.press('Control+Shift+KeyM');
+await page.keyboard.press('Meta+Shift+KeyM');
 await page.waitForSelector('[data-files-editor]', { timeout: 3_000 });
 check(
   'and coming back the text is exactly as it was left',
@@ -677,7 +684,7 @@ check(
   (await page.locator('[data-files-preview]').count()) === 0,
 );
 await page.locator('[data-files-editor]').click();
-await page.keyboard.press('Control+Shift+KeyM');
+await page.keyboard.press('Meta+Shift+KeyM');
 const refusal = (await page.locator('[data-files-note]').textContent()) ?? '';
 check(
   'and pressing the key there says so rather than doing nothing',
