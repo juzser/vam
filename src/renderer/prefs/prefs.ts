@@ -33,6 +33,7 @@ import {
   readEditorHighlight,
   setActiveEditorSettings,
 } from './editor.js';
+import { clampStoredTreeWidth } from './files-tree-width.js';
 import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
 import { DEFAULT_FOCUS_VIEW, readFocusView, setActiveFocusView } from './progress.js';
 import {
@@ -464,6 +465,36 @@ export type Prefs = {
    * would answer differently.
    */
   readonly editorIndent: number;
+  /**
+   * How wide the Files tab's tree was last DRAGGED to, in pixels -- or `null`
+   * for "never dragged", which is a real value rather than a missing one.
+   *
+   * NULL IS THE ONE DESIGN DECISION HERE. The tree shipped as a CLAMPED SHARE
+   * (`w-[38%] min-w-[7.5rem] max-w-[13.5rem]`, `FilesTab.tsx`), which gives a
+   * wide pane a readable column and a narrow one a floor. A stored pixel width
+   * cannot express that, so a default number would have moved the tree on
+   * every narrow pane of every operator who never touched the handle --
+   * exactly what `DEFAULT_PANES` exists to avoid on the other two boundaries.
+   * `null` keeps the share; a drag replaces it with a number; nothing in
+   * between has to be migrated.
+   *
+   * GLOBAL, not per pane and not per session, for the reason `focusView` and
+   * `editorIndent` give at length: `Canvas.tsx` mounts one `DetailPanel` --
+   * hence one `FilesTab` -- per split leaf and `PhoneShell` mounts another,
+   * so per pane it would be an arrangement the operator had to re-make on
+   * every split, with no dialogue in which a pane opened by a keystroke could
+   * be asked. Per session it would key an arrangement to an id the TTL prunes.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   *
+   * Stored in PIXELS and clamped ONLY against `[TREE_WIDTH_MIN,
+   * TREE_WIDTH_MAX]` -- never against a container. See
+   * `files-tree-width.ts`'s header for why a container clamp on this write
+   * path would collapse the operator's width the first time they looked at
+   * another tab.
+   */
+  readonly filesTreeWidth: number | null;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -489,6 +520,7 @@ export const EMPTY_PREFS: Prefs = {
   promptSubmitKey: DEFAULT_PROMPT_SUBMIT_KEY,
   editorHighlight: DEFAULT_EDITOR_HIGHLIGHT,
   editorIndent: DEFAULT_EDITOR_INDENT,
+  filesTreeWidth: null,
 };
 
 /**
@@ -720,6 +752,12 @@ function parsePrefs(
     // the two spaces the editor indented by before there was a setting.
     editorHighlight: readEditorHighlight((parsed as { editorHighlight?: unknown }).editorHighlight),
     editorIndent: clampEditorIndent((parsed as { editorIndent?: unknown }).editorIndent),
+    // Per field like every line above it, and the only one whose default is
+    // `null` rather than a value: "never dragged" is what the tree's own
+    // clamped share answers to, and a payload predating this field is exactly
+    // that. A number IS clamped, because a hand-edited width must not render
+    // a column nobody could have chosen.
+    filesTreeWidth: readFilesTreeWidth((parsed as { filesTreeWidth?: unknown }).filesTreeWidth),
   };
 }
 
@@ -1062,6 +1100,31 @@ function readDetailTab(raw: unknown): string | null {
 /** Written when the operator changes tab; `null` forgets which. */
 export function setDetailTab(prefs: Prefs, detailTab: string | null): Prefs {
   return { ...prefs, detailTab };
+}
+
+/**
+ * Anything that is not a finite number reads as "never dragged" -- which is
+ * what a payload predating this field already says by having no key, and what
+ * a devtools edit should cost too. A number that IS finite is clamped rather
+ * than dropped: an out-of-range width is a width someone meant, just not one
+ * the column can render.
+ */
+function readFilesTreeWidth(raw: unknown): number | null {
+  return typeof raw === 'number' && Number.isFinite(raw) ? clampStoredTreeWidth(raw) : null;
+}
+
+/**
+ * Store the width the tree was dragged to, or `null` to hand it back its
+ * clamped share. Clamped on the way in as well, like `setOutFontSize`: the
+ * handle cannot produce an out-of-range width, but a future caller could.
+ *
+ * NOTE WHAT IS NOT CLAMPED HERE: the container. `renderedTreeWidth` is the
+ * only place a container is consulted and it is a RENDER-time function --
+ * see `files-tree-width.ts`. A width narrowed against a hidden (0px) pane and
+ * written back here would be the operator's chosen width, gone, for good.
+ */
+export function setFilesTreeWidth(prefs: Prefs, width: number | null): Prefs {
+  return { ...prefs, filesTreeWidth: width === null ? null : clampStoredTreeWidth(width) };
 }
 
 /** Written whenever focus lands somewhere; `null` forgets the pointer. */

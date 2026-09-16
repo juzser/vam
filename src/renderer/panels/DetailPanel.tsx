@@ -856,6 +856,24 @@ export type DetailPanelProps = {
    * where the operator is already looking.
    */
   readonly onSetDefaultProvider?: (id: ProviderId) => void;
+  /**
+   * `prefs.filesTreeWidth` — the width the operator last dragged the Files
+   * tab's tree to, or `null`/absent for "never dragged", which draws the
+   * clamped share that tree has always drawn. Read here only to hand on to
+   * `FilesTab`; this panel has no opinion about it.
+   */
+  readonly filesTreeWidth?: number | null;
+  /**
+   * Persists a new tree width, or `undefined` to withdraw the drag handle
+   * entirely — ABSENT, NOT DISABLED, the same rule `onSetDefaultProvider`
+   * above follows: a caller with nowhere to put the number must not draw a
+   * grip that looks draggable and springs back the moment it is released.
+   *
+   * GLOBAL, not this pane's and not this session's — see the field's own
+   * comment in `prefs.ts` for why an arrangement the operator would otherwise
+   * re-make on every split is stored once.
+   */
+  readonly onFilesTreeWidth?: (width: number) => void;
 };
 
 /**
@@ -5967,6 +5985,13 @@ export function DetailPanel(props: DetailPanelProps) {
             // that its right-hand column IS the corner. See
             // `cornerReserveHeight`'s own comment above.
             reserveCornerHeight={cornerReserveHeight}
+            // The dragged tree width and the way to store a new one. Both
+            // come from the shell that owns `prefs`; `undefined` here draws
+            // the share and no handle, which is what the browser build and
+            // every test that has not wired a store get. See the two props'
+            // own comments above.
+            filesTreeWidth={props.filesTreeWidth ?? null}
+            onFilesTreeWidth={props.onFilesTreeWidth}
           />
         )}
       </div>
