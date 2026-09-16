@@ -139,6 +139,11 @@ import {
   submitsPrompt,
   subscribePromptSubmitKey,
 } from '../prefs/submit-key.js';
+import {
+  activeNarrowViews,
+  NARROW_PROSE_MAX_WIDTH,
+  subscribeNarrowViews,
+} from '../prefs/view-width.js';
 import { useAgentWorkReader } from '../sources/agent-work-reader.js';
 import { useHistoryReader } from '../sources/history-reader.js';
 import { describeFailure, type SourceError } from '../sources/port.js';
@@ -156,7 +161,7 @@ import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 import { TerminalTab } from './TerminalTab.js';
-import { TABS, type Tab, visibleTabs } from './tabs.js';
+import { narrowsAsProse, TABS, type Tab, visibleTabs } from './tabs.js';
 import {
   appendOlder,
   applyWalk,
@@ -5066,6 +5071,20 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const focusView = useSyncExternalStore(subscribeFocusView, activeFocusView, activeFocusView);
   /**
+   * WHETHER THIS PANE'S VIEWS ARE CAPPED AT A READABLE LINE LENGTH.
+   *
+   * Read through the same seam `focusView` above it uses, and for the same
+   * reason: it is global, `Canvas.tsx` mounts one of these per split leaf and
+   * `PhoneShell` mounts another, and there is no dialogue in which a pane
+   * opened by a keystroke could be asked. `prefs/view-width.ts` carries the
+   * argument for the number and for which views it reaches.
+   */
+  const narrowViews = useSyncExternalStore(
+    subscribeNarrowViews,
+    activeNarrowViews,
+    activeNarrowViews,
+  );
+  /**
    * THE TURNS THE OPERATOR HAS ASKED BACK, and why this is React state rather
    * than a stored field.
    *
@@ -5432,7 +5451,45 @@ export function DetailPanel(props: DetailPanelProps) {
         you read it. `min-h-0` on every level is still what makes a flex
         child able to shrink and scroll rather than growing its parent.
       */}
-      <div className="flex min-h-0 flex-1 select-text flex-col gap-2.5 px-3.5 py-3">
+      {/* THE BODY EVERY VIEW BUT ONE IS DRAWN INSIDE, and where the operator's
+          width choice lands (`prefs/view-width.ts`).
+
+          A MAXIMUM AND NOTHING ELSE. `narrowsAsProse` decides which views it
+          reaches: the Terminal caps itself in `ch` because eighty of its
+          characters is a COLUMN COUNT, and `FilesTab` — a child of this very
+          element, always mounted and merely `hidden` — is not in the ask and
+          is the one view a second opinion about width would harm. The cap is
+          therefore keyed to the CURRENT view rather than put on unconditionally:
+          leaving it on while Files is up would narrow a tree the operator
+          drags the width of themselves.
+
+          `mx-auto` CENTRES IT, which is a choice and not a default. The cap
+          exists to shorten the eye's return sweep; pinning the column against
+          one edge of a 1600px pane leaves a thousand pixels of void the eye
+          still has to cross to get back. The chrome that frames this body —
+          the view pill in the corner, the composer below — keeps the pane's
+          own width either way, so the column reads as a column and not as a
+          panel that failed to fill.
+
+          `w-full` is what makes `mx-auto` mean anything: a flex child sized by
+          its content has no spare inline space for auto margins to share.
+
+          THE COMPOSER BELOW IS DELIBERATELY NOT IN IT, and it is the one thing
+          a screenshot of the narrowed state shows and does not explain: the
+          operator named four VIEWS, and the prompt box is not one of them. It
+          is also the surface where width is a help rather than a cost -- a
+          long draft in a narrow box is scrolled, not read -- so it keeps the
+          pane. The price, said plainly, is that the column's left edge no
+          longer lines up with the box under it. */}
+      <div
+        data-detail-body
+        className={`flex min-h-0 w-full flex-1 select-text flex-col gap-2.5 px-3.5 py-3 ${
+          narrowViews && narrowsAsProse(current) ? 'mx-auto' : ''
+        }`}
+        style={
+          narrowViews && narrowsAsProse(current) ? { maxWidth: NARROW_PROSE_MAX_WIDTH } : undefined
+        }
+      >
         {/* A failed session says so here, not only in the dot's colour.
             Measured against the real CLI: a failed row carries `cwd, id,
             kind, name, sessionId, startedAt, state` and NOTHING about why --
