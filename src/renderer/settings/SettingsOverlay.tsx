@@ -59,11 +59,13 @@ import {
   setOutFontSize,
   setPaletteColor,
   setPromptSubmitKey,
+  setTerminalFontSize,
   setTheme,
   stylesheetPaletteValue,
   type Theme,
 } from '../prefs/prefs.js';
 import { type PromptSubmitKey, SUBMIT_KEY_LABELS } from '../prefs/submit-key.js';
+import { TERMINAL_FONT_SIZES } from '../prefs/terminal-font.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
 import { Switch } from './Switch.js';
 import { PHONE_SECTIONS, SECTIONS, type SectionId, shortcutSections } from './sections.js';
@@ -652,6 +654,60 @@ export function SettingsOverlay({
                   unit="px"
                   onCommit={(next) => onChange(setOutFontSize(prefs, next))}
                 />
+              </Block>
+
+              {/* THE TERMINAL'S OWN SIZE, here for the reason `out text` above
+                  it is: this is paint, and it is global. It is NOT the same
+                  control, and the difference is the one thing worth reading
+                  twice -- `out` is prose, where every integer in a range is a
+                  legible paragraph and a stepper is right; the terminal is a
+                  monospace GRID quantised into columns, where most single-pixel
+                  steps change nothing visible and the useful range is four
+                  sizes. A short list is also what lets the row show which size
+                  is in force rather than a number nobody can rank.
+
+                  AND IT IS NOT ONLY PAINT, which is why the hint says what it
+                  says. Choosing a bigger screen makes fewer columns fit, and
+                  vam tells tmux the new width (`terminal-size.ts`) -- an
+                  operator who is not told that would read a re-wrapped screen
+                  as vam having broken their session. */}
+              <Block
+                label={t('settings.appearance.terminalText.label')}
+                hint={t('settings.appearance.terminalText.hint')}
+              >
+                <div className="flex gap-1">
+                  {TERMINAL_FONT_SIZES.map((size) => (
+                    <button
+                      key={size}
+                      type="button"
+                      data-terminal-size-option={size}
+                      aria-pressed={prefs.terminalFontSize === size}
+                      // NAMED WITH THE SURFACE AND THE UNIT. `10.5` alone is
+                      // four characters a screen reader reads as a number with
+                      // nothing attached, and four such buttons in one dialog
+                      // would be four unlabelled numbers. `Choice` cannot carry
+                      // this, which is why these are spelled out here rather
+                      // than reusing it: its accessible name IS its visible
+                      // label, and the visible label has to stay short.
+                      aria-label={`terminal text ${size}px`}
+                      onClick={() => onChange(setTerminalFontSize(prefs, size))}
+                      // `capitalize` DOES NOTHING TO A NUMERAL, and it is here
+                      // on purpose: this surface capitalises every control
+                      // name AS CSS (`Choice` above does the same), and
+                      // `e2e/settings-chrome-shots.mjs` holds that as a rule
+                      // over the whole panel. A row exempt from it because its
+                      // labels happen to have no case is a row the rule stops
+                      // covering the day somebody writes a word in it.
+                      className={`vam-tap flex h-[28px] cursor-pointer items-center rounded border px-3 font-mono text-control capitalize ${FOCUS_RING} ${
+                        prefs.terminalFontSize === size
+                          ? 'border-line-loudest bg-raised text-ink'
+                          : 'border-line text-ink-dim'
+                      }`}
+                    >
+                      {size}
+                    </button>
+                  ))}
+                </div>
               </Block>
 
               {/* CONCISE MODE, and it is here for the same reason `out text`

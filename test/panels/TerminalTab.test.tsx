@@ -384,10 +384,17 @@ describe('the pane can be reached and scrolled from the keyboard', () => {
     expect(pane.getAttribute('tabindex')).toBe('-1');
     expect(q<HTMLElement>('[data-terminal-input]')?.getAttribute('tabindex')).toBe('0');
     // A focus stop that says nothing is a trap with a focus ring. A NAMED
-    // <section> is a region by its own semantics, not by a role attribute, and
-    // it is not a button: nothing is bound to Enter, and nothing captions it
-    // as bound.
-    expect(pane.tagName).toBe('SECTION');
+    // region, and not a button: nothing is bound to Enter, and nothing
+    // captions it as bound.
+    //
+    // THE ROLE IS NOW WRITTEN OUT, and that is a change of spelling rather
+    // than of semantics. This used to be a `<section>`, which IS `region` once
+    // it has an accessible name; the element became the one `OverlayScroll`
+    // scrolls, so the role is stated rather than inherited from a tag. The
+    // assertion moved with it deliberately -- a tag name would have gone green
+    // for a `<section>` that had lost its label, and this is the property that
+    // matters.
+    expect(pane.getAttribute('role')).toBe('region');
     expect(pane.getAttribute('aria-label')).toBeTruthy();
     // Still focusable programmatically, which is the one thing `tabIndex={-1}`
     // has to keep: `focusInsertStop` lands `I` here by calling `.focus()` on

@@ -49,6 +49,10 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  TERMINAL_FONT_SIZES,
+} from '../../src/renderer/prefs/terminal-font.js';
 
 const ROOT = resolve(process.cwd());
 const RENDERER = resolve(ROOT, 'src/renderer');
@@ -78,21 +82,6 @@ const EXCEPTIONS: ReadonlyArray<{
   readonly count: number;
   readonly why: string;
 }> = [
-  {
-    file: 'panels/TerminalTab.tsx',
-    size: '10.5',
-    count: 1,
-    why:
-      'THE TMUX SCREEN IS MEASURED, NOT STYLED. `terminal-size.ts` divides the ' +
-      "pane's box by the advance of one rendered character to decide the " +
-      'columns and rows tmux is told to compose at, and its own header records ' +
-      'the measurement it took: "Geist Mono at 10.5px measures 6.6015625px per ' +
-      'advance here". Rounding this up to the scale would silently re-flow the ' +
-      "operator's live session, and the screen tmux returns is already wrapped " +
-      'by then — no CSS can undo a break that is in the text. The chrome AROUND ' +
-      'the screen (its empty, pending and unreachable lines, and the size chip) ' +
-      'is on the scale; the screen itself is not.',
-  },
   {
     file: 'panels/PairingScreen.tsx',
     size: '24',
@@ -222,10 +211,36 @@ describe('the renderer sizes its type from one named scale', () => {
     const belowTheFloor = literals
       .filter(({ size }) => Number(size) < FLOOR)
       .map(({ file, size }) => `${file}: ${size}px`);
-    // The one thing under the floor is the tmux screen, and it is under it
-    // because a measurement says so rather than because a caption was tuned by
-    // eye. Spelled as the exact list, so a second one cannot join it quietly.
-    expect([...new Set(belowTheFloor)]).toEqual(['panels/TerminalTab.tsx: 10.5px']);
+    // NOTHING AT ALL NOW, and the one thing that used to be here is worth a
+    // sentence because it left rather than being raised. The tmux screen was
+    // set at a literal 10.5px and exempted on the grounds that the size is a
+    // MEASUREMENT (`terminal-size.ts` divides the pane's box by the advance of
+    // one character rendered at it). It is still measured; it is no longer a
+    // literal. The size is an operator setting whose default is above this
+    // floor, so there is no class left to exempt.
+    expect([...new Set(belowTheFloor)]).toEqual([]);
+  });
+
+  /**
+   * THE FLOOR IS ABOUT CLASSES, NOT ABOUT PIXELS -- and the terminal is where
+   * that distinction became load-bearing rather than pedantic.
+   *
+   * The rule above now finds nothing under 11px, and that would be a cheerful
+   * lie on its own: `prefs/terminal-font.ts` offers 10.5px, and an operator
+   * who picks it gets a pane set below the floor. That is not the thing the
+   * floor exists to stop. Fifty call sites sat under it because captions had
+   * been tuned smaller by eye, one at a time, with nobody able to say what
+   * size a caption was; a person deliberately choosing the density of their
+   * own terminal is the opposite act. The exception is written down HERE, in
+   * the guard, so that it stays a decision -- and derived from the shipped
+   * list, so that a fifth offered size cannot appear without this reading it.
+   */
+  it('names the one place a size below the floor is the operator’s to choose', () => {
+    const under = TERMINAL_FONT_SIZES.filter((size) => size < FLOOR);
+    expect(under).toEqual([10.5]);
+    // And the DEFAULT is not one of them: shipping below the floor to everyone
+    // is what the floor does stop.
+    expect(DEFAULT_TERMINAL_FONT_SIZE).toBeGreaterThanOrEqual(FLOOR);
   });
 
   it("spells no size as Tailwind's own text-xs / text-sm either", () => {

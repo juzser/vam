@@ -42,6 +42,11 @@ import {
   readPromptSubmitKey,
   setActivePromptSubmitKey,
 } from './submit-key.js';
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  readTerminalFontSize,
+  setActiveTerminalFontSize,
+} from './terminal-font.js';
 
 const KEY = 'vam.prefs.v1';
 
@@ -495,6 +500,29 @@ export type Prefs = {
    * another tab.
    */
   readonly filesTreeWidth: number | null;
+  /**
+   * How large the tmux screen is drawn, in pixels, out of the few sizes
+   * `prefs/terminal-font.ts` offers.
+   *
+   * GLOBAL, not per pane and not per session, for the reason `focusView`,
+   * `editorIndent` and `filesTreeWidth` give at length: `Canvas.tsx` mounts
+   * one `DetailPanel` -- hence one `TerminalTab` -- per split leaf and
+   * `PhoneShell` mounts another, so per pane it would be an arrangement the
+   * operator had to re-make on every split, with no dialogue in which a pane
+   * opened by a keystroke could be asked. Per session it would key a reading
+   * preference to an id the TTL prunes.
+   *
+   * IT IS NOT ONLY PAINT, which is what makes it unlike `outFontSize` next to
+   * it in this record: the size decides the advance of one character, and the
+   * advance decides how many COLUMNS tmux is told to compose at
+   * (`terminal-size.ts`). That is why `terminal-font.ts` is a store with a
+   * subscription rather than a custom property on the root -- see its header
+   * for the defect the property version would ship.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly terminalFontSize: number;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -521,6 +549,7 @@ export const EMPTY_PREFS: Prefs = {
   editorHighlight: DEFAULT_EDITOR_HIGHLIGHT,
   editorIndent: DEFAULT_EDITOR_INDENT,
   filesTreeWidth: null,
+  terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
 };
 
 /**
@@ -758,6 +787,13 @@ function parsePrefs(
     // that. A number IS clamped, because a hand-edited width must not render
     // a column nobody could have chosen.
     filesTreeWidth: readFilesTreeWidth((parsed as { filesTreeWidth?: unknown }).filesTreeWidth),
+    // Per field like every line above it, and normalised rather than merely
+    // defaulted, for the reason `readTerminalFontSize` argues: a size this
+    // vam does not offer is one no dialog could show as chosen, so it reads
+    // back as the size the pane ships at.
+    terminalFontSize: readTerminalFontSize(
+      (parsed as { terminalFontSize?: unknown }).terminalFontSize,
+    ),
   };
 }
 
@@ -1191,6 +1227,14 @@ export function setEditorHighlight(prefs: Prefs, on: unknown): Prefs {
  *  produce an out-of-range width, but a future caller could. */
 export function setEditorIndent(prefs: Prefs, width: unknown): Prefs {
   return { ...prefs, editorIndent: clampEditorIndent(width) };
+}
+
+/** Normalised on the way in as well as on the way out, like every setter above
+ *  it: the dialog can only offer sizes off the list, but a future caller could
+ *  store one that is not on it, and the pane would then be drawn at a size the
+ *  dialog shows nobody having chosen. */
+export function setTerminalFontSize(prefs: Prefs, size: unknown): Prefs {
+  return { ...prefs, terminalFontSize: readTerminalFontSize(size) };
 }
 
 /**
@@ -2170,6 +2214,7 @@ export function activatePrefs(prefs: Prefs): Prefs {
   setActiveFocusView(prefs.focusView);
   setActivePromptSubmitKey(prefs.promptSubmitKey);
   setActiveEditorSettings({ highlight: prefs.editorHighlight, indent: prefs.editorIndent });
+  setActiveTerminalFontSize(prefs.terminalFontSize);
   /**
    * AND ONE PREFERENCE CROSSES INTO MAIN, because the read it changes happens
    * there: `gh` is spawned by `main/sources/claude-code/source.ts`, which has

@@ -88,7 +88,7 @@ const EN = {
 
   // ── Appearance ───────────────────────────────────────────────────────────
   'settings.appearance.hint':
-    'theme, colours, the size of the text in out, how much of a turn the transcript draws, and the file editor',
+    'theme, colours, the size of the text in out and in the terminal, how much of a turn the transcript draws, and the file editor',
   'settings.appearance.theme.label': 'theme',
   'settings.appearance.theme.hint': 'system follows what the operating system asks for',
   'settings.appearance.templates.label': 'templates',
@@ -100,6 +100,11 @@ const EN = {
   'settings.appearance.outText.label': 'out text',
   'settings.appearance.outText.hint':
     "how large the agent's answer is drawn, in every response pane",
+  // THE TERMINAL'S OWN SIZE. The label says which surface, because vam draws
+  // text in more than one and only this one is measured in columns.
+  'settings.appearance.terminalText.label': 'terminal text',
+  'settings.appearance.terminalText.hint':
+    'how large the tmux screen is drawn — a bigger size fits fewer columns, and vam tells tmux the new width',
   'settings.appearance.focusView.label': 'focus view',
   'settings.appearance.focusView.hint':
     "fold each turn's tool calls away, leaving your prompts and the agent's answers",

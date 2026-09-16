@@ -15,7 +15,8 @@
  * untouched — which also means nothing here can break `j`/`k`.
  */
 
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import type { HTMLAttributes, ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** Never let the thumb shrink to a dot in a very long list. */
 const MIN_THUMB_PX = 24;
@@ -48,10 +49,28 @@ export function OverlayScroll({
   children,
   className,
   scrollRef,
+  scroller,
 }: {
   readonly children: ReactNode;
   readonly className: string;
   readonly scrollRef?: (el: HTMLDivElement | null) => void;
+  /**
+   * Everything the SCROLLING element itself has to carry, spread onto it.
+   *
+   * The sidebar and the file tree scroll a plain box, so they needed none of
+   * this. The terminal pane scrolls the same element that takes the keyboard,
+   * marks an insert scope, owns a pointer capture and carries the accessible
+   * name promising "press Tab to leave" (`TerminalTab.tsx`) -- and there is
+   * exactly one element that can be both, because the thing that scrolls is
+   * the thing whose `scrollTop` the six scroll keys move. Rather than a second
+   * overlay-scrollbar implementation living in that file, the one component
+   * takes what it must apply.
+   *
+   * Spread BEFORE the three members this component owns -- the ref, the scroll
+   * handler and the class -- so that a caller cannot take them away by
+   * accident and leave a thumb that never moves.
+   */
+  readonly scroller?: HTMLAttributes<HTMLDivElement> & Record<`data-${string}`, string | undefined>;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [metrics, setMetrics] = useState<Metrics>(NONE);
@@ -83,6 +102,7 @@ export function OverlayScroll({
   return (
     <div className="group relative flex min-h-0 flex-1 flex-col">
       <div
+        {...scroller}
         ref={(el) => {
           ref.current = el;
           scrollRef?.(el);
