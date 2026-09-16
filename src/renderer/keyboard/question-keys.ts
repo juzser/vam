@@ -18,7 +18,7 @@
 
 import { activeBindings, bindingChords, type KeyBindings, parseChord } from './chords.js';
 
-export type QuestionKeys = {
+type QuestionKeys = {
   /** Down and up the OPTIONS of the step on screen. */
   readonly down: readonly string[];
   readonly up: readonly string[];
@@ -72,7 +72,7 @@ export function questionKeys(overrides: KeyBindings = activeBindings()): Questio
  * option by position; `toggle` is the pick under the cursor; `chat` leaves the
  * picker for prose.
  */
-export type QuestionAction =
+type QuestionAction =
   | { readonly kind: 'walkOption'; readonly delta: 1 | -1 }
   | { readonly kind: 'walkStep'; readonly delta: 1 | -1 }
   /** ZERO-BASED — an index into the step's options, not the digit typed. The

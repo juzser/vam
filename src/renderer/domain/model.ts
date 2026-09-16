@@ -1,8 +1,8 @@
 /**
  * The one shape the canvas draws.
  *
- * docs/design/canvas-layout.md §2 established that this is not an invention:
- * the factory and orca each already treat "a decision waiting for a person" as
+ * This is not an invention: the factory and orca each already treat "a
+ * decision waiting for a person" as
  * first-class, and each already has a project layer, a session layer and a
  * notion of how many agents are running. What differs is only the vocabulary.
  * So the adapters translate into these types and the canvas never learns which
@@ -24,7 +24,7 @@
 export type SourceId = string;
 
 /**
- * The states worth a colour on a canvas you read at a glance (§3).
+ * The states worth a colour on a canvas you read at a glance.
  *
  * `waiting` is the one that earns the canvas its keep, and it means one precise
  * thing: **the session has finished its turn and the ball is with you.** It
@@ -63,7 +63,7 @@ export type SessionStatus = 'running' | 'waiting' | 'idle' | 'done' | 'failed';
 /**
  * One round trip between you and a session: your words in, its answer out.
  *
- * NOT one agent turn and NOT one phase (§3, "Node session"). A session runs its
+ * NOT one agent turn and NOT one phase. A session runs its
  * own agents — reviewer, verifier, coder — by itself, and none of those becomes
  * a row or a step here. They surface only as the `●N` count and the activity
  * line on the session that owns them. What is a step is the thing you would
@@ -83,7 +83,7 @@ export type SessionStatus = 'running' | 'waiting' | 'idle' | 'done' | 'failed';
  *  - `output` — **the session's final response**, not its working. A reviewer's
  *    verdict, not the diff it read to reach one.
  *
- * Both render clamped to two lines (§3). Two, not one: a prompt worth
+ * Both render clamped to two lines. Two, not one: a prompt worth
  * distinguishing from the one above it rarely fits in a single line, and a
  * response truncated to one line is usually the same first clause for every
  * session. Two lines is where these become telling rather than decorative.
@@ -287,7 +287,7 @@ export type Command = {
  * `PullRequestList`'s reason: a code alone cannot be shown and a message alone
  * cannot be matched on.
  */
-export type SlashCommandGap = {
+type SlashCommandGap = {
   readonly code: string;
   readonly message: string;
 };
@@ -462,8 +462,8 @@ export type Session = {
   readonly epic: string | null;
   readonly status: SessionStatus;
   /**
-   * How many agents this session is running right now — the `●N` on the header
-   * (§3). This is the ONLY place a subagent appears: it is work happening under
+   * How many agents this session is running right now — the `●N` on the header.
+   * This is the ONLY place a subagent appears: it is work happening under
    * a session you started, not a session of its own, and giving it a row would
    * turn a list of four things you own into a list of forty you do not.
    */
@@ -497,7 +497,7 @@ export type Session = {
    * concept of.
    */
   readonly branch: string | null;
-  /** Newest first. The canvas shows the first three; §3. */
+  /** Newest first. The canvas shows the first three. */
   readonly decisions: readonly Decision[];
   /**
    * Which system this session came from. Optional because merging several

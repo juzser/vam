@@ -32,7 +32,7 @@ export type ApiRunningSession = {
 };
 
 /** `queries.ts` → `TokensByEpic`. One row per epic the factory has budgeted. */
-export type ApiEpicTokens = {
+type ApiEpicTokens = {
   readonly epicId: string;
   readonly tokensSpent: number;
   readonly tokensBudget: number;
@@ -101,7 +101,7 @@ export type WaiverDecision = {
 };
 
 /** `db/schema.ts` → `findings`, narrowed to what a review queue needs. */
-export type ApiFinding = {
+type ApiFinding = {
   readonly findingId: string;
   readonly taskId: string;
   readonly fingerprint: string;
@@ -119,11 +119,11 @@ export type ApiTaskDetail = {
 };
 
 /** `queries.ts` → `KanbanTask`. Used only to enumerate a session's task ids. */
-export type ApiKanbanTask = { readonly taskId: string };
+type ApiKanbanTask = { readonly taskId: string };
 export type ApiKanbanColumn = { readonly tasks: readonly ApiKanbanTask[] };
 
 /** `db/schema.ts` → `lessons`, narrowed to what a review queue needs. */
-export type ApiLesson = {
+type ApiLesson = {
   readonly lessonId: string;
   readonly sessionId: string;
   readonly lessonType: string;

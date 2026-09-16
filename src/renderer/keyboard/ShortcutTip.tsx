@@ -44,7 +44,7 @@ import { CURSOR_MODES, type CursorMode, describeAction, MODE_TITLES } from './ke
 
 /** One row of a tooltip: the chords, and the mode that reading is true in
  *  (`null` for a key that means the same in both). */
-export type TipLine = {
+type TipLine = {
   readonly caption: string | null;
   readonly keys: string;
 };

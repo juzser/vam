@@ -1,8 +1,9 @@
 /**
- * Reads over the canvas model. Pure, source-agnostic, and deliberately the only
- * place that knows the canvas shows *three* decisions — a component that slices
- * the array itself is a second copy of that rule, and the two drift the first
- * time the number changes.
+ * Reads over the canvas model: ordering, counts, and the small facts a
+ * component would otherwise recompute for itself. Pure, source-agnostic, and
+ * deliberately the only place that knows the canvas shows *three* decisions —
+ * a component that slices the array itself is a second copy of that rule, and
+ * the two drift the first time the number changes.
  *
  * `orderedSessions` and its supporting ranking functions moved here from the
  * 0.1 canvas's `layout.ts` in the 0.2 migration's step 2: they were always
@@ -18,8 +19,8 @@
 
 import type { CanvasModel, Command, Decision, Group, Project, Session } from './model.js';
 
-/** How many decision rows a session node shows (docs/design/canvas-layout.md §3). */
-export const VISIBLE_DECISION_COUNT = 3;
+/** How many decision rows a session node shows. */
+const VISIBLE_DECISION_COUNT = 3;
 
 export type SessionEntry = {
   readonly project: Project;
@@ -74,7 +75,7 @@ export function allSessions(model: CanvasModel): SessionEntry[] {
   return entries;
 }
 
-/** The `◐ N agents` in the title bar (§3). */
+/** The `◐ N agents` in the title bar. */
 export function runningAgentTotal(model: CanvasModel): number {
   let total = 0;
   for (const { session } of allSessions(model)) {
@@ -83,7 +84,7 @@ export function runningAgentTotal(model: CanvasModel): number {
   return total;
 }
 
-/** The `N need you` in the status bar (§3). */
+/** The `N need you` in the status bar. */
 export function waitingCount(model: CanvasModel): number {
   return allSessions(model).filter(({ session }) => session.status === 'waiting').length;
 }
@@ -176,7 +177,7 @@ function projectRank(project: Project): number {
  * member keeps the property that matters (what needs you rises) while letting
  * each group stay in one piece.
  */
-export function orderedProjects(model: CanvasModel): Project[] {
+function orderedProjects(model: CanvasModel): Project[] {
   return [...model.projects].sort((a, b) => projectRank(a) - projectRank(b));
 }
 
@@ -201,7 +202,7 @@ function groupRank(group: Group): number {
  * With no groups this is `orderedProjects` and nothing else, which is the
  * state of every store in existence.
  */
-export function orderedTopLevel(model: CanvasModel): (Project | Group)[] {
+function orderedTopLevel(model: CanvasModel): (Project | Group)[] {
   const groups = model.groups ?? [];
   if (groups.length === 0) {
     return orderedProjects(model);
@@ -220,7 +221,7 @@ export function orderedTopLevel(model: CanvasModel): (Project | Group)[] {
 
 /** The members of one group, most urgent project first -- `orderedProjects`
  *  applied to the level below a group heading. */
-export function orderedInGroup(group: Group): Project[] {
+function orderedInGroup(group: Group): Project[] {
   return [...group.projects].sort((a, b) => projectRank(a) - projectRank(b));
 }
 

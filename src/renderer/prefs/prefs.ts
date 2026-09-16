@@ -1,8 +1,8 @@
 /**
  * The two things that are yours rather than the factory's.
  *
- * §3 already decided this and the code had not caught up: "draggable and
- * remembers position. Position is saved per user, **and does not go into
+ * The design already decided this and the code had not caught up: "draggable
+ * and remembers position. Position is saved per user, **and does not go into
  * the event log**." Where you dragged a card and which emoji you put on a
  * session are facts about how you like to look at the work — they are not
  * facts about the work, so they must not become events. The factory is right
