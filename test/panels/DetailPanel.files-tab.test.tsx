@@ -1781,7 +1781,11 @@ describe('the markdown preview', () => {
   it('keeps Save reachable from the preview, and a save from there really lands', async () => {
     const write = vi.fn(async () => ({ signature: SIGNATURE({ sha256: 'next' }) }));
     withBridge({
-      list: async () => ({ root: '/work/atlas', files: ['/work/atlas/README.md'], truncated: false }),
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md'],
+        truncated: false,
+      }),
       read: async () => ({ content: '# a\n', isBinary: false, signature: SIGNATURE() }),
       write,
     });
