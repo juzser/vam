@@ -17,7 +17,7 @@
  * three can be present on one machine without either config's `webServer`
  * deciding it has found the other's server.
  *
- * `?demo=1` is the whole fixture: the built page's demo mode renders the §3
+ * `?demo=1` is the whole fixture: the built page's demo mode renders the
  * fixture with every write refused in the renderer. No live factory, no proxy,
  * no port to keep free, and the same four sessions every run -- a layout
  * assertion against a live factory would measure whatever that factory
