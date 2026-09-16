@@ -60,9 +60,18 @@ export type FormatResult =
   /** The formatter declined, in words the caller draws verbatim. */
   | { readonly kind: 'refused'; readonly message: string };
 
-/** What vam will format, said in one place so every refusal can quote it and
- *  no refusal can go stale against the list. */
-const OFFER = 'vam formats .json (whitespace only), and the blank lines and comments in .env/.ini';
+/**
+ * What vam will format, said in one place so every refusal can quote it and no
+ * refusal can go stale against the list.
+ *
+ * EXPORTED, because there is a third reader now: the Format button's own
+ * tooltip (`FilesTab.tsx`). That button is never disabled -- pressing it on a
+ * `.ts` puts the refusal on screen by name -- so what the tooltip owes the
+ * operator is the SCOPE, and a hand-typed scope beside a button is exactly the
+ * kind of copy that outlives the day the formatter learns a file type.
+ */
+export const FORMAT_OFFER =
+  'vam formats .json (whitespace only), and the blank lines and comments in .env/.ini';
 
 /**
  * Format `content` for `path`, or say why not.
@@ -93,10 +102,10 @@ export function formatFile(path: string, content: string, indent: number): Forma
 function declineFor(name: string): string {
   const ext = extensionOf(name);
   if (ext === '.jsonc' || ext === '.json5') {
-    return `vam does not format ${ext} files — JSON.parse does not read them, and the round-trip that makes .json safe would delete every comment in the file. ${OFFER}.`;
+    return `vam does not format ${ext} files — JSON.parse does not read them, and the round-trip that makes .json safe would delete every comment in the file. ${FORMAT_OFFER}.`;
   }
   const subject = ext === null ? `files named ${name}` : `${ext} files`;
-  return `vam does not format ${subject} — it formats only what it can prove it has not changed. ${OFFER}.`;
+  return `vam does not format ${subject} — it formats only what it can prove it has not changed. ${FORMAT_OFFER}.`;
 }
 
 /* -------------------------------------------------------------------------

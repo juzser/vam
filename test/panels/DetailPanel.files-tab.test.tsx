@@ -22,6 +22,7 @@ import type {
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
+import { FORMAT_OFFER } from '../../src/renderer/panels/files-format.js';
 import { resetUnsavedRegistry } from '../../src/renderer/panels/unsaved-files.js';
 import {
   DEFAULT_EDITOR_HIGHLIGHT,
@@ -1578,5 +1579,80 @@ describe('the highlight overlay', () => {
     // become a second one.
     expect(qa('[data-files] [data-insert-stop]').length).toBe(1);
     expect(q('[data-files] [data-insert-stop]')?.hasAttribute('data-files-editor')).toBe(true);
+  });
+});
+
+/* =========================================================================
+ * THE TOOLBAR'S OWN WORDS.
+ *
+ * The operator asked for "a tooltip for the Save button and the formatter
+ * button". Save had none at all; Format had a `title`, which is the shape
+ * `panels/Note.tsx` was written to replace and says why in its own header: a
+ * `title` opens on HOVER and on nothing else, so on a keyboard-first tool the
+ * explanation was unreadable to the operator it was written for.
+ *
+ * So both are `Note`s now, and these hold four things a later edit could
+ * quietly undo: that the note exists, that it names the chord (neither key is
+ * in the rebindable table -- they are `EDITOR_KEYS`, hardcoded, which is what
+ * makes writing them out honest here rather than a lie waiting to happen),
+ * that no `title` came back, and that wrapping added no element to a flex row.
+ * ====================================================================== */
+
+describe('the tooltips on the two buttons the operator named', () => {
+  const noteOn = (selector: string): string | null =>
+    q(selector)?.getAttribute('data-note') ?? null;
+
+  it('gives Save a note a keyboard can read, naming the chord that does the same thing', async () => {
+    await openFile('/work/atlas/.env', 'A=1\n');
+    const text = noteOn('[data-files-save]');
+    expect(text).not.toBeNull();
+    expect(text).toContain('Mod-s');
+  });
+
+  /**
+   * AND THE FORMAT NOTE QUOTES THE FORMATTER'S OWN OFFER rather than a second
+   * copy of it. This button is never disabled -- pressing it on a `.ts` puts a
+   * refusal on screen by name -- so what the tooltip owes the operator is the
+   * SCOPE, and a hand-typed scope goes stale the first time the formatter
+   * learns a file type. `FORMAT_OFFER` is the string every refusal already
+   * ends with; this asserts the tooltip is built from that one and then
+   * asserts a real refusal still carries it, so the two surfaces are one fact
+   * rather than two that happen to agree today.
+   */
+  it('gives Format a note that quotes the same offer its refusals do', async () => {
+    await openFile('/work/atlas/.env', 'A=1\n');
+    const text = noteOn('[data-files-format]');
+    expect(text).not.toBeNull();
+    expect(text).toContain('Mod-Shift-f');
+    expect(text).toContain(FORMAT_OFFER);
+
+    cleanup();
+    await openFile('/work/atlas/index.ts', 'export const a = 1\n');
+    await pressFormat();
+    expect(note()).toContain(FORMAT_OFFER);
+  });
+
+  /**
+   * THE REGRESSION ITSELF. A `title` is not a failure that shows up in a
+   * snapshot -- it works perfectly with a mouse -- so the only thing keeping
+   * it from coming back is a check that looks for it.
+   */
+  it('uses no bare title on either — the shape that was unreadable from the keyboard', async () => {
+    await openFile('/work/atlas/.env', 'A=1\n');
+    expect(q('[data-files-save]')?.getAttribute('title')).toBeNull();
+    expect(q('[data-files-format]')?.getAttribute('title')).toBeNull();
+  });
+
+  /**
+   * `Tooltip.Trigger asChild` ADDS NO ELEMENT -- `ShortcutTip`'s own header
+   * states that as an invariant it depends on and does not enforce, and the
+   * header row these buttons sit in is a flex row whose spacing a wrapper
+   * would change. So each must still be a DIRECT child of that row.
+   */
+  it('wraps neither button in an extra element — the header row is a flex row', async () => {
+    await openFile('/work/atlas/.env', 'A=1\n');
+    const children = [...(q('[data-files-header]')?.children ?? [])];
+    expect(children.some((el) => el.hasAttribute('data-files-save'))).toBe(true);
+    expect(children.some((el) => el.hasAttribute('data-files-format'))).toBe(true);
   });
 });

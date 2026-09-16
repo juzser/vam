@@ -113,11 +113,12 @@ import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { activeEditorSettings, subscribeEditorSettings } from '../prefs/editor.js';
 import type { SourceError } from '../sources/port.js';
 import { applyTab, relativeLabel } from './files-editor-text.js';
-import { formatFile } from './files-format.js';
+import { FORMAT_OFFER, formatFile } from './files-format.js';
 import { type EditorLang, highlightEditor, highlightLangFor } from './files-highlight.js';
 import { FileRowIcon } from './files-icons.js';
 import { EDITOR_KEYS, type FileTreeRow, fileTreeRows, resolveTreeKey } from './files-tree.js';
 import { SYNTAX_CLASS } from './highlight.js';
+import { Note } from './Note.js';
 import {
   encodeUnsaved,
   NO_UNSAVED_FILES,
@@ -963,35 +964,56 @@ export function FilesTab({
                 also holds the path, the dirty dot, Save and the view pill's
                 own reservation, and at the 320px floor the path has to keep
                 something to truncate. */}
+            {/* AND ITS TOOLTIP IS A `Note`, NOT A `title`. The operator asked
+                for tooltips on this button and on Save; this one HAD a
+                `title`, which is precisely the shape `panels/Note.tsx` exists
+                to replace -- a `title` opens on hover and on nothing else, so
+                on a keyboard-first tool its explanation was unreadable to its
+                own primary user. `aria-label` stays: the note is the
+                EXPLANATION, and a screen reader still needs the NAME.
+
+                The scope is quoted from `FORMAT_OFFER` rather than retyped.
+                A button that is never disabled owes the operator the reason it
+                might refuse, and a hand-written list beside a button is the
+                copy that survives the formatter learning a file type. */}
             {activeBuffer?.kind === 'editable' && (
-              <button
-                type="button"
-                data-files-format
-                onClick={formatActive}
-                aria-label="format this file"
-                title="format this file (Mod-Shift-f)"
-                className="vam-tap flex flex-none cursor-pointer items-center rounded-[6px] border border-line px-1.5 py-1 text-ink-dim hover:border-line-strong hover:text-ink"
+              <Note
+                text={`Tidy this file's whitespace (Mod-Shift-f). ${FORMAT_OFFER} — anything else is refused by name, and Mod-z puts back whatever it changed.`}
               >
-                <AlignLeft size={12} strokeWidth={1.8} />
-              </button>
+                <button
+                  type="button"
+                  data-files-format
+                  onClick={formatActive}
+                  aria-label="format this file"
+                  className="vam-tap flex flex-none cursor-pointer items-center rounded-[6px] border border-line px-1.5 py-1 text-ink-dim hover:border-line-strong hover:text-ink"
+                >
+                  <AlignLeft size={12} strokeWidth={1.8} />
+                </button>
+              </Note>
             )}
+            {/* SAVE HAD NO TOOLTIP AT ALL, and the one it has now names the
+                one behaviour an operator cannot guess from a disk icon: this
+                write is REFUSED rather than forced when the file moved under
+                it, and their own text survives that refusal. */}
             {activeBuffer?.kind === 'editable' && (
-              <button
-                type="button"
-                data-files-save
-                data-files-save-state={activeBuffer.save.kind}
-                onClick={() => void saveFile(activePath)}
-                disabled={activeBuffer.save.kind === 'saving'}
-                aria-label="save this file"
-                className="vam-tap flex flex-none cursor-pointer items-center gap-1 rounded-[6px] border border-line px-2 py-1 text-control text-ink-dim hover:border-line-strong hover:text-ink disabled:cursor-default disabled:opacity-60"
-              >
-                {activeBuffer.save.kind === 'saving' ? (
-                  <Loader2 size={12} strokeWidth={1.8} className="animate-spin" />
-                ) : (
-                  <Save size={12} strokeWidth={1.8} />
-                )}
-                Save
-              </button>
+              <Note text="Write this file to disk (Mod-s). If it changed on disk since you opened it the write is refused, not forced — your edits stay in the box either way.">
+                <button
+                  type="button"
+                  data-files-save
+                  data-files-save-state={activeBuffer.save.kind}
+                  onClick={() => void saveFile(activePath)}
+                  disabled={activeBuffer.save.kind === 'saving'}
+                  aria-label="save this file"
+                  className="vam-tap flex flex-none cursor-pointer items-center gap-1 rounded-[6px] border border-line px-2 py-1 text-control text-ink-dim hover:border-line-strong hover:text-ink disabled:cursor-default disabled:opacity-60"
+                >
+                  {activeBuffer.save.kind === 'saving' ? (
+                    <Loader2 size={12} strokeWidth={1.8} className="animate-spin" />
+                  ) : (
+                    <Save size={12} strokeWidth={1.8} />
+                  )}
+                  Save
+                </button>
+              </Note>
             )}
           </>
         )}
