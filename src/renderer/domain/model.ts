@@ -446,7 +446,7 @@ export type AgentQuestion = {
 
 export type Session = {
   readonly id: string;
-  /** Short name on the node header — an epic id, a task id, a run name. */
+  /** Short name shown on the tab and the sidebar row — an epic id, a task id, a run name. */
   readonly title: string;
   /**
    * A single glyph the operator picked, or `null` for none.

@@ -21,10 +21,10 @@ NORMAL; Insert is the resting state of the response pane.
 | `j` `k` (Select) | up and down the SESSION LIST, in the order the sidebar prints |
 | `h` `l` (Select) | left and right across the canvas — **computed geometrically at press time** |
 | `h j k l` (Insert) | the options of an open question; `h` alone returns to Select |
-| `f` | shows a jump label on every node, type the label to land there |
+| `f` | shows a jump label on every sidebar row (first 20), type the label to land there |
 | `/` `n` `N` | search by session/task name |
 | `gt` `gT` | move to next / previous project |
-| `gg` `G` | first / last node |
+| `gg` `G` | first / last session in the sidebar |
 | `Enter` | opens detail (the agent's full process) |
 | `yy` | **copies the command you need to run by hand to the clipboard** |
 | `Ctrl-K` | command palette |

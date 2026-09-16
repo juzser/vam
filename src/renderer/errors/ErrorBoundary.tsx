@@ -11,7 +11,7 @@
  * and they protect different things:
  *
  *   - Around the CANVAS, inside `SourceCanvas`. This is the throw that
- *     actually happens -- the canvas is where the model, the nodes and the
+ *     actually happens -- the canvas is where the model and the
  *     panels are -- and putting the boundary here keeps the source-failure
  *     banner above it alive, which matters because that banner usually
  *     carries the sentence explaining WHY the model was malformed enough to
