@@ -299,6 +299,70 @@ check(
   JSON.stringify(branches.filter((b) => b.name !== '')),
 );
 
+// THE ONE MEASUREMENT `token-contrast.test.ts` CANNOT MAKE. That guard parses
+// the stylesheet and compares two declarations, so it reads `--vam-ink-faint`
+// and stays green however far an `opacity` on the element dims the paint. The
+// age and the branch are dimmed exactly that way (see `SessionList.tsx`), so
+// the accessibility floor for this row can only be checked HERE, against
+// composited pixels: the alpha is applied by hand over the nearest ancestor
+// that actually paints, which is what the compositor does.
+const metaInk = await page.evaluate(() => {
+  const channels = (value) => {
+    const parts = value.match(/[\d.]+/g);
+    return parts === null ? null : parts.map(Number);
+  };
+  // EVERY row, not the first one. A selected row is filled with a lighter
+  // surface than a resting one, so the first match is not the worst case and a
+  // check that reads only it would pass while the row an operator is actually
+  // looking at fails.
+  return [...document.querySelectorAll('[data-row-meta-line]')].map((el) => {
+    const cs = getComputedStyle(el);
+    // `rgba(0, 0, 0, 0)` is NOT a ground. Taking a transparent background for
+    // black is how a contrast check reports a comfortable pass over nothing.
+    let ground = null;
+    for (let node = el; node !== null; node = node.parentElement) {
+      const bg = channels(getComputedStyle(node).backgroundColor);
+      if (bg !== null && (bg.length < 4 || bg[3] > 0)) {
+        ground = bg.slice(0, 3);
+        break;
+      }
+    }
+    const fg = channels(cs.color);
+    return { fg: fg === null ? null : fg.slice(0, 3), alpha: Number(cs.opacity), ground };
+  });
+});
+// The corpus is part of the assertion: "no row failed" over zero rows is the
+// same sentence as "every row passed", and only one of them is worth having.
+check(
+  'the dimmed age and branch were found, and every one has a ground that paints',
+  metaInk.length > 1 &&
+    metaInk.every(
+      (row) => row.fg !== null && row.ground !== null && row.alpha > 0 && row.alpha < 1,
+    ),
+  JSON.stringify(metaInk),
+);
+{
+  const lin = (c) => (c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4);
+  const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  const ratios = metaInk.map((row) => {
+    const painted = row.fg.map((c, i) => row.alpha * c + (1 - row.alpha) * row.ground[i]);
+    const a = lum(painted);
+    const b = lum(row.ground);
+    return {
+      painted: `rgb(${painted.map(Math.round).join(', ')})`,
+      ground: `rgb(${row.ground.join(', ')})`,
+      ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05),
+    };
+  });
+  const worst = ratios.reduce((a, b) => (a.ratio <= b.ratio ? a : b));
+  console.log(`meta ink, ${ratios.length} rows composited; worst ${JSON.stringify(worst)}`);
+  check(
+    'and what the compositor really paints clears WCAG 1.4.3 on the WORST row',
+    worst.ratio >= 4.5,
+    `worst ${worst.ratio.toFixed(2)}:1, ${worst.painted} on ${worst.ground}`,
+  );
+}
+
 await page.screenshot({ path: `${outDir}/sidebar-tree-levels.png` });
 console.log(`${outDir}/sidebar-tree-levels.png`);
 await page.locator('[data-sidebar-pane]').screenshot({ path: `${outDir}/sidebar-tree-column.png` });
