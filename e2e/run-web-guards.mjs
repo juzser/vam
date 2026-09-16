@@ -67,6 +67,16 @@
  * extremes and at vam's narrowest legal pane -- including the one act that
  * proves the container clamp never writes back, which is looking at another
  * tab and coming back, because a `display: none` tree measures 0px.
+ * and -- since the sidebar became a tree you can read -- where its three
+ * levels REALLY sit once a browser has laid the column out (a `padding-left`
+ * on a container moves its CHILDREN and not itself, so the declaration and the
+ * picture are two different facts), whether a status mark keeps its lane at
+ * every status, whether every spinner in the list is at the SAME ANGLE --
+ * `Element.getAnimations()` on a row mounted deliberately late, which is a
+ * question no unit environment can be asked at all -- whether a bell rung for
+ * a wait ever stops ringing, and what `prefers-reduced-motion` leaves drawn,
+ * which is the cascade's answer about a real node rather than a content scan
+ * of a stylesheet.
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -113,6 +123,7 @@ const GUARDS = [
   'files-markdown-shots',
   'files-tree-resize-shots',
   'terminal-ime-shots',
+  'sidebar-tree-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);
