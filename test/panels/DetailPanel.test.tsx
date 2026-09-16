@@ -3631,6 +3631,36 @@ describe('a turn with no answer says which kind of nothing it is', () => {
     }
   });
 
+  /**
+   * AND THE ACTIVITY LINE DOES NOT OUTRANK IT EITHER.
+   *
+   * A running session's newest turn prefers `Session.activity` over any of
+   * these sentences, because a live caption naming the tool the agent is on is
+   * better than prose. But `activity` is read off the SAME window, so on a
+   * window vam could not read it is at best stale -- a reading taken before,
+   * or from somewhere else -- and drawing it here would name work as this
+   * turn's working on the one turn vam has no working for. This is the
+   * `unconfirmed` rule next to it, for the same reason and one absence over.
+   */
+  it('keeps the unread sentence on a running turn that has an activity line', () => {
+    const only: Decision = { ...withOutput(null), unread: true };
+    draw({
+      decision: only,
+      entry: {
+        project: PROJECT,
+        session: {
+          ...SESSION,
+          status: 'running',
+          activity: 'Bash: run the tests',
+          decisions: [only],
+        },
+      },
+    });
+    const text = q<HTMLElement>('[data-out-empty]')?.textContent ?? '';
+    expect(text).toContain('could not read');
+    expect(text).not.toContain('run the tests');
+  });
+
   /** And a turn vam DID read keeps every sentence it had. */
   it('says nothing about reading on an ordinary unanswered turn', () => {
     show(null, 'done');

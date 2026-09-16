@@ -258,6 +258,37 @@ describe('a transcript line larger than the read window', () => {
       }
     });
 
+    /**
+     * THE `last-prompt` BRANCH IS NOT A LIAR, AND MUST NOT BE CALLED ONE.
+     *
+     * That branch exists for a real and common case: the operator's own line
+     * is ABOVE the top of the window, so the marker opens the turn itself and
+     * re-emits the prompt in full. On the six largest transcripts measured,
+     * five show exactly one turn in the tail and it is this shape. Such a
+     * window holds NO `user` line and holds the answer -- so a starvation test
+     * that demanded both would brand it unreadable and print "vam could not
+     * read the answer to this turn" over the answer itself. That is this
+     * defect inverted, and it is a one-character edit away.
+     *
+     * The stop rule may want both lines; the starvation REPORT may not. They
+     * are different questions and this is the fixture that tells them apart.
+     */
+    it('does not call a window unreadable when it read the answer but not the prompt', async () => {
+      const body =
+        `${oversizedLine(STEP + 200)}\n` +
+        jsonl(marker('what is left to do on the release'), answered('three things are left'));
+      const reader = readerOf(body);
+      const tail = await readLiveTail(reader, 'sess-1', STEP);
+
+      // It looked for the prompt -- it widened, and it reached byte 0 doing so.
+      expect(reader.reads.length).toBeGreaterThan(1);
+      expect(reader.reads.at(-1)?.from).toBe(0);
+      // ...and having found the ANSWER, it reports a reading, not a refusal.
+      expect(tail.starved).toBe(false);
+      expect(tail.facts.decisions[0]?.output).toBe('three things are left');
+      expect(tail.facts.decisions[0]?.unread).toBeUndefined();
+    });
+
     /** A window that DID read conversation is not starved, and says nothing. */
     it('marks no turn unread when it read conversation', async () => {
       const reader = readerOf(buriedTurn(STEP + 200));
