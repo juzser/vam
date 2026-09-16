@@ -55,7 +55,7 @@ const statusBar = () => document.querySelector('[data-status-bar]');
 const statusText = () => statusBar()?.textContent ?? '';
 
 beforeAll(() => {
-  // ReactFlow measures with APIs happy-dom does not implement.
+  // The rendered session panes measure with APIs happy-dom does not implement.
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}

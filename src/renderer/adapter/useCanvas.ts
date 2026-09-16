@@ -89,7 +89,7 @@ export function useCanvas(client: SmithClient, options?: UseCanvasOptions): Canv
     }
   }, [client]);
 
-  // Unconditional: reading never waited on SSE (canvas-layout.md §6.1).
+  // Unconditional: reading never waited on SSE (canvas-layout.md §5.1).
   useEffect(() => {
     void load();
   }, [load]);

@@ -121,8 +121,8 @@ function sessionSourceWith(closeSession?: (sessionId: string, force?: boolean) =
   };
 }
 
-// The same three globals every rendering Canvas test installs: ReactFlow
-// needs the first two, prefs the third.
+// The same three globals every rendering Canvas test installs: the rendered
+// session panes need the first two, prefs the third.
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
     observe() {}

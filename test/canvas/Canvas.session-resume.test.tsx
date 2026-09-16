@@ -83,8 +83,9 @@ function press(key: string) {
 }
 
 // The same two shims the other Canvas tests install, for the same reason:
-// ReactFlow measures and this happy-dom has no layout engine. `localStorage`
-// itself is installed for every test file by test/support/storage.ts.
+// the rendered session panes measure and this happy-dom has no layout
+// engine. `localStorage` itself is installed for every test file by
+// test/support/storage.ts.
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
     observe() {}
