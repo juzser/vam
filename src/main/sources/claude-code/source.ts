@@ -88,36 +88,43 @@ import {
   stopSessionViaCli,
 } from './stop.js';
 import { withLiveAgentTurn } from './subagent.js';
-import {
-  compactAge,
-  EMPTY_FACTS,
-  summarizeTranscript,
-  type TranscriptFacts,
-} from './transcript.js';
+import { MAX_TAIL_READ_BYTES, readLiveTail, TAIL_WINDOW_BYTES } from './tail.js';
+import { compactAge, EMPTY_FACTS, type TranscriptFacts } from './transcript.js';
 import { fileTranscriptSource, readTranscriptWindow, type TranscriptSource } from './window.js';
 
 /**
  * The read budget. Only sessions the CLI reported are opened -- single digits
- * in practice -- and each is read for its last `TAIL_BYTES` and no more (plus
- * the one byte `window.ts` probes to find the line boundary), so `load()`
- * costs kilobytes against the 0.94 GB of session transcripts on this disk,
- * independent of how large any one of them is. A transcript shared by two
- * resumed processes is read once.
+ * in practice -- and each is read backwards from the end until the window holds
+ * the raw material of a turn, a step of `TAIL_WINDOW_BYTES` at a time and never
+ * past `MAX_TAIL_READ_BYTES` in total (`tail.ts`, which states the whole rule
+ * and what it costs). So `load()` costs kilobytes against the 0.94 GB of
+ * session transcripts on this disk, independent of how large any one of them
+ * is. A transcript shared by two resumed processes is read once.
+ *
+ * ONE STEP IS THE COMMON CASE, and that is the point of stating the budget as a
+ * rule rather than as a constant: measured over the 85 session transcripts
+ * here, 83 satisfy the stop rule on the first step and pay exactly what the old
+ * single fixed read paid. The other two exist because a single LINE can be
+ * larger than the whole window -- 670 of them here -- and a window holding one
+ * of those holds no conversation at all.
  *
  * THIS IS THE LIVE VIEW'S BUDGET AND NOTHING ELSE'S. Scrolling back through a
  * session is a separate, on-demand read (`history.ts`), asked for by a person
  * and never by the poll; it does not widen this and this does not bound it.
  *
- * WHAT THE OPERATOR SEES FOR IT, said here because it is this constant that
- * decides it: 34 of the 77 sessions here fit inside the window entirely and
- * show every turn they have. The rest open MID-TURN, and the oldest turn on
- * the canvas is then one whose beginning vam never read -- its prompt is whole
- * (`last-prompt` re-emits the text in full) and its answer is the real one,
- * but the tool failures counted against it are only those inside the window.
- * That turn is not dropped: on five of the six largest transcripts here the
- * tail holds exactly one turn, so dropping it would leave the canvas empty.
- * `history.ts` is what reaches everything before it, and its cursor rules are
- * written so that turn is never handed over a second time.
+ * WHAT THE OPERATOR SEES FOR IT, said here because it is this budget that
+ * decides it: 34 of the 77 sessions measured for the original window fit inside
+ * one step entirely and show every turn they have. The rest open MID-TURN, and
+ * the oldest turn on the canvas is then one whose beginning vam never read --
+ * its prompt is whole (`last-prompt` re-emits the text in full) and its answer
+ * is the real one, but the tool failures counted against it are only those
+ * inside the window. That turn is not dropped: on five of the six largest
+ * transcripts here the tail holds exactly one turn, so dropping it would leave
+ * the canvas empty. `history.ts` is what reaches everything before it, and its
+ * cursor rules are written so that turn is never handed over a second time.
+ *
+ * AND WHEN EVEN THE WIDENED READ FINDS NO CONVERSATION, the turns it minted say
+ * so rather than claiming the session answered nothing (`Decision.unread`).
  *
  * The per-process status files are the one read that is per ROW rather than
  * per session -- there is no sharing them, since telling two rows apart is
@@ -125,7 +132,6 @@ import { fileTranscriptSource, readTranscriptWindow, type TranscriptSource } fro
  * hundred bytes, read whole), so a canvas of single-digit rows costs
  * single-digit kilobytes on top of the tails.
  */
-const TAIL_BYTES = 128 * 1024;
 
 /** Where Claude Code keeps transcripts. Derived, never a literal home path. */
 export const defaultTranscriptRoot = (): string => join(homedir(), '.claude', 'projects');
@@ -191,8 +197,19 @@ async function readTranscript(
     // The SAME window primitive `history.ts` pages with, so the ids the canvas
     // holds and the ids a page hands back are minted from the same offsets --
     // which is the whole reason a page can be merged into the tail at all.
-    const tail = await readTranscriptWindow(path, info.size - TAIL_BYTES, info.size);
-    const facts = summarizeTranscript(tail.text, sessionId, tail.start);
+    //
+    // The size is the one this `stat` already answered rather than a second
+    // one of its own: the file cannot be stat'd twice per poll just to learn a
+    // number that is sitting here.
+    const { facts } = await readLiveTail(
+      {
+        size: async () => info.size,
+        read: (from, to) => readTranscriptWindow(path, from, to),
+      },
+      sessionId,
+      TAIL_WINDOW_BYTES,
+      MAX_TAIL_READ_BYTES,
+    );
     // The roster's walk is what names the live agents, and it has already been
     // paid for the `●N` badge -- so a session with none costs nothing new here
     // and reads no file it did not read before (`subagent.ts`).
@@ -437,7 +454,7 @@ export async function loadClaudeCodeProjects(
       // same tail. Always present for this source -- empty means vam READ the
       // window and found none, which is the common case (model.ts).
       //
-      // WHAT THE WINDOW COSTS. Only the last `TAIL_BYTES` are read, so a
+      // WHAT THE WINDOW COSTS. Only the end of the transcript is read, so a
       // question asked far enough back has scrolled out and is simply not
       // here. That is the correct behaviour -- vam reports what it read, not
       // what it supposes -- but it means an empty list is never evidence that
