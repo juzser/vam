@@ -142,6 +142,7 @@ const GUARDS = [
   'terminal-chrome-shots',
   'tree-icon-shots',
   'out-links-shots',
+  'view-width-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

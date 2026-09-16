@@ -47,6 +47,7 @@ import {
   readTerminalFontSize,
   setActiveTerminalFontSize,
 } from './terminal-font.js';
+import { DEFAULT_NARROW_VIEWS, readNarrowViews, setActiveNarrowViews } from './view-width.js';
 
 const KEY = 'vam.prefs.v1';
 
@@ -523,6 +524,33 @@ export type Prefs = {
    * person, not a session that stopped existing.
    */
   readonly terminalFontSize: number;
+  /**
+   * Whether the Response, PRs, Agents and Terminal views are capped at a
+   * readable line length instead of filling the pane.
+   *
+   * GLOBAL, not per pane and not per session, for the reason `focusView`,
+   * `editorIndent`, `filesTreeWidth` and `terminalFontSize` give at length:
+   * `Canvas.tsx` mounts one `DetailPanel` -- hence one of each of these four
+   * views -- per split leaf and `PhoneShell` mounts another, so per pane it
+   * would be an arrangement the operator had to re-make on every split, with
+   * no dialogue in which a pane opened by a keystroke could be asked. Per
+   * session it would key a reading preference to an id the TTL prunes.
+   *
+   * ONE FLAG FOR FOUR VIEWS BECAUSE IT IS ONE PROMISE: no more than eighty
+   * characters on a line. `prefs/view-width.ts` carries the whole argument,
+   * including why the Terminal belongs with the prose views and why the pixel
+   * maximum is nevertheless different there.
+   *
+   * IT IS NOT ONLY PAINT, the same way `terminalFontSize` above it is not:
+   * narrowing the Terminal shrinks the box `terminal-size.ts` divides by the
+   * measured advance, so tmux is told a smaller column count and a running
+   * agent's screen is re-wrapped. That is why the flag is a store with a
+   * subscription rather than a custom property on the root.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly narrowViews: boolean;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -550,6 +578,7 @@ export const EMPTY_PREFS: Prefs = {
   editorIndent: DEFAULT_EDITOR_INDENT,
   filesTreeWidth: null,
   terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
+  narrowViews: DEFAULT_NARROW_VIEWS,
 };
 
 /**
@@ -794,6 +823,11 @@ function parsePrefs(
     terminalFontSize: readTerminalFontSize(
       (parsed as { terminalFontSize?: unknown }).terminalFontSize,
     ),
+    // Per field like every line above it, and normalised in the safe
+    // direction `readNarrowViews` argues: a payload this vam cannot read must
+    // not re-shape four views -- and re-wrap a running tmux session -- on the
+    // strength of a choice nobody made.
+    narrowViews: readNarrowViews((parsed as { narrowViews?: unknown }).narrowViews),
   };
 }
 
@@ -1235,6 +1269,13 @@ export function setEditorIndent(prefs: Prefs, width: unknown): Prefs {
  *  dialog shows nobody having chosen. */
 export function setTerminalFontSize(prefs: Prefs, size: unknown): Prefs {
   return { ...prefs, terminalFontSize: readTerminalFontSize(size) };
+}
+
+/** Normalised on the way in as well as on the way out, like every setter above
+ *  it: the switch can only send a boolean, but a hand-edited payload and a
+ *  future caller can send anything, and only a literal `true` may narrow. */
+export function setNarrowViews(prefs: Prefs, narrow: unknown): Prefs {
+  return { ...prefs, narrowViews: readNarrowViews(narrow) };
 }
 
 /**
@@ -2215,6 +2256,7 @@ export function activatePrefs(prefs: Prefs): Prefs {
   setActivePromptSubmitKey(prefs.promptSubmitKey);
   setActiveEditorSettings({ highlight: prefs.editorHighlight, indent: prefs.editorIndent });
   setActiveTerminalFontSize(prefs.terminalFontSize);
+  setActiveNarrowViews(prefs.narrowViews);
   /**
    * AND ONE PREFERENCE CROSSES INTO MAIN, because the read it changes happens
    * there: `gh` is spawned by `main/sources/claude-code/source.ts`, which has

@@ -105,6 +105,15 @@ const EN = {
   'settings.appearance.terminalText.label': 'terminal text',
   'settings.appearance.terminalText.hint':
     'how large the tmux screen is drawn — a bigger size fits fewer columns, and vam tells tmux the new width',
+  // THE VIEWS' WIDTH. The hint carries two facts an operator cannot guess and
+  // would otherwise meet as a fault: that the Terminal is one of the four
+  // views this reaches, and that narrowing it tells tmux a new column count —
+  // which re-wraps the screen of a session that is still running.
+  'settings.appearance.narrowViews.label': 'view width',
+  'settings.appearance.narrowViews.hint':
+    'hold the response, PRs, agents and terminal views to 80 characters a line instead of filling the pane — the terminal is told the narrower column count, so tmux re-wraps its screen',
+  'settings.appearance.narrowViews.on': 'narrowed',
+  'settings.appearance.narrowViews.off': 'full pane',
   'settings.appearance.focusView.label': 'focus view',
   'settings.appearance.focusView.hint':
     "fold each turn's tool calls away, leaving your prompts and the agent's answers",
